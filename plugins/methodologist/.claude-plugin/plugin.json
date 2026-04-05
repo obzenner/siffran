@@ -1,0 +1,8 @@
+{
+  "name": "methodologist",
+  "description": "Methodology router — picks and executes formal CS/math reasoning methodologies with tracked phases and structured output.",
+  "version": "0.1.0",
+  "author": {
+    "name": "obzenner"
+  }
+}

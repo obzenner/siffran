@@ -1,0 +1,45 @@
+{
+  "schema": {
+    "entries_key": "methodologies",
+    "files_dir": "methodologies",
+    "required_fields": ["name", "lineage", "use_when", "prevents"]
+  },
+  "methodologies": [
+    {
+      "name": "formal-reasoning",
+      "lineage": "Mathematical logic (Euclid → Hilbert → Gödel)",
+      "use_when": "Enforcing or questioning rules, conventions, standards. 'Does this apply here?' 'Why do we do it this way?'",
+      "prevents": "Blind rule enforcement, blind rule violation, unjustified exceptions"
+    },
+    {
+      "name": "decomposition",
+      "lineage": "Dijkstra (structured programming), Parnas (information hiding, 1972)",
+      "use_when": "Breaking a complex problem into parts. 'How should I structure this?' 'What are the pieces?'",
+      "prevents": "God objects, tangled dependencies, premature abstraction without boundary analysis"
+    },
+    {
+      "name": "invariant-analysis",
+      "lineage": "Hoare logic (1969), Floyd, Dijkstra (weakest precondition)",
+      "use_when": "Something works sometimes but not always. 'Why does this break?' 'What must stay true?' Pre/postconditions.",
+      "prevents": "'Works sometimes' bugs, state corruption, broken assumptions in loops/recursion"
+    },
+    {
+      "name": "contradiction",
+      "lineage": "Reductio ad absurdum (Aristotle → formal logic)",
+      "use_when": "Choosing between options. 'Should we do X or Y?' Assume one is wrong, derive consequences.",
+      "prevents": "Decision paralysis, hidden assumptions in 'obvious' choices, confirmation bias"
+    },
+    {
+      "name": "abstraction-refinement",
+      "lineage": "Wirth (stepwise refinement, 1971), Dijkstra, Back (refinement calculus)",
+      "use_when": "Building something new from scratch. Start abstract, refine toward concrete. 'What's the right level of detail?'",
+      "prevents": "Premature detail, analysis paralysis, incoherent architectures"
+    },
+    {
+      "name": "empirical-falsification",
+      "lineage": "Popper (falsifiability, 1934), Fisher (experimental design), Feynman",
+      "use_when": "Uncertain claims or assumptions. 'Will this scale?' 'Is this actually faster?' Design the cheapest disproving experiment.",
+      "prevents": "Untested assumptions becoming load-bearing, cargo cult engineering"
+    }
+  ]
+}
