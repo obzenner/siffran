@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "siffran",
+  "description": "Dmitry's personal Claude Code plugin marketplace — methodology-driven tools for rigorous engineering.",
+  "owner": {
+    "name": "obzenner"
+  },
+  "plugins": [
+    {
+      "name": "methodologist",
+      "source": "./plugins/methodologist",
+      "description": "Methodology router — selects and executes formal reasoning methodologies (axioms/proofs, decomposition, invariant analysis, contradiction, abstraction refinement, empirical falsification) based on task context.",
+      "category": "development"
+    }
+  ]
+}
