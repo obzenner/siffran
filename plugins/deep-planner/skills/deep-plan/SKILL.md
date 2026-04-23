@@ -43,7 +43,7 @@ Goal: build a first-approximation model of the relevant codebase surface.
 
 ### Step 1 — Scope
 
-Based on the task, identify which parts of the codebase are relevant. Use Glob and Grep to find entry points, related modules, existing patterns. Read dependency manifests (`package.json`, `requirements.txt`, `go.mod`, `Cargo.toml`, etc.) to identify the external dependency surface.
+Based on the task, identify which parts of the codebase are relevant. Use Glob and Grep to find entry points, related modules, existing patterns. Discover the project's language, package manager, and dependency manifest by reading the project root — do not assume any specific ecosystem. Read whatever dependency manifest the project uses to identify the external dependency surface.
 
 ### Step 2 — Read
 
@@ -105,7 +105,7 @@ Read files you skipped previously. Follow import chains you didn't trace. Check 
 For every External Integration item still marked UNVERIFIED, apply empirical falsification:
 
 1. **State the hypothesis.** "I believe library X exposes function Y with signature Z."
-2. **Find the evidence.** Look up the actual documentation. Use context7 (resolve-library-id → query-docs) for libraries it covers. Use WebSearch/WebFetch against official docs for others. Read the actual types if the dependency is installed locally (`node_modules`, site-packages, etc.).
+2. **Find the evidence.** Look up the actual documentation. Use context7 (resolve-library-id → query-docs) for libraries it covers. Use WebSearch/WebFetch against official docs for others. If the dependency is installed locally, read the actual source types from the project's dependency cache (discover where the project stores installed dependencies — don't assume a specific location).
 3. **Compare hypothesis to evidence.** Do the function names match? Do the signatures match? Are there required parameters you missed? Error cases you didn't account for? Version-specific behavior?
 4. **Update the model.**
    - If confirmed: mark VERIFIED, cite the doc source.
