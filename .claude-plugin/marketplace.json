@@ -11,6 +11,12 @@
       "source": "./plugins/methodologist",
       "description": "Methodology router — selects and executes formal reasoning methodologies (axioms/proofs, decomposition, invariant analysis, contradiction, abstraction refinement, empirical falsification) based on task context.",
       "category": "development"
+    },
+    {
+      "name": "deep-planner",
+      "source": "./plugins/deep-planner",
+      "description": "Iterative investigation-and-planning loop — reads code in multiple passes, separates business logic / custom code / external integrations, verifies all API surfaces against actual docs before graduating the plan.",
+      "category": "development"
     }
   ]
 }

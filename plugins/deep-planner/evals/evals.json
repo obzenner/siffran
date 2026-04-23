@@ -1,0 +1,50 @@
+{
+  "skill_name": "deep-plan",
+  "evals": [
+    {
+      "id": 1,
+      "name": "json-schema-validation",
+      "prompt": "Plan adding a validation system to this marketplace that uses JSON Schema (ajv) to validate all plugin.json and marketplace.json files at CI time, replacing the current /plugin validate . approach",
+      "expected_output": "Multi-pass plan with ajv API surfaces VERIFIED against actual docs, clear separation of validation rules (BL) from schema library integration (EI) and file-discovery glue (CC)",
+      "files": [],
+      "assertions": [
+        {"id": "multi-pass", "text": "Plan contains at least 2 distinct investigation passes"},
+        {"id": "three-domains", "text": "Plan has all three domain sections: Business Logic, Custom Code, and External Integration"},
+        {"id": "ajv-verified", "text": "ajv API surface is marked VERIFIED with a documentation citation"},
+        {"id": "bl-purity", "text": "Business Logic items do not mention ajv or any specific library name"},
+        {"id": "codebase-citation", "text": "At least one existing codebase file is cited as a pattern reference"},
+        {"id": "impl-order", "text": "Final plan includes an implementation order or build sequence section"}
+      ]
+    },
+    {
+      "id": 2,
+      "name": "dependency-graph",
+      "prompt": "Plan adding a dependency graph between plugins — plugins should be able to declare dependencies on other plugins, and the marketplace should enforce version compatibility and detect cycles",
+      "expected_output": "Plan where graph algorithms and version resolution are correctly classified as business logic, existing manifest patterns are cited, and any external library usage is verified or explicitly rejected in favor of custom code",
+      "files": [],
+      "assertions": [
+        {"id": "cycle-detection-is-bl", "text": "Cycle detection is classified as Business Logic, not External Integration"},
+        {"id": "semver-verified", "text": "If a semver library is used, it appears in External Integration and is marked VERIFIED"},
+        {"id": "manifest-cited", "text": "Existing plugin.json structure is cited from actual codebase reading"},
+        {"id": "multi-pass", "text": "Plan contains at least 2 distinct investigation passes"},
+        {"id": "no-unverified-libs", "text": "No external library is recommended without VERIFIED or UNRESOLVED status"},
+        {"id": "three-domains", "text": "Plan has all three domain sections: Business Logic, Custom Code, and External Integration"}
+      ]
+    },
+    {
+      "id": 3,
+      "name": "changelog-skill",
+      "prompt": "Plan adding a changelog skill to the methodologist plugin that auto-generates changelogs from git history, grouping by plugin and tagging by semver impact",
+      "expected_output": "Multiple investigation passes showing convergence, git APIs as external integration (verified), changelog format rules as business logic, skill structure following existing conventions (cited)",
+      "files": [],
+      "assertions": [
+        {"id": "git-is-ei", "text": "Git operations are classified as External Integration"},
+        {"id": "format-is-bl", "text": "Changelog format and grouping rules are classified as Business Logic"},
+        {"id": "skill-conventions-cited", "text": "Existing SKILL.md structure is cited with file path as pattern reference"},
+        {"id": "multi-pass", "text": "Plan contains at least 2 distinct investigation passes"},
+        {"id": "convergence-stated", "text": "Final plan explicitly states convergence status"},
+        {"id": "three-domains", "text": "Plan has all three domain sections: Business Logic, Custom Code, and External Integration"}
+      ]
+    }
+  ]
+}
