@@ -90,8 +90,14 @@ After all phases complete, produce a structured summary:
 <high | medium | low> — <why>
 
 ### Open questions
-<Anything unresolved, tagged: [needs-data], [needs-decision], [needs-experiment]>
+<Default: "None — all questions resolvable from the codebase, docs, or reasoning were resolved during the phases above." Only list a question here if you CANNOT resolve it yourself, and tag WHY it is unresolvable:
+  [needs-data]       — requires information you cannot obtain (no access, not in repo, not in docs)
+  [needs-decision]   — a genuine judgment call that is the user's to make, not derivable from evidence
+  [needs-experiment] — requires runtime evidence you cannot gather here (a benchmark, a prod check)
+Each listed question must state what you already tried to resolve it.>
 ```
+
+**Open-questions gate (apply before writing that section).** An open question is an admission you hit a wall — not a default output. Before listing anything, attempt to resolve it: read the relevant code, search the docs, reason it through, or run a command. A question survives to the artifact ONLY if it is blocked on one of the three tags above — information you cannot obtain, a decision that is genuinely the user's, or evidence you cannot gather here. If you can answer it by acting, answer it; do not list it. The honest default is "None."
 
 ## Registry
 
