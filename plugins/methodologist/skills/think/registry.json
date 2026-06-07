@@ -44,8 +44,14 @@
     {
       "name": "requirement-first-verification",
       "lineage": "Stepanov (requirements over syntax), Hoare (pre/postconditions), Popper (falsifiability), property-based testing",
-      "use_when": "Learning a language (Rust, Go, TS, Python, Haskell, ...) by verifying generated code rather than authoring it. 'Help me learn a language by testing things.' 'Verify this generated code properly.' Talk of harnesses, gates, property-based testing, verification-first learning, becoming an architect who reasons about language features.",
+      "use_when": "VERIFY TO LEARN. A human learning a language (Rust, Go, TS, Python, Haskell, ...) by verifying generated code rather than authoring it. 'Help me learn a language by testing things.' 'Verify this generated code properly.' Talk of harnesses, gates, property-based testing, verification-first learning, becoming an architect who reasons about language features. Pick this when the GOAL is understanding, not shipping.",
       "prevents": "Illusion-of-understanding from reading generated code, conflating 'compiles' with 'correct', learning a language as a disconnected feature list"
+    },
+    {
+      "name": "requirement-first-development",
+      "lineage": "Stepanov (requirements over syntax), Hoare (pre/postconditions), Popper (falsifiability), property-based testing",
+      "use_when": "VERIFY TO SHIP. An agent developing or verifying real code dynamically by stating language-free requirements, running the toolchain gates, and harnessing only what leaks past them. 'Verify this change properly.' 'What do I actually need to test here?' 'Prove this is correct before shipping.' Deciding which requirements need a test vs. which the type-checker already guarantees. Pick this when the GOAL is shipping verified code, not learning a language.",
+      "prevents": "Unverified requirements becoming load-bearing in shipped code, over-testing what the toolchain already guarantees while under-testing what leaks past it, conflating 'compiles' with 'correct'"
     }
   ]
 }
