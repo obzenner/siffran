@@ -40,6 +40,12 @@
       "lineage": "Popper (falsifiability, 1934), Fisher (experimental design), Feynman",
       "use_when": "Uncertain claims or assumptions. 'Will this scale?' 'Is this actually faster?' Design the cheapest disproving experiment.",
       "prevents": "Untested assumptions becoming load-bearing, cargo cult engineering"
+    },
+    {
+      "name": "requirement-first-verification",
+      "lineage": "Stepanov (requirements over syntax), Hoare (pre/postconditions), Popper (falsifiability), property-based testing",
+      "use_when": "Learning a language (Rust, Go, TS, Python, Haskell, ...) by verifying generated code rather than authoring it. 'Help me learn a language by testing things.' 'Verify this generated code properly.' Talk of harnesses, gates, property-based testing, verification-first learning, becoming an architect who reasons about language features.",
+      "prevents": "Illusion-of-understanding from reading generated code, conflating 'compiles' with 'correct', learning a language as a disconnected feature list"
     }
   ]
 }
