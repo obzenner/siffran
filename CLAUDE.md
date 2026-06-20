@@ -52,5 +52,5 @@ Run from repo root to validate marketplace and plugin manifests.
 
 | Plugin | Version | Description |
 |--------|---------|-------------|
-| `methodologist` | 0.3.0 | Methodology router — `/think` for auto-detect, `/think <name>` for specific methodology |
-| `deep-planner` | 0.2.0 | Iterative investigation-and-planning — `/deep-plan` reads code in passes, separates BL/CC/EI, verifies APIs against docs |
+| `methodologist` | 0.4.0 | Methodology router — `/think` for auto-detect, `/think <name>` for specific methodology |
+| `deep-planner` | 0.3.0 | Iterative investigation-and-planning — `/deep-plan` reads code in passes, separates BL/CC/EI, verifies APIs against docs |

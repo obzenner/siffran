@@ -92,11 +92,16 @@ For each module, check:
 
 If any answer is no, the decomposition has a leak. Fix it before proceeding.
 
+**Observability (per `../references/evidence-over-recall.md` §2): "independent: yes" is not assertable — it is the result of running the three checks.** For each module, show the answer to each check, not a summary verdict. "Independent" with no per-check trace is a fakeable claim; the three answers are the artifact that proves the check happened.
+
 **Output format:**
 ```
 Validation:
-- M1: <independent: yes/no> — <evidence>
-- M2: <independent: yes/no> — <evidence>
+- M1: <independent: yes/no>
+    impl-from-interface-only: <yes/no — what it needs beyond its dependencies' interfaces, if no>
+    testable-in-isolation: <yes/no — what real collaborator it can't mock, if no>
+    secret-change-contained: <yes/no — what outside it breaks, if no>
+- M2: <independent: yes/no> — <three checks as above>
 Leaks found: <none | describe and fix>
 ```
 

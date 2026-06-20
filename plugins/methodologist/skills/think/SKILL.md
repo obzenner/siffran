@@ -9,7 +9,9 @@ allowed-tools: [Read, Glob, Grep, Bash, Agent, TaskCreate, TaskUpdate]
 
 You are executing a structured reasoning methodology. You are NOT freestyling. Every phase is tracked, every output is structured, every conclusion is traced to its premises.
 
-## Step 0: Parse invocation
+## Step 0: Adopt the stance, then parse invocation
+
+**First, before anything else**, read `references/evidence-over-recall.md` (next to this file) and emit its stance declaration line verbatim. This is the shared spine of every methodology — parametric knowledge is a hypothesis, every step emits a fabrication-resistant artifact, open questions are resolved before they are surfaced. If that line is absent from your output, you have not run the methodology.
 
 The user invoked: `$ARGUMENTS`
 
@@ -90,14 +92,10 @@ After all phases complete, produce a structured summary:
 <high | medium | low> — <why>
 
 ### Open questions
-<Default: "None — all questions resolvable from the codebase, docs, or reasoning were resolved during the phases above." Only list a question here if you CANNOT resolve it yourself, and tag WHY it is unresolvable:
-  [needs-data]       — requires information you cannot obtain (no access, not in repo, not in docs)
-  [needs-decision]   — a genuine judgment call that is the user's to make, not derivable from evidence
-  [needs-experiment] — requires runtime evidence you cannot gather here (a benchmark, a prod check)
-Each listed question must state what you already tried to resolve it.>
+<Per the residual protocol in `references/evidence-over-recall.md` (§3): surface candidates, resolve each against evidence, then list ONLY the blocked residual — each tagged [needs-data | needs-decision | needs-experiment] with what you already tried. The honest default is "None.">
 ```
 
-**Open-questions gate (apply before writing that section).** An open question is an admission you hit a wall — not a default output. Before listing anything, attempt to resolve it: read the relevant code, search the docs, reason it through, or run a command. A question survives to the artifact ONLY if it is blocked on one of the three tags above — information you cannot obtain, a decision that is genuinely the user's, or evidence you cannot gather here. If you can answer it by acting, answer it; do not list it. The honest default is "None."
+**Open-questions gate (apply before writing that section).** Apply §3 of `references/evidence-over-recall.md`: a question is a worklist item to be resolved, not a section to be filled. Attempt resolution first — read the code, search the docs, reason it through, run a command. A question survives to the artifact only if blocked on one of the three tags, and must state what you tried. The honest default is "None."
 
 ## Registry
 
