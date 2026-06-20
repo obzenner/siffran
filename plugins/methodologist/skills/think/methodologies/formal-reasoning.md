@@ -53,20 +53,27 @@ Theorems:
 - T3: <claim> (from T1, A4)
 ```
 
-### Phase 4: Identify open questions
+### Phase 4: Resolve the gaps, surface only what's blocked
 
-What can't you derive from your axioms? Where are you guessing?
+What can't you derive from your axioms? Where are you guessing? Treat each gap as a worklist item, not a finding — apply §3 of `../references/evidence-over-recall.md`.
 
-Tag each:
-- `needs-data` — answerable with research or measurement
-- `needs-decision` — requires human judgment
-- `needs-experiment` — answerable only by trying
+1. **Surface** each gap as a candidate question.
+2. **Resolve** it: read the relevant code, search the docs, reason from the axioms, or run a command. Resolving a gap usually means it was a missing axiom (add it in Phase 2) or a derivable theorem (derive it in Phase 3) — fold it back, do not list it.
+3. **Surface only the residual** — questions genuinely blocked, each tagged and stating what you tried.
+
+Tags:
+- `needs-data` — information you cannot obtain (no access, not in repo, not in docs)
+- `needs-decision` — a judgment call that is the user's to make, not derivable from evidence
+- `needs-experiment` — runtime evidence you cannot gather here
+
+Do NOT manufacture questions to populate this phase. **The honest default is "None — all gaps were resolvable into axioms or theorems above."**
 
 **Output format:**
 ```
-Open questions:
-- Q1 [needs-data]: <question>
-- Q2 [needs-experiment]: <question>
+Gaps resolved (folded into axioms/theorems): <list, or "none">
+Open questions (blocked only):
+- Q1 [needs-decision]: <question> — tried: <what resolution you attempted>
+  (default: "None")
 ```
 
 ### Phase 5: Validate axioms
@@ -78,11 +85,13 @@ For each axiom, actively try to break it:
 
 An axiom that fails validation is the most valuable finding — it means your derived reasoning has a flaw you can fix before it becomes a problem.
 
+**Observability (per `../references/evidence-over-recall.md` §2): "holds" is not a verdict you assert, it is one you show.** Record the actual counterexample search you ran — the file you grepped, the doc you checked, the case you constructed and it survived. A bare "holds — evidence" with no traceable attempt is a fakeable claim; treat it as not-yet-validated.
+
 **Output format:**
 ```
 Validation:
-- A1: <holds | broken> — <evidence>
-- A2: <holds | broken> — <evidence>
+- A1: <holds | broken> — attempted: <the counterexample search / source checked> — result: <what you found>
+- A2: <holds | broken> — attempted: <...> — result: <...>
 ```
 
 ### Phase 6: Apply to context

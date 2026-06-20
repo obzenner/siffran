@@ -40,8 +40,11 @@ Explicitly assume ¬P is true. State what this means concretely. What would the 
 
 This is the hard part — you must take the negation seriously, not strawman it. Steel-man the negation.
 
+**Observability (per `../references/evidence-over-recall.md` §2): prove the steel-man before deriving against it.** First write the strongest honest case *for* ¬P — the best reason someone would choose it — as an explicit line. Only then derive consequences. A steel-man that is asserted ("I considered the alternative") rather than stated at full strength is a strawman in disguise; the explicit strongest-case line is the artifact that makes the difference observable.
+
 **Output format:**
 ```
+Strongest case for ¬P: <the best honest argument someone would make for the negation>
 Assuming ¬P:
 - Consequence C1: <what follows from ¬P>
 - Consequence C2: <what follows from C1>

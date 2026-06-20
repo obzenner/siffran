@@ -85,13 +85,15 @@ When you find a violation, characterize it:
 - **Which invariant is violated**
 - **Why the current code doesn't prevent it**
 
+**Observability (per `../references/evidence-over-recall.md` §2): the evidence is a traced code path, not a narrative.** Cite the `file:line` of each step — where the invariant is established, where each touching operation preserves or breaks it. A prose "this holds because the loop maintains it" with no line references is fakeable; an actual trace through cited lines is not.
+
 **Output format:**
 ```
 Verification:
 - I1: <holds | violated>
-  Evidence: <code path or proof>
-  [If violated] Trigger: <what causes it>
-  [If violated] Root cause: <why the code doesn't prevent it>
+  Evidence: <file:line → file:line trace of establishment and each operation that touches the state>
+  [If violated] Trigger: <minimal input/condition that causes it>
+  [If violated] Root cause: <file:line where the code fails to prevent it>
 ```
 
 ### Phase 6: Produce conclusion

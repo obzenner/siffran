@@ -1,7 +1,7 @@
 {
   "name": "deep-planner",
   "description": "Iterative investigation-and-planning loop — reads the codebase in passes, separates business logic / custom code / external integrations, verifies all API surfaces against actual docs before graduating the plan.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": {
     "name": "obzenner"
   }

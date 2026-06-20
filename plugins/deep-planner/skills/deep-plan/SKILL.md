@@ -33,6 +33,12 @@ No plan graduates with UNVERIFIED items. This is Popper applied to API surfaces:
 
 ## Invocation
 
+**First, emit this stance declaration verbatim before anything else** — it makes the methodology's spine observable in the transcript:
+
+> **Stance:** parametric knowledge (training weights) = hypothesis only. Every load-bearing claim discharged against evidence (code / docs / runtime) or surfaced as UNVERIFIED. Open questions are resolved until blocked, then surfaced with what was tried.
+
+If that line is absent from your output, you have not run the methodology. (This is the same spine the `methodologist` plugin states in `references/evidence-over-recall.md`; it is mirrored here because plugins cannot read across each other's files at runtime.)
+
 The user invoked: `$ARGUMENTS`
 
 If a task description was provided, use it as the starting point. If not, ask: "What are we planning?"
@@ -54,6 +60,8 @@ Actually read the files. Not filenames — contents. Focus on:
 - What interfaces and contracts the new code must satisfy
 - What test files reveal about implicit invariants
 
+**Observability:** "I read the file" is fakeable; a `file:line` citation of what you found is not. Every claim a plan item makes about the codebase must carry the `file:line` it came from. A file you assert you read but cite nothing from is, for the plan's purposes, unread — cite a specific finding or do not claim the read.
+
 ### Step 3 — Classify and Draft
 
 For every piece of work you've identified, assign it to a domain. Produce the first draft:
@@ -74,10 +82,13 @@ For every piece of work you've identified, assign it to a domain. Produce the fi
       HYPOTHESIS: <what you believe the API does, and why you believe it>
 
 ### Open Questions
-- OQ-1 [needs-data | needs-decision | needs-experiment]: <question>
+- OQ-1 [needs-data | needs-decision | needs-experiment]: <question> — tried: <resolution attempted>
+  (default: "None")
 
 ### Confidence: LOW — first pass, no verifications performed
 ```
+
+**Open-questions gate.** An open question is a worklist item, not a section to fill. Surface a candidate, then *resolve it* — read the code, look up the docs, trace the import. A question survives to the artifact only if blocked on `needs-data` / `needs-decision` / `needs-experiment`, and must state what you tried. Most first-pass questions are answerable by reading one more file — answer them, do not list them. The fixed-point loop (Phase 2) drives answerable questions to ∅; do not manufacture questions to populate this section. The honest default is "None."
 
 Present this to the user. Then proceed immediately to Phase 2.
 
