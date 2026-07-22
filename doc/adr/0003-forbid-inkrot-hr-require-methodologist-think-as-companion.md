@@ -11,6 +11,8 @@ links:
     kind: relatesto
   - target: 12
     kind: Depended on by
+  - target: 15
+    kind: relatesto
 ---
 
 # Forbid inkrot (/hr); require methodologist (/think) as companion

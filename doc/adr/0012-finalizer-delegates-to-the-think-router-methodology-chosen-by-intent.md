@@ -12,6 +12,10 @@ links:
     kind: Depends on
   - target: 5
     kind: relatesto
+  - target: 13
+    kind: relatesto
+  - target: 14
+    kind: relatesto
 ---
 
 # Finalizer delegates to the think router; methodology chosen by intent

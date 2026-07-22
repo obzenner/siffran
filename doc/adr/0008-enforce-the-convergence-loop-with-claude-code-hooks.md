@@ -11,6 +11,10 @@ links:
     kind: Depends on
   - target: 9
     kind: Depended on by
+  - target: 13
+    kind: Depended on by
+  - target: 14
+    kind: Depended on by
 ---
 
 # Enforce the convergence loop with Claude Code hooks
