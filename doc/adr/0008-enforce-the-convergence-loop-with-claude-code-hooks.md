@@ -45,11 +45,14 @@ it was checked against the actual hooks documentation before acceptance.
 ## Decision Outcome
 
 Chosen option: "Hook-enforced loop", because verification confirmed the mechanism exists:
-a `Stop` hook can block via exit code 2 (stderr fed back to Claude) or a top-level
-`decision: block` JSON field with a `reason`, and hooks receive `transcript_path`/`cwd` on stdin so
-a Stop hook can read the ledger it wrote earlier. Plugins ship hooks via `hooks/hooks.json`
-or inline in `plugin.json`, scripts referenced with `${CLAUDE_PLUGIN_ROOT}`. Verified
-against code.claude.com/docs/en/hooks.md, hooks-guide.md, plugins-reference.md.
+a `Stop` hook blocks by writing the reason to **stderr and exiting with code 2** (Claude
+reads the stderr and continues). The spike (build step 1) confirmed this is the mechanism
+the current Stop spec honors; a stdout top-level `decision: block` field is NOT honored for
+Stop and must not be relied on. Hooks receive `cwd` on stdin, so a Stop hook can read the
+spec-hosted unknowns it needs. Plugins ship hooks via `hooks/hooks.json` (top-level `hooks`
+key → event name → entries; exec form `command` + `args`), scripts referenced with
+`${CLAUDE_PLUGIN_ROOT}`. Verified against code.claude.com/docs/en/hooks.md and
+plugins-reference.md, and proven end-to-end by the spike at `.claude/spike-m3` (checks A6–A9).
 
 Two corrections from verification are folded in:
 1. Context re-injection is NOT `PreCompact` (fires before compaction, no injection path).
@@ -77,5 +80,8 @@ block; force compaction, observe re-injection.
 
 ## More Information
 
-Verified by a claude-code-guide research pass over the current hooks docs. The block cap
-directly motivates the termination design in ADR-9.
+Verified by a claude-code-guide research pass over the current hooks docs, then proven by
+the build-step-1 spike (`.claude/spike-m3`, 15/15 checks): the Python Stop hook parses the
+spec's inline confidences, exits 2 with a stderr reason while unconverged, exits 0 once all
+unknowns ≥ θ, and `SessionStart:compact` re-injects the unknowns after compaction. The block
+cap directly motivates the termination design in ADR-9.

@@ -5,3 +5,7 @@
 .claude/*
 !.claude/skills/
 !.claude/settings.json
+
+# Python bytecode
+__pycache__/
+*.pyc

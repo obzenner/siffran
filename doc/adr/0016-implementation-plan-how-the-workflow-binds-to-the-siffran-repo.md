@@ -64,7 +64,8 @@ Per axis, the alternatives considered and the choice:
 
 Chosen implementation plan:
 
-**Plugin.** New plugin `plugins/<workflow-name>/` (name finalized at build) with:
+**Plugin.** New plugin `plugins/empirica/` (name finalized at build → `empirica`,
+invoked `/empirica`) with:
 - `.claude-plugin/plugin.json` — semver starting `0.1.0`, author `obzenner` (repo convention).
 - `skills/<skill>/SKILL.md` — the workflow skill body (stance declaration + the loop).
 - `hooks/hooks.json` — the Stop-hook gate and `SessionStart:compact` re-injection (ADR-8),
@@ -89,10 +90,17 @@ time, never vendored (ADR-15).
 1. **Spike M3 SpikeHarness + one hook** against a fixture repo — prove (a) a Python Stop
    hook can read a file and block completion, and (b) M3 yields a real `gate: pass|fail`
    from an actual deterministic check. This retires the two stalest assumptions first.
+   **DONE** — spike at `.claude/spike-m3`, 15/15 checks; both assumptions confirmed. It
+   also refuted the Stop-block mechanism assumed in ADR-8's first draft (exit 2 + stderr is
+   honored; a stdout `decision` field is not) — ADR-8 corrected accordingly.
 2. Slice 1 — known path (M1 route → M5 `/think` finalize → M7 handoff): a usable skill with
-   no engine.
-3. Slice 2 — empirical engine (M2 staff, M3/M4 spike+race, M9 assess, hooks, M6 scribe).
-4. Remove deep-planner; regenerate tables via `checkup`.
+   no engine. **DONE** — `plugins/empirica/` shipped with `SKILL.md` (full loop authored),
+   `hooks/` (convergence_gate, spike_harness, state_restore), `hooks.json`; deep-planner
+   removed; tables regenerated via `checkup`; `claude plugin validate` passes.
+3. Slice 2 — empirical engine (M2 staff, M3/M4 spike+race, M9 assess, hooks, M6 scribe):
+   the SKILL.md describes all of these; the remaining build is exercising them on a real
+   task and hardening race/staffing beyond the skill's prose instructions.
+4. Remove deep-planner; regenerate tables via `checkup`. **DONE** (folded into step 2's PR).
 
 ### Consequences
 
@@ -102,9 +110,11 @@ time, never vendored (ADR-15).
   are explicitly gated on a spike, not asserted.
 * Good, because `.claude/` is already git-ignored, so the transient tier is free.
 * Good, because Slice 1 ships value before the engine exists.
-* Bad, because "Python hooks" and the confidence syntax are provisional until the spike
-  confirms them; if the spike refutes Python's fit for the hook I/O contract, this ADR's
-  language choice must be revisited (the spike is the fitness function).
+* Resolved (was: "Python hooks and confidence syntax are provisional"): the build-step-1
+  spike confirmed both — Python hooks fit the I/O contract and the inline
+  `<!-- confidence: N -->` convention parses cleanly (15/15 checks). The spike did refute
+  the assumed Stop-block *mechanism* (JSON `decision` field → actually exit 2 + stderr),
+  which is now corrected in ADR-8. The spike was the fitness function and it fired.
 * Bad, because this ADR overlaps `plan.md` (ADR-15) by intent — recorded as a decision here,
   it will be mirrored into the per-feature `plan.md` when the build runs, and the two must
   not drift (this ADR is authoritative for repo-binding; `plan.md` for per-feature detail).

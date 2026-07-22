@@ -46,7 +46,17 @@ termination. Specialization-only derivation is the load-bearing one: it makes th
 well-founded (every derived unknown is strictly closer to resolvable-by-evidence, so there
 is a floor). θ defines "done" via the confidence score the user asked for. The cap bounds
 the worst case and aligns with the platform's 8-block reality — the loop checkpoints to the
-durable ledger (ADR-7) and resumes across turns rather than grinding one session.
+durable spec (ADR-7) and resumes across turns rather than grinding one session.
+
+**Blocked residuals are the fourth, operational stop condition** (added at build, proven in
+the gate): an unknown the loop genuinely cannot resolve — a human judgment call, unobtainable
+data, an experiment not runnable here — is tagged in the spec
+`<!-- confidence: N, blocked: needs-decision|needs-data|needs-experiment -->` (the residual
+protocol of evidence-over-recall §3). A blocked unknown is surfaced to the human and no longer
+gates. Convergence is therefore "every unknown is **≥ θ or blocked**," which is what makes
+consequence #3 below (non-convergence as information) a first-class exit rather than only the
+cap's forced override. Without it, a truly unresolvable unknown would re-block every Stop
+until the 8-cap fired — turning a clean human hand-off into a wedged loop.
 
 ### Consequences
 
@@ -62,8 +72,10 @@ durable ledger (ADR-7) and resumes across turns rather than grinding one session
 
 Fitness function: (1) a test feeds M9 a knowns+unknowns state and asserts every derived
 unknown is strictly more concrete than its parent (no generalization); (2) convergence is
-reached when all unknowns ≥ θ; (3) a deliberately under-scoped task hits the iteration cap
-and the skill reports the still-open unknowns rather than claiming done.
+reached when all unknowns ≥ θ or blocked; (3) a deliberately under-scoped task hits the
+iteration cap and the skill reports the still-open unknowns rather than claiming done;
+(4) a blocked unknown lets the Stop hook exit 0 rather than re-blocking — proven by
+`.claude/spike-m3` check F4 (and F1 confirms an *unscored* unknown still blocks).
 
 ## More Information
 
