@@ -16,6 +16,8 @@ links:
     kind: relatesto
   - target: 15
     kind: relatesto
+  - target: 16
+    kind: Depended on by
 ---
 
 # Split artifacts into transient scratch and committable records

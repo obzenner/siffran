@@ -16,6 +16,8 @@ links:
     kind: relatesto
   - target: 3
     kind: relatesto
+  - target: 16
+    kind: Depended on by
 ---
 
 # Adopt spec-kit artifact set by GitHub reference; unknowns live in the spec

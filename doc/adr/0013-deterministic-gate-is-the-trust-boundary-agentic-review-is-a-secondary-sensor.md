@@ -18,6 +18,8 @@ links:
     kind: relatesto
   - target: 15
     kind: relatesto
+  - target: 16
+    kind: relatesto
 ---
 
 # Deterministic gate is the trust boundary; agentic review is a secondary sensor
