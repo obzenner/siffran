@@ -33,7 +33,6 @@ def _load(name: str):
 
 
 manifest = _load("manifest")
-cg = _load("convergence_gate")
 
 
 def _max_passes() -> int:
@@ -59,24 +58,19 @@ def main() -> int:
         return 0  # no run identity available → cannot key a manifest → fail open
 
     cwd = Path(str(payload.get("cwd") or "."))
-    # Record the spec path relative to cwd so the gate's fail-closed check and the manifest
-    # agree on WHICH file must exist for an active run.
-    spec_path = cg.locate_spec(cwd)
-    spec_rel = os.environ.get("EMPIRICA_SPEC", "spec.md")
-
+    # The manifest records the living spec's home as the run directory's spec.md (its
+    # default). The model writes the spec there during the run; the gate reads it from the
+    # manifest. The spec is never a repository file.
     try:
         manifest.start_run(
             manifest.locate_run(cwd, session_id),
             session_id, cwd,
             max_passes=_max_passes(),
-            spec_path=spec_rel,
         )
     except OSError:
         return 0  # best-effort: a write failure degrades to fail-open, never a wedge
-    # Publish the run id so budget.py keys its ledger to the SAME run (unifies identity,
-    # review 2.4). Only affects this hook's own subprocess env; harmless if unused.
+    # Publish the run id so budget.py keys its ledger to the SAME run (unifies identity).
     os.environ[manifest.RUN_ENV] = manifest.run_id(session_id, cwd)
-    _ = spec_path  # located for symmetry with the gate; not needed beyond spec_rel here
     return 0
 
 

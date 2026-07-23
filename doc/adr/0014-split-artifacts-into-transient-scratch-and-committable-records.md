@@ -24,12 +24,13 @@ links:
 
 ## Context and Problem Statement
 
-The workflow produces many artifacts: the unknowns ledger, spike scratch and test output,
-`/think` reasoning traces, and — on the unknown path — ADRs, a spec, and an implementation
-task, plus the eventual code. Which of these are durable records that belong in git, and
-which are throwaway working state that must never be committed? Without an explicit split
-the workflow either pollutes the repo with scratch or, worse, treats transient state as
-authoritative. This is the workflow's data-model boundary, and it was previously undecided.
+The workflow produces many artifacts: the living spec and spec-kit working set, the run
+manifest and spawn ledger, spike scratch and test output, `/think` reasoning traces, and —
+on convergence — the output the intent asked for, plus any ADRs a decision warrants. Which
+of these are durable records that belong in git, and which are throwaway working state that
+must never be committed? Without an explicit split the workflow either pollutes the repo with
+scratch or, worse, treats transient state as authoritative. This is the workflow's data-model
+boundary.
 
 ## Decision Drivers
 
@@ -54,19 +55,29 @@ authoritative. This is the workflow's data-model boundary, and it was previously
 
 Chosen option: "Two-tier split", with this assignment:
 
-**Transient (working state; in `.claude/` scratch, git-ignored; may be re-injected across
-compaction but never committed):**
-- the unknowns ledger (M8) — durable across turns, but working state, not a record
+**Transient (working state; in the run directory `.claude/empirica/<run_id>/`, git-ignored;
+may be re-injected across compaction but never committed):**
+- the living spec and the rest of the spec-kit working set — `spec.md`, `plan.md`,
+  `tasks.md`, `research.md` (ADR-15). These are the run's internal memory: how the
+  convergence loop tracks unknowns and their confidence for the goal it received. They are
+  the run's scratchpad, not a repository deliverable.
+- the run manifest (ADR-19) and the spawn ledger (ADR-17)
 - spike scratch and raw test output (M3)
 - `/think` reasoning traces (the trace informs the durable artifact, then is discarded)
 - staffing briefs (M2), intermediate SpikeResults, race bookkeeping (M4)
 
 **Committable (durable records; git; SSOT):**
-- ADRs (M6) — the decision record with rejected alternatives
-- the spec (M6) — self-contained: names files/interfaces, states out-of-scope, ends with
-  an end-to-end verification step
-- the implementation task (M6)
+- ADRs (M6) — the decision record with rejected alternatives, when the intent is a decision
+- the output the intent demanded — code, a document, a review, a refactor, a design — placed
+  where the intent dictates. empirica runs the convergence algorithm; the deliverable is
+  whatever the goal resolves to, produced by the model on convergence.
 - tests and code (M7 handoff → implementation)
+
+empirica is a workflow that serves any intent, not a producer of one fixed artifact. The
+spec-kit documents are the shape of its internal reasoning for a single run; the committable
+record is the goal's resolved output. If a goal's output happens to be a specification, that
+specification is the deliverable and is placed per the intent — distinct from the run's own
+internal spec, which stays in the run directory.
 
 The rule of thumb (Anthropic, "treat CLAUDE.md like code"; would its removal cause future
 mistakes?) decides edge cases. Agent-generated PR/commit *descriptions* are transient by
@@ -87,11 +98,12 @@ default — the human-authored intent/framing is the durable record (Willison, J
 
 ### Confirmation
 
-Fitness function: (1) after a run, `git status` shows only committable artifacts (ADRs,
-spec, task, tests, code) staged — no ledger, traces, or spike scratch; (2) the ledger and
-`/think` traces are written under a git-ignored scratch path; (3) a resumed run reconstructs
-state from scratch, not from git; (4) generated PR descriptions are not committed as the
-intent record.
+Fitness function: (1) after a run, `git status` shows only the goal's resolved output (and
+ADRs, when the intent is a decision) — the spec-kit working set, manifest, ledger, traces,
+and spike scratch never appear; (2) the living spec and all run state are written under the
+git-ignored run directory `.claude/empirica/<run_id>/`, never at the repository root; (3) a
+resumed run reconstructs state from that scratch, not from git; (4) generated PR descriptions
+are not committed as the intent record.
 
 ## More Information
 

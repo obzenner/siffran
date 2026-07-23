@@ -1,6 +1,6 @@
 ---
 name: empirica
-description: "Empirical-convergence development workflow. Track unknowns with confidence scores in a living spec, drive them to a fixed point (spike the ones that need runtime evidence, reason through the rest), then hand a converged spec to implementation. Use when starting non-trivial work where the plan is not yet certain — 'how should we build X', 'I'm not sure whether A or B', 'design and implement this feature', 'spike this', 'we don't know if this approach works'. Two paths: known territory goes straight to finalize; unknown territory runs the empirical loop first. Invoke as /empirica <goal>."
+description: "Empirical-convergence development workflow. Track unknowns with confidence scores in a living spec (the run's internal working memory), drive them to a fixed point (spike the ones that need runtime evidence, reason through the rest), then produce the goal's output. Use when starting non-trivial work where the plan is not yet certain — 'how should we build X', 'I'm not sure whether A or B', 'design and implement this feature', 'spike this', 'we don't know if this approach works'. Two paths: known territory goes straight to finalize; unknown territory runs the empirical loop first. Invoke as /empirica <goal>."
 allowed-tools: Read Glob Grep Bash Edit Write Agent TaskCreate TaskUpdate WebFetch
 compatibility: Designed for Claude Code; requires the methodologist skill as a companion and python3 for the hooks.
 metadata:
@@ -63,11 +63,20 @@ Announce: `Route: **known** | **unknown** — <one line why>`, then list the unk
 
 ## Step 2 — establish the living spec (state substrate, ADR-15)
 
-Convergence state — the unknowns and their confidence — lives in a **spec** in the run's
-working directory (`spec.md`); the spawn budget lives in its own transient ledger (see
-Budget below), not in the spec. The spec adopts the
-spec-kit artifact set by GitHub reference (ADR-15) — fetch the template with `WebFetch`, do
-NOT vendor a copy. Templates are pinned to spec-kit `v0.13.4`
+Convergence state — the unknowns and their confidence — lives in the run's **living spec**,
+the workflow's internal working memory for this goal. It is written to the run directory the
+manifest records: `.claude/empirica/<run_id>/spec.md`. This is transient run state (ADR-14),
+not a repository deliverable — **never write the spec to the repository root, and never copy
+it elsewhere; the run directory is its only home.** The spawn budget lives in its own
+transient ledger in the same directory (see Budget below), not in the spec.
+
+empirica serves whatever intent it received. The spec is how it *thinks*; the run's **output**
+is whatever the goal demands — code, a document, a review, a design — produced on convergence
+and placed where the intent dictates (ADR-14). If the goal's output is itself a specification,
+that deliverable is written to its intended location, separate from this internal spec.
+
+The spec adopts the spec-kit artifact set by GitHub reference (ADR-15) — fetch the template
+with `WebFetch`, do NOT vendor a copy. Templates are pinned to spec-kit `v0.13.4`
 (commit `ee883a1d4ecee9afe06a81f1bd38a0b745a8d059`):
 
 | Artifact | Pinned template URL |
@@ -104,11 +113,13 @@ Convention (enforced by the hook parser, `convergence_gate.py`):
   evidence-over-recall §3; this is the loop's principled termination, ADR-9/17).
 
 **Convergence ⇔ every unknown is either ≥ θ or blocked (surfaced)** (ADR-7/9). A known-path
-spec is one where that already holds. Fail direction (ADR-19 active-run manifest):
-- **no active-run manifest** (not an empirica run): no `spec.md` → allow (unrelated session);
-  `spec.md` unreadable → fail **closed**.
-- **active run** (a manifest was created at `/empirica` start): `spec.md` missing → fail
-  **closed** (it was deleted/renamed to escape the gate); manifest corrupt → fail **closed**.
+spec is one where that already holds. Fail direction (ADR-19 active-run manifest — the
+manifest, not a repository file, is the sole signal that a session is an empirica run):
+- **no manifest** (not an empirica run) → the gate allows the stop (never wedge an unrelated
+  session).
+- **manifest corrupt** → fail **closed** (corruption of the record that proves a run is live).
+- **active run**, living spec missing or unreadable → fail **closed** (the spec was deleted
+  or tampered to escape the gate).
 - The gate ticks a monotone pass counter each block; at `max_passes` it stops the loop
   honestly as non-converged (`stopped_residual`) rather than grinding to the platform's
   forced 8-block override.
@@ -205,32 +216,33 @@ companion, ADR-3/12/13) **conservatively**: escalate to it when the design is hi
 the loop stalled, or invariants are genuinely ambiguous — not at every step. `/think`
 resolves the finalized invariants and produces the reasoning trace.
 
-Finalize the committable artifacts (ADR-14, committable tier):
-- **ADRs** (via the `adrs` CLI, MADR format) — every real decision with its rejected
-  alternatives. This is `doc/adr/`.
-- the **spec** — self-contained: names files/interfaces, states what's out of scope, ends
-  with an end-to-end verification step.
-- **data-model.md / contracts/** from the spec-kit template (per feature, not one global schema).
-- the **implementation task**.
+Produce the committable output the intent demanded (ADR-14, committable tier):
+- the **goal's resolved deliverable** — code, a document, a review, a design — placed where
+  the intent dictates. This is what the run exists to produce.
+- **ADRs** (via the `adrs` CLI, MADR format) when the intent is a decision — every real
+  decision with its rejected alternatives. This is `doc/adr/`.
 
-The `/think` trace itself is transient (ADR-14) — it informs the ADR, then is discarded.
+The living spec and the rest of the spec-kit working set (`plan.md`, `tasks.md`,
+`data-model.md`, `contracts/`, `research.md`) are the run's internal memory — they stay in
+the run directory and are never committed. The `/think` trace is likewise transient (ADR-14):
+it informs the deliverable, then is discarded.
 
-## Step 6 — M7 Handoff: hand the converged spec to implementation
+## Step 6 — M7 Handoff: deliver the goal's output
 
-With convergence reached and artifacts committed, hand off to implementation. Tests and
-code are the committable output; the deterministic test suite is the machine-checkable spec
-and the trust boundary (ADR-13) — implementation is "done" when the gates are green, not
-when it looks right.
+With convergence reached, produce and hand off the goal's output. When that output is code,
+tests and code are the committable result; the deterministic test suite is the
+machine-checkable spec and the trust boundary (ADR-13) — implementation is "done" when the
+gates are green, not when it looks right.
 
 ## Data-model summary (what each step emits)
 
 | Tier | Artifacts | Home |
 |---|---|---|
-| **Transient** (ADR-14) | unknowns working state, spike scratch + raw gate output, `/think` traces, staffing briefs, race bookkeeping | `.claude/` scratch, git-ignored |
-| **Committable** (SSOT) | ADRs, the converged spec, data-model/contracts, the impl task, tests + code | git |
+| **Transient** (ADR-14) | the living spec + spec-kit working set, run manifest, spawn ledger, spike scratch + raw gate output, `/think` traces, staffing briefs, race bookkeeping | `.claude/empirica/<run_id>/`, git-ignored |
+| **Committable** (SSOT) | the goal's resolved output (code, document, review, …); ADRs when the intent is a decision; tests | git, at the intent's location |
 
-Unknowns + confidence live inline in the spec (ADR-15); the spec is the audit trail humans
-already read. No bespoke ledger file exists.
+Unknowns + confidence live inline in the living spec (ADR-15), the run's internal working
+memory. No bespoke ledger file exists.
 
 ## Rules
 

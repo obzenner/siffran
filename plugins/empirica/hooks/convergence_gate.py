@@ -11,9 +11,11 @@ stdout `decision` field, which the current Stop spec does not honor):
   block  → write the reason to STDERR and exit 2 (Claude reads stderr, keeps going).
   allow  → exit 0 (stdout {"continue": true} is informational only).
 
-State substrate (ADR-15): unknowns are checkbox items under a `## Unknowns` heading in
-spec.md, each carrying a confidence in a trailing HTML comment `<!-- confidence: N -->`
-(N in [0,1]). An unknown the agent genuinely cannot resolve is surfaced to the human with
+State substrate (ADR-15): the living spec is the run's internal working memory, held in the
+run directory (`.claude/empirica/<run_id>/spec.md`) and located via the manifest's
+`spec_path`. Unknowns are checkbox items under a `## Unknowns` heading, each carrying a
+confidence in a trailing HTML comment `<!-- confidence: N -->` (N in [0,1]). An unknown the
+agent genuinely cannot resolve is surfaced to the human with
 `<!-- confidence: N, blocked: <tag> -->` (tags per evidence-over-recall §3, plus
 `needs-budget` from ADR-17), where <tag> ∈ {needs-decision, needs-data, needs-experiment,
 needs-budget}; blocked unknowns stop gating (they are a residual for the human, not a
@@ -24,14 +26,12 @@ truly CONVERGED (no unknowns blocked) or merely STOPPED with residuals. A budget
 run (`blocked: needs-budget`) allows the stop but is flagged `converged: false` — the gate
 never lets budget exhaustion fabricate a green result.
 
-Fail direction (deliberate, per adversarial review + ADR-19 active-run manifest):
-  - NO active-run manifest (not an empirica run):
-      - no spec.md          → fail OPEN  (unrelated session; never wedge it)
-      - spec.md unreadable  → fail CLOSED (the moment you most want a gate)
-  - ACTIVE manifest (this IS an empirica run — identity established at /empirica start):
-      - spec.md missing     → fail CLOSED  (our spec was deleted/renamed to escape — 1.2a)
-      - manifest corrupt    → fail CLOSED  (corruption of an active run — review 2.5)
-  - manifest status ≠ active (already stopped/converged) → fail OPEN (done, don't re-block)
+Identity and fail direction (ADR-19 active-run manifest): the manifest is the sole signal
+that a session is an empirica run.
+  - no manifest         → not an empirica run → fail OPEN (never wedge an unrelated session)
+  - manifest corrupt    → fail CLOSED (corruption of the record that proves a run is live)
+  - active run, spec missing/unreadable → fail CLOSED (the spec was deleted/tampered)
+  - status ≠ active (already stopped/converged) → fail OPEN (done, don't re-block)
   - unscored / malformed / out-of-range confidence → treated as 0.0 → BLOCKS
     (absence of proof is not proof of convergence)
 
@@ -98,13 +98,14 @@ def theta() -> float:
     return value if 0.0 <= value <= 1.0 else DEFAULT_THETA
 
 
-def locate_spec(cwd: Path) -> Path:
-    """spec.md under cwd, or EMPIRICA_SPEC — relative overrides resolve against cwd."""
-    override = os.environ.get("EMPIRICA_SPEC")
-    if override:
-        p = Path(override)
-        return p if p.is_absolute() else cwd / p
-    return cwd / "spec.md"
+def spec_path_for(cwd: Path, session_id: str, run: dict | None) -> Path:
+    """The living spec's path. The spec is the run's internal working memory and lives in the
+    run directory (`.claude/empirica/<run_id>/spec.md`), recorded in the manifest's
+    `spec_path`. An active manifest's recorded path is authoritative; otherwise the path is
+    derived from the run identity. The spec is never a repository file."""
+    if run and isinstance(run.get("spec_path"), str) and run["spec_path"]:
+        return Path(run["spec_path"])
+    return manifest.default_spec_path(cwd, session_id)
 
 
 def unknowns_section(text: str) -> list[str]:
@@ -214,29 +215,33 @@ def main() -> int:
     except (json.JSONDecodeError, ValueError):
         payload = {}
     cwd = Path(str(payload.get("cwd") or "."))
-    spec_path = locate_spec(cwd)
-    run_path, run = _resolve_run(cwd, payload.get("session_id"))
+    session_id = payload.get("session_id")
+    run_path, run = _resolve_run(cwd, session_id)
     is_active = bool(run) and run.get("status") == "active"
 
     # --- Identity + fail direction (ADR-19) ---------------------------------
-    if run and run.get("status") == "__corrupt__":
-        # An active run whose manifest is corrupt → fail CLOSED (review 2.5): corruption
-        # of the record that proves a run is live is exactly when you want the gate.
+    # The active-run manifest is the sole signal that this is an empirica run. A session with
+    # no manifest is not an empirica run — fail OPEN, never wedge it.
+    if run is None:
+        print(json.dumps({"continue": True}))
+        return 0
+
+    if run.get("status") == "__corrupt__":
+        # An active run whose manifest is corrupt → fail CLOSED: corruption of the record
+        # that proves a run is live is exactly when you want the gate.
         print("empirica: active-run manifest is corrupt; refusing to stop until run state "
               "can be read (fail-closed, ADR-19).", file=sys.stderr)
         return 2
 
-    if not spec_path.exists():
-        if is_active:
-            # Our run's spec vanished (deleted/renamed to bypass convergence) — fail CLOSED
-            # (1.2a). Only reachable when a manifest proves this is an empirica run.
-            print(f"empirica: active run but {spec_path.name} is missing; refusing to stop — "
-                  f"restore the spec (fail-closed, ADR-19).", file=sys.stderr)
-            return 2
-        print(json.dumps({"continue": True}))  # not an empirica run — fail open (unchanged)
-        return 0
+    spec_path = spec_path_for(cwd, str(session_id), run)
 
-    if run and not is_active:
+    if is_active and not spec_path.exists():
+        # The run's spec vanished (deleted/renamed to bypass convergence) → fail CLOSED.
+        print(f"empirica: active run but the living spec is missing ({spec_path}); refusing "
+              f"to stop — restore it in the run directory (fail-closed, ADR-19).", file=sys.stderr)
+        return 2
+
+    if not is_active:
         # Manifest says this run already stopped/converged — don't re-block a finished run.
         print(json.dumps({"continue": True, "converged": run.get("status") == "converged"}))
         return 0

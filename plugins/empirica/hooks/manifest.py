@@ -62,10 +62,25 @@ def run_id(session_id: str, root: Path) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
-def locate_run(cwd: Path, session_id: str) -> Path:
-    """Path to this run's manifest. run_id sanitised to a single safe segment — no traversal."""
+def locate_run_dir(cwd: Path, session_id: str) -> Path:
+    """The run's private directory: `.claude/empirica/<run_id>/`. run_id is sanitised to a
+    single safe segment — no traversal. This directory is the run's entire home: the
+    manifest, the living spec, and any spec-kit working documents. It is transient scratch
+    (git-ignored) and the model must write the run's spec here, never to the repo."""
     rid = re.sub(r"[^a-f0-9]", "", run_id(session_id, cwd)) or "default"
-    return cwd / ".claude" / "empirica" / rid / "run.json"
+    return cwd / ".claude" / "empirica" / rid
+
+
+def locate_run(cwd: Path, session_id: str) -> Path:
+    """Path to this run's manifest, inside the run directory."""
+    return locate_run_dir(cwd, session_id) / "run.json"
+
+
+def default_spec_path(cwd: Path, session_id: str) -> Path:
+    """The run's living spec: `spec.md` inside the run directory. The spec is the run's
+    internal working memory (unknowns + confidence), not a repository deliverable, so it
+    lives beside the manifest and dies with the run."""
+    return locate_run_dir(cwd, session_id) / "spec.md"
 
 
 def _raise_non_finite(_c):
@@ -102,18 +117,23 @@ def read_run(path: Path) -> dict | None:
         "status": data["status"],
         "passes": _coerce_int(data.get("passes"), 0, minimum=0),
         "max_passes": _coerce_int(data.get("max_passes"), DEFAULT_MAX_PASSES, minimum=1),
-        "spec_path": data.get("spec_path") if isinstance(data.get("spec_path"), str) else "spec.md",
+        "spec_path": data.get("spec_path") if isinstance(data.get("spec_path"), str) else None,
         "evidence": evidence if isinstance(evidence, dict) else {},
     }
 
 
 def start_run(path: Path, session_id: str, root: Path,
-              max_passes: int = DEFAULT_MAX_PASSES, spec_path: str = "spec.md") -> dict:
+              max_passes: int = DEFAULT_MAX_PASSES, spec_path: str | None = None) -> dict:
     """Create the manifest for a run. IDEMPOTENT: an already-ACTIVE run keeps its pass
     count, so re-invoking `/empirica` mid-run continues rather than resetting the counter
     (which would let the model escape the cap). A corrupt/stopped file is replaced with a
     fresh active run — starting is an explicit new-run intent.
+
+    spec_path defaults to the run directory's `spec.md`. It is stored absolute so the Stop
+    gate reads exactly the file the run tracks, independent of the process's cwd.
     """
+    if spec_path is None:
+        spec_path = str((path.parent / "spec.md").resolve())
     with _io.lock(path):
         existing = read_run(path)
         if existing and existing.get("status") == "active":

@@ -41,9 +41,17 @@ def check(name: str, ok: bool, detail: str = "") -> None:
     results.append((name, ok, detail))
 
 
-def write_spec(body: str) -> Path:
+DEFAULT_SID = "sess-test"
+
+
+def write_spec(body: str, sid: str = DEFAULT_SID, max_passes: int = 8) -> Path:
+    """Establish a real empirica run: an active manifest plus the living spec written to the
+    run directory the manifest records (`.claude/empirica/<run_id>/spec.md`). The gate reads
+    the spec from the manifest, so this is how a run is legitimately established. Returns the
+    cwd (session id is DEFAULT_SID unless overridden)."""
     d = Path(tempfile.mkdtemp())
-    (d / "spec.md").write_text(body)
+    run = manifest.start_run(manifest.locate_run(d, sid), sid, d, max_passes=max_passes)
+    Path(run["spec_path"]).write_text(body)
     return d
 
 
@@ -86,7 +94,8 @@ def test_theta_guard():
 
 # --- Stop gate end-to-end (exit 2 = block, exit 0 = allow) ------------------
 def test_hook_blocks_when_unconverged():
-    p = run_hook(GATE, {"cwd": str(HERE)}, HERE)
+    d = write_spec(FIXTURE_SPEC.read_text())  # the committed fixture, in a real run
+    p = run_hook(GATE, {"cwd": str(d), "session_id": DEFAULT_SID}, d)
     check("A6 gate exits 2 (block) while unconverged", p.returncode == 2,
           f"rc={p.returncode} stderr={p.stderr!r}")
     check("A7 block reason on stderr names theta", "θ=0.8" in p.stderr, f"got {p.stderr!r}")
@@ -95,14 +104,14 @@ def test_hook_blocks_when_unconverged():
 def test_hook_allows_when_converged():
     d = write_spec("## Unknowns\n- [x] done <!-- confidence: 0.9 -->\n"
                    "- [x] also <!-- confidence: 0.85 -->\n")
-    p = run_hook(GATE, {"cwd": str(d)}, d)
+    p = run_hook(GATE, {"cwd": str(d), "session_id": DEFAULT_SID}, d)
     check("A8 gate exits 0 (allow) when converged", p.returncode == 0,
           f"rc={p.returncode} stderr={p.stderr!r}")
 
 
 def test_hook_fail_open_missing_spec():
     d = Path(tempfile.mkdtemp())
-    p = run_hook(GATE, {"cwd": str(d)}, d)
+    p = run_hook(GATE, {"cwd": str(d), "session_id": DEFAULT_SID}, d)
     check("A9 fail-open (exit 0) when no spec", p.returncode == 0,
           f"rc={p.returncode} stderr={p.stderr!r}")
 
@@ -111,7 +120,7 @@ def test_hook_fail_open_missing_spec():
 def test_unscored_unknown_blocks():
     d = write_spec("## Unknowns\n- [ ] no confidence comment here\n"
                    "- [x] scored <!-- confidence: 0.95 -->\n")
-    p = run_hook(GATE, {"cwd": str(d)}, d)
+    p = run_hook(GATE, {"cwd": str(d), "session_id": DEFAULT_SID}, d)
     check("F1 unscored unknown BLOCKS (exit 2)", p.returncode == 2,
           f"rc={p.returncode} stderr={p.stderr!r}")
 
@@ -119,16 +128,18 @@ def test_unscored_unknown_blocks():
 def test_out_of_range_confidence_blocks():
     # "8" (fat-finger for 0.8) is out of [0,1] → treated as 0.0 → blocks.
     d = write_spec("## Unknowns\n- [ ] fat finger <!-- confidence: 8 -->\n")
-    p = run_hook(GATE, {"cwd": str(d)}, d)
+    p = run_hook(GATE, {"cwd": str(d), "session_id": DEFAULT_SID}, d)
     check("F2 out-of-range confidence BLOCKS (exit 2)", p.returncode == 2,
           f"rc={p.returncode} stderr={p.stderr!r}")
 
 
 def test_unreadable_spec_fails_closed():
+    # Establish a run, then replace the living spec with a directory → read_text raises
+    # OSError → the active run fails CLOSED rather than fabricating convergence.
     d = Path(tempfile.mkdtemp())
-    spec = d / "spec.md"
-    spec.mkdir()  # a directory where a file is expected → read_text raises OSError
-    p = run_hook(GATE, {"cwd": str(d)}, d)
+    run = manifest.start_run(manifest.locate_run(d, DEFAULT_SID), DEFAULT_SID, d)
+    Path(run["spec_path"]).mkdir(parents=True)
+    p = run_hook(GATE, {"cwd": str(d), "session_id": DEFAULT_SID}, d)
     check("F3 unreadable spec FAILS CLOSED (exit 2)", p.returncode == 2,
           f"rc={p.returncode} stderr={p.stderr!r}")
 
@@ -137,7 +148,7 @@ def test_blocked_unknown_allows():
     # A genuinely unresolvable unknown surfaced to the human must NOT wedge the loop.
     d = write_spec("## Unknowns\n"
                    "- [ ] needs a human call <!-- confidence: 0.2, blocked: needs-decision -->\n")
-    p = run_hook(GATE, {"cwd": str(d)}, d)
+    p = run_hook(GATE, {"cwd": str(d), "session_id": DEFAULT_SID}, d)
     check("F4 blocked (surfaced) unknown ALLOWS stop (exit 0)", p.returncode == 0,
           f"rc={p.returncode} stderr={p.stderr!r}")
 
@@ -145,7 +156,7 @@ def test_blocked_unknown_allows():
 def test_checklist_outside_unknowns_ignored():
     # Checkboxes NOT under ## Unknowns must not block (scoping).
     d = write_spec("## Tasks\n- [ ] some todo\n\n## Unknowns\n- [x] u <!-- confidence: 0.9 -->\n")
-    p = run_hook(GATE, {"cwd": str(d)}, d)
+    p = run_hook(GATE, {"cwd": str(d), "session_id": DEFAULT_SID}, d)
     check("F5 checkbox outside Unknowns does not block", p.returncode == 0,
           f"rc={p.returncode} stderr={p.stderr!r}")
 
@@ -162,7 +173,7 @@ def test_invalid_blocked_tag_still_blocks():
     # review 1.1: a made-up blocked tag must NOT bypass the gate.
     d = write_spec("## Unknowns\n"
                    "- [ ] sneaky <!-- confidence: garbage, blocked: totally-made-up -->\n")
-    p = run_hook(GATE, {"cwd": str(d)}, d)
+    p = run_hook(GATE, {"cwd": str(d), "session_id": DEFAULT_SID}, d)
     check("G1 invalid blocked tag does NOT bypass (exit 2)", p.returncode == 2,
           f"rc={p.returncode} stderr={p.stderr!r}")
 
@@ -170,7 +181,7 @@ def test_invalid_blocked_tag_still_blocks():
 def test_valid_blocked_tags_allow():
     for tag in ("needs-decision", "needs-data", "needs-experiment", "needs-budget"):
         d = write_spec(f"## Unknowns\n- [ ] x <!-- confidence: 0.1, blocked: {tag} -->\n")
-        p = run_hook(GATE, {"cwd": str(d)}, d)
+        p = run_hook(GATE, {"cwd": str(d), "session_id": DEFAULT_SID}, d)
         check(f"G2 valid tag {tag} allows stop", p.returncode == 0, f"rc={p.returncode}")
 
 
@@ -178,7 +189,7 @@ def test_malformed_confidence_blocks_even_with_valid_tag():
     # review 1.1 residual: a valid tag must NOT exempt an item whose confidence is
     # malformed/out-of-range — a residual has to carry a real score. Fail closed.
     d = write_spec("## Unknowns\n- [ ] x <!-- confidence: garbage, blocked: needs-decision -->\n")
-    p = run_hook(GATE, {"cwd": str(d)}, d)
+    p = run_hook(GATE, {"cwd": str(d), "session_id": DEFAULT_SID}, d)
     check("G1b malformed confidence + valid tag STILL blocks (exit 2)", p.returncode == 2,
           f"rc={p.returncode} stderr={p.stderr!r}")
 
@@ -187,7 +198,7 @@ def test_second_unknowns_section_aggregated():
     # review 1.2b: a pending item in a SECOND Unknowns section must still block.
     d = write_spec("## Unknowns\n- [x] a <!-- confidence: 0.9 -->\n\n"
                    "## Notes\ntext\n\n## Unknowns\n- [ ] b <!-- confidence: 0.2 -->\n")
-    p = run_hook(GATE, {"cwd": str(d)}, d)
+    p = run_hook(GATE, {"cwd": str(d), "session_id": DEFAULT_SID}, d)
     check("G3 second Unknowns section is aggregated (exit 2)", p.returncode == 2,
           f"rc={p.returncode} stderr={p.stderr!r}")
 
@@ -282,11 +293,24 @@ def test_harness_large_output_bounded():
 
 # --- SessionStart:compact re-injection --------------------------------------
 def test_state_restore_reinjects_unknowns():
+    # Restore resolves the living spec via the manifest, so it needs a real run.
+    d = write_spec(FIXTURE_SPEC.read_text())
     proc = subprocess.run([sys.executable, str(RESTORE)],
-                          input=json.dumps({"cwd": str(HERE)}), capture_output=True, text=True)
+                          input=json.dumps({"cwd": str(d), "session_id": DEFAULT_SID}),
+                          capture_output=True, text=True)
     check("C1 restore exits 0", proc.returncode == 0, f"stderr={proc.stderr!r}")
     check("C2 restore re-injects unknown bodies", "U1" in proc.stdout, f"got {proc.stdout!r}")
     check("C3 restore reports sub-θ status", "below θ" in proc.stdout, f"got {proc.stdout!r}")
+
+
+def test_state_restore_no_run_is_silent():
+    # No manifest → not an empirica run → restore emits nothing (fail-open).
+    d = Path(tempfile.mkdtemp())
+    proc = subprocess.run([sys.executable, str(RESTORE)],
+                          input=json.dumps({"cwd": str(d), "session_id": "sess-none"}),
+                          capture_output=True, text=True)
+    check("C4 restore silent when no run", proc.returncode == 0 and proc.stdout.strip() == "",
+          f"rc={proc.returncode} stdout={proc.stdout!r}")
 
 
 # --- Spawn budget (ADR-17, corrected: enforce on spawns, not tokens) --------
@@ -358,7 +382,7 @@ def test_gate_budget_exhausted_is_non_converged():
     d = write_spec("## Unknowns\n"
                    "- [x] resolved <!-- confidence: 0.9 -->\n"
                    "- [ ] ran out <!-- confidence: 0.3, blocked: needs-budget -->\n")
-    p = run_hook(GATE, {"cwd": str(d)}, d)
+    p = run_hook(GATE, {"cwd": str(d), "session_id": DEFAULT_SID}, d)
     out = json.loads(p.stdout)
     check("E1 budget-exhausted run ALLOWS stop (exit 0)", p.returncode == 0,
           f"rc={p.returncode}")
@@ -370,7 +394,7 @@ def test_gate_budget_exhausted_is_non_converged():
 
 def test_gate_true_convergence_flagged_true():
     d = write_spec("## Unknowns\n- [x] done <!-- confidence: 0.9 -->\n")
-    p = run_hook(GATE, {"cwd": str(d)}, d)
+    p = run_hook(GATE, {"cwd": str(d), "session_id": DEFAULT_SID}, d)
     out = json.loads(p.stdout)
     check("E4 truly converged run flagged converged:true", out.get("converged") is True,
           f"got {out}")
@@ -380,7 +404,7 @@ def test_gate_budget_does_not_stop_healthy_loop():
     # A sub-θ unknown that is NOT blocked must still block the stop, regardless of budget —
     # budget never stops a healthy loop early (ADR-17 fitness #3).
     d = write_spec("## Unknowns\n- [ ] still open <!-- confidence: 0.3 -->\n")
-    p = run_hook(GATE, {"cwd": str(d)}, d)
+    p = run_hook(GATE, {"cwd": str(d), "session_id": DEFAULT_SID}, d)
     check("E5 healthy sub-θ loop still blocks (exit 2)", p.returncode == 2,
           f"rc={p.returncode}")
 
@@ -439,11 +463,11 @@ def test_manifest_evidence_slot():
 
 # --- Gate × manifest: fail-closed identity + pass-count termination E2E ------
 def _start_and_spec(body: str, max_passes: int = 8) -> tuple[Path, str]:
-    """Write a spec AND activate a run for the same (cwd, session) — an empirica run."""
+    """Activate a run and write its living spec into the run directory — a real empirica run."""
     d = Path(tempfile.mkdtemp())
-    (d / "spec.md").write_text(body)
     sid = "sess-e2e"
-    manifest.start_run(manifest.locate_run(d, sid), sid, d, max_passes=max_passes)
+    run = manifest.start_run(manifest.locate_run(d, sid), sid, d, max_passes=max_passes)
+    Path(run["spec_path"]).write_text(body)
     return d, sid
 
 
@@ -511,16 +535,18 @@ def test_gate_stopped_run_does_not_reblock():
 
 def test_run_start_hook_creates_manifest():
     d = Path(tempfile.mkdtemp())
-    (d / "spec.md").write_text("## Unknowns\n- [ ] x <!-- confidence: 0.1 -->\n")
     sid = "sess-runstart"
     proc = subprocess.run([sys.executable, str(RUN_START)],
                           input=json.dumps({"session_id": sid, "cwd": str(d),
-                                            "command_name": "empirica"}),
+                                            "command_name": "empirica:empirica"}),
                           capture_output=True, text=True, cwd=str(d))
     run = manifest.read_run(manifest.locate_run(d, sid))
     check("M21 run_start exits 0", proc.returncode == 0, f"stderr={proc.stderr!r}")
     check("M22 run_start created an active manifest", run is not None and run["status"] == "active",
           f"got {run}")
+    check("M22b manifest spec_path is inside the run directory (not the repo)",
+          run and run["spec_path"] == str((manifest.locate_run_dir(d, sid) / "spec.md").resolve()),
+          f"got {run and run.get('spec_path')}")
 
 
 def test_run_start_no_session_id_is_noop():
@@ -539,7 +565,6 @@ def test_run_start_with_real_captured_payload():
     # payload shape (captured live in session c7477410-…): session_id + cwd present alongside
     # command_name/command_args/prompt/expansion_type/command_source etc. → manifest created.
     d = Path(tempfile.mkdtemp())
-    (d / "spec.md").write_text("## Unknowns\n- [ ] x <!-- confidence: 0.1 -->\n")
     sid = "c7477410-ea2d-4960-bfb6-df1e6f39900c"
     payload = {
         "session_id": sid, "cwd": str(d),
@@ -587,7 +612,7 @@ def main() -> int:
               test_gate_is_real_not_judgment, test_gate_timeout_fails,
               test_harness_propagates_exit_code, test_harness_launch_failure_is_fail,
               test_harness_large_output_bounded,
-              test_state_restore_reinjects_unknowns,
+              test_state_restore_reinjects_unknowns, test_state_restore_no_run_is_silent,
               test_budget_math_unbounded_and_bounded, test_reserve_spawn_atomic_increment_and_cap,
               test_missing_ledger_fail_open, test_spawn_gate_denies_over_cap,
               test_spawn_gate_ignores_non_agent_tools, test_spawn_gate_unbounded_allows,

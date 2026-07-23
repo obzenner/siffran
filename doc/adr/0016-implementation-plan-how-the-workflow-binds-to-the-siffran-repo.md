@@ -79,9 +79,11 @@ invoked `/empirica`) with:
 never referenced (M2 staffing is inline). spec-kit read by pinned GitHub reference at use
 time, never vendored (ADR-15).
 
-**State.** Unknowns + confidence live inline in `spec.md` (ADR-15); transient scratch
-(spike output, `/think` traces, race bookkeeping) under `.claude/` scratch, git-ignored
-(ADR-14). Committable outputs: spec/research/data-model/contracts/plan/tasks + MADR ADRs.
+**State.** Unknowns + confidence live inline in the run's living spec, held in the run
+directory `.claude/empirica/<run_id>/` alongside the rest of the spec-kit working set, the
+manifest, and transient scratch (spike output, `/think` traces, race bookkeeping) — all
+git-ignored (ADR-14/15/19). Committable output: the goal's resolved deliverable, plus MADR
+ADRs when the intent is a decision.
 
 **deep-planner.** Removed from `marketplace.json` and `plugins/` when this plugin ships
 (ADR-4), in the same PR as the replacement.

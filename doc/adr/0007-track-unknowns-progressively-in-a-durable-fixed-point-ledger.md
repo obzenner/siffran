@@ -64,8 +64,8 @@ and is our genuine contribution; the storage is adopted, not invented (ADR-15).
   audit trail, and it is the same artifact humans already read.
 * Good, because the known/unknown split (ADR-5) becomes a spectrum — the known path is
   just an initial spec whose unknowns already satisfy `converged()`.
-* Good, because durability + cross-turn resumption (ADR-8) ride on the committable spec plus
-  transient scratch (ADR-14), with no bespoke store to maintain.
+* Good, because durability + cross-turn resumption (ADR-8) ride on the run's living spec in
+  the run directory (transient scratch, ADR-14), with no bespoke store to maintain.
 * Bad, because deriving new unknowns from knowns can grow the set — termination is not free
   and needs explicit guards (ADR-9).
 * Bad, because "unknowns as spec items with a confidence score" is less structured than a
