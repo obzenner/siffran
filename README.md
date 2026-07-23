@@ -19,7 +19,7 @@ Add the marketplace, then install a plugin:
 | Plugin | Version | Description |
 |--------|---------|-------------|
 | `methodologist` | 0.4.0 | Methodology router — picks and executes formal CS/math reasoning methodologies with tracked phases and structured output. |
-| `deep-planner` | 0.3.0 | Iterative investigation-and-planning loop — reads the codebase in passes, separates business logic / custom code / external integrations, verifies all API surfaces against actual docs before graduating the plan. |
+| `empirica` | 0.1.0 | Empirical-convergence workflow — tracks unknowns with confidence scores in a living spec, spikes them against real deterministic checks, and drives them to a fixed point before handing off to implementation. Hook-enforced convergence. |
 <!-- END GENERATED: plugins -->
 
 ## Development

@@ -13,9 +13,9 @@
       "category": "development"
     },
     {
-      "name": "deep-planner",
-      "source": "./plugins/deep-planner",
-      "description": "Iterative investigation-and-planning loop — reads code in multiple passes, separates business logic / custom code / external integrations, verifies all API surfaces against actual docs before graduating the plan.",
+      "name": "empirica",
+      "source": "./plugins/empirica",
+      "description": "Empirical-convergence workflow — tracks unknowns with confidence scores in a living spec, spikes them against real deterministic checks, and drives them to a fixed point before handing off to implementation. Hook-enforced convergence.",
       "category": "development"
     }
   ]
