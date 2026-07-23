@@ -11,6 +11,8 @@ links:
     kind: Depends on
   - target: 7
     kind: Depends on
+  - target: 19
+    kind: Refined by
 ---
 
 # Guarantee termination with specialization, threshold, and cap
@@ -42,11 +44,20 @@ convergence loop terminates?
 ## Decision Outcome
 
 Chosen option: "Three composed guards", because each closes a distinct escape from
-termination. Specialization-only derivation is the load-bearing one: it makes the recursion
-well-founded (every derived unknown is strictly closer to resolvable-by-evidence, so there
-is a floor). θ defines "done" via the confidence score the user asked for. The cap bounds
+termination. θ defines "done" via the confidence score the user asked for. The cap bounds
 the worst case and aligns with the platform's 8-block reality — the loop checkpoints to the
 durable spec (ADR-7) and resumes across turns rather than grinding one session.
+
+**Correction (ADR-19): the termination PROOF is the pass-count variant, not specialization.**
+This ADR's first draft called specialization-only derivation "load-bearing" for
+well-foundedness — but a natural-language "strictly narrower" question does not give a
+*measurable* variant, and an infinite chain of ever-narrower unknowns is not excluded by prose
+(external review finding 2.3). The real proof is the monotone variant `max_passes − passes`
+over (ℕ, <), enforced by the active-run manifest (ADR-19): it strictly decreases each pass and
+is bounded below by 0, so the loop terminates in ≤ `max_passes` passes whether or not it
+converges. Specialization-only is retained as a **quality heuristic** (it keeps derived
+unknowns useful and the search focused), not as the termination guarantee. Proven in
+`.claude/spike-manifest` (check G2c: a non-converging loop stops exactly at the cap).
 
 **Blocked residuals are the fourth, operational stop condition** (added at build, proven in
 the gate): an unknown the loop genuinely cannot resolve — a human judgment call, unobtainable

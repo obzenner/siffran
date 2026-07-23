@@ -25,6 +25,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 from typing import TypedDict
 
 DEFAULT_TIMEOUT = 300  # seconds; a spike check that runs longer is a failure signal
@@ -42,13 +43,51 @@ class SpikeResult(TypedDict):
     stderr_tail: list[str]
 
 
+MAX_LINE = 2000  # cap each retained line so one newline-free blob can't bloat the payload
+
+
 def _tail(text: str, n: int = 5) -> list[str]:
     if not text:
         return []
-    # Cap before splitting so a pathological single line can't blow up memory here.
-    if len(text) > MAX_OUTPUT_BYTES:
-        text = text[-MAX_OUTPUT_BYTES:]
-    return text.strip().splitlines()[-n:]
+    lines = text.strip().splitlines()[-n:]
+    return [ln if len(ln) <= MAX_LINE else ln[:MAX_LINE] + "…" for ln in lines]
+
+
+class _BoundedReader(threading.Thread):
+    """Drain a pipe in chunks, retaining only the last MAX_OUTPUT_BYTES.
+
+    This is the actual memory bound (review 1.5): the earlier version let
+    `communicate()` buffer the entire stream before truncating, so a multi-GB emitter
+    could OOM the hook. Here we keep a ring buffer of the tail and never hold more than
+    the cap, regardless of how much the command writes.
+    """
+
+    def __init__(self, pipe):
+        super().__init__(daemon=True)
+        self._pipe = pipe
+        self._buf = b""
+        self.overflowed = False
+
+    def run(self) -> None:
+        try:
+            while True:
+                chunk = self._pipe.read(65536)
+                if not chunk:
+                    break
+                self._buf += chunk
+                if len(self._buf) > MAX_OUTPUT_BYTES:
+                    self._buf = self._buf[-MAX_OUTPUT_BYTES:]
+                    self.overflowed = True
+        except (OSError, ValueError):
+            pass
+        finally:
+            try:
+                self._pipe.close()
+            except OSError:
+                pass
+
+    def text(self) -> str:
+        return self._buf.decode("utf-8", errors="replace")
 
 
 def run_gate(cmd: list[str], timeout: float = DEFAULT_TIMEOUT) -> SpikeResult:
@@ -57,34 +96,44 @@ def run_gate(cmd: list[str], timeout: float = DEFAULT_TIMEOUT) -> SpikeResult:
     Robust by construction (review 1.5): a timeout, non-UTF-8 output, or a launch failure
     (missing exe / permission / OSError) all resolve to gate=fail with the reason captured
     — no unhandled exception path. On timeout the whole PROCESS GROUP is killed so forked
-    descendants don't survive. Output is byte-capped so a chatty command can't exhaust
-    memory.
+    descendants don't survive. Output is drained through bounded ring buffers, so a chatty
+    command can never exhaust memory even before truncation.
     """
     # New session/process group so a timeout can kill the whole tree (POSIX).
     preexec = os.setsid if hasattr(os, "setsid") else None
     try:
         proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            errors="replace", preexec_fn=preexec,
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=preexec,
         )
     except (OSError, ValueError) as exc:
         return SpikeResult(cmd=cmd, returncode=_LAUNCH_FAIL_RC, gate="fail", timed_out=False,
                            stdout_tail=[], stderr_tail=[f"launch failed: {exc}"])
+
+    out_reader, err_reader = _BoundedReader(proc.stdout), _BoundedReader(proc.stderr)
+    out_reader.start()
+    err_reader.start()
     try:
-        out, err = proc.communicate(timeout=timeout)
+        proc.wait(timeout=timeout)
         timed_out = False
     except subprocess.TimeoutExpired:
         _kill_group(proc)
-        out, err = proc.communicate()
+        proc.wait()
+        timed_out = True
+    out_reader.join(timeout=5)
+    err_reader.join(timeout=5)
+
+    err_tail = _tail(err_reader.text())
+    if timed_out:
         return SpikeResult(cmd=cmd, returncode=None, gate="fail", timed_out=True,
-                           stdout_tail=_tail(out), stderr_tail=[f"timed out after {timeout}s"])
+                           stdout_tail=_tail(out_reader.text()),
+                           stderr_tail=[f"timed out after {timeout}s"])
     return SpikeResult(
         cmd=cmd,
         returncode=proc.returncode,
         gate="pass" if proc.returncode == 0 else "fail",
-        timed_out=timed_out,
-        stdout_tail=_tail(out),
-        stderr_tail=_tail(err),
+        timed_out=False,
+        stdout_tail=_tail(out_reader.text()),
+        stderr_tail=err_tail,
     )
 
 

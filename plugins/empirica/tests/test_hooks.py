@@ -31,6 +31,8 @@ def _load(name: str, path: Path):
 
 cg = _load("convergence_gate", GATE)
 budget = _load("budget", HOOKS / "budget.py")
+manifest = _load("manifest", HOOKS / "manifest.py")
+RUN_START = HOOKS / "run_start.py"
 
 results: list[tuple[str, bool, str]] = []
 
@@ -172,6 +174,15 @@ def test_valid_blocked_tags_allow():
         check(f"G2 valid tag {tag} allows stop", p.returncode == 0, f"rc={p.returncode}")
 
 
+def test_malformed_confidence_blocks_even_with_valid_tag():
+    # review 1.1 residual: a valid tag must NOT exempt an item whose confidence is
+    # malformed/out-of-range — a residual has to carry a real score. Fail closed.
+    d = write_spec("## Unknowns\n- [ ] x <!-- confidence: garbage, blocked: needs-decision -->\n")
+    p = run_hook(GATE, {"cwd": str(d)}, d)
+    check("G1b malformed confidence + valid tag STILL blocks (exit 2)", p.returncode == 2,
+          f"rc={p.returncode} stderr={p.stderr!r}")
+
+
 def test_second_unknowns_section_aggregated():
     # review 1.2b: a pending item in a SECOND Unknowns section must still block.
     d = write_spec("## Unknowns\n- [x] a <!-- confidence: 0.9 -->\n\n"
@@ -254,6 +265,19 @@ def test_harness_launch_failure_is_fail():
     # review 1.5: an un-launchable command resolves to gate=fail, not a crash.
     out, _ = run_harness(["this-command-does-not-exist-xyzzy"])
     check("B7 launch failure → gate=fail", out["gate"] == "fail", f"got {out}")
+
+
+def test_harness_large_output_bounded():
+    # review 1.5: a command emitting far more than the cap must NOT OOM the harness;
+    # output is drained through a bounded ring buffer and the tail stays small.
+    prog = ("import sys\n"
+            "chunk = 'x' * 1_000_000\n"
+            "[sys.stdout.write(chunk) for _ in range(50)]\n"  # ~50 MB
+            "sys.exit(0)\n")
+    out, _ = run_harness(["python3", "-c", prog])
+    tail_bytes = sum(len(s) for s in out["stdout_tail"])
+    check("B8 huge output → gate=pass, bounded tail", out["gate"] == "pass" and tail_bytes < 100_000,
+          f"gate={out['gate']} tail_bytes={tail_bytes}")
 
 
 # --- SessionStart:compact re-injection --------------------------------------
@@ -361,6 +385,153 @@ def test_gate_budget_does_not_stop_healthy_loop():
           f"rc={p.returncode}")
 
 
+# --- Active-run manifest (ADR-19): identity, fail-closed, termination -------
+def _fresh_run() -> tuple[Path, str, Path]:
+    root = Path(tempfile.mkdtemp())
+    sid = "sess-abc-123"
+    return manifest.locate_run(root, sid), sid, root
+
+
+def test_manifest_lifecycle_and_idempotent_start():
+    path, sid, root = _fresh_run()
+    check("M1 no manifest → None (fail-open signal)", manifest.read_run(path) is None)
+    run = manifest.start_run(path, sid, root, max_passes=5)
+    check("M2 start creates active run", run["status"] == "active" and run["passes"] == 0)
+    manifest.record_pass(path)
+    again = manifest.start_run(path, sid, root, max_passes=5)  # re-invoke mid-run
+    check("M3 re-start does NOT reset passes", again["passes"] == 1, f"got {again['passes']}")
+
+
+def test_manifest_run_id_stable_and_keyed():
+    _, sid, root = _fresh_run()
+    p1 = manifest.locate_run(root, sid)
+    p2 = manifest.locate_run(root, sid)
+    p3 = manifest.locate_run(root, "different-session")
+    check("M4 same session+root → same path", p1 == p2)
+    check("M5 different session → different path", p1 != p3)
+
+
+def test_manifest_corrupt_sentinel():
+    path, sid, root = _fresh_run()
+    manifest.start_run(path, sid, root)
+    path.write_text("{ this is not json")
+    run = manifest.read_run(path)
+    check("M6 corrupt active manifest → __corrupt__ sentinel", run["status"] == "__corrupt__",
+          f"got {run}")
+
+
+def test_manifest_variant_terminates():
+    path, sid, root = _fresh_run()
+    manifest.start_run(path, sid, root, max_passes=4)
+    seq = [manifest.variant(manifest.read_run(path))]  # variant at passes=0 → 4
+    for _ in range(4):  # tick to the cap: passes 1,2,3,4
+        seq.append(manifest.variant(manifest.record_pass(path)))
+    check("M7 variant strictly decreases", all(a > b for a, b in zip(seq, seq[1:])), f"seq={seq}")
+    check("M8 variant bounded below by 0 and reaches 0", min(seq) == 0, f"seq={seq}")
+    check("M9 at cap after max_passes ticks", manifest.at_cap(manifest.read_run(path)), f"seq={seq}")
+
+
+def test_manifest_evidence_slot():
+    path, sid, root = _fresh_run()
+    run = manifest.start_run(path, sid, root)
+    check("M10 evidence map present + empty (dormant, ADR-18)", run["evidence"] == {})
+
+
+# --- Gate × manifest: fail-closed identity + pass-count termination E2E ------
+def _start_and_spec(body: str, max_passes: int = 8) -> tuple[Path, str]:
+    """Write a spec AND activate a run for the same (cwd, session) — an empirica run."""
+    d = Path(tempfile.mkdtemp())
+    (d / "spec.md").write_text(body)
+    sid = "sess-e2e"
+    manifest.start_run(manifest.locate_run(d, sid), sid, d, max_passes=max_passes)
+    return d, sid
+
+
+def test_gate_active_run_missing_spec_fails_closed():
+    # 1.2a: an ACTIVE run whose spec is deleted must BLOCK (identity established).
+    d = Path(tempfile.mkdtemp())
+    sid = "sess-del"
+    manifest.start_run(manifest.locate_run(d, sid), sid, d)
+    # No spec.md written → active run + missing spec.
+    p = run_hook(GATE, {"cwd": str(d), "session_id": sid}, d)
+    check("M11 active run + missing spec → BLOCK (1.2a)", p.returncode == 2,
+          f"rc={p.returncode} stderr={p.stderr!r}")
+
+
+def test_gate_no_manifest_missing_spec_fails_open():
+    # No manifest (not an empirica run) + no spec → unchanged fail-OPEN (unrelated repo safe).
+    d = Path(tempfile.mkdtemp())
+    p = run_hook(GATE, {"cwd": str(d), "session_id": "sess-unrelated"}, d)
+    check("M12 no manifest + missing spec → fail-open (exit 0)", p.returncode == 0,
+          f"rc={p.returncode} stderr={p.stderr!r}")
+
+
+def test_gate_corrupt_manifest_fails_closed():
+    d, sid = _start_and_spec("## Unknowns\n- [x] a <!-- confidence: 0.9 -->\n")
+    manifest.locate_run(d, sid).write_text("{ not json")  # corrupt an active run
+    p = run_hook(GATE, {"cwd": str(d), "session_id": sid}, d)
+    check("M13 corrupt active manifest → BLOCK (2.5)", p.returncode == 2,
+          f"rc={p.returncode} stderr={p.stderr!r}")
+
+
+def test_gate_pass_counter_terminates_at_cap():
+    # The real termination proof: a never-converging run stops at max_passes as
+    # stopped_residual (exit 0, converged:false), not by grinding to the 8-block override.
+    # With max_passes=3 the gate blocks twice, then the 3rd pass ticks the counter to the
+    # cap and ALLOWS the stop honestly — the variant (max_passes−passes) reaching 0.
+    d, sid = _start_and_spec("## Unknowns\n- [ ] never <!-- confidence: 0.1 -->\n", max_passes=3)
+    passes = [run_hook(GATE, {"cwd": str(d), "session_id": sid}, d) for _ in range(3)]
+    codes = [p.returncode for p in passes]
+    run = manifest.read_run(manifest.locate_run(d, sid))
+    check("M14 blocks below the cap then allows at it", codes == [2, 2, 0], f"got {codes}")
+    out = json.loads(passes[-1].stdout)
+    check("M15 at cap → converged:false", out.get("converged") is False, f"got {out}")
+    check("M16 at-cap note names max_passes", "max_passes" in out.get("note", ""), f"got {out}")
+    check("M17 run recorded stopped_residual", run["status"] == "stopped_residual",
+          f"got {run}")
+
+
+def test_gate_active_run_converges_records_status():
+    d, sid = _start_and_spec("## Unknowns\n- [x] done <!-- confidence: 0.9 -->\n")
+    p = run_hook(GATE, {"cwd": str(d), "session_id": sid}, d)
+    run = manifest.read_run(manifest.locate_run(d, sid))
+    check("M18 converged active run → exit 0", p.returncode == 0, f"rc={p.returncode}")
+    check("M19 converged run recorded status=converged", run["status"] == "converged",
+          f"got {run}")
+
+
+def test_gate_stopped_run_does_not_reblock():
+    # Once a run is converged/stopped, a later Stop must NOT re-block (fail open).
+    d, sid = _start_and_spec("## Unknowns\n- [ ] open <!-- confidence: 0.1 -->\n")
+    manifest.set_status(manifest.locate_run(d, sid), "converged")
+    p = run_hook(GATE, {"cwd": str(d), "session_id": sid}, d)
+    check("M20 stopped run → fail-open even with sub-θ unknown (exit 0)", p.returncode == 0,
+          f"rc={p.returncode} stderr={p.stderr!r}")
+
+
+def test_run_start_hook_creates_manifest():
+    d = Path(tempfile.mkdtemp())
+    (d / "spec.md").write_text("## Unknowns\n- [ ] x <!-- confidence: 0.1 -->\n")
+    sid = "sess-runstart"
+    proc = subprocess.run([sys.executable, str(RUN_START)],
+                          input=json.dumps({"session_id": sid, "cwd": str(d),
+                                            "command_name": "empirica"}),
+                          capture_output=True, text=True, cwd=str(d))
+    run = manifest.read_run(manifest.locate_run(d, sid))
+    check("M21 run_start exits 0", proc.returncode == 0, f"stderr={proc.stderr!r}")
+    check("M22 run_start created an active manifest", run is not None and run["status"] == "active",
+          f"got {run}")
+
+
+def test_run_start_no_session_id_is_noop():
+    # No session id → no run identity → no manifest (gate then fails open). Must not crash.
+    d = Path(tempfile.mkdtemp())
+    proc = subprocess.run([sys.executable, str(RUN_START)],
+                          input=json.dumps({"cwd": str(d)}), capture_output=True, text=True, cwd=str(d))
+    check("M23 run_start without session_id → exit 0, no crash", proc.returncode == 0,
+          f"rc={proc.returncode} stderr={proc.stderr!r}")
+
+
 def main() -> int:
     for t in [test_parse, test_converged_math, test_theta_guard,
               test_hook_blocks_when_unconverged, test_hook_allows_when_converged,
@@ -369,17 +540,26 @@ def main() -> int:
               test_blocked_unknown_allows, test_checklist_outside_unknowns_ignored,
               test_malformed_stdin_no_crash,
               test_invalid_blocked_tag_still_blocks, test_valid_blocked_tags_allow,
+              test_malformed_confidence_blocks_even_with_valid_tag,
               test_second_unknowns_section_aggregated, test_strict_coercion_rejects_bad_caps,
               test_infinity_ledger_does_not_crash, test_run_id_sanitised,
               test_gate_pass, test_gate_fail,
               test_gate_is_real_not_judgment, test_gate_timeout_fails,
               test_harness_propagates_exit_code, test_harness_launch_failure_is_fail,
+              test_harness_large_output_bounded,
               test_state_restore_reinjects_unknowns,
               test_budget_math_unbounded_and_bounded, test_reserve_spawn_atomic_increment_and_cap,
               test_missing_ledger_fail_open, test_spawn_gate_denies_over_cap,
               test_spawn_gate_ignores_non_agent_tools, test_spawn_gate_unbounded_allows,
               test_gate_budget_exhausted_is_non_converged, test_gate_true_convergence_flagged_true,
-              test_gate_budget_does_not_stop_healthy_loop]:
+              test_gate_budget_does_not_stop_healthy_loop,
+              test_manifest_lifecycle_and_idempotent_start, test_manifest_run_id_stable_and_keyed,
+              test_manifest_corrupt_sentinel, test_manifest_variant_terminates,
+              test_manifest_evidence_slot, test_gate_active_run_missing_spec_fails_closed,
+              test_gate_no_manifest_missing_spec_fails_open, test_gate_corrupt_manifest_fails_closed,
+              test_gate_pass_counter_terminates_at_cap, test_gate_active_run_converges_records_status,
+              test_gate_stopped_run_does_not_reblock, test_run_start_hook_creates_manifest,
+              test_run_start_no_session_id_is_noop]:
         t()
     width = max(len(n) for n, _, _ in results)
     passed = 0

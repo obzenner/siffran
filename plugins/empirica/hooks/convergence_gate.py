@@ -24,12 +24,24 @@ truly CONVERGED (no unknowns blocked) or merely STOPPED with residuals. A budget
 run (`blocked: needs-budget`) allows the stop but is flagged `converged: false` — the gate
 never lets budget exhaustion fabricate a green result.
 
-Fail direction (deliberate, per adversarial review):
-  - no spec.md            → fail OPEN  (not an empirica run; never wedge an unrelated session)
-  - spec.md unreadable    → fail CLOSED (the moment you most want a gate)
+Fail direction (deliberate, per adversarial review + ADR-19 active-run manifest):
+  - NO active-run manifest (not an empirica run):
+      - no spec.md          → fail OPEN  (unrelated session; never wedge it)
+      - spec.md unreadable  → fail CLOSED (the moment you most want a gate)
+  - ACTIVE manifest (this IS an empirica run — identity established at /empirica start):
+      - spec.md missing     → fail CLOSED  (our spec was deleted/renamed to escape — 1.2a)
+      - manifest corrupt    → fail CLOSED  (corruption of an active run — review 2.5)
+  - manifest status ≠ active (already stopped/converged) → fail OPEN (done, don't re-block)
   - unscored / malformed / out-of-range confidence → treated as 0.0 → BLOCKS
     (absence of proof is not proof of convergence)
+
+Termination (ADR-19, refines ADR-9): on an active run the gate ticks a monotone pass
+counter each time it would block. The well-founded variant `max_passes - passes` over
+(ℕ, <) guarantees the loop stops in ≤ max_passes passes whether or not it converges — at
+the cap the gate records `stopped_residual` and allows the stop as honestly non-converged,
+rather than grinding to the platform's forced 8-block override.
 """
+import importlib.util
 import json
 import os
 import re
@@ -38,6 +50,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_THETA = 0.8
+
+
+def _load(name: str):
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(f"{name}.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+manifest = _load("manifest")
 
 # A checkbox list item (any bullet, any indent) inside the Unknowns section.
 UNKNOWN_LINE_RE = re.compile(r"^\s*[-*+]\s+\[[ xX]\]\s+(?P<body>.*)$")
@@ -123,6 +145,7 @@ def parse_unknowns(text: str) -> list[Unknown]:
         body = item.group("body")
         confidence = 0.0
         blocked = None
+        malformed = True  # no parseable comment at all → malformed → blocks
         comment = CONFIDENCE_RE.search(body)
         if comment:
             raw_blocked = (comment.group("blocked") or "").strip()
@@ -131,9 +154,16 @@ def parse_unknowns(text: str) -> list[Unknown]:
             blocked = raw_blocked if raw_blocked in VALID_BLOCKED_TAGS else None
             try:
                 value = float(comment.group("value"))
-                confidence = value if 0.0 <= value <= 1.0 else 0.0
+                if 0.0 <= value <= 1.0:
+                    confidence = value
+                    malformed = False
             except ValueError:
-                confidence = 0.0
+                pass
+        # Malformed/out-of-range confidence fails CLOSED even with a valid blocked tag
+        # (review 1.1 residual): a residual must carry a real score, so we drop the
+        # blocked exemption and let the item stay pending.
+        if malformed:
+            blocked = None
         unknowns.append(Unknown(body=body, confidence=confidence, blocked=blocked))
     return unknowns
 
@@ -148,6 +178,35 @@ def converged(unknowns: list[Unknown], th: float) -> bool:
     return not pending(unknowns, th)
 
 
+def _resolve_run(cwd: Path, session_id: object) -> tuple[Path | None, dict | None]:
+    """Locate and read this session's active-run manifest (ADR-19).
+
+    Returns (manifest_path, run). run is:
+      * None            — no session id OR no manifest file → NOT an empirica run
+      * {"__corrupt__"} — a manifest exists but is unparseable → caller fails CLOSED
+      * a normalised dict — a well-formed manifest
+    The Stop payload carries `session_id` as a common hook field; when it is absent (e.g.
+    a bare unit invocation) we behave exactly as before ADR-19 — no manifest, no identity.
+    """
+    if not isinstance(session_id, str) or not session_id:
+        return None, None
+    path = manifest.locate_run(cwd, session_id)
+    return path, manifest.read_run(path)
+
+
+def _allow_converged(unknowns: list[Unknown]) -> tuple[int, dict]:
+    """The allow-path payload: truly converged ⇔ nothing blocked; residuals ⇒ stopped."""
+    blocked = [u for u in unknowns if u.blocked]
+    budget_blocked = [u for u in blocked if u.blocked == "needs-budget"]
+    out: dict[str, object] = {"continue": True, "converged": not blocked}
+    if budget_blocked:
+        out["note"] = (f"NON-CONVERGED: budget exhausted, {len(budget_blocked)} unknown(s) "
+                       f"unresolved (blocked: needs-budget). Raise the budget to continue.")
+    elif blocked:
+        out["note"] = f"{len(blocked)} unknown(s) surfaced to human (blocked), not gated"
+    return 0, out
+
+
 def main() -> int:
     try:
         raw = sys.stdin.read()
@@ -156,9 +215,30 @@ def main() -> int:
         payload = {}
     cwd = Path(str(payload.get("cwd") or "."))
     spec_path = locate_spec(cwd)
+    run_path, run = _resolve_run(cwd, payload.get("session_id"))
+    is_active = bool(run) and run.get("status") == "active"
+
+    # --- Identity + fail direction (ADR-19) ---------------------------------
+    if run and run.get("status") == "__corrupt__":
+        # An active run whose manifest is corrupt → fail CLOSED (review 2.5): corruption
+        # of the record that proves a run is live is exactly when you want the gate.
+        print("empirica: active-run manifest is corrupt; refusing to stop until run state "
+              "can be read (fail-closed, ADR-19).", file=sys.stderr)
+        return 2
 
     if not spec_path.exists():
-        print(json.dumps({"continue": True}))  # not an empirica run — fail open
+        if is_active:
+            # Our run's spec vanished (deleted/renamed to bypass convergence) — fail CLOSED
+            # (1.2a). Only reachable when a manifest proves this is an empirica run.
+            print(f"empirica: active run but {spec_path.name} is missing; refusing to stop — "
+                  f"restore the spec (fail-closed, ADR-19).", file=sys.stderr)
+            return 2
+        print(json.dumps({"continue": True}))  # not an empirica run — fail open (unchanged)
+        return 0
+
+    if run and not is_active:
+        # Manifest says this run already stopped/converged — don't re-block a finished run.
+        print(json.dumps({"continue": True, "converged": run.get("status") == "converged"}))
         return 0
 
     try:
@@ -174,25 +254,35 @@ def main() -> int:
     open_unknowns = pending(unknowns, th)
 
     if not open_unknowns:
-        blocked = [u for u in unknowns if u.blocked]
-        budget_blocked = [u for u in blocked if u.blocked == "needs-budget"]
-        # Truly converged ⇔ nothing blocked at all. Any residual (esp. needs-budget)
-        # means we STOPPED, not converged — never fabricate green (ADR-17).
-        out: dict[str, object] = {"continue": True, "converged": not blocked}
-        if budget_blocked:
-            out["note"] = (f"NON-CONVERGED: budget exhausted, {len(budget_blocked)} unknown(s) "
-                           f"unresolved (blocked: needs-budget). Raise the budget to continue.")
-        elif blocked:
-            out["note"] = f"{len(blocked)} unknown(s) surfaced to human (blocked), not gated"
+        code, out = _allow_converged(unknowns)
+        if is_active:  # record the terminal status so a later Stop fails open, not re-blocks
+            manifest.set_status(run_path, "converged" if out["converged"] else "stopped_residual")
         print(json.dumps(out))
-        return 0
+        return code
+
+    # --- Still converging → BLOCK, but tick the termination variant (ADR-19) ---
+    if is_active:
+        run = manifest.record_pass(run_path)  # monotone +1; variant strictly decreases
+        if manifest.at_cap(run):
+            # Pass budget exhausted: stop HONESTLY as non-converged rather than grind to the
+            # platform's forced 8-block override. The variant guarantees we reach here.
+            manifest.set_status(run_path, "stopped_residual")
+            print(json.dumps({
+                "continue": True, "converged": False,
+                "note": (f"NON-CONVERGED: reached max_passes={run['max_passes']} with "
+                         f"{len(open_unknowns)} unknown(s) still below θ={th}. Loop terminated "
+                         f"by the pass-count variant (ADR-19). Raise EMPIRICA_MAX_PASSES or "
+                         f"resolve/blocked-tag the remaining unknowns."),
+            }))
+            return 0
 
     scores = ", ".join(f"{u.confidence:.2f}" for u in open_unknowns)
+    passes_note = (f" [pass {run['passes']}/{run['max_passes']}]" if is_active else "")
     reason = (
         f"Convergence not reached: {len(open_unknowns)} unknown(s) below θ={th} "
-        f"({scores}). Resolve them in {spec_path.name} — run one Assessor pass (score "
-        f"updates + specialize-only derivation). If one is genuinely unresolvable, mark it "
-        f"`<!-- confidence: N, blocked: needs-decision|needs-data|needs-experiment -->` to "
+        f"({scores}){passes_note}. Resolve them in {spec_path.name} — run one Assessor pass "
+        f"(score updates + specialize-only derivation). If one is genuinely unresolvable, mark "
+        f"it `<!-- confidence: N, blocked: needs-decision|needs-data|needs-experiment -->` to "
         f"surface it to the human instead of looping (ADR-9). If budget is exhausted, mark "
         f"it `blocked: needs-budget` (ADR-17)."
     )

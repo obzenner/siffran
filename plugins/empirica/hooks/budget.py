@@ -28,44 +28,29 @@ Ledger shape:
 
 Time note: hooks cannot call Date.now()/datetime.now() safely in a resumable run,
 so `updated_at` is stamped by the CALLER (passed in), never by this module.
+
+File-io note: the lock + atomic-write discipline is shared with manifest.py via atomicio.py
+(ADR-19) — one hardened implementation, not two copies of the same knowledge.
 """
+import importlib.util
 import json
 import math
 import os
 import re
-import tempfile
-from contextlib import contextmanager
 from pathlib import Path
 
-try:
-    import fcntl  # POSIX only
-    _HAVE_FCNTL = True
-except ImportError:  # pragma: no cover - Windows
-    _HAVE_FCNTL = False
+
+def _load(name: str):
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(f"{name}.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_io = _load("atomicio")
 
 LEDGER_ENV = "EMPIRICA_BUDGET"  # optional path override
 DEFAULT_REL = Path(".claude") / "empirica"
-
-_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
-_O_CLOEXEC = getattr(os, "O_CLOEXEC", 0)
-
-
-@contextmanager
-def _ledger_lock(path: Path):
-    """Exclusive OS lock on a per-ledger `.lock` file, opened O_NOFOLLOW (no symlink),
-    mode 0600. Best-effort where fcntl is absent (Windows). Shared by every writer so
-    reservation and full-ledger writes serialise against each other (review 2.6)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = path.with_suffix(".lock")
-    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR | _O_NOFOLLOW | _O_CLOEXEC, 0o600)
-    try:
-        if _HAVE_FCNTL:
-            fcntl.flock(fd, fcntl.LOCK_EX)
-        yield
-    finally:
-        if _HAVE_FCNTL:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)
 
 
 def locate_ledger(cwd: Path, run_id: str | None = None) -> Path:
@@ -140,36 +125,15 @@ def remaining_spawns(ledger: dict) -> float:
     return max(0, cap - ledger.get("spawns", 0))
 
 
-def _write(path: Path, ledger: dict) -> None:
-    """Atomically write via a fresh unique temp file in the target dir, then rename.
-
-    Uses tempfile.mkstemp (O_CREAT|O_EXCL|O_RDWR, mode 0600) so we never follow a
-    pre-planted symlink at a predictable `.tmp` path (review finding 1.3), and never
-    clobber an attacker-chosen target. The unique name also means uncoordinated writers
-    don't share one temp path.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=".budget.", suffix=".tmp")
-    tmp = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(ledger, fh, indent=2)
-            fh.flush()
-            os.fsync(fh.fileno())
-        tmp.replace(path)  # atomic on POSIX
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
-
-
 def write_ledger(path: Path, ledger: dict) -> None:
     """Persist a full ledger dict atomically, UNDER THE LOCK (review 2.6).
 
     write_ledger previously wrote without the lock, so an operator cap change could
-    clobber a concurrent reservation. It now shares reserve_spawn's lock discipline.
+    clobber a concurrent reservation. It now shares reserve_spawn's lock discipline —
+    both via the atomicio helpers manifest.py also uses (ADR-19).
     """
-    with _ledger_lock(path):
-        _write(path, _coerce(ledger))
+    with _io.lock(path):
+        _io.atomic_write_json(path, _coerce(ledger))
 
 
 def reserve_spawn(path: Path, updated_at: str | None = None) -> tuple[bool, dict]:
@@ -185,7 +149,7 @@ def reserve_spawn(path: Path, updated_at: str | None = None) -> tuple[bool, dict
     the SAME lock (review 2.5 TOCTOU): the caller must not separately pre-check "is it
     unbounded?" outside the lock. Without fcntl (Windows) it is best-effort.
     """
-    with _ledger_lock(path):
+    with _io.lock(path):
         ledger = read_ledger(path)
         cap = ledger.get("max_spawns")
         if cap is None:
@@ -197,5 +161,5 @@ def reserve_spawn(path: Path, updated_at: str | None = None) -> tuple[bool, dict
         ledger["spawns"] = ledger.get("spawns", 0) + 1
         if updated_at is not None:
             ledger["updated_at"] = updated_at
-        _write(path, ledger)
+        _io.atomic_write_json(path, ledger)
         return True, ledger

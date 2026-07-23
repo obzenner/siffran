@@ -10,10 +10,27 @@ metadata:
 # Empirica — Empirical-Convergence Workflow
 
 You are running a workflow that resolves unknowns to a fixed point *before* it writes
-production code. It is NOT freestyle planning. State is explicit, convergence is
-hook-enforced, and every gate is a real deterministic check — not your own judgment.
+production code. It is NOT freestyle planning. State is explicit and the convergence LOOP is
+hook-enforced (you cannot silently stop while unknowns are open).
 
-This skill is the design of the ADRs in `doc/adr/` (1–17 accepted; 18 proposed) made
+**Honest scope (ADR-18/19):** empirica is a *design tool*, not a production trust boundary.
+Be precise about what the harness enforces vs. what it takes on trust:
+- **Enforced (not model-cooperative):** the **spike gate** (`spike_harness.py`) is a real
+  subprocess exit code; **run identity + fail-closed gating** and **loop termination** are
+  owned by the active-run manifest (ADR-19) — deleting the spec of an active run blocks, a
+  corrupt run-state blocks, and the loop provably stops in ≤ `max_passes` passes via the
+  variant `max_passes − passes`. The spawn budget is denied at the `PreToolUse` boundary
+  (ADR-17).
+- **Still self-attested:** the **confidence score itself**. The Stop hook checks that you
+  *recorded* a score ≥ θ, not that evidence *earned* it. Binding evidence to the score is
+  proposed future work (ADR-18).
+- **Soft boundary (documented, not kernel-enforced):** manifest/ledger are files under
+  `.claude/`; the model has Bash/Write, so "harness-owned" means no instruction to touch
+  them and tampering is visible, not OS isolation (ADR-19 G3).
+
+The production trust boundary on the shipped code is CI (ADR-13), downstream of this workflow.
+
+This skill is the design of the ADRs in `doc/adr/` (1–17 & 19 accepted; 18 proposed) made
 executable. When a decision
 here surprises you, the ADR is the source of truth — read it, don't re-litigate it.
 
@@ -87,8 +104,14 @@ Convention (enforced by the hook parser, `convergence_gate.py`):
   evidence-over-recall §3; this is the loop's principled termination, ADR-9/17).
 
 **Convergence ⇔ every unknown is either ≥ θ or blocked (surfaced)** (ADR-7/9). A known-path
-spec is one where that already holds. Fail direction: no `spec.md` → gate allows (not our
-run); `spec.md` present but unreadable → gate fails **closed**.
+spec is one where that already holds. Fail direction (ADR-19 active-run manifest):
+- **no active-run manifest** (not an empirica run): no `spec.md` → allow (unrelated session);
+  `spec.md` unreadable → fail **closed**.
+- **active run** (a manifest was created at `/empirica` start): `spec.md` missing → fail
+  **closed** (it was deleted/renamed to escape the gate); manifest corrupt → fail **closed**.
+- The gate ticks a monotone pass counter each block; at `max_passes` it stops the loop
+  honestly as non-converged (`stopped_residual`) rather than grinding to the platform's
+  forced 8-block override.
 
 > If routed **known** and the spec already converges, skip to Step 5 (Finalize).
 
@@ -119,6 +142,11 @@ are still sub-θ, mark each `<!-- confidence: N, blocked: needs-budget -->` and 
 gate then allows the stop (blocked residuals don't gate) but reports `converged: false` — an
 honest "did not converge, spawn budget exhausted, N open." Raising `max_spawns` resumes the
 loop. Token cost, if you want it, is a *post-hoc* OTEL audit (`cost_usd`) that never gates.
+
+**Two independent bounds, both harness-enforced.** `max_spawns` bounds *fan-out cost*
+(spawn gate); `max_passes` bounds *loop length* (the ADR-19 pass-count variant, default 8,
+`EMPIRICA_MAX_PASSES` overrides). A run that never converges terminates at `max_passes`
+regardless of budget — the loop provably ends, not just when it runs out of spawns.
 
 ## Step 3 — M2 Staffer + M3/M4 spike the unknowns (unknown path only)
 
@@ -162,10 +190,13 @@ is **stalled**, not converging. Escalate once to `/think` (budget permitting); i
 stuck, surface the offending unknown as a `blocked:` residual. Stall detection never stops
 the loop by itself — it routes a stuck loop to the human or the expensive tier.
 
-**Failure modes this loop defends against (ADR-17):** *premature-done* — the deterministic
-Stop gate refuses the stop while unknowns are sub-θ; *self-preferential bias* — the trust
-boundary is a real check, not the agent's own confidence (ADR-13); *goal drift* —
-`SessionStart:compact` re-injects the spec so the original goal survives compaction.
+**Failure modes this loop defends against (ADR-17):** *premature-done* — the Stop gate
+refuses the stop while unknowns are sub-θ, so you cannot silently declare done; *self-
+preferential bias* — the **spike gate** is a real subprocess check, so evidence-backed
+unknowns don't rest on your own opinion (note: an unknown's *confidence score* is still
+self-attested until ADR-18's evidence binding lands — the defense is partial today);
+*goal drift* — `SessionStart:compact` re-injects the spec so the original goal survives
+compaction.
 
 ## Step 5 — M5 Finalizer: escalate to /think at the confluence
 
