@@ -32,6 +32,9 @@ so `updated_at` is stamped by the CALLER (passed in), never by this module.
 import json
 import math
 import os
+import re
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 try:
@@ -43,30 +46,74 @@ except ImportError:  # pragma: no cover - Windows
 LEDGER_ENV = "EMPIRICA_BUDGET"  # optional path override
 DEFAULT_REL = Path(".claude") / "empirica"
 
+_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_O_CLOEXEC = getattr(os, "O_CLOEXEC", 0)
 
-def locate_ledger(cwd: Path, run_id: str = "default") -> Path:
-    """Ledger path under cwd's .claude scratch, or EMPIRICA_BUDGET override."""
+
+@contextmanager
+def _ledger_lock(path: Path):
+    """Exclusive OS lock on a per-ledger `.lock` file, opened O_NOFOLLOW (no symlink),
+    mode 0600. Best-effort where fcntl is absent (Windows). Shared by every writer so
+    reservation and full-ledger writes serialise against each other (review 2.6)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_suffix(".lock")
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR | _O_NOFOLLOW | _O_CLOEXEC, 0o600)
+    try:
+        if _HAVE_FCNTL:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        if _HAVE_FCNTL:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+def locate_ledger(cwd: Path, run_id: str | None = None) -> Path:
+    """Ledger path under cwd's .claude scratch, or EMPIRICA_BUDGET override.
+
+    run_id keys the ledger per run so concurrent sessions in one repo do not share a
+    counter (review finding 2.4). It defaults to $EMPIRICA_RUN_ID (set by the harness
+    from the Claude session id) and only falls back to "default" when nothing else is
+    available. run_id is sanitised to a single safe path segment — no traversal.
+    """
     override = os.environ.get(LEDGER_ENV)
     if override:
         p = Path(override)
         return p if p.is_absolute() else cwd / p
-    return cwd / DEFAULT_REL / run_id / "budget.json"
+    rid = run_id or os.environ.get("EMPIRICA_RUN_ID") or "default"
+    rid = re.sub(r"[^A-Za-z0-9._-]", "_", rid) or "default"
+    return cwd / DEFAULT_REL / rid / "budget.json"
+
+
+def _int_or_none(value: object) -> int | None:
+    """A finite, non-negative integer, or None. Booleans and non-finite reject.
+
+    Strict on purpose (review 2.5): a string cap "5", a bool, a negative, a float, or
+    JSON Infinity must NOT silently become an unbounded or bogus cap.
+    """
+    if isinstance(value, bool):  # bool is a subclass of int — exclude explicitly
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    return None
 
 
 def _coerce(data: dict) -> dict:
     """Normalise a raw ledger dict; a malformed field must never crash a caller."""
-    max_spawns = data.get("max_spawns")
-    max_spawns = int(max_spawns) if isinstance(max_spawns, (int, float)) else None
+    if not isinstance(data, dict):
+        data = {}
     spawns = data.get("spawns", 0)
-    spawns = max(0, int(spawns)) if isinstance(spawns, (int, float)) else 0
+    spawns = spawns if (isinstance(spawns, int) and not isinstance(spawns, bool)
+                        and spawns >= 0) else 0
     cost = data.get("cost_usd")
-    cost = float(cost) if isinstance(cost, (int, float)) else None
+    cost = float(cost) if (isinstance(cost, (int, float)) and not isinstance(cost, bool)
+                           and math.isfinite(cost)) else None
     return {
-        "max_spawns": max_spawns,
+        "max_spawns": _int_or_none(data.get("max_spawns")),
         "spawns": spawns,
-        "run_id": data.get("run_id"),
+        "run_id": data.get("run_id") if isinstance(data.get("run_id"), str) else None,
         "cost_usd": cost,
-        "updated_at": data.get("updated_at"),
+        "updated_at": data.get("updated_at") if isinstance(data.get("updated_at"), str) else None,
     }
 
 
@@ -76,7 +123,11 @@ def read_ledger(path: Path) -> dict:
     Fail-open on read: absence of a ledger means 'no ceiling set', not 'deny all'.
     """
     try:
-        return _coerce(json.loads(path.read_text(encoding="utf-8")))
+        # parse_constant rejects Infinity/-Infinity/NaN (Python's json accepts them by
+        # default), so a crafted ledger cannot inject a non-finite value (review 2.5).
+        data = json.loads(path.read_text(encoding="utf-8"),
+                          parse_constant=lambda _c: (_ for _ in ()).throw(ValueError))
+        return _coerce(data)
     except (OSError, json.JSONDecodeError, ValueError):
         return _coerce({})
 
@@ -90,15 +141,35 @@ def remaining_spawns(ledger: dict) -> float:
 
 
 def _write(path: Path, ledger: dict) -> None:
+    """Atomically write via a fresh unique temp file in the target dir, then rename.
+
+    Uses tempfile.mkstemp (O_CREAT|O_EXCL|O_RDWR, mode 0600) so we never follow a
+    pre-planted symlink at a predictable `.tmp` path (review finding 1.3), and never
+    clobber an attacker-chosen target. The unique name also means uncoordinated writers
+    don't share one temp path.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(ledger, indent=2), encoding="utf-8")
-    tmp.replace(path)  # atomic on POSIX
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=".budget.", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(ledger, fh, indent=2)
+            fh.flush()
+            os.fsync(fh.fileno())
+        tmp.replace(path)  # atomic on POSIX
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def write_ledger(path: Path, ledger: dict) -> None:
-    """Persist a full ledger dict atomically (caller supplies any timestamp)."""
-    _write(path, _coerce(ledger))
+    """Persist a full ledger dict atomically, UNDER THE LOCK (review 2.6).
+
+    write_ledger previously wrote without the lock, so an operator cap change could
+    clobber a concurrent reservation. It now shares reserve_spawn's lock discipline.
+    """
+    with _ledger_lock(path):
+        _write(path, _coerce(ledger))
 
 
 def reserve_spawn(path: Path, updated_at: str | None = None) -> tuple[bool, dict]:
@@ -110,24 +181,21 @@ def reserve_spawn(path: Path, updated_at: str | None = None) -> tuple[bool, dict
     ground-truth counter the PreToolUse gate enforces on.
 
     The read-modify-write is guarded by an exclusive OS lock so concurrent parallel
-    spawns cannot race past the cap. Without fcntl (Windows) it is best-effort.
+    spawns cannot race past the cap. Configuration-detection AND reservation happen under
+    the SAME lock (review 2.5 TOCTOU): the caller must not separately pre-check "is it
+    unbounded?" outside the lock. Without fcntl (Windows) it is best-effort.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = path.with_suffix(".lock")
-    lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
-    try:
-        if _HAVE_FCNTL:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+    with _ledger_lock(path):
         ledger = read_ledger(path)
         cap = ledger.get("max_spawns")
-        if cap is not None and ledger.get("spawns", 0) >= cap:
+        if cap is None:
+            # No finite budget for this run → allow, and do NOT create/grow a ledger
+            # (keeps "no budget set → no file", the fail-open contract). Nothing to count.
+            return True, ledger
+        if ledger.get("spawns", 0) >= cap:
             return False, ledger  # cap reached — do not increment; the spawn is denied
         ledger["spawns"] = ledger.get("spawns", 0) + 1
         if updated_at is not None:
             ledger["updated_at"] = updated_at
         _write(path, ledger)
         return True, ledger
-    finally:
-        if _HAVE_FCNTL:
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)
-        os.close(lock_fd)

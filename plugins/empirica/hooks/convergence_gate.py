@@ -49,13 +49,21 @@ CONFIDENCE_RE = re.compile(
 UNKNOWNS_HEADING_RE = re.compile(r"^(#+)\s+unknowns\b", re.IGNORECASE)
 HEADING_RE = re.compile(r"^(#+)\s+")
 
+# The CLOSED set of residual tags that legitimately stop gating (ADR-9/17). A blocked
+# value outside this set is NOT honored — the item stays pending and BLOCKS (fail-closed).
+# This is what stops a one-token `blocked: made-up` from bypassing the gate: the
+# constrained model cannot invent a tag to declare its own work done (review finding 1.1).
+VALID_BLOCKED_TAGS = frozenset(
+    {"needs-decision", "needs-data", "needs-experiment", "needs-budget"}
+)
+
 
 @dataclass(frozen=True)
 class Unknown:
     """One unknown as the gate sees it. `confidence` is 0.0 when missing/malformed."""
     body: str
     confidence: float
-    blocked: str | None  # human-surfaced residual tag, or None if still in the loop
+    blocked: str | None  # a VALID residual tag, or None (unknown/invalid tags → None)
 
 
 def theta() -> float:
@@ -78,10 +86,12 @@ def locate_spec(cwd: Path) -> Path:
 
 
 def unknowns_section(text: str) -> list[str]:
-    """Lines under the `## Unknowns` heading, until the next same-or-higher heading.
+    """Lines under EVERY `## Unknowns` heading, each until the next same/higher heading.
 
     Scoping to the section is what lets 'missing confidence → block' be safe: only lines
     the author placed under Unknowns are gated, so unrelated checklists never false-block.
+    All Unknowns sections are AGGREGATED (not just the last), so a second section with a
+    pending item cannot be hidden from the gate (review finding 1.2b).
     """
     section: list[str] = []
     depth: int | None = None
@@ -89,12 +99,12 @@ def unknowns_section(text: str) -> list[str]:
         heading = UNKNOWNS_HEADING_RE.match(line)
         if heading:
             depth = len(heading.group(1))
-            section = []
-            continue
+            continue  # accumulate across sections; do NOT reset
         if depth is not None:
             other = HEADING_RE.match(line)
             if other and len(other.group(1)) <= depth:
-                break
+                depth = None  # left this section; wait for the next Unknowns heading
+                continue
             section.append(line)
     return section
 
@@ -115,7 +125,10 @@ def parse_unknowns(text: str) -> list[Unknown]:
         blocked = None
         comment = CONFIDENCE_RE.search(body)
         if comment:
-            blocked = (comment.group("blocked") or "").strip() or None
+            raw_blocked = (comment.group("blocked") or "").strip()
+            # Only a tag in the closed set stops gating; anything else → None (stays
+            # pending, blocks). A made-up tag cannot bypass the gate (review 1.1).
+            blocked = raw_blocked if raw_blocked in VALID_BLOCKED_TAGS else None
             try:
                 value = float(comment.group("value"))
                 confidence = value if 0.0 <= value <= 1.0 else 0.0

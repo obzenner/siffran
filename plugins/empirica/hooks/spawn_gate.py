@@ -52,10 +52,14 @@ def main() -> int:
 
     cwd = Path(str(payload.get("cwd") or "."))
     ledger_path = budget.locate_ledger(cwd)
-    pre = budget.read_ledger(ledger_path)
 
-    # No budget set (unbounded) → allow every spawn, nothing to enforce.
-    if pre.get("max_spawns") is None:
+    # Cheap fast-path: if no ledger file exists at all, this run has no budget — allow
+    # without taking a lock or creating scratch dirs. This is a performance skip only; it
+    # is safe because a run only becomes budgeted once a ledger is written, and the
+    # authoritative decision below still happens under the lock (no allow/deny is made
+    # from this unlocked read — review 2.5 TOCTOU is about the finite→reserve path, which
+    # stays fully locked in reserve_spawn).
+    if not ledger_path.exists():
         return 0
 
     allowed, ledger = budget.reserve_spawn(ledger_path)
