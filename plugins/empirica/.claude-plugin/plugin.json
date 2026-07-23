@@ -1,7 +1,7 @@
 {
   "name": "empirica",
   "description": "Empirical-convergence workflow — tracks unknowns with confidence scores in a living spec, spikes them against real deterministic checks, and drives them to a fixed point before handing off to implementation. Hook-enforced convergence.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "author": {
     "name": "obzenner"
   }

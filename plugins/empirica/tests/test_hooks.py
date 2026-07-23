@@ -532,6 +532,46 @@ def test_run_start_no_session_id_is_noop():
           f"rc={proc.returncode} stderr={proc.stderr!r}")
 
 
+def test_run_start_with_real_captured_payload():
+    # Regression for the dogfood bug: unit tests bypass Claude Code's matcher, so a broken
+    # matcher stayed green while the plugin was runtime-inert. We cannot test the harness's
+    # matcher engine here, but we CAN prove run_start.py handles the REAL UserPromptExpansion
+    # payload shape (captured live in session c7477410-…): session_id + cwd present alongside
+    # command_name/command_args/prompt/expansion_type/command_source etc. → manifest created.
+    d = Path(tempfile.mkdtemp())
+    (d / "spec.md").write_text("## Unknowns\n- [ ] x <!-- confidence: 0.1 -->\n")
+    sid = "c7477410-ea2d-4960-bfb6-df1e6f39900c"
+    payload = {
+        "session_id": sid, "cwd": str(d),
+        "transcript_path": "/x.jsonl", "prompt_id": "p1", "permission_mode": "bypassPermissions",
+        "hook_event_name": "UserPromptExpansion", "expansion_type": "slash_command",
+        "command_name": "empirica:empirica", "command_args": "design something",
+        "command_source": "plugin", "prompt": "/empirica:empirica design something",
+    }
+    proc = subprocess.run([sys.executable, str(RUN_START)], input=json.dumps(payload),
+                          capture_output=True, text=True, cwd=str(d))
+    run = manifest.read_run(manifest.locate_run(d, sid))
+    check("M24 real UserPromptExpansion payload → exit 0", proc.returncode == 0,
+          f"rc={proc.returncode} stderr={proc.stderr!r}")
+    check("M25 real payload creates active manifest", run is not None and run["status"] == "active",
+          f"got {run}")
+
+
+def test_hooks_json_matcher_is_regex_for_namespaced_command():
+    # Root-cause guard: the runtime command name is the PLUGIN-NAMESPACED "empirica:empirica",
+    # not "empirica". A bare-letters matcher is exact-matched by Claude Code and never fires.
+    # The matcher must contain the ":" (making it an unanchored JS regex) AND match the
+    # namespaced name. This pins the fix so a future edit back to "empirica" fails here.
+    import re as _re
+    cfg = json.loads((HOOKS / "hooks.json").read_text())
+    matchers = [g.get("matcher") for g in cfg["hooks"].get("UserPromptExpansion", [])]
+    check("M26 UserPromptExpansion group exists", len(matchers) >= 1, f"got {matchers}")
+    m = matchers[0] if matchers else ""
+    check("M27 matcher is a regex (contains ':'), not a bare exact string", ":" in m, f"got {m!r}")
+    check("M28 matcher actually matches 'empirica:empirica'",
+          bool(_re.search(m, "empirica:empirica")), f"matcher={m!r}")
+
+
 def main() -> int:
     for t in [test_parse, test_converged_math, test_theta_guard,
               test_hook_blocks_when_unconverged, test_hook_allows_when_converged,
@@ -559,7 +599,8 @@ def main() -> int:
               test_gate_no_manifest_missing_spec_fails_open, test_gate_corrupt_manifest_fails_closed,
               test_gate_pass_counter_terminates_at_cap, test_gate_active_run_converges_records_status,
               test_gate_stopped_run_does_not_reblock, test_run_start_hook_creates_manifest,
-              test_run_start_no_session_id_is_noop]:
+              test_run_start_no_session_id_is_noop, test_run_start_with_real_captured_payload,
+              test_hooks_json_matcher_is_regex_for_namespaced_command]:
         t()
     width = max(len(n) for n, _, _ in results)
     passed = 0

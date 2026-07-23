@@ -2,7 +2,7 @@
   "hooks": {
     "UserPromptExpansion": [
       {
-        "matcher": "empirica",
+        "matcher": "^empirica:empirica$",
         "hooks": [
           {
             "type": "command",
