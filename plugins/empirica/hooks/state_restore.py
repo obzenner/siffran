@@ -18,12 +18,17 @@ import json
 import sys
 from pathlib import Path
 
-# Load the sibling gate module by path without mutating sys.path (import hygiene:
+# Load sibling modules by path without mutating sys.path (import hygiene:
 # no shadowing of stdlib modules by files in this dir).
-_gate_path = Path(__file__).with_name("convergence_gate.py")
-_spec = importlib.util.spec_from_file_location("convergence_gate", _gate_path)
-cg = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(cg)
+def _load(name: str):
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(f"{name}.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+cg = _load("convergence_gate")
+budget = _load("budget")
 
 
 def main() -> int:
@@ -55,11 +60,25 @@ def main() -> int:
 
     print(
         f"[empirica] Resuming convergence loop from {spec_path}. "
-        f"State: {len(unknowns)} unknown(s), {status}. "
+        f"State: {len(unknowns)} unknown(s), {status}.{_budget_line(cwd)} "
         f"The Stop hook enforces convergence — continue resolving sub-θ unknowns.\n\n"
         f"Unknowns:\n{_render(unknowns, th)}"
     )
     return 0
+
+
+def _budget_line(cwd: Path) -> str:
+    """Report remaining spawn budget on resume so the loop knows its runway (ADR-17).
+
+    Spawns, not tokens: actual token spend is not readable mid-session, but the
+    PreToolUse gate enforces a spawn cap, so that is the runway that matters.
+    """
+    ledger = budget.read_ledger(budget.locate_ledger(cwd))
+    if ledger.get("max_spawns") is None:
+        return ""  # unbounded — nothing to report
+    remain = budget.remaining_spawns(ledger)
+    return (f" Spawn budget: {ledger['spawns']}/{ledger['max_spawns']} used "
+            f"({remain} remaining) — the PreToolUse gate denies spawns past the cap.")
 
 
 def _render(unknowns: list, th: float) -> str:

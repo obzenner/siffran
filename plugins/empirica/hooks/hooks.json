@@ -1,5 +1,18 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/spawn_gate.py"],
+            "timeout": 30
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

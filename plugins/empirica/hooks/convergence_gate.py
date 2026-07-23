@@ -14,8 +14,15 @@ stdout `decision` field, which the current Stop spec does not honor):
 State substrate (ADR-15): unknowns are checkbox items under a `## Unknowns` heading in
 spec.md, each carrying a confidence in a trailing HTML comment `<!-- confidence: N -->`
 (N in [0,1]). An unknown the agent genuinely cannot resolve is surfaced to the human with
-`<!-- confidence: N, blocked: needs-decision -->` (tags per evidence-over-recall §3);
-blocked unknowns stop gating (they are a residual for the human, not a loop to spin on).
+`<!-- confidence: N, blocked: <tag> -->` (tags per evidence-over-recall §3, plus
+`needs-budget` from ADR-17), where <tag> ∈ {needs-decision, needs-data, needs-experiment,
+needs-budget}; blocked unknowns stop gating (they are a residual for the human, not a
+loop to spin on).
+
+Convergence reporting (ADR-17): when the gate allows the stop, it reports whether the run
+truly CONVERGED (no unknowns blocked) or merely STOPPED with residuals. A budget-exhausted
+run (`blocked: needs-budget`) allows the stop but is flagged `converged: false` — the gate
+never lets budget exhaustion fabricate a green result.
 
 Fail direction (deliberate, per adversarial review):
   - no spec.md            → fail OPEN  (not an empirica run; never wedge an unrelated session)
@@ -155,8 +162,14 @@ def main() -> int:
 
     if not open_unknowns:
         blocked = [u for u in unknowns if u.blocked]
-        out: dict[str, object] = {"continue": True}
-        if blocked:
+        budget_blocked = [u for u in blocked if u.blocked == "needs-budget"]
+        # Truly converged ⇔ nothing blocked at all. Any residual (esp. needs-budget)
+        # means we STOPPED, not converged — never fabricate green (ADR-17).
+        out: dict[str, object] = {"continue": True, "converged": not blocked}
+        if budget_blocked:
+            out["note"] = (f"NON-CONVERGED: budget exhausted, {len(budget_blocked)} unknown(s) "
+                           f"unresolved (blocked: needs-budget). Raise the budget to continue.")
+        elif blocked:
             out["note"] = f"{len(blocked)} unknown(s) surfaced to human (blocked), not gated"
         print(json.dumps(out))
         return 0
@@ -167,7 +180,8 @@ def main() -> int:
         f"({scores}). Resolve them in {spec_path.name} — run one Assessor pass (score "
         f"updates + specialize-only derivation). If one is genuinely unresolvable, mark it "
         f"`<!-- confidence: N, blocked: needs-decision|needs-data|needs-experiment -->` to "
-        f"surface it to the human instead of looping (ADR-9)."
+        f"surface it to the human instead of looping (ADR-9). If budget is exhausted, mark "
+        f"it `blocked: needs-budget` (ADR-17)."
     )
     print(reason, file=sys.stderr)
     return 2

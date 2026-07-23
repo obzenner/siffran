@@ -76,16 +76,44 @@ Convention (enforced by the hook parser, `convergence_gate.py`):
 - **A checkbox with no / malformed / out-of-range confidence counts as 0.0 and BLOCKS** —
   absence of a score is not convergence. Every unknown you add must be scored.
 - An unknown you genuinely cannot resolve (a human judgment call, unobtainable data, an
-  experiment you can't run here) is a **residual**: tag it
-  `<!-- confidence: N, blocked: needs-decision|needs-data|needs-experiment -->`. A blocked
-  unknown is surfaced to the human and **stops gating** (the residual protocol of
-  evidence-over-recall §3; this is the loop's principled termination, ADR-9).
+  experiment you can't run here, **or an exhausted token budget**) is a **residual**: tag it
+  `<!-- confidence: N, blocked: needs-decision|needs-data|needs-experiment|needs-budget -->`.
+  A blocked unknown is surfaced to the human and **stops gating** (the residual protocol of
+  evidence-over-recall §3; this is the loop's principled termination, ADR-9/17).
 
 **Convergence ⇔ every unknown is either ≥ θ or blocked (surfaced)** (ADR-7/9). A known-path
 spec is one where that already holds. Fail direction: no `spec.md` → gate allows (not our
 run); `spec.md` present but unreadable → gate fails **closed**.
 
 > If routed **known** and the spec already converges, skip to Step 5 (Finalize).
+
+## Budget — the loop is spawn-bounded, and the harness ENFORCES it (ADR-17)
+
+The budget's currency is **subagent spawns, not tokens** — because that is what can be both
+counted truthfully and *denied*. (Verified 2026-07-23: a `PreToolUse` hook can deny an
+`Agent` spawn, but actual token spend is not readable mid-session — no hook payload carries
+it. A token budget would be advisory theater; a spawn budget is enforceable.)
+
+A run sets `max_spawns` in a transient ledger `.claude/empirica/<run>/budget.json` (ADR-14
+scratch, git-ignored). The **`PreToolUse` spawn gate (`hooks/spawn_gate.py`) denies any
+subagent spawn past the cap** — exit 2, spawn refused, reason returned to Claude. This is
+harness-enforced, not a request the model may ignore (the same trust model as the Stop gate).
+Fan-out is a **budgeted exception, not the default**; parallelism must earn its coordination
+cost.
+
+| Order | Action | Cost | Gated by |
+|-------|--------|------|----------|
+| 1 | deterministic gate (`spike_harness.py`) | ~free (subprocess) | **never** — it is the trust boundary |
+| 2 | one discovery/spike agent | 1 spawn | spawn gate (denies past `max_spawns`) |
+| 3 | fan-out (N agents) | N spawns | spawn gate, per spawn; only if independent **and** breadth-bound |
+| 4 | `/think` escalation | 1 spawn | spawn gate + stall detected |
+| 5 | adversarial review | 1+ spawns | spawn gate + gate green + high-stakes |
+
+**Exhaustion never fabricates convergence.** When the spawn cap denies a spawn and unknowns
+are still sub-θ, mark each `<!-- confidence: N, blocked: needs-budget -->` and stop. The Stop
+gate then allows the stop (blocked residuals don't gate) but reports `converged: false` — an
+honest "did not converge, spawn budget exhausted, N open." Raising `max_spawns` resumes the
+loop. Token cost, if you want it, is a *post-hoc* OTEL audit (`cost_usd`) that never gates.
 
 ## Step 3 — M2 Staffer + M3/M4 spike the unknowns (unknown path only)
 
@@ -122,6 +150,17 @@ the spec so the loop is durable-resumable (ADR-8/9); the 8-block cap means you r
 turns rather than holding one turn open.
 
 **Do not hand-declare convergence.** Convergence is what the gate says, not what you assert.
+
+**Stall detection (ADR-17, adapted from loop-until-dry).** θ is the *only* stop rule — but
+if K consecutive passes derive no new (narrower) unknown and move nothing across θ, the loop
+is **stalled**, not converging. Escalate once to `/think` (budget permitting); if it stays
+stuck, surface the offending unknown as a `blocked:` residual. Stall detection never stops
+the loop by itself — it routes a stuck loop to the human or the expensive tier.
+
+**Failure modes this loop defends against (ADR-17):** *premature-done* — the deterministic
+Stop gate refuses the stop while unknowns are sub-θ; *self-preferential bias* — the trust
+boundary is a real check, not the agent's own confidence (ADR-13); *goal drift* —
+`SessionStart:compact` re-injects the spec so the original goal survives compaction.
 
 ## Step 5 — M5 Finalizer: escalate to /think at the confluence
 
