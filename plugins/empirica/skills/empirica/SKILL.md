@@ -1,8 +1,10 @@
 ---
 name: empirica
 description: "Empirical-convergence development workflow. Track unknowns with confidence scores in a living spec, drive them to a fixed point (spike the ones that need runtime evidence, reason through the rest), then hand a converged spec to implementation. Use when starting non-trivial work where the plan is not yet certain — 'how should we build X', 'I'm not sure whether A or B', 'design and implement this feature', 'spike this', 'we don't know if this approach works'. Two paths: known territory goes straight to finalize; unknown territory runs the empirical loop first. Invoke as /empirica <goal>."
-argument-hint: "[goal or feature to build]"
-allowed-tools: [Read, Glob, Grep, Bash, Edit, Write, Agent, TaskCreate, TaskUpdate, WebFetch]
+allowed-tools: Read Glob Grep Bash Edit Write Agent TaskCreate TaskUpdate WebFetch
+compatibility: Designed for Claude Code; requires the methodologist skill as a companion and python3 for the hooks.
+metadata:
+  argument-hint: "[goal or feature to build]"
 ---
 
 # Empirica — Empirical-Convergence Workflow
