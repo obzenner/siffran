@@ -58,9 +58,9 @@ def main() -> int:
         return 0  # no run identity available → cannot key a manifest → fail open
 
     cwd = Path(str(payload.get("cwd") or "."))
-    # The manifest records the living spec's home as the run directory's spec.md (its
-    # default). The model writes the spec there during the run; the gate reads it from the
-    # manifest. The spec is never a repository file.
+    # The manifest records the claim graph's home as the run directory's claims.json (its
+    # default, ADR-22). The model writes the graph there during the run; the gate reads it from
+    # the manifest. The graph is never a repository file.
     try:
         manifest.start_run(
             manifest.locate_run(cwd, session_id),
@@ -69,8 +69,13 @@ def main() -> int:
         )
     except OSError:
         return 0  # best-effort: a write failure degrades to fail-open, never a wedge
-    # Publish the run id so budget.py keys its ledger to the SAME run (unifies identity).
-    os.environ[manifest.RUN_ENV] = manifest.run_id(session_id, cwd)
+    # NOTE: this hook deliberately does NOT publish the run id into the environment. An earlier
+    # version set os.environ[RUN_ENV] here, claiming to "unify identity" with budget.py — that
+    # never worked. Verified by live experiment (2026-07-24): every hook fires in a FRESH
+    # subprocess, so a var set here dies with this process. Two independent captures confirmed
+    # a later Stop hook sees None. No mechanism is needed: run identity is DERIVED
+    # deterministically from (session_id, cwd) by manifest.run_id, and `session_id` was present
+    # on every captured Stop payload — so each hook recomputes the same run id independently.
     return 0
 
 

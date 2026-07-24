@@ -170,6 +170,35 @@ this schema serves) and relates to ADR-18 (evidence binding — now an in-toto S
 Standards verified 2026-07-24 against live sources: GSN (scsc.uk/gsn, CC-licensed, SCSC ACWG),
 OMG SACM v2.3 (omg.org/spec/SACM, formal Oct 2023, XML interchange), in-toto attestation
 Statement v1 (github.com/in-toto/attestation). Intellectual lineage: Toulmin's argument model
-(claim/grounds/warrant/rebuttal) for the Justification/warrant concept. Open item: the exact
-SACM subset empirica conforms to (vocabulary-only vs XML-exportable) is a build-time decision
-requiring a full read of the SACM v2.3 spec — recorded, not guessed.
+(claim/grounds/warrant/rebuttal) for the Justification/warrant concept.
+
+**RESOLVED at build time (2026-07-24) — the SACM conformance open item.** This ADR deferred
+"vocabulary-only vs XML-exportable" pending a full read of the SACM v2.3 spec. That read was
+done (OMG formal/23-05-08, October 2023, confirmed from the spec PDF's cover page) and the
+answer is **vocabulary-only**, as this ADR leaned:
+
+* SACM §2 defines **five** compliance points — Argumentation Model (§2.2), Artifact Model
+  (§2.3), Assurance Case Model (§2.4, *"This compliance point is mandatory"* for full
+  conformance), Terminology Model (§2.5), and SACM UML Profile (§2.6). Each requires importing
+  and exporting XMI conforming to the XML Schema derived from the normative MOF metamodel.
+* The Argumentation subset **is** cleanly separable — §2.2 states conformance to it "does not
+  entail support for the Evidence subpackage of SACM, or the terminology subpackage," and names
+  GSN explicitly as a notation with "their own mapping onto SACM argumentation aspects"
+  (Annex A). So an Argumentation-only XMI exporter is a legitimate, addable-later target.
+* But it requires real XMI/MOF serialisation machinery with **no consumer asking for it today**,
+  and SACM itself treats GSN's vocabulary as first-class rather than requiring GSN users to
+  speak SACM natively. Nothing forces the choice now.
+
+empirica therefore adopts GSN's element and relationship vocabulary as its JSON schema and
+claims conformance to **no** SACM compliance point. The implementation additionally hard-codes
+GSN v3's normative permitted-connection lists and its DAG requirement as validation rules
+(a correction: strategy-to-solution is *not* a permitted `SupportedBy` connection).
+
+Also corrected at build time: `predicateType` must be a real URI. in-toto types it as a
+TypeURI ("SHOULD resolve … but MAY be unresolvable"; no registration needed), so the bare
+`empirica/research/v1` sketched above has no scheme and would be non-conformant — the
+implementation uses `https://empirica.dev/attestation/{research,spike}/v1`. Confirmed also:
+binding a subject digest to claim TEXT rather than a file is spec-legal, and a bare unsigned
+Statement needs no DSSE envelope (only the optional Envelope layer mandates signatures).
+Standards read live: GSN Community Standard v3 (SCSC-141C, May 2021, CC BY 4.0 — licence
+confirmed), OMG SACM v2.3, in-toto attestation Statement v1.

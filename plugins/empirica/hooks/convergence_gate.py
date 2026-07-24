@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Stop-hook convergence gate (ADR-7, ADR-8).
 
-Blocks completion while any unknown in the living spec is unresolved. Proven by the
-spike + regression suite at .claude/spike-m3.
+Blocks completion while any claim in the run's claim graph is unresolved. Covered by the
+committed regression suite in `tests/test_hooks.py`.
 
 Contract (verified against code.claude.com/docs/en/hooks + plugins-reference,
 re-verified 2026-07-22 — the canonical Stop-block mechanism is exit code 2, NOT a
@@ -11,15 +11,25 @@ stdout `decision` field, which the current Stop spec does not honor):
   block  → write the reason to STDERR and exit 2 (Claude reads stderr, keeps going).
   allow  → exit 0 (stdout {"continue": true} is informational only).
 
-State substrate (ADR-15): the living spec is the run's internal working memory, held in the
-run directory (`.claude/empirica/<run_id>/spec.md`) and located via the manifest's
-`spec_path`. Unknowns are checkbox items under a `## Unknowns` heading, each carrying a
-confidence in a trailing HTML comment `<!-- confidence: N -->` (N in [0,1]). An unknown the
-agent genuinely cannot resolve is surfaced to the human with
-`<!-- confidence: N, blocked: <tag> -->` (tags per evidence-over-recall §3, plus
-`needs-budget` from ADR-17), where <tag> ∈ {needs-decision, needs-data, needs-experiment,
-needs-budget}; blocked unknowns stop gating (they are a residual for the human, not a
-loop to spin on).
+State substrate (ADR-22, superseding the markdown spec of ADR-15): the run's internal working
+memory is a JSON CLAIM GRAPH — a GSN argument with in-toto evidence leaves — held in the run
+directory (`.claude/empirica/<run_id>/claims.json`) and located via the manifest's
+`graph_path`. Claim state is DERIVED from evidence, never read from the file, so a model can
+no longer reach convergence by typing a confidence number: see claimgraph.py's module docs.
+A claim the agent genuinely cannot resolve is surfaced to the human with a residual tag from
+the closed set {needs-decision, needs-data, needs-experiment, needs-budget}; blocked claims
+stop gating (they are a residual for the human, not a loop to spin on) but they are NEVER
+reported as convergence.
+
+Evidence (ADR-20 P3): a claim may only be approved when it has the evidence it owes — Fold 1
+(a research citation to a source outside the model's training data) for every claim, plus
+Fold 2 (a harness-written passing spike) for `needs-experiment` claims. evidence.py is the
+judge of that; this gate consumes its verdict and reports WHICH fold is missing.
+
+Independent audit (ADR-20 P6): a converged claim graph is NECESSARY but not SUFFICIENT for a
+run to report `converged` — a separate principal must also have written a passing verdict
+(audit.py). A run that stops with residuals or an exhausted budget is exempt: it is not
+claiming convergence, so there is nothing to certify.
 
 Convergence reporting (ADR-17): when the gate allows the stop, it reports whether the run
 truly CONVERGED (no unknowns blocked) or merely STOPPED with residuals. A budget-exhausted
@@ -27,12 +37,17 @@ run (`blocked: needs-budget`) allows the stop but is flagged `converged: false` 
 never lets budget exhaustion fabricate a green result.
 
 Identity and fail direction (ADR-19 active-run manifest): the manifest is the sole signal
-that a session is an empirica run.
+that a session is an empirica run. This matrix is load-bearing and unchanged by the substrate
+move — only the file it points at changed.
   - no manifest         → not an empirica run → fail OPEN (never wedge an unrelated session)
   - manifest corrupt    → fail CLOSED (corruption of the record that proves a run is live)
-  - active run, spec missing/unreadable → fail CLOSED (the spec was deleted/tampered)
+  - active run, graph missing/corrupt → fail CLOSED (the graph was deleted/tampered)
   - status ≠ active (already stopped/converged) → fail OPEN (done, don't re-block)
+  - LEGACY manifest (pre-ADR-22: spec_path, no graph_path) → fail OPEN with a note. A run
+    that started under the markdown substrate cannot be evaluated by this code, and ADR-19's
+    "never wedge a session" outranks gating a run we cannot read.
   - unscored / malformed / out-of-range confidence → treated as 0.0 → BLOCKS
+  - confidence ≥ θ but the required evidence folds are missing → BLOCKS
     (absence of proof is not proof of convergence)
 
 Termination (ADR-19, refines ADR-9): on an active run the gate ticks a monotone pass
@@ -44,9 +59,7 @@ rather than grinding to the platform's forced 8-block override.
 import importlib.util
 import json
 import os
-import re
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_THETA = 0.8
@@ -60,32 +73,14 @@ def _load(name: str):
 
 
 manifest = _load("manifest")
+claimgraph = _load("claimgraph")
+evidence = _load("evidence")
+audit = _load("audit")
 
-# A checkbox list item (any bullet, any indent) inside the Unknowns section.
-UNKNOWN_LINE_RE = re.compile(r"^\s*[-*+]\s+\[[ xX]\]\s+(?P<body>.*)$")
-# Confidence and optional blocked-tag inside the trailing HTML comment.
-CONFIDENCE_RE = re.compile(
-    r"<!--\s*confidence:\s*(?P<value>[^,>]+?)\s*"
-    r"(?:,\s*blocked:\s*(?P<blocked>[^>]+?)\s*)?-->"
-)
-UNKNOWNS_HEADING_RE = re.compile(r"^(#+)\s+unknowns\b", re.IGNORECASE)
-HEADING_RE = re.compile(r"^(#+)\s+")
-
-# The CLOSED set of residual tags that legitimately stop gating (ADR-9/17). A blocked
-# value outside this set is NOT honored — the item stays pending and BLOCKS (fail-closed).
-# This is what stops a one-token `blocked: made-up` from bypassing the gate: the
-# constrained model cannot invent a tag to declare its own work done (review finding 1.1).
-VALID_BLOCKED_TAGS = frozenset(
-    {"needs-decision", "needs-data", "needs-experiment", "needs-budget"}
-)
-
-
-@dataclass(frozen=True)
-class Unknown:
-    """One unknown as the gate sees it. `confidence` is 0.0 when missing/malformed."""
-    body: str
-    confidence: float
-    blocked: str | None  # a VALID residual tag, or None (unknown/invalid tags → None)
+# The CLOSED set of residual tags that legitimately stop gating (ADR-9/17) now lives with the
+# schema that owns it. Re-exported here because state_restore.py and the tests read it from
+# the gate, and one definition beats two that can drift.
+VALID_BLOCKED_TAGS = claimgraph.VALID_BLOCKED_TAGS
 
 
 def theta() -> float:
@@ -98,16 +93,16 @@ def theta() -> float:
     return value if 0.0 <= value <= 1.0 else DEFAULT_THETA
 
 
-def spec_path_for(cwd: Path, session_id: str, run: dict | None) -> Path:
-    """The living spec's path. The spec is the run's internal working memory and lives in the
-    run directory (`.claude/empirica/<run_id>/spec.md`); the manifest records it in
-    `spec_path`. The run directory is the spec's ONLY home, so a manifest-provided path is
-    honoured only when it resolves inside that directory — a `spec_path` pointing elsewhere
+def graph_path_for(cwd: Path, session_id: str, run: dict | None) -> Path:
+    """The claim graph's path. The graph is the run's internal working memory and lives in the
+    run directory (`.claude/empirica/<run_id>/claims.json`); the manifest records it in
+    `graph_path`. The run directory is the graph's ONLY home, so a manifest-provided path is
+    honoured only when it resolves inside that directory — a `graph_path` pointing elsewhere
     (a corrupt manifest, or one rewritten to aim the gate at a pre-'converged' file outside
-    the run) is rejected in favour of the canonical default. The spec is never a repository
+    the run) is rejected in favour of the canonical default. The graph is never a repository
     file."""
-    default = manifest.default_spec_path(cwd, session_id)
-    recorded = run.get("spec_path") if run else None
+    default = manifest.default_graph_path(cwd, session_id)
+    recorded = run.get("graph_path") if run else None
     if isinstance(recorded, str) and recorded:
         candidate = Path(recorded)
         run_dir = manifest.locate_run_dir(cwd, session_id).resolve()
@@ -115,79 +110,8 @@ def spec_path_for(cwd: Path, session_id: str, run: dict | None) -> Path:
             candidate.resolve().relative_to(run_dir)
             return candidate
         except ValueError:
-            pass  # outside the run directory → not trusted; fall back to the canonical spec
+            pass  # outside the run directory → not trusted; fall back to the canonical graph
     return default
-
-
-def unknowns_section(text: str) -> list[str]:
-    """Lines under EVERY `## Unknowns` heading, each until the next same/higher heading.
-
-    Scoping to the section is what lets 'missing confidence → block' be safe: only lines
-    the author placed under Unknowns are gated, so unrelated checklists never false-block.
-    All Unknowns sections are AGGREGATED (not just the last), so a second section with a
-    pending item cannot be hidden from the gate (review finding 1.2b).
-    """
-    section: list[str] = []
-    depth: int | None = None
-    for line in text.splitlines():
-        heading = UNKNOWNS_HEADING_RE.match(line)
-        if heading:
-            depth = len(heading.group(1))
-            continue  # accumulate across sections; do NOT reset
-        if depth is not None:
-            other = HEADING_RE.match(line)
-            if other and len(other.group(1)) <= depth:
-                depth = None  # left this section; wait for the next Unknowns heading
-                continue
-            section.append(line)
-    return section
-
-
-def parse_unknowns(text: str) -> list[Unknown]:
-    """Every checkbox item in the Unknowns section, scored. The one novel piece (ADR-15).
-
-    Missing, malformed, or out-of-range confidence → 0.0, so an unproven unknown blocks
-    rather than silently satisfying the gate.
-    """
-    unknowns: list[Unknown] = []
-    for line in unknowns_section(text):
-        item = UNKNOWN_LINE_RE.match(line)
-        if not item:
-            continue
-        body = item.group("body")
-        confidence = 0.0
-        blocked = None
-        malformed = True  # no parseable comment at all → malformed → blocks
-        comment = CONFIDENCE_RE.search(body)
-        if comment:
-            raw_blocked = (comment.group("blocked") or "").strip()
-            # Only a tag in the closed set stops gating; anything else → None (stays
-            # pending, blocks). A made-up tag cannot bypass the gate (review 1.1).
-            blocked = raw_blocked if raw_blocked in VALID_BLOCKED_TAGS else None
-            try:
-                value = float(comment.group("value"))
-                if 0.0 <= value <= 1.0:
-                    confidence = value
-                    malformed = False
-            except ValueError:
-                pass
-        # Malformed/out-of-range confidence fails CLOSED even with a valid blocked tag
-        # (review 1.1 residual): a residual must carry a real score, so we drop the
-        # blocked exemption and let the item stay pending.
-        if malformed:
-            blocked = None
-        unknowns.append(Unknown(body=body, confidence=confidence, blocked=blocked))
-    return unknowns
-
-
-def pending(unknowns: list[Unknown], th: float) -> list[Unknown]:
-    """Unknowns still in the loop: below θ and not surfaced-to-human."""
-    return [u for u in unknowns if u.confidence < th and not u.blocked]
-
-
-def converged(unknowns: list[Unknown], th: float) -> bool:
-    """Fixed point reached ⇔ nothing pending (blocked residuals don't gate) — ADR-7/9."""
-    return not pending(unknowns, th)
 
 
 def _resolve_run(cwd: Path, session_id: object) -> tuple[Path | None, dict | None]:
@@ -206,17 +130,59 @@ def _resolve_run(cwd: Path, session_id: object) -> tuple[Path | None, dict | Non
     return path, manifest.read_run(path)
 
 
-def _allow_converged(unknowns: list[Unknown]) -> tuple[int, dict]:
-    """The allow-path payload: truly converged ⇔ nothing blocked; residuals ⇒ stopped."""
-    blocked = [u for u in unknowns if u.blocked]
-    budget_blocked = [u for u in blocked if u.blocked == "needs-budget"]
+def _allow_converged(graph: dict, th: float, evidence_ok) -> tuple[int, dict]:
+    """The allow-path payload: truly converged ⇔ no residuals; residuals ⇒ stopped.
+
+    A blocked residual is never reported as convergence — ADR-17's "never fabricate green".
+    """
+    if claimgraph.root_is_refuted(graph, th, evidence_ok):
+        # The run disproved its own intent. Allow the stop — looping on a refuted goal is
+        # pointless — but never as convergence. This is a finding to hand to the human, and
+        # without this branch a single forged refutation of the top goal converged the run
+        # vacuously (adversarial review finding).
+        return 0, {"continue": True, "converged": False,
+                   "note": ("NON-CONVERGED: the run's TOP GOAL was refuted by evidence. The "
+                            "intent as stated cannot be established — surface the refutation "
+                            "and its evidence to the human. This is a result, not a green run.")}
+    blocked = claimgraph.blocked_residuals(graph, th, evidence_ok)
+    budget_blocked = [nid for nid in blocked
+                      if graph["nodes"][nid]["blocked"] == "needs-budget"]
     out: dict[str, object] = {"continue": True, "converged": not blocked}
     if budget_blocked:
-        out["note"] = (f"NON-CONVERGED: budget exhausted, {len(budget_blocked)} unknown(s) "
+        out["note"] = (f"NON-CONVERGED: budget exhausted, {len(budget_blocked)} claim(s) "
                        f"unresolved (blocked: needs-budget). Raise the budget to continue.")
     elif blocked:
-        out["note"] = f"{len(blocked)} unknown(s) surfaced to human (blocked), not gated"
+        out["note"] = f"{len(blocked)} claim(s) surfaced to human (blocked), not gated"
     return 0, out
+
+
+def _block_reason(graph: dict, run_dir: Path, open_claims: list[str], th: float,
+                  passes_note: str) -> str:
+    """The message the agent reads when the gate blocks.
+
+    It names, per claim, WHICH fold of evidence is missing rather than only reporting a score,
+    because "your confidence is too low" is not actionable while "no research citation exists
+    for this claim" is. This is the gate teaching the protocol at the point of failure.
+    """
+    lines = []
+    for nid in open_claims[:10]:
+        node = graph["nodes"][nid]
+        why = evidence.explain(run_dir, graph, nid)
+        lines.append(f"  - [{nid}] {node['text'][:80]} (confidence {node['confidence']:.2f}) "
+                     f"→ {why}")
+    more = (f"\n  … (+{len(open_claims) - 10} more)" if len(open_claims) > 10 else "")
+    return (
+        f"Convergence not reached: {len(open_claims)} claim(s) not yet terminal "
+        f"(θ={th}){passes_note}.\n" + "\n".join(lines) + more +
+        "\n\nEach claim needs: FOLD 1 — a research citation to a source outside your training "
+        "data (fetched docs, code you actually read, runtime output); plus FOLD 2 for a "
+        "needs-experiment claim — a passing spike recorded by spike_harness.py from a real "
+        "exit code. Recall is not evidence (ADR-20 P3). If a claim is genuinely unresolvable, "
+        "tag it blocked: needs-decision|needs-data|needs-experiment to surface it to the human "
+        "instead of looping (ADR-9); if budget is exhausted, blocked: needs-budget (ADR-17). "
+        "If evidence REFUTES a claim, record the refutation and discard it — do not park it "
+        "at low confidence."
+    )
 
 
 def main() -> int:
@@ -244,34 +210,109 @@ def main() -> int:
               "can be read (fail-closed, ADR-19).", file=sys.stderr)
         return 2
 
-    spec_path = spec_path_for(cwd, str(session_id), run)
-
-    if is_active and not spec_path.exists():
-        # The run's spec vanished (deleted/renamed to bypass convergence) → fail CLOSED.
-        print(f"empirica: active run but the living spec is missing ({spec_path}); refusing "
-              f"to stop — restore it in the run directory (fail-closed, ADR-19).", file=sys.stderr)
-        return 2
-
     if not is_active:
         # Manifest says this run already stopped/converged — don't re-block a finished run.
         print(json.dumps({"continue": True, "converged": run.get("status") == "converged"}))
         return 0
 
-    try:
-        text = spec_path.read_text(encoding="utf-8", errors="replace")
-    except OSError as exc:
-        # Spec exists but cannot be read — fail CLOSED, not open.
-        print(f"empirica: {spec_path.name} exists but is unreadable ({exc}); "
-              f"refusing to stop until convergence can be evaluated.", file=sys.stderr)
+    graph_path = graph_path_for(cwd, str(session_id), run)
+    graph = claimgraph.load(graph_path)
+
+    if manifest.is_legacy(run) and graph is None:
+        # A run that started under the pre-ADR-22 markdown substrate: legacy-shaped manifest
+        # AND no claim graph to evaluate. This code cannot judge its state, and wedging a live
+        # session is the one thing ADR-19 forbids outright — so fail OPEN, loudly, and let the
+        # user restart the run.
+        #
+        # The `graph is None` conjunct is load-bearing. Testing the manifest SHAPE alone made
+        # this an escape hatch: drop `graph_path` and add `spec_path` in the manifest and any
+        # actively-blocking run walked free, defeating the fail-closed gate (reproduced, then
+        # found again by an independent doc audit). A run that HAS a claim graph is evaluated on
+        # that graph no matter what shape its manifest is in.
+        print(json.dumps({
+            "continue": True, "converged": False,
+            "note": ("NON-CONVERGED: this run predates the claim-graph substrate (ADR-22) and "
+                     "cannot be evaluated by the current gate. Re-invoke /empirica to start a "
+                     "run on the new substrate."),
+        }))
+        return 0
+
+    if graph is None:
+        # The run's claim graph vanished (deleted/renamed to bypass convergence) → CLOSED.
+        print(f"empirica: active run but the claim graph is missing ({graph_path}); refusing "
+              f"to stop — restore it in the run directory (fail-closed, ADR-19).",
+              file=sys.stderr)
+        return 2
+
+    if graph == claimgraph.CORRUPT:
+        # Present but unreadable/structurally invalid → CLOSED. A malformed argument is not a
+        # converged one, and this is exactly the tamper case the sentinel exists for.
+        print(f"empirica: the claim graph ({graph_path.name}) is unreadable or structurally "
+              f"invalid; refusing to stop until convergence can be evaluated (fail-closed, "
+              f"ADR-19/22).", file=sys.stderr)
         return 2
 
     th = theta()
-    unknowns = parse_unknowns(text)
-    open_unknowns = pending(unknowns, th)
+    run_dir = graph_path.parent
+    # The two-fold evidence verdict (ADR-20 P3). Claim state is derived through this oracle,
+    # so a typed confidence with no evidence cannot reach `approved`.
+    evidence_ok = evidence.oracle(run_dir, graph)
+    open_claims = claimgraph.pending(graph, th, evidence_ok)
 
-    if not open_unknowns:
-        code, out = _allow_converged(unknowns)
+    if not open_claims:
+        code, out = _allow_converged(graph, th, evidence_ok)
+        if out["converged"]:
+            # P6: a run may only REPORT convergence after an independent principal has
+            # verified it. Residual/budget-exhausted stops are exempt — they do not claim
+            # convergence, so there is nothing for an auditor to certify, and requiring one
+            # would wedge a run that has honestly given up.
+            approved = [nid for nid in claimgraph.gating_goals(graph, th, evidence_ok)
+                        if claimgraph.state_of(graph, nid, th, evidence_ok)
+                        == claimgraph.STATE_APPROVED]
+            # Pass the current pass count so a verdict from an earlier pass is rejected as
+            # stale — it reviewed a claim graph that has since changed.
+            audit_ok, audit_reason = audit.check(run_dir, approved, run.get("passes"))
+            # P1 is evaluated on BOTH paths. It used to be computed only in the failure branch,
+            # which meant a route-before-investigate violation vanished the moment the audit
+            # passed — falsifying ADR-20's fitness function 3 ("a run whose route was declared
+            # after investigation is flagged") in exactly the case that matters: a rubber-stamped
+            # audit over an inverted run. Found by an independent coverage review.
+            route_issue = audit.route_note(run)
+            if not audit_ok:
+                # P1 is surfaced to the auditor rather than hard-blocked here: the stamp can be
+                # coarse, and a coarse signal should not be the sole reason a run wedges.
+                p1_note = (f"\n\nAlso flag for the auditor (ADR-20 P1): {route_issue}."
+                           if route_issue else "")
+                print(f"Claim graph is converged, but the run may not report `converged`: "
+                      f"{audit_reason}.\n\nThe auditor must re-read each approved claim's "
+                      f"Fold-1 citation and confirm the cited source actually supports the "
+                      f"claim, then write its verdict to "
+                      f"{audit.verdict_path(run_dir).name} carrying the nonce from its spawn "
+                      f"(ADR-20 P6).{p1_note}", file=sys.stderr)
+                if is_active:
+                    manifest.record_pass(run_path)  # an audit round is a pass; keep terminating
+                    if manifest.at_cap(manifest.read_run(run_path)):
+                        manifest.set_status(run_path, "stopped_residual")
+                        print(json.dumps({
+                            "continue": True, "converged": False,
+                            "note": ("NON-CONVERGED: claim graph converged but the independent "
+                                     "audit never passed within max_passes."),
+                        }))
+                        return 0
+                return 2
+            out["audit"] = "passed"
+            if route_issue:
+                # The audit passed but the run inverted the protocol. Report it in the RESULT,
+                # not just in a block message the agent may never see: a passing audit must not
+                # launder a P1 violation. Not fatal (the stamp can be coarse — see route_note),
+                # so the stop is allowed, but the violation is on the record and `converged` is
+                # qualified rather than clean.
+                out["p1_violation"] = route_issue
+                out["note"] = (f"Audit passed, but ADR-20 P1 was violated: {route_issue}. "
+                               f"Routing is a commitment made up front, not a label applied "
+                               f"retroactively.")
         if is_active:  # record the terminal status so a later Stop fails open, not re-blocks
+            manifest.set_phase(run_path, "converged" if out["converged"] else "assess")
             manifest.set_status(run_path, "converged" if out["converged"] else "stopped_residual")
         print(json.dumps(out))
         return code
@@ -286,23 +327,14 @@ def main() -> int:
             print(json.dumps({
                 "continue": True, "converged": False,
                 "note": (f"NON-CONVERGED: reached max_passes={run['max_passes']} with "
-                         f"{len(open_unknowns)} unknown(s) still below θ={th}. Loop terminated "
-                         f"by the pass-count variant (ADR-19). Raise EMPIRICA_MAX_PASSES or "
-                         f"resolve/blocked-tag the remaining unknowns."),
+                         f"{len(open_claims)} claim(s) still not terminal (θ={th}). Loop "
+                         f"terminated by the pass-count variant (ADR-19). Raise "
+                         f"EMPIRICA_MAX_PASSES or resolve/blocked-tag the remaining claims."),
             }))
             return 0
 
-    scores = ", ".join(f"{u.confidence:.2f}" for u in open_unknowns)
     passes_note = (f" [pass {run['passes']}/{run['max_passes']}]" if is_active else "")
-    reason = (
-        f"Convergence not reached: {len(open_unknowns)} unknown(s) below θ={th} "
-        f"({scores}){passes_note}. Resolve them in {spec_path.name} — run one Assessor pass "
-        f"(score updates + specialize-only derivation). If one is genuinely unresolvable, mark "
-        f"it `<!-- confidence: N, blocked: needs-decision|needs-data|needs-experiment -->` to "
-        f"surface it to the human instead of looping (ADR-9). If budget is exhausted, mark "
-        f"it `blocked: needs-budget` (ADR-17)."
-    )
-    print(reason, file=sys.stderr)
+    print(_block_reason(graph, run_dir, open_claims, th, passes_note), file=sys.stderr)
     return 2
 
 
