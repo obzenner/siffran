@@ -39,7 +39,8 @@ conventions rather than invented.
 * Some choices (hook runtime specifics, confidence-in-spec parsing) touch current Claude
   Code behaviour — where training data is stale, prefer a spike over a paper decision.
 * Honour the design ADRs: self-contained but methodologist-companion (ADR-3), hook-enforced
-  (ADR-8), transient vs committable (ADR-14), spec-kit by reference (ADR-15).
+  (ADR-8), transient vs committable (ADR-14), claim-graph state schema (ADR-22, superseding the
+  spec-kit substrate of ADR-15).
 * Ship a thin usable slice before the heavy engine (ship-or-kill gate).
 
 ## Considered Options
@@ -52,10 +53,12 @@ Per axis, the alternatives considered and the choice:
   existing tooling (`plugins/methodologist/scripts/validate.py`); bash rejected as too
   brittle for JSON ledger parsing, node rejected as a new runtime the repo doesn't use.
   (Marked to confirm against the actual hook I/O contract in the first spike — see Drivers.)
-* **Confidence-in-spec representation** — separate JSON store vs. inline in `spec.md`. →
-  **Inline in the living spec** (ADR-15): each unknown is a checkbox item tagged with a
-  confidence value in a machine-parseable convention (e.g. an HTML-comment or a fixed
-  suffix), parsed by the Python hook. Exact syntax proven in the spike, not guessed here.
+* **Claim + confidence representation** — inline in a markdown spec vs. a typed store. →
+  **A JSON claim graph** (ADR-22): each claim is a node (GSN element type) carrying a
+  confidence value and its in-toto evidence leaves, written to the run directory and parsed by
+  the Python hook. (The original build shipped an inline-in-`spec.md` convention under the
+  superseded ADR-15; ADR-22 replaces it with the claim graph. Exact on-disk shape proven in the
+  build spike, not guessed here.)
 * **Transient scratch location** — new dir vs. reuse `.claude/`. → **`.claude/` scratch**,
   which the repo's `.gitignore` already excludes (`\.claude/*`), so ADR-14's transient tier
   needs no new ignore rule.
@@ -76,13 +79,13 @@ invoked `/empirica`) with:
   `README.md` regenerated via the `checkup` skill (repo convention — do not hand-edit).
 
 **Dependencies.** methodologist declared a required companion (ADR-3, ADR-12); inkrot `/hr`
-never referenced (M2 staffing is inline). spec-kit read by pinned GitHub reference at use
-time, never vendored (ADR-15).
+never referenced (M2 staffing is inline). Claim/argument and evidence standards (GSN, in-toto)
+referenced, never vendored (ADR-22, carrying forward ADR-15's reference-don't-vendor principle).
 
-**State.** Unknowns + confidence live inline in the run's living spec, held in the run
-directory `.claude/empirica/<run_id>/` alongside the rest of the spec-kit working set, the
-manifest, and transient scratch (spike output, `/think` traces, race bookkeeping) — all
-git-ignored (ADR-14/15/19). Committable output: the goal's resolved deliverable, plus MADR
+**State.** Claims + confidence + evidence live in the run's **claim graph** (ADR-22: a GSN
+argument with in-toto evidence leaves), held in the run directory `.claude/empirica/<run_id>/`
+alongside the manifest and transient scratch (spike output, `/think` traces, race bookkeeping) —
+all git-ignored (ADR-14/19). Committable output: the goal's resolved deliverable, plus MADR
 ADRs when the intent is a decision.
 
 **deep-planner.** Removed from `marketplace.json` and `plugins/` when this plugin ships
@@ -112,14 +115,14 @@ ADRs when the intent is a decision.
   are explicitly gated on a spike, not asserted.
 * Good, because `.claude/` is already git-ignored, so the transient tier is free.
 * Good, because Slice 1 ships value before the engine exists.
-* Resolved (was: "Python hooks and confidence syntax are provisional"): the build-step-1
-  spike confirmed both — Python hooks fit the I/O contract and the inline
-  `<!-- confidence: N -->` convention parses cleanly (15/15 checks). The spike did refute
-  the assumed Stop-block *mechanism* (JSON `decision` field → actually exit 2 + stderr),
-  which is now corrected in ADR-8. The spike was the fitness function and it fired.
-* Bad, because this ADR overlaps `plan.md` (ADR-15) by intent — recorded as a decision here,
-  it will be mirrored into the per-feature `plan.md` when the build runs, and the two must
-  not drift (this ADR is authoritative for repo-binding; `plan.md` for per-feature detail).
+* Resolved: the build-step-1 spike confirmed Python hooks fit the I/O contract, and refuted
+  the assumed Stop-block *mechanism* (JSON `decision` field → actually exit 2 + stderr), now
+  corrected in ADR-8. The spike also confirmed an inline `<!-- confidence: N -->` markdown
+  convention (15/15 checks); that convention is **superseded by the JSON claim graph of
+  ADR-22** — the confidence value and evidence now live in a claim-graph node, not a markdown
+  comment. The spike remains valid as the fitness function that fired.
+* Bad, because this ADR is authoritative for repo-binding while per-feature detail lives in the
+  run's claim graph (ADR-22); the two must not drift.
 
 ### Confirmation
 

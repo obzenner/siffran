@@ -43,11 +43,14 @@ the reasoning live?
   `{id, statement, kind, confidence, derived_from, resolved_by}`. (Rejected once the
   artifact standard was checked: this reinvents state that the industry represents in the
   living spec — see ADR-15.)
-* **Fixed-point convergence over spec-hosted unknowns (M9 Assessor as function f)** — the
+* **Fixed-point convergence over a claim graph (M9 Assessor as function f)** — the
   progressive-resolution *behavior* stays: M9 applies one pass — score updates + derive new
-  unknowns — and `converged()` is true iff no unknown sits below threshold θ. The *substrate*
-  is the living spec (spec-kit `spec.md`, ADR-15), where each unknown is an open item
-  carrying a confidence score, not a separate bespoke file.
+  claims — and `converged()` is true iff no claim sits below threshold θ. The *substrate* is
+  the run's claim graph (ADR-22: a GSN argument with in-toto evidence leaves), where each
+  unknown is a claim node carrying a confidence score and its evidence, not a separate bespoke
+  file. (The originally rejected bespoke ledger `{id, statement, kind, confidence,
+  derived_from, resolved_by}` is essentially the claim node — ADR-22 gives it a standards
+  grounding, GSN/in-toto, rather than a hand-rolled schema.)
 
 ## Decision Outcome
 
