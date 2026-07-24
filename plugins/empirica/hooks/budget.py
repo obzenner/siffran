@@ -57,9 +57,15 @@ def locate_ledger(cwd: Path, run_id: str | None = None) -> Path:
     """Ledger path under cwd's .claude scratch, or EMPIRICA_BUDGET override.
 
     run_id keys the ledger per run so concurrent sessions in one repo do not share a
-    counter (review finding 2.4). It defaults to $EMPIRICA_RUN_ID (set by the harness
-    from the Claude session id) and only falls back to "default" when nothing else is
-    available. run_id is sanitised to a single safe path segment — no traversal.
+    counter (review finding 2.4). Callers should PASS run_id explicitly — derived from
+    (session_id, cwd) via manifest.run_id, which is how every hook independently arrives at the
+    same identity.
+
+    The $EMPIRICA_RUN_ID fallback is retained only for an operator setting it manually (e.g. in
+    settings.json `env`, or when driving these modules from a script). It is NOT populated by
+    another hook: verified by live experiment (2026-07-24) that each hook runs in a fresh
+    subprocess, so no hook can publish an env var to a later one. Do not rely on it.
+    run_id is sanitised to a single safe path segment — no traversal.
     """
     override = os.environ.get(LEDGER_ENV)
     if override:

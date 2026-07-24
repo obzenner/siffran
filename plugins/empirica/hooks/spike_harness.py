@@ -18,14 +18,25 @@ Exit code (review 2.2): by default main() exits with the checked command's own s
 (0 ⇔ gate=pass), so `spike_harness … && next` behaves like a real gate and CI/Bash see the
 right colour. Use `--report-only` to always exit 0 and read the `gate` field from the JSON.
 
-Usage:  python3 spike_harness.py [--timeout SEC] [--report-only] <cmd> [args...]
+FOLD-2 EVIDENCE (ADR-20 P3 / ADR-21 M2): this module is the SOLE WRITER of spike records.
+With `--claim <id> --run-dir <dir> --ts <stamp>` it writes an in-toto Statement binding the
+claim to this run's real exit code (via evidence.py). That is the whole reason the record
+cannot be forged: `gate` is derived from `returncode`, never from a model's assertion. Do not
+add another caller of `evidence.write_spike` — a second writer would reopen the hole.
+
+Usage:  python3 spike_harness.py [--timeout SEC] [--report-only]
+                                 [--claim ID --run-dir DIR --ts STAMP [--file PATH ...]]
+                                 <cmd> [args...]
 """
+import hashlib
+import importlib.util
 import json
 import os
 import signal
 import subprocess
 import sys
 import threading
+from pathlib import Path
 from typing import TypedDict
 
 DEFAULT_TIMEOUT = 300  # seconds; a spike check that runs longer is a failure signal
@@ -148,14 +159,24 @@ def _kill_group(proc: subprocess.Popen) -> None:
         proc.kill()
 
 
-def parse_args(argv: list[str]) -> tuple[list[str], float, bool]:
-    """Split leading `--timeout SEC` / `--report-only` flags from the command to run.
+def _load(name: str):
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(f"{name}.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def parse_args(argv: list[str]) -> tuple[list[str], float, bool, dict]:
+    """Split leading flags from the command to run.
 
     timeout is clamped to a finite positive value (review 1.5: a bogus timeout must not
-    disable the guard).
+    disable the guard). The evidence flags (`--claim`, `--run-dir`, `--ts`, repeated
+    `--file`) are optional: without them the harness behaves exactly as before, as a plain
+    deterministic gate that records nothing.
     """
     timeout = DEFAULT_TIMEOUT
     report_only = False
+    ev: dict = {"claim": None, "run_dir": None, "ts": None, "files": []}
     while argv:
         if argv[0] == "--report-only":
             report_only = True
@@ -168,19 +189,67 @@ def parse_args(argv: list[str]) -> tuple[list[str], float, bool]:
             except ValueError:
                 pass
             argv = argv[2:]
+        elif argv[0] == "--file" and len(argv) >= 2:
+            ev["files"].append(argv[1])
+            argv = argv[2:]
+        elif argv[0] in ("--claim", "--run-dir", "--ts") and len(argv) >= 2:
+            ev[argv[0][2:].replace("-", "_")] = argv[1]
+            argv = argv[2:]
         else:
             break
-    return argv, timeout, report_only
+    return argv, timeout, report_only, ev
+
+
+def _record_evidence(result: SpikeResult, ev: dict) -> dict | None:
+    """Write the Fold-2 record for this run, from the REAL exit code.
+
+    Returns a small status dict for the JSON output, or None when the evidence flags were not
+    supplied. A write failure is reported, never fatal: the gate's exit code is still the
+    verdict, and a run that could not persist evidence must fail the Stop gate later (no
+    record ⇒ no approval) rather than crash the check the user asked for.
+
+    `claim_text` is read from the claim graph so the in-toto subject digest binds to the claim
+    as currently worded — the harness must not accept claim text from the command line, or a
+    caller could bind a spike to a claim it never tested.
+    """
+    if not (ev.get("claim") and ev.get("run_dir") and ev.get("ts")):
+        return None
+    run_dir = Path(ev["run_dir"])
+    try:
+        graph_mod = _load("claimgraph")
+        evidence = _load("evidence")
+        g = graph_mod.load(graph_mod.default_graph_path(run_dir))
+        if g is None or g == graph_mod.CORRUPT:
+            return {"recorded": False,
+                    "reason": f"no readable claim graph in {run_dir} — cannot bind evidence"}
+        node = g["nodes"].get(ev["claim"])
+        if node is None:
+            return {"recorded": False, "reason": f"claim {ev['claim']!r} is not in the graph"}
+        stdout_text = "\n".join(result["stdout_tail"])
+        path = evidence.write_spike(
+            run_dir, f"spike-{ev['claim']}", ev["claim"], node["text"],
+            cmd=result["cmd"], gate=result["gate"],
+            result_hash=hashlib.sha256(stdout_text.encode("utf-8")).hexdigest(),
+            files=[Path(f) for f in ev["files"]], ts=ev["ts"],
+        )
+        return {"recorded": True, "gate": result["gate"], "path": str(path)}
+    except (OSError, ValueError, AttributeError, KeyError) as exc:
+        return {"recorded": False, "reason": f"{type(exc).__name__}: {exc}"}
 
 
 def main() -> int:
-    cmd, timeout, report_only = parse_args(sys.argv[1:])
+    cmd, timeout, report_only, ev = parse_args(sys.argv[1:])
     if not cmd:
-        print(json.dumps({"error": "usage: spike_harness.py [--timeout SEC] "
-                                    "[--report-only] <cmd> [args...]"}))
+        print(json.dumps({"error": "usage: spike_harness.py [--timeout SEC] [--report-only] "
+                                    "[--claim ID --run-dir DIR --ts STAMP [--file PATH ...]] "
+                                    "<cmd> [args...]"}))
         return 2
     result = run_gate(cmd, timeout)
-    print(json.dumps(result, indent=2))
+    out = dict(result)
+    recorded = _record_evidence(result, ev)
+    if recorded is not None:
+        out["evidence"] = recorded
+    print(json.dumps(out, indent=2))
     if report_only:
         return 0  # always green; caller reads the `gate` field
     # Default: propagate the checked command's real status so the gate composes with

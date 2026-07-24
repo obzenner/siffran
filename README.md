@@ -19,9 +19,17 @@ Add the marketplace, then install a plugin:
 | Plugin | Version | Description |
 |--------|---------|-------------|
 | `methodologist` | 0.4.0 | Methodology router — picks and executes formal CS/math reasoning methodologies with tracked phases and structured output. |
-| `empirica` | 0.3.0 | Empirical-convergence workflow — tracks unknowns with confidence scores in a living spec (the run's internal working memory), spikes them against real deterministic checks, and drives them to a fixed point before producing the goal's output. Hook-enforced convergence. |
+| `empirica` | 0.4.1 | Empirical-convergence workflow — adjudicates a claim graph (GSN argument with in-toto evidence) where every claim's confidence must be earned by real external evidence: research citations first, deterministic spike verdicts for machine-checkable claims, then an independent auditor before a run may report convergence. Hook-enforced. |
 <!-- END GENERATED: plugins -->
 
 ## Development
 
-See [CLAUDE.md](./CLAUDE.md) for repo structure, conventions, and how to add a plugin or methodology. Run `/plugin validate .` and the `checkup` skill before committing.
+The project lifecycle lives in the `Makefile` — run `make help` to see every operation:
+
+```
+make check      # lint + tests + manifest validation + ADR health (run before committing)
+make status     # plugin versions, ADR count, working-tree state
+make bump PLUGIN=<name> PART=minor
+```
+
+See [CLAUDE.md](./CLAUDE.md) for repo structure, conventions, and how to add a plugin or methodology. Run `make check` and the `checkup` skill before committing.

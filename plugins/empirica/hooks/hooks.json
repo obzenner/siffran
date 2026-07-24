@@ -24,6 +24,17 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "matcher": "Read|Glob|Grep|Bash|WebFetch|WebSearch|NotebookRead|LSP",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/route_stamp.py"],
+            "timeout": 10
+          }
+        ]
       }
     ],
     "Stop": [

@@ -24,7 +24,7 @@ links:
 
 ## Context and Problem Statement
 
-The workflow produces many artifacts: the living spec and spec-kit working set, the run
+The workflow produces many artifacts: the claim graph (the run's working memory), the run
 manifest and spawn ledger, spike scratch and test output, `/think` reasoning traces, and —
 on convergence — the output the intent asked for, plus any ADRs a decision warrants. Which
 of these are durable records that belong in git, and which are throwaway working state that
@@ -57,10 +57,10 @@ Chosen option: "Two-tier split", with this assignment:
 
 **Transient (working state; in the run directory `.claude/empirica/<run_id>/`, git-ignored;
 may be re-injected across compaction but never committed):**
-- the living spec and the rest of the spec-kit working set — `spec.md`, `plan.md`,
-  `tasks.md`, `research.md` (ADR-15). These are the run's internal memory: how the
-  convergence loop tracks unknowns and their confidence for the goal it received. They are
-  the run's scratchpad, not a repository deliverable.
+- the **claim graph** — the run's internal working memory (ADR-22: a GSN assurance argument
+  with in-toto evidence records). This is how the convergence loop tracks claims, their
+  confidence, and their evidence for the goal it received. It is the run's scratchpad, not a
+  repository deliverable.
 - the run manifest (ADR-19) and the spawn ledger (ADR-17)
 - spike scratch and raw test output (M3)
 - `/think` reasoning traces (the trace informs the durable artifact, then is discarded)
@@ -73,11 +73,11 @@ may be re-injected across compaction but never committed):**
   whatever the goal resolves to, produced by the model on convergence.
 - tests and code (M7 handoff → implementation)
 
-empirica is a workflow that serves any intent, not a producer of one fixed artifact. The
-spec-kit documents are the shape of its internal reasoning for a single run; the committable
-record is the goal's resolved output. If a goal's output happens to be a specification, that
-specification is the deliverable and is placed per the intent — distinct from the run's own
-internal spec, which stays in the run directory.
+empirica is a workflow that serves any intent, not a producer of one fixed artifact. The claim
+graph is the shape of its internal reasoning for a single run; the committable record is the
+goal's resolved output. If a goal's output happens to be a specification, that specification is
+the deliverable and is placed per the intent — distinct from the run's own claim graph, which
+stays in the run directory.
 
 The rule of thumb (Anthropic, "treat CLAUDE.md like code"; would its removal cause future
 mistakes?) decides edge cases. Agent-generated PR/commit *descriptions* are transient by
@@ -99,9 +99,9 @@ default — the human-authored intent/framing is the durable record (Willison, J
 ### Confirmation
 
 Fitness function: (1) after a run, `git status` shows only the goal's resolved output (and
-ADRs, when the intent is a decision) — the spec-kit working set, manifest, ledger, traces,
-and spike scratch never appear; (2) the living spec and all run state are written under the
-git-ignored run directory `.claude/empirica/<run_id>/`, never at the repository root; (3) a
+ADRs, when the intent is a decision) — the claim graph, manifest, ledger, traces, and spike
+scratch never appear; (2) the claim graph and all run state are written under the git-ignored
+run directory `.claude/empirica/<run_id>/`, never at the repository root; (3) a
 resumed run reconstructs state from that scratch, not from git; (4) generated PR descriptions
 are not committed as the intent record.
 

@@ -78,9 +78,10 @@ expands, carrying `session_id` and `cwd` — the run-start signal that also prov
 skill (not an unrelated session) started it. The matcher is anchored to the plugin-namespaced
 command name `empirica:empirica`; a bare `empirica` is exact-matched by the harness and never
 fires. It writes `.claude/empirica/<run_id>/run.json` where
-`run_id = sha256(session_id + canonical root)`, and the living spec sits beside it at
-`.claude/empirica/<run_id>/spec.md`. Start is **idempotent**: re-invoking `/empirica` mid-run
-does not reset `passes`.
+`run_id = sha256(session_id + canonical root)`, and the run's claim graph (ADR-22) sits beside
+it in the same run directory. The manifest's `spec_path` field points at the claim-graph file
+the gate reads. Start is **idempotent**: re-invoking `/empirica` mid-run does not reset
+`passes`.
 
 **Fail direction (G1, closes 1.2a + 2.5).** The convergence gate reads the manifest:
 - **no manifest** → not an empirica run → existing spec-based **fail-OPEN** path, unchanged

@@ -20,6 +20,8 @@ links:
     kind: relatesto
   - target: 16
     kind: relatesto
+  - target: 20
+    kind: relatesto
 ---
 
 # Deterministic gate is the trust boundary; agentic review is a secondary sensor
@@ -67,6 +69,13 @@ problems but cannot declare done. This mirrors Anthropic's Claude Code gating hi
 (cheap→expensive: in-prompt check → separate evaluator → **deterministic Stop hook that
 blocks the turn until it passes** → verification subagent) and the "show evidence rather
 than assert success" rule.
+
+**"Advisory" bounds APPROVAL power, not blocking power.** The distinction is flag vs approve:
+agentic review may FLAG (surface a problem, and — as with the independent auditor of ADR-20 P6 —
+that flag may be *binding*, refusing convergence) but it may never APPROVE (turn unproven work
+into done). Only the deterministic check approves a claim. So a required, blocking agentic
+auditor is consistent with this ADR: it adds a necessary veto, never a sufficient approval. The
+approver of an experiment claim remains the real check's `gate: pass`, nothing softer.
 
 Two structural consequences:
 1. **M3's SpikeResult is anchored on the deterministic gate.** Its load-bearing field is

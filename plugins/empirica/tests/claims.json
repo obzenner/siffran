@@ -1,0 +1,45 @@
+{
+  "_comment": [
+    "Fixture claim graph (ADR-22) — the GSN argument shape the Stop gate reads.",
+    "Replaces the old markdown spec.md fixture: claim state is DERIVED from evidence and",
+    "confidence, never read from the file, so there is deliberately no `state` field here.",
+    "θ = 0.8. G1/G2 are sub-θ (still open); G3 is above θ.",
+    "Node types are GSN elements; edges are SupportedBy (argument) / InContextOf (context)."
+  ],
+  "root": "G0",
+  "nodes": {
+    "G0": {
+      "type": "Goal",
+      "text": "The empirica hooks enforce the run protocol",
+      "confidence": 0.9
+    },
+    "G1": {
+      "type": "Goal",
+      "text": "A Python Stop hook can block completion via the documented stdin contract",
+      "kind": "needs-experiment",
+      "confidence": 0.4
+    },
+    "G2": {
+      "type": "Goal",
+      "text": "The spike harness yields a deterministic gate from a real subprocess",
+      "kind": "needs-experiment",
+      "confidence": 0.55
+    },
+    "G3": {
+      "type": "Goal",
+      "text": "Repo tooling is Python",
+      "kind": "needs-data",
+      "confidence": 0.95
+    },
+    "C1": {
+      "type": "Context",
+      "text": "Claude Code hooks, python3, the siffran marketplace repo"
+    }
+  },
+  "edges": [
+    { "from": "G0", "to": "G1", "type": "SupportedBy" },
+    { "from": "G0", "to": "G2", "type": "SupportedBy" },
+    { "from": "G0", "to": "G3", "type": "SupportedBy" },
+    { "from": "G0", "to": "C1", "type": "InContextOf" }
+  ]
+}

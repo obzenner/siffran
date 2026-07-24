@@ -1,7 +1,7 @@
 ---
 number: 15
 title: Adopt spec-kit artifact set by GitHub reference; unknowns live in the spec
-status: accepted
+status: superseded
 date: 2026-07-22
 tags:
   - architecture
@@ -18,9 +18,17 @@ links:
     kind: relatesto
   - target: 16
     kind: Depended on by
+  - target: 22
+    kind: Superseded by
 ---
 
 # Adopt spec-kit artifact set by GitHub reference; unknowns live in the spec
+
+> **Superseded by ADR-22.** empirica's state substrate is a claim graph (a GSN assurance
+> argument with in-toto evidence records), not the spec-kit document set. The principle this
+> ADR established — *reference standards, do not vendor* — is retained and carried into ADR-22
+> (GSN/SACM/in-toto are referenced, not vendored). The spec-kit *document model* no longer fits
+> empirica's claim-graph model; the rest of this record stands as the historical rationale.
 
 ## Context and Problem Statement
 
