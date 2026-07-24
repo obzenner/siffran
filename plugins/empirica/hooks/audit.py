@@ -50,6 +50,7 @@ def _load(name: str):
 
 
 _io = _load("atomicio")
+_stamps = _load("stamps")
 
 # The auditor's identity as the harness sees it: the subagent_type a spawn must name for its
 # ticket to count. Kept as a NAME, never a model id — tiers resolve in the agent definition
@@ -143,30 +144,32 @@ def read_verdict(run_dir: Path) -> dict | None:
 
 
 def route_note(run: dict) -> str | None:
-    """A note for the block message when P1 was violated, or None when it was not.
+    """A note for the run's report when P1 was not cleanly satisfied, or None when it was.
 
     The P1 ordering is reported to the AUDITOR rather than hard-blocked by the Stop gate: the
     stamp can be coarse (a pass-relative marker when the harness supplies no timestamp), and a
     coarse signal should not be the sole thing that wedges a run. The auditor, which reads both
     stamps and the transcript, is the right judge — this function is how the gate tells it where
     to look.
+
+    Returns a note for INCONCLUSIVE as well as VIOLATION. An unverifiable ordering is precisely
+    what the auditor needs pointed out; treating it as clean would restore the vacuum this check
+    exists to close. The ordering logic itself lives in stamps.py — this module used to carry its
+    own copy, and the copy meant one comparison bug had to be fixed in two places.
     """
-    ok, reason = _manifest_route_check(run)
-    return None if ok else reason
+    verdict, reason = _stamps.route_verdict(run)
+    return None if verdict == _stamps.OK else reason
 
 
-def _manifest_route_check(run: dict) -> tuple[bool, str]:
-    """Route-before-investigate, computed from the manifest's stamps. Split out so audit.py has
-    no import dependency on manifest.py (both are loaded standalone by the hooks)."""
-    route_ts, tool_ts = run.get("route_ts"), run.get("first_tool_ts")
-    if tool_ts is None:
-        return True, "no investigative tool call recorded yet"
-    if route_ts is None:
-        return False, ("investigation began before any route was announced (ADR-20 P1)")
-    if route_ts <= tool_ts:
-        return True, "route was announced before investigation began"
-    return False, (f"the route was announced ({route_ts}) AFTER investigation began "
-                   f"({tool_ts}) — applied retroactively (ADR-20 P1)")
+def stamps_route_verdict(run: dict) -> tuple[str, str]:
+    """The full three-way P1 verdict: `("ok"|"violation"|"inconclusive", reason)`.
+
+    Re-exported here so the Stop gate reaches the ordering logic through the module it already
+    loads, without loading stamps.py a second time under a separate module object. The gate
+    needs the three-way answer because it reports a proven inversion and an unverifiable
+    ordering under different keys.
+    """
+    return _stamps.route_verdict(run)
 
 
 def check(run_dir: Path, approved_claims: list[str],

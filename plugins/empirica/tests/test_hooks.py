@@ -35,6 +35,7 @@ manifest = _load("manifest", HOOKS / "manifest.py")
 graph = _load("claimgraph", HOOKS / "claimgraph.py")
 ev = _load("evidence", HOOKS / "evidence.py")
 aud = _load("audit", HOOKS / "audit.py")
+stamps = _load("stamps", HOOKS / "stamps.py")
 RUN_START = HOOKS / "run_start.py"
 
 results: list[tuple[str, bool, str]] = []
@@ -1790,6 +1791,103 @@ def test_gate_surfaces_p1_violation_to_the_auditor():
           "P1" in p.stderr and "retroactive" in p.stderr, f"got {p.stderr!r}")
 
 
+def test_stamp_ordering_is_numeric_not_lexicographic():
+    """Regression, Copilot review of PR #9: the P1 check compared stamps with raw `<=`.
+
+    Two independent defects lived in that one operator, and BOTH could invert the verdict:
+      * within a counter kind, string order is not numeric — 'pass:10' <= 'pass:2' is True
+      * across kinds the comparison is meaningless — and since '2' < 'p', an ISO route stamp
+        always sorted before a `pass:` tool stamp
+    """
+    check("S40 pass:10 is AFTER pass:2 (not before, as string order claimed)",
+          stamps.compare("pass:10", "pass:2") == 1, stamps.compare("pass:10", "pass:2"))
+    check("S41 pass:2 is BEFORE pass:10",
+          stamps.compare("pass:2", "pass:10") == -1)
+    check("S42 equal counters compare equal", stamps.compare("seq:7", "seq:7") == 0)
+    check("S43 ISO stamps still order chronologically",
+          stamps.compare("2026-07-24T10:00:00Z", "2026-07-24T11:00:00Z") == -1)
+    check("S44 a trailing Z parses (the spelling the skill emits)",
+          stamps.parse("2026-07-24T10:00:00Z") is not None)
+    check("S45 naive and aware ISO stamps compare without raising",
+          stamps.compare("2026-07-24T10:00:00", "2026-07-24T11:00:00Z") == -1)
+
+    # Different kinds count different things, so no order may be invented from them.
+    check("S46 ISO vs pass: is NOT comparable (was silently True)",
+          stamps.compare("2026-07-24T23:00:00Z", "pass:0") is None)
+    check("S47 seq: and pass: are distinct kinds, not interchangeable counters",
+          stamps.compare("seq:5", "pass:5") is None)
+    for junk in ("garbage", "", "   ", None, 42, True, "pass:", "pass:x"):
+        check(f"S48 unparseable stamp {junk!r} yields no ordering",
+              stamps.parse(junk) is None, f"parsed {junk!r}")
+
+
+def test_p1_is_decisive_via_harness_write_order():
+    """The cross-kind case was the DEFAULT (skill stamps ISO, hook falls back to pass:N), so
+    "not comparable" alone would leave P1 vacuous in normal operation. The manifest's own write
+    sequence supplies an order the harness witnessed, which is always comparable."""
+    d = Path(tempfile.mkdtemp())
+    rp = manifest.locate_run(d, DEFAULT_SID)
+    manifest.start_run(rp, DEFAULT_SID, d)
+    manifest.stamp_first_tool(rp, "pass:0")             # investigated first...
+    manifest.stamp_route(rp, "2026-07-24T23:00:00Z")    # ...route announced after
+    run = manifest.read_run(rp)
+    check("S49 the manifest records the harness write order",
+          run["first_tool_seq"] == 1 and run["route_seq"] == 2,
+          f"tool={run['first_tool_seq']} route={run['route_seq']}")
+    verdict, reason = stamps.route_verdict(run)
+    check("S50 inverted run with incomparable stamps → VIOLATION via write order",
+          verdict == stamps.VIOLATION, f"{verdict}: {reason}")
+
+    # The compliant mirror image, stamps equally incomparable.
+    d2 = Path(tempfile.mkdtemp())
+    rp2 = manifest.locate_run(d2, DEFAULT_SID)
+    manifest.start_run(rp2, DEFAULT_SID, d2)
+    manifest.stamp_route(rp2, "pass:0")
+    manifest.stamp_first_tool(rp2, "2026-07-24T23:00:00Z")
+    verdict2, reason2 = stamps.route_verdict(manifest.read_run(rp2))
+    check("S51 compliant run with incomparable stamps → OK via write order",
+          verdict2 == stamps.OK, f"{verdict2}: {reason2}")
+
+    # Backdating is still impossible: first write wins on BOTH halves of the record.
+    manifest.stamp_route(rp, "2026-07-24T01:00:00Z")
+    check("S52 the write-order counter cannot be re-stamped either",
+          manifest.read_run(rp)["route_seq"] == 2)
+
+
+def test_p1_inconclusive_is_not_reported_as_clean():
+    """A legacy manifest (no write order) with incomparable stamps must report INCONCLUSIVE —
+    never OK. Silently passing an unverifiable check is the vacuity the fix removes."""
+    verdict, reason = stamps.route_verdict(
+        {"route_ts": "2026-07-24T23:00:00Z", "first_tool_ts": "pass:0"})
+    check("S53 incomparable stamps without write order → INCONCLUSIVE",
+          verdict == stamps.INCONCLUSIVE, f"{verdict}: {reason}")
+    check("S54 the reason admits it could not be verified",
+          "not comparable" in reason and "could not be verified" in reason, reason)
+    # The bool-collapsing wrapper must fail closed on it.
+    ok, _ = manifest.route_before_investigation(
+        {"route_ts": "2026-07-24T23:00:00Z", "first_tool_ts": "pass:0"})
+    check("S55 route_before_investigation reports inconclusive as NOT ok", ok is False)
+    # And the auditor is told, rather than the run reading as clean.
+    check("S56 the gate's route note is raised for an inconclusive ordering",
+          aud.route_note({"route_ts": "2026-07-24T23:00:00Z",
+                          "first_tool_ts": "pass:0"}) is not None)
+
+
+def test_gate_separates_proven_violation_from_unverifiable():
+    """An unverifiable ordering must not be filed as a violation: that would accuse a compliant
+    run. It must not be filed as clean either. Distinct keys, distinct claims."""
+    d = write_run([{"text": "settled", "confidence": 0.9}])
+    rp = manifest.locate_run(d, DEFAULT_SID)
+    run = manifest.read_run(rp)
+    run.update({"route_ts": "2026-07-24T23:00:00Z", "first_tool_ts": "pass:0"})
+    verdict, _ = stamps.route_verdict(run)
+    check("S57 a legacy-shaped inverted-looking run is inconclusive, not a violation",
+          verdict == stamps.INCONCLUSIVE, verdict)
+    # Both hook modules must agree — they used to hold separate copies of this logic.
+    check("S58 audit.py and manifest.py give the SAME P1 verdict (one implementation)",
+          aud.stamps_route_verdict(run) == stamps.route_verdict(run))
+
+
 def test_hooks_json_registers_the_stamp_hook():
     cfg = json.loads((HOOKS / "hooks.json").read_text())
     pre = cfg["hooks"].get("PreToolUse", [])
@@ -1871,6 +1969,10 @@ def main() -> int:
               test_route_before_investigation_verdict,
               test_route_stamp_first_write_wins_on_route_too,
               test_gate_surfaces_p1_violation_to_the_auditor,
+              test_stamp_ordering_is_numeric_not_lexicographic,
+              test_p1_is_decisive_via_harness_write_order,
+              test_p1_inconclusive_is_not_reported_as_clean,
+              test_gate_separates_proven_violation_from_unverifiable,
               test_hooks_json_registers_the_stamp_hook]:
         t()
     width = max(len(n) for n, _, _ in results)

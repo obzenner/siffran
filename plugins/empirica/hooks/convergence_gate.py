@@ -277,7 +277,8 @@ def main() -> int:
             # passed — falsifying ADR-20's fitness function 3 ("a run whose route was declared
             # after investigation is flagged") in exactly the case that matters: a rubber-stamped
             # audit over an inverted run. Found by an independent coverage review.
-            route_issue = audit.route_note(run)
+            route_verdict, route_issue = audit.stamps_route_verdict(run)
+            route_issue = None if route_verdict == "ok" else route_issue
             if not audit_ok:
                 # P1 is surfaced to the auditor rather than hard-blocked here: the stamp can be
                 # coarse, and a coarse signal should not be the sole reason a run wedges.
@@ -302,15 +303,24 @@ def main() -> int:
                 return 2
             out["audit"] = "passed"
             if route_issue:
-                # The audit passed but the run inverted the protocol. Report it in the RESULT,
-                # not just in a block message the agent may never see: a passing audit must not
-                # launder a P1 violation. Not fatal (the stamp can be coarse — see route_note),
-                # so the stop is allowed, but the violation is on the record and `converged` is
-                # qualified rather than clean.
-                out["p1_violation"] = route_issue
-                out["note"] = (f"Audit passed, but ADR-20 P1 was violated: {route_issue}. "
-                               f"Routing is a commitment made up front, not a label applied "
-                               f"retroactively.")
+                # The audit passed but P1 is not clean. Report it in the RESULT, not just in a
+                # block message the agent may never see: a passing audit must not launder a P1
+                # problem. Not fatal (the stamp can be coarse — see route_note), so the stop is
+                # allowed, but it goes on the record and `converged` is qualified, not clean.
+                #
+                # A proven inversion and an unverifiable ordering are reported under DIFFERENT
+                # keys. Filing "could not tell" as `p1_violation` would accuse a compliant run,
+                # while calling it clean would hide that nothing was checked — both are lies of
+                # the kind this gate exists to prevent.
+                if route_verdict == "violation":
+                    out["p1_violation"] = route_issue
+                    out["note"] = (f"Audit passed, but ADR-20 P1 was violated: {route_issue}. "
+                                   f"Routing is a commitment made up front, not a label applied "
+                                   f"retroactively.")
+                else:
+                    out["p1_unverified"] = route_issue
+                    out["note"] = (f"Audit passed. ADR-20 P1 could not be verified: "
+                                   f"{route_issue}.")
         if is_active:  # record the terminal status so a later Stop fails open, not re-blocks
             manifest.set_phase(run_path, "converged" if out["converged"] else "assess")
             manifest.set_status(run_path, "converged" if out["converged"] else "stopped_residual")

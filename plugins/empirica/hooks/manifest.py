@@ -43,6 +43,7 @@ def _load(name: str):
 
 
 _io = _load("atomicio")
+_stamps = _load("stamps")
 
 DEFAULT_MAX_PASSES = 8  # aligns with the platform's 8-consecutive-block Stop cap (ADR-8)
 # Real, non-corrupt lifecycle states. Anything else in a present file → __corrupt__.
@@ -104,6 +105,15 @@ def _coerce_int(value: object, default: int, *, minimum: int) -> int:
     return value
 
 
+def _coerce_opt_int(value: object) -> int | None:
+    """A plain non-negative int, or None. Unlike _coerce_int there is no default: absence is
+    meaningful here (a manifest predating the ordering counters), so it must stay None rather
+    than collapse to 0, which would read as a real position in the order."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
 def read_run(path: Path) -> dict | None:
     """The manifest, or None if there is NO manifest (fail-open signal), or a __corrupt__
     sentinel if a manifest EXISTS but is unparseable/invalid (fail-closed signal).
@@ -143,6 +153,14 @@ def read_run(path: Path) -> dict | None:
         "route_ts": data.get("route_ts") if isinstance(data.get("route_ts"), str) else None,
         "first_tool_ts": (data.get("first_tool_ts")
                           if isinstance(data.get("first_tool_ts"), str) else None),
+        # The ordering the HARNESS witnessed, independent of what the stamps say. Stamps arrive
+        # in incomparable kinds (ISO vs `pass:<n>`) depending on what the harness supplied, so
+        # comparing them alone left P1 unverifiable in the common case. These counters are
+        # assigned under this module's lock at the moment each event is recorded, giving a total
+        # order that is always comparable. None on manifests written before they existed.
+        "route_seq": _coerce_opt_int(data.get("route_seq")),
+        "first_tool_seq": _coerce_opt_int(data.get("first_tool_seq")),
+        "stamp_seq": _coerce_int(data.get("stamp_seq"), 0, minimum=0),
     }
 
 
@@ -232,49 +250,49 @@ def set_phase(path: Path, phase: str) -> dict | None:
         return run
 
 
+def _stamp_event(path: Path, ts_field: str, seq_field: str, ts: str) -> dict | None:
+    """Record an ordering event: its caller-supplied stamp AND its position in the manifest's
+    own write order. FIRST WRITE WINS, so a run cannot re-stamp to make a bad ordering look good.
+
+    The `seq` half is what makes P1 checkable at all. Stamps come in kinds that may not be
+    comparable to each other (an ISO time vs. a `pass:<n>` fallback), but this counter is
+    assigned here, under the lock, in the order the harness actually observed the events — a
+    total order no caller can forge by choosing a stamp format. See stamps.py.
+    """
+    with _io.lock(path):
+        run = read_run(path)
+        if run and run["status"] != "__corrupt__" and not run.get(ts_field):
+            run[ts_field] = ts
+            run["stamp_seq"] = run.get("stamp_seq", 0) + 1
+            run[seq_field] = run["stamp_seq"]
+            _io.atomic_write_json(path, run)
+        return run
+
+
 def stamp_route(path: Path, ts: str) -> dict | None:
     """Record WHEN the run announced its route (ADR-20 P1). First write wins — a run cannot
     re-stamp a later route over an earlier investigation to make the order look right."""
-    with _io.lock(path):
-        run = read_run(path)
-        if run and run["status"] != "__corrupt__" and not run.get("route_ts"):
-            run["route_ts"] = ts
-            _io.atomic_write_json(path, run)
-        return run
+    return _stamp_event(path, "route_ts", "route_seq", ts)
 
 
 def stamp_first_tool(path: Path, ts: str) -> dict | None:
     """Record the FIRST investigative tool call (ADR-21 M1). First write wins, so the stamp
     marks the genuine start of evidence-gathering and cannot be pushed later."""
-    with _io.lock(path):
-        run = read_run(path)
-        if run and run["status"] != "__corrupt__" and not run.get("first_tool_ts"):
-            run["first_tool_ts"] = ts
-            _io.atomic_write_json(path, run)
-        return run
+    return _stamp_event(path, "first_tool_ts", "first_tool_seq", ts)
 
 
 def route_before_investigation(run: dict) -> tuple[bool, str]:
     """Did routing precede investigation (ADR-20 P1)? Returns (ok, reason).
 
-    Honest about what it can prove:
-      * both stamps present  → a real comparison, and the verdict is meaningful
-      * no tool stamp        → nothing was investigated yet; nothing to violate
-      * no route stamp but a tool stamp → the run investigated without ever announcing a
-        route. Reported as a violation, because P1 requires the announcement up front.
-    String comparison is valid for ISO-8601 UTC timestamps, which is what callers stamp.
+    Thin wrapper over `stamps.route_verdict` — the ordering logic lives in ONE place because
+    this check and audit.py's copy of it drifted into carrying the same bug twice.
+
+    Collapses three outcomes to a bool, so INCONCLUSIVE reports as not-ok: an ordering that
+    could not be verified must never read as verified. Callers needing the distinction (the
+    Stop gate, which words its report differently) should call `stamps.route_verdict` directly.
     """
-    route_ts, tool_ts = run.get("route_ts"), run.get("first_tool_ts")
-    if tool_ts is None:
-        return True, "no investigative tool call recorded yet"
-    if route_ts is None:
-        return False, ("investigation began before any route was announced (ADR-20 P1: "
-                       "routing is a commitment made up front, not a label applied "
-                       "retroactively)")
-    if route_ts <= tool_ts:
-        return True, "route was announced before investigation began"
-    return False, (f"the route was announced ({route_ts}) AFTER investigation began "
-                   f"({tool_ts}) — the routing decision was applied retroactively (ADR-20 P1)")
+    verdict, reason = _stamps.route_verdict(run)
+    return verdict == _stamps.OK, reason
 
 
 def variant(run: dict) -> int:
