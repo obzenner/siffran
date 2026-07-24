@@ -651,7 +651,8 @@ def test_graph_path_outside_run_dir_is_rejected():
         "nodes": {"G0": {"type": "Goal", "text": "done", "confidence": 0.99}},
         "edges": []}))
     rp = manifest.locate_run(d, sid)
-    data = json.loads(rp.read_text()); data["graph_path"] = str(decoy.resolve())
+    data = json.loads(rp.read_text())
+    data["graph_path"] = str(decoy.resolve())
     rp.write_text(json.dumps(data))
     resolved = cg.graph_path_for(d, sid, manifest.read_run(rp))
     check("M13b out-of-run graph_path ignored → canonical run-dir graph",

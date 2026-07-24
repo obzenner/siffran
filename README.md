@@ -24,4 +24,12 @@ Add the marketplace, then install a plugin:
 
 ## Development
 
-See [CLAUDE.md](./CLAUDE.md) for repo structure, conventions, and how to add a plugin or methodology. Run `/plugin validate .` and the `checkup` skill before committing.
+The project lifecycle lives in the `Makefile` — run `make help` to see every operation:
+
+```
+make check      # lint + tests + manifest validation + ADR health (run before committing)
+make status     # plugin versions, ADR count, working-tree state
+make bump PLUGIN=<name> PART=minor
+```
+
+See [CLAUDE.md](./CLAUDE.md) for repo structure, conventions, and how to add a plugin or methodology. Run `make check` and the `checkup` skill before committing.
