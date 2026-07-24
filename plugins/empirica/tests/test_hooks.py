@@ -313,6 +313,19 @@ def test_state_restore_no_run_is_silent():
           f"rc={proc.returncode} stdout={proc.stdout!r}")
 
 
+def test_state_restore_silent_on_terminal_run():
+    # A converged/stopped run has no loop to resume — restore must not print "Resuming
+    # convergence loop…" for a finished run (Copilot review PR #8).
+    d = write_spec("## Unknowns\n- [x] done <!-- confidence: 0.9 -->\n")
+    manifest.set_status(manifest.locate_run(d, DEFAULT_SID), "converged")
+    proc = subprocess.run([sys.executable, str(RESTORE)],
+                          input=json.dumps({"cwd": str(d), "session_id": DEFAULT_SID}),
+                          capture_output=True, text=True)
+    check("C5 restore silent on terminal (converged) run",
+          proc.returncode == 0 and proc.stdout.strip() == "",
+          f"rc={proc.returncode} stdout={proc.stdout!r}")
+
+
 # --- Spawn budget (ADR-17, corrected: enforce on spawns, not tokens) --------
 GATE_SPAWN = HOOKS / "spawn_gate.py"
 
@@ -498,6 +511,29 @@ def test_gate_corrupt_manifest_fails_closed():
           f"rc={p.returncode} stderr={p.stderr!r}")
 
 
+def test_spec_path_outside_run_dir_is_rejected():
+    # Copilot review PR #8: a manifest spec_path pointing outside the run directory (a corrupt
+    # or rewritten manifest aiming the gate at a "converged" file elsewhere) must be ignored
+    # in favour of the canonical run-dir spec. Here the run-dir spec is unconverged, but the
+    # manifest points at an out-of-run "converged" file — the gate must still BLOCK.
+    d = Path(tempfile.mkdtemp())
+    sid = "sess-escape"
+    run = manifest.start_run(manifest.locate_run(d, sid), sid, d)
+    Path(run["spec_path"]).write_text("## Unknowns\n- [ ] open <!-- confidence: 0.1 -->\n")
+    decoy = d / "decoy-converged.md"
+    decoy.write_text("## Unknowns\n- [x] done <!-- confidence: 0.99 -->\n")
+    # Rewrite the manifest to point spec_path at the decoy (outside the run dir).
+    rp = manifest.locate_run(d, sid)
+    data = json.loads(rp.read_text()); data["spec_path"] = str(decoy.resolve())
+    rp.write_text(json.dumps(data))
+    resolved = cg.spec_path_for(d, sid, manifest.read_run(rp))
+    check("M13b out-of-run spec_path ignored → canonical run-dir spec",
+          resolved == manifest.default_spec_path(d, sid), f"got {resolved}")
+    p = run_hook(GATE, {"cwd": str(d), "session_id": sid}, d)
+    check("M13c decoy cannot fabricate convergence → gate BLOCKS", p.returncode == 2,
+          f"rc={p.returncode} stderr={p.stderr!r}")
+
+
 def test_gate_pass_counter_terminates_at_cap():
     # The real termination proof: a never-converging run stops at max_passes as
     # stopped_residual (exit 0, converged:false), not by grinding to the 8-block override.
@@ -613,6 +649,7 @@ def main() -> int:
               test_harness_propagates_exit_code, test_harness_launch_failure_is_fail,
               test_harness_large_output_bounded,
               test_state_restore_reinjects_unknowns, test_state_restore_no_run_is_silent,
+              test_state_restore_silent_on_terminal_run,
               test_budget_math_unbounded_and_bounded, test_reserve_spawn_atomic_increment_and_cap,
               test_missing_ledger_fail_open, test_spawn_gate_denies_over_cap,
               test_spawn_gate_ignores_non_agent_tools, test_spawn_gate_unbounded_allows,
@@ -622,6 +659,7 @@ def main() -> int:
               test_manifest_corrupt_sentinel, test_manifest_variant_terminates,
               test_manifest_evidence_slot, test_gate_active_run_missing_spec_fails_closed,
               test_gate_no_manifest_missing_spec_fails_open, test_gate_corrupt_manifest_fails_closed,
+              test_spec_path_outside_run_dir_is_rejected,
               test_gate_pass_counter_terminates_at_cap, test_gate_active_run_converges_records_status,
               test_gate_stopped_run_does_not_reblock, test_run_start_hook_creates_manifest,
               test_run_start_no_session_id_is_noop, test_run_start_with_real_captured_payload,

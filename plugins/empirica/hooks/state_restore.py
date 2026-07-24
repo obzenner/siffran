@@ -44,8 +44,9 @@ def main() -> int:
         return 0  # no run identity → nothing to restore
 
     run = manifest.read_run(manifest.locate_run(cwd, session_id))
-    if not run or run.get("status") == "__corrupt__":
-        return 0  # not an empirica run (or unreadable) — nothing to restore
+    if not run or run.get("status") != "active":
+        return 0  # only an ACTIVE run has a loop to resume; a terminal (converged/stopped)
+                   # or corrupt/absent run has nothing to re-inject — stay silent
 
     spec_path = cg.spec_path_for(cwd, session_id, run)
     if not spec_path.exists():

@@ -100,12 +100,23 @@ def theta() -> float:
 
 def spec_path_for(cwd: Path, session_id: str, run: dict | None) -> Path:
     """The living spec's path. The spec is the run's internal working memory and lives in the
-    run directory (`.claude/empirica/<run_id>/spec.md`), recorded in the manifest's
-    `spec_path`. An active manifest's recorded path is authoritative; otherwise the path is
-    derived from the run identity. The spec is never a repository file."""
-    if run and isinstance(run.get("spec_path"), str) and run["spec_path"]:
-        return Path(run["spec_path"])
-    return manifest.default_spec_path(cwd, session_id)
+    run directory (`.claude/empirica/<run_id>/spec.md`); the manifest records it in
+    `spec_path`. The run directory is the spec's ONLY home, so a manifest-provided path is
+    honoured only when it resolves inside that directory — a `spec_path` pointing elsewhere
+    (a corrupt manifest, or one rewritten to aim the gate at a pre-'converged' file outside
+    the run) is rejected in favour of the canonical default. The spec is never a repository
+    file."""
+    default = manifest.default_spec_path(cwd, session_id)
+    recorded = run.get("spec_path") if run else None
+    if isinstance(recorded, str) and recorded:
+        candidate = Path(recorded)
+        run_dir = manifest.locate_run_dir(cwd, session_id).resolve()
+        try:
+            candidate.resolve().relative_to(run_dir)
+            return candidate
+        except ValueError:
+            pass  # outside the run directory → not trusted; fall back to the canonical spec
+    return default
 
 
 def unknowns_section(text: str) -> list[str]:
