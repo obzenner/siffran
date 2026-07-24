@@ -57,24 +57,30 @@ in running code, per empirica's own discipline (design → spike → record).
 
 * **Keep spec-presence as the only signal.** Rejected: cannot tell "our run, spec deleted"
   (should block) from "unrelated repo, no spec" (should allow) — the ambiguity behind 1.2a.
-* **Put run state inside `spec.md`.** Rejected: the spec is model-editable and committable; run
-  identity and the pass counter must be harness-owned and transient (the model could reset the
-  counter to escape the cap).
-* **Active-run manifest (chosen).** A harness-owned transient `run.json` keyed to
-  `session_id + canonical project root`, created at run start via a `UserPromptExpansion`
-  (matcher `empirica`) hook, carrying `status`, monotone `passes`, `max_passes`, `spec_path`,
-  and a dormant `evidence` map. Absence of the manifest is the "not a run → fail open" signal;
-  an active manifest turns missing/corrupt state into fail-closed.
+* **Put run state inside the living spec.** Rejected: the spec is the model's own working
+  memory and freely editable; run identity and the pass counter must be harness-owned (the
+  model could reset the counter to escape the cap).
+* **Active-run manifest (chosen).** A harness-owned transient `run.json` in the run directory,
+  keyed to `session_id + canonical project root`, created at run start via a
+  `UserPromptExpansion` hook (matcher `^empirica:empirica$`, matching the plugin-namespaced
+  command name), carrying `status`, monotone `passes`, `max_passes`, `spec_path` (the living
+  spec's location in the run directory), and a dormant `evidence` map. Absence of the manifest
+  is the "not a run → fail open" signal; an active manifest turns missing/corrupt state into
+  fail-closed.
 
 ## Decision Outcome
 
 Chosen option: **"Active-run manifest."**
 
-**Creation (verified against code.claude.com/docs/en/hooks):** a `UserPromptExpansion` hook with
-`matcher: "empirica"` fires once when `/empirica` expands, carrying `session_id` and `cwd` — the
-run-start signal that also proves the empirica skill (not an unrelated session) started it. It
-writes `.claude/empirica/<run_id>/run.json` where `run_id = sha256(session_id + canonical root)`.
-Start is **idempotent**: re-invoking `/empirica` mid-run does not reset `passes`.
+**Creation (verified against code.claude.com/docs/en/hooks and a captured live payload):** a
+`UserPromptExpansion` hook with `matcher: "^empirica:empirica$"` fires once when `/empirica`
+expands, carrying `session_id` and `cwd` — the run-start signal that also proves the empirica
+skill (not an unrelated session) started it. The matcher is anchored to the plugin-namespaced
+command name `empirica:empirica`; a bare `empirica` is exact-matched by the harness and never
+fires. It writes `.claude/empirica/<run_id>/run.json` where
+`run_id = sha256(session_id + canonical root)`, and the living spec sits beside it at
+`.claude/empirica/<run_id>/spec.md`. Start is **idempotent**: re-invoking `/empirica` mid-run
+does not reset `passes`.
 
 **Fail direction (G1, closes 1.2a + 2.5).** The convergence gate reads the manifest:
 - **no manifest** → not an empirica run → existing spec-based **fail-OPEN** path, unchanged

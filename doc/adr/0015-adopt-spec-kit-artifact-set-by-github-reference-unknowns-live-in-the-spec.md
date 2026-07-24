@@ -56,23 +56,33 @@ do we adopt, and how do we reference it without carrying stale copies?
 
 ## Decision Outcome
 
-Chosen option: "Adopt spec-kit's artifact set by GitHub reference." The committable artifact
-backbone is the spec-kit set — `spec.md`, `research.md`, `data-model.md`, `contracts/`,
-`plan.md`, `tasks.md` — plus MADR ADRs (this repo already uses them; they map to arc42 §9).
-The agent reads the current templates from `github.com/github/spec-kit` at use time rather
-than from a vendored copy, so we never carry a stale template.
+Chosen option: "Adopt spec-kit's artifact set by GitHub reference." The spec-kit set —
+`spec.md`, `research.md`, `data-model.md`, `contracts/`, `plan.md`, `tasks.md` — is the shape
+of empirica's **internal working memory for a run**: the structure in which the convergence
+loop holds unknowns, plans, and evidence while it drives a goal to a fixed point. These
+documents live in the run directory (`.claude/empirica/<run_id>/`, ADR-14/19) and are
+transient — they are how the run thinks, not what it ships. The agent reads the current
+templates from `github.com/github/spec-kit` at use time rather than from a vendored copy, so
+we never carry a stale template. MADR ADRs (this repo already uses them; they map to
+arc42 §9) are the decision record when the intent is a decision — a committable output, not
+part of the run's internal memory.
 
 Consequences for the data model:
 1. **Drop the bespoke `Ledger` schema.** Unknowns live as open items in the living spec
    (practitioner convergence: Osmani folds decisions/unknowns back into `spec.md` as the
-   source of truth). Our addition on top is the confidence score + θ threshold + specialize-
-   only derivation (ADR-7, ADR-9) — the one piece no standard provides.
-2. **`SpikeResult`, `RaceResult`, `/think` traces are transient scratch** (ADR-14), not
-   committable artifacts — the disposable layer all practitioners agree is thrown away.
-   They need no formal published schema; they are internal, in-memory/`.claude/` only.
-3. **`data-model.md` is a per-feature artifact** produced from spec-kit's template, feeding
-   `contracts/`. It is NOT a single global schema we hand-author once.
-4. **Tests/contracts/invariants are the machine-checkable spec** (Hollman "over-test
+   working source of truth for a task). Our addition on top is the confidence score + θ
+   threshold + specialize-only derivation (ADR-7, ADR-9) — the one piece no standard provides.
+2. **The spec-kit working set is transient run memory** (ADR-14), held in the run directory
+   and never committed. empirica serves any intent; its deliverable is the goal's resolved
+   output, produced on convergence, not the scratchpad it reasoned in. If a goal's output is
+   itself a specification, that specification is placed per the intent — distinct from the
+   run's internal spec.
+3. **`SpikeResult`, `RaceResult`, `/think` traces are transient scratch** — the disposable
+   layer all practitioners agree is thrown away. They need no formal published schema; they
+   are internal, in the run directory only.
+4. **`data-model.md` is a per-feature working artifact** produced from spec-kit's template,
+   feeding `contracts/`. It is NOT a single global schema we hand-author once.
+5. **Tests/contracts/invariants are the machine-checkable spec** (Hollman "over-test
    everything"; Willison test-suite-as-SoT), consistent with the deterministic gate (ADR-13).
 
 ### Consequences
@@ -94,10 +104,12 @@ Consequences for the data model:
 
 Fitness function: (1) the repo stores NO copy of spec-kit templates — a grep for vendored
 spec/plan/tasks templates returns nothing; (2) the workflow fetches templates from a pinned
-`github.com/github/spec-kit` release at use time; (3) committable output matches the
-spec-kit file set + MADR ADRs; (4) `SpikeResult`/`RaceResult`/traces never appear as
-committed files (ADR-14 fitness function already covers this); (5) unknowns are represented
-in `spec.md` with an attached confidence score, and convergence = all unknowns ≥ θ.
+`github.com/github/spec-kit` release at use time; (3) the spec-kit working set is written
+only under the run directory and never appears as a committed file — the committed output is
+the goal's resolved deliverable plus any ADRs a decision warrants; (4) `SpikeResult`/
+`RaceResult`/traces never appear as committed files (ADR-14 fitness function already covers
+this); (5) unknowns are represented in the living spec with an attached confidence score, and
+convergence = all unknowns ≥ θ.
 
 ## More Information
 
