@@ -122,6 +122,21 @@ def main() -> int:
     if payload.get("tool_name") not in INVESTIGATIVE_TOOLS:
         return 0
 
+    # The run announcing its OWN route is not investigation — and stamping it made the P1 check
+    # unable to pass. SKILL.md Step 1 has the agent announce by running this script as a Bash
+    # command; PreToolUse fires "Before a tool call executes" (docs), so the hook saw the
+    # announcement's own Bash call and claimed `first_tool_seq` before the announcement body could
+    # claim `route_seq`. Both stamps are first-write-wins, so every compliant run was reported as
+    # a P1 VIOLATION — verified live: first_tool_ts='pass:0'/seq=1 vs route_seq=2. A checker that
+    # can never pass is the mirror of the vacuity stamps.py exists to remove.
+    #
+    # This is the same category of exclusion as Write/Edit above: self-observation is not evidence
+    # gathering. Narrow on purpose — only a command carrying this script's own announcement flag is
+    # skipped, so a genuine `grep`/`python3` call still stamps.
+    command = (payload.get("tool_input") or {}).get("command")
+    if isinstance(command, str) and "--announce-route" in command:
+        return 0
+
     session_id = payload.get("session_id")
     if not isinstance(session_id, str) or not session_id:
         return 0  # no run identity → nothing to stamp
