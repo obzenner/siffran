@@ -1769,6 +1769,50 @@ def test_route_before_investigation_verdict():
     check("S14 investigating with NO route announced → VIOLATION", ok is False, reason)
 
 
+def test_announcement_does_not_stamp_itself():
+    """REGRESSION — the P1 check could never PASS, the mirror of the vacuity stamps.py removed.
+
+    SKILL.md Step 1 has the agent announce its route by running route_stamp.py as a Bash command,
+    and route_stamp.py is itself registered on PreToolUse for Bash. PreToolUse fires "Before a
+    tool call executes" (code.claude.com/docs/en/hooks), so the hook stamped the announcement's
+    OWN Bash call as `first_tool_*` before the announcement body could write `route_*`. Both are
+    first-write-wins, so every compliant run was reported as a P1 VIOLATION. Verified live in a
+    real session: first_tool_ts='pass:0', first_tool_seq=1, route_seq=2 → violation.
+
+    The earlier P1 tests all missed it because they drove the two stamps directly
+    (`manifest.stamp_first_tool` / a bare `--announce-route` subprocess), never sending a
+    PreToolUse payload whose command IS the announcement — the one sequence the workflow always
+    produces.
+
+    BOTH halves are asserted, because deleting the hook outright would satisfy the first alone.
+    """
+    d = Path(tempfile.mkdtemp())
+    rp = manifest.locate_run(d, DEFAULT_SID)
+    manifest.start_run(rp, DEFAULT_SID, d)
+    announce = (f"python3 {STAMP} --announce-route --session {DEFAULT_SID} "
+                f"--ts 2026-08-04T10:00:00Z --cwd {d}")
+
+    # The PreToolUse hook observes the Bash call that CARRIES the announcement.
+    run_hook(STAMP, {"tool_name": "Bash", "cwd": str(d), "session_id": DEFAULT_SID,
+                     "tool_input": {"command": announce}}, d)
+    check("S59 the run's own route announcement is not stamped as investigation",
+          manifest.read_run(rp)["first_tool_ts"] is None,
+          f"got {manifest.read_run(rp)['first_tool_ts']} — the announcement stamped itself")
+
+    # Now the body of that call runs, and a compliant run must read OK.
+    manifest.stamp_route(rp, "2026-08-04T10:00:00Z")
+    verdict, reason = stamps.route_verdict(manifest.read_run(rp))
+    check("S60 a compliant run is NOT reported as a P1 violation",
+          verdict == stamps.OK, f"got {verdict}: {reason}")
+
+    # Second half: a GENUINE investigative call must still stamp, or the fix is a removal.
+    run_hook(STAMP, {"tool_name": "Bash", "cwd": str(d), "session_id": DEFAULT_SID,
+                     "tool_input": {"command": "grep -rn TODO src/"}}, d)
+    check("S61 a genuine investigative call is still stamped",
+          manifest.read_run(rp)["first_tool_ts"] is not None,
+          "the stamp was removed rather than made self-aware")
+
+
 def test_route_stamp_first_write_wins_on_route_too():
     """A run cannot re-stamp an earlier route to make a bad ordering look good."""
     d = Path(tempfile.mkdtemp())
@@ -1967,6 +2011,7 @@ def main() -> int:
               test_route_stamp_ignores_non_investigative_tools,
               test_route_stamp_is_a_noop_outside_a_run,
               test_route_before_investigation_verdict,
+              test_announcement_does_not_stamp_itself,
               test_route_stamp_first_write_wins_on_route_too,
               test_gate_surfaces_p1_violation_to_the_auditor,
               test_stamp_ordering_is_numeric_not_lexicographic,
