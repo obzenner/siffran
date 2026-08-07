@@ -76,6 +76,7 @@ manifest = _load("manifest")
 claimgraph = _load("claimgraph")
 evidence = _load("evidence")
 audit = _load("audit")
+attribution = _load("attribution")
 
 # The CLOSED set of residual tags that legitimately stop gating (ADR-9/17) now lives with the
 # schema that owns it. Re-exported here because state_restore.py and the tests read it from
@@ -302,6 +303,15 @@ def main() -> int:
                         return 0
                 return 2
             out["audit"] = "passed"
+            # ADR-24 §3: was the independence P6 claims actually obtained? REPORTED, never
+            # blocking (§3.3) — in-session attribution is declared rather than witnessed, and a
+            # declared field must not be the sole reason a run fails closed. It goes in the
+            # RESULT for the same reason the P1 note does: a finding only in a block message the
+            # agent may never surface is a finding nobody reads.
+            attr = attribution.report(graph, evidence.read_leaves(run_dir), approved,
+                                      audit.audit_actor(run_dir))
+            if attr["findings"] or attr["coverage"]["vacuous"]:
+                out["attribution"] = attr
             if route_issue:
                 # The audit passed but P1 is not clean. Report it in the RESULT, not just in a
                 # block message the agent may never see: a passing audit must not launder a P1

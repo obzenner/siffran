@@ -2,7 +2,8 @@
 name: empirica-auditor
 description: "Independent auditor for an empirica run. Verifies the run against the ADR-20 rubric — re-reading each approved claim's research citation to confirm the cited source actually supports the claim — and writes a pass/fail verdict artifact. Spawn this before a run may report converged. The authoring agent must never write the verdict itself."
 tools: Read, Glob, Grep, Bash, WebFetch, Write
-model: opus
+model: claude-opus-4-8
+effort: xhigh
 ---
 
 # empirica auditor — the author cannot grade its own work

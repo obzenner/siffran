@@ -33,6 +33,7 @@ def _load(name: str):
 
 
 manifest = _load("manifest")
+doctor = _load("doctor")
 
 
 def _max_passes() -> int:
@@ -62,13 +63,23 @@ def main() -> int:
     # default, ADR-22). The model writes the graph there during the run; the gate reads it from
     # the manifest. The graph is never a repository file.
     try:
-        manifest.start_run(
-            manifest.locate_run(cwd, session_id),
-            session_id, cwd,
-            max_passes=_max_passes(),
-        )
+        run_path = manifest.locate_run(cwd, session_id)
+        manifest.start_run(run_path, session_id, cwd, max_passes=_max_passes())
     except OSError:
         return 0  # best-effort: a write failure degrades to fail-open, never a wedge
+
+    # ADR-24 §4: the preflight doctor runs at run-start and records what this machine can reach.
+    # Wrapped in a blanket guard on purpose. This hook's contract is "always exit 0 — a run-start
+    # failure must never wedge the user's prompt", and the doctor shells out to third-party CLIs
+    # whose failure modes are not ours to enumerate. A doctor that could take down a prompt would
+    # be a worse defect than any it diagnoses, so ANY exception degrades to "no preflight
+    # recorded" and the run proceeds on baseline behaviour. With multi-provider mode off (the
+    # default) the doctor runs no subprocesses at all, so on a bare install this is a few file
+    # reads.
+    try:
+        doctor.write_report(run_path.parent, doctor.diagnose(run_path.parent))
+    except Exception:  # noqa: BLE001 — see above: never wedge the prompt over a preflight
+        pass
     # NOTE: this hook deliberately does NOT publish the run id into the environment. An earlier
     # version set os.environ[RUN_ENV] here, claiming to "unify identity" with budget.py — that
     # never worked. Verified by live experiment (2026-07-24): every hook fires in a FRESH

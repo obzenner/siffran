@@ -58,24 +58,100 @@ _CORRUPT = {"status": "__corrupt__", "passes": 0, "max_passes": 0, "phase": DEFA
 RUN_ENV = "EMPIRICA_RUN_ID"  # harness may pass a precomputed run id; else derived
 
 
+# Markers that identify a PROJECT ROOT, in priority order.
+#
+# `.git` comes FIRST, and the order is the whole point. It was originally the other way round —
+# an established run store outranked the VCS marker, reasoning that a run in progress should be
+# resumed rather than forked. An independent audit falsified that: this defect's OWN leftover
+# artifact is a stray `plugins/empirica/.claude/empirica/` directory, so preferring the run store
+# made the litter re-split identity exactly as the bug had, and the anchor that fixes the defect
+# was defeated by the defect's debris. The repository boundary is the honest definition of "this
+# project" and it does not move when a run scatters state.
+#
+# The run-store marker is retained BELOW `.git` for the genuine case it serves: a project that is
+# not a git repository but already has a run directory should keep using it rather than start a
+# second identity beside it.
+ANCHOR_MARKERS = (Path(".git"), Path(".claude") / "empirica")
+
+
+def project_anchor(cwd: Path) -> Path:
+    """The directory run identity is keyed on: the nearest ancestor (including `cwd`) holding a
+    project marker, else `cwd` itself.
+
+    WHY THIS EXISTS — a real, reproduced failure, not a hypothetical. run_id used to key on the
+    raw `cwd` of whichever hook was firing. But the hooks docs define `cwd` as "Current working
+    directory when the hook is invoked" (and ship a dedicated `CwdChanged` event), so it MOVES
+    mid-session. Observed: `/empirica` was invoked while cwd was `<repo>/plugins/empirica`, so
+    run_start.py wrote its manifest under that subdirectory; every later hook fired from `<repo>`,
+    derived a different run_id, found no manifest, and the ADR-19 matrix correctly failed OPEN.
+    The whole harness went inert for the rest of the run — no convergence gate, no spawn cap, no
+    mandatory audit — and the symptom was easy to misread as "the run-start hook never fired".
+
+    Anchoring keeps the property ADR-19 wanted from keying on the tree (two different repos get two
+    different runs) while dropping the one it did not intend (two cwds in ONE repo getting two
+    different runs). Deterministic: a pure function of the filesystem, no clock, no randomness —
+    ADR-19's resumability rule holds.
+
+    HONEST LIMIT (ADR-21): this is only as stable as the marker it finds. Two sessions whose cwds
+    sit in DIFFERENT repositories under one project — a git submodule, a nested checkout, a
+    worktree — still anchor differently, and correctly so; but a run that legitimately spans them
+    would still split. And a project with no `.git` and no established run store anchors on cwd,
+    which is the original behaviour with the original weakness. The claim is "the observed defect
+    cannot recur", not "identity is stable under every layout".
+
+    Falls back to `cwd` rather than walking to `/`: a run in an unmarked directory should be keyed
+    to that directory, never to the filesystem root, which would collide across projects.
+
+    Marker PRIORITY beats marker DISTANCE, deliberately: the nearest `.git` wins over a closer run
+    store, because a stray run store is exactly what this defect leaves behind (see
+    ANCHOR_MARKERS). Within one marker kind, the nearest ancestor wins.
+    """
+    cwd = cwd.resolve()
+    for marker in ANCHOR_MARKERS:
+        for candidate in (cwd, *cwd.parents):
+            if (candidate / marker).exists():
+                return candidate
+    return cwd
+
+
+def _run_id_from(session_id: str, anchor: Path) -> str:
+    """The identity hash itself, over an ALREADY-ANCHORED directory.
+
+    Split out from `run_id` so a test can reproduce the pre-fix behaviour by passing an
+    unanchored path — a regression check for this defect has to be able to express the broken
+    scheme, or it cannot show the fix changed anything.
+    """
+    return hashlib.sha256(f"{session_id}:{anchor}".encode("utf-8")).hexdigest()[:16]
+
+
 def run_id(session_id: str, root: Path) -> str:
-    """Stable per (session, canonical root); distinct across sessions. 16 hex chars.
+    """Stable per (session, project root); distinct across sessions. 16 hex chars.
 
     Keying on BOTH means two concurrent sessions in one repo get distinct runs (fixes the
     shared-`default`-ledger bug, review 2.4) and the same session resuming in the same tree
     continues its run. sha256 avoids leaking the raw session id / path into the filename.
+
+    `root` is ANCHORED to the project root before hashing (see `project_anchor`), so callers may
+    keep passing the hook payload's `cwd` verbatim and still land on one identity per session per
+    project — which is what every call site already assumed.
     """
-    raw = f"{session_id}:{root.resolve()}"
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+    return _run_id_from(session_id, project_anchor(root))
 
 
 def locate_run_dir(cwd: Path, session_id: str) -> Path:
     """The run's private directory: `.claude/empirica/<run_id>/`. run_id is sanitised to a
     single safe segment — no traversal. This directory is the run's entire home: the
     manifest, the claim graph, the evidence store, and the audit artifacts. It is transient
-    scratch (git-ignored) and the model must write the run's state here, never to the repo."""
-    rid = re.sub(r"[^a-f0-9]", "", run_id(session_id, cwd)) or "default"
-    return cwd / ".claude" / "empirica" / rid
+    scratch (git-ignored) and the model must write the run's state here, never to the repo.
+
+    Rooted at the PROJECT ANCHOR, not at the caller's cwd. Both halves must anchor together: a
+    hook firing from a subdirectory would otherwise compute the right run_id and then look for it
+    in the wrong place, scattering run artifacts into subdirectories where `make clean-runs` never
+    finds them. That is precisely how the observed inert-harness run left a stray manifest under
+    `plugins/empirica/.claude/` (see `project_anchor`)."""
+    anchor = project_anchor(cwd)
+    rid = re.sub(r"[^a-f0-9]", "", _run_id_from(session_id, anchor)) or "default"
+    return anchor / ".claude" / "empirica" / rid
 
 
 def locate_run(cwd: Path, session_id: str) -> Path:

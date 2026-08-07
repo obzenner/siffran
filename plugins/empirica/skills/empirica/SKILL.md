@@ -213,6 +213,19 @@ passing spike over an unresearched claim is a green light on an unexamined assum
 Design the smallest check that **could fail**, and confirm it can by breaking it on purpose. A
 check that passes both ways proves nothing.
 
+**And be suspicious of your own falsification control.** Building ADR-24 produced the sharpest
+lesson in this plugin's history: a hand-written list of sabotages was falsified by four consecutive
+independent audits, each finding a *different* mutation of the *same* property the previous fix had
+just covered. A curated list's coverage is exactly its author's imagination, and you are the worst
+placed person to enumerate your own blind spots. Two escalations followed, and both are reusable:
+
+1. **Generate the mutations, don't curate them** — enumerate mechanically from the code, so coverage
+   is not a function of what you thought to write down.
+2. **Make survivors prove themselves.** A mutation that survives your suite is either an unguarded
+   behaviour or genuinely harmless — and "genuinely harmless" must be *demonstrated by execution*,
+   not argued in a comment. The audit that broke escalation 1 found four written excuses to be
+   factually false. This is just ADR-13 again: the exit code approves, never the author's confidence.
+
 ### Grade: approve, block, or DISCARD
 
 - evidence **supports** (and the spike passed) → confidence ≥ θ → **approved**
@@ -306,10 +319,43 @@ covers **every** approved claim.
 the failure P6 exists to close (ADR-13; moai-adk's `plan-auditor` split). If the audit fails,
 fix what it found and loop — a failing audit is a successful workflow, not a setback.
 
-**Model routing (ADR-23):** roles bind to tiers in the agent definitions under `agents/` —
-`empirica-researcher` (fast), `empirica-spike-runner` (capable), `empirica-auditor` (capable+,
-deliberately a different tier from the author). Never name a concrete model in workflow logic;
-tier→model resolution lives in config so a model rename never touches the workflow.
+**Actor routing (ADR-24, superseding ADR-23's tier primitive):** roles bind to **concrete model
+generations** in the agent definitions under `agents/` — the auditor is deliberately a *different
+generation from the author*, not merely a different tier. A tier collapses the one property a
+second model is worth having: two models in one cost class have different blind spots, and what
+an independent audit buys is **decorrelated error**. Model ids still live only in the agent
+definitions (config), never in workflow logic, so a rename never touches this skill.
+
+A claim may name its own actor when it needs a specific one:
+
+```json
+"G4": {"type": "Goal", "kind": "needs-experiment",
+       "actor": {"model": "<a concrete model id>", "harness": "claude-code"}}
+```
+
+Take the id from the agent definitions or from `make doctor` — this skill deliberately names no
+model, so that a model rename never edits the workflow.
+
+Optional and additive — a claim without an `actor` resolves exactly as before. **Attribution comes
+from the dispatcher, never the actor:** asked to name itself, a model pinned to one identifier
+reported a different one, three times over. So `spawn_gate.py` records the auditor's model from its
+definition, and the Stop gate reports whether independence was actually obtained. Those reports do
+not block (§3.3) — an in-session attribution is *declared*, not witnessed, and a declared signal
+must never be the sole reason a run fails closed.
+
+`fable` is **excluded by policy** (30-day content retention at the vendor), and the exclusion is
+enforced in `actors.py`, not left to discipline.
+
+**Two optional modes, both OFF by default** (`<run_dir>/modes.json`, or `EMPIRICA_MODE_*`):
+`multi_provider` allows actors outside this harness (`codex`, `pi`) — while off they are not even
+probed; `cli_exec` dispatches actors as subprocesses, which buys *witnessed* attribution and is
+charged to the same ADR-17 spawn ledger. A bare Claude Code + python3 install behaves exactly as
+0.4.x does, and that is the point.
+
+The preflight `empirica doctor` runs at run-start and writes `<run_dir>/actors.json`. It **spends
+no inference** — version and config reads only — never gates the baseline, and only *recommends*:
+"available" is not "permitted", and it will not reassign a claim for you. Run it yourself with
+`make doctor`.
 
 ## Step 6 — Finalizer: escalate to /think at the confluence
 
@@ -339,7 +385,7 @@ green (ADR-17).
 
 | Tier | Artifacts | Home |
 |---|---|---|
-| **Transient** (ADR-14) | claim graph (`claims.json`), evidence store (`evidence/*.json`), run manifest, spawn ledger, audit tickets + verdict, spike scratch, `/think` traces | `.claude/empirica/<run_id>/`, git-ignored |
+| **Transient** (ADR-14) | claim graph (`claims.json`), evidence store (`evidence/*.json`), run manifest, spawn ledger, audit tickets + verdict, preflight report (`actors.json`), mode config (`modes.json`), spike scratch, `/think` traces | `.claude/empirica/<run_id>/` at the **project root**, git-ignored |
 | **Committable** (SSOT) | the goal's resolved output (code, document, review, …); ADRs when the intent is a decision; tests | git, at the intent's location |
 
 ## Rules
@@ -352,6 +398,9 @@ green (ADR-17).
 - Derived claims specialize only, so the loop terminates (ADR-9).
 - Standards over invention: GSN vocabulary, in-toto attestations, MADR for decisions — reference
   standards, do not vendor or invent schemas (ADR-22).
-- Never name a concrete model in workflow logic; route by tier and role (ADR-23).
+- Route by **actor identity**, not tier: a cost class does not buy decorrelated error (ADR-24).
+  Model ids live in the agent definitions, never in workflow logic.
+- **Never let an actor report its own identity** — attribution comes from whatever dispatched it,
+  and an unwitnessed attribution is reported as *declared*, never as proven (ADR-24 §2).
 - `/think` is the expensive tier — escalate on stall/ambiguity/high-stakes, not by reflex.
 - methodologist is a required companion; inkrot `/hr` is forbidden (ADR-3).

@@ -48,6 +48,9 @@ def _load(name: str):
 
 
 _io = _load("atomicio")
+# For project_anchor only. manifest.py does not import budget.py, so there is no cycle — and one
+# definition of "where is this project rooted?" beats two that can drift.
+_manifest = _load("manifest")
 
 LEDGER_ENV = "EMPIRICA_BUDGET"  # optional path override
 DEFAULT_REL = Path(".claude") / "empirica"
@@ -66,14 +69,27 @@ def locate_ledger(cwd: Path, run_id: str | None = None) -> Path:
     another hook: verified by live experiment (2026-07-24) that each hook runs in a fresh
     subprocess, so no hook can publish an env var to a later one. Do not rely on it.
     run_id is sanitised to a single safe path segment — no traversal.
+
+    The ledger sits at the PROJECT ANCHOR (manifest.project_anchor), not under the caller's raw
+    cwd, so it lands in the same run directory the manifest does. Anchoring only the run_id and
+    not the path would recreate the defect it fixes one level down: the spawn gate would derive the
+    correct run identity, then read a ledger at a subdirectory path that no `max_spawns` was ever
+    written to — a cap that silently does not apply, which is the exact ADR-19 review-2.4 bug in a
+    new location.
     """
     override = os.environ.get(LEDGER_ENV)
     if override:
         p = Path(override)
-        return p if p.is_absolute() else cwd / p
+        # A RELATIVE override anchors too. Resolving it against the raw payload cwd bypassed
+        # project_anchor entirely and so reproduced the scattered-ledger defect this function's
+        # docstring claims to fix — two hooks firing from two directories would read two different
+        # ledgers, and a cap written to one would silently not apply to the other. Caught by an
+        # independent audit; an absolute override is honoured verbatim, since that is an explicit
+        # operator choice about a specific file.
+        return p if p.is_absolute() else _manifest.project_anchor(cwd) / p
     rid = run_id or os.environ.get("EMPIRICA_RUN_ID") or "default"
     rid = re.sub(r"[^A-Za-z0-9._-]", "_", rid) or "default"
-    return cwd / DEFAULT_REL / rid / "budget.json"
+    return _manifest.project_anchor(cwd) / DEFAULT_REL / rid / "budget.json"
 
 
 def _int_or_none(value: object) -> int | None:

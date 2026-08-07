@@ -2,7 +2,7 @@
 name: empirica-spike-runner
 description: "Fold-2 spike worker for an empirica run. Designs a real deterministic check for a needs-experiment claim, runs it through spike_harness.py so the verdict is a genuine exit code, and reports the result. Use when a claim needs runtime evidence rather than a citation."
 tools: Read, Glob, Grep, Bash, Write, WebFetch
-model: opus
+model: claude-opus-5
 ---
 
 # empirica spike runner — Fold 2, the verdict is an exit code

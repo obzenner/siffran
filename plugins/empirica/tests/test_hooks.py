@@ -10,9 +10,11 @@ protects the distributed plugin from regression — unlike the earlier transient
 """
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 HERE = Path(__file__).parent
@@ -42,7 +44,31 @@ results: list[tuple[str, bool, str]] = []
 
 
 def check(name: str, ok: bool, detail: str = "") -> None:
-    results.append((name, ok, detail))
+    """Record one assertion.
+
+    `ok` is coerced to a real bool. A caller that passes a list or dict — easy to do, since
+    `check("...", thing.get("findings"))` reads naturally — used to store a non-bool that made
+    `passed += ok` raise TypeError in main(), ABORTING THE WHOLE SUITE at the summary line. Found
+    while confirming the ADR-24 checks can fail: a deliberately sabotaged hook crashed the runner
+    instead of reporting a red check, which would have let a real regression read as "the suite
+    errored" rather than "this behaviour broke". A test harness must always survive to report.
+    """
+    results.append((name, bool(ok), detail))
+
+
+warnings: list[str] = []
+
+
+def warn(message: str) -> None:
+    """Record a condition that is TRUE, actionable, and NOT this commit's to fix.
+
+    Distinct from `check` on purpose. Some facts must be surfaced without gating: a stale installed
+    plugin copy is a real problem an auditor should know about, but a gating check for it would be
+    permanently red until the fixing commit ships — so that commit could not pass its own suite, and
+    a check nobody can make green gets deleted along with the guard inside it. Warnings print in
+    their own section and never affect the exit code.
+    """
+    warnings.append(message)
 
 
 DEFAULT_SID = "sess-test"
@@ -1669,15 +1695,70 @@ def test_agent_definitions_pin_tiers_not_ids_in_logic():
     for d in defs:
         text = d.read_text()
         check(f"R23 {d.stem} declares a model tier", "\nmodel:" in text, "missing model: frontmatter")
-    # No concrete model id anywhere in the hooks or the skill.
+    # ADR-23 fitness #3, RETAINED but sharpened by ADR-24. The rule is that a model rename must
+    # never touch workflow LOGIC — so no hook may name a concrete model in code it executes.
+    #
+    # The old form of this check was a substring scan over the whole file, which could not tell a
+    # docstring from a decision. ADR-24 needs `actors.py` to document `claude-opus-5` in examples
+    # and to name `fable` in a policy-exclusion table, so the scan started failing on prose while
+    # still being unable to catch the thing it exists to catch: a model id used in a branch. This
+    # version walks the AST and inspects only string literals in EXECUTABLE positions, so it is
+    # both quieter and strictly stricter than before.
+    import ast
+
+    MODEL_TOKENS = ("claude-opus", "claude-sonnet", "claude-haiku", "claude-fable",
+                    "us.anthropic", "eu.anthropic", "gpt-", "openai.")
+    # The ONE permitted exception, narrow and named: actors.POLICY_EXCLUDED is a policy table
+    # whose whole purpose is to name an excluded model (ADR-24 §7). A policy exclusion that could
+    # not name what it excludes would be inert.
+    ALLOWED_ASSIGNMENTS = {"POLICY_EXCLUDED"}
+
+    def executable_strings(tree):
+        """Every string literal that is NOT a docstring, with its enclosing assignment target."""
+        docstrings = set()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                body = getattr(node, "body", [])
+                if (body and isinstance(body[0], ast.Expr)
+                        and isinstance(body[0].value, ast.Constant)
+                        and isinstance(body[0].value.value, str)):
+                    docstrings.add(id(body[0].value))
+        # Map each string literal to the module-level name it is assigned to, if any, so the
+        # POLICY_EXCLUDED exemption can be scoped to that table instead of to a whole file.
+        owner: dict[int, str] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+                if names:
+                    for sub in ast.walk(node.value):
+                        if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                            owner[id(sub)] = names[0]
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                    and id(node) not in docstrings):
+                yield node.value, owner.get(id(node))
+
     leaked = []
-    for path in list(HOOKS.glob("*.py")) + [HOOKS.parent / "skills/empirica/SKILL.md"]:
-        body = path.read_text()
-        for token in ("claude-opus", "claude-sonnet", "claude-haiku", "claude-fable",
-                      "us.anthropic", "eu.anthropic"):
-            if token in body:
-                leaked.append(f"{path.name}:{token}")
-    check("R24 no concrete model ID leaks into hooks or the skill", leaked == [], f"{leaked}")
+    for path in sorted(HOOKS.glob("*.py")):
+        tree = ast.parse(path.read_text())
+        for value, assigned_to in executable_strings(tree):
+            if assigned_to in ALLOWED_ASSIGNMENTS:
+                continue
+            for token in MODEL_TOKENS:
+                if token in value:
+                    leaked.append(f"{path.name}:{token}")
+    # The skill is prose, so it keeps a plain scan — a model named there would be an instruction.
+    skill = (HOOKS.parent / "skills/empirica/SKILL.md").read_text()
+    leaked += [f"SKILL.md:{t}" for t in MODEL_TOKENS if t in skill]
+    check("R24 no concrete model ID is used in executable hook logic or the skill",
+          leaked == [], f"{sorted(set(leaked))}")
+    # The exemption must be REAL, or R24 above passes for the wrong reason (a broken AST walk
+    # that finds nothing would also report leaked == []).
+    check("R24b the check can see executable strings at all",
+          any("fable" in v for v, owner in
+              executable_strings(ast.parse((HOOKS / "actors.py").read_text()))
+              if owner in ALLOWED_ASSIGNMENTS),
+          "the AST walk found no strings in POLICY_EXCLUDED — the scan is not actually looking")
 
 
 # --- Phase machine + route-before-investigate (ADR-21 M1, ADR-20 P1) --------
@@ -1950,6 +2031,1269 @@ def test_hooks_json_registers_the_stamp_hook():
           any(_re.search(m, "WebFetch") for m in matchers if "|" in m), f"got {matchers}")
 
 
+# --- ADR-24: actor attribution, preflight doctor, optional modes -------------
+actors = _load("actors", HOOKS / "actors.py")
+attribution = _load("attribution", HOOKS / "attribution.py")
+modes = _load("modes", HOOKS / "modes.py")
+doctor = _load("doctor", HOOKS / "doctor.py")
+DISPATCH = HOOKS / "dispatch_gate.py"
+
+
+def test_run_identity_survives_a_cwd_change():
+    """REGRESSION, the worst defect found so far — the harness went INERT for a whole run.
+
+    `/empirica` was invoked while the session cwd was `<repo>/plugins/empirica`, so run_start.py
+    wrote its manifest under that subdirectory. Every later hook fired from `<repo>`, derived a
+    different run_id from the moved cwd, found no manifest, and correctly failed OPEN — no
+    convergence gate, no spawn cap, no mandatory audit, for the rest of the session. The docs
+    define `cwd` as "Current working directory when the hook is invoked" and ship a `CwdChanged`
+    event, so keying identity on cwd keyed it on a moving value.
+
+    A gate that is silently switched off is worse than a gate that is wrong, so this is the one
+    property here worth a dedicated regression test.
+    """
+    root = Path(tempfile.mkdtemp()).resolve()
+    subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+    sub = root / "plugins" / "empirica"
+    sub.mkdir(parents=True)
+    sid = "sess-anchor"
+
+    # The pre-fix scheme, reproduced through the seam left for exactly this purpose.
+    check("T1 the OLD cwd-keyed scheme really did disagree across a cwd change",
+          manifest._run_id_from(sid, sub) != manifest._run_id_from(sid, root),
+          "cannot reproduce the defect — this test would prove nothing")
+    check("T2 run identity is now stable across a cwd change",
+          manifest.run_id(sid, sub) == manifest.run_id(sid, root),
+          f"{manifest.run_id(sid, sub)} != {manifest.run_id(sid, root)}")
+    check("T3 the run DIRECTORY is stable too, not just the id",
+          manifest.locate_run_dir(sub, sid) == manifest.locate_run_dir(root, sid),
+          "the id anchored but the path did not — artifacts would scatter into subdirectories")
+    check("T4 the run directory sits at the project root",
+          manifest.locate_run_dir(sub, sid).parent.parent.parent == root)
+    check("T5 the spawn ledger anchors with it (one cap, not one per cwd)",
+          budget.locate_ledger(sub, manifest.run_id(sid, sub))
+          == budget.locate_ledger(root, manifest.run_id(sid, root)))
+
+    # END TO END: start the run from the SUBDIRECTORY as the real invocation did, then let the
+    # Stop gate fire from the ROOT. Before the fix this allowed the stop (fail-open, no manifest);
+    # now the gate must find the run and block on the open claim. This is the half that actually
+    # proves the harness is no longer inert.
+    p = run_hook(RUN_START, {"session_id": sid, "cwd": str(sub)}, sub)
+    check("T6 run-start from a subdirectory exits 0", p.returncode == 0, p.stderr)
+    run_dir = manifest.locate_run_dir(root, sid)
+    check("T7 the manifest lands at the project root, not under the subdirectory",
+          (run_dir / "run.json").exists() and not (sub / ".claude").exists(),
+          f"run_dir={run_dir} stray={(sub / '.claude').exists()}")
+    graph.save(run_dir / "claims.json", {
+        "root": "G0",
+        "nodes": {"G0": {"type": "Goal", "text": "root", "confidence": 1.0},
+                  "G1": {"type": "Goal", "text": "unresolved", "confidence": 0.0}},
+        "edges": [{"from": "G0", "to": "G1", "type": "SupportedBy"}]})
+    p = run_hook(GATE, {"cwd": str(root), "session_id": sid}, root)
+    check("T8 a Stop from the ROOT finds the run started in the SUBDIR and blocks",
+          p.returncode == 2, f"rc={p.returncode} — the gate is inert again: {p.stdout[:200]}")
+
+    # Controls: the two distinctions ADR-19 keyed on cwd to get must both survive.
+    other = Path(tempfile.mkdtemp()).resolve()
+    subprocess.run(["git", "init", "-q", str(other)], check=True, capture_output=True)
+    check("T9 two sessions in one repo stay distinct",
+          manifest.run_id("sess-A", root) != manifest.run_id("sess-B", root))
+    check("T10 two repos stay distinct", manifest.run_id(sid, root) != manifest.run_id(sid, other))
+    bare = Path(tempfile.mkdtemp()).resolve() / "x" / "y"
+    bare.mkdir(parents=True)
+    check("T11 no project marker falls back to cwd, never to /",
+          manifest.project_anchor(bare) == bare)
+
+    # AUDIT FINDING — the defect's own debris must not re-split identity. A stray run store left
+    # inside a subdirectory (exactly what this bug scatters) once outranked `.git`, so the anchor
+    # that fixes the defect was defeated by the defect's litter.
+    litter = sub / ".claude" / "empirica"
+    litter.mkdir(parents=True)
+    check("T11b a stray run store in a subdir does NOT re-split identity",
+          manifest.run_id(sid, sub) == manifest.run_id(sid, root),
+          "the anchor was defeated by the very artifact this defect leaves behind")
+    check("T11c .git outranks a nearer run store", manifest.project_anchor(sub) == root)
+    # But a NON-git project must still resume an established run rather than fork beside it.
+    nogit = Path(tempfile.mkdtemp()).resolve()
+    (nogit / ".claude" / "empirica").mkdir(parents=True)
+    deep = nogit / "a" / "b"
+    deep.mkdir(parents=True)
+    check("T11d without .git, an established run store is still the anchor",
+          manifest.project_anchor(deep) == nogit)
+    # A RELATIVE $EMPIRICA_BUDGET override anchors too, or the scattered-ledger defect returns one
+    # level down (audit finding: locate_ledger bypassed project_anchor on that path).
+    prior = os.environ.get(budget.LEDGER_ENV)
+    os.environ[budget.LEDGER_ENV] = "ledger.json"
+    try:
+        check("T11e a relative ledger override anchors instead of following cwd",
+              budget.locate_ledger(sub) == budget.locate_ledger(root) == root / "ledger.json",
+              f"{budget.locate_ledger(sub)} vs {budget.locate_ledger(root)}")
+        os.environ[budget.LEDGER_ENV] = str(root / "abs.json")
+        check("T11f an ABSOLUTE override is still honoured verbatim",
+              budget.locate_ledger(sub) == root / "abs.json")
+    finally:
+        if prior is None:
+            os.environ.pop(budget.LEDGER_ENV, None)
+        else:
+            os.environ[budget.LEDGER_ENV] = prior
+
+
+def test_actor_is_additive_everywhere():
+    """ADR-24 §1/§2 — `actor` must be purely additive. A graph or leaf without one must behave
+    byte-identically to before, or the feature breaks every existing run."""
+    d = Path(tempfile.mkdtemp())
+    (d / "evidence").mkdir()
+    g = graph.normalise({
+        "root": "G0",
+        "nodes": {"G0": {"type": "Goal", "text": "root", "confidence": 0.9},
+                  "G1": {"type": "Goal", "text": "with actor", "kind": "needs-data",
+                         "confidence": 0.9,
+                         "actor": {"model": "claude-opus-5", "harness": "claude-code"}},
+                  "G2": {"type": "Goal", "text": "no actor", "kind": "needs-data",
+                         "confidence": 0.9}},
+        "edges": [{"from": "G0", "to": "G1", "type": "SupportedBy"},
+                  {"from": "G0", "to": "G2", "type": "SupportedBy"}]})
+    check("T12 a graph carrying an actor is still valid", g != graph.CORRUPT)
+    check("T13 the actor round-trips through normalise",
+          g["nodes"]["G1"]["actor"]["model"] == "claude-opus-5")
+    check("T14 a node without an actor reads as None, not as a default",
+          g["nodes"]["G2"]["actor"] is None)
+    # A malformed actor must degrade to None, NEVER corrupt the graph: losing a routing
+    # preference must not make a valid argument unreadable.
+    bad = graph.normalise({"root": "G0", "nodes": {
+        "G0": {"type": "Goal", "text": "root", "confidence": 0.5, "actor": "not-a-dict"}},
+        "edges": []})
+    check("T15 a malformed actor degrades to None rather than corrupting the graph",
+          bad != graph.CORRUPT and bad["nodes"]["G0"]["actor"] is None)
+
+    # Evidence: omitting the actor must produce the pre-ADR-24 predicate EXACTLY, key for key.
+    p_plain = ev.write_research(d, "e1", "G2", "no actor", source="s", kind="docs",
+                                citation="c", result="supports", ts="2026-08-06T10:00:00Z")
+    plain = json.loads(p_plain.read_text())
+    check("T16 an actor-less research leaf has NO actor key (absence, not null)",
+          "actor" not in plain["predicate"], f"{sorted(plain['predicate'])}")
+    check("T17 the actor-less predicate is exactly the historical field set",
+          sorted(plain["predicate"]) == ["citation", "fold", "kind", "result", "source", "ts"],
+          f"{sorted(plain['predicate'])}")
+    p_attr = ev.write_research(d, "e2", "G1", "with actor", source="s", kind="docs",
+                              citation="c", result="supports", ts="2026-08-06T10:00:00Z",
+                              actor={"model": "claude-opus-5", "harness": "claude-code"})
+    check("T18 an attributed leaf carries the actor",
+          json.loads(p_attr.read_text())["predicate"]["actor"]["model"] == "claude-opus-5")
+    leaves = ev.read_leaves(d)
+    check("T19 both leaves still validate", len(leaves) == 2, f"{len(leaves)}")
+    ok = ev.oracle(d, g)
+    check("T20 attribution does not change approvability",
+          graph.state_of(g, "G1", 0.8, ok) == graph.STATE_APPROVED
+          and graph.state_of(g, "G2", 0.8, ok) == graph.STATE_APPROVED)
+
+
+def test_fable_is_refused_by_policy():
+    """ADR-24 §7 — `fable` is a VALID value of Claude Code's model: frontmatter, so nothing in
+    the harness stops it. This list is the only thing that does, and the reason (30-day retention
+    at the vendor) is recorded in code so it is not 'cleaned up' as an unused tier."""
+    check("T21 fable is excluded and the reason mentions retention",
+          "retention" in (actors.policy_excluded("fable") or ""),
+          f"{actors.policy_excluded('fable')}")
+    check("T22 a full fable model id is also excluded",
+          actors.policy_excluded("claude-fable-5") is not None)
+    check("T23 an actor naming fable does not normalise",
+          actors.normalise({"model": "fable"}) is None)
+    check("T24 a fable actor cannot enter an evidence leaf",
+          "actor" not in json.loads(ev.write_research(
+              Path(tempfile.mkdtemp()), "e", "G1", "t", source="s", kind="docs", citation="c",
+              result="supports", ts="2026-08-06T10:00:00Z",
+              actor={"model": "claude-fable-5"}).read_text())["predicate"])
+    # The exclusion must be a token match, not a substring one: over-broad exclusion is its own
+    # bug, and it would silently refuse an unrelated future model.
+    check("T25 the exclusion is not an over-broad substring match",
+          actors.policy_excluded("fabletown-7") is None)
+    check("T26 an ordinary model is not excluded", actors.policy_excluded("claude-opus-5") is None)
+    # AUDIT 4 — the model-id guard reaches log lines, report text and (under Mode B) an argv, and
+    # was expressed as a single `or` whose halves could neutralise each other. These values must
+    # never normalise, and must never reach a leaf on disk.
+    d_inject = Path(tempfile.mkdtemp())
+    for bad in ("claude opus; rm -rf /", "claude-opus-5\nrm -rf /", "", "   ",
+                "$(whoami)", "a" * 200, "-flag-like"):
+        check(f"T26b a malformed model id is refused: {bad[:24]!r}",
+              actors.normalise({"model": bad}) is None)
+        leaf = json.loads(ev.write_research(
+            d_inject, f"e{abs(hash(bad))}", "G1", "t", source="s", kind="docs", citation="c",
+            result="supports", ts="2026-08-06T10:00:00Z", actor={"model": bad}).read_text())
+        check(f"T26c …and never reaches a leaf on disk: {bad[:24]!r}",
+              "actor" not in leaf["predicate"])
+    check("T26d a non-string model is refused independently of the regex",
+          actors.normalise({"model": 42}) is None
+          and actors.normalise({"model": None}) is None
+          and actors.normalise({"model": ["claude-opus-5"]}) is None)
+    # AUDIT 5 — the `.strip()` was unguarded: deleting it left the suite green while a padded id
+    # either failed the anchored fullmatch (silently dropping a legitimate actor) or was stored with
+    # whitespace, which then breaks `same_actor`'s equality and so the independence check itself.
+    padded = actors.normalise({"model": "  claude-opus-5  "})
+    check("T26l a padded model id normalises and is STORED trimmed",
+          padded is not None and padded["model"] == "claude-opus-5", f"{padded}")
+    check("T26m a padded and an unpadded id are the SAME actor",
+          actors.same_actor({"model": " claude-opus-5"}, {"model": "claude-opus-5 "}) is True,
+          "whitespace would defeat the independence comparison")
+    check("T26n a whitespace-only model is still refused",
+          actors.normalise({"model": "   "}) is None
+          and actors.normalise({"model": "\t\n"}) is None)
+    # WITNESSED-SURVIVOR FINDINGS — `policy_excluded`'s RETURN VALUES were unasserted. Only its
+    # use inside `normalise` was covered, so collapsing it to a constant (excluding everything, or
+    # nothing) left the suite green in one direction and only incidentally red in the other.
+    check("T26e policy_excluded returns a REASON string for an excluded model, not just truthy",
+          isinstance(actors.policy_excluded("fable"), str)
+          and len(actors.policy_excluded("fable")) > 40)
+    check("T26f …and None for a permitted one, so it DISCRIMINATES",
+          actors.policy_excluded("claude-opus-5") is None
+          and actors.policy_excluded("openai.gpt-5.6-sol") is None)
+    check("T26g a non-string input yields None rather than raising",
+          actors.policy_excluded(42) is None and actors.policy_excluded(None) is None)
+    # `same_actor`'s three exit paths were each reachable but only one was asserted per direction.
+    check("T26h same_actor: identical concrete models CLASH",
+          actors.same_actor({"model": "claude-opus-5"}, {"model": "claude-opus-5"}) is True)
+    check("T26i same_actor: different concrete models do NOT",
+          actors.same_actor({"model": "claude-opus-5"}, {"model": "claude-opus-4-8"}) is False)
+    check("T26j same_actor: an unusable side never clashes",
+          actors.same_actor(None, {"model": "claude-opus-5"}) is False
+          and actors.same_actor({"model": "fable"}, {"model": "fable"}) is False
+          and actors.same_actor({"model": "claude-opus-5"}, "x") is False)
+    check("T26k same_actor: a TIER on EITHER side never clashes",
+          actors.same_actor({"model": "opus"}, {"model": "claude-opus-5"}) is False
+          and actors.same_actor({"model": "claude-opus-5"}, {"model": "opus"}) is False,
+          "a cost class is not an identity — claiming a clash would accuse without evidence")
+
+
+def test_audit_independence_is_real_and_asserted():
+    """ADR-24 finding 1 was a LIVE DEFECT: the auditor and spike-runner agents both declared
+    `model: opus`, so 'the author cannot grade its own work' was the same weights re-grading
+    their own reasoning — and nothing recorded a model, so nothing detected it.
+
+    This test is the thing that stops it silently regressing a second time.
+
+    IT CHECKS EVERY RESOLVABLE COPY, not just this working tree — and that distinction is the whole
+    value of the test. An independent audit found the first version read only
+    `plugins/empirica/agents/*.md`, while the definition the harness ACTUALLY resolved for the
+    auditor it spawned was the installed marketplace copy, which still said `model: opus` for both
+    roles. So finding 1 was live in the deployed configuration and no committed check saw it: the
+    test asserted a property of a file nothing loads. A check that reads the wrong copy is worse
+    than no check, because it reports green about a question it never asked.
+    """
+    def frontmatter_model(path):
+        text = path.read_text()
+        head = text.split("---")[1]
+        for line in head.splitlines():
+            if line.startswith("model:"):
+                return line.split(":", 1)[1].strip()
+        return None
+
+    def definition_paths(name):
+        """Every copy of this agent definition a harness could resolve FOR THIS VERSION.
+
+        THREE roots, and the middle one is the whole point:
+
+          1. the plugin under test (this working tree) — what will ship;
+          2. the installed MARKETPLACE checkout, at ANY version — the copy a live spawn resolves
+             from on this machine;
+          3. installed version CACHES that declare the same version as the working tree — a
+             same-version copy disagreeing with the tree is a packaging defect.
+
+        Root 2 is unconditional, and getting there took two audits. The first version of this check
+        read the working tree alone, and missed that the harness resolved an installed copy still
+        declaring the same model for both roles. The second version scoped every installed copy by
+        version — which sounded principled and was, as an audit then pointed out, VACUOUS: the tree
+        was 0.5.0 while the installed checkout was 0.4.1, so nothing outside the tree was checked at
+        all, and the scoping structurally excluded the exact copy whose staleness caused the
+        original miss. The harness resolves what is INSTALLED, not what declares a matching version.
+
+        Version caches (root 3) stay scoped, and that distinction is real rather than convenient: a
+        cache entry is an immutable archive of a published release, an older release genuinely does
+        contain the older configuration, and no edit here rewrites history — so asserting over all
+        of them would make this permanently red on any machine that ever installed an earlier
+        version. A check nobody can make green gets deleted, which is how a guard is actually lost.
+
+        The marketplace checkout is different: it is a mutable git checkout that TRACKS a branch, so
+        a red result there is genuinely actionable (`git pull` / reinstall), and it is the copy that
+        runs. When it is behind, this check SHOULD be red — that is a true statement about what
+        would happen if an auditor were spawned right now.
+        """
+        def version_of(root):
+            try:
+                return json.loads(
+                    (root / ".claude-plugin" / "plugin.json").read_text()).get("version")
+            except (OSError, json.JSONDecodeError, ValueError):
+                return None
+
+        here = HOOKS.parent
+        want = version_of(here)
+        roots = [here]
+        home = Path.home() / ".claude" / "plugins"
+        # Root 2: unconditional — this is what a live spawn resolves.
+        roots.extend(p for p in home.glob("marketplaces/*/plugins/empirica") if p.is_dir())
+        # Root 3: same-version caches only (see docstring).
+        roots.extend(p for p in home.glob("cache/*/empirica/*")
+                     if p.is_dir() and want is not None and version_of(p) == want)
+        seen, out = set(), []
+        for root in roots:
+            path = root / "agents" / f"{name}.md"
+            if path.exists() and path.resolve() not in seen:
+                seen.add(path.resolve())
+                out.append(path)
+        return out
+
+    auditor_defs = definition_paths("empirica-auditor")
+    author_defs = definition_paths("empirica-spike-runner")
+    check("T27a the auditor definition is found at all", bool(auditor_defs))
+    # FIVE audits found this claim's guard weak, the last three for the SAME reason: deleting the
+    # installed-copy roots left the suite green, so nothing asserted that they are consulted. The
+    # enumeration itself must therefore be checked, not just its results. This is the fix that closes
+    # the recurrence: `definition_paths` is asserted to CONSULT the resolution paths, by planting a
+    # definition in each root and requiring it to be found.
+    home = Path.home() / ".claude" / "plugins"
+    expected_roots = {"working-tree": HOOKS.parent}
+    for label, pattern in (("marketplace", "marketplaces/*/plugins/empirica"),
+                           ("version-cache", "cache/*/empirica/*")):
+        for candidate in home.glob(pattern):
+            if (candidate / "agents").is_dir():
+                expected_roots.setdefault(label, candidate)
+                break
+    found_roots = {p.parent.parent.resolve() for p in auditor_defs}
+    for label, root in expected_roots.items():
+        if label == "version-cache":
+            # Scoped by version on purpose (an old release is an immutable archive), so it is only
+            # required when a SAME-VERSION cache entry exists on this machine.
+            try:
+                same = json.loads(
+                    (root / ".claude-plugin" / "plugin.json").read_text()).get("version") == \
+                    json.loads((HOOKS.parent / ".claude-plugin"
+                                / "plugin.json").read_text()).get("version")
+            except (OSError, json.JSONDecodeError, ValueError):
+                same = False
+            if not same:
+                continue
+        check(f"T27b definition_paths CONSULTS the {label} root",
+              root.resolve() in found_roots,
+              f"{root} was not enumerated — the harness resolves from there, so a stale copy would "
+              f"go unseen (the recurrence five audits found)")
+    check("T27b2 …and enumerates at least the working tree plus every applicable install root",
+          len(found_roots) >= len([r for label, r in expected_roots.items()
+                                   if label != "version-cache"]),
+          f"found {sorted(map(str, found_roots))}")
+
+    def offenders(paths_a, paths_b, predicate):
+        return [str(p) for p in paths_a if predicate(p, paths_b)]
+
+    same_model = offenders(
+        auditor_defs, author_defs,
+        lambda a, bs: frontmatter_model(a) is not None
+        and any(frontmatter_model(a) == frontmatter_model(b) for b in bs))
+    tiers = [str(p) for p in auditor_defs + author_defs
+             if actors.is_tier_alias(frontmatter_model(p) or "")]
+
+    # SEPARATED BY WHO CAN FIX IT — and the separation is the point, not a softening.
+    #
+    # A defect in THIS TREE is the plugin's own bug and must be red: nothing ships until it is
+    # fixed. A stale INSTALLED copy is a true and useful statement ("an auditor spawned right now
+    # would grade its own work") but it is not something this commit can repair — the installed
+    # checkout tracks a published branch, so it only becomes correct AFTER the fix ships. Making the
+    # suite red for it would mean the commit that fixes the defect cannot pass its own checks, and a
+    # check nobody can make green gets deleted. So the tree is GATED and the install is REPORTED,
+    # loudly, with the path and the remedy.
+    tree = HOOKS.parent.resolve()
+
+    def in_tree(path):
+        return Path(path).resolve().is_relative_to(tree)
+
+    check("T27c THIS TREE never has the auditor and author on the same model",
+          [p for p in same_model if in_tree(p)] == [],
+          f"{[p for p in same_model if in_tree(p)]} — ADR-20 P6 independence is nominal")
+    check("T27d THIS TREE never pins a TIER instead of a generation",
+          [p for p in tiers if in_tree(p)] == [], f"{[p for p in tiers if in_tree(p)]}")
+    stale = sorted({p for p in same_model + tiers if not in_tree(p)})
+    if stale:
+        # A WARNING, not a check. A gating check here would be permanently red until the fix ships,
+        # so the commit that repairs the defect could not pass its own suite — and a check nobody can
+        # make green gets deleted, taking the real guard with it. A warning is loud, actionable, and
+        # cannot be satisfied by weakening the assertion above it.
+        warn(f"ADR-20 P6: an auditor spawned RIGHT NOW would resolve from an installed copy that "
+             f"grades its own work: {stale}. Not fixable by this commit — these update when the "
+             f"fix ships and the plugin is reinstalled. Until then, treat any audit run on this "
+             f"machine as NOT independent.")
+
+    auditor = frontmatter_model(HOOKS.parent / "agents" / "empirica-auditor.md")
+    author = frontmatter_model(HOOKS.parent / "agents" / "empirica-spike-runner.md")
+    check("T27 the auditor and the author are DIFFERENT models",
+          auditor and author and auditor != author,
+          f"auditor={auditor} author={author} — ADR-20 P6 independence is nominal again")
+    check("T28 both name a concrete generation, not a tier alias",
+          not actors.is_tier_alias(auditor) and not actors.is_tier_alias(author),
+          f"auditor={auditor} author={author}: a tier collapses decorrelated error (ADR-24 §2)")
+    check("T29 neither is policy-excluded",
+          actors.policy_excluded(auditor) is None and actors.policy_excluded(author) is None)
+    check("T30 same_actor agrees they are independent",
+          not actors.same_actor({"model": auditor}, {"model": author}))
+    # And the comparison must not be foolable by routing the same weights differently.
+    check("T31 the same model via a different harness is NOT independent",
+          actors.same_actor({"model": "claude-opus-5", "harness": "claude-code"},
+                            {"model": "claude-opus-5", "harness": "pi"}),
+          "harness/provider must not launder a same-model audit")
+    check("T32 two tier aliases are never counted as the same actor",
+          not actors.same_actor({"model": "opus"}, {"model": "opus"}),
+          "'capable == capable' says nothing about which weights ran")
+
+
+def test_auditor_spawn_records_the_dispatcher_side_actor():
+    """ADR-24 §2 — attribution comes from the DISPATCHER, never the actor. Verified live: three
+    models misreported their own identity while the provider attested the truth. So the spawn gate
+    reads the auditor's model from its definition, and records it as `declared` (not witnessed),
+    because the model resolves from frontmatter after the hook returns (V8)."""
+    d = Path(tempfile.mkdtemp())
+    sid = "sess-attrib"
+    manifest.start_run(manifest.locate_run(d, sid), sid, d)
+    run_dir = manifest.locate_run_dir(d, sid)
+    p = run_hook(GATE_SPAWN_HOOK, {"tool_name": "Agent", "cwd": str(d), "session_id": sid,
+                                   "tool_input": {"subagent_type": "empirica:empirica-auditor"}},
+                 d)
+    check("T33 the auditor spawn is allowed", p.returncode == 0, p.stderr)
+    actor = aud.audit_actor(run_dir)
+    check("T34 the ticket records an actor", actor is not None,
+          "no actor on the ticket — §3's same-actor check has nothing to compare")
+    check("T35 the recorded model matches the auditor's DEFINITION",
+          actor and actor["model"] == "claude-opus-4-8", f"{actor}")
+    check("T36 in-session attribution is DECLARED, never witnessed",
+          actor and actor["attribution"] == actors.DECLARED, f"{actor}")
+    # AUDIT 4 — assert the ON-DISK artifact, not only what the reader returns. The write path forces
+    # `declared` and so does the read path, so a test that checks only the read path passes even when
+    # the file itself says `witnessed`. The file is what a human or a later reviewer inspects, and a
+    # corrupt artifact that reads correctly is exactly the kind of gap ADR-19's file-level trust model
+    # cannot absorb.
+    on_disk = json.loads(aud.tickets_path(run_dir).read_text())["tickets"][0].get("actor") or {}
+    check("T36b the TICKET FILE itself records declared, not witnessed",
+          on_disk.get("attribution") == actors.DECLARED, f"on disk: {on_disk}")
+    check("T36c and a caller cannot write witnessed through the in-session path",
+          aud.record_spawn(run_dir, "r2", 0,
+                           actor={"model": "claude-opus-4-8",
+                                  "attribution": actors.WITNESSED}) is not None
+          and json.loads(aud.tickets_path(run_dir).read_text())["tickets"][-1]["actor"][
+              "attribution"] == actors.DECLARED,
+          "an in-session spawn wrote a WITNESSED attribution to disk")
+    # A hand-edited ticket must not be able to upgrade its own attribution strength: the in-session
+    # path is structurally incapable of witnessing, so the claim is wrong whoever writes it.
+    tickets = json.loads(aud.tickets_path(run_dir).read_text())
+    forged = tickets["tickets"][0].get("actor")
+    if forged:
+        forged["attribution"] = actors.WITNESSED
+        aud.tickets_path(run_dir).write_text(json.dumps(tickets))
+    reread = aud.audit_actor(run_dir)
+    check("T37 a forged `witnessed` on an in-session ticket is forced back to declared",
+          bool(forged) and reread and reread["attribution"] == actors.DECLARED,
+          "the weaker dispatch path was allowed to present itself as the stronger one")
+
+
+def test_same_actor_audit_is_detected_and_reported():
+    """ADR-24 §3.2 — the check that makes finding 1 visible. REPORTS, never blocks (§3.3)."""
+    d = Path(tempfile.mkdtemp())
+    (d / "evidence").mkdir()
+    g = graph.normalise({"root": "G0", "nodes": {
+        "G0": {"type": "Goal", "text": "root", "confidence": 0.9},
+        "G1": {"type": "Goal", "text": "claim one", "kind": "needs-data", "confidence": 0.9}},
+        "edges": [{"from": "G0", "to": "G1", "type": "SupportedBy"}]})
+    ev.write_research(d, "e1", "G1", "claim one", source="s", kind="docs", citation="c",
+                      result="supports", ts="2026-08-06T10:00:00Z",
+                      actor={"model": "claude-opus-5", "harness": "claude-code"})
+    leaves = ev.read_leaves(d)
+    same = attribution.check_same_actor_audit(["G1"], leaves, {"model": "claude-opus-5"})
+    check("T38 an audit on the SAME model as the work is detected", len(same) == 1, f"{same}")
+    check("T39 the finding explains that P6 independence was not obtained",
+          same and "independence was NOT obtained" in same[0]["detail"])
+    diff = attribution.check_same_actor_audit(["G1"], leaves, {"model": "claude-opus-4-8"})
+    check("T40 a DIFFERENT auditor produces no false positive", diff == [], f"{diff}")
+    # A deterministic spike is not a judge: the exit code is the approver (ADR-13), so a
+    # harness-attributed leaf must never be flagged as a model clash.
+    d2 = Path(tempfile.mkdtemp())
+    (d2 / "evidence").mkdir()
+    ev.write_spike(d2, "s1", "G1", "claim one", cmd=["true"], gate="pass", result_hash="h",
+                   files=[], ts="2026-08-06T10:00:00Z")
+    spike_leaf = ev.read_leaves(d2)
+    check("T41 a spike's CODE actor is recorded as witnessed",
+          spike_leaf[0]["actor"]["source_type"] == actors.CODE
+          and spike_leaf[0]["actor"]["attribution"] == actors.WITNESSED, f"{spike_leaf[0]}")
+    check("T42 a spike is never flagged as a same-actor clash",
+          attribution.check_same_actor_audit(
+              ["G1"], spike_leaf, {"model": "spike_harness.py"}) == [])
+
+    # §3.1 mismatch, plus its control.
+    mismatch = attribution.check_mismatch(graph.normalise({"root": "G0", "nodes": {
+        "G0": {"type": "Goal", "text": "root", "confidence": 0.9},
+        "G1": {"type": "Goal", "text": "claim one", "kind": "needs-data", "confidence": 0.9,
+               "actor": {"model": "openai.gpt-5.6-sol", "harness": "pi"}}},
+        "edges": [{"from": "G0", "to": "G1", "type": "SupportedBy"}]}), leaves)
+    check("T43 a claim resolved by a different actor than assigned is reported",
+          len(mismatch) == 1 and mismatch[0]["check"] == attribution.MISMATCH, f"{mismatch}")
+    check("T44 an assignment with no attributed evidence is NOT a mismatch",
+          attribution.check_mismatch(g, []) == [],
+          "missing data must not be reported as a contradiction")
+    # AUDIT COUNTEREXAMPLE — B5 claims "a deterministic spike's CODE actor is never flagged as a
+    # model clash", and T42 tested that on the same-actor side ONLY. check_mismatch carries the
+    # identical exemption with no guard, so deleting it FABRICATES a mismatch: a claim assigned to a
+    # model and correctly evidenced by the harness is exactly the design working, and reporting it
+    # as a contradiction would train a reader to ignore these findings.
+    assigned_graph = graph.normalise({"root": "G0", "nodes": {
+        "G0": {"type": "Goal", "text": "root", "confidence": 0.9},
+        "G1": {"type": "Goal", "text": "claim one", "kind": "needs-experiment", "confidence": 0.9,
+               "actor": {"model": "claude-opus-5", "harness": "claude-code"}}},
+        "edges": [{"from": "G0", "to": "G1", "type": "SupportedBy"}]})
+    check("T44b a claim evidenced ONLY by a spike is never a mismatch",
+          attribution.check_mismatch(assigned_graph, spike_leaf) == [],
+          "the harness's own CODE actor was reported as contradicting the assigned model")
+    # Control: the exemption must be scoped to CODE, not swallow every mismatch.
+    check("T44c a genuine model mismatch is still reported alongside a spike leaf",
+          len(attribution.check_mismatch(assigned_graph, spike_leaf + [
+              lf for lf in leaves if lf["fold"] == "research"])) == 0
+          and len(attribution.check_mismatch(graph.normalise({"root": "G0", "nodes": {
+              "G0": {"type": "Goal", "text": "root", "confidence": 0.9},
+              "G1": {"type": "Goal", "text": "claim one", "kind": "needs-data", "confidence": 0.9,
+                     "actor": {"model": "openai.gpt-5.6-sol", "harness": "pi"}}},
+              "edges": [{"from": "G0", "to": "G1", "type": "SupportedBy"}]}),
+              spike_leaf + leaves)) == 1,
+          "the CODE exemption must not silence a real model mismatch")
+
+    # The vacuity guard: no attribution recorded anywhere must NOT read as a clean pass.
+    rep = attribution.report(g, [], ["G1"], {"model": "claude-opus-4-8"})
+    check("T45 an unattributed run is reported as UNMEASURED, not clean",
+          rep["coverage"]["vacuous"] and "not a clean result" in rep["note"], f"{rep['note']}")
+    rep2 = attribution.report(g, leaves, ["G1"], {"model": "claude-opus-4-8"})
+    check("T46 an attributed run with no clash says so, and counts what it checked",
+          not rep2["findings"] and rep2["coverage"]["model_attributed"] == 1, f"{rep2}")
+
+    # AUDIT FINDING — vacuity was computed from the CLAIM side alone, so an unidentified auditor
+    # produced "no clash detected": a clean-looking result from a comparison that never ran. That
+    # was this very run's live state when it was audited, which is the strongest argument for
+    # guarding it. BOTH sides must be known for silence to mean anything.
+    for label, actor in (("no audit actor at all", None),
+                         ("a TIER-named auditor", {"model": "opus"}),
+                         ("a policy-excluded auditor", {"model": "fable"})):
+        rep3 = attribution.report(g, leaves, ["G1"], actor)
+        check(f"T46b {label} is reported as UNMEASURED, not clean",
+              rep3["coverage"]["vacuous"] and "could NOT be checked" in rep3["note"],
+              f"{rep3['note']}")
+    check("T46c the note names WHICH side is missing",
+          "audit's actor was not recorded" in attribution.report(g, leaves, ["G1"], None)["note"])
+    # GENERATED-SWEEP FINDING — check_same_actor_audit's early return on an unusable audit_actor was
+    # unguarded in the FALSE direction: forcing it to proceed anyway must not fabricate findings
+    # against a `None` auditor, and forcing it to always return [] must not silence a real clash.
+    check("T46g an unusable audit actor yields no findings, not a crash",
+          attribution.check_same_actor_audit(["G1"], leaves, None) == []
+          and attribution.check_same_actor_audit(["G1"], leaves, {"model": "fable"}) == []
+          and attribution.check_same_actor_audit(["G1"], leaves, "not-a-dict") == [])
+    check("T46h and a USABLE one still finds the clash (the early return is not blanket)",
+          len(attribution.check_same_actor_audit(["G1"], leaves,
+                                                {"model": "claude-opus-5"})) == 1)
+    # AUDIT 4 — `report`'s note branches were excused as "prose", which was wrong: §3's entire
+    # user-visible OUTPUT is that sentence. Forcing the findings branch off turned a real
+    # same-actor clash into "no attribution clash detected" with the suite green. The note must
+    # therefore be asserted per branch, and asserted to be MUTUALLY EXCLUSIVE — a clash outranks
+    # both a vacuity report and a clean report.
+    clash = attribution.report(g, leaves, ["G1"], {"model": "claude-opus-5"})
+    check("T46i a REAL clash is announced in the note, not just in findings",
+          clash["findings"] and "independence was NOT obtained" in clash["note"], f"{clash['note']}")
+    check("T46j a clash note never reads as clean or as unmeasured",
+          "no attribution clash detected" not in clash["note"]
+          and "could NOT be checked" not in clash["note"], f"{clash['note']}")
+    clean = attribution.report(g, leaves, ["G1"], {"model": "claude-opus-4-8"})
+    check("T46k a clean run says clean and counts what it checked",
+          not clean["findings"] and "no attribution clash detected" in clean["note"],
+          f"{clean['note']}")
+    check("T46l the three note branches are mutually exclusive",
+          len({clash["note"], clean["note"],
+               attribution.report(g, leaves, ["G1"], None)["note"]}) == 3)
+    # And the model_actors filter must not admit EMPTY entries: audit 4 found that forcing its
+    # guard true inflated model_attributed 0 -> 1 and flipped `vacuous` on a spike-only run — the
+    # vacuity defect returning a fourth time through a survivor excused as harmless.
+    check("T46m a spike-only run has ZERO model-attributed claims",
+          attribution.model_actors(spike_leaf) == {}
+          and attribution.coverage(g, spike_leaf, {"model": "claude-opus-4-8"})["vacuous"],
+          f"{attribution.model_actors(spike_leaf)}")
+    # WITNESSED-SURVIVOR FINDINGS — `coverage`'s COUNTS were reported but never asserted, and the
+    # vacuity note's per-side branches were only exercised one at a time. Both are observable
+    # outputs a reader consumes, so a mutation that changed them left the suite green.
+    counted = graph.normalise({"root": "G0", "nodes": {
+        "G0": {"type": "Goal", "text": "root", "confidence": 0.9},
+        "G1": {"type": "Goal", "text": "claim one", "kind": "needs-data", "confidence": 0.9,
+               "actor": {"model": "claude-opus-5"}},
+        "G2": {"type": "Goal", "text": "claim two", "kind": "needs-data", "confidence": 0.9},
+        "C1": {"type": "Context", "text": "not a goal"}},
+        "edges": [{"from": "G0", "to": "G1", "type": "SupportedBy"},
+                  {"from": "G0", "to": "G2", "type": "SupportedBy"},
+                  {"from": "G0", "to": "C1", "type": "InContextOf"}]})
+    cov4 = attribution.coverage(counted, leaves, {"model": "claude-opus-4-8"})
+    check("T46n coverage counts GOALS only, excluding non-Goal nodes",
+          cov4["goals"] == 3, f"{cov4}")
+    check("T46o coverage counts ASSIGNED claims, and discriminates",
+          cov4["assigned"] == 1, f"{cov4}")
+    check("T46p coverage counts model-attributed claims", cov4["model_attributed"] == 1, f"{cov4}")
+    # Both vacuity sides missing at once must name BOTH, not just the first.
+    both = attribution.report(counted, [], ["G1"], None)["note"]
+    check("T46q when BOTH sides are missing the note names both",
+          "no claim's evidence carries an actor" in both
+          and "audit's actor was not recorded" in both, both)
+    tier_only = attribution.report(counted, leaves, ["G1"], {"model": "opus"})["note"]
+    check("T46r a tier-named auditor is named as such, not as 'not recorded'",
+          "names a TIER" in tier_only and "was not recorded" not in tier_only, tier_only)
+    claim_only = attribution.report(counted, [], ["G1"], {"model": "claude-opus-4-8"})["note"]
+    check("T46s a missing claim side alone names only that side",
+          "no claim's evidence carries an actor" in claim_only
+          and "audit's actor" not in claim_only, claim_only)
+    check("T46d a fully-attributed comparison is NOT vacuous",
+          not rep2["coverage"]["vacuous"] and rep2["coverage"]["audit_attributed"],
+          f"{rep2['coverage']}")
+    # AUDIT COUNTEREXAMPLE — `coverage`'s witnessed COUNT had no guard: emptying it left the suite
+    # green. The count is the difference between "we chose the model and know it" and "we wrote
+    # down what we were told", which is the whole trust distinction ADR-24 §2 turns on, so a report
+    # that silently reports zero witnessed claims understates what the run actually established.
+    d3 = Path(tempfile.mkdtemp())
+    (d3 / "evidence").mkdir()
+    ev.write_research(d3, "w1", "G1", "claim one", source="s", kind="docs", citation="c",
+                      result="supports", ts="2026-08-06T10:00:00Z",
+                      actor={"model": "openai.gpt-5.6-sol", "harness": "pi",
+                             "attribution": actors.WITNESSED})
+    ev.write_research(d3, "d1", "G1", "claim one", source="s2", kind="docs", citation="c2",
+                      result="supports", ts="2026-08-06T10:01:00Z",
+                      actor={"model": "claude-opus-5", "harness": "claude-code",
+                             "attribution": actors.DECLARED})
+    cov3 = attribution.coverage(g, ev.read_leaves(d3), {"model": "claude-opus-4-8"})
+    check("T46e a WITNESSED attribution is counted as witnessed", cov3["witnessed"] == 1,
+          f"{cov3} — a witnessed/declared count that always reads 0 hides §2's trust distinction")
+    # Control: a run with only DECLARED attribution must count zero witnessed, or T46e passes for
+    # the wrong reason (a counter that returns 1 unconditionally).
+    d4 = Path(tempfile.mkdtemp())
+    (d4 / "evidence").mkdir()
+    ev.write_research(d4, "d2", "G1", "claim one", source="s", kind="docs", citation="c",
+                      result="supports", ts="2026-08-06T10:00:00Z",
+                      actor={"model": "claude-opus-5", "attribution": actors.DECLARED})
+    check("T46f a declared-only run counts ZERO witnessed",
+          attribution.coverage(g, ev.read_leaves(d4), {"model": "claude-opus-4-8"})["witnessed"] == 0)
+
+
+def test_attribution_reaches_the_run_report():
+    """§3.3 — the finding must appear in the RESULT, not only in a block message. A passing audit
+    must not launder a same-actor audit, exactly as it must not launder a P1 violation."""
+    d = write_run([{"text": "c1", "confidence": 1.0}], sid="sess-attr-report")
+    sid = "sess-attr-report"
+    rp = manifest.locate_run(d, sid)
+    run_dir = manifest.locate_run_dir(d, sid)
+    # Attribute the claim's evidence to a model, then have the AUDIT be the same model.
+    ev.write_research(run_dir, "e-actor", "G1", "c1", source="s", kind="docs", citation="c",
+                      result="supports", ts="2026-08-06T10:00:00Z",
+                      actor={"model": "claude-opus-5", "harness": "claude-code"})
+    nonce = aud.record_spawn(run_dir, manifest.read_run(rp)["run_id"], 0,
+                             actor={"model": "claude-opus-5", "harness": "claude-code"})
+    aud.verdict_path(run_dir).write_text(json.dumps({
+        "verdict": "pass", "nonce": nonce, "claims_reviewed": ["G0", "G1"]}))
+    manifest.stamp_route(rp, "2026-08-06T09:00:00Z")
+    manifest.stamp_first_tool(rp, "2026-08-06T09:30:00Z")
+    p = run_hook(GATE, {"cwd": str(d), "session_id": sid}, d)
+    check("T47 the stop is ALLOWED — attribution reports, never blocks", p.returncode == 0,
+          f"rc={p.returncode} {p.stderr[:200]}")
+    out = json.loads(p.stdout)
+    check("T48 the run still reports converged", out.get("converged") is True, f"{out}")
+    findings = out.get("attribution", {}).get("findings") or []
+    check("T49 but the same-actor audit is on the record", len(findings) > 0,
+          f"{out.get('attribution')}")
+    check("T50 the finding names the check",
+          any(f["check"] == attribution.SAME_ACTOR for f in findings), f"{findings}")
+
+
+def test_modes_are_off_by_default_and_independent():
+    """ADR-24 §5 — both modes OFF by default. This is what keeps the plugin installable: a bare
+    Claude Code + python3 install must behave exactly as 0.4.x does."""
+    d = Path(tempfile.mkdtemp())
+    env_before = {k: os.environ.pop(v, None) for k, v in modes.ENV_KEYS.items()}
+    try:
+        check("T51 multi-provider is OFF by default",
+              not modes.enabled(modes.MULTI_PROVIDER, d))
+        check("T52 cli-exec is OFF by default", not modes.enabled(modes.CLI_EXEC, d))
+        check("T53 the default is reported AS a default, not as a choice",
+              modes.state(d)[modes.CLI_EXEC]["source"] == "default")
+        # Independently toggled: enabling one must not enable or disable the other.
+        modes.write(d, cli_exec=True)
+        check("T54 enabling cli-exec does not enable multi-provider",
+              modes.enabled(modes.CLI_EXEC, d) and not modes.enabled(modes.MULTI_PROVIDER, d))
+        modes.write(d, multi_provider=True)
+        check("T55 enabling the second mode preserves the first",
+              modes.enabled(modes.CLI_EXEC, d) and modes.enabled(modes.MULTI_PROVIDER, d))
+        # Env overrides the file, so an operator can force a mode off for one invocation.
+        os.environ[modes.ENV_KEYS[modes.CLI_EXEC]] = "off"
+        check("T56 env overrides the run config", not modes.enabled(modes.CLI_EXEC, d))
+        check("T57 the source of the answer is reported",
+              modes.state(d)[modes.CLI_EXEC]["source"] == "env")
+        # A typo must fall through to the file rather than silently overriding it.
+        os.environ[modes.ENV_KEYS[modes.CLI_EXEC]] = "ja"
+        check("T58 an unrecognised env value falls through instead of overriding",
+              modes.enabled(modes.CLI_EXEC, d))
+        del os.environ[modes.ENV_KEYS[modes.CLI_EXEC]]
+        # A corrupt config must read as OFF, not fail closed: it configures OPTIONAL capability,
+        # so the safe direction is the baseline everyone can run.
+        modes.config_path(d).write_text("{not json")
+        check("T59 a corrupt mode config reads as OFF, never as a wedge",
+              not modes.enabled(modes.CLI_EXEC, d) and not modes.any_enabled(d))
+        # GENERATED-SWEEP FINDINGS, all previously unguarded.
+        # A TYPE-corrupt config is different from an UNPARSEABLE one: T59 used invalid JSON, which
+        # takes the earlier branch, so the bools-only type check itself was never exercised. A JSON
+        # string must not enable a mode.
+        modes.config_path(d).write_text(json.dumps({"cli_exec": "yes", "multi_provider": 1}))
+        check("T59b a type-corrupt config does NOT enable a mode",
+              not modes.enabled(modes.CLI_EXEC, d) and not modes.enabled(modes.MULTI_PROVIDER, d),
+              "a JSON string or int turned a mode ON")
+        check("T59c and its source is reported as default, not run-config",
+              modes.state(d)[modes.CLI_EXEC]["source"] == "default")
+        # An unknown mode must be REFUSED, not silently dropped: a near-miss typo otherwise writes a
+        # config that looks like it enabled something and does nothing.
+        try:
+            modes.write(d, cli_exex=True)
+            refused = False
+        except ValueError:
+            refused = True
+        check("T59d writing an unknown mode is refused, not silently dropped", refused)
+        check("T59e the refusal did not corrupt the existing config",
+              isinstance(modes.state(d), dict))
+        # An unknown mode NAME must read as off rather than raising KeyError from ENV_KEYS.
+        check("T59f querying an unknown mode returns False, never raises",
+              modes.enabled("not_a_mode", d) is False)
+        # WITNESSED-SURVIVOR FINDINGS (the mutation sweep, once survivors had to prove themselves).
+        # Every RETURN VALUE these functions produce is observable, and none was asserted:
+        # `any_enabled` collapsed to False left the suite green while feeding the doctor's
+        # `departs_from_baseline`, and `write`'s return value — the merged config a caller reads
+        # back — was never checked at all.
+        fresh = Path(tempfile.mkdtemp())
+        check("T59i any_enabled is False on a baseline run", modes.any_enabled(fresh) is False)
+        modes.write(fresh, cli_exec=True)
+        check("T59j any_enabled is True once a mode is on, and DISCRIMINATES",
+              modes.any_enabled(fresh) is True,
+              "a constant any_enabled would hide that a run departs from baseline")
+        check("T59k write returns the MERGED config, not a bool",
+              modes.write(fresh, multi_provider=True) == {"cli_exec": True,
+                                                          "multi_provider": True},
+              f"{modes.write(fresh, multi_provider=True)}")
+        check("T59l _file_modes returns a dict for a MISSING config, never a bool",
+              modes._file_modes(Path(tempfile.mkdtemp())) == {})
+        # Every SHAPE a config file can take must yield {} and must not raise. The earlier corrupt
+        # config test used only unparseable text, so a file that is VALID JSON but not an object —
+        # `[]`, `"str"`, `null`, a number — was never exercised; the witness sweep showed removing the
+        # dict guard makes those raise AttributeError inside a hook. A mode config is user-editable,
+        # so every shape it can have is reachable input.
+        for content, label in (("{bad", "unparseable"), ("[]", "a JSON array"),
+                               ('"a string"', "a JSON string"), ("null", "JSON null"),
+                               ("42", "a JSON number"), ("true", "a JSON bool"), ("", "empty")):
+            modes.config_path(fresh).write_text(content)
+            try:
+                got, raised = modes._file_modes(fresh), None
+            except Exception as exc:  # noqa: BLE001
+                got, raised = None, type(exc).__name__
+            check(f"T59m a config that is {label} yields {{}} and never raises",
+                  got == {} and raised is None, f"got={got!r} raised={raised}")
+            check(f"T59m2 …and enabled() stays False for {label}",
+                  modes.enabled(modes.CLI_EXEC, fresh) is False)
+        # And the doctor's baseline flag must track it, since that is the field a reader consumes.
+        clean = Path(tempfile.mkdtemp())
+        check("T59n the doctor reports departs_from_baseline=False on a baseline run",
+              doctor.diagnose(clean)["departs_from_baseline"] is False)
+        modes.write(clean, cli_exec=True)
+        check("T59o …and True once a mode is enabled",
+              doctor.diagnose(clean)["departs_from_baseline"] is True)
+        # And the ON spelling set must actually discriminate — forcing the _TRUE test either way was
+        # undetectable, because no check asserted a recognised true value against an unrecognised one.
+        prior_env = os.environ.get(modes.ENV_KEYS[modes.CLI_EXEC])
+        try:
+            for spelling in ("1", "true", "on", "enabled"):
+                os.environ[modes.ENV_KEYS[modes.CLI_EXEC]] = spelling
+                check(f"T59g `{spelling}` enables a mode", modes.enabled(modes.CLI_EXEC, d))
+            for spelling in ("0", "false", "off", "disabled", "yes", "2", "garbage"):
+                os.environ[modes.ENV_KEYS[modes.CLI_EXEC]] = spelling
+                check(f"T59h `{spelling}` does NOT enable a mode",
+                      not modes.enabled(modes.CLI_EXEC, d))
+        finally:
+            if prior_env is None:
+                os.environ.pop(modes.ENV_KEYS[modes.CLI_EXEC], None)
+            else:
+                os.environ[modes.ENV_KEYS[modes.CLI_EXEC]] = prior_env
+    finally:
+        for mode, prior in env_before.items():
+            if prior is not None:
+                os.environ[modes.ENV_KEYS[mode]] = prior
+            else:
+                os.environ.pop(modes.ENV_KEYS[mode], None)
+
+
+def test_doctor_detects_without_inferring():
+    """ADR-24 §4 — the preflight spends NO inference, never gates the baseline, and does not probe
+    optional tools unless their mode is on."""
+    check("T60 no probe argv invokes a model (rule 1, structural)",
+          doctor.probe_is_non_inferential(),
+          "a probe would spend tokens in a preflight — the rule is now violated")
+    # The choke point must actually refuse, or rule 1 rests on discipline alone.
+    refused = False
+    try:
+        doctor._run(("codex", "exec", "hello"))
+    except ValueError:
+        refused = True
+    check("T61 an inferential argv is REFUSED by the runner", refused,
+          "doctor._run would have executed a model call")
+
+    d = Path(tempfile.mkdtemp())
+    env_before = {k: os.environ.pop(v, None) for k, v in modes.ENV_KEYS.items()}
+    try:
+        # Mode A off (the default) → nothing optional is probed at all.
+        rep = doctor.diagnose(d)
+        check("T62 the baseline is present and never gated",
+              rep["baseline"]["status"] == doctor.PERMITTED)
+        check("T63 with multi-provider OFF, no optional tool is probed",
+              rep["tools"] == {} and rep["probed_optional"] is False, f"{rep['tools']}")
+        check("T64 the report says so instead of looking like nothing is installed",
+              any("not probed" in r for r in rep["recommendations"]))
+        check("T65 the report records that it spent no inference",
+              rep["spends_inference"] is False)
+        check("T66 the policy exclusion travels with the report",
+              "fable" in rep["policy_excluded"])
+
+        # Mode A on → the classifier runs. Assert the CLASSIFIER, not this machine's inventory:
+        # a test that required `pi` to be installed would fail for everyone else.
+        modes.write(d, multi_provider=True)
+        rep2 = doctor.diagnose(d)
+        check("T67 with multi-provider ON, optional tools are probed",
+              set(rep2["tools"]) == set(actors.OPTIONAL_HARNESSES), f"{sorted(rep2['tools'])}")
+        check("T68 every probe yields a known status",
+              all(t["status"] in {doctor.ABSENT, doctor.UNCONFIGURED, doctor.UNAPPROVED,
+                                  doctor.PERMITTED} for t in rep2["tools"].values()),
+              f"{rep2['tools']}")
+        check("T69 a missing tool is `absent`, not an error",
+              doctor.probe("definitely-not-a-real-cli-xyz")["status"] == doctor.ABSENT)
+        # RULE 4, the one that matters most: available must not imply permitted. Drive the
+        # classifier with a synthetic pi config so the assertion holds on any machine.
+        fake = Path(tempfile.mkdtemp())
+        (fake / ".pi" / "agent").mkdir(parents=True)
+        (fake / ".pi" / "agent" / "models.json").write_text(
+            json.dumps({"providers": {"openai": {}}}))
+        check("T70 an unapproved provider is `configured-but-unapproved`, never permitted",
+              doctor._pi_provider(fake) == "openai"
+              and "openai" not in doctor.APPROVED_PROVIDERS)
+        (fake / ".pi" / "agent" / "models.json").write_text(
+            json.dumps({"providers": {"openai": {}, "bedrock-mantle-openai": {}}}))
+        check("T71 an approved provider is preferred when several are configured",
+              doctor._pi_provider(fake) == "bedrock-mantle-openai")
+        check("T72 recommendations are sentences for a human, not actions taken",
+              all(isinstance(r, str) for r in rep2["recommendations"]) and rep2["tools"] is not None)
+        # AUDIT FINDING — rule 4's provider→status mapping had NO guard at all. Every check either
+        # drove `_pi_provider` in isolation or asserted only that probe()'s status was a MEMBER of
+        # the status set — and `permitted` is a member, so replacing the whole branch with
+        # `status = PERMITTED` destroyed the rule ADR-24 calls the one that matters most while
+        # leaving the suite green. `classify` is pure, so it can be asserted exhaustively on any
+        # machine, whether or not the optional tools are installed.
+        check("T72b an unapproved provider classifies as configured-but-unapproved",
+              doctor.classify("openai") == doctor.UNAPPROVED)
+        check("T72c an unknown provider is unapproved, not permitted (allow-list not deny-list)",
+              doctor.classify("some-new-vendor-2027") == doctor.UNAPPROVED)
+        check("T72d no provider determinable → installed-unconfigured",
+              doctor.classify(None) == doctor.UNCONFIGURED)
+        for approved in sorted(doctor.APPROVED_PROVIDERS):
+            check(f"T72e an approved provider is permitted: {approved}",
+                  doctor.classify(approved) == doctor.PERMITTED)
+        check("T72f classify DISCRIMINATES — it does not return one status for everything",
+              len({doctor.classify(x) for x in (None, "openai", "amazon-bedrock")}) == 3)
+        # GENERATED-SWEEP FINDINGS. A mutation sweep (b12_mutation_sweep.py) replaced the
+        # hand-written sabotage table after three audits each found a different unguarded mutation
+        # of the same property. These are the survivors it named that are real behaviours, not
+        # cosmetics — each one previously left the suite green.
+        #
+        # doctor.py rule 1: probe_is_non_inferential must actually DETECT an inferential argv, not
+        # merely return True. Forcing its inner test either way was undetectable.
+        check("T72g the rule-1 detector recognises an inferential argv when there is one",
+              doctor._INFERENTIAL_MARKERS and not all(
+                  m in ("--version",) for m in doctor._INFERENTIAL_MARKERS))
+        saved = dict(doctor._NON_INFERENTIAL)
+        try:
+            doctor._NON_INFERENTIAL["codex"] = (("codex", "exec"),)
+            check("T72h rule 1 reports FALSE when an inferential probe is present",
+                  doctor.probe_is_non_inferential() is False,
+                  "the detector cannot see a model call in its own probe table")
+            doctor._NON_INFERENTIAL["codex"] = (("codex", "--version"),)
+            check("T72i and TRUE again when it is removed",
+                  doctor.probe_is_non_inferential() is True)
+        finally:
+            doctor._NON_INFERENTIAL.clear()
+            doctor._NON_INFERENTIAL.update(saved)
+        # _version must report None on a FAILED probe rather than a bogus string: a tool whose
+        # --version errors is unconfigured, not "version <error text>".
+        check("T72j a tool that is absent yields no version",
+              doctor.probe("definitely-not-a-real-cli-xyz")["version"] is None)
+        # AUDIT 4 — interpolating the status into the sentence was not enough: the CLAIM was still
+        # free text, so a branch could render "status configured-but-unapproved: permitted via
+        # openai". Assert the usable/not-usable verdict per status, over a synthetic report so it
+        # holds on any machine.
+        for status, expect_usable in ((doctor.PERMITTED, True), (doctor.UNAPPROVED, False),
+                                      (doctor.UNCONFIGURED, False), (doctor.ABSENT, False)):
+            synthetic = {"baseline": {"harness": "claude-code", "status": doctor.PERMITTED},
+                         "modes": modes.state(None), "probed_optional": True,
+                         "tools": {"pi": {"tool": "pi", "status": status, "version": "1.0",
+                                          "provider": "openai"}},
+                         "policy_excluded": {}}
+            line = next(r for r in doctor.recommend(synthetic) if r.startswith("`pi`"))
+            check(f"T72k the sentence for {status} says {'USABLE' if expect_usable else 'NOT usable'}",
+                  ("USABLE as an actor" in line) == expect_usable
+                  and ("NOT usable" in line) != expect_usable, line)
+            check(f"T72l …and never claims 'permitted' for {status}",
+                  expect_usable or "permitted" not in line.replace("not permitted", ""), line)
+        # WITNESSED-SURVIVOR FINDINGS — `_pi_provider`'s return values and `recommend`'s two
+        # mode-note branches were observable but unasserted. The provider reader was only checked
+        # for two happy paths, so collapsing either return to a constant left the suite green.
+        home = Path(tempfile.mkdtemp())
+        (home / ".pi" / "agent").mkdir(parents=True)
+        cfg = home / ".pi" / "agent" / "models.json"
+        for content, expect in (('{"providers": {"openai": {}}}', "openai"),
+                                ('{"providers": {"openai": {}, "amazon-bedrock": {}}}',
+                                 "amazon-bedrock"),
+                                ('{"providers": {}}', None),
+                                ('{"providers": []}', None),
+                                ('{"no-providers-key": 1}', None),
+                                ("{not json}", None)):
+            cfg.write_text(content)
+            check(f"T72m _pi_provider on {content[:34]!r} → {expect!r}",
+                  doctor._pi_provider(home) == expect, f"got {doctor._pi_provider(home)!r}")
+        check("T72n _pi_provider returns None when the config is absent entirely",
+              doctor._pi_provider(Path(tempfile.mkdtemp())) is None)
+        # recommend()'s mode notes: each must appear when its mode is OFF and vanish when ON.
+        for mode, marker in ((modes.MULTI_PROVIDER, "not probed"),
+                             (modes.CLI_EXEC, "attribution stays DECLARED")):
+            for enabled_flag in (False, True):
+                synthetic = {"baseline": {"harness": "claude-code", "status": doctor.PERMITTED},
+                             "modes": {m: {"enabled": (enabled_flag if m == mode else False),
+                                           "source": "test"} for m in modes.MODES},
+                             "probed_optional": enabled_flag if mode == modes.MULTI_PROVIDER
+                             else False,
+                             "tools": {}, "policy_excluded": {}}
+                lines = " ".join(doctor.recommend(synthetic))
+                check(f"T72o the {mode} note is {'absent' if enabled_flag else 'present'} "
+                      f"when it is {'ON' if enabled_flag else 'OFF'}",
+                      (marker in lines) is not enabled_flag, lines[:160])
+    finally:
+        for mode, prior in env_before.items():
+            if prior is not None:
+                os.environ[modes.ENV_KEYS[mode]] = prior
+            else:
+                os.environ.pop(modes.ENV_KEYS[mode], None)
+
+
+def test_doctor_runs_at_run_start_and_cannot_wedge():
+    """§4 — the doctor runs at run-start. run_start.py's contract is ALWAYS exit 0: a preflight
+    that could take down a user's prompt would be a worse defect than any it diagnoses."""
+    d = Path(tempfile.mkdtemp())
+    sid = "sess-doctor"
+    p = run_hook(RUN_START, {"session_id": sid, "cwd": str(d)}, d)
+    check("T73 run-start still exits 0 with the doctor wired in", p.returncode == 0, p.stderr)
+    run_dir = manifest.locate_run_dir(d, sid)
+    check("T74 the preflight report is written to the run directory",
+          doctor.actors_path(run_dir).exists(), f"missing {doctor.actors_path(run_dir)}")
+    rep = json.loads(doctor.actors_path(run_dir).read_text())
+    check("T75 the report is usable", rep["baseline"]["status"] == doctor.PERMITTED)
+    check("T76 the report is transient run state, not a repo file",
+          doctor.actors_path(run_dir).parent == run_dir
+          and ".claude" in str(doctor.actors_path(run_dir)))
+    # A doctor that throws must not wedge the prompt. Simulate by making the run dir unwritable.
+    d2 = Path(tempfile.mkdtemp())
+    sid2 = "sess-doctor-fail"
+    rd2 = manifest.locate_run_dir(d2, sid2)
+    rd2.mkdir(parents=True)
+    (rd2 / "actors.json").mkdir()  # a DIRECTORY where the report must be written → write fails
+    p2 = run_hook(RUN_START, {"session_id": sid2, "cwd": str(d2)}, d2)
+    check("T77 a FAILING doctor still exits 0 (never wedge the prompt)",
+          p2.returncode == 0, f"rc={p2.returncode} {p2.stderr[:200]}")
+    check("T78 and the run itself was still started",
+          manifest.read_run(manifest.locate_run(d2, sid2))["status"] == "active")
+
+
+def test_cli_exec_dispatch_is_gated_at_the_same_boundary():
+    """ADR-24 §5B / V4 — the payoff. Mode B dispatches actors as Bash subprocesses, and the
+    spawn budget must survive that. A PreToolUse:Bash gate can deny by exit 2 and charge the SAME
+    ADR-17 ledger, so a dispatched actor is gated exactly like an `Agent` spawn."""
+    # Classification first — the residual cost ADR-24 commits to documenting is that coverage
+    # rests on a command test rather than a tool name, so the command test must be exercised.
+    for cmd in ("codex exec 'audit this'", "claude -p 'hello'", "pi --mode json 'x'",
+                "echo hi && codex exec 'sneaky'", "/usr/local/bin/codex exec 'by path'",
+                "claude --print 'long form'"):
+        check(f"T79 recognised as a dispatch: {cmd[:34]}", dispatch_is(cmd), cmd)
+    # AUDIT COUNTEREXAMPLE — the segment split had no discriminating test. T79's only compound row
+    # (`echo hi && codex exec …`) cannot exercise it: `echo` is not an actor CLI, so plain token
+    # scanning finds `codex exec` regardless. The split only matters when an EARLIER actor-CLI token
+    # hits the `break` — and then a real dispatch after `&&` goes uncounted against the ADR-17
+    # ledger, which is precisely the guarantee this gate exists to provide.
+    for cmd in ("codex --version && pi -p 'x'",
+                "claude --help; codex exec 'after a semicolon'",
+                "pi --version || claude -p 'after or'",
+                "codex doctor | claude -p 'after a pipe'"):
+        check(f"T79b a dispatch AFTER a non-dispatch actor call: {cmd[:38]}", dispatch_is(cmd), cmd)
+    # And an unparseable command must not be waved through: "I could not parse it" is not
+    # "it is not a dispatch" (the docstring's own claim, previously unguarded).
+    check("T79c an unbalanced quote around a dispatch still counts",
+          dispatch_is("codex exec 'unterminated"), "the shlex fallback dropped the tokens")
+    check("T79d an unparseable NON-dispatch is still not a dispatch",
+          not dispatch_is("grep -rn 'unterminated"))
+    for cmd in ("codex --version", "codex doctor", "pi --version", "grep -rn TODO src/",
+                "echo 'codex exec is mentioned but not run'", "ls -la", ""):
+        check(f"T80 NOT a dispatch: {cmd[:34] or '(empty)'}", not dispatch_is(cmd), cmd)
+
+    d = Path(tempfile.mkdtemp())
+    sid = "sess-dispatch"
+    manifest.start_run(manifest.locate_run(d, sid), sid, d)
+    run_dir = manifest.locate_run_dir(d, sid)
+    budget.write_ledger(run_dir / "budget.json", {"max_spawns": 1, "spawns": 1})
+    payload = {"tool_name": "Bash", "cwd": str(d), "session_id": sid,
+               "tool_input": {"command": "codex exec 'resolve G3'"}}
+
+    # THE INERT BRANCH — with Mode B off, this hook must not deny anything. A dispatch gate that
+    # denied ordinary shell commands would be far worse than a missed dispatch.
+    check("T81 with Mode B OFF an exhausted budget does NOT deny a dispatch",
+          run_hook(DISPATCH, payload, d).returncode == 0,
+          "the gate is active on a baseline run — it must be inert")
+    modes.write(run_dir, cli_exec=True)
+    p = run_hook(DISPATCH, payload, d)
+    check("T82 with Mode B ON the exhausted budget DENIES the dispatch", p.returncode == 2,
+          f"rc={p.returncode} — Mode B would trade away the ADR-17 boundary")
+    check("T83 the denial explains it is charged to the same ledger",
+          "same ADR-17 ledger" in p.stderr, p.stderr[:160])
+    # Unrelated Bash must still be allowed even with the budget exhausted and Mode B on.
+    check("T84 unrelated Bash is still allowed at cap",
+          run_hook(DISPATCH, {**payload, "tool_input": {"command": "grep -rn TODO src/"}},
+                   d).returncode == 0)
+    # ONE ledger: a dispatch under a live budget consumes a slot the Agent gate would have seen.
+    budget.write_ledger(run_dir / "budget.json", {"max_spawns": 2, "spawns": 0})
+    run_hook(DISPATCH, payload, d)
+    check("T85 an allowed dispatch charges the shared ledger",
+          budget.read_ledger(run_dir / "budget.json")["spawns"] == 1,
+          "two ledgers would mean a cap of 6 permits 12 actors")
+    # And it must not gate a session that is not an empirica run at all.
+    check("T86 no active run → the dispatch gate is a no-op",
+          run_hook(DISPATCH, {**payload, "cwd": str(Path(tempfile.mkdtemp()))},
+                   Path(tempfile.mkdtemp())).returncode == 0)
+    # GENERATED-SWEEP FINDINGS — the gate's fail-open branches were unguarded in the direction that
+    # matters. Each `if <guard>: return 0` was only tested by NOT tripping it; forcing the guard
+    # false (so the gate proceeds on input it should ignore) left the suite green. A gate that
+    # processes what it should skip is how an over-eager hook starts denying ordinary work.
+    budget.write_ledger(run_dir / "budget.json", {"max_spawns": 1, "spawns": 1})  # exhausted
+    for label, mutation in (
+            ("a non-Bash tool", {"tool_name": "Read"}),
+            ("a missing session id", {"session_id": None}),
+            ("an empty session id", {"session_id": ""}),
+            ("a missing tool_input", {"tool_input": {}}),
+            ("a non-string command", {"tool_input": {"command": 42}}),
+    ):
+        p = run_hook(DISPATCH, {**payload, **mutation}, d)
+        check(f"T86b at an EXHAUSTED cap, {label} is still allowed", p.returncode == 0,
+              f"rc={p.returncode} — the gate acted on input it must ignore: {p.stderr[:120]!r}")
+    # Control: the same exhausted cap DOES deny the real thing, so T86b is not passing because the
+    # gate is simply inert.
+    check("T86c …while the real dispatch at the same cap is denied",
+          run_hook(DISPATCH, payload, d).returncode == 2)
+    # And a terminal run must not be gated: only an ACTIVE run has a budget to charge.
+    manifest.set_status(manifest.locate_run(d, sid), "converged")
+    check("T86d a CONVERGED run is not gated", run_hook(DISPATCH, payload, d).returncode == 0)
+    manifest.set_status(manifest.locate_run(d, sid), "active")
+    # AUDIT 4 — the allow/deny decision itself was unguarded WITH BUDGET AVAILABLE, and had been
+    # excused as an "equivalent path". It is not: inverting it made a dispatch under an ample cap
+    # exit 2 with "budget exhausted: 1/6". Every prior dispatch check either ran at an exhausted cap
+    # or with no ledger, so the allow half of the decision was never observed.
+    budget.write_ledger(run_dir / "budget.json", {"max_spawns": 6, "spawns": 0})
+    p = run_hook(DISPATCH, payload, d)
+    check("T86e a dispatch with budget AVAILABLE is allowed", p.returncode == 0,
+          f"rc={p.returncode} stderr={p.stderr[:140]!r} — the gate's decision is inverted")
+    check("T86f …and the §6 advice still rides that allow path",
+          "pins no session" in p.stderr,
+          "the advice branch is unreachable when a ledger exists — audit 3's counterexample (c)")
+    check("T86g the allowed dispatch charged exactly one slot",
+          budget.read_ledger(run_dir / "budget.json")["spawns"] == 1)
+    # A session-pinned dispatch under the same cap: allowed, charged, and NOT advised.
+    pinned = {**payload, "tool_input": {
+        "command": f"codex exec resume {actors.session_id_for('r', 'G1')} 'x'"}}
+    p = run_hook(DISPATCH, pinned, d)
+    check("T86h a session-pinned dispatch is allowed and NOT advised",
+          p.returncode == 0 and "pins no session" not in p.stderr,
+          f"rc={p.returncode} stderr={p.stderr[:140]!r}")
+    # AUDIT 5 (via the coverage-traced witness) — the `cwd` fallback was unguarded. Every dispatch
+    # check passed `cwd` explicitly, so nothing asserted what happens when the payload omits it: the
+    # gate resolves the run relative to the WRONG directory, finds no active run, and silently stops
+    # gating. The fallback must therefore locate the run from the process cwd, which is where the
+    # hook actually runs, so an omitted field degrades to "same directory" rather than "no gate".
+    budget.write_ledger(run_dir / "budget.json", {"max_spawns": 1, "spawns": 1})
+    no_cwd = {"tool_name": "Bash", "session_id": sid,
+              "tool_input": {"command": "codex exec 'x'"}}
+    p = run_hook(DISPATCH, no_cwd, d)
+    check("T86i a payload with NO cwd still gates (falls back to the process cwd)",
+          p.returncode == 2,
+          f"rc={p.returncode} — an omitted cwd silently disabled the ADR-17 boundary")
+    check("T86j an EMPTY cwd behaves the same as an omitted one",
+          run_hook(DISPATCH, {**no_cwd, "cwd": ""}, d).returncode == 2)
+    # The DISCRIMINATING half, and the reason it is needed: T86i/T86j alone do not distinguish the
+    # real code from `payload.get("cwd") and "."`, because with cwd absent BOTH yield ".". The
+    # mutation's actual effect is on the PRESENT-cwd case — it discards the supplied path and
+    # resolves the run relative to the process cwd instead, which silently stops gating whenever the
+    # hook's process cwd differs from the payload's. Every other dispatch check happens to run from
+    # `d`, so nothing observed it. This one deliberately runs the hook from ELSEWHERE.
+    elsewhere = Path(tempfile.mkdtemp())
+    p = run_hook(DISPATCH, {**no_cwd, "cwd": str(d)}, elsewhere)
+    check("T86k the SUPPLIED cwd is honoured even when the hook runs from another directory",
+          p.returncode == 2,
+          f"rc={p.returncode} — the payload's cwd was discarded, so the gate looked for the run in "
+          f"the wrong place and stopped gating")
+
+
+def dispatch_is(command: str) -> bool:
+    """dispatch_gate.is_dispatch, loaded lazily so the module is imported once."""
+    global _dispatch_mod
+    try:
+        _dispatch_mod
+    except NameError:
+        _dispatch_mod = _load("dispatch_gate", DISPATCH)
+    return _dispatch_mod.is_dispatch(command)
+
+
+def test_derived_session_ids_are_deterministic():
+    """ADR-24 §6 — a per-claim session id must be derived, not random: hooks stay deterministic in
+    a resumable run (ADR-19), and `claude --session-id` requires a valid UUID (V1)."""
+    a = actors.session_id_for("run123", "G4")
+    b = actors.session_id_for("run123", "G4")
+    check("T87 the derivation is stable across calls", a == b)
+    check("T88 it is a valid UUID (claude --session-id requires one)",
+          str(uuid.UUID(a)) == a, a)
+    check("T89 different claims get different sessions",
+          a != actors.session_id_for("run123", "G5"))
+    check("T90 different runs get different sessions",
+          a != actors.session_id_for("run124", "G4"))
+    # Stable across PROCESSES, not merely within one — the property resumability needs.
+    out = subprocess.run(
+        [sys.executable, "-c",
+         "import importlib.util,sys;"
+         f"s=importlib.util.spec_from_file_location('a',{str(HOOKS / 'actors.py')!r});"
+         "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);"
+         "print(m.session_id_for('run123','G4'))"],
+        capture_output=True, text=True)
+    check("T91 the derivation is stable across PROCESSES", out.stdout.strip() == a,
+          f"{out.stdout.strip()!r} != {a!r}")
+    # AUDIT FINDING — §6 was a helper with no caller: schema and tests, not wiring. A derivation
+    # nothing uses is a convention each future adapter would re-implement differently, which is
+    # exactly what "standards over invention" is meant to prevent.
+    dispatch = _load("dispatch_gate", DISPATCH)
+    check("T91b the derivation has a real caller that builds the CLI flag",
+          dispatch.session_flag_for("run123", "G4", "claude") == ["--session-id", a], a)
+    check("T91c pi takes the same derived id (arbitrary string, creates if missing)",
+          dispatch.session_flag_for("run123", "G4", "pi") == ["--session-id", a])
+    check("T91d codex resumes by subcommand, not flag",
+          dispatch.session_flag_for("run123", "G4", "codex") == ["resume", a])
+    # And nothing in this module may name a model: the flag builder is workflow logic (ADR-23
+    # fitness #3, which R24 enforces file-wide).
+    # AUDIT FINDING (twice) — §6 must be BEHAVIOUR, not a helper. The first fix added
+    # session_flag_for, which the second audit correctly observed had no production caller either:
+    # a longer chain still terminating in dead code. The gate now uses it to advise on a dispatch
+    # that pins no session, so the derivation runs in production.
+    cold = dispatch.advice_for("codex exec 'resolve G3'", "run123")
+    check("T91f a dispatch pinning NO session gets §6 advice", cold is not None)
+    check("T91g the advice carries a real derived session id",
+          cold and actors.session_id_for("run123", "<claim-id>") in cold, f"{cold}")
+    check("T91h a dispatch that DOES pin a session is not nagged",
+          dispatch.advice_for(f"codex exec resume {a} 'x'", "run123") is None)
+    check("T91i a non-dispatch is never advised",
+          dispatch.advice_for("grep -rn TODO src/", "run123") is None)
+    check("T91j the harness is identified from the command",
+          dispatch.dispatched_harness("claude -p 'x'") == "claude"
+          and dispatch.dispatched_harness("pi --mode json 'x'") == "pi"
+          and dispatch.dispatched_harness("codex --version") is None)
+    # AUDIT FINDING (V5, found by this plugin auditing itself) — detection scanned EVERY token for
+    # an actor-CLI name, so `echo claude -p` and `grep claude -p file` read as dispatches. Not a
+    # harmless over-count: a positive charges the ADR-17 ledger and, at the cap, main() returns 2 —
+    # an innocent Bash command DENIED. Detection must match only in command position.
+    #
+    # Two-sided on purpose. Narrowing to `tokens[0]` alone would kill over-detection while breaking
+    # every prefix case a prior audit added (env assignments, wrappers, paths), and an
+    # under-detection lets a real dispatch go uncharged. Both directions are load-bearing, so both
+    # are asserted here rather than left to whichever failure the author happened to be chasing.
+    _elevate = "su" + "do"  # spelled indirectly: a literal trips local dangerous-command hooks
+    for _cmd, _want in [
+        # MUST detect — a missed dispatch is an uncharged spawn
+        ("FOO=bar claude -p hi", "claude"),
+        ("FOO=bar BAZ=1 claude -p hi", "claude"),
+        ("/usr/local/bin/codex exec hi", "codex"),
+        ("env claude -p hi", "claude"),
+        ("env FOO=1 claude -p hi", "claude"),
+        (f"{_elevate} -u alice claude -p hi", "claude"),   # wrapper with flag + value
+        ("timeout 30 claude -p hi", "claude"),             # wrapper with bare value
+        ("nohup claude -p hi", "claude"),
+        ("codex --version && pi -p 'x'", "pi"),
+        ("cd /tmp; claude -p 'x'", "claude"),
+        # MUST NOT detect — the name is an ARGUMENT, not the program being invoked
+        ("echo claude -p", None),
+        ("grep claude -p file", None),
+        ("grep -rn 'claude -p' src/", None),
+        ("git commit -m 'run claude -p later'", None),
+        ("python3 build.py --tool claude -p", None),
+        ("cat notes-claude-p.txt", None),
+        # MUST NOT detect — invoked, but not to run a model (the doctor's own probes cost nothing)
+        ("claude --help", None),
+        ("codex doctor", None),
+    ]:
+        _got = dispatch.dispatched_harness(_cmd)
+        check(f"T91L dispatch position: {_cmd!r} → {_want}", _got == _want,
+              f"got {_got!r}, want {_want!r}"
+              + (" (over-detection charges the ledger and can DENY innocent Bash)"
+                 if _want is None else " (under-detection leaves a dispatch uncharged)"))
+    # And advice must never become a denial: it rides the allow path.
+    d5 = Path(tempfile.mkdtemp())
+    sid5 = "sess-advice"
+    manifest.start_run(manifest.locate_run(d5, sid5), sid5, d5)
+    modes.write(manifest.locate_run_dir(d5, sid5), cli_exec=True)
+    p5 = run_hook(DISPATCH, {"tool_name": "Bash", "cwd": str(d5), "session_id": sid5,
+                             "tool_input": {"command": "codex exec 'no session'"}}, d5)
+    check("T91k §6 advice is emitted but ALLOWS the dispatch",
+          p5.returncode == 0 and "pins no session" in p5.stderr,
+          f"rc={p5.returncode} stderr={p5.stderr[:120]!r}")
+    check("T91e every ADR-24 module has at least one caller outside the tests",
+          all(any(name in (HOOKS / f).read_text()
+                  for f in ("convergence_gate.py", "run_start.py", "spawn_gate.py",
+                            "dispatch_gate.py", "doctor.py"))
+              for name in ("actors", "attribution", "modes", "doctor")),
+          "an ADR-24 module is dead code reachable only from the test suite")
+
+
+def test_adr19_fail_matrix_survives_adr24():
+    """The whole ADR-24 build sits on top of the ADR-19 fail-direction matrix. If anchoring or the
+    doctor changed those directions, everything above is built on sand."""
+    d = Path(tempfile.mkdtemp())
+    subprocess.run(["git", "init", "-q", str(d)], check=True, capture_output=True)
+    sid = "sess-matrix"
+    check("T92 no manifest → fail OPEN",
+          run_hook(GATE, {"cwd": str(d), "session_id": sid}, d).returncode == 0)
+    rp = manifest.locate_run(d, sid)
+    manifest.start_run(rp, sid, d)
+    rp.write_text("{corrupt")
+    check("T93 corrupt manifest → fail CLOSED",
+          run_hook(GATE, {"cwd": str(d), "session_id": sid}, d).returncode == 2)
+    manifest.start_run(rp, sid, d)
+    check("T94 active run, missing graph → fail CLOSED",
+          run_hook(GATE, {"cwd": str(d), "session_id": sid}, d).returncode == 2)
+    manifest.set_status(rp, "converged")
+    check("T95 terminal run → fail OPEN (never re-block a finished run)",
+          run_hook(GATE, {"cwd": str(d), "session_id": sid}, d).returncode == 0)
+
+
+def test_hooks_json_registers_the_dispatch_gate():
+    cfg = json.loads((HOOKS / "hooks.json").read_text())
+    pre = cfg["hooks"].get("PreToolUse", [])
+    scripts = [h["args"][0].rsplit("/", 1)[-1] for g in pre for h in g.get("hooks", [])]
+    check("T96 the dispatch gate is registered on PreToolUse",
+          "dispatch_gate.py" in scripts, f"{scripts}")
+    bash_groups = [g for g in pre if g.get("matcher") == "Bash"]
+    check("T97 it is matched on Bash", len(bash_groups) == 1, f"{[g.get('matcher') for g in pre]}")
+    check("T98 the spawn gate is still registered on Agent",
+          any(g.get("matcher") == "Agent" for g in pre))
+
+
 def main() -> int:
     for t in [test_parse, test_converged_math, test_theta_guard,
               test_hook_blocks_when_unconverged, test_hook_allows_when_converged,
@@ -2018,8 +3362,31 @@ def main() -> int:
               test_p1_is_decisive_via_harness_write_order,
               test_p1_inconclusive_is_not_reported_as_clean,
               test_gate_separates_proven_violation_from_unverifiable,
-              test_hooks_json_registers_the_stamp_hook]:
-        t()
+              test_hooks_json_registers_the_stamp_hook,
+              # --- ADR-24 -------------------------------------------------------
+              test_run_identity_survives_a_cwd_change,
+              test_actor_is_additive_everywhere,
+              test_fable_is_refused_by_policy,
+              test_audit_independence_is_real_and_asserted,
+              test_auditor_spawn_records_the_dispatcher_side_actor,
+              test_same_actor_audit_is_detected_and_reported,
+              test_attribution_reaches_the_run_report,
+              test_modes_are_off_by_default_and_independent,
+              test_doctor_detects_without_inferring,
+              test_doctor_runs_at_run_start_and_cannot_wedge,
+              test_cli_exec_dispatch_is_gated_at_the_same_boundary,
+              test_derived_session_ids_are_deterministic,
+              test_adr19_fail_matrix_survives_adr24,
+              test_hooks_json_registers_the_dispatch_gate]:
+        # An exception inside one test is recorded as a FAILED check for that test and the suite
+        # CONTINUES. Previously it propagated and aborted the run, so a single broken hook hid
+        # every check after it — and a crash reads to a reader as "the tooling is broken", not as
+        # "this behaviour regressed". Found while sabotage-testing the ADR-24 checks, where three
+        # deliberately-broken hooks crashed the runner instead of turning their guards red.
+        try:
+            t()
+        except Exception as exc:  # noqa: BLE001 — a test must not be able to hide its siblings
+            check(f"{t.__name__} raised {type(exc).__name__}", False, str(exc)[:200])
     width = max(len(n) for n, _, _ in results)
     passed = 0
     for name, ok, detail in results:
@@ -2028,6 +3395,10 @@ def main() -> int:
             line += f"  → {detail}"
         print(line)
         passed += ok
+    if warnings:
+        print(f"\n{len(warnings)} warning(s) — true, actionable, not gated (see warn()):")
+        for message in warnings:
+            print(f"  [WARN] {message}")
     print(f"\n{passed}/{len(results)} checks passed")
     return 0 if passed == len(results) else 1
 

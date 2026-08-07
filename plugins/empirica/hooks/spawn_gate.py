@@ -34,6 +34,7 @@ an audit, which fails CLOSED later rather than wedging the spawn now.
 """
 import importlib.util
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -48,6 +49,34 @@ def _load(name: str):
 budget = _load("budget")
 manifest = _load("manifest")
 audit = _load("audit")
+actors = _load("actors")
+
+# The agent definitions live beside the hooks directory. Reading the auditor's `model:` from its
+# own definition is what makes attribution DISPATCHER-side (ADR-24 §2): the hook determines the
+# model from configuration it can read, rather than asking the auditor who it is — which ADR-24
+# finding 3 proved a model cannot answer correctly.
+AGENTS_DIR = Path(__file__).resolve().parent.parent / "agents"
+_FRONTMATTER_MODEL = re.compile(r"^model:\s*(\S+)\s*$", re.MULTILINE)
+
+
+def _declared_model(agent_name: str) -> str | None:
+    """The `model:` field from an agent definition's frontmatter, or None.
+
+    Best-effort: a missing or unreadable definition simply means no actor is recorded on the
+    ticket, which reads as "attribution not available" — never as a reason to deny the spawn.
+    """
+    path = AGENTS_DIR / f"{agent_name}.md"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    # Frontmatter only: a `model:` line in the body prose is documentation, not configuration.
+    _, _, rest = text.partition("---\n")
+    head, sep, _ = rest.partition("\n---")
+    if not sep:
+        return None
+    m = _FRONTMATTER_MODEL.search(head)
+    return m.group(1) if m else None
 
 
 def _record_auditor_spawn(payload: dict, cwd: Path) -> None:
@@ -72,9 +101,16 @@ def _record_auditor_spawn(payload: dict, cwd: Path) -> None:
     run = manifest.read_run(run_path)
     if not run or run.get("status") != "active":
         return  # only an active empirica run has an audit to gate
+    # ADR-24 §2: record the auditor's identity as the DISPATCHER understands it. `declared`, not
+    # witnessed — the model resolves from frontmatter after this hook returns, so the harness never
+    # sees the resolved model (V8). Reading the definition here is still strictly better than
+    # nothing: it is the value the harness will act on, and it is not the auditor's own word.
+    model = _declared_model(audit.AUDITOR_AGENT)
+    actor = ({"source_type": actors.LLM_JUDGE, "model": model,
+              "harness": actors.HARNESS_BASELINE} if model else None)
     try:
         audit.record_spawn(run_path.parent, run.get("run_id") or session_id,
-                           run.get("passes", 0))
+                           run.get("passes", 0), actor=actor)
     except OSError:
         pass  # see module doc: never deny a spawn because a ticket could not be written
 

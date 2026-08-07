@@ -55,6 +55,7 @@ def _load(name: str):
 
 
 _io = _load("atomicio")
+_actors = _load("actors")
 
 DEFAULT_THETA = 0.8
 CORRUPT = "__corrupt__"  # sentinel: a graph exists but cannot be trusted → fail CLOSED
@@ -184,6 +185,15 @@ def normalise(raw):
                          if isinstance(node.get("evidence"), list) else []),
             "refuted_by": (node["refuted_by"]
                            if isinstance(node.get("refuted_by"), str) else None),
+            # ADR-24 §1: the actor this claim is ASSIGNED to, if any. Purely additive — a node
+            # without one resolves exactly as it always has (session default / agent frontmatter),
+            # so every existing graph keeps working unchanged. A malformed actor normalises to
+            # None rather than corrupting the graph: an assignment is a routing preference, and
+            # losing a preference must never make an otherwise-valid argument unreadable.
+            #
+            # Assignment is not attribution. This field says who SHOULD resolve the claim; who
+            # actually did is recorded on the evidence, by the dispatcher (see actors.py).
+            "actor": _actors.normalise(node.get("actor")),
         }
         # NOTE: a `state` key present in the file is deliberately NOT read. See module docs.
 

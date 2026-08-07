@@ -60,6 +60,7 @@ def _load(name: str):
 
 
 _io = _load("atomicio")
+_actors = _load("actors")
 
 # --- in-toto attestation Statement v1 ----------------------------------------
 # Verified against the in-toto attestation spec (github.com/in-toto/attestation, spec/v1/
@@ -138,6 +139,19 @@ def files_digest(paths: list[Path]) -> str:
 # --- writing (Fold 1 by the run; Fold 2 ONLY by spike_harness.py) -----------
 
 
+def _attach_actor(predicate: dict, actor: dict | None) -> None:
+    """Add `actor` to a predicate IN PLACE, only when it normalises (ADR-24 §2).
+
+    Absent or malformed → the key is not written at all, rather than written as null. That keeps
+    an actor-less leaf byte-identical to what this module produced before ADR-24, so the whole
+    feature is additive: no existing digest shifts, and "no attribution recorded" is expressed by
+    absence rather than by a value a reader might mistake for one.
+    """
+    normalised = _actors.normalise(actor) if actor is not None else None
+    if normalised is not None:
+        predicate["actor"] = normalised
+
+
 def _statement(claim_id: str, claim_text: str, predicate_type: str, predicate: dict) -> dict:
     """An in-toto Statement v1 binding a predicate to a claim as its subject."""
     return {
@@ -149,11 +163,19 @@ def _statement(claim_id: str, claim_text: str, predicate_type: str, predicate: d
 
 
 def write_research(run_dir: Path, evidence_id: str, claim_id: str, claim_text: str, *,
-                   source: str, kind: str, citation: str, result: str, ts: str) -> Path:
+                   source: str, kind: str, citation: str, result: str, ts: str,
+                   actor: dict | None = None) -> Path:
     """Record a Fold-1 research leaf. `ts` is caller-stamped (never generated here).
 
     Raises ValueError on a malformed record: a research record that cannot be validated is
     worse than none, because it looks like evidence to a reader.
+
+    `actor` (ADR-24 §2) records WHO produced this evidence, and is written by the dispatcher —
+    never by the actor, which cannot report its own identity. Optional and additive: omitting it
+    yields exactly the predicate this function produced before, so no existing leaf, digest, or
+    gate behaviour changes. A malformed actor is dropped rather than raising, for the same reason
+    the graph drops one: attribution is a record, and losing a record must not invalidate real
+    evidence.
     """
     if kind not in RESEARCH_KINDS:
         raise ValueError(f"research kind must be one of {sorted(RESEARCH_KINDS)}: {kind!r}")
@@ -163,10 +185,10 @@ def write_research(run_dir: Path, evidence_id: str, claim_id: str, claim_text: s
         raise ValueError("a research record needs a non-empty citation")
     if not (isinstance(source, str) and source.strip()):
         raise ValueError("a research record needs a non-empty source")
-    stmt = _statement(claim_id, claim_text, PREDICATE_RESEARCH, {
-        "fold": FOLD1, "kind": kind, "source": source, "citation": citation,
-        "result": result, "ts": ts,
-    })
+    predicate = {"fold": FOLD1, "kind": kind, "source": source, "citation": citation,
+                 "result": result, "ts": ts}
+    _attach_actor(predicate, actor)
+    stmt = _statement(claim_id, claim_text, PREDICATE_RESEARCH, predicate)
     path = _leaf_path(run_dir, evidence_id)
     with _io.lock(path):
         _io.atomic_write_json(path, stmt)
@@ -175,7 +197,7 @@ def write_research(run_dir: Path, evidence_id: str, claim_id: str, claim_text: s
 
 def write_spike(run_dir: Path, evidence_id: str, claim_id: str, claim_text: str, *,
                 cmd: list[str], gate: str, result_hash: str, files: list[Path],
-                ts: str) -> Path:
+                ts: str, actor: dict | None = None) -> Path:
     """Record a Fold-2 spike leaf. SOLE CALLER: spike_harness.py, from a real exit code.
 
     Nothing here can tell a forged call from a genuine one — that property comes from the
@@ -184,12 +206,18 @@ def write_spike(run_dir: Path, evidence_id: str, claim_id: str, claim_text: str,
     """
     if gate not in (GATE_PASS, GATE_FAIL):
         raise ValueError(f"gate must be {GATE_PASS!r} or {GATE_FAIL!r}: {gate!r}")
-    stmt = _statement(claim_id, claim_text, PREDICATE_SPIKE, {
-        "fold": FOLD2, "kind": "spike", "command": list(cmd),
-        "command_hash": command_digest(cmd), "gate": gate,
-        "hashes": {"result": result_hash, "files": files_digest(files)},
-        "files": [str(p) for p in files], "ts": ts,
-    })
+    predicate = {"fold": FOLD2, "kind": "spike", "command": list(cmd),
+                 "command_hash": command_digest(cmd), "gate": gate,
+                 "hashes": {"result": result_hash, "files": files_digest(files)},
+                 "files": [str(p) for p in files], "ts": ts}
+    # A spike's actor is CODE, not a model: its verdict is a subprocess exit code, which is the
+    # one approver in the whole system (ADR-13). Recording that explicitly matters — it is what
+    # distinguishes "a machine decided" from "a model judged", and the §3 same-actor check must
+    # never flag a spike as a model clash.
+    _attach_actor(predicate, actor if actor is not None
+                  else {"source_type": _actors.CODE, "model": "spike_harness.py",
+                        "harness": _actors.HARNESS_BASELINE, "attribution": _actors.WITNESSED})
+    stmt = _statement(claim_id, claim_text, PREDICATE_SPIKE, predicate)
     path = _leaf_path(run_dir, evidence_id)
     with _io.lock(path):
         _io.atomic_write_json(path, stmt)
@@ -252,7 +280,12 @@ def validate_leaf(raw) -> dict | None:
     if not isinstance(ts, str):
         return None
 
-    common = {"claim_id": name, "claim_digest": sha, "ts": ts}
+    # ADR-24 §2: surface the actor when one is recorded, so the §3 checks can compare
+    # assignment against attribution. Normalised through actors.py, so a leaf carrying a
+    # policy-excluded or malformed actor reads as "no attribution" — never as a valid one, and
+    # never as a reason to reject otherwise-valid evidence.
+    common = {"claim_id": name, "claim_digest": sha, "ts": ts,
+              "actor": _actors.normalise(predicate.get("actor"))}
     if ptype == PREDICATE_RESEARCH:
         if (predicate.get("kind") not in RESEARCH_KINDS
                 or predicate.get("result") not in (SUPPORTS, REFUTES)):
