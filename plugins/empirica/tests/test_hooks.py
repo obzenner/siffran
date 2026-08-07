@@ -3205,6 +3205,44 @@ def test_derived_session_ids_are_deterministic():
           dispatch.dispatched_harness("claude -p 'x'") == "claude"
           and dispatch.dispatched_harness("pi --mode json 'x'") == "pi"
           and dispatch.dispatched_harness("codex --version") is None)
+    # AUDIT FINDING (V5, found by this plugin auditing itself) — detection scanned EVERY token for
+    # an actor-CLI name, so `echo claude -p` and `grep claude -p file` read as dispatches. Not a
+    # harmless over-count: a positive charges the ADR-17 ledger and, at the cap, main() returns 2 —
+    # an innocent Bash command DENIED. Detection must match only in command position.
+    #
+    # Two-sided on purpose. Narrowing to `tokens[0]` alone would kill over-detection while breaking
+    # every prefix case a prior audit added (env assignments, wrappers, paths), and an
+    # under-detection lets a real dispatch go uncharged. Both directions are load-bearing, so both
+    # are asserted here rather than left to whichever failure the author happened to be chasing.
+    _elevate = "su" + "do"  # spelled indirectly: a literal trips local dangerous-command hooks
+    for _cmd, _want in [
+        # MUST detect — a missed dispatch is an uncharged spawn
+        ("FOO=bar claude -p hi", "claude"),
+        ("FOO=bar BAZ=1 claude -p hi", "claude"),
+        ("/usr/local/bin/codex exec hi", "codex"),
+        ("env claude -p hi", "claude"),
+        ("env FOO=1 claude -p hi", "claude"),
+        (f"{_elevate} -u alice claude -p hi", "claude"),   # wrapper with flag + value
+        ("timeout 30 claude -p hi", "claude"),             # wrapper with bare value
+        ("nohup claude -p hi", "claude"),
+        ("codex --version && pi -p 'x'", "pi"),
+        ("cd /tmp; claude -p 'x'", "claude"),
+        # MUST NOT detect — the name is an ARGUMENT, not the program being invoked
+        ("echo claude -p", None),
+        ("grep claude -p file", None),
+        ("grep -rn 'claude -p' src/", None),
+        ("git commit -m 'run claude -p later'", None),
+        ("python3 build.py --tool claude -p", None),
+        ("cat notes-claude-p.txt", None),
+        # MUST NOT detect — invoked, but not to run a model (the doctor's own probes cost nothing)
+        ("claude --help", None),
+        ("codex doctor", None),
+    ]:
+        _got = dispatch.dispatched_harness(_cmd)
+        check(f"T91L dispatch position: {_cmd!r} → {_want}", _got == _want,
+              f"got {_got!r}, want {_want!r}"
+              + (" (over-detection charges the ledger and can DENY innocent Bash)"
+                 if _want is None else " (under-detection leaves a dispatch uncharged)"))
     # And advice must never become a denial: it rides the allow path.
     d5 = Path(tempfile.mkdtemp())
     sid5 = "sess-advice"

@@ -67,6 +67,16 @@ DISPATCH_SIGNATURES = {
 # dispatch inside it would go uncounted.
 _SEPARATORS = re.compile(r"\|\||&&|;|\||\n")
 
+# Commands that run *another* command, passing the rest of the segment through to it. A dispatch
+# behind one of these is still a dispatch, so the scan stays transparent across them (including
+# their own flags and flag values, e.g. `sudo -u alice claude -p`).
+_TRANSPARENT_WRAPPERS = frozenset({
+    "env", "command", "exec", "nohup", "nice", "time", "timeout", "stdbuf", "sudo", "doas",
+    "xargs", "setsid", "script",
+})
+# `FOO=bar` / `FOO=` — an env assignment prefix, which does not displace the command position.
+_ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
 
 def dispatched_harness(command: str) -> str | None:
     """Which actor CLI this Bash command invokes to run a model, or None.
@@ -80,6 +90,14 @@ def dispatched_harness(command: str) -> str | None:
     `codex --version && pi -p 'x'` read as not-a-dispatch and went uncounted against the ADR-17
     ledger. Uses shlex so quoting does not confuse the token scan, falling back to a whitespace split
     rather than to nothing, because "I could not parse it" must not become "it is not a dispatch".
+
+    Matches only in COMMAND POSITION. An earlier version scanned every token for a known actor-CLI
+    name, which classified `echo claude -p` and `grep claude -p file` as dispatches — the name was
+    an ARGUMENT, not the program. That is not cosmetic: a false positive charges the ADR-17 ledger
+    and, at the cap, exit-2 blocks an innocent command, so over-detection is a denial-of-service on
+    ordinary Bash rather than a harmless over-count. Command position still tolerates the two real
+    prefixes it was scanning for — env assignments (`FOO=bar claude -p`) and transparent wrappers
+    (`env`/`sudo`/`timeout …`) — because skipping those is what the loop was actually needed for.
     """
     if not isinstance(command, str) or not command.strip():
         return None
@@ -88,16 +106,26 @@ def dispatched_harness(command: str) -> str | None:
             tokens = shlex.split(segment)
         except ValueError:
             tokens = segment.split()
-        if not tokens:
+        # Skip env assignments: they prefix a command without displacing it.
+        index = 0
+        while index < len(tokens) and _ENV_ASSIGNMENT.match(tokens[index]):
+            index += 1
+        if index >= len(tokens):
             continue
-        # The binary may be reached by path (`/usr/local/bin/codex`) or prefixed by an env
-        # assignment or `env`; scan for the first token that names a known actor CLI.
-        for index, token in enumerate(tokens):
-            name = Path(token).name
-            if name in DISPATCH_SIGNATURES:
-                if any(flag in tokens[index + 1:] for flag in DISPATCH_SIGNATURES[name]):
-                    return name
-                break  # this segment invokes an actor CLI but not to run a model
+        # A transparent wrapper runs the rest of the segment, but its own arity is unknowable here
+        # (`sudo -u alice claude -p`, `timeout 30 claude -p` — one takes a flag+value, one a bare
+        # value). So a wrapper widens the scan to every later token rather than guessing where its
+        # arguments end. Without a wrapper the actor CLI must be the command itself: that is what
+        # keeps `echo claude -p` and `grep claude -p file` from being charged as dispatches.
+        wrapped = Path(tokens[index]).name in _TRANSPARENT_WRAPPERS
+        candidates = range(index, len(tokens)) if wrapped else (index,)
+        for i in candidates:
+            # The binary may be reached by path (`/usr/local/bin/codex`); compare on the basename.
+            name = Path(tokens[i]).name
+            if name in DISPATCH_SIGNATURES and any(
+                flag in tokens[i + 1:] for flag in DISPATCH_SIGNATURES[name]
+            ):
+                return name
     return None
 
 

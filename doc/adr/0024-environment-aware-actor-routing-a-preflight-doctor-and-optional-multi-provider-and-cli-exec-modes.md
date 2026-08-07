@@ -505,3 +505,33 @@ by the commit that fixes the defect, so `test_hooks.py` gates tree defects and *
 staleness — a check that can only go green after release would block its own fix and then be deleted.
 And the two schema flags take different argument forms (claude inline, codex a path), while the
 Bedrock bearer token is short-lived, so an adapter must mint per invocation.
+
+## 0.5.1 — P6 obtained, and the plugin finds a defect in itself
+
+Re-running the workflow under `--plugin-dir` (session-scoped, so the tree's definitions are what the
+hooks resolve) closed the second residual and produced one new finding.
+
+**P6 is now obtained.** The spawn gate recorded `model: claude-opus-4-8, is_tier: false` on the audit
+ticket, resolved from the tree's 0.5.0 auditor definition — a *different generation* from the Opus 5
+author, which is the decorrelated error this ADR argues a tier cannot buy. Two caveats stay on the
+record: the attribution is `declared`, not witnessed (§2 — `cli_exec` is off, so empirica did not
+dispatch the auditor itself), and the suite's staleness `warn()` still fires because it scans on-disk
+marketplace copies and *cannot observe `--plugin-dir` shadowing*. Declared-consistent, not proven.
+
+**V5 — `dispatched_harness` over-detected, and the cost was a denial, not an over-count.** Detection
+scanned every token for a known actor-CLI name, so `echo claude -p` and `grep claude -p file`
+classified as dispatches. A positive charges the ADR-17 ledger and, at the cap, `main()` returns 2:
+an innocent Bash command DENIED. Detection now matches only in **command position**, still skipping
+env-assignment prefixes and transparent wrappers (`env`, `timeout`, …) because those were what the
+original all-tokens scan was actually needed for.
+
+The regression test is deliberately **two-sided**. Narrowing to `tokens[0]` would kill over-detection
+while breaking every prefix case earlier audits added, and an under-detection lets a real dispatch go
+uncharged; whichever direction the author happens to be chasing is the one that gets tested, so both
+are asserted. Verified by reverting the fix: the suite fails 584/587.
+
+Worth stating plainly, because it is the point of the harness: **this defect was found by empirica
+auditing its own implementation** — a falsification control that refused to assert the buggy value as
+correct surfaced it, and the auditor then bounded the severity better than the author had (`main()` is
+inert unless `cli_exec` is on, so 0.5.0 shipped no baseline regression; the fix matters before Mode B
+lands). The remaining residuals are **P1** (uncorrectable, above) and the undelivered Mode B adapters.
