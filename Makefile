@@ -119,6 +119,10 @@ status: ## Show plugin versions, ADR count, and working-tree state
 adr-list: ## List all ADRs with their status
 	@if command -v adrs >/dev/null 2>&1; then adrs --ng list; else ls -1 $(ADR_DIR)/*.md; fi
 
+.PHONY: doctor
+doctor: ## empirica preflight: what actors can this machine reach? (spends no inference)
+	@python3 plugins/empirica/hooks/doctor.py $(if $(JSON),--json,)
+
 ## --- Release
 
 .PHONY: bump

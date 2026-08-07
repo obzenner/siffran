@@ -51,6 +51,7 @@ def _load(name: str):
 
 _io = _load("atomicio")
 _stamps = _load("stamps")
+_actors = _load("actors")
 
 # The auditor's identity as the harness sees it: the subagent_type a spawn must name for its
 # ticket to count. Kept as a NAME, never a model id — tiers resolve in the agent definition
@@ -77,16 +78,46 @@ def spawn_nonce(run_id: str, seq: int) -> str:
     return hashlib.sha256(f"{run_id}:audit:{seq}".encode("utf-8")).hexdigest()[:32]
 
 
-def record_spawn(run_dir: Path, run_id: str, pass_no: int) -> str:
+def record_spawn(run_dir: Path, run_id: str, pass_no: int,
+                 actor: dict | None = None) -> str:
     """Called from the PreToolUse spawn gate when an auditor subagent is spawned. Appends a
-    ticket and returns its nonce. This is the harness-proven half of the audit gate."""
+    ticket and returns its nonce. This is the harness-proven half of the audit gate.
+
+    `actor` (ADR-24 §2) is the auditor's identity as the DISPATCHER understood it — read from the
+    agent definition's `model:` field, never from anything the auditor says about itself, because
+    a model cannot report its own identity (ADR-24 finding 3). Recorded as `declared`, not
+    `witnessed`: `spawn_gate.py` sees `subagent_type` and the model resolves from frontmatter
+    AFTER this hook fires, so the harness never observes the resolved model. Marking it witnessed
+    would be the overclaim ADR-21 forbids.
+
+    Optional and additive: a ticket without an actor is exactly the ticket this wrote before, so
+    the audit gate's behaviour is unchanged for anyone who does not record one.
+    """
     path = tickets_path(run_dir)
     with _io.lock(path):
         data = _read_tickets(path)
         nonce = spawn_nonce(run_id, len(data) + 1)
-        data.append({"nonce": nonce, "pass": pass_no})
+        ticket = {"nonce": nonce, "pass": pass_no}
+        normalised = (_actors.normalise(actor, attribution=_actors.DECLARED,
+                                       force_attribution=True) if actor else None)
+        if normalised is not None:
+            ticket["actor"] = normalised
+        data.append(ticket)
         _io.atomic_write_json(path, {"tickets": data})
     return nonce
+
+
+def audit_actor(run_dir: Path) -> dict | None:
+    """The actor recorded for the most recent auditor spawn, or None.
+
+    The LAST ticket, because that is the spawn whose verdict the gate is about to evaluate; an
+    earlier round's auditor may legitimately have been a different model.
+    """
+    tickets = _read_tickets(tickets_path(run_dir))
+    for ticket in reversed(tickets):
+        if ticket.get("actor"):
+            return ticket["actor"]
+    return None
 
 
 def _raise_non_finite(_c):
@@ -106,7 +137,15 @@ def _read_tickets(path: Path) -> list[dict]:
         if (isinstance(t, dict) and isinstance(t.get("nonce"), str)
                 and _HEX.fullmatch(t["nonce"])
                 and isinstance(t.get("pass"), int) and not isinstance(t.get("pass"), bool)):
-            out.append({"nonce": t["nonce"], "pass": t["pass"]})
+            ticket = {"nonce": t["nonce"], "pass": t["pass"]}
+            # ADR-24 §2. Normalised on read as well as on write, so a hand-edited ticket claiming
+            # a policy-excluded model or `attribution: witnessed` for an in-session spawn cannot
+            # smuggle a stronger attribution than the dispatch path actually earned.
+            actor = _actors.normalise(t.get("actor"), attribution=_actors.DECLARED,
+                                      force_attribution=True)
+            if actor is not None:
+                ticket["actor"] = actor
+            out.append(ticket)
     return out
 
 

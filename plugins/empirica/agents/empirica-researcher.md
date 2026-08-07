@@ -2,7 +2,7 @@
 name: empirica-researcher
 description: "Fold-1 research worker for an empirica run. Resolves a needs-data claim by fetching and citing a real source outside the model's training data, then returns a structured research record. Use for the mechanical fetch-and-cite work of the empirical loop."
 tools: Read, Glob, Grep, Bash, WebFetch
-model: sonnet
+model: haiku
 ---
 
 # empirica researcher — Fold 1, evidence over recall
