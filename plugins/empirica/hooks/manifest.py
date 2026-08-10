@@ -47,7 +47,11 @@ _stamps = _load("stamps")
 
 DEFAULT_MAX_PASSES = 8  # aligns with the platform's 8-consecutive-block Stop cap (ADR-8)
 # Real, non-corrupt lifecycle states. Anything else in a present file → __corrupt__.
-STATUSES = frozenset({"active", "converged", "stopped_residual", "stopped_budget"})
+# `stopped_frozen` (ADR-26) is deliberately DISTINCT from `stopped_residual`: "closed with a
+# declared scope and an open-items list" and "ran out of passes" are different outcomes, and a
+# status that conflated them would be the dressing-up ADR-17 forbids.
+STATUSES = frozenset({"active", "converged", "stopped_residual", "stopped_budget",
+                      "stopped_frozen"})
 # The run's phase machine (ADR-21 M1): route → resolve → assess → audit → converged.
 # `phase` is where the run says it is; the gate independently checks the evidence, so a phase
 # label is a record, never a permission. Ordered, because P1's route-before-investigate check
@@ -237,6 +241,19 @@ def read_run(path: Path) -> dict | None:
         "route_seq": _coerce_opt_int(data.get("route_seq")),
         "first_tool_seq": _coerce_opt_int(data.get("first_tool_seq")),
         "stamp_seq": _coerce_int(data.get("stamp_seq"), 0, minimum=0),
+        # ADR-26 freeze. `frozen_claims` is the set of claims that were ALREADY GATING when the
+        # run froze — the scope it committed to discharge. None means "not frozen", which is the
+        # baseline where every claim gates.
+        #
+        # A malformed value normalises to None, i.e. NOT FROZEN. This is the opposite direction
+        # from `modes.json`, and deliberately so: a corrupt mode file falls back to the mode being
+        # off, but a corrupt freeze record must fall back to gating MORE, never less. A freeze
+        # record that freed a blocking run when unreadable would be the legacy-shape exploit
+        # again.
+        "frozen_claims": (sorted({c for c in data["frozen_claims"] if isinstance(c, str) and c})
+                          if isinstance(data.get("frozen_claims"), list) else None),
+        "freeze_ts": data.get("freeze_ts") if isinstance(data.get("freeze_ts"), str) else None,
+        "freeze_seq": _coerce_opt_int(data.get("freeze_seq")),
     }
 
 
@@ -355,6 +372,56 @@ def stamp_first_tool(path: Path, ts: str) -> dict | None:
     """Record the FIRST investigative tool call (ADR-21 M1). First write wins, so the stamp
     marks the genuine start of evidence-gathering and cannot be pushed later."""
     return _stamp_event(path, "first_tool_ts", "first_tool_seq", ts)
+
+
+def freeze(path: Path, gating_claims: list[str], ts: str) -> dict | None:
+    """Commit the run's scope: the claims it will discharge (ADR-26). No-op on corrupt/absent.
+
+    FIRST WRITE WINS, like the route and first-tool stamps. This is the anti-bypass property, not
+    a convenience: `gating_claims` is the set ALREADY GATING at the moment of the freeze, so a
+    claim derived afterwards can never be in it. The attack "freeze early, then add the hard
+    claims" therefore does not buy a pass with less work — it buys a pass with less SCOPE,
+    declared up front, with every omission printed in the run's result and handed to the auditor.
+    Re-freezing to enlarge the set is refused for the same reason a run cannot re-stamp its route:
+    a commitment that can be rewritten per pass is unbounded shrinking with extra steps.
+
+    Freezing with an EMPTY gating set is allowed and yields a run that discharges nothing and
+    defers everything — visibly vacuous rather than illegal, the same treatment as a spike that
+    binds no files (evidence.py's `_files_intact`). Making the degenerate case loud beats making
+    it an error the caller works around.
+
+    Termination is untouched: freeze only ever lets a run reach a terminal state SOONER, so the
+    ADR-19 variant `max_passes - passes` still bounds the loop and remains the only termination
+    argument.
+    """
+    with _io.lock(path):
+        run = read_run(path)
+        if not run or run["status"] == "__corrupt__" or run.get("frozen_claims") is not None:
+            return run
+        run["frozen_claims"] = sorted({c for c in gating_claims if isinstance(c, str) and c})
+        run["freeze_ts"] = ts
+        run["stamp_seq"] = run.get("stamp_seq", 0) + 1
+        run["freeze_seq"] = run["stamp_seq"]
+        _io.atomic_write_json(path, run)
+        return run
+
+
+def is_frozen(run: dict) -> bool:
+    """Has this run committed its scope (ADR-26)? A malformed record reads as NOT frozen, so the
+    baseline where every claim gates is what an unreadable freeze falls back to."""
+    return isinstance(run.get("frozen_claims"), list)
+
+
+def deferred_claims(run: dict, gating: list[str]) -> list[str]:
+    """Gating claims that arrived AFTER the freeze — the run's honest open-items list (ADR-26).
+
+    Empty when the run is not frozen: without a commitment there is nothing to be outside of, and
+    every claim gates.
+    """
+    if not is_frozen(run):
+        return []
+    frozen = set(run["frozen_claims"])
+    return [nid for nid in gating if nid not in frozen]
 
 
 def route_before_investigation(run: dict) -> tuple[bool, str]:

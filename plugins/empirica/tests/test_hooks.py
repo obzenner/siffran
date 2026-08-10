@@ -1389,10 +1389,34 @@ def _spawn_auditor(d: Path, sid: str = DEFAULT_SID) -> str:
     return tickets[-1]["nonce"] if tickets else ""
 
 
-def _write_verdict(d: Path, sid: str = DEFAULT_SID, **kw) -> None:
+def _reviewed(d: Path, claim_ids: list[str], sid: str = DEFAULT_SID) -> list[dict]:
+    """`claims_reviewed` entries for these claims, at their CURRENT digests (ADR-25).
+
+    Computed the same way the gate computes them — through `evidence.claim_digest` and
+    `evidence.evidence_digest` — because a test that hand-rolled either hash would pass while the
+    real auditor failed, which is the drift the single-definition rule exists to prevent.
+    """
     run_dir = manifest.locate_run_dir(d, sid)
+    g = graph.load(graph.default_graph_path(run_dir))
+    leaves = ev.read_leaves(run_dir)
+    out = []
+    for nid in claim_ids:
+        node = g["nodes"].get(nid) if isinstance(g, dict) else None
+        text = node["text"] if node else ""
+        out.append({"claim_id": nid, "claim_digest": ev.claim_digest(text),
+                    "evidence_digest": ev.evidence_digest(leaves, nid, text)})
+    return out
+
+
+def _write_verdict(d: Path, sid: str = DEFAULT_SID, **kw) -> None:
+    """Write a verdict. `claims_reviewed` may be given as ids (digests are computed for them) or
+    as fully-formed entries, so a test can deliberately record a WRONG digest."""
+    run_dir = manifest.locate_run_dir(d, sid)
+    reviewed = kw.get("claims_reviewed", ["G0", "G1"])
+    if reviewed and all(isinstance(c, str) for c in reviewed):
+        reviewed = _reviewed(d, reviewed, sid)
     body = {"verdict": "pass", "nonce": kw.get("nonce", ""), "auditor": "empirica-auditor",
-            "claims_reviewed": kw.get("claims_reviewed", ["G0", "G1"]),
+            "claims_reviewed": reviewed,
             "findings": kw.get("findings", []), "ts": "2026-07-24T13:00:00Z"}
     body.update({k: v for k, v in kw.items() if k in ("verdict",)})
     aud.verdict_path(run_dir).write_text(json.dumps(body))
@@ -1451,7 +1475,7 @@ def test_partial_audit_is_refused():
     check("R14 a verdict that skipped approved claims is refused", p.returncode == 2,
           f"rc={p.returncode} stderr={p.stderr!r}")
     check("R15 the reason says which claims went unreviewed",
-          "did not review" in p.stderr, f"got {p.stderr!r}")
+          "never reviewed" in p.stderr, f"got {p.stderr!r}")
 
 
 def test_malformed_verdict_reads_as_absent():
@@ -1489,23 +1513,363 @@ def test_audit_gate_terminates_at_cap():
           run["status"] == "stopped_residual", f"got {run}")
 
 
-def test_stale_audit_is_rejected():
-    """REGRESSION — the ticket's `pass` field was written and validated but never COMPARED, so
-    an audit from pass 1 could certify a graph that kept changing for seven more passes."""
-    tickets = [{"nonce": "a" * 32, "pass": 1}]
-    run = Path(tempfile.mkdtemp())
-    aud.tickets_path(run).parent.mkdir(parents=True, exist_ok=True)
-    aud.tickets_path(run).write_text(json.dumps({"tickets": tickets}))
-    aud.verdict_path(run).write_text(json.dumps(
-        {"verdict": "pass", "nonce": "a" * 32, "auditor": "empirica-auditor",
-         "claims_reviewed": ["G0"], "findings": [], "ts": "2026-07-24T13:00:00Z"}))
-    ok, reason = aud.check(run, ["G0"], 1)
-    check("R35 an audit at the CURRENT pass is accepted", ok is True, reason)
-    ok2, reason2 = aud.check(run, ["G0"], 4)
-    check("R36 an audit from an EARLIER pass is rejected as stale", ok2 is False, reason2)
-    check("R37 the reason says the graph changed since review", "STALE" in reason2, reason2)
-    ok3, _ = aud.check(run, ["G0"])
-    check("R38 omitting current_pass keeps the old behaviour (back-compat)", ok3 is True)
+def _digests_of(d: Path, nid: str, sid: str = DEFAULT_SID) -> dict:
+    """The digests the gate will demand for one claim — the `approved` map's value shape."""
+    return _reviewed(d, [nid], sid)[0]
+
+
+def _approved_map(d: Path, claim_ids: list[str], sid: str = DEFAULT_SID) -> dict:
+    return {e["claim_id"]: {"claim_digest": e["claim_digest"],
+                            "evidence_digest": e["evidence_digest"]}
+            for e in _reviewed(d, claim_ids, sid)}
+
+
+def test_audit_verdict_is_per_claim_not_per_graph():
+    """ADR-25 — the headline behaviour: adding a claim must not un-review the others.
+
+    Under the old per-graph pass counter, any change invalidated the whole verdict, so adding one
+    claim to a 22-claim graph demanded 22 re-reviews. Worse, the gate ticks a pass on every
+    audit-fail round, so the intended fix-and-loop rhythm invalidated the verdict on COMPLIANT
+    behaviour.
+    """
+    d = write_run([{"text": "claim one", "confidence": 0.9},
+                   {"text": "claim two", "confidence": 0.9}])
+    nonce = _spawn_auditor(d)
+    _write_verdict(d, nonce=nonce, claims_reviewed=["G0", "G1", "G2"])
+    ok, reason = aud.check(manifest.locate_run_dir(d, DEFAULT_SID),
+                           _approved_map(d, ["G0", "G1", "G2"]))
+    check("R35 a verdict covering every approved claim at its current digests passes", ok is True,
+          reason)
+
+    # Now add a THIRD claim, as a real convergence pass would.
+    run_dir = manifest.locate_run_dir(d, DEFAULT_SID)
+    gp = graph.default_graph_path(run_dir)
+    g = json.loads(gp.read_text())
+    g["nodes"]["G3"] = {"type": "Goal", "text": "a claim derived later", "confidence": 0.9}
+    g["edges"].append({"from": "G0", "to": "G3", "type": "SupportedBy"})
+    gp.write_text(json.dumps(g))
+    ev.write_research(run_dir, "r-G3", "G3", "a claim derived later",
+                      source="https://docs.example/x", kind="docs", citation="cited",
+                      result="supports", ts="2026-07-24T09:00:00Z")
+
+    ok2, reason2 = aud.check(run_dir, _approved_map(d, ["G0", "G1", "G2", "G3"]))
+    check("R36 adding a claim blocks convergence until it is reviewed", ok2 is False, reason2)
+    check("R37 …and the reason names ONLY the new claim, not the already-reviewed ones",
+          "G3" in reason2 and "G1" not in reason2 and "G2" not in reason2, reason2)
+
+
+def test_rewording_an_audited_claim_unreviews_that_claim():
+    """ADR-25 — a reworded claim's `claim_digest` moves, so the audit answered a different
+    question. Symmetric with `_binds`, which invalidates the EVIDENCE on a reword."""
+    d = write_run([{"text": "the original wording", "confidence": 0.9}])
+    nonce = _spawn_auditor(d)
+    _write_verdict(d, nonce=nonce, claims_reviewed=["G0", "G1"])
+    run_dir = manifest.locate_run_dir(d, DEFAULT_SID)
+    gp = graph.default_graph_path(run_dir)
+    g = json.loads(gp.read_text())
+    g["nodes"]["G1"]["text"] = "a materially different wording"
+    gp.write_text(json.dumps(g))
+    # Re-evidence it so the ONLY reason it can fail is the audit coverage, not a missing fold.
+    ev.write_research(run_dir, "r-G1b", "G1", "a materially different wording",
+                      source="https://docs.example/y", kind="docs", citation="cited",
+                      result="supports", ts="2026-07-24T09:00:00Z")
+    ok, reason = aud.check(run_dir, _approved_map(d, ["G0", "G1"]))
+    check("R38 rewording an audited claim un-reviews it", ok is False, reason)
+    check("R39 the reason says it was REWORDED, not merely unreviewed",
+          "REWORDED" in reason and "G1" in reason, reason)
+
+
+def test_swapping_evidence_after_review_unreviews_that_claim():
+    """ADR-25 — THE OPTION-B REGRESSION, pinned.
+
+    `claim_digest` is over claim TEXT only, so swapping a citation for a fabricated one leaves it
+    identical. Keying the verdict on the claim digest alone — the fix as originally proposed —
+    would read this as still reviewed, and since it also drops the pass-staleness proxy that
+    incidentally caught it, it would NARROW the audit while appearing to sharpen it. The
+    `evidence_digest` is what closes it.
+    """
+    d = write_run([{"text": "a claim", "confidence": 0.9}])
+    nonce = _spawn_auditor(d)
+    _write_verdict(d, nonce=nonce, claims_reviewed=["G0", "G1"])
+    run_dir = manifest.locate_run_dir(d, DEFAULT_SID)
+    before = _digests_of(d, "G1")
+    # Same claim text; a DIFFERENT source and citation. This is citation substitution.
+    ev.write_research(run_dir, "r-G1", "G1", "a claim",
+                      source="https://fabricated.example/nope", kind="docs",
+                      citation="a passage that was never read", result="supports",
+                      ts="2026-07-24T09:30:00Z")
+    after = _digests_of(d, "G1")
+    check("R40 swapping the citation leaves claim_digest UNCHANGED (why option B fails)",
+          before["claim_digest"] == after["claim_digest"])
+    check("R41 …but MOVES evidence_digest",
+          before["evidence_digest"] != after["evidence_digest"])
+    ok, reason = aud.check(run_dir, _approved_map(d, ["G0", "G1"]))
+    check("R42 swapping an audited claim's evidence un-reviews it", ok is False, reason)
+    check("R43 the reason says the EVIDENCE changed", "EVIDENCE" in reason and "G1" in reason,
+          reason)
+
+
+def test_legacy_flat_verdict_form_is_refused():
+    """ADR-25 — no backwards compatibility, on purpose.
+
+    A dual-form reader would keep the weaker form reachable, which is exactly the legacy-shape
+    escape hatch the gate already had to close once (see the legacy-manifest regression).
+    """
+    d = _converged_run()
+    nonce = _spawn_auditor(d)
+    run_dir = manifest.locate_run_dir(d, DEFAULT_SID)
+    aud.verdict_path(run_dir).write_text(json.dumps(
+        {"verdict": "pass", "nonce": nonce, "auditor": "empirica-auditor",
+         "claims_reviewed": ["G0", "G1"],  # the pre-ADR-25 flat form
+         "findings": [], "ts": "2026-07-24T13:00:00Z"}))
+    verdict = aud.read_verdict(run_dir)
+    check("R44 a flat list[str] verdict yields NO reviewed entries",
+          verdict is not None and verdict["claims_reviewed"] == [], f"got {verdict}")
+    p = run_hook(GATE, {"cwd": str(d), "session_id": DEFAULT_SID}, d)
+    check("R45 a legacy-shape verdict cannot converge a run", p.returncode == 2,
+          f"rc={p.returncode}")
+
+
+def test_entry_missing_a_digest_is_not_coverage():
+    """An entry that cannot be compared is not a review. Dropped, so the claim reads unreviewed
+    rather than covered-by-something-unverifiable."""
+    d = _converged_run()
+    nonce = _spawn_auditor(d)
+    run_dir = manifest.locate_run_dir(d, DEFAULT_SID)
+    entries = _reviewed(d, ["G0", "G1"])
+    del entries[1]["evidence_digest"]
+    aud.verdict_path(run_dir).write_text(json.dumps(
+        {"verdict": "pass", "nonce": nonce, "auditor": "empirica-auditor",
+         "claims_reviewed": entries, "findings": [], "ts": "2026-07-24T13:00:00Z"}))
+    ok, reason = aud.check(run_dir, _approved_map(d, ["G0", "G1"]))
+    check("R46 an entry missing a digest does not count as coverage", ok is False, reason)
+    check("R47 a non-sha256 digest is refused too",
+          aud._review_entry({"claim_id": "G1", "claim_digest": "nope",
+                             "evidence_digest": "0" * 64}) is None)
+
+
+def test_fix_and_reaudit_does_not_invalidate_untouched_claims():
+    """ADR-25 driver 2 — the loop the old proxy punished.
+
+    audit fails → the run fixes ONE claim → re-audit. The other claims are untouched, so their
+    digests have not moved and they stay reviewed. Under the pass counter, the pass tick alone
+    invalidated all of them.
+    """
+    d = write_run([{"text": "claim one", "confidence": 0.9},
+                   {"text": "claim two", "confidence": 0.9}])
+    nonce = _spawn_auditor(d)
+    _write_verdict(d, nonce=nonce, claims_reviewed=["G0", "G1", "G2"], verdict="fail",
+                   findings=["G2's citation does not support the claim"])
+    run_dir = manifest.locate_run_dir(d, DEFAULT_SID)
+    ok, _ = aud.check(run_dir, _approved_map(d, ["G0", "G1", "G2"]))
+    check("R48 a failing audit blocks", ok is False)
+
+    # The run fixes G2's evidence only, then re-audits — reviewing just G2.
+    ev.write_research(run_dir, "r-G2", "G2", "claim two",
+                      source="https://docs.example/real", kind="docs",
+                      citation="the passage that actually decides it", result="supports",
+                      ts="2026-07-24T11:00:00Z")
+    nonce2 = _spawn_auditor(d)
+    entries = _reviewed(d, ["G2"]) + [
+        # G0 and G1 carry the digests from the FIRST review — unchanged, because nothing touched
+        # them. This is the whole point: the auditor did not re-read them.
+        e for e in _reviewed(d, ["G0", "G1"])]
+    aud.verdict_path(run_dir).write_text(json.dumps(
+        {"verdict": "pass", "nonce": nonce2, "auditor": "empirica-auditor",
+         "claims_reviewed": entries, "findings": [], "ts": "2026-07-24T12:00:00Z"}))
+    ok2, reason2 = aud.check(run_dir, _approved_map(d, ["G0", "G1", "G2"]))
+    check("R49 after fixing ONE claim, a re-audit of that claim converges the run", ok2 is True,
+          reason2)
+
+
+def test_repeat_requires_every_run_to_pass():
+    """`--repeat N` is CONJUNCTIVE: one sample is not a verdict.
+
+    The check here fails on its 3rd invocation and passes otherwise, so a single-sample run is
+    green and a repeated run is red — deterministically, without relying on real randomness (which
+    would make the test itself flaky, the very thing this feature exists to catch).
+    """
+    d = Path(tempfile.mkdtemp())
+    counter, script = d / "n", d / "flaky.sh"
+    script.write_text("#!/bin/sh\nn=$(cat %s 2>/dev/null || echo 0)\nn=$((n+1))\n"
+                      "echo $n > %s\n[ $n -ne 3 ]\n" % (counter, counter))
+    script.chmod(0o755)
+    harness = _load("spike_harness", HARNESS)
+
+    first = harness.run_gate_repeated([str(script)], repeat=1)
+    check("Q20 a single sample of the flaky check passes", first["gate"] == "pass", f"{first}")
+    counter.write_text("0")
+    repeated = harness.run_gate_repeated([str(script)], repeat=5)
+    check("Q21 --repeat 5 catches the failing repetition", repeated["gate"] == "fail",
+          f"{repeated}")
+    check("Q22 it short-circuits at the first failure, not after all N",
+          len(repeated["runs"]) == 3, f"got {len(repeated['runs'])} runs")
+    check("Q23 every repetition's exit code is on the record",
+          [r["returncode"] for r in repeated["runs"]] == [0, 0, 1],
+          f"{[r['returncode'] for r in repeated['runs']]}")
+
+    counter.write_text("100")  # never hits 3 again → all pass
+    clean = harness.run_gate_repeated([str(script)], repeat=4)
+    check("Q24 a genuinely deterministic check passes all N", clean["gate"] == "pass", f"{clean}")
+    check("Q25 …and records all N runs", len(clean["runs"]) == 4, f"{clean}")
+    check("Q26 repeat=1 leaves the payload shape unchanged (no `runs` key)",
+          "runs" not in harness.run_gate_repeated(["true"], repeat=1))
+    args = harness.parse_args(["--repeat", "0", "--", "x"])
+    check("Q27 --repeat 0 clamps to 1 rather than skipping the check", args[4] == 1, f"{args}")
+    check("Q28 a malformed --repeat falls back to 1",
+          harness.parse_args(["--repeat", "abc", "x"])[4] == 1)
+    check("Q29 --repeat is clamped to MAX_REPEAT",
+          harness.parse_args(["--repeat", "10000", "x"])[4] == harness.MAX_REPEAT)
+
+
+def test_repeat_result_hash_covers_every_run():
+    """The record's `result_hash` must describe the WHOLE repeated run.
+
+    It used to be sha256 of one run's stdout tail; under --repeat that is the digest of an
+    arbitrary repetition, which varies between invocations of a nondeterministic check and so
+    describes nothing. A repeated run digests the ordered per-run digests instead.
+    """
+    harness = _load("spike_harness", HARNESS)
+    a = harness.run_gate_repeated(["sh", "-c", "echo same"], repeat=3)
+    b = harness.run_gate_repeated(["sh", "-c", "echo same"], repeat=3)
+    check("Q30 a deterministic repeated check has a STABLE result_hash",
+          harness._result_hash(a) == harness._result_hash(b))
+    single = harness.run_gate_repeated(["sh", "-c", "echo same"], repeat=1)
+    check("Q31 …and it DIFFERS from the single-run digest, because it covers 3 runs",
+          harness._result_hash(a) != harness._result_hash(single))
+    varying = harness.run_gate_repeated(["sh", "-c", "date +%s%N; echo x"], repeat=1)
+    check("Q32 a single run still digests its own stdout (unchanged behaviour)",
+          harness._result_hash(varying) is not None and "runs" not in varying)
+
+
+# --- ADR-26 freeze ----------------------------------------------------------
+
+
+def _freeze(d: Path, sid: str = DEFAULT_SID, ts: str = "2026-08-10T10:00:00Z") -> dict:
+    """Run the freeze entry point the way the skill does, and return its JSON summary."""
+    p = subprocess.run(
+        [sys.executable, str(HOOKS / "route_stamp.py"), "--freeze", "--session", sid,
+         "--ts", ts, "--cwd", str(d)],
+        capture_output=True, text=True, cwd=str(d))
+    return json.loads(p.stdout) if p.stdout.strip() else {}
+
+
+def _add_claim(d: Path, nid: str, text: str, confidence: float = 0.0,
+               sid: str = DEFAULT_SID, evidenced: bool = True) -> None:
+    """Append a gating claim to a live run's graph, as a convergence pass would."""
+    run_dir = manifest.locate_run_dir(d, sid)
+    gp = graph.default_graph_path(run_dir)
+    g = json.loads(gp.read_text())
+    g["nodes"][nid] = {"type": "Goal", "text": text, "confidence": confidence}
+    g["edges"].append({"from": "G0", "to": nid, "type": "SupportedBy"})
+    gp.write_text(json.dumps(g))
+    if evidenced:
+        ev.write_research(run_dir, f"r-{nid}", nid, text, source="https://docs.example/z",
+                          kind="docs", citation="cited", result="supports",
+                          ts="2026-07-24T09:00:00Z")
+
+
+def test_freeze_defers_later_claims_and_closes_the_run():
+    """ADR-26 THE BYPASS TEST — freeze, then add an unresolved claim.
+
+    The run still stops, because a post-freeze claim does not gate. But the claim appears in
+    `deferred`, is never silently dropped, and never lets the run report convergence. That is the
+    whole trade freeze makes: less SCOPE, declared up front and printed, never less work on the
+    scope it committed to.
+    """
+    d = write_run([{"text": "committed claim", "confidence": 0.9}])
+    summary = _freeze(d)
+    check("Z1 freezing snapshots the claims already gating",
+          summary.get("frozen") is True and sorted(summary.get("frozen_claims", [])) == ["G0", "G1"],
+          f"{summary}")
+
+    _add_claim(d, "G9", "a hard claim discovered after the freeze", confidence=0.0)
+    # A frozen stop still owes an audit (see test_frozen_run_still_owes_an_audit) — the point here
+    # is that the unresolved POST-freeze claim is not what blocks.
+    _write_verdict(d, nonce=_spawn_auditor(d), claims_reviewed=["G0", "G1"])
+    p = run_hook(GATE, {"cwd": str(d), "session_id": DEFAULT_SID}, d)
+    check("Z2 an unresolved POST-freeze claim does not block the stop", p.returncode == 0,
+          f"rc={p.returncode} stderr={p.stderr!r}")
+    out = json.loads(p.stdout)
+    check("Z3 the run is NOT reported as converged", out.get("converged") is False, f"{out}")
+    check("Z4 the deferred claim is named in the result, not silently dropped",
+          out.get("deferred") == ["G9"], f"{out}")
+    run = manifest.read_run(manifest.locate_run(d, DEFAULT_SID))
+    check("Z5 the terminal status is stopped_frozen, distinct from stopped_residual",
+          run["status"] == "stopped_frozen", f"{run['status']}")
+
+
+def test_freeze_cannot_be_enlarged_by_refreezing():
+    """First write wins. A commitment that can be rewritten per pass is not a commitment."""
+    d = write_run([{"text": "first claim", "confidence": 0.9}])
+    _freeze(d)
+    _add_claim(d, "G7", "added after the freeze", confidence=0.9)
+    second = _freeze(d, ts="2026-08-10T11:00:00Z")
+    check("Z6 a second freeze does not enlarge the committed set",
+          sorted(second.get("frozen_claims", [])) == ["G0", "G1"], f"{second}")
+    run = manifest.read_run(manifest.locate_run(d, DEFAULT_SID))
+    check("Z7 the manifest keeps the ORIGINAL freeze stamp",
+          run["freeze_ts"] == "2026-08-10T10:00:00Z", f"{run}")
+    check("Z8 …and G7 is deferred, never retro-committed",
+          manifest.deferred_claims(run, ["G0", "G1", "G7"]) == ["G7"], f"{run}")
+
+
+def test_frozen_claims_still_gate():
+    """Freeze must not weaken the claims it committed to — only defer the ones it did not."""
+    d = write_run([{"text": "unresolved committed claim", "confidence": 0.1}])
+    _freeze(d)
+    p = run_hook(GATE, {"cwd": str(d), "session_id": DEFAULT_SID}, d)
+    check("Z9 an open claim INSIDE the frozen set still blocks", p.returncode == 2,
+          f"rc={p.returncode}")
+    check("Z10 the block message still names the missing fold or score",
+          "G1" in p.stderr, f"got {p.stderr!r}")
+
+
+def test_corrupt_freeze_record_reads_as_not_frozen():
+    """Fail toward gating MORE. A freeze record that freed a blocking run when unreadable would
+    be the legacy-shape exploit again — note this is the OPPOSITE direction from modes.json,
+    whose corrupt state is safely 'off'."""
+    d = write_run([{"text": "still open", "confidence": 0.1}])
+    rp = manifest.locate_run(d, DEFAULT_SID)
+    raw = json.loads(rp.read_text())
+    raw["frozen_claims"] = "not-a-list"
+    rp.write_text(json.dumps(raw))
+    run = manifest.read_run(rp)
+    check("Z11 a malformed frozen_claims normalises to None", run["frozen_claims"] is None,
+          f"{run}")
+    check("Z12 …so the run reads as NOT frozen", manifest.is_frozen(run) is False)
+    _add_claim(d, "G8", "would be deferred if the freeze were honoured", confidence=0.1)
+    p = run_hook(GATE, {"cwd": str(d), "session_id": DEFAULT_SID}, d)
+    check("Z13 an unreadable freeze gates every claim (fails toward MORE gating)",
+          p.returncode == 2, f"rc={p.returncode}")
+
+
+def test_frozen_run_still_owes_an_audit():
+    """A frozen stop ASSERTS it discharged its committed scope. That is a positive claim, so P6
+    still applies — otherwise freeze would be an audit bypass and ADR-26's "the auditor judges the
+    freeze" guard would be vacuous."""
+    d = write_run([{"text": "committed and settled", "confidence": 0.9}])
+    _freeze(d)
+    _add_claim(d, "G9", "deferred", confidence=0.0)
+    p = run_hook(GATE, {"cwd": str(d), "session_id": DEFAULT_SID}, d)
+    check("Z14 a frozen run with NO audit is blocked, not waved through", p.returncode == 2,
+          f"rc={p.returncode} stderr={p.stderr!r}")
+    check("Z15 the block message tells the auditor to judge the DEFERRAL",
+          "FROZEN" in p.stderr and "deferral" in p.stderr.lower(), f"got {p.stderr!r}")
+
+    nonce = _spawn_auditor(d)
+    _write_verdict(d, nonce=nonce, claims_reviewed=["G0", "G1"])
+    p2 = run_hook(GATE, {"cwd": str(d), "session_id": DEFAULT_SID}, d)
+    check("Z16 with a passing audit the frozen run closes", p2.returncode == 0,
+          f"rc={p2.returncode} stderr={p2.stderr!r}")
+    out = json.loads(p2.stdout)
+    check("Z17 …reporting the audit, the deferral, and converged:false together",
+          out.get("audit") == "passed" and out.get("deferred") == ["G9"]
+          and out.get("converged") is False, f"{out}")
+    check("Z18 a residual (gave-up) stop is still exempt from the audit requirement",
+          run_hook(GATE, {"cwd": str(write_run([{"text": "human call", "confidence": 0.1,
+                                                 "blocked": "needs-decision"}])),
+                          "session_id": DEFAULT_SID}, d).returncode == 0)
 
 
 def test_legacy_shape_cannot_free_a_blocking_run():
@@ -1539,6 +1903,26 @@ def test_legacy_shape_cannot_free_a_blocking_run():
     p3 = run_hook(GATE, {"cwd": str(d3), "session_id": DEFAULT_SID}, d3)
     check("G13 a GENUINE legacy run (no graph) still fails OPEN", p3.returncode == 0,
           f"rc={p3.returncode} stderr={p3.stderr!r}")
+
+
+def test_pretooluse_hook_does_not_import_the_freeze_path():
+    """route_stamp.py fires on EVERY Read/Grep/Bash in EVERY session, including sessions that are
+    not empirica runs. Anything imported at its module scope is therefore paid per tool call.
+
+    The freeze path (ADR-26) needs claimgraph + evidence + convergence_gate; importing those
+    eagerly measured ~3ms per tool call for code only `--freeze` reaches, so they load inside
+    `freeze_scope`. This test pins that, because the regression is invisible — the suite stays
+    green and only interactive latency degrades.
+    """
+    source = (HOOKS / "route_stamp.py").read_text()
+    head = source.split("def freeze_scope", 1)[0]
+    eager = [m for m in ("claimgraph", "evidence", "convergence_gate")
+             if f'_load("{m}")' in head]
+    check("T99 the PreToolUse hook does not eagerly load the freeze-only modules",
+          eager == [], f"loaded at module scope: {eager}")
+    check("T99b …and freeze_scope loads them itself",
+          all(f'_load("{m}")' in source.split("def freeze_scope", 1)[1]
+              for m in ("claimgraph", "evidence", "convergence_gate")))
 
 
 def test_route_announcement_is_recorded():
@@ -2689,7 +3073,8 @@ def test_attribution_reaches_the_run_report():
     nonce = aud.record_spawn(run_dir, manifest.read_run(rp)["run_id"], 0,
                              actor={"model": "claude-opus-5", "harness": "claude-code"})
     aud.verdict_path(run_dir).write_text(json.dumps({
-        "verdict": "pass", "nonce": nonce, "claims_reviewed": ["G0", "G1"]}))
+        "verdict": "pass", "nonce": nonce,
+        "claims_reviewed": _reviewed(d, ["G0", "G1"], sid)}))
     manifest.stamp_route(rp, "2026-08-06T09:00:00Z")
     manifest.stamp_first_tool(rp, "2026-08-06T09:30:00Z")
     p = run_hook(GATE, {"cwd": str(d), "session_id": sid}, d)
@@ -3346,7 +3731,21 @@ def main() -> int:
               test_failing_audit_blocks, test_partial_audit_is_refused,
               test_malformed_verdict_reads_as_absent,
               test_residual_stop_does_not_require_an_audit, test_audit_gate_terminates_at_cap,
-              test_stale_audit_is_rejected, test_legacy_shape_cannot_free_a_blocking_run, test_route_announcement_is_recorded,
+              test_audit_verdict_is_per_claim_not_per_graph,
+              test_rewording_an_audited_claim_unreviews_that_claim,
+              test_swapping_evidence_after_review_unreviews_that_claim,
+              test_legacy_flat_verdict_form_is_refused,
+              test_entry_missing_a_digest_is_not_coverage,
+              test_fix_and_reaudit_does_not_invalidate_untouched_claims,
+              test_repeat_requires_every_run_to_pass,
+              test_repeat_result_hash_covers_every_run,
+              test_freeze_defers_later_claims_and_closes_the_run,
+              test_freeze_cannot_be_enlarged_by_refreezing,
+              test_frozen_claims_still_gate,
+              test_corrupt_freeze_record_reads_as_not_frozen,
+              test_frozen_run_still_owes_an_audit,
+              test_pretooluse_hook_does_not_import_the_freeze_path,
+              test_legacy_shape_cannot_free_a_blocking_run, test_route_announcement_is_recorded,
               test_spawn_ledger_is_keyed_to_the_run, test_p1_violation_survives_a_passing_audit, test_spike_with_no_files_cannot_approve,
               test_auditor_is_spawned_by_its_plugin_scoped_name,
               test_agent_definitions_pin_tiers_not_ids_in_logic,

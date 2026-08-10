@@ -24,7 +24,12 @@ claim to this run's real exit code (via evidence.py). That is the whole reason t
 cannot be forged: `gate` is derived from `returncode`, never from a model's assertion. Do not
 add another caller of `evidence.write_spike` — a second writer would reopen the hole.
 
-Usage:  python3 spike_harness.py [--timeout SEC] [--report-only]
+ONE SAMPLE IS NOT A VERDICT. `--repeat N` runs the check N times and passes only if every run
+exited 0. A check with any nondeterminism — an unseeded property test, a timing or ordering
+dependency — can pass once by luck, and that single green record then approves the claim for the
+rest of the run. Use it for any check whose result is not obviously a pure function of the tree.
+
+Usage:  python3 spike_harness.py [--timeout SEC] [--repeat N] [--report-only]
                                  [--claim ID --run-dir DIR --ts STAMP [--file PATH ...]]
                                  <cmd> [args...]
 """
@@ -45,7 +50,13 @@ _LAUNCH_FAIL_RC = 127  # command could not be launched (missing/permission/OS er
 
 
 class SpikeResult(TypedDict):
-    """The transient gate payload (ADR-14). `gate` is 'pass' iff returncode == 0."""
+    """The transient gate payload (ADR-14). `gate` is 'pass' iff returncode == 0.
+
+    Under `--repeat N` the top-level fields describe the RUN AS A WHOLE — `gate` is 'pass' only
+    if every repetition passed, and `returncode` is the first failing code — with the per-run
+    detail in `runs`. A single run leaves `runs` absent, so the payload is unchanged for callers
+    that never repeat.
+    """
     cmd: list[str]
     returncode: int | None
     gate: str
@@ -148,6 +159,49 @@ def run_gate(cmd: list[str], timeout: float = DEFAULT_TIMEOUT) -> SpikeResult:
     )
 
 
+MAX_REPEAT = 100  # a repeat count above this is a mistake, not a stronger check
+
+
+def run_gate_repeated(cmd: list[str], timeout: float = DEFAULT_TIMEOUT,
+                      repeat: int = 1) -> SpikeResult:
+    """Run the check `repeat` times; the gate passes only if EVERY run passed.
+
+    WHY THIS EXISTS: a single sample cannot distinguish "this check passes" from "this check
+    passed once". A flaky or randomised check — a property test with an unseeded generator, a
+    check with a timing or ordering dependency — yields a green Fold-2 record from one lucky run,
+    and that record then approves the claim forever (ADR-13's exit code is still the approver, but
+    one sample of it). Repeating is the cheapest real defence: N independent exit codes, all of
+    which must be 0.
+
+    Short-circuits on the FIRST failure. A check that already failed cannot be rescued by later
+    runs, and continuing would spend the user's time to learn nothing — so `runs` records the runs
+    actually performed, not a padded list.
+
+    Conjunctive on purpose: a majority rule would let a known-flaky check approve a claim, which
+    is the exact property this flag exists to detect.
+    """
+    runs: list[dict] = []
+    worst: SpikeResult | None = None
+    for _ in range(repeat):
+        result = run_gate(cmd, timeout)
+        runs.append({"returncode": result["returncode"], "gate": result["gate"],
+                     "timed_out": result["timed_out"],
+                     # Per-run stdout digest, not the text: enough to see that repetitions
+                     # differed (the signature of a nondeterministic check) without carrying N
+                     # copies of the output into a record that must stay small.
+                     "stdout_sha256": hashlib.sha256(
+                         "\n".join(result["stdout_tail"]).encode("utf-8")).hexdigest()})
+        worst = result
+        if result["gate"] != "pass":
+            break  # first failure decides the gate; later runs cannot un-fail it
+    assert worst is not None  # parse_args guarantees repeat >= 1
+    out = SpikeResult(**worst)
+    if repeat > 1:
+        out["runs"] = runs  # type: ignore[typeddict-unknown-key]
+        out["repeat"] = repeat  # type: ignore[typeddict-unknown-key]
+    return out
+
+
 def _kill_group(proc: subprocess.Popen) -> None:
     """Kill the child's whole process group on timeout so descendants don't leak."""
     try:
@@ -166,16 +220,21 @@ def _load(name: str):
     return mod
 
 
-def parse_args(argv: list[str]) -> tuple[list[str], float, bool, dict]:
+def parse_args(argv: list[str]) -> tuple[list[str], float, bool, dict, int]:
     """Split leading flags from the command to run.
 
     timeout is clamped to a finite positive value (review 1.5: a bogus timeout must not
     disable the guard). The evidence flags (`--claim`, `--run-dir`, `--ts`, repeated
     `--file`) are optional: without them the harness behaves exactly as before, as a plain
     deterministic gate that records nothing.
+
+    `--repeat N` is clamped to [1, MAX_REPEAT] and a malformed value falls back to 1 — the same
+    fail-toward-the-default discipline as `--timeout`. Clamping rather than rejecting keeps the
+    flag from being a way to make the harness refuse to run at all.
     """
     timeout = DEFAULT_TIMEOUT
     report_only = False
+    repeat = 1
     ev: dict = {"claim": None, "run_dir": None, "ts": None, "files": []}
     while argv:
         if argv[0] == "--report-only":
@@ -189,6 +248,12 @@ def parse_args(argv: list[str]) -> tuple[list[str], float, bool, dict]:
             except ValueError:
                 pass
             argv = argv[2:]
+        elif argv[0] == "--repeat" and len(argv) >= 2:
+            try:
+                repeat = max(1, min(MAX_REPEAT, int(argv[1])))
+            except ValueError:
+                pass
+            argv = argv[2:]
         elif argv[0] == "--file" and len(argv) >= 2:
             ev["files"].append(argv[1])
             argv = argv[2:]
@@ -197,7 +262,26 @@ def parse_args(argv: list[str]) -> tuple[list[str], float, bool, dict]:
             argv = argv[2:]
         else:
             break
-    return argv, timeout, report_only, ev
+    return argv, timeout, report_only, ev, repeat
+
+
+def _result_hash(result: SpikeResult) -> str:
+    """The record's `result` digest.
+
+    For a single run: sha256 of the retained stdout, as before. Under `--repeat` that would be
+    the digest of ONE arbitrary repetition's output — a value that varies between invocations of
+    a nondeterministic check and therefore describes nothing. So a repeated run digests the
+    ordered per-run stdout digests instead, which is stable for a deterministic check and
+    visibly differs for a flaky one: the field keeps meaning what it says.
+    """
+    runs = result.get("runs")
+    if runs:
+        h = hashlib.sha256()
+        for run in runs:
+            h.update(run["stdout_sha256"].encode("ascii"))
+            h.update(b"\0")
+        return h.hexdigest()
+    return hashlib.sha256("\n".join(result["stdout_tail"]).encode("utf-8")).hexdigest()
 
 
 def _record_evidence(result: SpikeResult, ev: dict) -> dict | None:
@@ -225,11 +309,9 @@ def _record_evidence(result: SpikeResult, ev: dict) -> dict | None:
         node = g["nodes"].get(ev["claim"])
         if node is None:
             return {"recorded": False, "reason": f"claim {ev['claim']!r} is not in the graph"}
-        stdout_text = "\n".join(result["stdout_tail"])
         path = evidence.write_spike(
             run_dir, f"spike-{ev['claim']}", ev["claim"], node["text"],
-            cmd=result["cmd"], gate=result["gate"],
-            result_hash=hashlib.sha256(stdout_text.encode("utf-8")).hexdigest(),
+            cmd=result["cmd"], gate=result["gate"], result_hash=_result_hash(result),
             files=[Path(f) for f in ev["files"]], ts=ev["ts"],
         )
         return {"recorded": True, "gate": result["gate"], "path": str(path)}
@@ -238,13 +320,14 @@ def _record_evidence(result: SpikeResult, ev: dict) -> dict | None:
 
 
 def main() -> int:
-    cmd, timeout, report_only, ev = parse_args(sys.argv[1:])
+    cmd, timeout, report_only, ev, repeat = parse_args(sys.argv[1:])
     if not cmd:
-        print(json.dumps({"error": "usage: spike_harness.py [--timeout SEC] [--report-only] "
+        print(json.dumps({"error": "usage: spike_harness.py [--timeout SEC] [--repeat N] "
+                                    "[--report-only] "
                                     "[--claim ID --run-dir DIR --ts STAMP [--file PATH ...]] "
                                     "<cmd> [args...]"}))
         return 2
-    result = run_gate(cmd, timeout)
+    result = run_gate_repeated(cmd, timeout, repeat)
     out = dict(result)
     recorded = _record_evidence(result, ev)
     if recorded is not None:

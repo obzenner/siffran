@@ -56,6 +56,13 @@ you were spawned. Read:
    claims that are IN it. Compare the graph against the stated goal and ask what a competent
    engineer would have had to establish. **A material unknown that was never written down as a
    claim is a FAIL** — silence is how a run converges without doing the work.
+9. **If the run FROZE, judge the deferral** (ADR-26). A frozen run committed to a scope
+   (`frozen_claims` in `run.json`) and deferred everything derived later. Freeze bounds what the
+   harness gates; it cannot judge whether the committed scope was honest — that is yours. Ask: does
+   the frozen set cover the intent's core, or did the freeze carve out the hard part and defer it?
+   **A freeze that deferred something the goal actually depends on is a FAIL**, even though every
+   frozen claim is properly evidenced. Deferring genuine refinements and follow-on work is correct
+   and is what the mechanism is for.
 
 ## Output — write the verdict artifact
 
@@ -67,13 +74,49 @@ nonce-mismatched verdict blocks convergence.
   "verdict": "pass" | "fail",
   "nonce": "<the nonce you were given at spawn>",
   "auditor": "empirica-auditor",
-  "claims_reviewed": ["G1", "G2", "..."],
+  "claims_reviewed": [
+    {"claim_id": "G1",
+     "claim_digest": "<sha256 of the claim text you read>",
+     "evidence_digest": "<sha256 over the supporting leaves you re-read>"}
+  ],
   "findings": ["one line per problem found — required when verdict is fail"],
   "ts": "<ISO timestamp>"
 }
 ```
 
-`claims_reviewed` must list **every approved claim**. The gate rejects a verdict that skipped
-any of them — you cannot pass a run by reviewing one claim and ignoring the rest.
+`claims_reviewed` must cover **every approved claim**, and each entry records the two digests the
+claim had *when you reviewed it* (ADR-25). The gate recomputes both from disk and rejects a verdict
+that skipped a claim, or reviewed an older wording of one, or reviewed evidence that has since been
+swapped. You cannot pass a run by reviewing one claim and ignoring the rest.
+
+**Do not hand-compute the digests.** Both come from the same functions the gate uses, so call them:
+
+```bash
+python3 -c '
+import importlib.util, json, sys
+from pathlib import Path
+def load(n):
+    s = importlib.util.spec_from_file_location(n, Path(sys.argv[1]) / f"{n}.py")
+    m = importlib.util.module_from_spec(s); s.loader.exec_module(m); return m
+ev, cgph = load("evidence"), load("claimgraph")
+run_dir = Path(sys.argv[2])
+graph = cgph.load(cgph.default_graph_path(run_dir))
+leaves = ev.read_leaves(run_dir)
+print(json.dumps([
+    {"claim_id": nid,
+     "claim_digest": ev.claim_digest(graph["nodes"][nid]["text"]),
+     "evidence_digest": ev.evidence_digest(leaves, nid, graph["nodes"][nid]["text"])}
+    for nid in sys.argv[3:]], indent=2))
+' <hooks_dir> <run_dir> G1 G2 …
+```
+
+Pass only the claim ids you actually reviewed and are willing to sign off. A digest you computed
+without reading the evidence is a false review, and it is the one failure this whole mechanism
+cannot detect — the gate can check that you recorded a digest, never that you looked.
+
+**This is an incremental audit.** On a re-audit, claims whose digests have not moved are still
+covered by your previous verdict, so review what changed — the gate's block message names exactly
+which claims are unreviewed, reworded, or re-evidenced. Re-reviewing an unchanged claim is wasted
+work, not extra rigour.
 
 Report your findings in your final message too, but the FILE is what the gate reads.

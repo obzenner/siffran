@@ -112,6 +112,45 @@ def claim_digest(claim_text: str) -> str:
     return hashlib.sha256(claim_text.encode("utf-8")).hexdigest()
 
 
+def evidence_digest(leaves: list[dict], claim_id: str, claim_text: str) -> str:
+    """sha256 over the SUPPORTING evidence bound to this claim — the digest an audit verdict
+    records so its reviewed-ness ages per claim (ADR-25).
+
+    ONE definition, called by both the auditor that writes a verdict and the gate that checks
+    it. A second hand-rolled hash on either side would drift, and a drifted digest reads as
+    "evidence changed" forever — an audit nobody can ever pass.
+
+    Covers the fields a reviewer's judgement actually rests on: which fold, which source, which
+    citation, and the verdict the leaf carries. It deliberately does NOT cover `ts`, because
+    re-recording identical research with a new timestamp did not change what the auditor read,
+    and it does not cover the claim text — `claim_digest` already carries that, and folding it in
+    twice would make one change move two digests for no gain.
+
+    Why this is needed at all: `claim_digest` hashes claim TEXT. Swapping a citation for a
+    fabricated one leaves the text — and so that digest — identical, which is why keying an audit
+    verdict on the claim digest alone would be blind to evidence substitution (ADR-25, option B).
+
+    Empty (nothing bound and supporting) hashes to a distinct constant rather than raising: an
+    approved claim always has supporting research, so a caller seeing the empty digest is looking
+    at a claim that cannot be approved anyway, and the gate's per-fold message says so better than
+    an exception here would.
+    """
+    bound = sorted(
+        (lf for lf in leaves
+         if _binds(lf, claim_id, claim_text) and lf.get("result") != REFUTES),
+        key=lambda lf: (lf["fold"], lf.get("source") or "", lf.get("citation") or "",
+                        lf.get("command_hash") or "", lf.get("files_hash") or ""),
+    )
+    h = hashlib.sha256()
+    for lf in bound:
+        for field in ("fold", "kind", "source", "citation", "result", "gate",
+                      "command_hash", "files_hash", "result_hash"):
+            value = lf.get(field)
+            h.update(b"\0" if value is None else str(value).encode("utf-8"))
+            h.update(b"\0")
+    return h.hexdigest()
+
+
 def command_digest(cmd: list[str]) -> str:
     """sha256 over the argv of the checked command, NUL-joined so ["a b"] and ["a","b"] are
     distinct — a command hash that collided on argv boundaries would let a different command
