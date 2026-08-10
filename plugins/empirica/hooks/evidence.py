@@ -241,9 +241,25 @@ def write_research(run_dir: Path, evidence_id: str, claim_id: str, claim_text: s
     return path
 
 
+def _exit_codes(codes: list | None, samples: int) -> list:
+    """Normalise the per-run exit codes for the predicate (ADR-29).
+
+    A timeout has no exit code, so `None` is a legitimate entry and is preserved rather than
+    coerced — writing 0 or -1 there would fabricate a status the OS never returned. Anything else
+    non-integer is dropped. When no codes are supplied the list is empty rather than invented:
+    absence must read as "not recorded", never as a run that succeeded.
+    """
+    del samples  # the caller's list length IS the sample count; never truncate to a claimed one
+    if not isinstance(codes, list):
+        return []
+    return [c if (isinstance(c, int) and not isinstance(c, bool)) or c is None else None
+            for c in codes]
+
+
 def write_spike(run_dir: Path, evidence_id: str, claim_id: str, claim_text: str, *,
                 cmd: list[str], gate: str, result_hash: str, files: list[Path],
-                ts: str, actor: dict | None = None, samples: int = 1) -> Path:
+                ts: str, actor: dict | None = None, samples: int = 1,
+                exit_codes: list | None = None) -> Path:
     """Record a Fold-2 spike leaf. SOLE CALLER: spike_harness.py, from a real exit code.
 
     Nothing here can tell a forged call from a genuine one — that property comes from the
@@ -261,7 +277,14 @@ def write_spike(run_dir: Path, evidence_id: str, claim_id: str, claim_text: str,
                  # result hash, so no reader — gate, auditor, or human — could tell which claims
                  # rested on a single lucky exit code. `--repeat` fixed the sampling and left the
                  # RECORD silent, which defeated the point at the evidence layer.
-                 "samples": samples if isinstance(samples, int) and samples > 0 else 1}
+                 "samples": samples if isinstance(samples, int) and samples > 0 else 1,
+                 # The exit code of EVERY run, in order (ADR-29). `samples` alone says how many
+                 # times the check ran but not what happened, so a reader could not distinguish
+                 # "5 clean passes" from "4 passes after a failure" — and the skill already claimed
+                 # these were recorded, which they were not. Reported by an agent that probed the
+                 # record for them and found only `samples`. The list is the honest artifact:
+                 # short, checkable, and exactly what a conjunctive gate rests on.
+                 "exit_codes": _exit_codes(exit_codes, samples)}
     # A spike's actor is CODE, not a model: its verdict is a subprocess exit code, which is the
     # one approver in the whole system (ADR-13). Recording that explicitly matters — it is what
     # distinguishes "a machine decided" from "a model judged", and the §3 same-actor check must
@@ -364,10 +387,18 @@ def validate_leaf(raw) -> dict | None:
             "result_hash": hashes.get("result") if isinstance(hashes.get("result"), str) else None,
             "command_hash": (predicate.get("command_hash")
                              if isinstance(predicate.get("command_hash"), str) else None),
+            # ADR-29: the argv itself, so a stale spike can be RE-RUN rather than reconstructed by
+            # hand. The record already stored it; only `command_hash` was surfaced, which is enough
+            # to detect a different command and useless for repeating the same one.
+            "command": ([c for c in predicate["command"] if isinstance(c, str)]
+                        if isinstance(predicate.get("command"), list) else []),
             # ADR-27. A leaf without it reads as 1 — a single sample is what an unmarked spike was,
             # so absence means one run rather than "unknown".
             "samples": (samples if isinstance(samples, int) and not isinstance(samples, bool)
-                        and samples > 0 else 1)}
+                        and samples > 0 else 1),
+            # ADR-29: the per-run exit codes, surfaced so the auditor can check the gate against
+            # what the runs actually returned rather than trusting `gate` alone.
+            "exit_codes": _exit_codes(predicate.get("exit_codes"), 0)}
 
 
 def _binds(leaf: dict, claim_id: str, claim_text: str) -> bool:

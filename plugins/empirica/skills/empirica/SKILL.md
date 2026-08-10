@@ -3,8 +3,12 @@ name: empirica
 description: "Empirical-convergence development workflow. Adjudicate a claim graph — propose claims, earn each one's confidence with real external evidence (research first, then a deterministic spike where the claim is machine-checkable), discard what evidence refutes — then have an independent auditor verify the run before it may report convergence. Use when starting non-trivial work where the plan is not yet certain — 'how should we build X', 'I'm not sure whether A or B', 'design and implement this feature', 'spike this', 'we don't know if this approach works'. Two paths: known territory goes straight to finalize; unknown territory runs the empirical loop first. Invoke as /empirica <goal>."
 allowed-tools: Read Glob Grep Bash Edit Write Agent TaskCreate TaskUpdate WebFetch
 compatibility: Designed for Claude Code; requires the methodologist skill as a companion and python3 for the hooks.
-metadata:
-  argument-hint: "[goal or feature to build]"
+# TOP-LEVEL on purpose (ADR-28). `argument-hint` only drives autocomplete when it sits here; under
+# `metadata` it is arbitrary key-value data and the hint never shows, so the mode flags would be
+# undiscoverable. This is a Claude Code-only field, which makes the plugin unpackageable for
+# claude.ai and the Skills API — an acceptable and already-unavoidable cost, since empirica's
+# enforcement IS its Python lifecycle hooks and those do not run there at all.
+argument-hint: "[--cli-exec] [--multi-provider] <goal>"
 ---
 
 # Empirica — Empirical-Convergence Workflow
@@ -71,8 +75,8 @@ The production trust boundary on shipped code is CI (ADR-13), downstream of this
 Agentic review may **block** but never **approve** — the deterministic spike is the only approver.
 
 This skill is the design of the ADRs in `doc/adr/` (1–14, 16–24 accepted; 15 superseded by 22;
-25–27 proposed) made executable. When a decision here surprises you, the ADR is the source of
-truth — read it, don't re-litigate it.
+25–27 proposed, 28–29 accepted) made executable. When a decision here surprises you, the ADR is
+the source of truth — read it, don't re-litigate it.
 
 ## Step 0: Adopt the stance
 
@@ -87,7 +91,34 @@ home is that plugin's `evidence-over-recall.md`. A run whose only source is the 
 weights has produced **no** evidence and cannot converge. If that line is absent from your
 output, you are not running this workflow.
 
-The user invoked: `$ARGUMENTS` — this is the **goal**.
+The user invoked: `$ARGUMENTS`.
+
+**Leading `--` flags are MODE FLAGS, not part of the goal** (ADR-28). `/empirica --cli-exec design X`
+means the goal is `design X`, and the run is in CLI-exec mode. Strip any leading flags before you
+read the goal — a claim graph rooted in `--cli-exec design X` has a corrupted intent, and it will be
+the root of every claim in the run.
+
+You do **not** apply the flags yourself. The `run_start.py` hook already parsed `command_args` from
+the invocation Claude Code saw and wrote `<run_dir>/modes.json` before your first turn. That
+ordering is deliberate: the hooks that consume modes (`dispatch_gate.py`, the doctor) are separate
+processes that can read only the environment and the filesystem — they cannot see `$ARGUMENTS` — so
+a mode held in your context could never reach them. Your job is to read the resulting state and
+report it, never to re-implement the parse.
+
+If you need the parsed values, ask the code rather than re-deriving them:
+
+```
+python3 -c 'import importlib.util,sys,json
+from pathlib import Path
+s=importlib.util.spec_from_file_location("modes", Path(sys.argv[1])/"modes.py")
+m=importlib.util.module_from_spec(s); s.loader.exec_module(m)
+print(json.dumps({"state": m.state(Path(sys.argv[2])),
+                  "unknown_flags": m.unknown_flags(Path(sys.argv[2]))}, indent=2))' <hooks_dir> <run_dir>
+```
+
+**Surface an unrecognised flag to the user.** A typo like `--cli-exex` enables nothing; the hook
+records it in `modes.json` and the doctor reports it. Say so plainly — a user who believes a run is
+in a mode it is not in will misread everything that follows.
 
 ## Step 1 — Route BEFORE investigating (P1)
 
@@ -222,6 +253,21 @@ The record also carries `samples` — how many times the check actually ran — 
 `--file`: they are hashed into the record, so a later edit invalidates the green. A spike whose timestamp precedes its research is **rejected**: a
 passing spike over an unresearched claim is a green light on an unexamined assumption.
 
+**After a formatter, re-gate instead of re-typing (ADR-29).** `cargo fmt`, `ruff format`, `prettier`
+and friends rewrite bytes, so every spike touching a reformatted file legitimately goes stale. That
+detection is correct and stays — a digest that ignored whitespace would be worthless, since
+whitespace is semantic in Python, YAML, Makefiles and string literals. What is automated is the
+*recovery*:
+
+```
+python3 <plugin>/hooks/spike_harness.py --regate --run-dir <run_dir> --ts <ISO now>
+```
+
+It re-runs **only** the stale spikes, using the command each record already stores, at the same
+sample count. This is not a way to bless a stale record: every spike is re-executed and its verdict
+comes from a fresh exit code, so a re-gate can discover that the formatting pass broke something —
+and it exits nonzero when one now fails. Run your formatter, then re-gate, then read the report.
+
 Design the smallest check that **could fail**, and confirm it can by breaking it on purpose. A
 check that passes both ways proves nothing.
 
@@ -229,10 +275,18 @@ check that passes both ways proves nothing.
 of the tree (a property test with an unseeded generator, anything touching time, ordering,
 concurrency, the network, or a hash seed), a single run can pass by luck and that one green record
 then approves the claim for the rest of the run. `--repeat N` runs it N times and passes only if
-**every** run exits 0; the per-run exit codes go into the record. Repeating is conjunctive on
-purpose — a majority rule would let a known-flaky check approve a claim, which is the property the
-flag exists to detect. Ask yourself which of your checks would survive `--repeat 10`, and repeat
-that one.
+**every** run exits 0. Repeating is conjunctive on purpose — a majority rule would let a known-flaky
+check approve a claim, which is the property the flag exists to detect. Ask yourself which of your
+checks would survive `--repeat 10`, and repeat that one.
+
+The record carries `samples` (how many runs) and `exit_codes` (the status of each, in order), so a
+reader can tell 5 clean passes from 4 passes after a failure. A timeout has no exit code and appears
+as `null` rather than a fabricated number. Verify with:
+
+```
+python3 -c 'import json,sys; p=json.load(open(sys.argv[1]))["predicate"]
+print(p["samples"], p["exit_codes"])' <run_dir>/evidence/spike-<claim>.json
+```
 
 **And be suspicious of your own falsification control.** Building ADR-24 produced the sharpest
 lesson in this plugin's history: a hand-written list of sabotages was falsified by four consecutive
@@ -430,11 +484,29 @@ must never be the sole reason a run fails closed.
 `fable` is **excluded by policy** (30-day content retention at the vendor), and the exclusion is
 enforced in `actors.py`, not left to discipline.
 
-**Two optional modes, both OFF by default** (`<run_dir>/modes.json`, or `EMPIRICA_MODE_*`):
-`multi_provider` allows actors outside this harness (`codex`, `pi`) — while off they are not even
-probed; `cli_exec` dispatches actors as subprocesses, which buys *witnessed* attribution and is
-charged to the same ADR-17 spawn ledger. A bare Claude Code + python3 install behaves exactly as
-0.4.x does, and that is the point.
+**Two optional modes, both OFF by default.** `multi_provider` allows actors outside this harness
+(`codex`, `pi`) — while off they are not even probed; `cli_exec` dispatches actors as subprocesses,
+which buys *witnessed* attribution and is charged to the same ADR-17 spawn ledger. A bare Claude
+Code + python3 install behaves exactly as 0.4.x does, and that is the point.
+
+Set them **at invocation** (ADR-28) — this is the normal path:
+
+```
+/empirica --cli-exec design the retry policy
+/empirica --cli-exec --multi-provider spike the parser
+/empirica --no-cli-exec resume the audit      # force a mode OFF for one run
+```
+
+Precedence, most specific first — unchanged from ADR-24, with the flags landing at the file layer:
+
+| Source | Wins over | Use when |
+|---|---|---|
+| `EMPIRICA_MODE_*` env | everything | a Makefile target or CI job must force a mode regardless of what was typed |
+| invocation flags → `<run_dir>/modes.json` | the default | the normal path: per-run, recorded, visible to the doctor |
+| off | — | the default everyone gets |
+
+An env var still beats a flag, deliberately: an operator overriding one run from the outside must
+not be silently countermanded by whatever the invocation said.
 
 The preflight `empirica doctor` runs at run-start and writes `<run_dir>/actors.json`. It **spends
 no inference** — version and config reads only — never gates the baseline, and only *recommends*:
