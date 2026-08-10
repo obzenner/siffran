@@ -113,8 +113,8 @@ def claim_digest(claim_text: str) -> str:
 
 
 def evidence_digest(leaves: list[dict], claim_id: str, claim_text: str) -> str:
-    """sha256 over the SUPPORTING evidence bound to this claim — the digest an audit verdict
-    records so its reviewed-ness ages per claim (ADR-25).
+    """sha256 over ALL evidence bound to this claim — the digest an audit verdict records so its
+    reviewed-ness ages per claim (ADR-25, amended by ADR-27).
 
     ONE definition, called by both the auditor that writes a verdict and the gate that checks
     it. A second hand-rolled hash on either side would drift, and a drifted digest reads as
@@ -126,20 +126,27 @@ def evidence_digest(leaves: list[dict], claim_id: str, claim_text: str) -> str:
     and it does not cover the claim text — `claim_digest` already carries that, and folding it in
     twice would make one change move two digests for no gain.
 
+    REFUTING LEAVES ARE INCLUDED (ADR-27). They were excluded on the reasoning that only supporting
+    evidence sustains an approval — which had it backwards. Adding a leaf that CONTRADICTS an
+    approved, already-reviewed claim is one of the most important things an auditor could be asked
+    to look at again, and while refutations were filtered out, that addition moved no digest and the
+    stale verdict still read as full coverage. Found by an adversarial review of 0.6.0. A refutation
+    is evidence about the claim, so it belongs in the claim's evidence digest.
+
     Why this is needed at all: `claim_digest` hashes claim TEXT. Swapping a citation for a
     fabricated one leaves the text — and so that digest — identical, which is why keying an audit
     verdict on the claim digest alone would be blind to evidence substitution (ADR-25, option B).
 
-    Empty (nothing bound and supporting) hashes to a distinct constant rather than raising: an
-    approved claim always has supporting research, so a caller seeing the empty digest is looking
-    at a claim that cannot be approved anyway, and the gate's per-fold message says so better than
-    an exception here would.
+    Empty (nothing bound) hashes to a distinct constant rather than raising: an approved claim
+    always has supporting research, so a caller seeing the empty digest is looking at a claim that
+    cannot be approved anyway, and the gate's per-fold message says so better than an exception
+    here would.
     """
     bound = sorted(
-        (lf for lf in leaves
-         if _binds(lf, claim_id, claim_text) and lf.get("result") != REFUTES),
-        key=lambda lf: (lf["fold"], lf.get("source") or "", lf.get("citation") or "",
-                        lf.get("command_hash") or "", lf.get("files_hash") or ""),
+        (lf for lf in leaves if _binds(lf, claim_id, claim_text)),
+        key=lambda lf: (lf["fold"], lf.get("result") or "", lf.get("source") or "",
+                        lf.get("citation") or "", lf.get("command_hash") or "",
+                        lf.get("files_hash") or ""),
     )
     h = hashlib.sha256()
     for lf in bound:
@@ -236,7 +243,7 @@ def write_research(run_dir: Path, evidence_id: str, claim_id: str, claim_text: s
 
 def write_spike(run_dir: Path, evidence_id: str, claim_id: str, claim_text: str, *,
                 cmd: list[str], gate: str, result_hash: str, files: list[Path],
-                ts: str, actor: dict | None = None) -> Path:
+                ts: str, actor: dict | None = None, samples: int = 1) -> Path:
     """Record a Fold-2 spike leaf. SOLE CALLER: spike_harness.py, from a real exit code.
 
     Nothing here can tell a forged call from a genuine one — that property comes from the
@@ -248,7 +255,13 @@ def write_spike(run_dir: Path, evidence_id: str, claim_id: str, claim_text: str,
     predicate = {"fold": FOLD2, "kind": "spike", "command": list(cmd),
                  "command_hash": command_digest(cmd), "gate": gate,
                  "hashes": {"result": result_hash, "files": files_digest(files)},
-                 "files": [str(p) for p in files], "ts": ts}
+                 "files": [str(p) for p in files], "ts": ts,
+                 # How many times the check actually ran (ADR-27). Without this, a 20-sample spike
+                 # and a 1-sample spike produced byte-identical predicates apart from an opaque
+                 # result hash, so no reader — gate, auditor, or human — could tell which claims
+                 # rested on a single lucky exit code. `--repeat` fixed the sampling and left the
+                 # RECORD silent, which defeated the point at the evidence layer.
+                 "samples": samples if isinstance(samples, int) and samples > 0 else 1}
     # A spike's actor is CODE, not a model: its verdict is a subprocess exit code, which is the
     # one approver in the whole system (ADR-13). Recording that explicitly matters — it is what
     # distinguishes "a machine decided" from "a model judged", and the §3 same-actor check must
@@ -345,11 +358,16 @@ def validate_leaf(raw) -> dict | None:
     files = predicate.get("files")
     if not isinstance(files, list) or not all(isinstance(f, str) for f in files):
         return None
+    samples = predicate.get("samples")
     return {**common, "fold": FOLD2, "gate": predicate["gate"],
             "files": files, "files_hash": hashes["files"],
             "result_hash": hashes.get("result") if isinstance(hashes.get("result"), str) else None,
             "command_hash": (predicate.get("command_hash")
-                             if isinstance(predicate.get("command_hash"), str) else None)}
+                             if isinstance(predicate.get("command_hash"), str) else None),
+            # ADR-27. A leaf without it reads as 1 — a single sample is what an unmarked spike was,
+            # so absence means one run rather than "unknown".
+            "samples": (samples if isinstance(samples, int) and not isinstance(samples, bool)
+                        and samples > 0 else 1)}
 
 
 def _binds(leaf: dict, claim_id: str, claim_text: str) -> bool:

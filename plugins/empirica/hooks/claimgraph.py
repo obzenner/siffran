@@ -41,6 +41,7 @@ alone does not close this.
 Loaded by sibling hooks via spec_from_file_location, so it uses no package imports; file-io
 is reused from atomicio.py — one hardened writer (ADR-19).
 """
+import hashlib
 import importlib.util
 import json
 import math
@@ -273,6 +274,47 @@ def save(path: Path, graph: dict) -> None:
 
 
 # --- derived state (the anti-forgery core) ----------------------------------
+
+
+def argument_digest(graph: dict) -> str:
+    """sha256 over the SHAPE of the argument: its root, its nodes' gating attributes, and its
+    SupportedBy edges. Recorded in an audit verdict so reviewed-ness binds to the argument the
+    auditor actually walked (ADR-27, amending ADR-25).
+
+    WHY THIS EXISTS — a reproduced regression, not a hypothetical. ADR-25 keyed audit coverage on
+    per-claim digests over each APPROVED claim's text and evidence, and deleted the per-graph pass
+    counter as a subsumed proxy. But a per-claim digest over the approved SET cannot see a claim
+    LEAVING that set. Detach a blocking claim from the root (drop its SupportedBy edge, leave the
+    node in the file) and it stops gating, every survivor's digests are unchanged, and a verdict
+    written before the claim ever existed still covered the run — which converged. The deleted pass
+    counter caught this incidentally, so removing it weakened coverage, exactly what ADR-25's second
+    decision driver forbade.
+
+    So this digest covers what per-claim digests structurally cannot: the set of claims and how
+    they hang together. It includes `blocked` and `kind` because both change whether and how a
+    claim gates, and `refuted_by` because a discard prunes a whole subtree. It EXCLUDES
+    `confidence`, which moves constantly during a normal loop and is already covered per claim by
+    the state derivation — folding it in would re-create ADR-25's false positive at graph scope.
+
+    InContextOf edges are excluded: they attach context, which is not a claim to adjudicate and
+    does not extend the gated path (see `_children`).
+    """
+    h = hashlib.sha256()
+    h.update(graph["root"].encode("utf-8"))
+    h.update(b"\0")
+    for nid in sorted(graph["nodes"]):
+        node = graph["nodes"][nid]
+        h.update(nid.encode("utf-8"))
+        for field in ("type", "kind", "blocked", "refuted_by"):
+            value = node.get(field)
+            h.update(b"\0" if value is None else str(value).encode("utf-8"))
+            h.update(b"\0")
+    h.update(b"edges\0")
+    for edge in sorted((e["from"], e["to"]) for e in graph["edges"]
+                       if e["type"] == "SupportedBy"):
+        h.update(f"{edge[0]}>{edge[1]}".encode("utf-8"))
+        h.update(b"\0")
+    return h.hexdigest()
 
 
 def state_of(graph: dict, nid: str, th: float, evidence_ok=None) -> str:

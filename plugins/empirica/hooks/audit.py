@@ -207,10 +207,16 @@ def read_verdict(run_dir: Path) -> dict | None:
         return None
     findings = raw.get("findings")
     reviewed = raw.get("claims_reviewed")
+    argument = raw.get("argument_digest")
     return {
         "verdict": raw["verdict"],
         "nonce": nonce,
         "auditor": raw.get("auditor") if isinstance(raw.get("auditor"), str) else None,
+        # ADR-27: the shape of the argument the auditor walked. None when absent or malformed,
+        # which `check` treats as no coverage at all — a verdict that does not say WHICH argument
+        # it reviewed cannot be matched against the one on disk.
+        "argument_digest": (argument if isinstance(argument, str) and _SHA256.fullmatch(argument)
+                            else None),
         "claims_reviewed": ([e for e in (_review_entry(r) for r in reviewed) if e]
                             if isinstance(reviewed, list) else []),
         "findings": ([f for f in findings if isinstance(f, str)]
@@ -248,13 +254,19 @@ def stamps_route_verdict(run: dict) -> tuple[str, str]:
     return _stamps.route_verdict(run)
 
 
-def check(run_dir: Path, approved: dict[str, dict]) -> tuple[bool, str]:
+def check(run_dir: Path, approved: dict[str, dict],
+          argument_digest: str | None = None) -> tuple[bool, str]:
     """May this run report `converged`? Returns (ok, reason).
 
     `approved` maps each approved claim id to the digests it must have been reviewed at:
     `{claim_id: {"claim_digest": ..., "evidence_digest": ...}}`. The CALLER computes them from
     the graph and the evidence store (see `convergence_gate`), so this module never has to know
     how either is stored.
+
+    `argument_digest` is the SHAPE of the claim graph as it stands now (ADR-27). When given, the
+    verdict must carry the same value, because per-claim coverage over the approved set cannot see
+    a claim LEAVING that set — detaching a blocking claim from the root shrinks the set without
+    moving any survivor's digest.
 
     Requirements, each of which closes an observed or plausible bypass:
       1. an auditor spawn ticket exists     — the audit was actually performed
@@ -263,6 +275,8 @@ def check(run_dir: Path, approved: dict[str, dict]) -> tuple[bool, str]:
       4. the verdict is `pass`              — a failing audit blocks (ADR-13: may veto)
       5. every approved claim was reviewed AT ITS CURRENT DIGESTS — an auditor cannot pass a run
          by reviewing one claim and ignoring the rest, NOR by reviewing an older version of one
+      6. the verdict names the SAME ARGUMENT SHAPE that is on disk — so re-parenting, detaching,
+         deleting, blocking or discarding a claim invalidates the verdict (ADR-27)
 
     Requirement 5 is per (claim, claim_digest, evidence_digest) rather than per graph (ADR-25).
     That is what lets a verdict age gracefully: adding a 23rd claim leaves the other 22 reviewed,
@@ -296,6 +310,20 @@ def check(run_dir: Path, approved: dict[str, dict]) -> tuple[bool, str]:
     if verdict["verdict"] != VERDICT_PASS:
         findings = "; ".join(verdict["findings"][:5]) or "no findings recorded"
         return False, f"the independent audit FAILED: {findings}"
+
+    if argument_digest is not None and verdict["argument_digest"] != argument_digest:
+        # Checked BEFORE per-claim coverage: "the argument changed" is the broader fact, and
+        # reporting a list of individually-fine claims would hide that the structure holding them
+        # together is not the one that was reviewed.
+        return False, ("the audit reviewed a DIFFERENT argument than the one on disk: the claim "
+                       "graph's shape has changed since the verdict was written (a claim was "
+                       "added, deleted, re-parented, detached from the goal, blocked or "
+                       "discarded). Per-claim digests cannot see a claim leaving the gated set, "
+                       "so the whole argument must be re-audited (ADR-27)"
+                       if verdict["argument_digest"] else
+                       "the audit verdict does not record which argument it reviewed "
+                       "(`argument_digest` missing or malformed) — it cannot be matched against "
+                       "the claim graph on disk (ADR-27)")
 
     reviewed = {e["claim_id"]: e for e in verdict["claims_reviewed"]}
     unreviewed, restated, re_evidenced = [], [], []
