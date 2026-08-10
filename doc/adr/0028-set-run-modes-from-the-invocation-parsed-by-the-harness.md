@@ -1,7 +1,7 @@
 ---
 number: 28
 title: "Set run modes from the invocation, parsed by the harness"
-status: proposed
+status: accepted
 date: 2026-08-11
 tags:
   - workflow

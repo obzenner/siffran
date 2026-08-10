@@ -1,7 +1,7 @@
 ---
 number: 29
 title: "Record per-run exit codes and automate re-gating after a formatter"
-status: proposed
+status: accepted
 date: 2026-08-11
 tags:
   - evidence

@@ -75,8 +75,8 @@ The production trust boundary on shipped code is CI (ADR-13), downstream of this
 Agentic review may **block** but never **approve** — the deterministic spike is the only approver.
 
 This skill is the design of the ADRs in `doc/adr/` (1–14, 16–24 accepted; 15 superseded by 22;
-25–29 proposed) made executable. When a decision here surprises you, the ADR is the source of
-truth — read it, don't re-litigate it.
+25–27 proposed, 28–29 accepted) made executable. When a decision here surprises you, the ADR is
+the source of truth — read it, don't re-litigate it.
 
 ## Step 0: Adopt the stance
 
