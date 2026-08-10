@@ -131,10 +131,22 @@ def _resolve_run(cwd: Path, session_id: object) -> tuple[Path | None, dict | Non
     return path, manifest.read_run(path)
 
 
-def _allow_converged(graph: dict, th: float, evidence_ok) -> tuple[int, dict]:
-    """The allow-path payload: truly converged ⇔ no residuals; residuals ⇒ stopped.
+def _allow_converged(graph: dict, th: float, evidence_ok,
+                     deferred: list[str] | None = None) -> tuple[int, dict, bool]:
+    """The allow-path payload: truly converged ⇔ no residuals and nothing deferred.
 
-    A blocked residual is never reported as convergence — ADR-17's "never fabricate green".
+    Returns `(exit_code, payload, audit_owed)`.
+
+    A blocked residual is never reported as convergence — ADR-17's "never fabricate green" — and
+    neither is a deferred claim (ADR-26): a frozen run has known open items by construction, so
+    it reports `converged: false` with the list, never a clean green.
+
+    `audit_owed` is NOT simply `converged`. A frozen run that discharged its committed scope is
+    asserting that it finished the work it took on, which is a positive claim and must be
+    certified — otherwise freeze would be an audit bypass and ADR-26's "the auditor judges the
+    freeze" guard would be vacuous. What stays exempt is a run that gave up: a blocked residual or
+    a refuted root claims nothing, so there is nothing for an auditor to certify and demanding one
+    would wedge a run that has honestly stopped.
     """
     if claimgraph.root_is_refuted(graph, th, evidence_ok):
         # The run disproved its own intent. Allow the stop — looping on a refuted goal is
@@ -144,17 +156,28 @@ def _allow_converged(graph: dict, th: float, evidence_ok) -> tuple[int, dict]:
         return 0, {"continue": True, "converged": False,
                    "note": ("NON-CONVERGED: the run's TOP GOAL was refuted by evidence. The "
                             "intent as stated cannot be established — surface the refutation "
-                            "and its evidence to the human. This is a result, not a green run.")}
+                            "and its evidence to the human. This is a result, not a green run.")}, False
     blocked = claimgraph.blocked_residuals(graph, th, evidence_ok)
+    deferred = deferred or []
     budget_blocked = [nid for nid in blocked
                       if graph["nodes"][nid]["blocked"] == "needs-budget"]
-    out: dict[str, object] = {"continue": True, "converged": not blocked}
-    if budget_blocked:
+    out: dict[str, object] = {"continue": True, "converged": not blocked and not deferred}
+    audit_owed = not blocked
+    if deferred:
+        # ADR-26: the deferred claims ARE the deliverable of a frozen run — the honest open-items
+        # list it hands forward. They go in the result by id, never merely counted: a finding
+        # reduced to a number is a finding nobody can act on.
+        out["deferred"] = sorted(deferred)
+        out["note"] = (f"NON-CONVERGED (frozen): the run discharged the scope it committed to at "
+                       f"freeze time; {len(deferred)} claim(s) derived AFTER the freeze are "
+                       f"deferred to a next run, not resolved: "
+                       f"{', '.join(sorted(deferred)[:10])}. Re-invoke /empirica to take them up.")
+    elif budget_blocked:
         out["note"] = (f"NON-CONVERGED: budget exhausted, {len(budget_blocked)} claim(s) "
                        f"unresolved (blocked: needs-budget). Raise the budget to continue.")
     elif blocked:
         out["note"] = f"{len(blocked)} claim(s) surfaced to human (blocked), not gated"
-    return 0, out
+    return 0, out, audit_owed
 
 
 def _block_reason(graph: dict, run_dir: Path, open_claims: list[str], th: float,
@@ -260,19 +283,44 @@ def main() -> int:
     evidence_ok = evidence.oracle(run_dir, graph)
     open_claims = claimgraph.pending(graph, th, evidence_ok)
 
+    # ADR-26 freeze: claims derived AFTER the run committed its scope do not gate. They are
+    # reported as deferred instead — the run's honest open-items list. Only claims that were
+    # already gating at freeze time must reach a terminal state, so freezing cannot buy a pass
+    # with less WORK, only with less SCOPE, declared up front and printed in the result.
+    #
+    # `pending` is filtered rather than `gating_goals`, so a deferred claim still counts for the
+    # audit and the attribution report if it somehow reached `approved` — deferral suppresses
+    # GATING, not existence.
+    deferred = manifest.deferred_claims(run, claimgraph.gating_goals(graph, th, evidence_ok))
+    if deferred:
+        deferred_set = set(deferred)
+        open_claims = [nid for nid in open_claims if nid not in deferred_set]
+
     if not open_claims:
-        code, out = _allow_converged(graph, th, evidence_ok)
-        if out["converged"]:
+        code, out, audit_owed = _allow_converged(graph, th, evidence_ok, deferred)
+        if audit_owed:
             # P6: a run may only REPORT convergence after an independent principal has
             # verified it. Residual/budget-exhausted stops are exempt — they do not claim
             # convergence, so there is nothing for an auditor to certify, and requiring one
-            # would wedge a run that has honestly given up.
+            # would wedge a run that has honestly given up. A FROZEN run is NOT exempt: it
+            # asserts it discharged its committed scope, and that assertion is what the auditor
+            # judges (ADR-26) — including whether the freeze carved out the intent's core.
             approved = [nid for nid in claimgraph.gating_goals(graph, th, evidence_ok)
                         if claimgraph.state_of(graph, nid, th, evidence_ok)
                         == claimgraph.STATE_APPROVED]
-            # Pass the current pass count so a verdict from an earlier pass is rejected as
-            # stale — it reviewed a claim graph that has since changed.
-            audit_ok, audit_reason = audit.check(run_dir, approved, run.get("passes"))
+            # The digests each approved claim must have been reviewed at (ADR-25). Computed HERE
+            # because this is the layer that holds both the graph and the evidence store; audit.py
+            # only compares. Recomputed from disk every pass, so a reworded claim or a swapped
+            # citation moves a digest and un-reviews exactly that claim — no per-graph staleness
+            # proxy, which used to fire on the compliant fix-and-loop rhythm below.
+            leaves = evidence.read_leaves(run_dir)
+            approved_digests = {
+                nid: {"claim_digest": evidence.claim_digest(graph["nodes"][nid]["text"]),
+                      "evidence_digest": evidence.evidence_digest(
+                          leaves, nid, graph["nodes"][nid]["text"])}
+                for nid in approved
+            }
+            audit_ok, audit_reason = audit.check(run_dir, approved_digests)
             # P1 is evaluated on BOTH paths. It used to be computed only in the failure branch,
             # which meant a route-before-investigate violation vanished the moment the audit
             # passed — falsifying ADR-20's fitness function 3 ("a run whose route was declared
@@ -285,12 +333,20 @@ def main() -> int:
                 # coarse, and a coarse signal should not be the sole reason a run wedges.
                 p1_note = (f"\n\nAlso flag for the auditor (ADR-20 P1): {route_issue}."
                            if route_issue else "")
+                frozen_note = (
+                    f"\n\nThis run is FROZEN (ADR-26): it committed to "
+                    f"{len(run['frozen_claims'])} claim(s) and defers {len(deferred)} derived "
+                    f"later ({', '.join(sorted(deferred)[:5])}). The auditor must judge the "
+                    f"DEFERRAL too — a freeze that carved out the intent's core is a FAIL."
+                    if deferred else "")
                 print(f"Claim graph is converged, but the run may not report `converged`: "
                       f"{audit_reason}.\n\nThe auditor must re-read each approved claim's "
                       f"Fold-1 citation and confirm the cited source actually supports the "
                       f"claim, then write its verdict to "
-                      f"{audit.verdict_path(run_dir).name} carrying the nonce from its spawn "
-                      f"(ADR-20 P6).{p1_note}", file=sys.stderr)
+                      f"{audit.verdict_path(run_dir).name} carrying the nonce from its spawn, "
+                      f"recording each reviewed claim as "
+                      f"{{claim_id, claim_digest, evidence_digest}} (ADR-20 P6, ADR-25)."
+                      f"{frozen_note}{p1_note}", file=sys.stderr)
                 if is_active:
                     manifest.record_pass(run_path)  # an audit round is a pass; keep terminating
                     if manifest.at_cap(manifest.read_run(run_path)):
@@ -308,7 +364,7 @@ def main() -> int:
             # declared field must not be the sole reason a run fails closed. It goes in the
             # RESULT for the same reason the P1 note does: a finding only in a block message the
             # agent may never surface is a finding nobody reads.
-            attr = attribution.report(graph, evidence.read_leaves(run_dir), approved,
+            attr = attribution.report(graph, leaves, approved,
                                       audit.audit_actor(run_dir))
             if attr["findings"] or attr["coverage"]["vacuous"]:
                 out["attribution"] = attr
@@ -322,18 +378,30 @@ def main() -> int:
                 # keys. Filing "could not tell" as `p1_violation` would accuse a compliant run,
                 # while calling it clean would hide that nothing was checked — both are lies of
                 # the kind this gate exists to prevent.
+                #
+                # APPENDED, never assigned: a frozen run already put its deferred-items list in
+                # `note`, and overwriting it would drop the run's actual open items in favour of
+                # the P1 remark. Two findings, two sentences.
                 if route_verdict == "violation":
                     out["p1_violation"] = route_issue
-                    out["note"] = (f"Audit passed, but ADR-20 P1 was violated: {route_issue}. "
-                                   f"Routing is a commitment made up front, not a label applied "
-                                   f"retroactively.")
+                    p1_text = (f"Audit passed, but ADR-20 P1 was violated: {route_issue}. "
+                               f"Routing is a commitment made up front, not a label applied "
+                               f"retroactively.")
                 else:
                     out["p1_unverified"] = route_issue
-                    out["note"] = (f"Audit passed. ADR-20 P1 could not be verified: "
-                                   f"{route_issue}.")
+                    p1_text = f"Audit passed. ADR-20 P1 could not be verified: {route_issue}."
+                out["note"] = f"{out['note']} {p1_text}" if out.get("note") else p1_text
         if is_active:  # record the terminal status so a later Stop fails open, not re-blocks
+            # A frozen run gets its OWN terminal status: it closed on a declared scope, which is
+            # neither convergence nor an exhausted loop (ADR-26).
+            if out["converged"]:
+                status = "converged"
+            elif deferred:
+                status = "stopped_frozen"
+            else:
+                status = "stopped_residual"
             manifest.set_phase(run_path, "converged" if out["converged"] else "assess")
-            manifest.set_status(run_path, "converged" if out["converged"] else "stopped_residual")
+            manifest.set_status(run_path, status)
         print(json.dumps(out))
         return code
 

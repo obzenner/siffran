@@ -30,9 +30,13 @@ the exact failure this plugin exists to prevent.
 - **Derived claim state.** A claim's terminal state is *computed* from evidence on every read.
   There is no persisted state field: writing `"state": "approved"` into the graph does nothing.
   This one is structural — it holds even against a hostile graph.
-- **An audit that never happened.** Convergence requires both a spawn ticket and a verdict, so a
-  run that simply skips the audit — the failure observed in the wild — cannot report `converged`.
+- **An audit that never happened, or that no longer covers the run.** Convergence requires both a
+  spawn ticket and a verdict, so a run that simply skips the audit — the failure observed in the
+  wild — cannot report `converged`. Coverage is checked **per claim** against the claim's text digest
+  and its evidence digest, so a reworded claim or a swapped citation un-reviews that claim (ADR-25).
   Fabricating the artifacts is another matter (see NOT enforced).
+- **A frozen run's committed scope.** Freezing defers *later* claims, never the ones it committed
+  to; the commitment is first-write-wins and a frozen run still owes a passing audit (ADR-26).
 - **Run identity, fail-closed gating, and termination** (ADR-19): deleting or corrupting an
   active run's claim graph blocks; the loop provably ends in ≤ `max_passes` passes.
 - **The spawn budget**, denied at the `PreToolUse` boundary (ADR-17).
@@ -55,12 +59,16 @@ the exact failure this plugin exists to prevent.
   fixes the claim set up front. Neither is airtight.
 - **Route ordering** is *witnessed* (timestamps), not gated: the stamp can be coarse, so a
   violation is reported to the auditor rather than hard-blocking the run.
+- **Whether a freeze was honest.** Freeze bounds what the *harness* gates; no hook can judge whether
+  the committed scope covered the intent. A run that freezes early under-scopes itself visibly — the
+  deferred claims are in the result — but the judgement is the auditor's, so freeze moves that
+  question from *impossible* to *reviewable*, not to *enforced* (ADR-26).
 
 The production trust boundary on shipped code is CI (ADR-13), downstream of this workflow.
 Agentic review may **block** but never **approve** — the deterministic spike is the only approver.
 
-This skill is the design of the ADRs in `doc/adr/` (1–14, 16–23 accepted; 15 superseded by 22)
-made executable. When a decision here surprises you, the ADR is the source of truth — read it,
+This skill is the design of the ADRs in `doc/adr/` (1–14, 16–24 accepted; 15 superseded by 22;
+25–26 proposed) made executable. When a decision here surprises you, the ADR is the source of truth — read it,
 don't re-litigate it.
 
 ## Step 0: Adopt the stance
@@ -213,6 +221,15 @@ passing spike over an unresearched claim is a green light on an unexamined assum
 Design the smallest check that **could fail**, and confirm it can by breaking it on purpose. A
 check that passes both ways proves nothing.
 
+**One sample is not a verdict — use `--repeat N`.** If the check is not obviously a pure function
+of the tree (a property test with an unseeded generator, anything touching time, ordering,
+concurrency, the network, or a hash seed), a single run can pass by luck and that one green record
+then approves the claim for the rest of the run. `--repeat N` runs it N times and passes only if
+**every** run exits 0; the per-run exit codes go into the record. Repeating is conjunctive on
+purpose — a majority rule would let a known-flaky check approve a claim, which is the property the
+flag exists to detect. Ask yourself which of your checks would survive `--repeat 10`, and repeat
+that one.
+
 **And be suspicious of your own falsification control.** Building ADR-24 produced the sharpest
 lesson in this plugin's history: a hand-written list of sabotages was falsified by four consecutive
 independent audits, each finding a *different* mutation of the *same* property the previous fix had
@@ -293,6 +310,43 @@ residual. **Nothing detects this for you** — no code compares passes to spot a
 self-check. The hard backstop is the pass counter: a stalled loop still terminates at
 `max_passes` and reports `stopped_residual`, so a missed stall costs passes, never correctness.
 
+### Stop discovering and start closing — `--freeze` (ADR-26)
+
+Discovery is the point of the loop, and that is exactly why it needs an off switch. Nothing in the
+gate ever tells you to stop finding things: every pass can legitimately derive new claims, each new
+claim owes Fold 1, and the block message only ever offers *resolve* or *blocked:*. A run that keeps
+finding real things therefore has one terminal path — grind to `max_passes` and report
+`stopped_residual`. That is honest, but it is not finishing.
+
+Freeze is the third exit. It commits the run's **scope**:
+
+```
+python3 <plugin>/hooks/route_stamp.py --freeze --session <session_id> --ts <ISO now>
+```
+
+The claims **already gating at that moment** become the set this run must discharge. Claims derived
+afterwards are **deferred**: they do not gate, they are reported in the result by id, and they are
+handed to the next run as an honest open-items list. The run then stops as soon as its committed set
+is terminal, with status `stopped_frozen` and `converged: false` — closed on a declared scope, which
+is neither convergence nor an exhausted loop.
+
+**Freeze when the design has stopped changing and the remaining findings are refinements** — the
+signal is passes that produce new claims *about* the design rather than evidence *for* it. This is
+not stall detection: a stall is unproductive passes; this is productive passes with no ending.
+
+Two things make it a commitment rather than an escape, and you should know both:
+
+- **First write wins.** You cannot re-freeze to enlarge or replace the set, exactly as you cannot
+  re-stamp your route. Freezing early does not buy a pass with less work — only with less scope,
+  declared up front, with every omission printed in the result.
+- **The auditor judges the deferral.** The freeze set and the deferred list go into the audit, and
+  rubric item 8 (*the claim set covers the intent*) is evaluated against the **frozen** set. A
+  freeze that carved out the intent's core is a **FAIL**. A frozen run still owes a passing audit —
+  it is asserting it discharged what it took on, and that assertion gets certified like any other.
+
+Freeze changes no bound: `max_passes` and `max_spawns` are untouched, and a frozen run that cannot
+discharge its committed set still terminates at the cap as `stopped_residual`.
+
 ## Step 5 — Independent audit BEFORE converged (P6, mandatory)
 
 A converged claim graph is **necessary but not sufficient**. Spawn the auditor:
@@ -314,6 +368,24 @@ the ADR-20 rubric — above all **re-reading each approved claim's Fold-1 citati
 cited source actually supports the claim** — and writes `audit-verdict.json`. The Stop gate
 requires a `pass` verdict whose nonce matches a real auditor spawn and whose `claims_reviewed`
 covers **every** approved claim.
+
+**The audit is incremental, per claim (ADR-25).** Each `claims_reviewed` entry is
+`{claim_id, claim_digest, evidence_digest}` — the digests the claim had when the auditor read it.
+The gate recomputes both from disk, so:
+
+| What changed since the audit | Effect |
+|---|---|
+| nothing on this claim | stays reviewed — **no re-review needed** |
+| the claim was reworded | that claim un-reviews (`claim_digest` moved) |
+| its evidence was swapped or re-recorded | that claim un-reviews (`evidence_digest` moved) |
+| a new claim was added | only the new claim is unreviewed |
+
+A failing audit therefore no longer costs you the whole graph: fix what it found, re-audit **those**
+claims, and the untouched ones stay covered. The block message names exactly which claims are
+unreviewed, reworded, or re-evidenced. Both digests come from `evidence.py` and the auditor calls
+those functions rather than hashing by hand — one definition, so the writer and the checker cannot
+drift. There is **no backwards compatibility**: a verdict listing bare claim-id strings reads as
+absent, and absent blocks.
 
 **You cannot satisfy this by writing the verdict yourself.** The author grading its own work is
 the failure P6 exists to close (ADR-13; moai-adk's `plan-auditor` split). If the audit fails,
@@ -379,7 +451,9 @@ code, tests and code are the committable result; the deterministic suite is the 
 spec and the trust boundary (ADR-13) — "done" is when the gates are green, not when it looks right.
 
 Non-convergence at `max_passes` is reported honestly as `stopped_residual`, never dressed up as
-green (ADR-17).
+green (ADR-17). A run that closed on a frozen scope reports `stopped_frozen` with its deferred
+claims — a different outcome from an exhausted loop, and reported as such. Hand the deferred list
+forward: it is the input to the next run, not a footnote.
 
 ## Data-model summary
 
@@ -392,7 +466,10 @@ green (ADR-17).
 
 - Convergence is hook-enforced and gate-defined. Never assert "done" — let the gate decide.
 - Research (Fold 1) comes first, for every claim. Recall is not evidence.
-- Every spike gate is a real subprocess exit code, never model judgment (ADR-13).
+- Every spike gate is a real subprocess exit code, never model judgment (ADR-13). One sample is not
+  a verdict — `--repeat N` any check that is not a pure function of the tree.
+- Know when to stop discovering: `--freeze` commits the scope, defers later findings as reported
+  open items, and closes the run on purpose instead of at the cap (ADR-26).
 - Refuted claims are discarded, not parked at low confidence.
 - The author never grades its own convergence — the audit is a distinct principal (ADR-20 P6).
 - Derived claims specialize only, so the loop terminates (ADR-9).

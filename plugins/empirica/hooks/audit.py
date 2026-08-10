@@ -30,6 +30,13 @@ improvement and it is all this mechanism claims. It is the same trust level as t
 the ledger (ADR-19 G3): the model has no instruction to tamper and tampering is visible, but
 this is not OS isolation and not a security boundary.
 
+REVIEWED-NESS IS PER CLAIM, AND CONTENT-ADDRESSED (ADR-25). A verdict records, for each approved
+claim, the `claim_digest` and `evidence_digest` it was reviewed at — so it invalidates under exactly
+the conditions that invalidate the evidence it reviewed, and no others. Adding a claim leaves the
+rest reviewed; rewording one, or swapping its citation, un-reviews that one. The whole-graph pass
+counter this replaced could only say "something changed", which made the normal audit-fail →
+fix → re-audit loop invalidate its own previous work every round.
+
 Trust direction (ADR-13, unchanged): agentic review may BLOCK but never APPROVE. The auditor is
 a necessary veto, not the approver — the deterministic spike remains the only thing that
 approves an experiment claim. A passing audit is therefore a NECESSARY condition for
@@ -149,6 +156,35 @@ def _read_tickets(path: Path) -> list[dict]:
     return out
 
 
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+
+
+def _review_entry(raw) -> dict | None:
+    """One normalised `claims_reviewed` entry, or None if it is not a usable review record.
+
+    The shape is `{claim_id, claim_digest, evidence_digest}` (ADR-25). Both digests are required
+    and must be real sha256 hex: an entry missing one cannot be compared against the claim it
+    names, so it is not a review of anything. Dropped rather than tolerated — an entry that
+    cannot be checked must not count as coverage.
+
+    The pre-ADR-25 flat form (a bare claim-id string) is NOT accepted, deliberately and with no
+    fallback. Accepting both would keep the weaker form reachable, and a gate that honours a
+    legacy shape is the exploit `convergence_gate.py` already had to close once.
+    """
+    if not isinstance(raw, dict):
+        return None
+    claim_id = raw.get("claim_id")
+    if not isinstance(claim_id, str) or not claim_id:
+        return None
+    digests = {}
+    for field in ("claim_digest", "evidence_digest"):
+        value = raw.get(field)
+        if not isinstance(value, str) or not _SHA256.fullmatch(value):
+            return None
+        digests[field] = value
+    return {"claim_id": claim_id, **digests}
+
+
 def read_verdict(run_dir: Path) -> dict | None:
     """The auditor's verdict, normalised, or None when there is none / it is unusable.
 
@@ -170,12 +206,13 @@ def read_verdict(run_dir: Path) -> dict | None:
     if not isinstance(nonce, str) or not _HEX.fullmatch(nonce):
         return None
     findings = raw.get("findings")
+    reviewed = raw.get("claims_reviewed")
     return {
         "verdict": raw["verdict"],
         "nonce": nonce,
         "auditor": raw.get("auditor") if isinstance(raw.get("auditor"), str) else None,
-        "claims_reviewed": ([c for c in raw["claims_reviewed"] if isinstance(c, str)]
-                            if isinstance(raw.get("claims_reviewed"), list) else []),
+        "claims_reviewed": ([e for e in (_review_entry(r) for r in reviewed) if e]
+                            if isinstance(reviewed, list) else []),
         "findings": ([f for f in findings if isinstance(f, str)]
                      if isinstance(findings, list) else []),
         "ts": raw.get("ts") if isinstance(raw.get("ts"), str) else None,
@@ -211,24 +248,32 @@ def stamps_route_verdict(run: dict) -> tuple[str, str]:
     return _stamps.route_verdict(run)
 
 
-def check(run_dir: Path, approved_claims: list[str],
-          current_pass: int | None = None) -> tuple[bool, str]:
+def check(run_dir: Path, approved: dict[str, dict]) -> tuple[bool, str]:
     """May this run report `converged`? Returns (ok, reason).
 
-    Requirements, each of which closes an observed or plausible bypass:
-      1. an auditor spawn ticket exists           — the audit was actually performed
-      2. a verdict exists and is readable         — its result is on disk, not in the transcript
-      3. the verdict's nonce matches a ticket     — it is bound to a real spawn of THIS run
-      4. the verdict is `pass`                    — a failing audit blocks (ADR-13: may veto)
-      5. every approved claim was reviewed        — an auditor cannot pass a run by reviewing
-                                                    one claim and ignoring the rest
-      6. the audit is not STALE                   — the ticket's pass is not older than the work
-                                                    it certifies (only when `current_pass` given)
+    `approved` maps each approved claim id to the digests it must have been reviewed at:
+    `{claim_id: {"claim_digest": ..., "evidence_digest": ...}}`. The CALLER computes them from
+    the graph and the evidence store (see `convergence_gate`), so this module never has to know
+    how either is stored.
 
-    Requirement 6 exists because the ticket recorded a `pass` number that nothing ever compared
-    (found by an independent doc audit). Without it, an audit from pass 1 certified a graph that
-    kept changing for seven more passes — a real staleness hole, and the same class of bug as an
-    unbound spike record.
+    Requirements, each of which closes an observed or plausible bypass:
+      1. an auditor spawn ticket exists     — the audit was actually performed
+      2. a verdict exists and is readable   — its result is on disk, not in the transcript
+      3. the verdict's nonce matches a ticket — it is bound to a real spawn of THIS run
+      4. the verdict is `pass`              — a failing audit blocks (ADR-13: may veto)
+      5. every approved claim was reviewed AT ITS CURRENT DIGESTS — an auditor cannot pass a run
+         by reviewing one claim and ignoring the rest, NOR by reviewing an older version of one
+
+    Requirement 5 is per (claim, claim_digest, evidence_digest) rather than per graph (ADR-25).
+    That is what lets a verdict age gracefully: adding a 23rd claim leaves the other 22 reviewed,
+    while rewording a claim or swapping its citation un-reviews exactly that claim. The previous
+    scheme compared one pass number for the whole graph, so any change invalidated everything —
+    and because `convergence_gate` ticks a pass on every audit-fail round, the intended
+    fix-and-loop rhythm invalidated the verdict mechanically, on compliant behaviour.
+
+    The `current_pass` staleness proxy that used to live here is GONE, not merely relaxed. It
+    stood in for "the graph changed since review"; both digests now measure that directly, so the
+    proxy's only remaining behaviour was that false positive.
     """
     tickets = _read_tickets(tickets_path(run_dir))
     if not tickets:
@@ -240,7 +285,8 @@ def check(run_dir: Path, approved_claims: list[str],
     if verdict is None:
         return False, (f"an auditor was spawned but no readable verdict is present at "
                        f"{verdict_path(run_dir).name}; the auditor must write its verdict "
-                       f"artifact (verdict: pass|fail, nonce, claims_reviewed)")
+                       f"artifact (verdict: pass|fail, nonce, and claims_reviewed as "
+                       f"{{claim_id, claim_digest, evidence_digest}} entries)")
 
     if verdict["nonce"] not in {t["nonce"] for t in tickets}:
         return False, ("the audit verdict's nonce does not match any auditor spawn recorded "
@@ -251,21 +297,34 @@ def check(run_dir: Path, approved_claims: list[str],
         findings = "; ".join(verdict["findings"][:5]) or "no findings recorded"
         return False, f"the independent audit FAILED: {findings}"
 
-    reviewed = set(verdict["claims_reviewed"])
-    missed = [c for c in approved_claims if c not in reviewed]
-    if missed:
-        return False, (f"the audit did not review {len(missed)} approved claim(s) "
-                       f"({', '.join(missed[:5])}) — every approved claim's Fold-1 citation "
-                       f"must be re-read by the auditor")
+    reviewed = {e["claim_id"]: e for e in verdict["claims_reviewed"]}
+    unreviewed, restated, re_evidenced = [], [], []
+    for claim_id, digests in approved.items():
+        entry = reviewed.get(claim_id)
+        if entry is None:
+            unreviewed.append(claim_id)
+        elif entry["claim_digest"] != digests["claim_digest"]:
+            restated.append(claim_id)
+        elif entry["evidence_digest"] != digests["evidence_digest"]:
+            re_evidenced.append(claim_id)
 
-    if current_pass is not None:
-        # The audit must certify the CURRENT state of the run, not an earlier one. A verdict from
-        # a spawn several passes ago was written against a different claim graph.
-        matching = [t for t in tickets if t["nonce"] == verdict["nonce"]]
-        stale = [t for t in matching if t["pass"] < current_pass]
-        if matching and len(stale) == len(matching):
-            return False, (f"the audit is STALE: it was performed at pass {stale[0]['pass']} but "
-                           f"the run is now at pass {current_pass}, so the claim graph has "
-                           f"changed since it was reviewed — re-run the audit")
+    if unreviewed or restated or re_evidenced:
+        # Each bucket gets its own sentence: "not reviewed", "reworded since review" and
+        # "re-evidenced since review" call for different work, and a message that lumped them
+        # together would send the auditor looking for the wrong thing.
+        parts = []
+        if unreviewed:
+            parts.append(f"{len(unreviewed)} approved claim(s) were never reviewed "
+                         f"({', '.join(sorted(unreviewed)[:5])})")
+        if restated:
+            parts.append(f"{len(restated)} claim(s) were REWORDED after review "
+                         f"({', '.join(sorted(restated)[:5])}), so the audit answered a "
+                         f"different question")
+        if re_evidenced:
+            parts.append(f"{len(re_evidenced)} claim(s) had their EVIDENCE changed after review "
+                         f"({', '.join(sorted(re_evidenced)[:5])}), so the citation the auditor "
+                         f"re-read is not the one now supporting the claim")
+        return False, ("the audit does not cover the run's current state: " + "; ".join(parts)
+                       + " — re-audit these claims (the rest stay reviewed)")
 
     return True, "independent audit passed"
