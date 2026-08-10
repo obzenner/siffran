@@ -3963,6 +3963,89 @@ def test_hooks_json_registers_the_dispatch_gate():
           any(g.get("matcher") == "Agent" for g in pre))
 
 
+# --- Minimal lifecycle smoke test -------------------------------------------
+def test_minimal_lifecycle_smoke():
+    """The smallest check that the PLUGIN — not its modules — works end to end.
+
+    Every other test here drives one hook, or drives modules in-process. That leaves a real gap:
+    nothing walks a single run directory through the actual entry points, as subprocesses, in the
+    order a live session uses them. A suite of green units is compatible with a plugin whose
+    pieces do not compose, which is exactly the runtime-inert failure M26-M28 was written for.
+
+    Minimal by construction: one run dir, four subprocess calls, three assertions on the two
+    values that are the plugin's whole contract — the gate's exit code (2=block, 0=allow) and
+    `converged` in its report.
+
+      run_start.py    → the harness creates the run           (exit 0, manifest active)
+      spike_harness.py→ a needs-experiment claim earns Fold 2  (gate from a real exit code)
+      convergence_gate.py → blocks, because the audit is absent (exit 2)
+      spawn_gate.py + verdict → the same gate now allows        (exit 0, converged:true)
+
+    The block-then-allow shape is what makes this falsifiable: an assertion that only ever sees
+    "allow" would pass against a gate that had been ripped out entirely. Both polarities come
+    from one gate over one run, so a gate that cannot block and a gate that cannot allow are each
+    caught. Verified by mutation, not by argument — see the sabotage note at the end.
+    """
+    d = Path(tempfile.mkdtemp())
+    sid = "sess-smoke"
+
+    # 1. The harness starts the run. run_start.py is the only thing that does, so if this is
+    #    inert nothing downstream has a run to gate.
+    p = run_hook(RUN_START, {"session_id": sid, "cwd": str(d)}, d)
+    run_path = manifest.locate_run(d, sid)
+    run = manifest.read_run(run_path)
+    check("SM1 run_start.py activates a run (exit 0, status active)",
+          p.returncode == 0 and run and run.get("status") == "active",
+          f"rc={p.returncode} run={run}")
+
+    run_dir = manifest.locate_run_dir(d, sid)
+    claim_text = "the smoke claim, machine-checkable"
+    graph_path = Path(run["graph_path"])
+    graph_path.write_text(json.dumps({
+        "root": "G0",
+        "nodes": {"G0": {"type": "Goal", "text": "the run's goal", "confidence": 0.95},
+                  "G1": {"type": "Goal", "text": claim_text, "kind": "needs-experiment",
+                         "confidence": 0.9}},
+        "edges": [{"from": "G0", "to": "G1", "type": "SupportedBy"}],
+    }))
+    # Fold 1 first — and it must PREDATE the spike, or evidence.py rejects the spike as
+    # research-that-came-after (the ADR-20 P3 ordering rule).
+    for nid, text in (("G0", "the run's goal"), ("G1", claim_text)):
+        ev.write_research(run_dir, f"ev-{nid}", nid, text, kind="code",
+                          source="plugins/empirica/tests/test_hooks.py",
+                          citation="this lifecycle test is the source", result="supports",
+                          ts="2026-08-08T00:00:00Z")
+
+    # 2. Fold 2 through the harness, which is the SOLE writer of a spike record: `gate` here is
+    #    a genuine subprocess exit code, never this test's opinion (ADR-13).
+    probe = run_dir / "probe.txt"
+    probe.write_text("probe")
+    sp = subprocess.run(
+        [sys.executable, str(HARNESS), "--claim", "G1", "--run-dir", str(run_dir),
+         "--ts", "2026-08-08T01:00:00Z", "--file", str(probe),
+         sys.executable, "-c", "raise SystemExit(0)"],
+        capture_output=True, text=True, cwd=str(d))
+    spike = json.loads((run_dir / "evidence" / "spike-G1.json").read_text())
+    check("SM2 spike_harness.py records gate=pass from a real exit 0",
+          sp.returncode == 0 and spike["predicate"]["gate"] == "pass",
+          f"rc={sp.returncode} predicate={spike.get('predicate')}")
+
+    # 3. Fully evidenced, but no audit has happened → the gate must BLOCK. This is the
+    #    assertion that a removed or defanged gate cannot survive.
+    p = run_hook(GATE, {"cwd": str(d), "session_id": sid}, d)
+    check("SM3 the gate BLOCKS (exit 2) an evidenced run with no audit",
+          p.returncode == 2, f"rc={p.returncode} stderr={p.stderr!r}")
+
+    # 4. Spawn the auditor through the real PreToolUse gate (which issues the nonce), record a
+    #    passing verdict, and the SAME gate over the SAME run must now allow and report green.
+    _write_verdict(d, sid=sid, nonce=_spawn_auditor(d, sid), claims_reviewed=["G0", "G1"])
+    p = run_hook(GATE, {"cwd": str(d), "session_id": sid}, d)
+    report = json.loads(p.stdout) if p.stdout.strip() else {}
+    check("SM4 …and ALLOWS (exit 0, converged:true) once the audit chain is complete",
+          p.returncode == 0 and report.get("converged") is True,
+          f"rc={p.returncode} stdout={p.stdout!r} stderr={p.stderr!r}")
+
+
 def main() -> int:
     for t in [test_parse, test_converged_math, test_theta_guard,
               test_hook_blocks_when_unconverged, test_hook_allows_when_converged,
@@ -4067,7 +4150,8 @@ def main() -> int:
               test_cli_exec_dispatch_is_gated_at_the_same_boundary,
               test_derived_session_ids_are_deterministic,
               test_adr19_fail_matrix_survives_adr24,
-              test_hooks_json_registers_the_dispatch_gate]:
+              test_hooks_json_registers_the_dispatch_gate,
+              test_minimal_lifecycle_smoke]:
         # An exception inside one test is recorded as a FAILED check for that test and the suite
         # CONTINUES. Previously it propagated and aborted the run, so a single broken hook hid
         # every check after it — and a crash reads to a reader as "the tooling is broken", not as
