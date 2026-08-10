@@ -157,8 +157,17 @@ def _allow_converged(graph: dict, th: float, evidence_ok,
                    "note": ("NON-CONVERGED: the run's TOP GOAL was refuted by evidence. The "
                             "intent as stated cannot be established — surface the refutation "
                             "and its evidence to the human. This is a result, not a green run.")}, False
-    blocked = claimgraph.blocked_residuals(graph, th, evidence_ok)
     deferred = deferred or []
+    deferred_set = set(deferred)
+    # Residuals are counted over the NON-DEFERRED goals only (ADR-27). A blocked tag on a claim the
+    # freeze already set aside must not decide anything about the scope the run is asserting it
+    # discharged — and it did: one `blocked: needs-decision` on a post-freeze claim made
+    # `audit_owed` false and bought a `stopped_frozen` stop with ZERO independent review, which is
+    # precisely the exemption ADR-26's second guard exists to prevent. Reproduced by an adversarial
+    # review against 0.6.0. A post-freeze node is also free to write and never gates, so the tag did
+    # not even need to sit on real work.
+    blocked = [nid for nid in claimgraph.blocked_residuals(graph, th, evidence_ok)
+               if nid not in deferred_set]
     budget_blocked = [nid for nid in blocked
                       if graph["nodes"][nid]["blocked"] == "needs-budget"]
     out: dict[str, object] = {"continue": True, "converged": not blocked and not deferred}
@@ -320,7 +329,12 @@ def main() -> int:
                           leaves, nid, graph["nodes"][nid]["text"])}
                 for nid in approved
             }
-            audit_ok, audit_reason = audit.check(run_dir, approved_digests)
+            # ADR-27: also bind the verdict to the argument's SHAPE. Without this, detaching a
+            # blocking claim from the root shrank the approved set without moving any survivor's
+            # digest, so a verdict written before that claim existed still covered the run — and
+            # the run converged. Reproduced against the merged code.
+            audit_ok, audit_reason = audit.check(run_dir, approved_digests,
+                                                 claimgraph.argument_digest(graph))
             # P1 is evaluated on BOTH paths. It used to be computed only in the failure branch,
             # which meant a route-before-investigate violation vanished the moment the audit
             # passed — falsifying ADR-20's fitness function 3 ("a run whose route was declared

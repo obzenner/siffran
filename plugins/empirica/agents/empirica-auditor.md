@@ -74,10 +74,11 @@ nonce-mismatched verdict blocks convergence.
   "verdict": "pass" | "fail",
   "nonce": "<the nonce you were given at spawn>",
   "auditor": "empirica-auditor",
+  "argument_digest": "<sha256 of the argument's shape, as you walked it>",
   "claims_reviewed": [
     {"claim_id": "G1",
      "claim_digest": "<sha256 of the claim text you read>",
-     "evidence_digest": "<sha256 over the supporting leaves you re-read>"}
+     "evidence_digest": "<sha256 over the evidence leaves you re-read>"}
   ],
   "findings": ["one line per problem found — required when verdict is fail"],
   "ts": "<ISO timestamp>"
@@ -85,11 +86,18 @@ nonce-mismatched verdict blocks convergence.
 ```
 
 `claims_reviewed` must cover **every approved claim**, and each entry records the two digests the
-claim had *when you reviewed it* (ADR-25). The gate recomputes both from disk and rejects a verdict
+claim had *when you reviewed it* (ADR-25). The gate recomputes them from disk and rejects a verdict
 that skipped a claim, or reviewed an older wording of one, or reviewed evidence that has since been
-swapped. You cannot pass a run by reviewing one claim and ignoring the rest.
+swapped or contradicted. You cannot pass a run by reviewing one claim and ignoring the rest.
 
-**Do not hand-compute the digests.** Both come from the same functions the gate uses, so call them:
+`argument_digest` binds the verdict to the argument's **shape** — which claims exist and how they
+hang together (ADR-27). Per-claim digests cannot see a claim *leaving* the gated set, so without this
+a run could detach or delete a blocking claim and a verdict written before that claim existed would
+still read as full coverage. It moves when a claim is added, deleted, detached, re-parented, blocked
+or discarded; it does **not** move when a confidence changes.
+
+**Do not hand-compute the digests.** All three come from the same functions the gate uses, so call
+them:
 
 ```bash
 python3 -c '
@@ -102,11 +110,13 @@ ev, cgph = load("evidence"), load("claimgraph")
 run_dir = Path(sys.argv[2])
 graph = cgph.load(cgph.default_graph_path(run_dir))
 leaves = ev.read_leaves(run_dir)
-print(json.dumps([
-    {"claim_id": nid,
-     "claim_digest": ev.claim_digest(graph["nodes"][nid]["text"]),
-     "evidence_digest": ev.evidence_digest(leaves, nid, graph["nodes"][nid]["text"])}
-    for nid in sys.argv[3:]], indent=2))
+print(json.dumps({
+    "argument_digest": cgph.argument_digest(graph),
+    "claims_reviewed": [
+        {"claim_id": nid,
+         "claim_digest": ev.claim_digest(graph["nodes"][nid]["text"]),
+         "evidence_digest": ev.evidence_digest(leaves, nid, graph["nodes"][nid]["text"])}
+        for nid in sys.argv[3:]]}, indent=2))
 ' <hooks_dir> <run_dir> G1 G2 …
 ```
 

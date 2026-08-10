@@ -33,10 +33,13 @@ the exact failure this plugin exists to prevent.
 - **An audit that never happened, or that no longer covers the run.** Convergence requires both a
   spawn ticket and a verdict, so a run that simply skips the audit — the failure observed in the
   wild — cannot report `converged`. Coverage is checked **per claim** against the claim's text digest
-  and its evidence digest, so a reworded claim or a swapped citation un-reviews that claim (ADR-25).
+  and its evidence digest, so a reworded claim, a swapped citation, or a refutation arriving later
+  un-reviews that claim (ADR-25). The verdict is additionally bound to the argument's **shape**, so a
+  claim cannot be detached or deleted to shrink what the audit had to cover (ADR-27).
   Fabricating the artifacts is another matter (see NOT enforced).
 - **A frozen run's committed scope.** Freezing defers *later* claims, never the ones it committed
-  to; the commitment is first-write-wins and a frozen run still owes a passing audit (ADR-26).
+  to; the commitment is first-write-wins and a frozen run still owes a passing audit — a `blocked:`
+  tag on a deferred claim cannot buy an exemption (ADR-26, ADR-27).
 - **Run identity, fail-closed gating, and termination** (ADR-19): deleting or corrupting an
   active run's claim graph blocks; the loop provably ends in ≤ `max_passes` passes.
 - **The spawn budget**, denied at the `PreToolUse` boundary (ADR-17).
@@ -68,8 +71,8 @@ The production trust boundary on shipped code is CI (ADR-13), downstream of this
 Agentic review may **block** but never **approve** — the deterministic spike is the only approver.
 
 This skill is the design of the ADRs in `doc/adr/` (1–14, 16–24 accepted; 15 superseded by 22;
-25–26 proposed) made executable. When a decision here surprises you, the ADR is the source of truth — read it,
-don't re-litigate it.
+25–27 proposed) made executable. When a decision here surprises you, the ADR is the source of
+truth — read it, don't re-litigate it.
 
 ## Step 0: Adopt the stance
 
@@ -214,8 +217,9 @@ python3 <plugin>/hooks/spike_harness.py \
 ```
 
 `gate` is `pass` iff the command exited 0 — a real subprocess verdict, never your reading of it.
-List every file the check depends on with `--file`: they are hashed into the record, so a later
-edit invalidates the green. A spike whose timestamp precedes its research is **rejected**: a
+The record also carries `samples` — how many times the check actually ran — so a reader can tell a
+20-sample verdict from a single lucky exit code (ADR-27). List every file the check depends on with
+`--file`: they are hashed into the record, so a later edit invalidates the green. A spike whose timestamp precedes its research is **rejected**: a
 passing spike over an unresearched claim is a green light on an unexamined assumption.
 
 Design the smallest check that **could fail**, and confirm it can by breaking it on purpose. A
@@ -377,8 +381,16 @@ The gate recomputes both from disk, so:
 |---|---|
 | nothing on this claim | stays reviewed — **no re-review needed** |
 | the claim was reworded | that claim un-reviews (`claim_digest` moved) |
-| its evidence was swapped or re-recorded | that claim un-reviews (`evidence_digest` moved) |
-| a new claim was added | only the new claim is unreviewed |
+| its evidence was swapped, re-recorded, or **contradicted** | that claim un-reviews (`evidence_digest` moved) |
+| a claim was added, deleted, detached, re-parented, blocked or discarded | the whole verdict's shape match fails (`argument_digest` moved) |
+| a confidence changed on an already-approved claim | nothing — the claim was approved before and after |
+
+The verdict also records an `argument_digest` over the argument's **shape** (ADR-27). Per-claim
+digests are keyed per *surviving* claim, so they cannot see a claim **leaving** the gated set —
+without this, detaching or deleting a blocking claim let a verdict written before that claim existed
+read as full coverage, and the run converged. When the shape changes you must re-confirm coverage,
+but the per-claim entries for untouched claims stay valid: re-issue the coverage, don't re-read
+everything.
 
 A failing audit therefore no longer costs you the whole graph: fix what it found, re-audit **those**
 claims, and the untouched ones stay covered. The block message names exactly which claims are

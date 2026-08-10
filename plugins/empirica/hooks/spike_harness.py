@@ -313,6 +313,9 @@ def _record_evidence(result: SpikeResult, ev: dict) -> dict | None:
             run_dir, f"spike-{ev['claim']}", ev["claim"], node["text"],
             cmd=result["cmd"], gate=result["gate"], result_hash=_result_hash(result),
             files=[Path(f) for f in ev["files"]], ts=ev["ts"],
+            # The real number of runs behind this verdict, so the record says how many samples
+            # back it (ADR-27). `runs` is absent for a single run, hence the fallback.
+            samples=len(result.get("runs") or [None]),
         )
         return {"recorded": True, "gate": result["gate"], "path": str(path)}
     except (OSError, ValueError, AttributeError, KeyError) as exc:
