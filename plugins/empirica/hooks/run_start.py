@@ -34,6 +34,7 @@ def _load(name: str):
 
 manifest = _load("manifest")
 doctor = _load("doctor")
+modes = _load("modes")
 
 
 def _max_passes() -> int:
@@ -67,6 +68,36 @@ def main() -> int:
         manifest.start_run(run_path, session_id, cwd, max_passes=_max_passes())
     except OSError:
         return 0  # best-effort: a write failure degrades to fail-open, never a wedge
+
+    # ADR-28: modes come from the INVOCATION — `/empirica --cli-exec <goal>` — and are persisted
+    # to `<run_dir>/modes.json` here, at the file layer of modes.py's precedence. Env still wins,
+    # so a Makefile target or CI job can force a mode off regardless of what was typed.
+    #
+    # Parsed by the HARNESS, not by the agent, and this is the whole point: `command_args` is the
+    # invocation as Claude Code saw it, so the agent cannot silently drop a flag, and the modes a
+    # run believes it is in are the modes a user actually asked for. The hooks that consume modes
+    # (dispatch_gate, doctor) are separate processes that can only read the environment and the
+    # filesystem — they cannot see `$ARGUMENTS` — so a mode held only in the agent's context could
+    # never have reached them.
+    #
+    # `command_args` is the field the real UserPromptExpansion payload carries (captured live; see
+    # the run_start payload regression test). `prompt` is the documented fallback for a harness
+    # that omits it; the command name is stripped so its own flags are never read as modes.
+    try:
+        args = payload.get("command_args")
+        if not isinstance(args, str) or not args.strip():
+            prompt = payload.get("prompt")
+            args = prompt.split(None, 1)[1] if isinstance(prompt, str) and " " in prompt else ""
+        flags, unknown = modes.parse_flags(args)
+        if flags:
+            modes.write(run_path.parent, **flags)
+        if unknown:
+            # This hook cannot print — its contract is silence and exit 0 — so an unrecognised
+            # flag is recorded for the doctor's report rather than dropped. A typo that silently
+            # does nothing is how a user ends up believing a run is in a mode it is not in.
+            modes.record_unknown_flags(run_path.parent, unknown)
+    except (OSError, ValueError):
+        pass  # best-effort, like every other write here: never wedge the prompt over a mode
 
     # ADR-24 §4: the preflight doctor runs at run-start and records what this machine can reach.
     # Wrapped in a blanket guard on purpose. This hook's contract is "always exit 0 — a run-start

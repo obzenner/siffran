@@ -3373,6 +3373,237 @@ def test_attribution_reaches_the_run_report():
           any(f["check"] == attribution.SAME_ACTOR for f in findings), f"{findings}")
 
 
+def test_exit_codes_are_recorded_per_run():
+    """ADR-29 — the skill CLAIMED the per-run exit codes were in the record; they were not.
+
+    `spike_harness` computed them in `runs` and passed only `len()` as `samples`, so a reader could
+    not distinguish 5 clean passes from 4 passes after a failure. Reported by an agent that probed
+    the record for `exit_codes`, `exits`, and every field containing exit/code/run, and found only
+    `samples`. A doc that oversells the evidence is the exact failure this plugin exists to prevent.
+    """
+    d = write_run([{"text": "machine-checkable", "confidence": 0.0, "kind": "needs-experiment"}])
+    run_dir = manifest.locate_run_dir(d, DEFAULT_SID)
+    probe = run_dir / "p.txt"
+    probe.write_text("x")
+
+    def spike(claim, *extra):
+        subprocess.run([sys.executable, str(HARNESS), "--claim", claim, "--run-dir", str(run_dir),
+                        "--ts", "2026-08-11T10:00:00Z", "--file", str(probe), *extra],
+                       capture_output=True, text=True)
+        return json.loads((ev.evidence_dir(run_dir) / f"spike-{claim}.json").read_text())
+
+    leaf = spike("G1", "--repeat", "4", "true")
+    check("Q36 a repeated spike records one exit code per run",
+          leaf["predicate"]["exit_codes"] == [0, 0, 0, 0],
+          f"got {leaf['predicate'].get('exit_codes')}")
+    check("Q37 …and the normalised leaf surfaces them",
+          ev.validate_leaf(leaf)["exit_codes"] == [0, 0, 0, 0])
+    check("Q38 samples and exit_codes agree",
+          leaf["predicate"]["samples"] == len(leaf["predicate"]["exit_codes"]))
+
+    leaf = spike("G1", "false")
+    check("Q39 a single-run spike records its one exit code",
+          leaf["predicate"]["exit_codes"] == [1], f"got {leaf['predicate'].get('exit_codes')}")
+
+    # A leaf predating the field reads as "not recorded" — never as a run that succeeded.
+    del leaf["predicate"]["exit_codes"]
+    check("Q40 a leaf with no exit_codes reads as empty, not as a zero",
+          ev.validate_leaf(leaf)["exit_codes"] == [])
+    check("Q41 a timeout's absent exit code stays null, not a fabricated number",
+          ev._exit_codes([0, None, 1], 0) == [0, None, 1])
+
+
+def test_regate_reruns_only_stale_spikes():
+    """ADR-29 — a formatter invalidates spikes legitimately; recovery should not be manual.
+
+    An agent reported `cargo fmt` invalidating 8 records twice, correctly noting each catch was
+    legitimate. So the DETECTION is unchanged and this only automates re-running. The critical
+    property: re-gating must be able to discover that the formatting pass BROKE something, so each
+    spike is re-executed rather than blessed.
+    """
+    d = write_run([{"text": "checkable one", "confidence": 0.0, "kind": "needs-experiment"},
+                   {"text": "checkable two", "confidence": 0.0, "kind": "needs-experiment"}])
+    run_dir = manifest.locate_run_dir(d, DEFAULT_SID)
+    src = run_dir / "src.txt"
+    src.write_text("original")
+    marker = run_dir / "must_exist.txt"
+    marker.write_text("yes")
+    harness = _load("spike_harness", HARNESS)
+
+    for claim in ("G1", "G2"):
+        subprocess.run([sys.executable, str(HARNESS), "--claim", claim, "--run-dir", str(run_dir),
+                        "--ts", "2026-08-11T10:00:00Z", "--file", str(src),
+                        sys.executable, "-c", f"import os,sys; sys.exit(0 if os.path.exists({str(marker)!r}) else 1)"],
+                       capture_output=True, text=True)
+    leaves = {lf["claim_id"]: lf for lf in ev.read_leaves(run_dir)}
+    check("Q42 both spikes start intact",
+          all(ev._files_intact(leaves[c]) for c in ("G1", "G2")))
+
+    # A formatter rewrites the file: both go stale, legitimately.
+    src.write_text("re-formatted")
+    leaves = {lf["claim_id"]: lf for lf in ev.read_leaves(run_dir)}
+    check("Q43 rewriting a tracked file invalidates both spikes",
+          not any(ev._files_intact(leaves[c]) for c in ("G1", "G2")))
+
+    report = harness.regate(run_dir, "2026-08-11T12:00:00Z")
+    check("Q44 regate finds and re-runs exactly the stale spikes",
+          report["regated"] and report["stale_found"] == 2, f"got {report}")
+    leaves = {lf["claim_id"]: lf for lf in ev.read_leaves(run_dir)}
+    check("Q45 …and both are intact again with fresh verdicts",
+          all(ev._files_intact(leaves[c]) and leaves[c]["gate"] == "pass" for c in ("G1", "G2")),
+          f"got { {c: (leaves[c]['gate'], ev._files_intact(leaves[c])) for c in ('G1','G2')} }")
+    check("Q46 re-gating an already-intact run finds nothing to do",
+          harness.regate(run_dir, "2026-08-11T13:00:00Z")["stale_found"] == 0)
+
+    # THE LOAD-BEARING PROPERTY: a re-gate must be able to go RED. Break the check, then re-stale.
+    marker.unlink()
+    src.write_text("formatted again")
+    report = harness.regate(run_dir, "2026-08-11T14:00:00Z")
+    check("Q47 a re-gate DISCOVERS a now-failing check rather than blessing it",
+          report["failed"] == ["G1", "G2"], f"got {report}")
+    leaves = {lf["claim_id"]: lf for lf in ev.read_leaves(run_dir)}
+    check("Q48 …and records gate=fail, so the claim cannot be approved",
+          all(leaves[c]["gate"] == "fail" for c in ("G1", "G2")))
+    ok, reason = ev.verdict(list(leaves.values()), "G1", "checkable one", "needs-experiment",
+                            "approve")
+    check("Q49 the gate refuses a claim whose re-gated spike failed", ok is False, reason)
+
+
+def test_mode_flags_are_parsed_from_the_invocation():
+    """ADR-28 — modes come from what the user typed, parsed by the HARNESS.
+
+    The parse is pure and command-position-scoped. That second property is the important one: it
+    is the same bug `dispatch_gate` already had to fix for actor dispatches, where a mention of a
+    tool in prose was read as an invocation of it.
+    """
+    cases = [
+        ("--cli-exec design X", {modes.CLI_EXEC: True}, [], "design X"),
+        ("--multi-provider --cli-exec spike Y",
+         {modes.MULTI_PROVIDER: True, modes.CLI_EXEC: True}, [], "spike Y"),
+        ("--no-cli-exec resume", {modes.CLI_EXEC: False}, [], "resume"),
+        ("design X", {}, [], "design X"),
+        ("", {}, [], ""),
+        # A flag NAMED in the goal must not be applied — it is not in command position.
+        ("make --cli-exec the default", {}, [], "make --cli-exec the default"),
+        ("design a --cli-exec flag", {}, [], "design a --cli-exec flag"),
+        # A typo is REPORTED, never silently ignored.
+        ("--cli-exex design X", {}, ["--cli-exex"], "design X"),
+        ("--cli-exec --bogus design X", {modes.CLI_EXEC: True}, ["--bogus"], "design X"),
+    ]
+    for text, want_flags, want_unknown, want_goal in cases:
+        flags, unknown = modes.parse_flags(text)
+        check(f"T100 parse {text!r} → flags", flags == want_flags, f"got {flags}")
+        check(f"T101 parse {text!r} → unknown", unknown == want_unknown, f"got {unknown}")
+        check(f"T102 strip {text!r} → goal", modes.strip_flags(text) == want_goal,
+              f"got {modes.strip_flags(text)!r}")
+
+
+def test_unknown_flags_are_recorded_but_enable_nothing():
+    """A typo must be VISIBLE and INERT. Visible because a user who believes a run is in a mode it
+    is not in will misread everything after; inert because the recording lives outside the mode
+    vocabulary, so it can never be read as enabling something."""
+    d = Path(tempfile.mkdtemp())
+    env_before = {k: os.environ.pop(v, None) for k, v in modes.ENV_KEYS.items()}
+    try:
+        modes.record_unknown_flags(d, ["--cli-exex"])
+        check("T103 an unrecognised flag is recorded",
+              modes.unknown_flags(d) == ["--cli-exex"], f"got {modes.unknown_flags(d)}")
+        check("T104 …and enables NO mode",
+              not modes.enabled(modes.CLI_EXEC, d) and not modes.enabled(modes.MULTI_PROVIDER, d))
+        check("T105 …and does not make the run look like it departs from baseline",
+              modes.any_enabled(d) is False)
+        # It coexists with real modes rather than clobbering them.
+        modes.write(d, cli_exec=True)
+        check("T106 writing a real mode preserves the recorded typo",
+              modes.enabled(modes.CLI_EXEC, d) and modes.unknown_flags(d) == ["--cli-exex"],
+              f"modes={modes.state(d)} unknown={modes.unknown_flags(d)}")
+        modes.record_unknown_flags(d, ["--cli-exex", "--other"])
+        check("T107 recording is idempotent per flag and appends new ones",
+              modes.unknown_flags(d) == ["--cli-exex", "--other"], f"got {modes.unknown_flags(d)}")
+        check("T108 the doctor surfaces it in its report",
+              doctor.diagnose(d, ts="2026-08-11T00:00:00Z")["unknown_flags"] == ["--cli-exex",
+                                                                                "--other"])
+    finally:
+        for mode, prev in env_before.items():
+            if prev is not None:
+                os.environ[modes.ENV_KEYS[mode]] = prev
+
+
+def test_run_start_applies_mode_flags_from_the_real_payload():
+    """ADR-28 end to end: the flags a user typed reach `modes.json` via the run-start hook.
+
+    Driven through the hook as a SUBPROCESS with the real UserPromptExpansion payload shape —
+    `command_args` is the field captured live from a session (see the payload regression test
+    above). An in-process call would not prove the hook wires it up.
+    """
+    env_before = {k: os.environ.pop(v, None) for k, v in modes.ENV_KEYS.items()}
+    try:
+        d = Path(tempfile.mkdtemp())
+        sid = "sess-flags"
+        run_hook(RUN_START, {"session_id": sid, "cwd": str(d),
+                             "hook_event_name": "UserPromptExpansion",
+                             "command_name": "empirica:empirica",
+                             "command_args": "--cli-exec design the retry policy",
+                             "prompt": "/empirica:empirica --cli-exec design the retry policy"}, d)
+        run_dir = manifest.locate_run_dir(d, sid)
+        check("T109 an invocation flag reaches modes.json",
+              modes.enabled(modes.CLI_EXEC, run_dir), f"state={modes.state(run_dir)}")
+        check("T110 …recorded as run-config, not as a default",
+              modes.state(run_dir)[modes.CLI_EXEC]["source"] == "run-config")
+        check("T111 the other mode stays OFF",
+              not modes.enabled(modes.MULTI_PROVIDER, run_dir))
+
+        # No flags → no modes.json content, i.e. byte-identical behaviour to pre-ADR-28.
+        d2 = Path(tempfile.mkdtemp())
+        run_hook(RUN_START, {"session_id": "sess-plain", "cwd": str(d2),
+                             "command_args": "design something"}, d2)
+        rd2 = manifest.locate_run_dir(d2, "sess-plain")
+        check("T112 an invocation with NO flags leaves both modes off",
+              not modes.any_enabled(rd2), f"state={modes.state(rd2)}")
+
+        # A typo is recorded and enables nothing, through the real hook.
+        d3 = Path(tempfile.mkdtemp())
+        run_hook(RUN_START, {"session_id": "sess-typo", "cwd": str(d3),
+                             "command_args": "--cli-exex design something"}, d3)
+        rd3 = manifest.locate_run_dir(d3, "sess-typo")
+        check("T113 a typo'd flag is recorded by the hook",
+              modes.unknown_flags(rd3) == ["--cli-exex"], f"got {modes.unknown_flags(rd3)}")
+        check("T114 …and enables nothing", not modes.any_enabled(rd3))
+
+        # ENV STILL WINS over a flag (ADR-24 precedence, preserved).
+        os.environ[modes.ENV_KEYS[modes.CLI_EXEC]] = "off"
+        d4 = Path(tempfile.mkdtemp())
+        run_hook(RUN_START, {"session_id": "sess-env", "cwd": str(d4),
+                             "command_args": "--cli-exec design X"}, d4)
+        rd4 = manifest.locate_run_dir(d4, "sess-env")
+        check("T115 env overrides an invocation flag",
+              not modes.enabled(modes.CLI_EXEC, rd4), f"state={modes.state(rd4)}")
+        check("T116 …and reports env as the source",
+              modes.state(rd4)[modes.CLI_EXEC]["source"] == "env")
+    finally:
+        for mode, prev in env_before.items():
+            os.environ.pop(modes.ENV_KEYS[mode], None)
+            if prev is not None:
+                os.environ[modes.ENV_KEYS[mode]] = prev
+
+
+def test_argument_hint_is_top_level_so_autocomplete_shows_the_flags():
+    """ADR-28 — `argument-hint` only drives autocomplete at the TOP LEVEL of frontmatter.
+
+    Under `metadata` it is arbitrary key-value data and the hint never renders, so the mode flags
+    would be undiscoverable. Pinned because the nesting is spec-compliant and therefore looks
+    correct: nothing else would catch a well-meaning move back under `metadata`.
+    """
+    text = (Path(__file__).parent.parent / "skills" / "empirica" / "SKILL.md").read_text()
+    front = text.split("---", 2)[1]
+    hint = [ln for ln in front.splitlines() if ln.startswith("argument-hint:")]
+    check("T117 argument-hint is a TOP-LEVEL frontmatter key", len(hint) == 1, f"got {hint}")
+    check("T118 …and advertises both mode flags",
+          "--cli-exec" in hint[0] and "--multi-provider" in hint[0], f"got {hint}")
+    check("T119 it is NOT nested under metadata (where it would not render)",
+          "  argument-hint:" not in front, "found an indented argument-hint under metadata")
+
+
 def test_modes_are_off_by_default_and_independent():
     """ADR-24 §5 — both modes OFF by default. This is what keeps the plugin installable: a bare
     Claude Code + python3 install must behave exactly as 0.4.x does."""
@@ -4144,6 +4375,12 @@ def main() -> int:
               test_auditor_spawn_records_the_dispatcher_side_actor,
               test_same_actor_audit_is_detected_and_reported,
               test_attribution_reaches_the_run_report,
+              test_exit_codes_are_recorded_per_run,
+              test_regate_reruns_only_stale_spikes,
+              test_mode_flags_are_parsed_from_the_invocation,
+              test_unknown_flags_are_recorded_but_enable_nothing,
+              test_run_start_applies_mode_flags_from_the_real_payload,
+              test_argument_hint_is_top_level_so_autocomplete_shows_the_flags,
               test_modes_are_off_by_default_and_independent,
               test_doctor_detects_without_inferring,
               test_doctor_runs_at_run_start_and_cannot_wedge,

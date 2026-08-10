@@ -29,9 +29,16 @@ exited 0. A check with any nondeterminism — an unseeded property test, a timin
 dependency — can pass once by luck, and that single green record then approves the claim for the
 rest of the run. Use it for any check whose result is not obviously a pure function of the tree.
 
+RE-GATING AFTER A FORMATTER (ADR-29). `--regate --run-dir DIR --ts STAMP` re-runs every spike whose
+`files_hash` no longer matches the tree, using the command each record already stores. It does not
+bless a stale record: each spike is re-executed and its verdict comes from a fresh exit code, so a
+re-gate can and should discover that the formatting pass broke something. Exits nonzero if any
+re-gated spike now fails.
+
 Usage:  python3 spike_harness.py [--timeout SEC] [--repeat N] [--report-only]
                                  [--claim ID --run-dir DIR --ts STAMP [--file PATH ...]]
                                  <cmd> [args...]
+        python3 spike_harness.py --regate --run-dir DIR --ts STAMP [--timeout SEC]
 """
 import hashlib
 import importlib.util
@@ -316,14 +323,89 @@ def _record_evidence(result: SpikeResult, ev: dict) -> dict | None:
             # The real number of runs behind this verdict, so the record says how many samples
             # back it (ADR-27). `runs` is absent for a single run, hence the fallback.
             samples=len(result.get("runs") or [None]),
+            # ADR-29: the real exit code of every run, in order. A single run has no `runs` list,
+            # so its own returncode is the one-element list — the field then means the same thing
+            # for repeated and unrepeated spikes.
+            exit_codes=([r["returncode"] for r in result["runs"]] if result.get("runs")
+                        else [result["returncode"]]),
         )
         return {"recorded": True, "gate": result["gate"], "path": str(path)}
     except (OSError, ValueError, AttributeError, KeyError) as exc:
         return {"recorded": False, "reason": f"{type(exc).__name__}: {exc}"}
 
 
+def regate(run_dir: Path, ts: str, timeout: float = DEFAULT_TIMEOUT) -> dict:
+    """Re-run every spike whose `files_hash` no longer matches the tree (ADR-29).
+
+    WHY THIS EXISTS: a formatter is the common case, and it is a real invalidation. `cargo fmt`
+    rewrites bytes, so `files_digest` legitimately changes and eight green spikes legitimately go
+    stale — an agent reported exactly that, twice, and correctly noted that "each catch was
+    legitimate". The defect was never the detection; it was that re-establishing eight verdicts was
+    manual, so the honest response to a formatting pass was tedious enough to invite skipping it.
+
+    This is deliberately NOT a way to bless a stale record. Each spike is re-executed and its new
+    verdict comes from a fresh subprocess exit code, exactly as the first one did — the only thing
+    saved is retyping the command. A spike that now FAILS is recorded as failing, which is the whole
+    point: re-gating must be able to discover that the formatter broke something.
+
+    Only STALE leaves are re-run. A spike still matching the tree is left alone, so this is cheap to
+    run habitually and never rewrites a valid record's timestamp.
+    """
+    graph_mod, evidence = _load("claimgraph"), _load("evidence")
+    graph = graph_mod.load(graph_mod.default_graph_path(run_dir))
+    if graph is None or graph == graph_mod.CORRUPT:
+        return {"regated": False, "reason": f"no readable claim graph in {run_dir}"}
+    out = []
+    for leaf in evidence.read_leaves(run_dir):
+        if leaf["fold"] != evidence.FOLD2 or not leaf["files"]:
+            continue
+        if leaf["files_hash"] == evidence.files_digest([Path(f) for f in leaf["files"]]):
+            continue  # still intact — nothing to do
+        node = graph["nodes"].get(leaf["claim_id"])
+        if node is None or not leaf["command"]:
+            out.append({"claim": leaf["claim_id"], "regated": False,
+                        "reason": "claim is gone from the graph"
+                                  if node is None else "no command recorded to re-run"})
+            continue
+        result = run_gate_repeated(leaf["command"], timeout, max(1, leaf["samples"]))
+        evidence.write_spike(
+            run_dir, f"spike-{leaf['claim_id']}", leaf["claim_id"], node["text"],
+            cmd=result["cmd"], gate=result["gate"], result_hash=_result_hash(result),
+            files=[Path(f) for f in leaf["files"]], ts=ts, samples=max(1, leaf["samples"]),
+            exit_codes=([r["returncode"] for r in result["runs"]] if result.get("runs")
+                        else [result["returncode"]]),
+        )
+        out.append({"claim": leaf["claim_id"], "regated": True, "gate": result["gate"],
+                    "samples": max(1, leaf["samples"])})
+    failed = [r["claim"] for r in out if r.get("gate") == "fail"]
+    return {"regated": True, "stale_found": len(out), "results": out, "failed": failed,
+            "note": ("every stale spike was RE-EXECUTED; verdicts come from fresh exit codes, "
+                     "not from blessing the old record")}
+
+
 def main() -> int:
-    cmd, timeout, report_only, ev, repeat = parse_args(sys.argv[1:])
+    # `--regate` is its own mode: it takes no command, because it re-runs the commands already
+    # recorded in the run's own evidence.
+    argv = sys.argv[1:]
+    if "--regate" in argv:
+        opts = {}
+        for i, tok in enumerate(argv):
+            if tok in ("--run-dir", "--ts", "--timeout") and i + 1 < len(argv):
+                opts[tok[2:]] = argv[i + 1]
+        if not opts.get("run-dir") or not opts.get("ts"):
+            print(json.dumps({"error": "usage: spike_harness.py --regate --run-dir DIR --ts STAMP "
+                                       "[--timeout SEC]"}))
+            return 2
+        try:
+            timeout = float(opts.get("timeout") or DEFAULT_TIMEOUT)
+        except ValueError:
+            timeout = DEFAULT_TIMEOUT
+        report = regate(Path(opts["run-dir"]), opts["ts"], timeout)
+        print(json.dumps(report, indent=2))
+        # Nonzero when a re-gate turned something red, so `--regate && next` behaves like a gate.
+        return 1 if report.get("failed") else 0
+
+    cmd, timeout, report_only, ev, repeat = parse_args(argv)
     if not cmd:
         print(json.dumps({"error": "usage: spike_harness.py [--timeout SEC] [--repeat N] "
                                     "[--report-only] "

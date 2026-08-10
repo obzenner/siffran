@@ -208,6 +208,10 @@ def diagnose(run_dir: Path | None = None, *, ts: str | None = None,
         "baseline": {"harness": _actors.HARNESS_BASELINE, "status": PERMITTED,
                      "note": "baseline is never gated (ADR-24 §4)"},
         "modes": mode_state,
+        # ADR-28: flags typed at invocation that matched no mode. A record, never a gate — but a
+        # visible one, because a mode typo otherwise leaves a user believing a run is in a mode it
+        # is not in. Empty for every run that typed no flags, so this is additive.
+        "unknown_flags": _modes.unknown_flags(run_dir),
         "tools": tools,
         "probed_optional": probe_optional,
         "spends_inference": False,          # rule 1, asserted by probe_is_non_inferential()

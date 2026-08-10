@@ -154,7 +154,13 @@ def write(run_dir: Path, **flags: bool) -> dict:
     with _io.lock(path):
         current = _file_modes(run_dir)
         current.update({m: bool(v) for m, v in flags.items()})
-        _io.atomic_write_json(path, current)
+        # Preserve the recorded unknown flags (ADR-28). `_file_modes` deliberately returns only
+        # known modes with bool values, so rebuilding the file from it alone DROPPED the typo
+        # record — found by its own test. The record has to survive a later mode write, or a run
+        # that sets a mode after a typo silently loses the evidence of the typo.
+        preserved = _read_unknown(path)
+        payload = {**current, UNKNOWN_KEY: preserved} if preserved else current
+        _io.atomic_write_json(path, payload)
     return current
 
 
@@ -162,3 +168,95 @@ def any_enabled(run_dir: Path | None = None) -> bool:
     """True when this run departs from baseline behaviour at all. The doctor uses it to decide
     whether to probe anything beyond the baseline (ADR-24 §4)."""
     return any(enabled(m, run_dir) for m in MODES)
+
+
+# --- invocation flags (ADR-28) ----------------------------------------------
+# The flag spelling a user types, mapped to the mode it sets. `--no-` prefixes are derived, so
+# adding a mode here gives you both polarities and cannot forget one.
+FLAGS = {"--multi-provider": MULTI_PROVIDER, "--cli-exec": CLI_EXEC}
+
+
+def parse_flags(text: str) -> tuple[dict, list[str]]:
+    """Read mode flags out of an invocation's argument text. Returns (flags, unknown_flags).
+
+    `/empirica --cli-exec design X` → ({"cli_exec": True}, []). `--no-cli-exec` sets it False, so
+    an operator can force a mode off for one run without editing state.
+
+    UNRECOGNISED FLAGS ARE RETURNED, NOT IGNORED. A user who types `--cli-exex` must be told,
+    for the same reason `write()` refuses unknown keys: a typo that silently does nothing gives
+    you a run you believe is in a mode it is not in. The caller decides how loud to be — the
+    run-start hook cannot print (it must never wedge a prompt), so it records them for the report.
+
+    Only tokens in the LEADING flag run are considered, and parsing stops at the first
+    non-flag token. Otherwise a goal like "make `--cli-exec` the default" would enable the mode
+    just by mentioning it — the same command-position bug that `dispatch_gate` already had to fix
+    for actor dispatches.
+
+    Pure: no clock, no environment, no writes (ADR-19). The caller persists the result.
+    """
+    flags: dict[str, bool] = {}
+    unknown: list[str] = []
+    for token in (text or "").split():
+        if not token.startswith("--"):
+            break  # end of the flag run; the rest is the goal
+        if token in FLAGS:
+            flags[FLAGS[token]] = True
+        elif token.startswith("--no-") and f"--{token[5:]}" in FLAGS:
+            flags[FLAGS[f"--{token[5:]}"]] = False
+        else:
+            unknown.append(token)
+    return flags, unknown
+
+
+UNKNOWN_KEY = "unknown_flags"
+
+
+def _read_unknown(path: Path) -> list[str]:
+    """The recorded unknown flags in a mode file, or [] — one reader, shared by `write`,
+    `record_unknown_flags` and `unknown_flags`, so the three cannot disagree about the shape."""
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"), parse_constant=_raise_non_finite)
+    except (OSError, json.JSONDecodeError, ValueError):
+        return []
+    if not isinstance(raw, dict):
+        return []
+    return [f for f in (raw.get(UNKNOWN_KEY) or []) if isinstance(f, str)]
+
+
+def record_unknown_flags(run_dir: Path, unknown: list[str]) -> None:
+    """Persist flags that matched no mode, so a typo is VISIBLE instead of silent.
+
+    Kept in `modes.json` under a key outside the mode vocabulary, so `_file_modes` (which reads
+    only known modes with bool values) ignores it entirely and no mode can be enabled by it. The
+    doctor surfaces it; that is the whole mechanism — a record, never a gate.
+
+    Best-effort and non-raising on a corrupt file: failing to record a typo must not be worse
+    than the typo.
+    """
+    if not unknown:
+        return
+    path = config_path(run_dir)
+    with _io.lock(path):
+        current = _file_modes(run_dir)
+        seen = _read_unknown(path)
+        merged = seen + [f for f in unknown if f not in seen]
+        _io.atomic_write_json(path, {**current, UNKNOWN_KEY: merged})
+
+
+def unknown_flags(run_dir: Path | None) -> list[str]:
+    """Unrecognised flags recorded for this run, for the doctor's report."""
+    return [] if run_dir is None else _read_unknown(config_path(run_dir))
+
+
+def strip_flags(text: str) -> str:
+    """The invocation text with its leading mode flags removed — i.e. the actual goal.
+
+    The skill needs this because `$ARGUMENTS` still contains the flags: without stripping them,
+    `--cli-exec` becomes part of the goal the run is trying to establish, and a claim graph rooted
+    in "--cli-exec design X" is a subtly corrupted intent.
+    """
+    tokens = (text or "").split()
+    i = 0
+    while i < len(tokens) and tokens[i].startswith("--"):
+        i += 1
+    return " ".join(tokens[i:])
