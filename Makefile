@@ -25,6 +25,7 @@ ADR_DIR := doc/adr
 EMPIRICA_TESTS := $(PLUGINS_DIR)/empirica/tests/test_hooks.py
 EMPIRICA_CORE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_core.py
 EMPIRICA_STATE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_state_adapter.py
+EMPIRICA_GIT_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/git/tests/test_git_artifact_repo.py
 METHODOLOGIST_CORE_TESTS := $(PLUGINS_DIR)/methodologist/tests/test_core.py
 MARKETPLACE := .claude-plugin/marketplace.json
 
@@ -65,6 +66,7 @@ test: ## Run the plugin test suites
 	@$(PYTHON) $(EMPIRICA_TESTS)
 	@$(PYTHON) $(EMPIRICA_CORE_TESTS)
 	@$(PYTHON) $(EMPIRICA_STATE_TESTS)
+	@$(PYTHON) $(EMPIRICA_GIT_ADAPTER_TESTS)
 	@$(PYTHON) $(METHODOLOGIST_CORE_TESTS)
 
 .PHONY: lint
