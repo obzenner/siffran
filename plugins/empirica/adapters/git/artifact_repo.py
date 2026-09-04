@@ -390,5 +390,10 @@ def _ref_component(value: str) -> str:
     risk between two runs, which would silently merge their artifact sets into one namespace."""
     slug = re.sub(r"[^A-Za-z0-9._-]", "-", value).strip("-.")
     slug = re.sub(r"-{2,}", "-", slug) or "x"
+    # Git rejects ``..`` anywhere in a ref even when the full component is not
+    # itself ``..``. Keep the readable prefix valid; the full digest below
+    # preserves injectivity.
+    while ".." in slug:
+        slug = slug.replace("..", "-")
     digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
     return f"{slug}-{digest}"

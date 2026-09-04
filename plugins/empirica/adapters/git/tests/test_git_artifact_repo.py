@@ -90,6 +90,13 @@ class GitArtifactRepositoryTest(unittest.TestCase):
         self.assertTrue(ref.startswith("refs/empirica/artifacts/"))
         _run(self.root, "show-ref", "--verify", "--quiet", ref)  # raises if missing
 
+    def test_ref_components_with_double_dots_are_valid(self):
+        key = RunKey("project..name", "run..name", 1)
+        self.repo.append(key, _art("x"))
+        ref = self.repo.ref_for(key)
+        self.assertNotIn("..", ref)
+        _run(self.root, "check-ref-format", ref)
+
     # --- idempotency / commutativity -----------------------------------------
 
     def test_append_is_idempotent_and_leaves_ref_unmoved(self):
