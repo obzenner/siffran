@@ -58,7 +58,7 @@ help: ## Show this help (generated from target descriptions)
 ## --- Verify
 
 .PHONY: check
-check: lint test validate contract-check methodologist-pi-check adr-check ## Run every check (what CI and pre-commit should run)
+check: lint test validate contract-check methodologist-pi-check empirica-pi-check adr-check ## Run every check (what CI and pre-commit should run)
 	@printf '\n$(BOLD)All checks passed.$(RESET)\n'
 
 .PHONY: test
@@ -115,7 +115,12 @@ contract-check: ## Validate host-neutral API schemas and conformance fixtures
 .PHONY: methodologist-pi-check
 methodologist-pi-check: ## Validate the Methodologist Pi adapter package (static always; tests if node present)
 	@printf '$(BOLD)==> methodologist Pi adapter$(RESET)\n'
-	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py
+	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py plugins/methodologist/adapters/pi
+
+.PHONY: empirica-pi-check
+empirica-pi-check: ## Validate the Empirica Pi adapter package (static + bridge smoke always; tests if node present)
+	@printf '$(BOLD)==> empirica Pi adapter$(RESET)\n'
+	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py plugins/empirica/adapters/pi
 
 ## --- Inspect
 

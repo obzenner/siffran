@@ -1,0 +1,43 @@
+{
+  "name": "@siffran/empirica-pi",
+  "version": "0.1.0",
+  "description": "Pi (pi.dev) adapter for the Empirica plugin: registers /empirica and /empirica-status, gates the report_convergence tool/command, and contributes the Empirica skill via resources_discover. Translates Pi lifecycle/tool events to the empirica/v1 contract through an injected transport; the production transport is a JSON stdio bridge to the host-neutral core (ADR-30, ADR-32).",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi",
+    "pi-extension",
+    "pi.dev",
+    "empirica",
+    "siffran",
+    "convergence"
+  ],
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "bridge.py",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  }
+}
