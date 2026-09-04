@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Validate a skill registry against files on disk.
+"""Validate a skill registry and its methodology files against the core models.
+
+Delegates the registry/file sync check to the host-neutral Methodologist core
+(`plugins/methodologist/core`) and layers the strengthened structural checks on
+top: every methodology file must carry six numbered phases, a lineage and a
+prevents line, and a well-formed output block wherever it declares one; the
+shared stance reference must carry its mandatory declaration.
 
 A registry.json declares its own structure via a "schema" block:
   - entries_key: which top-level key holds the entries array
@@ -13,56 +19,48 @@ Usage:
 Exit code 0 = all checks pass, 1 = failures found.
 """
 
-import json
 import sys
 from pathlib import Path
 
+# The core is a sibling package under plugins/methodologist/; make it importable
+# without a package install so `make validate` and a bare `python3` both work.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from core import (  # noqa: E402
+    load_methodology,
+    load_registry,
+    validate_methodology_structure,
+    validate_registry_against_files,
+    validate_stance,
+)
+
 
 def validate(skill_dir: Path) -> list[str]:
-    errors: list[str] = []
-
     registry_path = skill_dir / "registry.json"
     if not registry_path.exists():
         return [f"Missing: {registry_path}"]
 
-    with open(registry_path) as f:
-        registry = json.load(f)
-
-    schema = registry.get("schema")
-    if not schema:
-        return ["registry.json missing 'schema' block"]
-
-    entries_key = schema.get("entries_key")
-    files_dir = schema.get("files_dir")
-    required_fields = set(schema.get("required_fields", []))
-
-    if not entries_key or not files_dir:
+    registry = load_registry(registry_path)
+    if not registry.schema.entries_key or not registry.schema.files_dir:
         return ["schema must define 'entries_key' and 'files_dir'"]
 
-    target_dir = skill_dir / files_dir
+    target_dir = skill_dir / registry.schema.files_dir
     if not target_dir.exists():
         return [f"Missing directory: {target_dir}"]
 
-    entries = registry.get(entries_key, [])
-    registry_names: set[str] = set()
+    md_files = sorted(target_dir.glob("*.md"))
+    file_stems = {p.stem for p in md_files}
 
-    for i, entry in enumerate(entries):
-        missing = required_fields - set(entry.keys())
-        if missing:
-            errors.append(f"Entry {i}: missing fields {missing}")
+    errors = validate_registry_against_files(registry, file_stems)
 
-        name = entry.get("name")
-        if not name:
-            errors.append(f"Entry {i}: missing 'name'")
-            continue
+    for md in md_files:
+        errors.extend(validate_methodology_structure(load_methodology(md)))
 
-        registry_names.add(name)
-        if not (target_dir / f"{name}.md").exists():
-            errors.append(f"Registry has '{name}' but {name}.md not found in {files_dir}/")
-
-    file_names = {p.stem for p in target_dir.glob("*.md")}
-    for name in sorted(file_names - registry_names):
-        errors.append(f"File '{name}.md' exists in {files_dir}/ but not in registry")
+    stance_path = skill_dir / "references" / "evidence-over-recall.md"
+    if stance_path.exists():
+        errors.extend(validate_stance(stance_path.read_text()))
+    else:
+        errors.append(f"Missing stance reference: {stance_path}")
 
     return errors
 
