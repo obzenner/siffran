@@ -326,5 +326,340 @@ class AuditCoverage(unittest.TestCase):
         self.assertIn("DIFFERENT argument", why)
 
 
+"""Contract tests for the empirica persistence ports (ADR-31).
+
+Run: python3 plugins/empirica/tests/test_core.py   (stdlib only, no pytest dependency)
+Exit 0 = all checks pass; 1 = at least one failed.
+
+These are *contract* tests, not adapter tests: they exercise the ports through minimal in-memory
+fakes and assert the four semantics every real adapter must also honour —
+    * CAS               — compare_and_set is conditional on the opaque revision;
+    * generation isolation — a write under one RunKey.generation is invisible to another;
+    * append union      — artifact append is commutative and idempotent (set union);
+    * first-write-wins  — create/compare_and_set never clobber a concurrent writer.
+Plus the absent-vs-corrupt distinction and the explicit migration path. The fakes are the
+executable spec of the contract; a filesystem or database adapter is correct iff it passes the
+same suite.
+"""
+import importlib
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+# The core package uses relative imports, so import it as the package `core` with the plugin
+# root on sys.path (mirrors how test_hooks.py loads the hooks).
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent  # plugins/empirica
+sys.path.insert(0, str(PLUGIN_ROOT))
+core = importlib.import_module("core")
+
+ABSENT = core.ABSENT
+Artifact = core.Artifact
+Conflict = core.Conflict
+Corrupt = core.Corrupt
+MigrationReport = core.MigrationReport
+Present = core.Present
+Revision = core.Revision
+RunKey = core.RunKey
+
+results: list[tuple[str, bool, str]] = []
+
+
+def check(name: str, ok: bool, detail: str = "") -> None:
+    """Record one assertion. `ok` is coerced to a real bool so a caller that passes a container
+    can never make the summation in main() raise and abort the whole suite (test_hooks.py 2.9)."""
+    results.append((name, bool(ok), detail))
+
+
+# --- In-memory fakes: the executable spec of each port ----------------------
+_CORRUPT = object()  # a stored blob that cannot be decoded
+
+
+class FakeRunRepository:
+    """Reference RunRepository: a dict keyed by RunKey, revisions minted from a counter.
+
+    The revision is deliberately an opaque monotonic token, NOT the value's hash, so a test that
+    accidentally reconstructed a revision from the value would fail — proving callers must round-
+    trip the token they were given."""
+
+    def __init__(self) -> None:
+        self._store: dict[RunKey, object] = {}  # key -> (value, Revision) | _CORRUPT
+        self._counter = 0
+
+    def _mint(self) -> Revision:
+        self._counter += 1
+        return Revision(f"r{self._counter}")
+
+    def read(self, key: RunKey):
+        entry = self._store.get(key)
+        if entry is None:
+            return ABSENT
+        if entry is _CORRUPT:
+            return Corrupt("undecodable")
+        value, rev = entry
+        return Present(value, rev)
+
+    def create(self, key: RunKey, value):
+        if key in self._store:  # present or corrupt — either way, not ours to create
+            raise Conflict(key, None, "already exists")
+        rev = self._mint()
+        self._store[key] = (value, rev)
+        return rev
+
+    def compare_and_set(self, key: RunKey, value, expected: Revision):
+        entry = self._store.get(key)
+        if entry is None:
+            raise Conflict(key, expected, "absent")
+        if entry is _CORRUPT:
+            raise Conflict(key, expected, "corrupt")
+        _, rev = entry
+        if rev != expected:
+            raise Conflict(key, expected, f"stale (stored {rev})")
+        new = self._mint()
+        self._store[key] = (value, new)
+        return new
+
+    def _inject_corrupt(self, key: RunKey) -> None:
+        """Test affordance: simulate an on-store blob that no longer decodes."""
+        self._store[key] = _CORRUPT
+
+
+class FakeArtifactRepository:
+    """Reference ArtifactRepository: a dict of key -> frozenset[Artifact]. Append is set union, so
+    commutativity and idempotence fall out of set semantics — exactly the contract adapters owe."""
+
+    def __init__(self) -> None:
+        self._store: dict[RunKey, frozenset] = {}
+
+    def append(self, key: RunKey, artifact: Artifact) -> None:
+        self._store[key] = self._store.get(key, frozenset()) | {artifact}
+
+    def read(self, key: RunKey):
+        entry = self._store.get(key)
+        if entry is None:
+            return ABSENT
+        # An opaque, order-independent digest of the set stands in for a real content revision.
+        rev = Revision(str(hash(entry)))
+        return Present(entry, rev)
+
+
+@dataclass
+class FakeMigration:
+    """Reference MigrationPort: copies operational state and artifacts source -> target, leaving
+    source intact. The only sanctioned bridge across a generation boundary (ADR-31)."""
+
+    runs: FakeRunRepository
+    artifacts: FakeArtifactRepository
+
+    def migrate(self, source: RunKey, target: RunKey) -> MigrationReport:
+        runs_moved = 0
+        src_run = self.runs.read(source)
+        if isinstance(src_run, Present):
+            self.runs.create(target, src_run.value)  # first-write-wins guards target
+            runs_moved = 1
+        arts_moved = 0
+        src_arts = self.artifacts.read(source)
+        if isinstance(src_arts, Present):
+            for art in src_arts.value:
+                self.artifacts.append(target, art)
+            arts_moved = len(src_arts.value)
+        return MigrationReport(source, target, runs_moved, arts_moved)
+
+
+K = RunKey("proj", "run-1", 1)
+
+
+# --- CAS --------------------------------------------------------------------
+def test_cas_conditional_on_revision():
+    repo = FakeRunRepository()
+    rev0 = repo.create(K, {"status": "active", "passes": 0})
+    got = repo.read(K)
+    check("A1 read after create is Present with a revision",
+          isinstance(got, Present) and got.revision == rev0, f"got {got}")
+    rev1 = repo.compare_and_set(K, {"status": "active", "passes": 1}, expected=rev0)
+    check("A2 CAS with the current revision succeeds and advances the revision",
+          rev1 != rev0 and isinstance(repo.read(K), Present), f"rev1={rev1}")
+    stale = False
+    try:
+        repo.compare_and_set(K, {"status": "x"}, expected=rev0)  # rev0 is now stale
+    except Conflict:
+        stale = True
+    check("A3 CAS with a stale revision raises Conflict", stale)
+    check("A4 the refused CAS did not mutate the value",
+          repo.read(K).value == {"status": "active", "passes": 1}, f"got {repo.read(K)}")
+    rev2 = repo.compare_and_set(K, {"status": "done"}, expected=rev1)
+    check("A5 CAS with the fresh revision after a failed attempt still works", rev2 != rev1)
+
+
+# --- first-write-wins -------------------------------------------------------
+def test_first_write_wins():
+    repo = FakeRunRepository()
+    repo.create(K, {"status": "active"})
+    lost = False
+    try:
+        repo.create(K, {"status": "clobbered"})  # a second creator races and loses
+    except Conflict:
+        lost = True
+    check("B1 a second create on an existing key raises Conflict (first-writer-wins)", lost)
+    check("B2 the first writer's value survives the losing create",
+          repo.read(K).value == {"status": "active"}, f"got {repo.read(K)}")
+    fresh = FakeRunRepository()
+    absent_cas = False
+    try:
+        fresh.compare_and_set(K, {"status": "x"}, expected=Revision("r1"))
+    except Conflict:
+        absent_cas = True
+    check("B3 compare_and_set on an absent key raises Conflict (no blind upsert)", absent_cas)
+
+
+# --- generation isolation ---------------------------------------------------
+def test_generation_isolation_runs():
+    repo = FakeRunRepository()
+    g1 = RunKey("proj", "run-1", 1)
+    g2 = RunKey("proj", "run-1", 2)  # same project+run, next generation
+    repo.create(g1, {"status": "active", "gen": 1})
+    check("C1 a write under generation 1 is ABSENT at generation 2",
+          repo.read(g2) is ABSENT, f"got {repo.read(g2)}")
+    # Generation 2 can be created independently; it does not disturb generation 1.
+    repo.create(g2, {"status": "active", "gen": 2})
+    check("C2 generation 2 holds its own value", repo.read(g2).value["gen"] == 2)
+    check("C3 generation 1 is untouched by the generation-2 write",
+          repo.read(g1).value["gen"] == 1, f"got {repo.read(g1)}")
+
+
+def test_generation_isolation_artifacts():
+    repo = FakeArtifactRepository()
+    g1 = RunKey("proj", "run-1", 1)
+    g2 = RunKey("proj", "run-1", 2)
+    repo.append(g1, Artifact("a", "body-a"))
+    check("C4 artifacts appended at generation 1 are ABSENT at generation 2",
+          repo.read(g2) is ABSENT, f"got {repo.read(g2)}")
+    check("C5 generation 1 still sees its artifact",
+          repo.read(g1).value == frozenset({Artifact("a", "body-a")}))
+
+
+# --- append union (commutative + idempotent) --------------------------------
+def test_append_is_commutative_and_idempotent():
+    a, b, c = Artifact("a", "A"), Artifact("b", "B"), Artifact("c", "C")
+
+    r1 = FakeArtifactRepository()
+    for art in (a, b, c):
+        r1.append(K, art)
+    r2 = FakeArtifactRepository()
+    for art in (c, a, b):  # different order
+        r2.append(K, art)
+    check("D1 append is commutative: order does not change the resulting set",
+          r1.read(K).value == r2.read(K).value == frozenset({a, b, c}),
+          f"{r1.read(K)} vs {r2.read(K)}")
+
+    r3 = FakeArtifactRepository()
+    for art in (a, a, a, b):  # duplicates
+        r3.append(K, art)
+    check("D2 append is idempotent: appending the same artifact is a no-op",
+          r3.read(K).value == frozenset({a, b}), f"got {r3.read(K)}")
+
+    r4 = FakeArtifactRepository()
+    r4.append(K, a)
+    v_before = r4.read(K).value
+    r4.append(K, a)
+    check("D3 re-appending an existing artifact leaves the set unchanged",
+          r4.read(K).value == v_before == frozenset({a}))
+
+    check("D4 an empty artifact store reads ABSENT, not an empty Present",
+          FakeArtifactRepository().read(K) is ABSENT)
+
+
+# --- absent vs corrupt ------------------------------------------------------
+def test_absent_is_distinct_from_corrupt():
+    repo = FakeRunRepository()
+    check("E1 an unwritten key reads ABSENT", repo.read(K) is ABSENT)
+    repo._inject_corrupt(K)
+    got = repo.read(K)
+    check("E2 an undecodable blob reads Corrupt (not ABSENT)",
+          isinstance(got, Corrupt) and got.reason, f"got {got}")
+    check("E3 ABSENT and Corrupt are different outcomes", (repo.read(K) is ABSENT) is False)
+    # Fail closed: a corrupt run must not be creatable (that would silently discard it) nor CAS-able.
+    refused_create = refused_cas = False
+    try:
+        repo.create(K, {"status": "new"})
+    except Conflict:
+        refused_create = True
+    try:
+        repo.compare_and_set(K, {"status": "new"}, expected=Revision("r1"))
+    except Conflict:
+        refused_cas = True
+    check("E4 create refuses to overwrite a corrupt document (fail closed)", refused_create)
+    check("E5 compare_and_set refuses a corrupt document (fail closed)", refused_cas)
+
+
+# --- explicit migration -----------------------------------------------------
+def test_migration_is_the_only_generation_bridge():
+    runs = FakeRunRepository()
+    arts = FakeArtifactRepository()
+    g1 = RunKey("proj", "run-1", 1)
+    g2 = RunKey("proj", "run-1", 2)
+    runs.create(g1, {"status": "active", "gen": 1})
+    arts.append(g1, Artifact("a", "A"))
+    arts.append(g1, Artifact("b", "B"))
+
+    check("F1 before migration generation 2 is ABSENT (no implicit crossing)",
+          runs.read(g2) is ABSENT and arts.read(g2) is ABSENT)
+
+    report = FakeMigration(runs, arts).migrate(g1, g2)
+    check("F2 migration reports what crossed the boundary",
+          report == MigrationReport(g1, g2, runs_migrated=1, artifacts_migrated=2),
+          f"got {report}")
+    check("F3 generation 2 now holds the migrated state",
+          runs.read(g2).value == {"status": "active", "gen": 1}
+          and arts.read(g2).value == frozenset({Artifact("a", "A"), Artifact("b", "B")}),
+          f"runs={runs.read(g2)} arts={arts.read(g2)}")
+    check("F4 the source generation is left intact (migration is reversible)",
+          runs.read(g1).value == {"status": "active", "gen": 1}
+          and arts.read(g1).value == frozenset({Artifact("a", "A"), Artifact("b", "B")}))
+
+    # Migrating onto an occupied target must lose to the first writer, not clobber it.
+    clobbered = False
+    try:
+        FakeMigration(runs, arts).migrate(g1, g2)
+    except Conflict:
+        clobbered = True
+    check("F5 re-migrating onto an occupied generation raises Conflict (first-write-wins holds)",
+          clobbered)
+
+
+# --- record hygiene ---------------------------------------------------------
+def test_records_are_immutable_and_value_typed():
+    frozen = False
+    try:
+        RunKey("p", "r", 1).generation = 2  # type: ignore[misc]
+    except Exception:
+        frozen = True
+    check("G1 RunKey is frozen (immutable identity)", frozen)
+    check("G2 RunKey has value equality (usable as a dict/set key)",
+          RunKey("p", "r", 1) == RunKey("p", "r", 1)
+          and RunKey("p", "r", 1) != RunKey("p", "r", 2))
+    check("G3 Revision compares by value (opaque token round-trips)",
+          Revision("x") == Revision("x") and Revision("x") != Revision("y"))
+    check("G4 Artifact is hashable so it can live in the append-union set",
+          len({Artifact("a", "A"), Artifact("a", "A")}) == 1)
+
+
+def main() -> int:
+    unit_suite = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
+    unit_result = unittest.TextTestRunner(verbosity=2).run(unit_suite)
+    tests = [v for k, v in sorted(globals().items())
+             if k.startswith("test_") and callable(v)]
+    for t in tests:
+        t()
+    passed = sum(1 for _, ok, _ in results if ok)
+    for name, ok, detail in results:
+        mark = "ok  " if ok else "FAIL"
+        line = f"  [{mark}] {name}"
+        if not ok and detail:
+            line += f"  — {detail}"
+        print(line)
+    print(f"\n{passed}/{len(results)} checks passed")
+    return 0 if unit_result.wasSuccessful() and passed == len(results) else 1
+
+
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    raise SystemExit(main())
