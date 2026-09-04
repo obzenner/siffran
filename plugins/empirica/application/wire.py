@@ -32,7 +32,29 @@ CMD_START_RUN = "StartRun"
 CMD_OBSERVE_ACTION = "ObserveAction"
 CMD_EVALUATE_RUN = "EvaluateRun"
 CMD_GET_RUN = "GetRun"
-_COMMANDS = frozenset({CMD_START_RUN, CMD_OBSERVE_ACTION, CMD_EVALUATE_RUN, CMD_GET_RUN})
+# RestoreRun returns an enriched read-only snapshot of the whole operational plane (status, budget,
+# phase, modes, freeze, ordering witnesses, tickets) so a host can rebuild its in-session view after
+# a compaction or a resume without reading any side file (ADR-31; mirrors the legacy state_restore).
+CMD_RESTORE_RUN = "RestoreRun"
+_COMMANDS = frozenset({CMD_START_RUN, CMD_OBSERVE_ACTION, CMD_EVALUATE_RUN, CMD_GET_RUN,
+                       CMD_RESTORE_RUN})
+
+# ObserveAction kinds. Two families: KNOWLEDGE kinds append to the immutable argument (and are
+# refused on a finished run — its argument is sealed), and OPERATIONAL kinds touch the run's control
+# state. Reserving a spawn is neither an argument edit nor a lifecycle commitment, so it is the one
+# kind that fails OPEN on a terminal run (there is nothing left to gate).
+KIND_RESERVE_SPAWN = "reserve_spawn"
+KIND_CONFIGURE_BUDGET = "configure_budget"
+KIND_PHASE = "phase"
+KIND_MODE = "mode"
+KIND_FREEZE = "freeze"
+KIND_ROUTE = "route"
+KIND_INVESTIGATE = "investigate"
+KIND_DISPATCH = "dispatch"
+KIND_CONSUME_AUDIT_TICKET = "consume_audit_ticket"
+# Actions that fail OPEN on a terminal run: a resource gate and pure resource/config reads have no
+# bearing on a finished run's sealed argument, so refusing them would wedge unrelated work.
+_TERMINAL_FAIL_OPEN_KINDS = frozenset({KIND_RESERVE_SPAWN})
 
 # EvaluateRun intents (response.result oneOf drives behaviour; see service._evaluate).
 INTENT_CONTINUE = "continue"
@@ -95,7 +117,7 @@ def decode_handle(handle: object) -> RunKey:
     if not isinstance(obj, dict) or {"p", "r", "g"} - obj.keys():
         raise InvalidRequest("run_id handle is missing project/run/generation")
     project, run, gen = obj["p"], obj["r"], obj["g"]
-    if not isinstance(project, str) or not isinstance(run, str) or not isinstance(gen, int):
+    if not isinstance(project, str) or not isinstance(run, str) or type(gen) is not int or gen < 0:
         raise InvalidRequest("run_id handle has malformed project/run/generation")
     return RunKey(project, run, gen)
 

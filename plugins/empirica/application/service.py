@@ -24,17 +24,22 @@ an orphan artifact (harmless, immutable) but never makes an orphan *current*.
 """
 from __future__ import annotations
 
+import hashlib
 from typing import Protocol
 
 from core import Allow, Block, Fault, Inert, Present, RunKey, RunState, adjudicate, claims
 from core.records import ABSENT, Conflict, Corrupt
 
-from . import knowledge, wire
-from .state import DEFAULT_MAX_PASSES, DEFAULT_THETA, OperationalState
+from . import actors, knowledge, wire
+from .state import DEFAULT_MAX_PASSES, DEFAULT_THETA, MODES, PHASES, OperationalState
 
 # Bound on the graph-pointer CAS retry loop. Each retry re-reads the run and re-attempts the swap;
 # contention clears in one extra pass per concurrent winner, so this only trips on a live-lock.
 _MAX_CAS_RETRIES = 32
+
+# Internal sentinel: a finalize CAS lost its race and the caller must re-read and retry. Never
+# escapes the service — the EvaluateRun retry loop consumes it (ADR-31 CAS retries).
+_RETRY = object()
 
 
 class GenerationAllocator(Protocol):
@@ -85,6 +90,8 @@ class EmpiricaService:
             return self._start_run(command)
         if ctype == wire.CMD_GET_RUN:
             return self._get_run(command)
+        if ctype == wire.CMD_RESTORE_RUN:
+            return self._restore_run(command)
         if ctype == wire.CMD_OBSERVE_ACTION:
             return self._observe(command)
         if ctype == wire.CMD_EVALUATE_RUN:
@@ -149,6 +156,76 @@ class EmpiricaService:
             return wire.fault(wire.FAULT_CORRUPT_RUN, "run document is unreadable")
         return self._run_snapshot(key, state)
 
+    # --- RestoreRun ----------------------------------------------------------
+
+    def _restore_run(self, command: dict) -> dict:
+        """Return an enriched, read-only snapshot of the whole operational plane so a host can rebuild
+        its in-session view after a compaction or a resume without touching any side file (ADR-31;
+        the host-neutral successor to the legacy ``state_restore`` re-injection). Writes nothing.
+
+        Fail directions match the reads it composes: an absent run is Inert(no_run), a corrupt run
+        document faults closed, and a corrupt knowledge plane faults closed on the graph resume view
+        rather than reporting a run that cannot be trusted as restorable."""
+        key = wire.decode_handle(wire.require(command, "run_id", str))
+        read = self._runs.read(key)
+        if read is ABSENT:
+            return wire.inert("no_run")
+        if isinstance(read, Corrupt):
+            return wire.fault(wire.FAULT_CORRUPT_RUN, read.reason)
+        state = OperationalState.decode(read.value)
+        if state is None:
+            return wire.fault(wire.FAULT_CORRUPT_RUN, "run document is unreadable")
+
+        snapshot: dict = {
+            "phase": state.phase,
+            "passes": state.passes,
+            "max_passes": state.max_passes,
+            "theta": state.theta,
+            "spawn": self._spawn_view(state),
+            "modes": dict(state.modes),
+            "route": self._route_view(state),
+            "audit_tickets": [dict(t) for t in state.audit_tickets],
+            "dispatches": [dict(d) for d in state.dispatches],
+            "has_graph": state.claim_graph_artifact_id is not None,
+        }
+        if state.frozen_claims is not None:
+            snapshot["frozen_claims"] = list(state.frozen_claims)
+
+        # A derived claim-graph resume view, when the run has an argument and it (and the knowledge
+        # plane) are readable. A corrupt knowledge plane faults closed; a merely-absent pointer just
+        # omits the graph view. This never re-adjudicates — it reports, it does not stop the run.
+        if state.claim_graph_artifact_id is not None:
+            graph_view = self._restore_graph_view(key, state)
+            if isinstance(graph_view, dict) and graph_view.get("__fault__"):
+                return graph_view["__fault__"]
+            if graph_view is not None:
+                snapshot["graph"] = graph_view
+        return wire.allow(state.status == wire.STATUS_CONVERGED,
+                          self._run_view(key, state, snapshot=snapshot))
+
+    def _restore_graph_view(self, key: RunKey, state: OperationalState):
+        """The gating/open/blocked/deferred counts for the run's current graph, or a fault wrapper on
+        a corrupt knowledge plane / stale pointer. ``None`` when the graph is not yet readable."""
+        try:
+            graph, graph_fault = self._load_graph(key, state)
+        except knowledge.KnowledgeError as exc:
+            return {"__fault__": wire.fault(wire.FAULT_CORRUPT_ARTIFACTS, str(exc))}
+        if graph_fault is not None:
+            return {"__fault__": graph_fault}
+        if not isinstance(graph, dict):
+            return None
+        ev = knowledge.build_evidence_oracle(self._knowledge.evidence)
+
+        def ev_ok(nid, purpose):
+            return ev(nid, purpose)[0]
+        gating = claims.gating_goals(graph, state.theta, ev_ok)
+        open_claims = claims.pending(graph, state.theta, ev_ok)
+        blocked = claims.blocked_residuals(graph, state.theta, ev_ok)
+        deferred = ([nid for nid in gating if nid not in set(state.frozen_claims)]
+                    if state.frozen_claims is not None else [])
+        return {"gating": len(gating), "open": len(open_claims), "blocked": len(blocked),
+                "deferred": len(deferred)}
+
     # --- ObserveAction -------------------------------------------------------
 
     def _observe(self, command: dict) -> dict:
@@ -165,18 +242,24 @@ class EmpiricaService:
         if state is None:
             return wire.fault(wire.FAULT_CORRUPT_RUN, "run document is unreadable")
         if not state.is_active:
-            # A finished run's knowledge is sealed; refuse to append onto it rather than let a late
-            # observation rewrite a converged/stopped run's argument.
+            # A finished run's argument is sealed. An action that would edit that argument or add a
+            # lifecycle commitment is refused (fail closed) so a late write cannot rewrite a
+            # converged/stopped run. But an action UNRELATED to the argument — a spawn-budget gate —
+            # fails OPEN: there is nothing left to gate, so refusing it would only wedge unrelated
+            # work (mirrors the legacy spawn/dispatch gates returning 0 on an inactive run).
+            if kind in wire._TERMINAL_FAIL_OPEN_KINDS:
+                return wire.allow(state.status == wire.STATUS_CONVERGED,
+                                  self._run_view(key, state,
+                                                 spawn=self._spawn_view(state, reserved=True,
+                                                     note=f"run is {state.status}; budget not "
+                                                          "enforced on a finished run")))
             return wire.fault(wire.FAULT_CONFLICT, f"run is {state.status}, not active")
 
+        # --- knowledge-plane appends (immutable argument; revision unchanged) ---
         if kind == knowledge.KIND_GRAPH:
             return self._update_graph(key, action.get("graph"))
         if kind == knowledge.KIND_EVIDENCE:
             return self._observe_evidence(key, state, action)
-        if kind == knowledge.KIND_AUDIT_TICKET:
-            return self._append_and_ack(key, state,
-                                        knowledge.audit_ticket_artifact(
-                                            wire.require(action, "nonce", str)))
         if kind == knowledge.KIND_AUDIT_VERDICT:
             return self._append_and_ack(key, state,
                                         knowledge.audit_verdict_artifact(
@@ -185,8 +268,28 @@ class EmpiricaService:
             return self._append_and_ack(key, state,
                                         knowledge.attribution_artifact(
                                             wire.require(action, "report", dict)))
-        if kind == "route":
-            return self._observe_route(key, read.revision, state, action)
+
+        # --- operational-plane mutations (CAS-guarded state writes) ---
+        if kind == wire.KIND_RESERVE_SPAWN:
+            return self._reserve_spawn(key)
+        if kind == wire.KIND_CONFIGURE_BUDGET:
+            return self._configure_budget(key, action)
+        if kind == wire.KIND_PHASE:
+            return self._transition_phase(key, action)
+        if kind == wire.KIND_MODE:
+            return self._set_modes(key, action)
+        if kind == wire.KIND_FREEZE:
+            return self._freeze(key, action)
+        if kind == wire.KIND_ROUTE:
+            return self._stamp_route(key, action)
+        if kind == wire.KIND_INVESTIGATE:
+            return self._stamp_investigation(key)
+        if kind == wire.KIND_DISPATCH:
+            return self._record_dispatch(key, action)
+        if kind == knowledge.KIND_AUDIT_TICKET:
+            return self._issue_audit_ticket(key, action)
+        if kind == wire.KIND_CONSUME_AUDIT_TICKET:
+            return self._consume_audit_ticket(key, action)
         return wire.fault(wire.FAULT_UNSUPPORTED, f"unsupported action kind: {kind}")
 
     def _observe_evidence(self, key: RunKey, state: OperationalState, action: dict) -> dict:
@@ -202,14 +305,22 @@ class EmpiricaService:
             key, state, knowledge.evidence_artifact(claim_id, purpose, ok, reason))
 
     def _verdict_payload(self, action: dict) -> dict:
-        """Extract the audit-verdict fields ``core.audit.coverage_check`` reads. Missing fields are
-        rejected up front so a malformed verdict never lands as an artifact."""
+        """Extract the audit-verdict fields ``core.audit.coverage_check`` reads. Missing/mis-typed
+        fields are rejected up front so a malformed verdict never lands as an artifact; per-entry
+        shape is re-validated when the oracle reads it back (``knowledge._normalise_verdict``), so a
+        hand-crafted stored artifact still fails closed rather than crashing the wire boundary."""
+        reviewed = action.get("claims_reviewed", [])
+        findings = action.get("findings", [])
+        if not isinstance(reviewed, list):
+            raise wire.InvalidRequest("claims_reviewed must be a list")
+        if not isinstance(findings, list):
+            raise wire.InvalidRequest("findings must be a list")
         return {
             "verdict": wire.require(action, "verdict", str),
             "nonce": wire.require(action, "nonce", str),
             "argument_digest": action.get("argument_digest"),
-            "claims_reviewed": action.get("claims_reviewed", []),
-            "findings": action.get("findings", []),
+            "claims_reviewed": reviewed,
+            "findings": findings,
         }
 
     def _append_and_ack(self, key: RunKey, state: OperationalState,
@@ -222,18 +333,265 @@ class EmpiricaService:
         self._artifacts.append(key, knowledge_artifact(art_id, body))
         return self._run_snapshot(key, state)
 
-    def _observe_route(self, key: RunKey, expected, state: OperationalState, action: dict) -> dict:
-        """Record the P1 routing verdict on the operational state (a run-level commitment, not a
-        claim). CAS'd like any state write."""
-        verdict = wire.require(action, "verdict", str)
+    # --- operational-plane operations (CAS-guarded) --------------------------
+
+    def _commit(self, key: RunKey, mutate):
+        """CAS-retry a pure operational-state mutation. ``mutate(state)`` returns either a finished
+        result dict (a no-op Allow, a Block, or a Fault — nothing is written) or a new
+        :class:`OperationalState` to persist. Reads the run fresh each attempt, requires it still
+        active, applies ``mutate``, and compare-and-sets against the revision it just read; a losing
+        CAS re-reads and retries so a concurrent writer never clobbers the winner (ADR-31).
+
+        A corrupt/absent/terminal read appearing mid-operation fails closed — the same fail-closed
+        direction the initial dispatch check took.
+        """
+        for _ in range(_MAX_CAS_RETRIES):
+            read = self._runs.read(key)
+            if read is ABSENT:
+                return wire.fault(wire.FAULT_CONFLICT, "run disappeared during the operation")
+            if isinstance(read, Corrupt):
+                return wire.fault(wire.FAULT_CORRUPT_RUN, read.reason)
+            state = OperationalState.decode(read.value)
+            if state is None:
+                return wire.fault(wire.FAULT_CORRUPT_RUN, "run document is unreadable")
+            if not state.is_active:
+                return wire.fault(wire.FAULT_CONFLICT, f"run is {state.status}, not active")
+            outcome = mutate(state)
+            if isinstance(outcome, dict):
+                return outcome  # a finished result: nothing to persist
+            try:
+                self._runs.compare_and_set(key, outcome.encode(), read.revision)
+            except Conflict:
+                continue  # a concurrent writer advanced the run; re-read and retry
+            return outcome
+        return wire.fault(wire.FAULT_CONFLICT, "operation did not converge under contention")
+
+    def _reserve_spawn(self, key: RunKey) -> dict:
+        """Atomically reserve ONE spawn against the cap (ADR-17). Unbounded → allow and count nothing.
+        Cap reached → Block, count unchanged (a denied spawn did not happen). Otherwise increment the
+        counter under CAS — the ground-truth reservation a host gate enforces on."""
+        def mutate(state: OperationalState):
+            if state.max_spawns is None:
+                return wire.allow(False, self._run_view(
+                    key, state, spawn=self._spawn_view(state, reserved=True,
+                                                       note="unbounded budget")))
+            if not state.can_reserve_spawn():
+                return wire.block(
+                    f"spawn budget exhausted: {state.spawns}/{state.max_spawns} used; the spawn is "
+                    f"DENIED (ADR-17). Resolve remaining unknowns without spawning, tag them "
+                    f"blocked=needs-budget, or raise max_spawns.",
+                    self._run_view(key, state, spawn=self._spawn_view(state, reserved=False)))
+            return state.evolve(spawns=state.spawns + 1)
+        result = self._commit(key, mutate)
+        if isinstance(result, dict):
+            return result
+        return wire.allow(False, self._run_view(
+            key, result, spawn=self._spawn_view(result, reserved=True)))
+
+    def _configure_budget(self, key: RunKey, action: dict) -> dict:
+        """Set (or clear) the spawn cap (ADR-17). ``max_spawns`` is a non-negative int or null
+        (unbounded). Under the same CAS as any state write, so an operator's cap change cannot
+        clobber a concurrent reservation."""
+        if "max_spawns" not in action:
+            raise wire.InvalidRequest("missing field: max_spawns")
+        cap = action["max_spawns"]
+        if cap is not None and (not isinstance(cap, int) or isinstance(cap, bool) or cap < 0):
+            raise wire.InvalidRequest("max_spawns must be a non-negative integer or null")
+
+        def mutate(state: OperationalState):
+            if state.max_spawns == cap:  # already at this cap — no-op, do not churn the revision
+                return wire.allow(False, self._run_view(key, state, spawn=self._spawn_view(state)))
+            return state.evolve(max_spawns=cap)
+        result = self._commit(key, mutate)
+        if isinstance(result, dict):
+            return result
+        return wire.allow(False, self._run_view(key, result, spawn=self._spawn_view(result)))
+
+    def _transition_phase(self, key: RunKey, action: dict) -> dict:
+        """Advance the run's phase (ADR-21 M1). Monotone: a transition may hold or move forward,
+        never regress — an illegal transition is refused as a conflict rather than silently applied."""
+        phase = wire.require(action, "phase", str)
+        if phase not in PHASES:
+            raise wire.InvalidRequest(f"unknown phase: {phase!r}; valid phases are {list(PHASES)}")
+
+        def mutate(state: OperationalState):
+            if phase == state.phase:
+                return wire.allow(False, self._run_view(key, state, phase=state.phase))
+            if not state.can_advance_to(phase):
+                return wire.fault(
+                    wire.FAULT_CONFLICT,
+                    f"illegal phase transition {state.phase!r} → {phase!r}: the phase machine is "
+                    f"monotone (route → resolve → assess → audit → converged) and may not regress")
+            return state.evolve(phase=phase)
+        result = self._commit(key, mutate)
+        if isinstance(result, dict):
+            return result
+        return wire.allow(False, self._run_view(key, result, phase=result.phase))
+
+    def _set_modes(self, key: RunKey, action: dict) -> dict:
+        """Merge run mode flags (ADR-24/28). A closed vocabulary: an unknown mode key or a non-bool
+        value is refused, so a typo cannot look like it enabled a mode. Merges into the existing
+        modes so setting one does not silently clear the other."""
+        flags = wire.require(action, "modes", dict)
+        unknown = sorted(k for k in flags if k not in MODES)
+        if unknown:
+            raise wire.InvalidRequest(
+                f"unknown mode(s) {unknown}; valid modes are {list(MODES)}")
+        if any(not isinstance(v, bool) for v in flags.values()):
+            raise wire.InvalidRequest("mode values must be booleans")
+
+        def mutate(state: OperationalState):
+            merged = {**state.modes, **flags}
+            if merged == state.modes:  # nothing changed — no-op, do not churn the revision
+                return wire.allow(False, self._run_view(key, state, modes=dict(state.modes)))
+            return state.evolve(modes=merged)
+        result = self._commit(key, mutate)
+        if isinstance(result, dict):
+            return result
+        return wire.allow(False, self._run_view(key, result, modes=dict(result.modes)))
+
+    def _freeze(self, key: RunKey, action: dict) -> dict:
+        """Commit the run's scope (ADR-26): the claims it will discharge. FIRST WRITE WINS — a run
+        cannot re-freeze to enlarge (or shrink) a commitment it already made. An empty scope is
+        allowed and yields a run that discharges nothing and defers everything (visibly vacuous,
+        not illegal)."""
+        raw = wire.require(action, "claims", list)
+        if any(not isinstance(c, str) for c in raw):
+            raise wire.InvalidRequest("claims must be a list of claim-id strings")
+        committed = tuple(sorted({c for c in raw if c}))
+
+        def mutate(state: OperationalState):
+            if state.frozen_claims is not None:
+                return wire.allow(False, self._run_view(
+                    key, state, frozen_claims=list(state.frozen_claims),
+                    note="already frozen (first write wins)"))
+            seq = state.stamp_seq + 1
+            return state.evolve(frozen_claims=committed, freeze_seq=seq, stamp_seq=seq)
+        result = self._commit(key, mutate)
+        if isinstance(result, dict):
+            return result
+        return wire.allow(False, self._run_view(
+            key, result, frozen_claims=list(result.frozen_claims)))
+
+    def _stamp_route(self, key: RunKey, action: dict) -> dict:
+        """Record that the run announced its route (ADR-20 P1). FIRST WRITE WINS, and the position is
+        taken from this document's own monotone write counter — so a late re-announcement cannot
+        backdate the commitment, and the ordering against the first investigative action is a total
+        order no caller can forge by choosing a stamp format."""
         reason = action.get("reason", "")
         if not isinstance(reason, str):
             raise wire.InvalidRequest("reason must be a string")
-        new_state = state.evolve(route_verdict=(verdict, reason))
-        persisted = self._cas(key, expected, new_state)
-        if isinstance(persisted, dict):
-            return persisted
-        return self._run_snapshot(key, persisted)
+
+        def mutate(state: OperationalState):
+            if state.route_seq is not None:
+                return wire.allow(False, self._run_view(
+                    key, state, route=self._route_view(state),
+                    note="route already announced (first write wins)"))
+            seq = state.stamp_seq + 1
+            return state.evolve(route_seq=seq, stamp_seq=seq, route_reason=reason)
+        result = self._commit(key, mutate)
+        if isinstance(result, dict):
+            return result
+        return wire.allow(False, self._run_view(key, result, route=self._route_view(result)))
+
+    def _stamp_investigation(self, key: RunKey) -> dict:
+        """Record the FIRST investigative action (ADR-20 P1). FIRST WRITE WINS: the stamp marks the
+        genuine start of evidence-gathering and cannot be pushed later, so a run that investigated
+        before announcing its route cannot hide it."""
+        def mutate(state: OperationalState):
+            if state.first_investigation_seq is not None:
+                return wire.allow(False, self._run_view(
+                    key, state, route=self._route_view(state),
+                    note="first investigation already recorded (first write wins)"))
+            seq = state.stamp_seq + 1
+            return state.evolve(first_investigation_seq=seq, stamp_seq=seq)
+        result = self._commit(key, mutate)
+        if isinstance(result, dict):
+            return result
+        return wire.allow(False, self._run_view(key, result, route=self._route_view(result)))
+
+    def _record_dispatch(self, key: RunKey, action: dict) -> dict:
+        """Record who an actor dispatch resolved to and how well we know it (ADR-24). Attribution is
+        written by the DISPATCHER, never the actor: a ``witnessed`` claim is honoured only when the
+        caller marks the dispatch witnessed (a CLI-exec dispatch it invoked itself); an in-session
+        spawn is forced to ``declared`` because it cannot observe the resolved model."""
+        raw_actor = wire.require(action, "actor", dict)
+        witnessed = action.get("witnessed", False)
+        if not isinstance(witnessed, bool):
+            raise wire.InvalidRequest("witnessed must be a boolean")
+        strength = actors.WITNESSED if witnessed else actors.DECLARED
+        actor = actors.normalise(raw_actor, attribution=strength, force_attribution=True)
+        if actor is None:
+            raise wire.InvalidRequest(
+                "actor is not a valid actor record (needs a well-formed, non-policy-excluded model)")
+        claim_id = action.get("claim_id")
+        if claim_id is not None and not isinstance(claim_id, str):
+            raise wire.InvalidRequest("claim_id must be a string or null")
+
+        def mutate(state: OperationalState):
+            seq = state.stamp_seq + 1
+            record = {"seq": seq, "actor": actor}
+            if claim_id:
+                record["claim_id"] = claim_id
+            return state.evolve(dispatches=(*state.dispatches, record), stamp_seq=seq)
+        result = self._commit(key, mutate)
+        if isinstance(result, dict):
+            return result
+        return wire.allow(False, self._run_view(
+            key, result, dispatch=dict(result.dispatches[-1])))
+
+    def _issue_audit_ticket(self, key: RunKey, action: dict) -> dict:
+        """Issue a fresh audit ticket (ADR-20 P6): mint a per-spawn nonce and record it on the
+        operational plane (ADR-31 puts tickets there, not in the knowledge plane). The nonce is
+        DERIVED from the run key and the ticket's ordinal — deterministic (no clock, no randomness)
+        and computable by anything that can read the run, because its job is BINDING a verdict to a
+        recorded spawn, not secrecy. An optional ``actor`` records dispatch attribution (declared
+        for an in-session spawn, witnessed only when the caller marks it so)."""
+        raw_actor = action.get("actor")
+        witnessed = action.get("witnessed", False)
+        if not isinstance(witnessed, bool):
+            raise wire.InvalidRequest("witnessed must be a boolean")
+        actor = None
+        if raw_actor is not None:
+            strength = actors.WITNESSED if witnessed else actors.DECLARED
+            actor = actors.normalise(raw_actor, attribution=strength, force_attribution=True)
+            if actor is None:
+                raise wire.InvalidRequest("actor is not a valid actor record")
+
+        def mutate(state: OperationalState):
+            seq = len(state.audit_tickets) + 1
+            ticket = {"nonce": _mint_nonce(key, seq), "seq": seq, "consumed": False}
+            if actor is not None:
+                ticket["actor"] = actor
+            return state.evolve(audit_tickets=(*state.audit_tickets, ticket))
+        result = self._commit(key, mutate)
+        if isinstance(result, dict):
+            return result
+        issued = result.audit_tickets[-1]
+        return wire.allow(False, self._run_view(
+            key, result, ticket={"nonce": issued["nonce"], "seq": issued["seq"]}))
+
+    def _consume_audit_ticket(self, key: RunKey, action: dict) -> dict:
+        """Mark an issued ticket consumed (ADR-20 P6). Idempotent: consuming an already-consumed
+        ticket is a no-op. An unknown nonce is a caller error, not a race — rejected as
+        invalid_request. Consumption is bookkeeping; the audit coverage decision still binds on the
+        issued nonce, so this never changes whether a run may converge."""
+        nonce = wire.require(action, "nonce", str)
+
+        def mutate(state: OperationalState):
+            if not any(t["nonce"] == nonce for t in state.audit_tickets):
+                return wire.fault(wire.FAULT_INVALID_REQUEST,
+                                  "no audit ticket matches that nonce")
+            if all(t.get("consumed") for t in state.audit_tickets if t["nonce"] == nonce):
+                return wire.allow(False, self._run_view(
+                    key, state, note="ticket already consumed"))
+            updated = tuple({**t, "consumed": True} if t["nonce"] == nonce else t
+                            for t in state.audit_tickets)
+            return state.evolve(audit_tickets=updated)
+        result = self._commit(key, mutate)
+        if isinstance(result, dict):
+            return result
+        return wire.allow(False, self._run_view(key, result))
 
     def _update_graph(self, key: RunKey, raw_graph: object) -> dict:
         """The graph-update transaction: validate/canonicalise, content-address, append the immutable
@@ -276,11 +634,21 @@ class EmpiricaService:
     # --- EvaluateRun ---------------------------------------------------------
 
     def _evaluate(self, command: dict) -> dict:
+        """Adjudicate the run, retrying the whole read → load → adjudicate → finalize transaction on a
+        CAS conflict (ADR-31: the application uses RunRepository CAS retries and owns the max_passes
+        policy). A losing finalize re-reads: if a concurrent winner terminalized the run it is
+        reported (never re-judged), otherwise the decision is recomputed against the fresh state."""
         key = wire.decode_handle(wire.require(command, "run_id", str))
         intent = wire.require(command, "intent", str)
         if intent not in wire._INTENTS:
             raise wire.InvalidRequest(f"unknown intent: {intent!r}")
+        for _ in range(_MAX_CAS_RETRIES):
+            outcome = self._evaluate_once(key, advisory=(intent == wire.INTENT_CONTINUE))
+            if outcome is not _RETRY:
+                return outcome
+        return wire.fault(wire.FAULT_CONFLICT, "evaluation did not converge under contention")
 
+    def _evaluate_once(self, key: RunKey, *, advisory: bool):
         read = self._runs.read(key)
         if read is ABSENT:
             return wire.inert("no_run")
@@ -303,7 +671,9 @@ class EmpiricaService:
 
         know = self._knowledge  # set by _load_graph
         evidence = knowledge.build_evidence_oracle(know.evidence)
-        audit = knowledge.build_audit_oracle(know.tickets, know.verdicts)
+        # Audit tickets live on the OPERATIONAL plane (ADR-31), so coverage is judged against the
+        # server-issued spawn nonces recorded there; only the verdict itself is a knowledge artifact.
+        audit = knowledge.build_audit_oracle(list(state.audit_tickets), know.verdicts)
         approving = knowledge.approving_evidence_ids(know.evidence)
         digest_of = knowledge.build_digest_of(graph, approving) if isinstance(graph, dict) else None
         attribution = know.attributions[-1] if know.attributions else None
@@ -312,9 +682,9 @@ class EmpiricaService:
                              frozen_claims=state.frozen_claims)
         decision = adjudicate(run=run_state, graph=graph, theta=state.theta,
                              evidence=evidence, audit=audit,
-                             route_verdict=state.route_verdict,
+                             route_verdict=state.route_p1_verdict(),
                              digest_of=digest_of, attribution=attribution)
-        return self._finalize(key, read, state, decision, advisory=(intent == wire.INTENT_CONTINUE))
+        return self._finalize(key, read, state, decision, advisory=advisory)
 
     def _load_graph(self, key: RunKey, state: OperationalState):
         """Load the graph the run's pointer names, plus the whole knowledge set (cached on self).
@@ -361,8 +731,8 @@ class EmpiricaService:
             return wire.allow(decision.converged, self._decision_run(key, state, decision))
         new_state = state.evolve(status=decision.status)
         persisted = self._cas(key, read.revision, new_state)
-        if isinstance(persisted, dict):
-            return persisted
+        if persisted is _RETRY:
+            return _RETRY
         return wire.allow(decision.converged, self._decision_run(key, persisted, decision))
 
     def _finalize_block(self, key: RunKey, read: Present, state: OperationalState,
@@ -376,15 +746,15 @@ class EmpiricaService:
         if new_passes >= state.max_passes:
             new_state = state.evolve(passes=new_passes, status=wire.STATUS_STOPPED_BUDGET)
             persisted = self._cas(key, read.revision, new_state)
-            if isinstance(persisted, dict):
-                return persisted
+            if persisted is _RETRY:
+                return _RETRY
             note = (f"NON-CONVERGED: reached max_passes={state.max_passes} without convergence "
                     f"({decision.reason})")
             return wire.allow(False, self._run_view(key, persisted, note=note))
         new_state = state.evolve(passes=new_passes)
         persisted = self._cas(key, read.revision, new_state)
-        if isinstance(persisted, dict):
-            return persisted
+        if persisted is _RETRY:
+            return _RETRY
         return wire.block(decision.reason, self._run_view(key, persisted))
 
     # --- persistence + views -------------------------------------------------
@@ -392,13 +762,12 @@ class EmpiricaService:
     def _cas(self, key: RunKey, expected, new_state: OperationalState):
         """Persist a state transition under CAS against the storage revision ``expected`` read
         alongside the previous state. Returns the persisted :class:`OperationalState` on success, or
-        a ``Fault(conflict)`` result dict if a concurrent write advanced the run — an evaluation
-        racing another must not silently clobber the winner's transition."""
+        the ``_RETRY`` sentinel if a concurrent write advanced the run — the EvaluateRun loop then
+        re-reads and re-adjudicates rather than clobber the winner's transition (ADR-31 CAS)."""
         try:
             self._runs.compare_and_set(key, new_state.encode(), expected)
         except Conflict:
-            return wire.fault(wire.FAULT_CONFLICT,
-                              "run changed during the operation; re-read and retry")
+            return _RETRY
         return new_state
 
     def _run_snapshot(self, key: RunKey, state: OperationalState) -> dict:
@@ -406,8 +775,32 @@ class EmpiricaService:
         GetRun/ObserveAction, where there is no stop decision to make — just the run's state."""
         return wire.allow(state.status == wire.STATUS_CONVERGED, self._run_view(key, state))
 
-    def _run_view(self, key: RunKey, state: OperationalState, note: str | None = None) -> dict:
-        return wire.run_obj(wire.encode_handle(key), state.status, state.revision, note=note)
+    def _run_view(self, key: RunKey, state: OperationalState, note: str | None = None,
+                  **extra: object) -> dict:
+        return wire.run_obj(wire.encode_handle(key), state.status, state.revision, note=note,
+                            **extra)
+
+    # --- operation view fragments --------------------------------------------
+
+    def _spawn_view(self, state: OperationalState, *, reserved: bool | None = None,
+                    note: str | None = None) -> dict:
+        """The spawn-budget fragment for a reserve/configure acknowledgement. ``remaining`` is null
+        when unbounded (JSON has no infinity), which the wire distinguishes from a numeric cap."""
+        view: dict = {"spawns": state.spawns, "max_spawns": state.max_spawns,
+                      "remaining": None if state.max_spawns is None
+                      else int(state.spawns_remaining)}
+        if reserved is not None:
+            view["reserved"] = reserved
+        if note:
+            view["note"] = note
+        return view
+
+    def _route_view(self, state: OperationalState) -> dict:
+        """The P1 ordering fragment: the write-order witnesses and the derived verdict."""
+        verdict, reason = state.route_p1_verdict()
+        return {"route_seq": state.route_seq,
+                "first_investigation_seq": state.first_investigation_seq,
+                "verdict": verdict, "reason": reason}
 
     def _decision_run(self, key: RunKey, state: OperationalState, decision: Allow) -> dict:
         """The run view for a finalised Allow, carrying the adjudicator's advisory reporting fields
@@ -436,3 +829,12 @@ def knowledge_artifact(artifact_id: str, body: str):
     from core.records import Artifact
 
     return Artifact(artifact_id, body)
+
+
+def _mint_nonce(key: RunKey, seq: int) -> str:
+    """A per-spawn audit nonce, DERIVED from the run key and the ticket's ordinal. Deterministic (no
+    clock, no randomness — a resumable run must recompute identically) and host-neutral (it names
+    only the opaque :class:`RunKey` fields, never a path). Its job is BINDING a verdict to a
+    recorded spawn of this run, not secrecy — anything that can read the run can recompute it."""
+    raw = f"{key.project_id}:{key.run_id}:{key.generation}:audit:{seq}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]

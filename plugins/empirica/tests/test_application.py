@@ -205,14 +205,15 @@ def passing_verdict(graph_canon, claim_id="G0", reason="Fold 1 + Fold 2 satisfie
 
 def drive_to_converged(svc, **start_kw):
     """StartRun → observe graph, approving evidence, audit spawn + passing verdict. Returns the
-    handle and the canonical graph."""
+    handle and the canonical graph. The audit ticket nonce is SERVER-MINTED (ADR-31 puts tickets on
+    the operational plane), so the verdict must carry the nonce the issue operation returned."""
     h = handle_of(start(svc, **start_kw))
     raw = single_goal_graph()
     canon = knowledge.canonicalize_graph(raw)
     observe(svc, h, {"kind": "graph", "graph": raw})
     observe(svc, h, approve_evidence())
-    observe(svc, h, {"kind": "audit_ticket", "nonce": "n1"})
-    observe(svc, h, passing_verdict(canon))
+    nonce = result(observe(svc, h, {"kind": "audit_ticket"}))["run"]["ticket"]["nonce"]
+    observe(svc, h, passing_verdict(canon, nonce=nonce))
     return h, canon
 
 
@@ -498,8 +499,8 @@ def test_frozen_run_defers_post_freeze_claims():
     canon = knowledge.canonicalize_graph(raw)
     observe(svc, h, {"kind": "graph", "graph": raw})
     observe(svc, h, approve_evidence("G0"))
-    observe(svc, h, {"kind": "audit_ticket", "nonce": "n1"})
-    observe(svc, h, passing_verdict(canon, "G0", nonce="n1"))
+    nonce = result(observe(svc, h, {"kind": "audit_ticket"}))["run"]["ticket"]["nonce"]
+    observe(svc, h, passing_verdict(canon, "G0", nonce=nonce))
     # Freeze committed only G0.
     stored = runs.raw_value(key)
     stored["frozen_claims"] = ["G0"]
@@ -564,6 +565,647 @@ def test_observe_on_finished_run_conflicts():
     r = result(observe(svc, h, approve_evidence("G1")))
     check("F6 observing onto a finished run is refused as a conflict",
           r["type"] == "Fault" and r["code"] == "conflict", f"got {r}")
+
+
+# --- spawn budget: reservation + configuration (ADR-17) ----------------------
+
+
+def restore(svc, run_id):
+    return svc.handle(req({"type": "RestoreRun", "run_id": run_id}))
+
+
+def test_reserve_spawn_under_cap_counts():
+    svc, runs, _ = make_service()
+    h = handle_of(start(svc, max_spawns=2))
+    r = result(observe(svc, h, {"kind": "reserve_spawn"}))
+    check("B1 reserving under the cap allows and counts one spawn",
+          r["type"] == "Allow" and r["run"]["spawn"]["reserved"] is True
+          and r["run"]["spawn"]["spawns"] == 1 and r["run"]["spawn"]["remaining"] == 1,
+          f"got {r}")
+    check("B1b the reservation is persisted",
+          runs.raw_value(RunKey("proj", "sess", 1))["spawns"] == 1)
+
+
+def test_reserve_spawn_past_cap_blocks_without_counting():
+    svc, runs, _ = make_service()
+    h = handle_of(start(svc, max_spawns=1))
+    observe(svc, h, {"kind": "reserve_spawn"})  # uses the only slot
+    r = result(observe(svc, h, {"kind": "reserve_spawn"}))
+    check("B2 reserving past the cap is a Block",
+          r["type"] == "Block" and r["run"]["spawn"]["reserved"] is False, f"got {r}")
+    check("B2b a denied spawn did not increment the counter",
+          runs.raw_value(RunKey("proj", "sess", 1))["spawns"] == 1)
+
+
+def test_reserve_spawn_unbounded_does_not_count():
+    svc, runs, _ = make_service()
+    h = handle_of(start(svc))  # no max_spawns -> unbounded
+    r = result(observe(svc, h, {"kind": "reserve_spawn"}))
+    check("B3 an unbounded budget reserves without counting",
+          r["type"] == "Allow" and r["run"]["spawn"]["remaining"] is None
+          and r["run"]["spawn"]["spawns"] == 0, f"got {r}")
+    check("B3b the run's revision did not advance (no write for an unbounded reserve)",
+          runs.raw_value(RunKey("proj", "sess", 1))["revision"] == 0)
+
+
+def test_configure_budget_sets_cap():
+    svc, runs, _ = make_service()
+    h = handle_of(start(svc))  # starts unbounded
+    observe(svc, h, {"kind": "configure_budget", "max_spawns": 1})
+    check("B4 configuring a cap makes reservation enforce it",
+          runs.raw_value(RunKey("proj", "sess", 1))["max_spawns"] == 1)
+    observe(svc, h, {"kind": "reserve_spawn"})
+    r = result(observe(svc, h, {"kind": "reserve_spawn"}))
+    check("B4b the configured cap is enforced by later reservations",
+          r["type"] == "Block", f"got {r}")
+
+
+def test_configure_budget_rejects_bad_cap():
+    svc, _, _ = make_service()
+    h = handle_of(start(svc))
+    r = result(observe(svc, h, {"kind": "configure_budget", "max_spawns": -1}))
+    r2 = result(observe(svc, h, {"kind": "configure_budget", "max_spawns": True}))
+    check("B5 a negative cap is refused as invalid_request",
+          r["type"] == "Fault" and r["code"] == "invalid_request", f"got {r}")
+    check("B5b a boolean cap is refused (bool is not a budget)",
+          r2["type"] == "Fault" and r2["code"] == "invalid_request", f"got {r2}")
+
+
+def test_reserve_spawn_race_never_exceeds_cap():
+    """A lost CAS on a reservation must re-read and respect the cap a concurrent winner set — two
+    racers against a cap of 1 spend exactly one slot, never two."""
+    runs = FakeRunRepository()
+    arts = FakeArtifactRepository()
+
+    class OneShotReserveRace:
+        """The FIRST reservation CAS loses to a concurrent writer that itself reserved the only
+        slot; the service must re-read (now at the cap) and deny rather than double-spend."""
+
+        def __init__(self, inner):
+            self._inner = inner
+            self._tripped = False
+
+        def read(self, key):
+            return self._inner.read(key)
+
+        def create(self, key, value):
+            return self._inner.create(key, value)
+
+        def generations(self, p, r):
+            return self._inner.generations(p, r)
+
+        def raw_value(self, key):
+            return self._inner.raw_value(key)
+
+        def compare_and_set(self, key, value, expected):
+            if not self._tripped:
+                self._tripped = True
+                cur = self._inner.read(key)
+                won = dict(cur.value)
+                won["spawns"] = won.get("spawns", 0) + 1  # a concurrent winner took the slot
+                self._inner.compare_and_set(key, won, cur.revision)
+                raise Conflict(key, expected, "a concurrent reservation won the race")
+            return self._inner.compare_and_set(key, value, expected)
+
+    wrapped = OneShotReserveRace(runs)
+    svc = EmpiricaService(wrapped, arts, FakeGenerationAllocator(runs))
+    h = handle_of(start(svc, max_spawns=1))
+    r = result(observe(svc, h, {"kind": "reserve_spawn"}))
+    key = RunKey("proj", "sess", 1)
+    check("B6 a lost reservation CAS re-reads and denies at the cap",
+          r["type"] == "Block", f"got {r}")
+    check("B6b the cap was never exceeded (exactly one slot spent)",
+          runs.raw_value(key)["spawns"] == 1, f"spawns={runs.raw_value(key)['spawns']}")
+
+
+# --- phase machine (ADR-21 M1) ----------------------------------------------
+
+
+def test_phase_advances_monotonically():
+    svc, runs, _ = make_service()
+    h = handle_of(start(svc))
+    check("P0 a fresh run starts in the route phase",
+          runs.raw_value(RunKey("proj", "sess", 1))["phase"] == "route")
+    r = result(observe(svc, h, {"kind": "phase", "phase": "resolve"}))
+    check("P1 a forward phase transition is applied and reported",
+          r["type"] == "Allow" and r["run"]["phase"] == "resolve", f"got {r}")
+    observe(svc, h, {"kind": "phase", "phase": "audit"})  # skipping ahead is still forward
+    check("P1b a forward skip is allowed",
+          runs.raw_value(RunKey("proj", "sess", 1))["phase"] == "audit")
+
+
+def test_phase_regression_is_refused():
+    svc, _, _ = make_service()
+    h = handle_of(start(svc))
+    observe(svc, h, {"kind": "phase", "phase": "assess"})
+    r = result(observe(svc, h, {"kind": "phase", "phase": "route"}))
+    check("P2 a backward phase transition faults as a conflict",
+          r["type"] == "Fault" and r["code"] == "conflict", f"got {r}")
+
+
+def test_phase_unknown_value_is_invalid():
+    svc, _, _ = make_service()
+    h = handle_of(start(svc))
+    r = result(observe(svc, h, {"kind": "phase", "phase": "nonsense"}))
+    check("P3 an unknown phase is refused as invalid_request",
+          r["type"] == "Fault" and r["code"] == "invalid_request", f"got {r}")
+
+
+def test_phase_self_transition_is_noop():
+    svc, runs, _ = make_service()
+    h = handle_of(start(svc))
+    observe(svc, h, {"kind": "phase", "phase": "resolve"})
+    rev = runs.raw_value(RunKey("proj", "sess", 1))["revision"]
+    r = result(observe(svc, h, {"kind": "phase", "phase": "resolve"}))
+    check("P4 a self-transition is an allowed no-op that writes nothing",
+          r["type"] == "Allow"
+          and runs.raw_value(RunKey("proj", "sess", 1))["revision"] == rev, f"got {r}")
+
+
+# --- P1 ordering: first-write-wins route + first investigation ---------------
+
+
+def test_route_before_investigation_is_ok():
+    svc, _, _ = make_service()
+    h = handle_of(start(svc))
+    observe(svc, h, {"kind": "route", "reason": "deps classified"})
+    r = result(observe(svc, h, {"kind": "investigate"}))
+    check("O1 route announced before investigation → P1 ok",
+          r["run"]["route"]["verdict"] == "ok", f"got {r}")
+
+
+def test_investigation_before_route_is_violation():
+    svc, _, _ = make_service()
+    h = handle_of(start(svc))
+    observe(svc, h, {"kind": "investigate"})
+    observe(svc, h, {"kind": "route"})
+    snap = result(restore(svc, h))["run"]["snapshot"]
+    check("O2 investigation before any route → P1 violation (derived from write order)",
+          snap["route"]["verdict"] == "violation", f"got {snap['route']}")
+
+
+def test_route_is_first_write_wins():
+    svc, runs, _ = make_service()
+    h = handle_of(start(svc))
+    observe(svc, h, {"kind": "route", "reason": "first"})
+    seq = runs.raw_value(RunKey("proj", "sess", 1))["route_seq"]
+    rev = runs.raw_value(RunKey("proj", "sess", 1))["revision"]
+    r = result(observe(svc, h, {"kind": "route", "reason": "second"}))
+    stored = runs.raw_value(RunKey("proj", "sess", 1))
+    check("O3 a second route is a no-op — the first write wins",
+          r["type"] == "Allow" and stored["route_seq"] == seq
+          and stored["route_reason"] == "first" and stored["revision"] == rev, f"got {stored}")
+
+
+def test_route_ordering_race_first_write_wins():
+    """Two route stamps racing: the loser re-reads, sees a route already recorded, and no-ops —
+    the earliest write's sequence position stands."""
+    runs = FakeRunRepository()
+    arts = FakeArtifactRepository()
+
+    class OneShotRouteRace:
+        def __init__(self, inner):
+            self._inner = inner
+            self._tripped = False
+
+        def read(self, key):
+            return self._inner.read(key)
+
+        def create(self, key, value):
+            return self._inner.create(key, value)
+
+        def generations(self, p, r):
+            return self._inner.generations(p, r)
+
+        def raw_value(self, key):
+            return self._inner.raw_value(key)
+
+        def compare_and_set(self, key, value, expected):
+            if not self._tripped:
+                self._tripped = True
+                cur = self._inner.read(key)
+                won = dict(cur.value)
+                won["route_seq"] = won.get("stamp_seq", 0) + 1
+                won["stamp_seq"] = won["route_seq"]
+                won["route_reason"] = "winner"
+                self._inner.compare_and_set(key, won, cur.revision)
+                raise Conflict(key, expected, "a concurrent route won")
+            return self._inner.compare_and_set(key, value, expected)
+
+    wrapped = OneShotRouteRace(runs)
+    svc = EmpiricaService(wrapped, arts, FakeGenerationAllocator(runs))
+    h = handle_of(start(svc))
+    r = result(observe(svc, h, {"kind": "route", "reason": "loser"}))
+    stored = runs.raw_value(RunKey("proj", "sess", 1))
+    check("O4 a lost route CAS re-reads and defers to the winner (first write wins)",
+          r["type"] == "Allow" and stored["route_reason"] == "winner", f"got {stored}")
+
+
+# --- modes (ADR-24/28) -------------------------------------------------------
+
+
+def test_set_modes_merges():
+    svc, runs, _ = make_service()
+    h = handle_of(start(svc))
+    observe(svc, h, {"kind": "mode", "modes": {"cli_exec": True}})
+    r = result(observe(svc, h, {"kind": "mode", "modes": {"multi_provider": True}}))
+    check("M1 setting a mode merges rather than clearing the other",
+          r["run"]["modes"] == {"cli_exec": True, "multi_provider": True}, f"got {r}")
+
+
+def test_set_modes_rejects_unknown_and_non_bool():
+    svc, _, _ = make_service()
+    h = handle_of(start(svc))
+    r = result(observe(svc, h, {"kind": "mode", "modes": {"cli_exex": True}}))
+    r2 = result(observe(svc, h, {"kind": "mode", "modes": {"cli_exec": "yes"}}))
+    check("M2 an unknown mode key is refused (a typo cannot look enabled)",
+          r["type"] == "Fault" and r["code"] == "invalid_request", f"got {r}")
+    check("M3 a non-boolean mode value is refused",
+          r2["type"] == "Fault" and r2["code"] == "invalid_request", f"got {r2}")
+
+
+# --- freeze (ADR-26) ---------------------------------------------------------
+
+
+def test_freeze_commits_scope_first_write_wins():
+    svc, runs, _ = make_service()
+    h = handle_of(start(svc))
+    r = result(observe(svc, h, {"kind": "freeze", "claims": ["G1", "G0", "G0"]}))
+    check("FZ1 freeze commits the deduplicated, sorted scope",
+          r["run"]["frozen_claims"] == ["G0", "G1"], f"got {r}")
+    stored = runs.raw_value(RunKey("proj", "sess", 1))
+    rev = stored["revision"]
+    r2 = result(observe(svc, h, {"kind": "freeze", "claims": ["G2"]}))
+    stored2 = runs.raw_value(RunKey("proj", "sess", 1))
+    check("FZ2 a re-freeze is a no-op — the first commitment stands",
+          r2["type"] == "Allow" and stored2["frozen_claims"] == ["G0", "G1"]
+          and stored2["revision"] == rev, f"got {stored2}")
+
+
+# --- actor dispatch attribution (ADR-24) -------------------------------------
+
+
+def test_dispatch_records_declared_attribution():
+    svc, _, _ = make_service()
+    h = handle_of(start(svc))
+    r = result(observe(svc, h, {"kind": "dispatch",
+                                "actor": {"model": "claude-opus-4-8"}, "claim_id": "G0"}))
+    d = r["run"]["dispatch"]
+    check("D1 a dispatch records a declared actor by default",
+          d["actor"]["model"] == "claude-opus-4-8" and d["actor"]["attribution"] == "declared"
+          and d["claim_id"] == "G0", f"got {d}")
+
+
+def test_dispatch_witnessed_flag():
+    svc, _, _ = make_service()
+    h = handle_of(start(svc))
+    r = result(observe(svc, h, {"kind": "dispatch", "witnessed": True,
+                                "actor": {"model": "gpt-5.6-sol", "attribution": "declared"}}))
+    check("D2 a witnessed dispatch is recorded witnessed (the dispatcher invoked it)",
+          r["run"]["dispatch"]["actor"]["attribution"] == "witnessed", f"got {r['run']['dispatch']}")
+
+
+def test_dispatch_in_session_cannot_claim_witnessed():
+    svc, _, _ = make_service()
+    h = handle_of(start(svc))
+    r = result(observe(svc, h, {"kind": "dispatch",
+                                "actor": {"model": "gpt-5.6-sol", "attribution": "witnessed"}}))
+    check("D3 an in-session dispatch claiming witnessed is forced to declared",
+          r["run"]["dispatch"]["actor"]["attribution"] == "declared", f"got {r['run']['dispatch']}")
+
+
+def test_dispatch_rejects_policy_excluded_model():
+    svc, _, _ = make_service()
+    h = handle_of(start(svc))
+    r = result(observe(svc, h, {"kind": "dispatch", "actor": {"model": "claude-fable-5"}}))
+    check("D4 a policy-excluded model is refused as invalid_request",
+          r["type"] == "Fault" and r["code"] == "invalid_request", f"got {r}")
+
+
+# --- audit ticket issue / consume (ADR-20 P6, ADR-31) ------------------------
+
+
+def test_audit_ticket_issue_mints_deterministic_nonce():
+    from application.service import _mint_nonce
+    svc, _, _ = make_service()
+    h = handle_of(start(svc))
+    r = result(observe(svc, h, {"kind": "audit_ticket"}))
+    tk = r["run"]["ticket"]
+    check("A1 issuing a ticket mints the derived per-spawn nonce",
+          tk["seq"] == 1 and tk["nonce"] == _mint_nonce(RunKey("proj", "sess", 1), 1), f"got {tk}")
+
+
+def test_audit_ticket_issue_increments_seq():
+    svc, _, _ = make_service()
+    h = handle_of(start(svc))
+    n1 = result(observe(svc, h, {"kind": "audit_ticket"}))["run"]["ticket"]
+    n2 = result(observe(svc, h, {"kind": "audit_ticket"}))["run"]["ticket"]
+    check("A2 a second issue gets a distinct nonce at the next ordinal",
+          n2["seq"] == 2 and n2["nonce"] != n1["nonce"], f"got {n1} {n2}")
+
+
+def test_audit_ticket_consume_is_idempotent():
+    svc, runs, _ = make_service()
+    h = handle_of(start(svc))
+    nonce = result(observe(svc, h, {"kind": "audit_ticket"}))["run"]["ticket"]["nonce"]
+    observe(svc, h, {"kind": "consume_audit_ticket", "nonce": nonce})
+    tickets = runs.raw_value(RunKey("proj", "sess", 1))["audit_tickets"]
+    check("A3 consuming a ticket marks it consumed",
+          tickets[0]["consumed"] is True, f"got {tickets}")
+    rev = runs.raw_value(RunKey("proj", "sess", 1))["revision"]
+    r2 = result(observe(svc, h, {"kind": "consume_audit_ticket", "nonce": nonce}))
+    check("A3b consuming again is an idempotent no-op",
+          r2["type"] == "Allow"
+          and runs.raw_value(RunKey("proj", "sess", 1))["revision"] == rev, f"got {r2}")
+
+
+def test_audit_ticket_consume_unknown_nonce():
+    svc, _, _ = make_service()
+    h = handle_of(start(svc))
+    r = result(observe(svc, h, {"kind": "consume_audit_ticket", "nonce": "deadbeef"}))
+    check("A4 consuming an unknown nonce faults as invalid_request",
+          r["type"] == "Fault" and r["code"] == "invalid_request", f"got {r}")
+
+
+# --- terminal-run fail-open for unrelated actions ----------------------------
+
+
+def test_reserve_spawn_on_terminal_run_fails_open():
+    svc, _, _ = make_service(default_max_passes=1)
+    h = handle_of(start(svc, max_spawns=1))
+    observe(svc, h, {"kind": "graph", "graph": single_goal_graph(confidence=0.0)})
+    evaluate(svc, h)  # -> stopped_budget (terminal)
+    r = result(observe(svc, h, {"kind": "reserve_spawn"}))
+    check("TF1 reserving a spawn on a terminal run fails OPEN (nothing left to gate)",
+          r["type"] == "Allow" and r["run"]["spawn"]["reserved"] is True, f"got {r}")
+
+
+def test_lifecycle_action_on_terminal_run_faults_closed():
+    svc, _, _ = make_service(default_max_passes=1)
+    h = handle_of(start(svc, max_spawns=1))
+    observe(svc, h, {"kind": "graph", "graph": single_goal_graph(confidence=0.0)})
+    evaluate(svc, h)  # -> stopped_budget (terminal)
+    r = result(observe(svc, h, {"kind": "phase", "phase": "audit"}))
+    r2 = result(observe(svc, h, {"kind": "configure_budget", "max_spawns": 9}))
+    check("TF2 a lifecycle transition on a terminal run faults closed (conflict)",
+          r["type"] == "Fault" and r["code"] == "conflict", f"got {r}")
+    check("TF2b configuring a budget on a terminal run faults closed",
+          r2["type"] == "Fault" and r2["code"] == "conflict", f"got {r2}")
+
+
+# --- RestoreRun snapshot (ADR-31) --------------------------------------------
+
+
+def test_restore_returns_operational_snapshot():
+    svc, _, _ = make_service()
+    h = handle_of(start(svc, max_spawns=3))
+    observe(svc, h, {"kind": "phase", "phase": "resolve"})
+    observe(svc, h, {"kind": "mode", "modes": {"cli_exec": True}})
+    snap = result(restore(svc, h))["run"]["snapshot"]
+    check("RS1 RestoreRun returns the operational plane (phase, budget, modes, route)",
+          snap["phase"] == "resolve" and snap["spawn"]["max_spawns"] == 3
+          and snap["modes"] == {"cli_exec": True} and "route" in snap
+          and snap["has_graph"] is False, f"got {snap}")
+
+
+def test_restore_includes_graph_view():
+    svc, _, _ = make_service()
+    h = handle_of(start(svc))
+    observe(svc, h, {"kind": "graph", "graph": single_goal_graph(confidence=0.0)})
+    snap = result(restore(svc, h))["run"]["snapshot"]
+    check("RS2 RestoreRun reports the claim-graph resume counts when a graph exists",
+          snap["has_graph"] is True and snap["graph"]["gating"] == 1
+          and snap["graph"]["open"] == 1, f"got {snap.get('graph')}")
+
+
+def test_restore_absent_is_inert():
+    svc, _, _ = make_service()
+    from application.wire import encode_handle
+    ghost = encode_handle(RunKey("proj", "ghost", 1))
+    r = result(restore(svc, ghost))
+    check("RS3 RestoreRun on an absent run is Inert(no_run)",
+          r["type"] == "Inert" and r["reason"] == "no_run", f"got {r}")
+
+
+def test_restore_corrupt_faults_closed():
+    svc, runs, _ = make_service()
+    h = handle_of(start(svc))
+    runs.inject_corrupt(RunKey("proj", "sess", 1))
+    r = result(restore(svc, h))
+    check("RS4 RestoreRun on a corrupt run faults closed",
+          r["type"] == "Fault" and r["code"] == "corrupt_run"
+          and r["fail_direction"] == "closed", f"got {r}")
+
+
+def test_restore_stale_pointer_faults_closed():
+    svc, runs, _ = make_service()
+    h = handle_of(start(svc))
+    observe(svc, h, {"kind": "graph", "graph": single_goal_graph()})
+    runs.raw_value(RunKey("proj", "sess", 1))["claim_graph_artifact_id"] = "0" * 64
+    r = result(restore(svc, h))
+    check("RS5 RestoreRun with a stale graph pointer faults closed (corrupt_artifacts)",
+          r["type"] == "Fault" and r["code"] == "corrupt_artifacts", f"got {r}")
+
+
+# --- corruption fails closed (decode strictness) -----------------------------
+
+
+def _corrupt_field(svc, runs, **overrides):
+    """Start a run, then poke a load-bearing field to a corrupt value in the stored document."""
+    h = handle_of(start(svc))
+    stored = runs.raw_value(RunKey("proj", "sess", 1))
+    stored.update(overrides)
+    return h
+
+
+def test_corrupt_theta_faults_closed_not_raises():
+    svc, runs, _ = make_service()
+    h = _corrupt_field(svc, runs, theta=[])  # non-numeric theta once crashed float()
+    r = result(get(svc, h))  # must return a Fault envelope, never raise
+    check("X1 a non-numeric theta faults closed as corrupt_run (no crash through the wire)",
+          r["type"] == "Fault" and r["code"] == "corrupt_run", f"got {r}")
+
+
+def test_non_finite_theta_faults_closed():
+    svc, runs, _ = make_service()
+    h = _corrupt_field(svc, runs, theta=float("inf"))
+    r = result(evaluate(svc, h))
+    check("X2 a non-finite theta faults closed",
+          r["type"] == "Fault" and r["code"] == "corrupt_run", f"got {r}")
+
+
+def test_unknown_status_faults_closed_not_fail_open():
+    """An unknown status must NOT read as terminal (which would fail a reserve OPEN from corrupt
+    state) — it must fault closed."""
+    svc, runs, _ = make_service()
+    h = _corrupt_field(svc, runs, status="totally-made-up")
+    r = result(observe(svc, h, {"kind": "reserve_spawn"}))
+    check("X3 an unknown status faults closed (never a terminal fail-open)",
+          r["type"] == "Fault" and r["code"] == "corrupt_run", f"got {r}")
+
+
+def test_non_positive_max_passes_faults_closed():
+    svc, runs, _ = make_service()
+    h = _corrupt_field(svc, runs, max_passes=0)
+    r = result(get(svc, h))
+    check("X4 a non-positive max_passes faults closed",
+          r["type"] == "Fault" and r["code"] == "corrupt_run", f"got {r}")
+
+
+def test_malformed_verdict_blocks_not_crashes():
+    """A stored verdict whose claims_reviewed carries a non-dict entry once crashed coverage_check;
+    it must instead fail the run closed (a Block), never raise through the wire."""
+    svc, _, arts = make_service()
+    h = handle_of(start(svc))
+    raw = single_goal_graph()
+    observe(svc, h, {"kind": "graph", "graph": raw})
+    observe(svc, h, approve_evidence())
+    nonce = result(observe(svc, h, {"kind": "audit_ticket"}))["run"]["ticket"]["nonce"]
+    # Inject a structurally broken verdict artifact directly into the knowledge store.
+    from application.service import knowledge_artifact
+    from application.knowledge import audit_verdict_artifact
+    art_id, body = audit_verdict_artifact({
+        "verdict": "pass", "nonce": nonce, "argument_digest": None,
+        "claims_reviewed": [1, {"claim_id": "G0"}], "findings": [None]})
+    arts.append(RunKey("proj", "sess", 1), knowledge_artifact(art_id, body))
+    r = result(evaluate(svc, h))
+    check("X5 a malformed stored verdict fails closed (Block), it does not crash the wire",
+          r["type"] == "Block", f"got {r}")
+
+
+def test_handle_rejects_boolean_and_negative_generation():
+    import base64
+    import json as _json
+    from application.wire import decode_handle, InvalidRequest
+    bad_bool = base64.urlsafe_b64encode(
+        _json.dumps({"p": "proj", "r": "sess", "g": True}).encode()).decode()
+    bad_neg = base64.urlsafe_b64encode(
+        _json.dumps({"p": "proj", "r": "sess", "g": -1}).encode()).decode()
+    ok_bool = ok_neg = False
+    try:
+        decode_handle(bad_bool)
+    except InvalidRequest:
+        ok_bool = True
+    try:
+        decode_handle(bad_neg)
+    except InvalidRequest:
+        ok_neg = True
+    check("X6 a boolean generation in a handle is rejected (bool is not an int gen)", ok_bool)
+    check("X7 a negative generation in a handle is rejected", ok_neg)
+
+
+def test_configure_and_mode_idempotency_no_churn():
+    svc, runs, _ = make_service()
+    h = handle_of(start(svc, max_spawns=2))
+    observe(svc, h, {"kind": "mode", "modes": {"cli_exec": True}})
+    key = RunKey("proj", "sess", 1)
+    rev = runs.raw_value(key)["revision"]
+    observe(svc, h, {"kind": "configure_budget", "max_spawns": 2})  # same cap
+    observe(svc, h, {"kind": "mode", "modes": {"cli_exec": True}})   # same mode
+    check("X8 re-configuring the same cap / re-setting the same mode writes nothing",
+          runs.raw_value(key)["revision"] == rev, f"revision moved to {runs.raw_value(key)['revision']}")
+
+
+# --- more concurrent races (issue, phase, investigation) ---------------------
+
+
+class _OneShotConflict:
+    """Wrap a run repo so the FIRST compare_and_set loses to a concurrent winner that applies
+    ``winner_patch`` to the stored value, then raises Conflict. The service must re-read and retry."""
+
+    def __init__(self, inner, winner_patch):
+        self._inner = inner
+        self._patch = winner_patch
+        self._tripped = False
+
+    def read(self, key):
+        return self._inner.read(key)
+
+    def create(self, key, value):
+        return self._inner.create(key, value)
+
+    def generations(self, p, r):
+        return self._inner.generations(p, r)
+
+    def raw_value(self, key):
+        return self._inner.raw_value(key)
+
+    def compare_and_set(self, key, value, expected):
+        if not self._tripped:
+            self._tripped = True
+            cur = self._inner.read(key)
+            won = dict(cur.value)
+            self._patch(won)
+            self._inner.compare_and_set(key, won, cur.revision)
+            raise Conflict(key, expected, "a concurrent writer won the race")
+        return self._inner.compare_and_set(key, value, expected)
+
+
+def test_audit_ticket_issue_race_distinct_nonces():
+    """Two concurrent issues both compute seq=1; a lost CAS must re-read (len=1) and re-mint seq=2,
+    so no two live tickets ever share a nonce or ordinal."""
+    from application.service import _mint_nonce
+    runs = FakeRunRepository()
+    arts = FakeArtifactRepository()
+
+    def winner(doc):
+        seq = len(doc.get("audit_tickets", [])) + 1
+        doc.setdefault("audit_tickets", []).append(
+            {"nonce": _mint_nonce(RunKey("proj", "sess", 1), seq), "seq": seq, "consumed": False})
+
+    wrapped = _OneShotConflict(runs, winner)
+    svc = EmpiricaService(wrapped, arts, FakeGenerationAllocator(runs))
+    h = handle_of(start(svc))
+    tk = result(observe(svc, h, {"kind": "audit_ticket"}))["run"]["ticket"]
+    stored = runs.raw_value(RunKey("proj", "sess", 1))["audit_tickets"]
+    nonces = {t["nonce"] for t in stored}
+    check("Y1 a lost issue CAS re-reads and mints the next ordinal (no nonce/seq collision)",
+          tk["seq"] == 2 and len(stored) == 2 and len(nonces) == 2, f"got {tk} stored={stored}")
+
+
+def test_phase_transition_race_retries():
+    runs = FakeRunRepository()
+    arts = FakeArtifactRepository()
+    wrapped = _OneShotConflict(runs, lambda doc: doc.update({"phase": "resolve"}))
+    svc = EmpiricaService(wrapped, arts, FakeGenerationAllocator(runs))
+    h = handle_of(start(svc))
+    r = result(observe(svc, h, {"kind": "phase", "phase": "audit"}))
+    check("Y2 a lost phase CAS re-reads and still advances monotonically",
+          r["type"] == "Allow" and r["run"]["phase"] == "audit"
+          and runs.raw_value(RunKey("proj", "sess", 1))["phase"] == "audit", f"got {r}")
+
+
+def test_first_investigation_first_write_wins_race():
+    runs = FakeRunRepository()
+    arts = FakeArtifactRepository()
+
+    def winner(doc):
+        seq = doc.get("stamp_seq", 0) + 1
+        doc["first_investigation_seq"] = seq
+        doc["stamp_seq"] = seq
+
+    wrapped = _OneShotConflict(runs, winner)
+    svc = EmpiricaService(wrapped, arts, FakeGenerationAllocator(runs))
+    h = handle_of(start(svc))
+    r = result(observe(svc, h, {"kind": "investigate"}))
+    stored = runs.raw_value(RunKey("proj", "sess", 1))
+    check("Y3 a lost first-investigation CAS defers to the winner (first write wins, one stamp)",
+          r["type"] == "Allow" and stored["first_investigation_seq"] == 1
+          and stored["stamp_seq"] == 1, f"got {stored}")
+
+
+def test_evaluate_retries_on_concurrent_write():
+    """A benign concurrent operational write between EvaluateRun's read and its finalize CAS must be
+    retried (re-read + re-adjudicate), not turned into a spurious conflict."""
+    runs = FakeRunRepository()
+    arts = FakeArtifactRepository()
+    wrapped = _OneShotConflict(runs, lambda doc: doc.update({"spawns": doc.get("spawns", 0) + 1}))
+    svc = EmpiricaService(wrapped, arts, FakeGenerationAllocator(runs))
+    h = handle_of(start(svc, max_spawns=5))
+    observe(svc, h, {"kind": "graph", "graph": single_goal_graph(blocked="needs-decision")})
+    r = result(evaluate(svc, h))
+    check("Y4 EvaluateRun retries through a lost finalize CAS and still returns its decision",
+          r["type"] == "Allow" and r["run"]["status"] == "stopped_residual", f"got {r}")
 
 
 # --- wire hardening ----------------------------------------------------------

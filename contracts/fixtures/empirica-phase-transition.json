@@ -1,0 +1,20 @@
+{
+  "request": {
+    "protocol": "empirica/v1",
+    "request_id": "fixture-phase",
+    "command": {
+      "type": "ObserveAction",
+      "run_id": "run-fixture",
+      "action": {"kind": "phase", "phase": "audit"}
+    }
+  },
+  "expected": {
+    "protocol": "empirica/v1",
+    "request_id": "fixture-phase",
+    "result": {
+      "type": "Allow",
+      "converged": false,
+      "run": {"id": "run-fixture", "status": "active", "revision": 8, "phase": "audit"}
+    }
+  }
+}

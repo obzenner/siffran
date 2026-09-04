@@ -1,0 +1,37 @@
+{
+  "request": {
+    "protocol": "empirica/v1",
+    "request_id": "fixture-restore",
+    "command": {
+      "type": "RestoreRun",
+      "run_id": "run-fixture"
+    }
+  },
+  "expected": {
+    "protocol": "empirica/v1",
+    "request_id": "fixture-restore",
+    "result": {
+      "type": "Allow",
+      "converged": false,
+      "run": {
+        "id": "run-fixture",
+        "status": "active",
+        "revision": 8,
+        "snapshot": {
+          "phase": "assess",
+          "passes": 2,
+          "max_passes": 8,
+          "theta": 0.8,
+          "spawn": {"spawns": 1, "max_spawns": 4, "remaining": 3},
+          "modes": {"cli_exec": true},
+          "route": {"route_seq": 1, "first_investigation_seq": 2, "verdict": "ok",
+                    "reason": "route was announced before investigation began (by write order)"},
+          "audit_tickets": [{"nonce": "b1946ac92492d2347c6235b4d2611184", "seq": 1, "consumed": false}],
+          "dispatches": [],
+          "has_graph": true,
+          "graph": {"gating": 3, "open": 1, "blocked": 0, "deferred": 0}
+        }
+      }
+    }
+  }
+}

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 
 from core import claims
 
@@ -254,12 +255,57 @@ def _select_verdict(verdicts: list[dict], tickets: list[dict]) -> dict | None:
     )
 
 
+_SHA256_HEX = re.compile(r"\A[0-9a-f]{64}\Z")
+
+
+def _normalise_verdict(verdict: dict | None) -> dict | None:
+    """A verdict coerced to the exact shape ``core.audit.coverage_check`` indexes into, or ``None``.
+
+    Defence in depth for the wire boundary: a stored verdict artifact (or one accepted at observe
+    time) may carry an arbitrarily-shaped ``claims_reviewed`` — e.g. ``[1]`` or ``[{}]`` — and
+    ``coverage_check`` indexes ``e["claim_id"]``/``entry["claim_digest"]`` on each entry, which would
+    raise and escape ``handle()`` instead of failing closed. Dropping malformed entries here means a
+    malformed verdict simply fails to cover the run (a Block), never crashes it (mirrors the hooks'
+    ``audit._review_entry``/``read_verdict``). A non-``pass`` verdict value is preserved verbatim so
+    the coverage check still reports it as a failing audit.
+    """
+    if not isinstance(verdict, dict):
+        return None
+    nonce = verdict.get("nonce")
+    if not isinstance(nonce, str) or not nonce:
+        return None  # a verdict that names no spawn cannot match any ticket
+    reviewed: list[dict] = []
+    raw_reviewed = verdict.get("claims_reviewed")
+    if isinstance(raw_reviewed, list):
+        for entry in raw_reviewed:
+            if not isinstance(entry, dict):
+                continue
+            claim_id = entry.get("claim_id")
+            cd, ed = entry.get("claim_digest"), entry.get("evidence_digest")
+            if (isinstance(claim_id, str) and claim_id
+                    and isinstance(cd, str) and _SHA256_HEX.match(cd)
+                    and isinstance(ed, str) and _SHA256_HEX.match(ed)):
+                reviewed.append({"claim_id": claim_id, "claim_digest": cd, "evidence_digest": ed})
+    argument = verdict.get("argument_digest")
+    findings = verdict.get("findings")
+    return {
+        "verdict": verdict.get("verdict") if verdict.get("verdict") in ("pass", "fail") else "fail",
+        "nonce": nonce,
+        "argument_digest": argument if isinstance(argument, str) and _SHA256_HEX.match(argument)
+        else None,
+        "claims_reviewed": reviewed,
+        "findings": [f for f in findings if isinstance(f, str)] if isinstance(findings, list) else [],
+    }
+
+
 def build_audit_oracle(tickets: list[dict], verdicts: list[dict]):
     """The ``audit(approved_digests, argument_digest) -> (ok, reason)`` oracle, delegating to the
-    pure :func:`core.audit.coverage_check` over the recorded tickets and selected verdict."""
+    pure :func:`core.audit.coverage_check` over the recorded tickets and selected verdict. The
+    selected verdict is normalised first, so a malformed stored verdict fails the run CLOSED (a
+    Block) rather than raising through the wire boundary."""
     from core.audit import coverage_check
 
-    verdict = _select_verdict(verdicts, tickets)
+    verdict = _normalise_verdict(_select_verdict(verdicts, tickets))
 
     def audit(approved_digests: dict, argument_digest: str) -> tuple[bool, str]:
         return coverage_check(tickets, verdict, approved_digests, argument_digest)

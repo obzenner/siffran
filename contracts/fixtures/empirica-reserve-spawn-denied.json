@@ -1,0 +1,25 @@
+{
+  "request": {
+    "protocol": "empirica/v1",
+    "request_id": "fixture-reserve-denied",
+    "command": {
+      "type": "ObserveAction",
+      "run_id": "run-fixture",
+      "action": {"kind": "reserve_spawn"}
+    }
+  },
+  "expected": {
+    "protocol": "empirica/v1",
+    "request_id": "fixture-reserve-denied",
+    "result": {
+      "type": "Block",
+      "reason": "spawn budget exhausted: 4/4 used; the spawn is DENIED (ADR-17).",
+      "run": {
+        "id": "run-fixture",
+        "status": "active",
+        "revision": 5,
+        "spawn": {"spawns": 4, "max_spawns": 4, "remaining": 0, "reserved": false}
+      }
+    }
+  }
+}
