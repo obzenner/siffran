@@ -58,7 +58,7 @@ help: ## Show this help (generated from target descriptions)
 ## --- Verify
 
 .PHONY: check
-check: lint test validate contract-check adr-check ## Run every check (what CI and pre-commit should run)
+check: lint test validate contract-check methodologist-pi-check adr-check ## Run every check (what CI and pre-commit should run)
 	@printf '\n$(BOLD)All checks passed.$(RESET)\n'
 
 .PHONY: test
@@ -111,6 +111,11 @@ adr-check: ## Check ADR link health and numbering (adrs doctor)
 contract-check: ## Validate host-neutral API schemas and conformance fixtures
 	@printf '$(BOLD)==> contracts$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_contracts.py
+
+.PHONY: methodologist-pi-check
+methodologist-pi-check: ## Validate the Methodologist Pi adapter package (static always; tests if node present)
+	@printf '$(BOLD)==> methodologist Pi adapter$(RESET)\n'
+	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py
 
 ## --- Inspect
 
