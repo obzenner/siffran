@@ -22,7 +22,6 @@ export interface NotifyCall {
 export interface SentMessage {
   text: string;
   deliverAs?: MessageDelivery;
-  triggerTurn?: boolean;
 }
 
 /** Records ctx.ui interactions the empirica adapter makes (notify only). */
@@ -57,9 +56,9 @@ export class FakePi implements ExtensionAPI {
     this.handlers.set(event, handler);
   }
 
-  sendMessage(
+  sendUserMessage(
     text: string,
-    options?: { deliverAs?: MessageDelivery; triggerTurn?: boolean },
+    options?: { deliverAs?: MessageDelivery },
   ): void {
     this.sentMessages.push({ text, ...options });
   }

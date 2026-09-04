@@ -12,7 +12,7 @@
 //   - pi.on("resources_discover", h) -> { skillPaths, promptPaths, themePaths }
 //   - pi.on("tool_call", h) -> ToolCallResult | void ; deny with { block, reason }
 //   - pi.on("agent_settled", h) -> void  (observational; cannot veto completion)
-//   - pi.sendMessage(text, { deliverAs, triggerTurn })
+//   - pi.sendUserMessage(text, { deliverAs })
 //   - ctx.ui.notify(message, type)
 
 export type NotifyType = "info" | "warning" | "error";
@@ -73,7 +73,7 @@ export type ToolCallHandler = (
 
 // `agent_settled` carries an empty event and returns void — it fires when Pi will
 // not continue on its own. It cannot veto completion (ADR-32); a follow-up is
-// enqueued through `pi.sendMessage`, not by returning a value.
+// enqueued through `pi.sendUserMessage`, not by returning a value.
 export type AgentSettledHandler = (
   event: Record<string, never>,
   ctx: ExtensionContext,
@@ -84,7 +84,9 @@ export type ResourcesDiscoverHandler = (
   ctx: ExtensionContext,
 ) => ResourcesDiscoverResult | Promise<ResourcesDiscoverResult>;
 
-export type MessageDelivery = "followUp" | "steer" | "nextTurn";
+// The delivery modes Pi's `sendUserMessage` accepts (real ExtensionAPI: no
+// "nextTurn" — that is a `sendMessage` custom-message mode, not a user message).
+export type MessageDelivery = "steer" | "followUp";
 
 export interface ExtensionAPI {
   registerCommand(name: string, def: CommandDefinition): void;
@@ -92,10 +94,12 @@ export interface ExtensionAPI {
   on(event: "tool_call", handler: ToolCallHandler): void;
   on(event: "agent_settled", handler: AgentSettledHandler): void;
   on(event: string, handler: (event: unknown, ctx: ExtensionContext) => unknown): void;
-  /** Enqueue a message; `deliverAs: "followUp"` lands after the current turn's
-   * tool calls finish. Best-effort — Pi may or may not start another turn. */
-  sendMessage?(
+  /** Enqueue a user message; it always triggers a turn, and `deliverAs:
+   * "followUp"` lands after the current turn's tool calls finish. Best-effort —
+   * Pi may or may not start another turn. This is the real ExtensionAPI method
+   * for a text nudge; `sendMessage` takes a CustomMessage object, not a string. */
+  sendUserMessage?(
     text: string,
-    options?: { deliverAs?: MessageDelivery; triggerTurn?: boolean },
+    options?: { deliverAs?: MessageDelivery },
   ): void;
 }

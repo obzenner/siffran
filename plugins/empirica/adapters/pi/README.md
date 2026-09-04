@@ -14,7 +14,7 @@ convergence rules stay in the core, reached through an injected transport.
 | Report a run's status | `pi.registerCommand("empirica-status", …)` | `GetRun` |
 | Convergence gate (command) | `pi.registerCommand("report-convergence", …)` | `EvaluateRun(report_convergence)` |
 | **Convergence gate (enforced)** | `pi.on("tool_call")` → `{ block, reason }` | `EvaluateRun(report_convergence)` |
-| Best-effort settled nudge | `pi.on("agent_settled")` → `pi.sendMessage` | `EvaluateRun(continue)` |
+| Best-effort settled nudge | `pi.on("agent_settled")` → `pi.sendUserMessage` | `EvaluateRun(continue)` |
 | Contribute the shared skill | `pi.on("resources_discover")` | — |
 
 ### The convergence gate is the trust boundary
@@ -32,7 +32,7 @@ tool calls are never round-tripped to the core.
 
 Pi's settled lifecycle cannot veto completion (ADR-32). At `agent_settled` the
 adapter evaluates the run and, if it is active with outstanding work, enqueues a
-**best-effort** follow-up via `pi.sendMessage({ deliverAs: "followUp" })`. The
+**best-effort** follow-up via `pi.sendUserMessage(nudge, { deliverAs: "followUp" })`. The
 message names itself a reminder, never blocks, and never throws. An agent can end
 without invoking the report tool; the run then remains explicitly active and
 non-converged — never silently certified.

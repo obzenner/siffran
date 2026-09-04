@@ -210,8 +210,8 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           evaluateRunRequest(runHandle, CONTINUE_INTENT, randomUUID()),
         );
         const nudge = settledFollowUp(response.result);
-        if (nudge !== null && typeof pi.sendMessage === "function") {
-          pi.sendMessage(nudge, { deliverAs: "followUp" });
+        if (nudge !== null && typeof pi.sendUserMessage === "function") {
+          pi.sendUserMessage(nudge, { deliverAs: "followUp" });
         }
       } catch {
         // Best-effort: a settled-time evaluation failure is not a gate and is

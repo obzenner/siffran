@@ -14,7 +14,7 @@
 //   - ctx.ui.setWidget(id, content, { placement })
 //   - ctx.ui.notify(message, level)
 
-export type NotifyLevel = "info" | "warn" | "error";
+export type NotifyLevel = "info" | "warning" | "error";
 
 export type WidgetPlacement = "aboveEditor" | "belowEditor";
 
