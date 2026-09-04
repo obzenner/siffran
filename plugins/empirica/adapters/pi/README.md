@@ -64,8 +64,13 @@ export default createEmpiricaExtension({
 ```
 
 The **default export** wires the production transport: a JSON stdio bridge
-(`stdio-transport.ts` → `bridge.py`) that runs the host-neutral
-`application.EmpiricaService` against the real persistence adapters. Operational
+(`stdio-transport.ts` → `pi/bridge.py`) that runs the host-neutral
+`application.EmpiricaService` against the real persistence adapters. `pi/bridge.py`
+is a thin subprocess shim over the **shared** bridge in
+`plugins/empirica/adapters/bridge.py`, which is the single place that wires the
+core to storage — the Pi transport spawns it over stdio, and the Claude Code hooks
+call its in-process `handle(request)` entry point, so both hosts reach the same
+typed `empirica/v1` operations with no second definition of the rules. Operational
 state lives only under `$EMPIRICA_HOME` (default `~/.empirica-plugin`, ADR-31) and
 knowledge artifacts under Git shadow refs; the TypeScript carries **no** domain
 rules, run identity, or persistence — it moves JSON and obeys the decision.
