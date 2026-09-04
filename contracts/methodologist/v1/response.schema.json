@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://siffran.dev/contracts/methodologist/v1/response.schema.json",
+  "title": "Methodologist v1 response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "request_id", "result"],
+  "properties": {
+    "protocol": {"const": "methodologist/v1"},
+    "request_id": {"type": "string", "minLength": 1},
+    "result": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["type", "methodology", "reason", "phases"],
+          "properties": {
+            "type": {"const": "MethodologySelected"},
+            "methodology": {"type": "string", "minLength": 1},
+            "reason": {"type": "string", "minLength": 1},
+            "phases": {"type": "array", "minItems": 1}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "candidates", "question"],
+          "properties": {
+            "type": {"const": "HumanDecisionRequired"},
+            "candidates": {"type": "array", "minItems": 2, "maxItems": 2},
+            "question": {"type": "string", "minLength": 1}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["type", "run_id", "next_phase"],
+          "properties": {
+            "type": {"const": "PhaseAdvanced"},
+            "run_id": {"type": "string", "minLength": 1},
+            "next_phase": {"type": ["integer", "null"]}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "code"],
+          "properties": {
+            "type": {"const": "Fault"},
+            "code": {"enum": ["invalid_request", "unknown_methodology", "out_of_order", "invalid_run"]}
+          }
+        }
+      ]
+    }
+  }
+}

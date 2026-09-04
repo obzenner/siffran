@@ -53,7 +53,7 @@ help: ## Show this help (generated from target descriptions)
 ## --- Verify
 
 .PHONY: check
-check: lint test validate adr-check ## Run every check (what CI and pre-commit should run)
+check: lint test validate contract-check adr-check ## Run every check (what CI and pre-commit should run)
 	@printf '\n$(BOLD)All checks passed.$(RESET)\n'
 
 .PHONY: test
@@ -96,6 +96,11 @@ adr-check: ## Check ADR link health and numbering (adrs doctor)
 	else \
 		printf '$(DIM)adrs not installed — skipping$(RESET)\n'; \
 	fi
+
+.PHONY: contract-check
+contract-check: ## Validate host-neutral API schemas and conformance fixtures
+	@printf '$(BOLD)==> contracts$(RESET)\n'
+	@$(PYTHON) $(SCRIPTS)/validate_contracts.py
 
 ## --- Inspect
 

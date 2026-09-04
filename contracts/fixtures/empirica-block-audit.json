@@ -1,0 +1,20 @@
+{
+  "request": {
+    "protocol": "empirica/v1",
+    "request_id": "fixture-audit-owed",
+    "command": {
+      "type": "EvaluateRun",
+      "run_id": "run-fixture",
+      "intent": "report_convergence"
+    }
+  },
+  "expected": {
+    "protocol": "empirica/v1",
+    "request_id": "fixture-audit-owed",
+    "result": {
+      "type": "Block",
+      "reason": "independent audit required",
+      "run": {"id": "run-fixture", "status": "active", "revision": 7}
+    }
+  }
+}
