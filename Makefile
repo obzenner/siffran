@@ -24,6 +24,7 @@ SCRIPTS := scripts
 ADR_DIR := doc/adr
 EMPIRICA_TESTS := $(PLUGINS_DIR)/empirica/tests/test_hooks.py
 EMPIRICA_CORE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_core.py
+METHODOLOGIST_CORE_TESTS := $(PLUGINS_DIR)/methodologist/tests/test_core.py
 MARKETPLACE := .claude-plugin/marketplace.json
 
 # All plugin manifests, discovered rather than listed — a new plugin is picked up automatically.
@@ -62,6 +63,7 @@ test: ## Run the plugin test suites
 	@printf '$(BOLD)==> tests$(RESET)\n'
 	@$(PYTHON) $(EMPIRICA_TESTS)
 	@$(PYTHON) $(EMPIRICA_CORE_TESTS)
+	@$(PYTHON) $(METHODOLOGIST_CORE_TESTS)
 
 .PHONY: lint
 lint: ## Lint Python hooks, tests, and scripts (ruff, if installed)

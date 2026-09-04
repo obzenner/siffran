@@ -10,8 +10,10 @@ stub, which is the whole point of the extraction. Behaviour is checked against t
 `hooks/convergence_gate.main`; a full end-to-end fidelity check against the live gate stays in
 `test_hooks.py`.
 """
+import importlib
 import sys
 import unittest
+from dataclasses import dataclass
 from pathlib import Path
 
 HERE = Path(__file__).parent
@@ -341,11 +343,6 @@ Plus the absent-vs-corrupt distinction and the explicit migration path. The fake
 executable spec of the contract; a filesystem or database adapter is correct iff it passes the
 same suite.
 """
-import importlib
-import sys
-from dataclasses import dataclass
-from pathlib import Path
-
 # The core package uses relative imports, so import it as the package `core` with the plugin
 # root on sys.path (mirrors how test_hooks.py loads the hooks).
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent  # plugins/empirica

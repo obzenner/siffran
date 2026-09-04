@@ -1,16 +1,8 @@
-"""Parse a methodology markdown file and a registry.json into core models.
-
-Pure text/dict -> model transforms plus thin path-loading adapters. The pure
-functions take strings and dicts so the core stays host-neutral; the loaders
-are the single place that touches the filesystem, and they take the path as an
-argument rather than assuming any fixed layout.
-"""
+"""Pure text/dict transforms from serialized resources into core models."""
 
 from __future__ import annotations
 
-import json
 import re
-from pathlib import Path
 from typing import Any
 
 from .models import (
@@ -102,19 +94,3 @@ def parse_registry(data: dict[str, Any]) -> Registry:
     else:
         entries = ()
     return Registry(schema=schema, entries=entries)
-
-
-def load_registry(path: str | Path) -> Registry:
-    """Read and parse a registry.json from disk (I/O adapter)."""
-
-    return parse_registry(json.loads(Path(path).read_text()))
-
-
-def load_methodology(path: str | Path) -> Methodology:
-    """Read and parse a methodology .md from disk (I/O adapter).
-
-    The methodology name is the file stem, matching the registry convention.
-    """
-
-    p = Path(path)
-    return parse_methodology(p.read_text(), name=p.stem)

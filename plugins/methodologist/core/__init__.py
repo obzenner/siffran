@@ -17,12 +17,7 @@ from .models import (
     SelectionDecision,
     check_phase_numbering,
 )
-from .parsing import (
-    load_methodology,
-    load_registry,
-    parse_methodology,
-    parse_registry,
-)
+from .parsing import parse_methodology, parse_registry
 from .ports import HumanPort, TaskTracker
 from .runner import register_phase_tasks
 from .validation import (
@@ -43,8 +38,6 @@ __all__ = [
     "RegistrySchema",
     "SelectionDecision",
     "check_phase_numbering",
-    "load_methodology",
-    "load_registry",
     "parse_methodology",
     "parse_registry",
     "HumanPort",

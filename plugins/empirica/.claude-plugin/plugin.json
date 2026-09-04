@@ -1,7 +1,7 @@
 {
   "name": "empirica",
   "description": "Empirical-convergence workflow \u2014 adjudicates a claim graph (GSN argument with in-toto evidence) where every claim's confidence must be earned by real external evidence: research citations first, deterministic spike verdicts for machine-checkable claims, then an independent auditor on a different model before a run may report convergence. Records which model actually answered each claim, and reports when audit independence was not obtained. Hook-enforced.",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "author": {
     "name": "obzenner"
   }

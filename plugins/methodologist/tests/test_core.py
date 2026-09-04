@@ -12,6 +12,7 @@ Two layers:
     and methodology files, so the executable checks stay honest about what ships.
 """
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -33,8 +34,6 @@ from core import (  # noqa: E402
     RegistrySchema,
     SelectionDecision,
     check_phase_numbering,
-    load_methodology,
-    load_registry,
     parse_methodology,
     parse_registry,
     register_phase_tasks,
@@ -328,7 +327,7 @@ class TestStanceValidation(unittest.TestCase):
 
 class TestRealFiles(unittest.TestCase):
     def test_registry_and_files_in_sync(self):
-        registry = load_registry(SKILL_DIR / "registry.json")
+        registry = parse_registry(json.loads((SKILL_DIR / "registry.json").read_text()))
         file_stems = {p.stem for p in METHODOLOGIES_DIR.glob("*.md")}
         self.assertEqual(validate_registry_against_files(registry, file_stems), [])
 
@@ -336,7 +335,7 @@ class TestRealFiles(unittest.TestCase):
         md_files = sorted(METHODOLOGIES_DIR.glob("*.md"))
         self.assertTrue(md_files, "no methodology files found")
         for md in md_files:
-            m = load_methodology(md)
+            m = parse_methodology(md.read_text(), name=md.stem)
             with self.subTest(methodology=m.name):
                 self.assertEqual(
                     m.phase_count, EXPECTED_PHASE_COUNT, f"{m.name} phase count"

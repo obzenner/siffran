@@ -19,6 +19,7 @@ Usage:
 Exit code 0 = all checks pass, 1 = failures found.
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -27,8 +28,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core import (  # noqa: E402
-    load_methodology,
-    load_registry,
+    parse_methodology,
+    parse_registry,
     validate_methodology_structure,
     validate_registry_against_files,
     validate_stance,
@@ -40,7 +41,7 @@ def validate(skill_dir: Path) -> list[str]:
     if not registry_path.exists():
         return [f"Missing: {registry_path}"]
 
-    registry = load_registry(registry_path)
+    registry = parse_registry(json.loads(registry_path.read_text()))
     if not registry.schema.entries_key or not registry.schema.files_dir:
         return ["schema must define 'entries_key' and 'files_dir'"]
 
@@ -54,7 +55,8 @@ def validate(skill_dir: Path) -> list[str]:
     errors = validate_registry_against_files(registry, file_stems)
 
     for md in md_files:
-        errors.extend(validate_methodology_structure(load_methodology(md)))
+        methodology = parse_methodology(md.read_text(), name=md.stem)
+        errors.extend(validate_methodology_structure(methodology))
 
     stance_path = skill_dir / "references" / "evidence-over-recall.md"
     if stance_path.exists():
