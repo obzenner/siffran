@@ -11,42 +11,31 @@ from collections.abc import Mapping
 from typing import Any
 
 from .correlation import request_id as new_request_id
+from .invocation import Invocation, parse_invocation
 from .selector import context_from_payload, selector_from_payload
 from .transport import BridgeTransport, Transport
 
 PROTOCOL = "empirica/v1"
 FALLBACK_GOAL = "empirica run (goal unspecified)"
-_FLAGS = {"--multi-provider": "multi_provider", "--cli-exec": "cli_exec"}
 
 
-def invocation_args(payload: Mapping[str, object]) -> str:
-    """Read Claude's current ``command_args`` shape or its documented prompt fallback."""
-    args = payload.get("command_args")
-    if isinstance(args, str) and args.strip():
-        return args
-    prompt = payload.get("prompt")
-    if isinstance(prompt, str):
-        parts = prompt.split(None, 1)
-        if len(parts) == 2:
-            return parts[1]
-    return ""
+def invocation_details(
+    payload: Mapping[str, object], *, environ: Mapping[str, str] | None = None,
+) -> Invocation:
+    """Return the complete, reviewable mode resolution used by StartRun and the doctor."""
+    return parse_invocation(
+        payload,
+        environ=os.environ if environ is None else environ,
+        fallback_goal=FALLBACK_GOAL,
+    )
 
 
-def goal_and_modes(payload: Mapping[str, object]) -> tuple[str, dict[str, bool]]:
-    """Parse only the leading mode-flag run and return the remaining invocation as the goal."""
-    tokens = invocation_args(payload).split()
-    modes: dict[str, bool] = {}
-    index = 0
-    while index < len(tokens) and tokens[index].startswith("--"):
-        token = tokens[index]
-        if token in _FLAGS:
-            modes[_FLAGS[token]] = True
-        elif token.startswith("--no-") and f"--{token[5:]}" in _FLAGS:
-            modes[_FLAGS[f"--{token[5:]}"]] = False
-        # Unknown leading flags are stripped exactly like the current parser. Their future
-        # reporting belongs to activation, not this transport-neutral StartRun slice.
-        index += 1
-    return " ".join(tokens[index:]).strip() or FALLBACK_GOAL, modes
+def goal_and_modes(
+    payload: Mapping[str, object], *, environ: Mapping[str, str] | None = None,
+) -> tuple[str, dict[str, bool]]:
+    """Compatibility projection of :func:`invocation_details`."""
+    invocation = invocation_details(payload, environ=environ)
+    return invocation.goal, invocation.modes
 
 
 def _max_passes(environ: Mapping[str, str]) -> int | None:
@@ -69,7 +58,7 @@ def build_start_run_request(
     """Translate one validated Claude payload into an ``empirica/v1`` StartRun envelope."""
     # Validate cwd/session together before deriving either selector component.
     context_from_payload(payload)
-    goal, modes = goal_and_modes(payload)
+    goal, modes = goal_and_modes(payload, environ=environ)
     command: dict[str, Any] = {
         "type": "StartRun",
         "selector": selector_from_payload(payload),
