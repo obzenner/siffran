@@ -161,7 +161,8 @@ with the run's other commitments, under the lock.
 
 ### Confirmation
 
-Regression tests in `plugins/empirica/tests/test_hooks.py` (`make test`):
+Executable regressions in `plugins/empirica/tests/test_core.py` and
+`plugins/empirica/tests/test_application.py` (`make test`):
 
 1. A frozen run whose frozen claims are all terminal stops, reports `converged: false`, status
    `stopped_frozen`, and lists the deferred claims by id.

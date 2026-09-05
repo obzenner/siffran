@@ -1,0 +1,51 @@
+{
+  "name": "@siffran/methodologist-pi",
+  "version": "0.7.0",
+  "description": "Turnkey Pi 0.84.1 package for Methodologist: normal /think remains bridge-backed, while /think --simple <intent> delegates one stateless direct execution prompt to the shared skill and registry.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-extension",
+    "pi.dev",
+    "methodologist",
+    "siffran",
+    "reasoning"
+  ],
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  },
+  "pi": {
+    "extensions": [
+      "./adapters/pi/src/index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "exports": {
+    ".": "./adapters/pi/src/index.ts"
+  },
+  "files": [
+    "adapters/bridge.py",
+    "adapters/pi/bridge.py",
+    "adapters/pi/README.md",
+    "adapters/pi/src",
+    "application.py",
+    "core/*.py",
+    "skills"
+  ],
+  "scripts": {
+    "test": "node --test adapters/pi/test/*.test.ts",
+    "typecheck": "tsc -p adapters/pi/tsconfig.json --noEmit"
+  }
+}

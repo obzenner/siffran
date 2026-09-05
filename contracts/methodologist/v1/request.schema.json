@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://siffran.dev/contracts/methodologist/v1/request.schema.json",
+  "title": "Methodologist v1 request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "request_id", "command"],
+  "properties": {
+    "protocol": {"const": "methodologist/v1"},
+    "request_id": {"type": "string", "minLength": 1},
+    "command": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "intent"],
+          "properties": {
+            "type": {"const": "SelectMethodology"},
+            "intent": {"type": "string", "minLength": 1},
+            "requested_methodology": {"type": ["string", "null"]}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "run_id", "phase", "output"],
+          "properties": {
+            "type": {"const": "CompletePhase"},
+            "run_id": {"type": "string", "minLength": 1},
+            "phase": {"type": "integer", "minimum": 1},
+            "output": {"type": "string", "minLength": 1}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "run_id"],
+          "properties": {
+            "type": {"const": "ProduceArtifact"},
+            "run_id": {"type": "string", "minLength": 1}
+          }
+        }
+      ]
+    }
+  }
+}

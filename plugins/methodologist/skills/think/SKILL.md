@@ -1,7 +1,7 @@
 ---
 name: think
-description: "Select and execute a formal reasoning methodology for the current task. Use when facing architectural decisions, debugging, rule enforcement, design tradeoffs, assumption validation, or any situation requiring structured thinking. Trigger phrases: 'think through this', 'reason about', 'which approach', 'analyze this decision', 'first principles', 'what are the assumptions', 'prove this', 'why does this break'. Invoke as /think for auto-detection or /think <methodology-name> to use a specific one."
-argument-hint: "[methodology-name]"
+description: "Select and execute a formal reasoning methodology for the current task. Use when facing architectural decisions, debugging, rule enforcement, design tradeoffs, assumption validation, or any situation requiring structured thinking. Trigger phrases: 'think through this', 'reason about', 'which approach', 'analyze this decision', 'first principles', 'what are the assumptions', 'prove this', 'why does this break'. Invoke as /think for bridge-backed auto-detection, /think <methodology-name> for a bridge-backed explicit choice, or /think --simple <intent> for direct stateless execution in Methodologist Pi."
+argument-hint: "[--simple <intent> | methodology-name]"
 allowed-tools: [Read, Glob, Grep, Bash, Agent, TaskCreate, TaskUpdate]
 ---
 
@@ -14,6 +14,15 @@ You are executing a structured reasoning methodology. You are NOT freestyling. E
 **First, before anything else**, read `references/evidence-over-recall.md` (next to this file) and emit its stance declaration line verbatim. This is the shared spine of every methodology — parametric knowledge is a hypothesis, every step emits a fabrication-resistant artifact, open questions are resolved before they are surfaced. If that line is absent from your output, you have not run the methodology.
 
 The user invoked: `$ARGUMENTS`
+
+**If the host kickoff identifies this as simple mode** (Methodologist Pi's
+`--simple <intent>` path): use the intent in that kickoff as the task. This is a
+direct, stateless execution path. Do not invoke a slash command,
+`methodologist_select`, or any other bridge/tool; do not use HumanPort, render a
+widget, or create/persist workflow or task state. Continue with Step 1, read the
+selected methodology from the shared files, announce the phase plan, and execute
+all phases directly. The simple-mode kickoff is already the sole user prompt, so
+do not recursively dispatch Methodologist again.
 
 **If a methodology name was provided** (e.g., `/think formal-reasoning`):
 - Read the methodology file from `methodologies/<name>.md` relative to this skill
@@ -37,15 +46,26 @@ Analyze the user's current task context — recent conversation, open files, the
 
 Announce your selection: `Using **<methodology-name>**: <one-line reason>`
 
+**Host bridge (normal mode only):** If a `methodologist_select` tool is
+available, do not open the methodology file yourself yet. Call that tool with
+the exact registry `name` and your one-line semantic reason. If the choice is
+genuinely ambiguous, call it with exactly the top two `{name, rationale}`
+candidates so the host can present the human choice UI. The bridge validates the
+named methodology through `methodologist/v1`, returns the canonical six-phase
+plan, and renders host-native phase tracking. Continue below using that returned
+plan. This is the same named bridge used by explicit `/think <name>`; never
+replace it with keyword routing. In simple mode, skip this entire bridge path.
+
 Then — and ONLY then — read the methodology file from `methodologies/<name>.md` relative to this skill.
 
 ## Step 2: Create phase tasks
 
 Every methodology file defines numbered phases. After reading the methodology:
 
-1. Create one task per phase using TaskCreate, prefixed with the methodology name
-2. Set the first task to `in_progress`
-3. Announce the phase plan to the user in a compact list
+1. In normal mode, create one task per phase using TaskCreate, prefixed with the
+   methodology name, and set the first task to `in_progress`. In simple mode,
+   create no task or workflow state.
+2. Announce the phase plan to the user in a compact list.
 
 Example:
 ```
@@ -65,8 +85,9 @@ For each phase:
 1. Read the methodology's instructions for that phase
 2. Do the work — read code, analyze, reason, search
 3. Produce the phase output in the format the methodology specifies
-4. Mark the task complete via TaskUpdate
-5. Move to the next phase
+4. In normal mode, mark the task complete via TaskUpdate
+5. In normal mode, move the next task to `in_progress`; in simple mode, continue
+   directly to the next phase without state writes
 
 **Rules during execution:**
 - Do NOT skip phases. If a phase seems unnecessary, say why and still produce minimal output for it.

@@ -24,12 +24,11 @@ costs one more loop.
 
 ## Inputs
 
-You will be given the run directory (`.claude/empirica/<run_id>/`) and a **nonce** issued when
-you were spawned. Read:
-
-- `claims.json` — the claim graph (GSN argument; node state is derived, never stored)
-- `evidence/*.json` — in-toto Statements: Fold-1 research citations and Fold-2 spike records
-- `run.json` — the manifest (passes, phase, status)
+You will be given an opaque run handle, an application snapshot/knowledge view obtained through the
+Empirica adapter API, and a **nonce** issued when you were spawned. Use `RestoreRun` and the
+knowledge adapter to inspect the graph and evidence. Runtime state belongs under
+`~/.empirica-plugin/` and knowledge under `refs/empirica/*`; never read or edit either directly.
+Never create, read, or edit runtime state under `.claude/` or `.pi/`.
 
 ## The rubric (ADR-20 P6) — check every item
 
@@ -64,10 +63,12 @@ you were spawned. Read:
    frozen claim is properly evidenced. Deferring genuine refinements and follow-on work is correct
    and is what the mechanism is for.
 
-## Output — write the verdict artifact
+## Output — submit the verdict artifact
 
-Write `audit-verdict.json` into the run directory. The gate reads it; a missing, malformed, or
-nonce-mismatched verdict blocks convergence.
+Return the verdict object below to the caller. It must be submitted with
+`adapters.claude.knowledge.build_audit_verdict_request` through `BridgeTransport`; do not write a
+verdict file or Git ref yourself. A missing, malformed, or nonce-mismatched verdict blocks
+convergence.
 
 ```json
 {
@@ -96,37 +97,16 @@ a run could detach or delete a blocking claim and a verdict written before that 
 still read as full coverage. It moves when a claim is added, deleted, detached, re-parented, blocked
 or discarded; it does **not** move when a confidence changes.
 
-**Do not hand-compute the digests.** All three come from the same functions the gate uses, so call
-them:
-
-```bash
-python3 -c '
-import importlib.util, json, sys
-from pathlib import Path
-def load(n):
-    s = importlib.util.spec_from_file_location(n, Path(sys.argv[1]) / f"{n}.py")
-    m = importlib.util.module_from_spec(s); s.loader.exec_module(m); return m
-ev, cgph = load("evidence"), load("claimgraph")
-run_dir = Path(sys.argv[2])
-graph = cgph.load(cgph.default_graph_path(run_dir))
-leaves = ev.read_leaves(run_dir)
-print(json.dumps({
-    "argument_digest": cgph.argument_digest(graph),
-    "claims_reviewed": [
-        {"claim_id": nid,
-         "claim_digest": ev.claim_digest(graph["nodes"][nid]["text"]),
-         "evidence_digest": ev.evidence_digest(leaves, nid, graph["nodes"][nid]["text"])}
-        for nid in sys.argv[3:]]}, indent=2))
-' <hooks_dir> <run_dir> G1 G2 …
-```
-
-Pass only the claim ids you actually reviewed and are willing to sign off. A digest you computed
-without reading the evidence is a false review, and it is the one failure this whole mechanism
-cannot detect — the gate can check that you recorded a digest, never that you looked.
+**Do not hand-compute the digests.** Obtain all three from the adapter/application knowledge view
+and its digest helpers. Pass only claim ids you actually reviewed and are willing to sign off. A
+digest you computed without reading the evidence is a false review, and it is the one failure this
+whole mechanism cannot detect — the gate can check that you recorded a digest, never that you
+looked.
 
 **This is an incremental audit.** On a re-audit, claims whose digests have not moved are still
 covered by your previous verdict, so review what changed — the gate's block message names exactly
 which claims are unreviewed, reworded, or re-evidenced. Re-reviewing an unchanged claim is wasted
 work, not extra rigour.
 
-Report your findings in your final message too, but the FILE is what the gate reads.
+Report your findings in your final message too, but the API-submitted artifact is what the gate
+reads.

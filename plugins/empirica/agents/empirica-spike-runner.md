@@ -30,19 +30,13 @@ rejected anyway.
    proves nothing. Before running it, ask "what result would refute the claim?" — if there is
    no such result, redesign. Prefer a check that fails loudly on the interesting case over one
    that passes broadly.
-3. **Write the spike under `.claude/spike-*`** (git-ignored, transient). Never in the repo
-   proper — a spike is scratch, not a deliverable (ADR-14).
-4. **Run it through the harness**, which is the only writer of the Fold-2 record:
-
-   ```
-   python3 <plugin>/hooks/spike_harness.py \
-     --claim <claim_id> --run-dir <run_dir> --ts <ISO timestamp> \
-     [--file <path each spike touched> ...] \
-     <command> [args...]
-   ```
-
-   `--file` arguments are hashed into the record, so a later edit to those files invalidates
-   the spike (the gate detects a stale green). List every file the check depends on.
+3. **Use an external temporary directory for scratch**, never `.claude/`, `.pi/`, or the repository
+   proper. Runtime state belongs to `~/.empirica-plugin/` and knowledge to `refs/empirica/*`; never
+   edit either directly.
+4. **Run it through the Claude knowledge adapter** using
+   `adapters.claude.knowledge.run_spike(...)`, then submit the sealed result with
+   `build_spike_request(...)` through `BridgeTransport`. This is the only normal writer of a Fold-2
+   record. Do not construct `SpikeExecution` or a gate value by hand.
 5. **Read the real verdict.** `gate: pass` iff exit 0. Do not reinterpret a failure as a pass
    because the failure looked incidental — investigate it. A flaky check is not evidence.
 

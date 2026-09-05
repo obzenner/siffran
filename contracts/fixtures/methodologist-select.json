@@ -1,0 +1,23 @@
+{
+  "request": {
+    "protocol": "methodologist/v1",
+    "request_id": "fixture-selection",
+    "command": {
+      "type": "SelectMethodology",
+      "intent": "Find which invariant a storage migration violates",
+      "requested_methodology": "invariant-analysis"
+    }
+  },
+  "expected": {
+    "protocol": "methodologist/v1",
+    "request_id": "fixture-selection",
+    "result": {
+      "type": "MethodologySelected",
+      "methodology": "invariant-analysis",
+      "reason": "The primary uncertainty is a preserved property across operations.",
+      "phases": [
+        {"id": "scope", "title": "Identify operation and scope"}
+      ]
+    }
+  }
+}

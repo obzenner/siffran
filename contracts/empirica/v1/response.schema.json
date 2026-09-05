@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://siffran.dev/contracts/empirica/v1/response.schema.json",
+  "title": "Empirica v1 response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "request_id", "result"],
+  "properties": {
+    "protocol": {"const": "empirica/v1"},
+    "request_id": {"type": "string", "minLength": 1},
+    "result": {
+      "oneOf": [
+        {"$ref": "#/$defs/allow"},
+        {"$ref": "#/$defs/block"},
+        {"$ref": "#/$defs/inert"},
+        {"$ref": "#/$defs/fault"}
+      ]
+    }
+  },
+  "$defs": {
+    "run": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "status", "revision"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "status": {
+          "enum": ["active", "converged", "stopped_residual", "stopped_frozen", "stopped_budget"]
+        },
+        "revision": {"type": "integer", "minimum": 0}
+      }
+    },
+    "allow": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["type", "converged", "run"],
+      "properties": {
+        "type": {"const": "Allow"},
+        "converged": {"type": "boolean"},
+        "run": {"$ref": "#/$defs/run"}
+      }
+    },
+    "block": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["type", "reason", "run"],
+      "properties": {
+        "type": {"const": "Block"},
+        "reason": {"type": "string", "minLength": 1},
+        "run": {"$ref": "#/$defs/run"}
+      }
+    },
+    "inert": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "reason"],
+      "properties": {
+        "type": {"const": "Inert"},
+        "reason": {"enum": ["no_run", "unsupported_host_event"]}
+      }
+    },
+    "fault": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "code", "fail_direction"],
+      "properties": {
+        "type": {"const": "Fault"},
+        "code": {
+          "enum": ["invalid_request", "unsupported", "conflict", "corrupt_run", "corrupt_artifacts", "unavailable"]
+        },
+        "message": {"type": "string"},
+        "fail_direction": {"enum": ["open", "closed"]}
+      }
+    }
+  }
+}

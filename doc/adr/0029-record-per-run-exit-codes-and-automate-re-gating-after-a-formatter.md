@@ -131,7 +131,8 @@ re-gate. Automating the recovery while keeping the detection costs one function 
 
 ### Confirmation
 
-Tests in `plugins/empirica/tests/test_hooks.py` (`make test`), each verified red on revert:
+Executable regressions now live in the active Claude adapter and activation lifecycle tests
+(`make test`), each verified red on revert:
 
 1. A repeated spike records one exit code per run; a single run records one; `samples` and
    `exit_codes` agree; a leaf without the field reads as `[]`; a timeout stays `null` (Q36–Q41).

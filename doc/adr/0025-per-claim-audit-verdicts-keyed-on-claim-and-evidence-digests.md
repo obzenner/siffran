@@ -145,8 +145,9 @@ regression test that pins it). A verdict in the old shape reads as **absent**, a
 
 ### Confirmation
 
-Regression tests in `plugins/empirica/tests/test_hooks.py`, run by `make test`, each of which must
-fail if the mechanism is removed:
+Executable regressions now live in `plugins/empirica/tests/test_core.py` and
+`plugins/empirica/tests/test_application.py`, run by `make test`; each must fail if the mechanism is
+removed:
 
 1. Adding a claim to an audited graph leaves the other claims reviewed and blocks on **only** the new
    one — the headline behaviour.

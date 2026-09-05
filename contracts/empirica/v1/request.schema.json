@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://siffran.dev/contracts/empirica/v1/request.schema.json",
+  "title": "Empirica v1 request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "request_id", "command"],
+  "properties": {
+    "protocol": {"const": "empirica/v1"},
+    "request_id": {"type": "string", "minLength": 1},
+    "command": {
+      "oneOf": [
+        {"$ref": "#/$defs/startRun"},
+        {"$ref": "#/$defs/resolveRun"},
+        {"$ref": "#/$defs/observeAction"},
+        {"$ref": "#/$defs/evaluateRun"},
+        {"$ref": "#/$defs/getRun"},
+        {"$ref": "#/$defs/restoreRun"}
+      ]
+    }
+  },
+  "$defs": {
+    "runSelector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project", "session"],
+      "properties": {
+        "project": {"type": "string", "minLength": 1},
+        "session": {"type": "string", "minLength": 1}
+      }
+    },
+    "startRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "selector", "goal"],
+      "properties": {
+        "type": {"const": "StartRun"},
+        "selector": {"$ref": "#/$defs/runSelector"},
+        "goal": {"type": "string", "minLength": 1},
+        "max_passes": {"type": "integer", "minimum": 1},
+        "max_spawns": {"type": ["integer", "null"], "minimum": 0},
+        "modes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "multi_provider": {"type": "boolean"},
+            "cli_exec": {"type": "boolean"}
+          }
+        }
+      }
+    },
+    "resolveRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "selector"],
+      "properties": {
+        "type": {"const": "ResolveRun"},
+        "selector": {"$ref": "#/$defs/runSelector"}
+      }
+    },
+    "observeAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "run_id", "action"],
+      "properties": {
+        "type": {"const": "ObserveAction"},
+        "run_id": {"type": "string", "minLength": 1},
+        "action": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["kind"],
+          "comment": "kind is one of the knowledge kinds (graph|evidence|audit_verdict|attribution) or an operational kind (reserve_spawn|configure_budget|phase|mode|freeze|route|investigate|dispatch|audit_ticket|consume_audit_ticket); per-kind fields are validated by the application handler, so additional properties are allowed here.",
+          "properties": {"kind": {"type": "string", "minLength": 1}}
+        },
+        "observed_at": {"type": ["string", "null"]}
+      }
+    },
+    "evaluateRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "run_id", "intent"],
+      "properties": {
+        "type": {"const": "EvaluateRun"},
+        "run_id": {"type": "string", "minLength": 1},
+        "intent": {"enum": ["continue", "report_convergence", "stop"]}
+      }
+    },
+    "getRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "run_id"],
+      "properties": {
+        "type": {"const": "GetRun"},
+        "run_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "restoreRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "run_id"],
+      "properties": {
+        "type": {"const": "RestoreRun"},
+        "run_id": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

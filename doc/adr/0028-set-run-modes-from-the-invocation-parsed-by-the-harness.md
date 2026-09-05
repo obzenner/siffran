@@ -145,8 +145,8 @@ cannot report what a run was actually configured with.
 
 ### Confirmation
 
-Regression tests in `plugins/empirica/tests/test_hooks.py` (`make test`), each verified to fail when
-its mechanism is reverted:
+Executable regressions now live in the active application and Claude adapter tests (`make test`);
+each is verified to fail when its mechanism is reverted:
 
 1. `parse_flags` handles both polarities, multiple flags, and empty input; `strip_flags` yields the
    goal (T100–T102).

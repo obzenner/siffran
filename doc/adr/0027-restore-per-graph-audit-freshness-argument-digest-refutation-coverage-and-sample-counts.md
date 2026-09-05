@@ -163,8 +163,9 @@ settle.
 
 ### Confirmation
 
-Regression tests in `plugins/empirica/tests/test_hooks.py` (`make test`), each verified to fail when
-its fix is reverted:
+Executable regressions now live in `plugins/empirica/tests/test_core.py`,
+`plugins/empirica/tests/test_application.py`, and the Claude activation lifecycle test (`make test`);
+each is verified to fail when its fix is reverted:
 
 1. Detaching a blocking claim does not launder an old verdict; the message says the *argument*
    changed (R52–R53). Re-auditing the new shape converges it (R54).
