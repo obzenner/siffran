@@ -16,10 +16,20 @@ if str(PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(PLUGIN_ROOT))
 
 from adapters.claude.correlation import CorrelationError, correlate  # noqa: E402
+from adapters.claude.dispatch import (  # noqa: E402
+    build_dispatch_request,
+    dispatch_actor,
+    dispatch_advice,
+    dispatched_harness,
+)
 from adapters.claude.fail_direction import (  # noqa: E402
     FailureDirection,
     blocks_on_failure,
     failure_direction,
+)
+from adapters.claude.route import (  # noqa: E402
+    build_investigation_request,
+    build_route_announcement_request,
 )
 from adapters.claude.run_start import (  # noqa: E402
     FALLBACK_GOAL,
@@ -27,6 +37,11 @@ from adapters.claude.run_start import (  # noqa: E402
     dispatch_start_run,
 )
 from adapters.claude.selector import SelectorError  # noqa: E402
+from adapters.claude.spawn import (  # noqa: E402
+    build_reserve_spawn_request,
+    dispatch_reserve_spawn,
+    spawn_decision,
+)
 from adapters.claude.transport import BridgeTransport  # noqa: E402
 
 
@@ -97,6 +112,110 @@ class TranslationParityTests(unittest.TestCase):
     def test_missing_session_is_rejected_before_transport(self) -> None:
         with self.assertRaises(SelectorError):
             build_start_run_request({"cwd": "."}, correlation_id="bad", environ={})
+
+
+class ControlPlaneParityTests(unittest.TestCase):
+    def payload(self, tool_name: str, tool_input: dict | None = None, **extra: object) -> dict:
+        return {
+            "session_id": "claude-session",
+            "cwd": ".",
+            "tool_name": tool_name,
+            "tool_input": tool_input or {},
+            **extra,
+        }
+
+    def test_agent_pretooluse_builds_reserve_spawn_and_preserves_timestamp(self) -> None:
+        payload = self.payload("Agent", timestamp="2026-09-05T20:00:00Z")
+        request = build_reserve_spawn_request(payload, "opaque-run", correlation_id="reserve-1")
+        self.assertEqual(request["command"], {
+            "type": "ObserveAction",
+            "run_id": "opaque-run",
+            "action": {"kind": "reserve_spawn"},
+            "observed_at": "2026-09-05T20:00:00Z",
+        })
+        transport = RecordingTransport()
+        dispatch_reserve_spawn(
+            payload, "opaque-run", transport=transport, correlation_id="reserve-2",
+        )
+        self.assertEqual(len(transport.requests), 1)
+
+    def test_spawn_terminal_is_open_corrupt_is_closed_and_cap_denial_blocks(self) -> None:
+        terminal = {"result": {"type": "Allow", "run": {"status": "converged"}}}
+        corrupt = {"result": {
+            "type": "Fault", "code": "corrupt_run", "message": "bad state",
+            "fail_direction": "closed",
+        }}
+        denied = {"result": {"type": "Block", "reason": "spawn budget exhausted: 1/1"}}
+        malformed = {"not": "a response"}
+        self.assertEqual(spawn_decision(terminal).exit_code, 0)
+        self.assertEqual((spawn_decision(corrupt).exit_code, spawn_decision(corrupt).reason),
+                         (2, "bad state"))
+        self.assertEqual((spawn_decision(denied).exit_code, spawn_decision(denied).reason),
+                         (2, "spawn budget exhausted: 1/1"))
+        self.assertEqual(spawn_decision(malformed).exit_code, 0)
+
+    def test_route_and_investigation_are_typed_and_never_invent_timestamps(self) -> None:
+        investigation = build_investigation_request(
+            self.payload("Grep", event_ts=37), "run", correlation_id="investigate-1",
+        )
+        self.assertEqual(investigation["command"]["action"], {"kind": "investigate"})
+        self.assertEqual(investigation["command"]["observed_at"], "seq:37")
+
+        route = build_route_announcement_request(
+            self.payload("Bash", {"command": "announce"}), "run", reason="known/unknown split",
+            correlation_id="route-1",
+        )
+        self.assertEqual(route["command"]["action"], {
+            "kind": "route", "reason": "known/unknown split",
+        })
+        self.assertNotIn("observed_at", route["command"])
+
+        own_announcement = self.payload(
+            "Bash", {"command": "route_stamp.py --announce-route --session s"},
+        )
+        self.assertIsNone(build_investigation_request(own_announcement, "run"))
+
+    def test_non_dispatch_bash_is_inert_and_never_advised(self) -> None:
+        payload = self.payload("Bash", {"command": "grep -rn claude src/"})
+        self.assertIsNone(dispatched_harness(payload["tool_input"]["command"]))
+        self.assertIsNone(build_dispatch_request(payload, "run", {"model": "gpt-5.6"}))
+        self.assertIsNone(dispatch_advice(payload["tool_input"]["command"], "run"))
+        transport = RecordingTransport()
+        response, advice = dispatch_actor(
+            payload, "run", {"model": "gpt-5.6"}, transport=transport,
+        )
+        self.assertIsNone(response)
+        self.assertIsNone(advice)
+        self.assertEqual(transport.requests, [])
+
+    def test_actor_dispatch_records_witnessed_fields_timestamp_and_advice(self) -> None:
+        payload = self.payload(
+            "Bash", {"command": "codex exec --model openai.gpt-5.6-sol resolve G4"},
+            ts="2026-09-05T20:01:00Z",
+        )
+        request = build_dispatch_request(
+            payload,
+            "run",
+            {"model": "openai.gpt-5.6-sol", "provider": "openai"},
+            claim_id="G4",
+            correlation_id="dispatch-1",
+        )
+        self.assertEqual(request["command"]["action"], {
+            "kind": "dispatch",
+            "actor": {
+                "model": "openai.gpt-5.6-sol",
+                "provider": "openai",
+                "source_type": "LLM_JUDGE",
+                "harness": "codex",
+            },
+            "witnessed": True,
+            "claim_id": "G4",
+        })
+        self.assertEqual(request["command"]["observed_at"], "2026-09-05T20:01:00Z")
+        self.assertIn("pins no session", dispatch_advice(payload["tool_input"]["command"], "run"))
+
+        pinned = "codex exec resume 123 --model openai.gpt-5.6-sol resolve G4"
+        self.assertIsNone(dispatch_advice(pinned, "run"))
 
 
 class UtilityTests(unittest.TestCase):
