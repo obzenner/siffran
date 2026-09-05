@@ -60,11 +60,14 @@ def _check_marketplace(errors: list[str]) -> None:
     if not isinstance(entries, list):
         errors.append("Codex marketplace plugins must be an array")
         return
-    names = [entry.get("name") for entry in entries if isinstance(entry, dict)]
-    if names != ["methodologist"]:
-        errors.append("Codex marketplace must expose Methodologist only")
+    matching = [
+        entry for entry in entries
+        if isinstance(entry, dict) and entry.get("name") == "methodologist"
+    ]
+    if len(matching) != 1:
+        errors.append("Codex marketplace must expose Methodologist exactly once")
         return
-    entry = entries[0]
+    entry = matching[0]
     source = entry.get("source")
     expected_source = {"source": "local", "path": "./plugins/methodologist"}
     if source != expected_source:

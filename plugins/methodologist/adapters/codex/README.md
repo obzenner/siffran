@@ -27,8 +27,9 @@ make methodologist-codex-smoke  # existing Codex login or OPENAI_API_KEY
 
 The smoke pins `@openai/codex@0.146.0`, creates isolated temporary `HOME` and
 `CODEX_HOME` directories, installs this repository as a marketplace, and
-verifies marketplace, skill, and MCP invocation. No Empirica files are exposed
-by the Codex marketplace.
+verifies marketplace, skill, and MCP invocation. Methodologist itself bundles
+no lifecycle hooks; Empirica is a separate marketplace entry whose hooks must
+be installed and trusted independently.
 
 [plugins]: https://developers.openai.com/plugins/build/plugins
 [skills]: https://developers.openai.com/codex/skills
