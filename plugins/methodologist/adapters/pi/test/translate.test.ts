@@ -157,6 +157,82 @@ test("bare /think delegates semantic selection to the model through shared resou
   assert.match(pi.sentUserMessages[0], /methodologist_select/);
 });
 
+test("/think --simple sends one direct shared-skill prompt and bypasses runtime state", async () => {
+  let dispatches = 0;
+  const pi = new FakePi();
+  createMethodologistExtension({
+    dispatch: () => {
+      dispatches += 1;
+      throw new Error("simple mode must not dispatch");
+    },
+  })(pi);
+  const ui = new FakeUi();
+
+  await pi.commands.get("think")!.handler(
+    "--simple decide whether retries preserve request ordering",
+    { ui },
+  );
+
+  assert.equal(dispatches, 0, "simple mode must bypass the bridge");
+  assert.equal(pi.sentUserMessages.length, 1, "simple mode must emit exactly one prompt");
+  assert.equal(pi.stateEntries.length, 0, "simple mode must not write workflow state");
+  assert.equal(ui.widgets.length, 0, "simple mode must not render phase widgets");
+  assert.equal(ui.selects.length, 0, "simple mode must not instantiate HumanPort UI");
+  assert.match(pi.sentUserMessages[0], /SKILL\.md/);
+  assert.match(pi.sentUserMessages[0], /registry\.json/);
+  assert.match(pi.sentUserMessages[0], /retries preserve request ordering/);
+  assert.match(pi.sentUserMessages[0], /simple-mode/);
+  assert.doesNotMatch(pi.sentUserMessages[0], /\/think(?:\s|$)/, "prompt must not recurse");
+  assert.doesNotMatch(pi.sentUserMessages[0], /methodologist_select/);
+});
+
+test("/think --simple requires an intent without dispatching or prompting", async () => {
+  const pi = new FakePi();
+  createMethodologistExtension({
+    dispatch: () => {
+      throw new Error("missing simple intent must not dispatch");
+    },
+  })(pi);
+  const ui = new FakeUi();
+
+  await pi.commands.get("think")!.handler("--simple", { ui });
+
+  assert.equal(pi.sentUserMessages.length, 0);
+  assert.equal(pi.stateEntries.length, 0);
+  assert.equal(ui.notifications.at(-1)?.level, "warning");
+  assert.match(ui.notifications.at(-1)?.message ?? "", /<intent>/);
+});
+
+test("normal named /think remains bridge-backed", async () => {
+  let dispatches = 0;
+  const pi = new FakePi();
+  createMethodologistExtension({
+    dispatch: (request): Response => {
+      dispatches += 1;
+      return {
+        protocol: PROTOCOL,
+        request_id: request.request_id,
+        result: {
+          type: "MethodologySelected",
+          methodology: request.command.requested_methodology!,
+          reason: request.command.intent,
+          phases: Array.from({ length: 6 }, (_, index) => ({
+            number: index + 1,
+            title: `Phase ${index + 1}`,
+          })),
+        },
+      };
+    },
+  })(pi);
+  const ui = new FakeUi();
+
+  await pi.commands.get("think")!.handler("formal-reasoning", { ui });
+
+  assert.equal(dispatches, 1);
+  assert.equal(pi.sentUserMessages.length, 0);
+  assert.equal(ui.lastWidgetLines()?.length, 6);
+});
+
 test("model selection tool: ambiguity -> human choice -> named bridge", async () => {
   const requests: string[] = [];
   const dispatch = (request: {

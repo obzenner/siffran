@@ -9,6 +9,9 @@
 //
 // Sources (Pi docs, packages/coding-agent/docs/extensions.md):
 //   - pi.registerCommand(name, { description, handler })
+//   - pi.sendUserMessage(content)
+//   - pi.appendEntry(customType, data) (modelled so tests can prove simple mode
+//     does not write extension workflow state)
 //   - pi.on("resources_discover", handler) -> { skillPaths, promptPaths, themePaths }
 //   - ctx.ui.select(title, options, config?) -> Promise<string | undefined>
 //   - ctx.ui.setWidget(id, content, { placement })
@@ -86,6 +89,7 @@ export interface ExtensionAPI {
     content: string,
     options?: { deliverAs?: "steer" | "followUp" },
   ): void;
+  appendEntry(customType: string, data?: unknown): void;
   on(event: "resources_discover", handler: ResourcesDiscoverHandler): void;
   on(event: string, handler: (event: unknown, ctx: ExtensionContext) => unknown): void;
 }

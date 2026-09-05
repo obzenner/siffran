@@ -2,9 +2,10 @@
 //
 // Explicit `/think <name>` requests go straight through methodologist/v1 to the
 // host-neutral core bridge. Bare `/think` delegates semantic selection to the
-// current model: the model reads the shared skill + registry, then calls the
-// `methodologist_select` tool, which enters the exact same named bridge flow.
-// No keyword router and no repository runtime state are involved.
+// current model, which enters that bridge through `methodologist_select`.
+// `/think --simple <intent>` is deliberately thinner: one user prompt tells the
+// model to execute the shared skill directly, without bridge/UI/workflow state.
+// No mode contains a keyword router or duplicate methodology instructions.
 
 import { randomUUID } from "node:crypto";
 import * as path from "node:path";
@@ -66,6 +67,19 @@ function bareSelectionPrompt(skillDir: string): string {
     `If one methodology best addresses the primary uncertainty, call ${SELECT_TOOL} with its exact registry name and a one-line reason.`,
     `If genuinely ambiguous, call ${SELECT_TOOL} with exactly two candidates (name + rationale); the tool will ask the human.`,
     "After the tool returns the validated six-phase plan, continue with the selected methodology exactly as the shared skill instructs.",
+  ].join("\n");
+}
+
+function simpleModePrompt(skillDir: string, intent: string): string {
+  const thinkDir = path.join(skillDir, "think");
+  return [
+    "Handle this as a Methodologist simple-mode request directly in the current agent turn.",
+    "Do not invoke any slash command or Methodologist tool, and do not create or persist workflow/task state or host UI.",
+    `Read and follow the shared skill at ${path.join(thinkDir, "SKILL.md")}, including its simple-mode rules.`,
+    `Use the shared registry at ${path.join(thinkDir, "registry.json")} to select semantically, never by keyword routing.`,
+    "Load the selected shared methodology file and execute it exactly as the skill directs; do not invent or reproduce methodology instructions from this prompt.",
+    "The user's intent is:",
+    intent,
   ].join("\n");
 }
 
@@ -176,6 +190,17 @@ export function createMethodologistExtension(deps: MethodologistPiDeps) {
     pi.registerCommand("think", {
       description: "Select and execute a formal reasoning methodology (methodologist).",
       handler: async (args, ctx) => {
+        const simple = args.match(/^\s*--simple(?:\s+([\s\S]*?))?\s*$/);
+        if (simple !== null) {
+          const intent = simple[1]?.trim() ?? "";
+          if (intent.length === 0) {
+            ctx.ui.notify("Usage: /think --simple <intent>", "warning");
+            return;
+          }
+          pi.sendUserMessage(simpleModePrompt(skillsDir, intent));
+          return;
+        }
+
         const parsed = parseThinkInvocation(args, known);
         if (parsed.requestedMethodology === null) {
           // Commands bypass skill expansion in Pi. Hand the semantic decision to

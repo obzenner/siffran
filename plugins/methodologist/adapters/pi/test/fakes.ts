@@ -27,6 +27,11 @@ export interface SelectCall {
   options: string[];
 }
 
+export interface StateEntry {
+  customType: string;
+  data?: unknown;
+}
+
 /** Records ctx.ui interactions; `selectAnswers` are dequeued by select(). */
 export class FakeUi implements UiContext {
   readonly widgets: WidgetCall[] = [];
@@ -66,6 +71,7 @@ export class FakePi implements ExtensionAPI {
   readonly commands = new Map<string, CommandDefinition>();
   readonly tools = new Map<string, ToolDefinition>();
   readonly sentUserMessages: string[] = [];
+  readonly stateEntries: StateEntry[] = [];
   readonly handlers = new Map<string, unknown>();
 
   registerCommand(name: string, def: CommandDefinition): void {
@@ -78,6 +84,10 @@ export class FakePi implements ExtensionAPI {
 
   sendUserMessage(content: string): void {
     this.sentUserMessages.push(content);
+  }
+
+  appendEntry(customType: string, data?: unknown): void {
+    this.stateEntries.push({ customType, data });
   }
 
   on(event: string, handler: unknown): void {

@@ -8,6 +8,12 @@ invariant; the Pi adapter contains no duplicate methodology rules.
 
 ## Command behavior
 
+- **`/think --simple <intent>`** — sends exactly one non-recursive user prompt
+  telling the active model to select and execute from the same shared
+  `SKILL.md`, `registry.json`, and methodology files. This path does not call the
+  bridge or `methodologist_select`, does not instantiate `HumanPort` or the
+  phase widget, and writes no Methodologist workflow/task state. It contains no
+  copied methodology instructions or keyword router.
 - **`/think <methodology-name>`** — sends the exact name through the production
   stdio bridge. The core validates it against `registry.json` and the
   methodology file, then returns all six canonical phases. Pi renders them in a
@@ -20,9 +26,10 @@ invariant; the Pi adapter contains no duplicate methodology rules.
 - **genuine ambiguity** — the model can submit exactly two candidates; Pi shows
   `ctx.ui.select`, then sends the human's choice through the named bridge.
 
-The model receives the validated phase plan from the tool and continues the
-shared skill's six-phase reasoning instructions. Selection rules and
-methodology content remain shared with the Claude plugin.
+The model receives the validated phase plan from the tool in normal mode and
+continues the shared skill's six-phase reasoning instructions. Simple mode reads
+and executes those instructions directly from the shared files. Selection rules
+and methodology content remain shared with the Claude plugin.
 
 ## Install / run
 
@@ -48,9 +55,11 @@ export default createMethodologistExtension({ dispatch: myTestOrRpcDispatch });
 
 ## State and UI
 
-The adapter and bridge read shared resources only. They write nothing under the
-repository, `.pi`, or `.claude`. Phase display state is in-memory and rendered
-with `ctx.ui.setWidget`; ambiguity uses `ctx.ui.select`.
+The normal adapter and bridge read shared resources only. They write nothing
+under the repository, `.pi`, or `.claude`; phase display state is in-memory and
+rendered with `ctx.ui.setWidget`, while ambiguity uses `ctx.ui.select`. Simple
+mode bypasses those UI ports and creates no Methodologist workflow/task state;
+its sole effect is one `pi.sendUserMessage` call containing the direct kickoff.
 
 ## Develop
 
@@ -59,5 +68,7 @@ make methodologist-pi-check
 make release-check
 ```
 
-The adapter tests include a real stdio round trip through the shared core and
-assert that an explicit methodology yields exactly six numbered phases.
+The adapter tests prove simple mode performs zero dispatches, emits exactly one
+prompt, writes no extension workflow state, and leaves normal bridge-backed
+behavior intact. The package is exercised against the live Pi CLI version named
+in `package.json` during release verification.

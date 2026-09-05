@@ -1,7 +1,7 @@
 {
   "name": "@siffran/methodologist-pi",
-  "version": "0.6.0",
-  "description": "Turnkey Pi 0.84.1 package for Methodologist: explicit /think names validate through the methodologist/v1 core bridge; bare /think delegates semantic selection to the model through the shared skill and registry, then enters the same named flow.",
+  "version": "0.7.0",
+  "description": "Turnkey Pi 0.84.1 package for Methodologist: normal /think remains bridge-backed, while /think --simple <intent> delegates one stateless direct execution prompt to the shared skill and registry.",
   "type": "module",
   "license": "MIT",
   "keywords": [
