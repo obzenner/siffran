@@ -1,9 +1,6 @@
 # CLAUDE.md
 
-This is a multi-host plugin collection (`obzenner/siffran`) for Claude Code,
-Codex, and Pi. It contains reusable skills and methodologies plus thin host
-adapters; Methodologist's Codex package reuses the shared `think` tree, while
-the Python lifecycle hooks remain Empirica/Claude-specific.
+This is a multi-host **plugin marketplace** (`obzenner/siffran`). It contains reusable skills and methodologies distributed for Claude Code, Codex, and Pi, plus the lifecycle adapters that make Empirica's gates real on supported host surfaces.
 
 ## Drive this project through the Makefile
 
@@ -36,11 +33,12 @@ Rules that follow from this:
 - `Makefile` — the project lifecycle; `make help` is the entry point
 - `scripts/` — validators the Makefile calls (manifest checks, doc-drift check, version bump)
 - `.claude-plugin/marketplace.json` — marketplace catalog listing all available plugins
-- `.agents/plugins/marketplace.json` — Codex marketplace (Methodologist only; no Empirica hooks)
+- `.agents/plugins/marketplace.json` — Codex marketplace catalog for both plugins
 - `plugins/<name>/.claude-plugin/plugin.json` — plugin manifest (name, version, description)
-- `plugins/methodologist/.codex-plugin/plugin.json` — Codex package manifest over the same shared skill tree
+- `plugins/<name>/.codex-plugin/plugin.json` — Codex-specific package manifest
 - `plugins/<name>/skills/<skill-name>/SKILL.md` — skill definition (frontmatter + instructions)
 - `plugins/<name>/hooks/` — Python lifecycle hooks + `hooks.json` wiring them to events
+- `plugins/empirica/adapters/codex/` — Codex 0.146.0 payload translation and native hook results
 - `plugins/<name>/agents/` — subagent definitions. **Spawn these by their plugin-scoped name** (`empirica:empirica-auditor`); the bare name does not resolve.
 - `plugins/<name>/tests/` — committed regression suites, run by `make test`
 - `plugins/methodologist/adapters/codex/` — stateless MCP translation into the host-neutral bridge
@@ -58,7 +56,8 @@ Every plugin must have a `version` field in its `plugin.json` following semver (
 - **MINOR** (0.1.0 → 0.2.0): new features, new methodologies, added examples
 - **MAJOR** (1.0.0 → 2.0.0): breaking changes to skill behavior or structure
 
-Set the version only in `plugin.json`, not in `marketplace.json`.
+Set the version in the host manifests, never in marketplace catalogs. `make bump` updates the
+Claude manifest and synchronizes a sibling `.codex-plugin/plugin.json` when one exists.
 
 ### Adding a new plugin
 
@@ -94,7 +93,7 @@ The table below and the `## Plugins` table in `README.md` are **generated** — 
 | Plugin | Version | Description |
 |--------|---------|-------------|
 | `methodologist` | 0.8.0 | Methodology router — picks and executes formal CS/math reasoning methodologies with tracked phases and structured output. |
-| `empirica` | 1.0.0 | Empirical-convergence workflow — adjudicates a claim graph (GSN argument with in-toto evidence) where every claim's confidence must be earned by real external evidence: research citations first, deterministic spike verdicts for machine-checkable claims, then an independent auditor on a different model before a run may report convergence. Records which model actually answered each claim, and reports when audit independence was not obtained. Hook-enforced. |
+| `empirica` | 1.1.0 | Empirical-convergence workflow — adjudicates a claim graph (GSN argument with in-toto evidence) where every claim's confidence must be earned by real external evidence: research citations first, deterministic spike verdicts for machine-checkable claims, then an independent auditor on a different model before a run may report convergence. Records which model actually answered each claim, and reports when audit independence was not obtained. Hook-enforced. |
 <!-- END GENERATED: plugins -->
 
 ## README

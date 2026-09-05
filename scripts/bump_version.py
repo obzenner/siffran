@@ -48,7 +48,17 @@ def main(argv: list[str]) -> int:
     data["version"] = f"{major}.{minor}.{patch}"
     path.write_text(json.dumps(data, indent=2) + "\n")
 
+    # A host-specific Codex manifest is packaging metadata for the same plugin release. Keep it
+    # synchronized when present; it is not an independent release stream.
+    codex_path = path.parents[1] / ".codex-plugin" / "plugin.json"
+    if codex_path.is_file():
+        codex_data = json.loads(codex_path.read_text())
+        codex_data["version"] = data["version"]
+        codex_path.write_text(json.dumps(codex_data, indent=2) + "\n")
+
     print(f"  {plugin}: {previous} -> {data['version']}")
+    if codex_path.is_file():
+        print(f"  synced {codex_path}")
     print("  next: regenerate the doc tables (make docs), then make check")
     return 0
 

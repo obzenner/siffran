@@ -43,7 +43,9 @@ def main() -> int:
     quarantine = ROOT / "quarantine"
     if quarantine.exists():
         fail(f"retired duplicate authority still exists: {quarantine}")
-    allowed_hooks = {"hooks.json", *ENTRYPOINTS}
+    # Codex has its own command-string hook schema and one thin multiplexer. Claude's
+    # hooks.json remains byte-for-byte frozen so adding that adapter cannot change this one.
+    allowed_hooks = {"hooks.json", "codex.json", "codex_hook.py", *ENTRYPOINTS}
     extra_hooks = sorted(path.name for path in HOOKS.iterdir()
                          if path.is_file() and path.name not in allowed_hooks)
     if extra_hooks:

@@ -16,7 +16,7 @@ Add the marketplace, then install a plugin:
 /plugin install empirica@siffran
 ```
 
-## Methodologist for Codex
+## Install for Codex
 
 Codex CLI 0.146.0 and the Codex desktop surface can install Methodologist from
 the repository marketplace:
@@ -24,6 +24,7 @@ the repository marketplace:
 ```sh
 codex plugin marketplace add obzenner/siffran
 codex plugin add methodologist@siffran
+codex plugin add empirica@siffran
 ```
 
 Start a new Codex session after installation. Methodologist's shared `think`
@@ -41,13 +42,23 @@ skill then has two honest modes:
   has no Methodologist task widget, so phases execute in the conversation
   without claiming host-native tracking.
 
-The Codex package requires Python 3 only for structured bridge mode. Before
+Methodologist requires Python 3 only for structured bridge mode. Before
 installing, review
 [`plugins/methodologist/.codex-plugin/plugin.json`](./plugins/methodologist/.codex-plugin/plugin.json),
 [`plugins/methodologist/.mcp.json`](./plugins/methodologist/.mcp.json), and the
-small MCP adapter. The package contains no hooks and the Codex marketplace does
-not expose Empirica, so installing Methodologist cannot activate Empirica's hook
-files. Codex's normal sandbox and MCP approval policy still apply.
+small MCP adapter. The Methodologist package contains no hooks. Codex's normal
+sandbox and MCP approval policy still apply.
+
+Empirica's command hooks require a separate trust step. Open `/hooks`, review the
+installed definitions, and trust them before use; untrusted or modified hooks do
+not enforce the workflow. Activate a run explicitly:
+
+```text
+$empirica design and verify the retry policy
+```
+
+See [`plugins/empirica/adapters/codex/README.md`](./plugins/empirica/adapters/codex/README.md)
+for the pinned payload contract and hosted-WebSearch visibility limit.
 
 Codex plugins are not supported in the IDE extension. Install the shared skill
 directly as a repo/user skill there if needed, and use native simple mode only.
@@ -87,7 +98,7 @@ pi install "$(pwd)"
 | Plugin | Version | Description |
 |--------|---------|-------------|
 | `methodologist` | 0.8.0 | Methodology router — picks and executes formal CS/math reasoning methodologies with tracked phases and structured output. |
-| `empirica` | 1.0.0 | Empirical-convergence workflow — adjudicates a claim graph (GSN argument with in-toto evidence) where every claim's confidence must be earned by real external evidence: research citations first, deterministic spike verdicts for machine-checkable claims, then an independent auditor on a different model before a run may report convergence. Records which model actually answered each claim, and reports when audit independence was not obtained. Hook-enforced. |
+| `empirica` | 1.1.0 | Empirical-convergence workflow — adjudicates a claim graph (GSN argument with in-toto evidence) where every claim's confidence must be earned by real external evidence: research citations first, deterministic spike verdicts for machine-checkable claims, then an independent auditor on a different model before a run may report convergence. Records which model actually answered each claim, and reports when audit independence was not obtained. Hook-enforced. |
 <!-- END GENERATED: plugins -->
 
 ## Development
@@ -100,6 +111,7 @@ make status     # plugin versions, ADR count, working-tree state
 make bump PLUGIN=<name> PART=minor
 make methodologist-codex-check  # deterministic package + MCP validation
 make methodologist-codex-smoke  # real codex-cli 0.146.0 online smoke
+make codex-live-check CODEX='npx -y @openai/codex@0.146.0'
 ```
 
 The online smoke creates isolated temporary `HOME` and `CODEX_HOME` trees,

@@ -28,6 +28,7 @@ EMPIRICA_APP_TESTS := $(PLUGINS_DIR)/empirica/tests/test_application.py
 EMPIRICA_STATE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_state_adapter.py
 EMPIRICA_GIT_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/git/tests/test_git_artifact_repo.py
 EMPIRICA_CLAUDE_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/claude/tests/test_claude_adapter.py
+EMPIRICA_CODEX_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/codex/tests/test_codex_adapter.py
 METHODOLOGIST_CORE_TESTS := $(PLUGINS_DIR)/methodologist/tests/test_core.py
 METHODOLOGIST_CODEX_TESTS := $(PLUGINS_DIR)/methodologist/adapters/codex/tests/test_mcp_server.py
 MARKETPLACE := .claude-plugin/marketplace.json
@@ -60,7 +61,7 @@ help: ## Show this help (generated from target descriptions)
 ## --- Verify
 
 .PHONY: check
-check: lint test validate contract-check activation-check methodologist-codex-check pi-bundle-check methodologist-pi-check empirica-pi-check adr-check ## Run every check (what CI and pre-commit should run)
+check: lint test validate contract-check activation-check methodologist-codex-check empirica-codex-check pi-bundle-check methodologist-pi-check empirica-pi-check adr-check ## Run every check (what CI and pre-commit should run)
 	@printf '\n$(BOLD)All checks passed.$(RESET)\n'
 
 .PHONY: test
@@ -72,6 +73,7 @@ test: ## Run the plugin test suites
 	@$(PYTHON) $(EMPIRICA_STATE_TESTS)
 	@$(PYTHON) $(EMPIRICA_GIT_ADAPTER_TESTS)
 	@$(PYTHON) $(EMPIRICA_CLAUDE_ADAPTER_TESTS)
+	@$(PYTHON) $(EMPIRICA_CODEX_ADAPTER_TESTS)
 	@$(PYTHON) $(METHODOLOGIST_CORE_TESTS)
 	@$(PYTHON) $(METHODOLOGIST_CODEX_TESTS)
 
@@ -145,6 +147,16 @@ pi-bundle-check: ## Validate the repository-root Pi package used by `pi install 
 empirica-pi-check: ## Validate the Empirica Pi adapter package (static + bridge smoke always; tests if node present)
 	@printf '$(BOLD)==> empirica Pi adapter$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py plugins/empirica/adapters/pi
+
+.PHONY: empirica-codex-check
+empirica-codex-check: ## Validate the Empirica Codex package, hook payloads, and isolated lifecycle
+	@printf '$(BOLD)==> empirica Codex adapter$(RESET)\n'
+	@$(PYTHON) $(SCRIPTS)/validate_codex_adapter.py
+
+.PHONY: codex-live-check
+codex-live-check: ## Smoke Codex 0.146.0 marketplace/plugin loading (set CODEX=... if needed)
+	@printf '$(BOLD)==> Codex 0.146.0 live plugin smoke$(RESET)\n'
+	@CODEX="$${CODEX:-codex}" $(PYTHON) $(SCRIPTS)/validate_codex_adapter.py --live
 
 ## --- Inspect
 

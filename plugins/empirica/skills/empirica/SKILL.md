@@ -2,7 +2,7 @@
 name: empirica
 description: "Empirical-convergence development workflow. Adjudicate a claim graph — propose claims, earn each one's confidence with real external evidence (research first, then a deterministic spike where the claim is machine-checkable), discard what evidence refutes — then have an independent auditor verify the run before it may report convergence. Use when starting non-trivial work where the plan is not yet certain — 'how should we build X', 'I'm not sure whether A or B', 'design and implement this feature', 'spike this', 'we don't know if this approach works'. Two paths: known territory goes straight to finalize; unknown territory runs the empirical loop first. Invoke as /empirica <goal>."
 allowed-tools: Read Glob Grep Bash Edit Write Agent TaskCreate TaskUpdate WebFetch
-compatibility: Designed for Claude Code; requires the methodologist skill as a companion and python3 for the hooks.
+compatibility: Designed for Claude Code, Codex CLI 0.146.0+, and Pi; requires methodologist as a companion and python3 for hook-backed hosts.
 # TOP-LEVEL on purpose (ADR-28). `argument-hint` only drives autocomplete when it sits here; under
 # `metadata` it is arbitrary key-value data and the hint never shows, so the mode flags would be
 # undiscoverable. This is a Claude Code-only field, which makes the plugin unpackageable for
@@ -98,16 +98,26 @@ means the goal is `design X`, and the run is in CLI-exec mode. Strip any leading
 read the goal — a claim graph rooted in `--cli-exec design X` has a corrupted intent, and it will be
 the root of every claim in the run.
 
-You do **not** apply the flags yourself. The Claude adapter parses the invocation and sends the
+You do **not** apply the flags yourself. The active host adapter parses the invocation and sends the
 resolved flags in `StartRun`; the application stores them in the operational document under
 `~/.empirica-plugin/`. Read them only through `RestoreRun` on the `empirica/v1` adapter API.
 A typo such as `--cli-exex` enables nothing and must be surfaced plainly.
 
-**Runtime boundary:** use `adapters/claude` request builders and `BridgeTransport` for every graph,
+**Runtime boundary:** on Claude use `adapters/claude`; on Codex use `adapters/codex` and
+`adapters.codex.knowledge`; in both cases use the host's `BridgeTransport` for every graph,
 evidence, spike, regate, route, freeze, audit-ticket, verdict, and restore operation. Operational
 state belongs only under `~/.empirica-plugin/`; knowledge belongs only under `refs/empirica/*`.
-Never create, read, or edit runtime state below `.claude/` or `.pi/`, and never edit either store
-directly. The explicit `make migrate-legacy` command is the sole legacy-path exception.
+Never create, read, or edit runtime state below `.claude/`, `.codex/`, or `.pi/`, and never edit
+either store directly. The explicit `make migrate-legacy` command is the sole legacy-path exception.
+
+**Codex activation and sensor boundary:** Codex runs start only when the prompt begins with
+`$empirica` (the namespaced `$empirica:empirica` and legacy `/empirica` spellings are also
+accepted). After classifying the goal, record the route before investigative Bash with
+`python3 -c 'pass' -- --empirica-route '<reason>'`; the trusted `PreToolUse:Bash` hook stamps it
+through the application before the no-op executes. Codex 0.146.0 hosted Responses API WebSearch
+does not pass through `PreToolUse`, so its ordering is UNVERIFIED; cite its result normally, but do
+not claim the hook witnessed it. Plugin installation also does not trust hooks: if the relevant
+hashes are not trusted and enabled in `/hooks`, no hook-enforcement claim is valid.
 
 ## Step 1 — Route BEFORE investigating (P1)
 
@@ -122,7 +132,8 @@ start investigating. Routing is a commitment made up front, not a label applied 
 to justify a shortcut (ADR-5/20 — the observed inversion).
 
 **Record the announcement** immediately through
-`adapters.claude.route.build_route_announcement_request` and `BridgeTransport`, before any evidence
+the active host's route operation (`adapters.claude.route.build_route_announcement_request`, or
+Codex's `--empirica-route` no-op witnessed by `PreToolUse:Bash`) before any evidence
 gathering. The application records both route and first investigation with CAS-guarded monotone
 sequence numbers. Skipping the announcement remains a P1 violation.
 
@@ -132,7 +143,7 @@ case where the initial unknown set is already empty.
 ## Step 2 — Seed the claim graph (state substrate, ADR-22)
 
 Convergence state is a **claim graph**: a GSN assurance argument with in-toto evidence leaves.
-Submit it with `adapters.claude.knowledge.build_graph_request` through `BridgeTransport`. The
+Submit it with the active host's `knowledge.build_graph_request` through `BridgeTransport`. The
 application stores immutable knowledge in `refs/empirica/*` and its graph pointer in the operational
 document under `~/.empirica-plugin/`; it is never a worktree file. There are no
 `spec.md`/`plan.md`/`tasks.md` runtime files.
@@ -199,7 +210,8 @@ output, a primary source online. **Recall is not evidence.** Reading a repo and 
 conclusions from training data is zero Fold-1 validation, and every confidence written that way
 is unbacked.
 
-Build each in-toto Statement with `build_research_request` and submit it through `BridgeTransport`:
+Build each in-toto Statement with the active host's `build_research_request` and submit it through
+`BridgeTransport`:
 
 ```json
 {
@@ -223,7 +235,7 @@ evidence no longer counts, because it answered a different question.
 Research what the check should be and what "correct" looks like **first**, then build it. Run it
 through the harness, which is the sole writer of spike records:
 
-Use `adapters.claude.knowledge.run_spike(...)` to execute the deterministic harness, then submit
+Use the active host's `knowledge.run_spike(...)` to execute the deterministic harness, then submit
 its sealed `SpikeExecution` with `build_spike_request(...)` through `BridgeTransport`. Never write
 a spike verdict or evidence leaf directly.
 
@@ -239,7 +251,8 @@ detection is correct and stays — a digest that ignored whitespace would be wor
 whitespace is semantic in Python, YAML, Makefiles and string literals. What is automated is the
 *recovery*:
 
-Call `build_regate_requests(...)` and dispatch every returned request through `BridgeTransport`.
+Call the active host's `build_regate_requests(...)` and dispatch every returned request through
+`BridgeTransport`.
 
 It re-runs **only** the stale spikes, using the command each record already stores, at the same
 sample count. This is not a way to bless a stale record: every spike is re-executed and its verdict
@@ -395,7 +408,14 @@ never fire (it must be `^empirica:empirica$`). If the spawn errors with "not fou
 where this plugin was just installed or updated, reload plugins or restart the session — a stale
 session registry can fail to resolve a newly added agent even when the name is correct.
 
-Pass it the run directory and the **nonce** the spawn gate issued. It verifies the run against
+On Codex, plugin bundles do not contribute Claude's `agents/` definitions. Use the native
+`spawn_agent` tool and put the literal `empirica-auditor` marker in its dispatcher-visible
+`agent_type`, `name`, `task_name`, or `message`; the trusted `PreToolUse:Agent` hook issues the
+ticket. This witnesses a requested spawn, not actor identity or independence. If the audit requires
+decorrelated model generations, use a witnessed CLI dispatch with an explicit model in `cli_exec`
+mode and report any independence not actually obtained.
+
+Pass it the opaque run handle and the **nonce** the spawn gate issued. It verifies the run against
 the ADR-20 rubric — above all **re-reading each approved claim's Fold-1 citation to confirm the
 cited source actually supports the claim** — and submits its verdict with
 `build_audit_verdict_request` through `BridgeTransport`. The Stop gate
