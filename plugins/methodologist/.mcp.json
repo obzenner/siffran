@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "methodologist": {
+      "type": "stdio",
+      "command": "python3",
+      "args": [
+        "adapters/codex/mcp_server.py"
+      ],
+      "cwd": ".",
+      "startup_timeout_sec": 10,
+      "tool_timeout_sec": 10
+    }
+  }
+}

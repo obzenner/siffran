@@ -29,6 +29,7 @@ EMPIRICA_STATE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_state_adapter.py
 EMPIRICA_GIT_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/git/tests/test_git_artifact_repo.py
 EMPIRICA_CLAUDE_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/claude/tests/test_claude_adapter.py
 METHODOLOGIST_CORE_TESTS := $(PLUGINS_DIR)/methodologist/tests/test_core.py
+METHODOLOGIST_CODEX_TESTS := $(PLUGINS_DIR)/methodologist/adapters/codex/tests/test_mcp_server.py
 MARKETPLACE := .claude-plugin/marketplace.json
 
 # All plugin manifests, discovered rather than listed — a new plugin is picked up automatically.
@@ -48,7 +49,7 @@ endif
 
 .PHONY: help
 help: ## Show this help (generated from target descriptions)
-	@printf '$(BOLD)siffran$(RESET) — Claude Code plugin marketplace\n\n'
+	@printf '$(BOLD)siffran$(RESET) — Claude Code, Codex, and Pi plugin collection\n\n'
 	@printf '$(BOLD)Usage:$(RESET) make <target>\n\n'
 	@awk 'BEGIN {FS = ":.*?## "} \
 		/^## ---/ { printf "\n$(BOLD)%s$(RESET)\n", substr($$0, 8); next } \
@@ -59,7 +60,7 @@ help: ## Show this help (generated from target descriptions)
 ## --- Verify
 
 .PHONY: check
-check: lint test validate contract-check activation-check pi-bundle-check methodologist-pi-check empirica-pi-check adr-check ## Run every check (what CI and pre-commit should run)
+check: lint test validate contract-check activation-check methodologist-codex-check pi-bundle-check methodologist-pi-check empirica-pi-check adr-check ## Run every check (what CI and pre-commit should run)
 	@printf '\n$(BOLD)All checks passed.$(RESET)\n'
 
 .PHONY: test
@@ -72,6 +73,7 @@ test: ## Run the plugin test suites
 	@$(PYTHON) $(EMPIRICA_GIT_ADAPTER_TESTS)
 	@$(PYTHON) $(EMPIRICA_CLAUDE_ADAPTER_TESTS)
 	@$(PYTHON) $(METHODOLOGIST_CORE_TESTS)
+	@$(PYTHON) $(METHODOLOGIST_CODEX_TESTS)
 
 .PHONY: lint
 lint: ## Lint Python hooks, tests, and scripts (ruff, if installed)
@@ -123,6 +125,16 @@ activation-check: ## Verify Empirica runtime isolation and thin Claude hook acti
 methodologist-pi-check: ## Validate the Methodologist Pi adapter package (static always; tests if node present)
 	@printf '$(BOLD)==> methodologist Pi adapter$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py plugins/methodologist
+
+.PHONY: methodologist-codex-check
+methodologist-codex-check: ## Deterministically validate the Methodologist Codex package and MCP bridge
+	@printf '$(BOLD)==> methodologist Codex package$(RESET)\n'
+	@$(PYTHON) $(SCRIPTS)/validate_codex_plugin.py
+
+.PHONY: methodologist-codex-smoke
+methodologist-codex-smoke: ## Run online discovery/invocation smoke tests with codex-cli 0.146.0
+	@printf '$(BOLD)==> methodologist Codex 0.146.0 smoke$(RESET)\n'
+	@$(PYTHON) $(SCRIPTS)/smoke_codex_plugin.py
 
 .PHONY: pi-bundle-check
 pi-bundle-check: ## Validate the repository-root Pi package used by `pi install git:...`
