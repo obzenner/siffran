@@ -1,0 +1,36 @@
+{
+  "name": "@siffran/pi-plugins",
+  "version": "1.0.0",
+  "description": "Turnkey Pi packages for the Empirica evidence-convergence workflow and Methodologist formal reasoning router.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi.dev",
+    "empirica",
+    "methodologist",
+    "siffran"
+  ],
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  },
+  "pi": {
+    "extensions": [
+      "./plugins/empirica/adapters/pi/src/index.ts",
+      "./plugins/methodologist/adapters/pi/src/index.ts"
+    ],
+    "skills": [
+      "./plugins/empirica/skills",
+      "./plugins/methodologist/skills"
+    ]
+  }
+}

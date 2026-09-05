@@ -1,16 +1,46 @@
 # siffran
 
-A [Claude Code](https://docs.claude.com/en/docs/claude-code) plugin marketplace. It packages reusable, methodology-driven skills — formal reasoning routers, iterative planners, and structural health checks — so they can be installed into any Claude Code project via the plugin system.
+A plugin collection for [Claude Code](https://docs.claude.com/en/docs/claude-code) and the [Pi coding agent](https://pi.dev). It packages reusable, methodology-driven workflows: formal reasoning with Methodologist and evidence-backed convergence with Empirica.
 
-There's no build step and no runtime code: every plugin is declarative configuration plus Markdown skill definitions.
+The same host-neutral cores power the Claude Code and Pi adapters. Empirica stores operational state under `~/.empirica-plugin` and durable claims and evidence in Git shadow refs, leaving project worktrees clean.
 
-## Install
+## Install for Claude Code
 
 Add the marketplace, then install a plugin:
 
-```
+```text
 /plugin marketplace add obzenner/siffran
 /plugin install methodologist@siffran
+/plugin install empirica@siffran
+```
+
+## Install for Pi
+
+Install the repository as one Pi package. This enables both Methodologist and Empirica:
+
+```sh
+pi install git:github.com/obzenner/siffran
+```
+
+Restart Pi after installation, or run `/reload` in an existing session. Available commands include:
+
+```text
+/think <intent>                 # structured Methodologist workflow
+/think --simple <intent>        # original single-prompt Methodologist mode
+/empirica <goal>                # start an evidence-convergence run
+/empirica-status                # inspect the current run
+```
+
+To update later:
+
+```sh
+pi update --extensions
+```
+
+For local development, install the checkout instead:
+
+```sh
+pi install "$(pwd)"
 ```
 
 ## Plugins

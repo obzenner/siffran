@@ -59,7 +59,7 @@ help: ## Show this help (generated from target descriptions)
 ## --- Verify
 
 .PHONY: check
-check: lint test validate contract-check activation-check methodologist-pi-check empirica-pi-check adr-check ## Run every check (what CI and pre-commit should run)
+check: lint test validate contract-check activation-check pi-bundle-check methodologist-pi-check empirica-pi-check adr-check ## Run every check (what CI and pre-commit should run)
 	@printf '\n$(BOLD)All checks passed.$(RESET)\n'
 
 .PHONY: test
@@ -123,6 +123,11 @@ activation-check: ## Verify Empirica runtime isolation and thin Claude hook acti
 methodologist-pi-check: ## Validate the Methodologist Pi adapter package (static always; tests if node present)
 	@printf '$(BOLD)==> methodologist Pi adapter$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py plugins/methodologist
+
+.PHONY: pi-bundle-check
+pi-bundle-check: ## Validate the repository-root Pi package used by `pi install git:...`
+	@printf '$(BOLD)==> Pi bundle$(RESET)\n'
+	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py .
 
 .PHONY: empirica-pi-check
 empirica-pi-check: ## Validate the Empirica Pi adapter package (static + bridge smoke always; tests if node present)
