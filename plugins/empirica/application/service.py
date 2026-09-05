@@ -214,7 +214,8 @@ class EmpiricaService:
             return {"__fault__": graph_fault}
         if not isinstance(graph, dict):
             return None
-        ev = knowledge.build_evidence_oracle(self._knowledge.evidence)
+        ev = knowledge.build_evidence_oracle(self._knowledge.evidence,
+                                             self._knowledge.evidence_leaves)
 
         def ev_ok(nid, purpose):
             return ev(nid, purpose)[0]
@@ -260,6 +261,26 @@ class EmpiricaService:
             return self._update_graph(key, action.get("graph"))
         if kind == knowledge.KIND_EVIDENCE:
             return self._observe_evidence(key, state, action)
+        if kind == knowledge.KIND_EVIDENCE_LEAF:
+            evidence_id = wire.require(action, "evidence_id", str)
+            statement = wire.require(action, "statement", dict)
+            verdicts = wire.require(action, "verdicts", dict)
+            # Host adapters are the trusted observation boundary: raw model-facing callers must
+            # never invent verdicts.  Still validate the boundary structurally so malformed data
+            # cannot become an approving truthy value in the knowledge oracle.
+            for purpose in ("approve", "refute"):
+                verdict = verdicts.get(purpose)
+                if (not isinstance(verdict, dict)
+                        or not isinstance(verdict.get("ok"), bool)
+                        or not isinstance(verdict.get("reason"), str)):
+                    raise wire.InvalidRequest(
+                        f"verdicts.{purpose} must contain boolean ok and string reason")
+            supersedes = action.get("supersedes")
+            if supersedes is not None and not isinstance(supersedes, str):
+                raise wire.InvalidRequest("supersedes must be an artifact id or null")
+            return self._append_and_ack(
+                key, state,
+                knowledge.evidence_leaf_artifact(evidence_id, statement, verdicts, supersedes))
         if kind == knowledge.KIND_AUDIT_VERDICT:
             return self._append_and_ack(key, state,
                                         knowledge.audit_verdict_artifact(
@@ -670,12 +691,13 @@ class EmpiricaService:
             return graph_fault
 
         know = self._knowledge  # set by _load_graph
-        evidence = knowledge.build_evidence_oracle(know.evidence)
+        evidence = knowledge.build_evidence_oracle(know.evidence, know.evidence_leaves)
         # Audit tickets live on the OPERATIONAL plane (ADR-31), so coverage is judged against the
         # server-issued spawn nonces recorded there; only the verdict itself is a knowledge artifact.
         audit = knowledge.build_audit_oracle(list(state.audit_tickets), know.verdicts)
         approving = knowledge.approving_evidence_ids(know.evidence)
-        digest_of = knowledge.build_digest_of(graph, approving) if isinstance(graph, dict) else None
+        digest_of = (knowledge.build_digest_of(graph, approving, know.evidence_leaves)
+                     if isinstance(graph, dict) else None)
         attribution = know.attributions[-1] if know.attributions else None
 
         run_state = RunState(status="active", is_legacy=state.is_legacy,

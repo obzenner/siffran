@@ -28,6 +28,10 @@ from core import claims
 
 KIND_GRAPH = "graph"
 KIND_EVIDENCE = "evidence"
+# Exact in-toto evidence imported/produced by host adapters.  The legacy ``evidence`` kind above
+# remains for wire compatibility; new adapters retain the statement so ADR-25 digests stay byte-for-
+# byte compatible with the established Claude implementation.
+KIND_EVIDENCE_LEAF = "evidence_leaf"
 KIND_AUDIT_TICKET = "audit_ticket"
 KIND_AUDIT_VERDICT = "audit_verdict"
 KIND_ATTRIBUTION = "attribution"
@@ -75,6 +79,14 @@ def graph_artifact(canonical_graph: dict) -> tuple[str, str]:
 def evidence_artifact(claim_id: str, purpose: str, ok: bool, reason: str) -> tuple[str, str]:
     return _envelope(KIND_EVIDENCE,
                      {"claim_id": claim_id, "purpose": purpose, "ok": ok, "reason": reason})
+
+
+def evidence_leaf_artifact(evidence_id: str, statement: dict, verdicts: dict,
+                           supersedes: str | None = None) -> tuple[str, str]:
+    payload = {"evidence_id": evidence_id, "statement": statement, "verdicts": verdicts}
+    if supersedes is not None:
+        payload["supersedes"] = supersedes
+    return _envelope(KIND_EVIDENCE_LEAF, payload)
 
 
 def audit_ticket_artifact(nonce: str) -> tuple[str, str]:
@@ -148,6 +160,7 @@ def canonicalize_graph(raw: object) -> dict:
             "blocked": blocked,
             "evidence": list(evidence),
             "refuted_by": refuted_by,
+            "actor": node.get("actor") if isinstance(node.get("actor"), dict) else None,
         }
 
     canon_edges: list[dict] = []
@@ -180,6 +193,7 @@ class Knowledge:
     def __init__(self) -> None:
         self.graphs: dict[str, dict] = {}  # graph artifact id -> canonical graph
         self.evidence: list[dict] = []
+        self.evidence_leaves: list[dict] = []
         self.tickets: list[dict] = []
         self.verdicts: list[dict] = []
         self.attributions: list[dict] = []
@@ -201,6 +215,9 @@ class Knowledge:
                 k.graphs[art.artifact_id] = record.get("graph")
             elif kind == KIND_EVIDENCE:
                 k.evidence.append(record)
+            elif kind == KIND_EVIDENCE_LEAF:
+                record["_artifact_id"] = art.artifact_id
+                k.evidence_leaves.append(record)
             elif kind == KIND_AUDIT_TICKET:
                 k.tickets.append(record)
             elif kind == KIND_AUDIT_VERDICT:
@@ -215,7 +232,19 @@ class Knowledge:
 # --- injected verdicts for adjudicate ----------------------------------------
 
 
-def build_evidence_oracle(evidence_records: list[dict]):
+def active_evidence_leaves(records: list[dict]) -> list[dict]:
+    """Resolve replacement chains without relying on append order.
+
+    Re-gating replaces the logical ``spike-<claim>`` record.  Because ArtifactRepository is a set,
+    the replacement explicitly names the content address it supersedes; readers then ignore every
+    superseded node.  This preserves append-only history while matching the legacy one-file-per-id
+    last-write view.
+    """
+    superseded = {r.get("supersedes") for r in records if isinstance(r.get("supersedes"), str)}
+    return [r for r in records if r.get("_artifact_id") not in superseded]
+
+
+def build_evidence_oracle(evidence_records: list[dict], leaf_records: list[dict] | None = None):
     """The ``evidence(node_id, purpose) -> (ok, reason)`` oracle from recorded evidence artifacts.
 
     Monotone by design: a claim is approvable once an approving evidence artifact exists for it, so
@@ -223,7 +252,22 @@ def build_evidence_oracle(evidence_records: list[dict]):
     earned and recorded, matching the run's append-only history (ADR-20 P3).
     """
     index: dict[tuple[str, str], tuple[bool, str]] = {}
-    for rec in evidence_records:
+    records = list(evidence_records)
+    for leaf in active_evidence_leaves(leaf_records or []):
+        verdicts = leaf.get("verdicts")
+        statement = leaf.get("statement")
+        subjects = statement.get("subject") if isinstance(statement, dict) else None
+        claim_id = (subjects[0].get("name") if isinstance(subjects, list) and subjects
+                    and isinstance(subjects[0], dict) else None)
+        if not isinstance(verdicts, dict) or not isinstance(claim_id, str):
+            continue
+        for purpose in _PURPOSES:
+            value = verdicts.get(purpose)
+            if isinstance(value, dict):
+                records.append({"claim_id": claim_id, "purpose": purpose,
+                                "ok": bool(value.get("ok")),
+                                "reason": str(value.get("reason", ""))})
+    for rec in records:
         claim_id, purpose = rec.get("claim_id"), rec.get("purpose")
         if not isinstance(claim_id, str) or purpose not in _PURPOSES:
             continue
@@ -326,14 +370,56 @@ def evidence_digest(evidence_ids: list[str]) -> str:
     return hashlib.sha256("\0".join(sorted(evidence_ids)).encode("utf-8")).hexdigest()
 
 
-def build_digest_of(graph: dict, approving_evidence_ids: dict[str, list[str]]):
+def _leaf_digest(records: list[dict], claim_id: str, claim_text: str) -> str:
+    """ADR-25 evidence digest, exactly matching ``hooks/evidence.py:evidence_digest``."""
+    bound = []
+    expected_claim = claim_digest(claim_text)
+    for record in active_evidence_leaves(records):
+        statement = record.get("statement")
+        if not isinstance(statement, dict):
+            continue
+        subject = statement.get("subject")
+        predicate = statement.get("predicate")
+        if (not isinstance(subject, list) or len(subject) != 1
+                or not isinstance(subject[0], dict) or not isinstance(predicate, dict)):
+            continue
+        digest = subject[0].get("digest")
+        if (subject[0].get("name") != claim_id or not isinstance(digest, dict)
+                or digest.get("sha256") != expected_claim):
+            continue
+        ptype = statement.get("predicateType", "")
+        fold = "research" if ptype.endswith("/research/v1") else "spike"
+        hashes = predicate.get("hashes") if isinstance(predicate.get("hashes"), dict) else {}
+        bound.append({"fold": fold,
+                      "kind": predicate.get("kind") if fold == "research" else None,
+                      "source": predicate.get("source"), "citation": predicate.get("citation"),
+                      "result": predicate.get("result"), "gate": predicate.get("gate"),
+                      "command_hash": predicate.get("command_hash"),
+                      "files_hash": hashes.get("files"), "result_hash": hashes.get("result")})
+    bound.sort(key=lambda lf: (lf["fold"], lf.get("result") or "", lf.get("source") or "",
+                               lf.get("citation") or "", lf.get("command_hash") or "",
+                               lf.get("files_hash") or ""))
+    h = hashlib.sha256()
+    for leaf in bound:
+        for field in ("fold", "kind", "source", "citation", "result", "gate",
+                      "command_hash", "files_hash", "result_hash"):
+            value = leaf.get(field)
+            h.update(b"\0" if value is None else str(value).encode("utf-8"))
+            h.update(b"\0")
+    return h.hexdigest()
+
+
+def build_digest_of(graph: dict, approving_evidence_ids: dict[str, list[str]],
+                    leaf_records: list[dict] | None = None):
     """The ``digest_of(node_id) -> {claim_digest, evidence_digest}`` map an approved claim must have
     been reviewed at. Computed from the current graph and the recorded evidence, so it always
     reflects the run's live state — the audit is judged against what supports the claim *now*."""
     def digest_of(node_id: str) -> dict:
         text = graph["nodes"][node_id]["text"]
         return {"claim_digest": claim_digest(text),
-                "evidence_digest": evidence_digest(approving_evidence_ids.get(node_id, []))}
+                "evidence_digest": (_leaf_digest(leaf_records, node_id, text)
+                                    if leaf_records else
+                                    evidence_digest(approving_evidence_ids.get(node_id, [])))}
 
     return digest_of
 

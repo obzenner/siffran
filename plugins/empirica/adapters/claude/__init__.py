@@ -15,6 +15,17 @@ from .dispatch import (
 )
 from .fail_direction import FailureDirection, blocks_on_failure, failure_direction
 from .invocation import Invocation, build_mode_request, parse_invocation
+from .knowledge import (
+    SpikeExecution,
+    build_attribution_request,
+    build_audit_ticket_request,
+    build_audit_verdict_request,
+    build_graph_request,
+    build_regate_requests,
+    build_research_request,
+    build_spike_request,
+    run_spike,
+)
 from .preflight import diagnose
 from .route import (
     INVESTIGATIVE_TOOLS,
@@ -44,16 +55,24 @@ __all__ = [
     "SelectorError",
     "SpawnDecision",
     "StopResult",
+    "SpikeExecution",
     "Transport",
     "INVESTIGATIVE_TOOLS",
     "blocks_on_failure",
     "build_dispatch_request",
+    "build_attribution_request",
+    "build_audit_ticket_request",
+    "build_audit_verdict_request",
+    "build_graph_request",
     "build_investigation_request",
     "build_mode_request",
     "build_reserve_spawn_request",
+    "build_regate_requests",
+    "build_research_request",
     "build_restore_request",
     "build_route_announcement_request",
     "build_start_run_request",
+    "build_spike_request",
     "build_stop_request",
     "context_from_payload",
     "correlate",
@@ -73,6 +92,7 @@ __all__ = [
     "observed_at",
     "parse_invocation",
     "request_id",
+    "run_spike",
     "restore_context",
     "selector_from_payload",
     "spawn_decision",

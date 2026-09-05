@@ -32,6 +32,15 @@ from adapters.claude.fail_direction import (  # noqa: E402
     failure_direction,
 )
 from adapters.claude.invocation import build_mode_request, parse_invocation  # noqa: E402
+from adapters.claude.knowledge import (  # noqa: E402
+    SpikeExecution,
+    build_graph_request,
+    build_regate_requests,
+    build_research_request,
+    build_spike_request,
+    run_spike,
+)
+from adapters.claude.migrate_legacy import migrate  # noqa: E402
 from adapters.claude.preflight import diagnose  # noqa: E402
 from adapters.claude.restore import build_restore_request, restore_context  # noqa: E402
 from adapters.claude.route import (  # noqa: E402
@@ -364,6 +373,214 @@ class FinalControlParityTests(unittest.TestCase):
             self.assertNotIn(".claude/empirica", source)
             self.assertNotIn("modes.json", source)
             self.assertNotIn("actors.json", source)
+
+
+class KnowledgeTranslationTests(unittest.TestCase):
+    def graph(self) -> dict:
+        return {"root": "G0", "nodes": {"G0": {
+            "type": "Goal", "text": "command succeeds", "kind": "needs-experiment",
+            "confidence": 0.9,
+        }}, "edges": []}
+
+    def research(self) -> dict:
+        import hashlib
+        return {"_type": "https://in-toto.io/Statement/v1",
+                "subject": [{"name": "G0", "digest": {"sha256": hashlib.sha256(
+                    b"command succeeds").hexdigest()}}],
+                "predicateType": "https://empirica.dev/attestation/research/v1",
+                "predicate": {"fold": "research", "kind": "runtime", "source": "true",
+                              "citation": "POSIX true exits zero", "result": "supports",
+                              "ts": "2026-09-05T20:00:00Z"}}
+
+    def test_graph_research_and_real_spike_translate_without_runtime_files(self) -> None:
+        graph, research = self.graph(), self.research()
+        graph_request = build_graph_request("run", graph, correlation_id="graph")
+        self.assertEqual(graph_request["command"]["action"], {"kind": "graph", "graph": graph})
+        research_request = build_research_request(
+            "run", "research-G0", research, graph, [research], correlation_id="research")
+        self.assertFalse(research_request["command"]["action"]["verdicts"]["approve"]["ok"])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "subject.txt"
+            target.write_text("bound\n", encoding="utf-8")
+            execution = run_spike("G0", "command succeeds", ["true"], [target],
+                                  "2026-09-05T20:01:00Z")
+            request = build_spike_request(
+                "run", "spike-G0", execution, graph, [research], correlation_id="spike")
+            self.assertEqual(execution.statement["predicate"]["gate"], "pass")
+            self.assertEqual(execution.statement["predicate"]["exit_codes"], [0])
+            self.assertTrue(request["command"]["action"]["verdicts"]["approve"]["ok"])
+            with self.assertRaisesRegex(ValueError, "deterministic harness"):
+                build_spike_request("run", "forged", SpikeExecution(execution.statement, {}),
+                                    graph, [research])
+            self.assertFalse((Path(tmp) / ".claude").exists())
+            self.assertFalse((Path(tmp) / ".pi").exists())
+
+            old_id = "a" * 64
+            stored = [{"artifact_id": old_id, "evidence_id": "spike-G0",
+                       "statement": execution.statement}]
+            self.assertEqual(build_regate_requests("run", graph, stored,
+                                                   "2026-09-05T20:02:00Z"), [])
+            target.write_text("changed\n", encoding="utf-8")
+            regated = build_regate_requests("run", graph, stored,
+                                            "2026-09-05T20:02:00Z")
+            self.assertEqual(len(regated), 1)
+            self.assertEqual(regated[0]["command"]["action"]["supersedes"], old_id)
+            self.assertEqual(regated[0]["command"]["action"]["statement"]["predicate"]["gate"],
+                             "pass")
+
+            replacement = run_spike("G0", "command succeeds", ["true"], [target],
+                                    "2026-09-05T20:03:00Z")
+            active_history = [stored[0], {
+                "artifact_id": "b" * 64, "evidence_id": "spike-G0",
+                "statement": replacement.statement, "supersedes": old_id,
+            }]
+            self.assertEqual(build_regate_requests(
+                "run", graph, active_history, "2026-09-05T20:04:00Z"), [])
+
+
+class LegacyMigrationIntegrationTests(unittest.TestCase):
+    def _git(self, repo: Path, *args: str) -> str:
+        env = {**os.environ, "GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "t@example.invalid",
+               "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "t@example.invalid"}
+        return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True,
+                              text=True, env=env).stdout.strip()
+
+    def _hook(self, name: str):
+        import importlib.util
+        path = PLUGIN_ROOT / "hooks" / f"{name}.py"
+        spec = importlib.util.spec_from_file_location(f"migration_test_{name}", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_explicit_migration_is_idempotent_digest_exact_and_uses_real_stores(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            repo, home, legacy = base / "repo", base / "home", base / "legacy"
+            repo.mkdir()
+            legacy.mkdir()
+            self._git(repo, "init", "-q")
+            (repo / "tracked").write_text("unchanged\n", encoding="utf-8")
+            self._git(repo, "add", "tracked")
+            self._git(repo, "commit", "-q", "-m", "fixture")
+            head, index = self._git(repo, "rev-parse", "HEAD"), self._git(repo, "write-tree")
+
+            graph = {"root": "G0", "nodes": {"G0": {
+                "type": "Goal", "text": "true succeeds", "kind": "needs-experiment",
+                "confidence": 0.9,
+            }}, "edges": []}
+            (legacy / "claims.json").write_text(json.dumps(graph), encoding="utf-8")
+            (legacy / "run.json").write_text(json.dumps({"run_id": "legacy-session",
+                                                          "goal": "true succeeds"}),
+                                             encoding="utf-8")
+            bound = repo / "tracked"
+            evidence = self._hook("evidence")
+            evidence.write_research(legacy, "research-G0", "G0", "true succeeds",
+                                    source="true", kind="runtime", citation="true exits zero",
+                                    result="supports", ts="2026-09-05T20:00:00Z")
+            harness = PLUGIN_ROOT / "hooks" / "spike_harness.py"
+            spike = subprocess.run([sys.executable, str(harness), "--claim", "G0", "--run-dir",
+                                    str(legacy), "--ts", "2026-09-05T20:01:00Z", "--file",
+                                    str(bound), "true"], capture_output=True, text=True)
+            self.assertEqual(spike.returncode, 0, spike.stderr)
+            leaves = evidence.read_leaves(legacy)
+            expected_digest = evidence.evidence_digest(leaves, "G0", "true succeeds")
+
+            audit = self._hook("audit")
+            nonce = audit.record_spawn(legacy, "legacy-session", 1)
+            claims = self._hook("claimgraph")
+            verdict = {"verdict": "pass", "nonce": nonce,
+                       "argument_digest": claims.argument_digest(claims.normalise(graph)),
+                       "claims_reviewed": [{"claim_id": "G0",
+                                            "claim_digest": evidence.claim_digest("true succeeds"),
+                                            "evidence_digest": expected_digest}], "findings": []}
+            (legacy / "audit-verdict.json").write_text(json.dumps(verdict), encoding="utf-8")
+            source_before = {p.relative_to(legacy): p.read_bytes() for p in legacy.rglob("*")
+                             if p.is_file()}
+
+            with patch.dict(os.environ, {"EMPIRICA_HOME": str(home)}, clear=False):
+                first = migrate(legacy, repo)
+                second = migrate(legacy, repo)
+                self.assertTrue(first["migrated"])
+                self.assertTrue(second["idempotent"])
+
+                from adapters import bridge
+                from application import knowledge as app_knowledge
+                from application.wire import decode_handle
+                from core.records import Present
+                service = bridge.build_service(repo)
+                key = decode_handle(first["run_id"])
+                arts = service._artifacts.read(key)
+                self.assertIsInstance(arts, Present)
+                decoded = app_knowledge.Knowledge.from_artifacts(arts.value)
+                self.assertEqual(app_knowledge._leaf_digest(decoded.evidence_leaves, "G0",
+                                                            "true succeeds"), expected_digest)
+                run = service._runs.read(key)
+                self.assertEqual(len(run.value["audit_tickets"]), 1)
+
+                import shutil
+                conflicting = base / "conflicting"
+                shutil.copytree(legacy, conflicting)
+                conflicting_graph = json.loads((conflicting / "claims.json").read_text())
+                conflicting_graph["nodes"]["G0"]["text"] = "different claim"
+                (conflicting / "claims.json").write_text(json.dumps(conflicting_graph))
+                with self.assertRaisesRegex(RuntimeError, "non-identical"):
+                    migrate(conflicting, repo, session_id="legacy-session")
+
+                malformed = service.handle({
+                    "protocol": "empirica/v1", "request_id": "malformed-verdicts",
+                    "command": {"type": "ObserveAction", "run_id": first["run_id"],
+                                "action": {"kind": "evidence_leaf", "evidence_id": "bad",
+                                           "statement": leaves[0],
+                                           "verdicts": {"approve": {"ok": "yes", "reason": 1},
+                                                        "refute": {"ok": False,
+                                                                   "reason": "no"}}}},
+                })
+                self.assertEqual(malformed["result"]["type"], "Fault")
+                self.assertEqual(malformed["result"]["code"], "invalid_request")
+
+                evaluated = service.handle({
+                    "protocol": "empirica/v1", "request_id": "migration-evaluate",
+                    "command": {"type": "EvaluateRun", "run_id": first["run_id"],
+                                "intent": "report_convergence"},
+                })
+                self.assertEqual(evaluated["result"]["type"], "Allow")
+                self.assertTrue(evaluated["result"]["converged"])
+
+                generations_before = service._runs.generations(key.project_id, key.run_id)
+                refs_before = self._git(repo, "for-each-ref", "--format=%(refname):%(objectname)",
+                                        "refs/empirica/artifacts/").splitlines()
+                artifacts_before = service._artifacts.read(key)
+                state_files = list(home.glob("projects/*/runs/*/gen-*/run.json"))
+                state_before = {p.relative_to(home): p.read_bytes() for p in state_files}
+                terminal_retry = migrate(legacy, repo)
+                self.assertEqual(terminal_retry["run_id"], first["run_id"])
+                self.assertTrue(terminal_retry["idempotent"])
+                self.assertEqual(terminal_retry["operations"], 0)
+                self.assertEqual(service._runs.generations(key.project_id, key.run_id),
+                                 generations_before)
+                self.assertEqual(self._git(
+                    repo, "for-each-ref", "--format=%(refname):%(objectname)",
+                    "refs/empirica/artifacts/").splitlines(), refs_before)
+                self.assertEqual(service._artifacts.read(key), artifacts_before)
+                terminal_state = service._runs.read(key)
+                self.assertEqual(len(terminal_state.value["audit_tickets"]), 1)
+                self.assertEqual({p.relative_to(home): p.read_bytes() for p in state_files},
+                                 state_before)
+                with self.assertRaisesRegex(RuntimeError, "non-identical"):
+                    migrate(conflicting, repo, session_id="legacy-session")
+
+            refs = self._git(repo, "for-each-ref", "--format=%(refname)",
+                             "refs/empirica/artifacts/").splitlines()
+            self.assertEqual(len(refs), 1)
+            self.assertEqual(self._git(repo, "rev-parse", "HEAD"), head)
+            self.assertEqual(self._git(repo, "write-tree"), index)
+            self.assertEqual(self._git(repo, "status", "--porcelain"), "")
+            self.assertEqual(source_before, {p.relative_to(legacy): p.read_bytes()
+                                             for p in legacy.rglob("*") if p.is_file()})
+            self.assertFalse((repo / ".claude").exists())
+            self.assertFalse((repo / ".pi").exists())
 
 
 class UtilityTests(unittest.TestCase):

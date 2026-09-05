@@ -150,6 +150,15 @@ adr-list: ## List all ADRs with their status
 doctor: ## empirica preflight: what actors can this machine reach? (spends no inference)
 	@python3 plugins/empirica/hooks/doctor.py $(if $(JSON),--json,)
 
+.PHONY: migrate-legacy
+migrate-legacy: ## Explicitly import a legacy run: make migrate-legacy RUN_DIR=... REPO=...
+	@if [ -z "$(RUN_DIR)" ] || [ -z "$(REPO)" ]; then \
+		printf 'usage: make migrate-legacy RUN_DIR=<legacy-run-dir> REPO=<git-repo> [SESSION_ID=<id>]\n' >&2; \
+		exit 2; \
+	fi
+	@$(PYTHON) plugins/empirica/adapters/claude/migrate_legacy.py \
+		--run-dir "$(RUN_DIR)" --repo "$(REPO)" $(if $(SESSION_ID),--session-id "$(SESSION_ID)",)
+
 ## --- Release
 
 .PHONY: bump
