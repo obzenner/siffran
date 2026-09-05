@@ -33,10 +33,10 @@ const UNSPECIFIED_INTENT = "(auto-select from current task context)";
  * Parse a `/think` argument string into a selection intent and an optional
  * explicitly-requested methodology.
  *
- * Mirrors SKILL.md: `/think <name>` requests a specific methodology; bare
- * `/think` (or free text) asks the core to select. `knownMethodologies` lets
- * the caller distinguish a methodology name from free-text intent without this
- * module reading the registry.
+ * Mirrors SKILL.md: bare `/think` asks the model to select, while any non-empty
+ * argument is a requested methodology name. `knownMethodologies` is retained
+ * only to canonicalise case for embedding hosts; validation belongs to the
+ * methodologist/v1 core, not to a keyword/free-text router in this adapter.
  */
 export function parseThinkInvocation(
   args: string,
@@ -49,10 +49,10 @@ export function parseThinkInvocation(
   const match = knownMethodologies.find(
     (name) => name.toLowerCase() === trimmed.toLowerCase(),
   );
-  if (match !== undefined) {
-    return { intent: trimmed, requestedMethodology: match };
-  }
-  return { intent: trimmed, requestedMethodology: null };
+  return {
+    intent: trimmed,
+    requestedMethodology: match ?? trimmed,
+  };
 }
 
 export function selectMethodologyRequest(

@@ -122,7 +122,7 @@ activation-check: ## Verify Empirica runtime isolation and thin Claude hook acti
 .PHONY: methodologist-pi-check
 methodologist-pi-check: ## Validate the Methodologist Pi adapter package (static always; tests if node present)
 	@printf '$(BOLD)==> methodologist Pi adapter$(RESET)\n'
-	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py plugins/methodologist/adapters/pi
+	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py plugins/methodologist
 
 .PHONY: empirica-pi-check
 empirica-pi-check: ## Validate the Empirica Pi adapter package (static + bridge smoke always; tests if node present)

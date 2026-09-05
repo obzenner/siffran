@@ -1,27 +1,22 @@
-// Methodologist adapter for Pi (pi.dev).
+// Turnkey Methodologist adapter for Pi 0.84.1.
 //
-// Per ADR-32 the Pi adapter: (1) registers `/think`, (2) contributes the
-// host-neutral methodology resources via `resources_discover`, and (3) renders
-// phase progress and human choice through Pi capabilities rather than Claude
-// task tools. It translates a Pi invocation into a `methodologist/v1` Request
-// and renders the Response; the methodology *rules* stay in the core, reached
-// through the injected `dispatch` seam (ADR-30).
+// Explicit `/think <name>` requests go straight through methodologist/v1 to the
+// host-neutral core bridge. Bare `/think` delegates semantic selection to the
+// current model: the model reads the shared skill + registry, then calls the
+// `methodologist_select` tool, which enters the exact same named bridge flow.
+// No keyword router and no repository runtime state are involved.
 
-import { fileURLToPath } from "node:url";
-import * as path from "node:path";
 import { randomUUID } from "node:crypto";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
-import type { Dispatch } from "./contract.ts";
-import type { ExtensionAPI } from "./pi-types.ts";
+import type { Dispatch, MethodologySelected, Request, Response } from "./contract.ts";
 import { PiHumanPort } from "./human-port.ts";
+import type { ExtensionAPI, ExtensionContext, ToolResult } from "./pi-types.ts";
 import { PiWidgetTaskTracker } from "./task-tracker.ts";
-import {
-  applyResult,
-  parseThinkInvocation,
-  selectMethodologyRequest,
-} from "./translate.ts";
+import { createStdioBridgeDispatch, defaultBridgeConfig } from "./stdio-transport.ts";
+import { applyResult, parseThinkInvocation, selectMethodologyRequest } from "./translate.ts";
 
-// plugins/methodologist/adapters/pi/src/index.ts -> plugins/methodologist/skills
 export const DEFAULT_SKILLS_DIR = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -30,78 +25,181 @@ export const DEFAULT_SKILLS_DIR = path.resolve(
   "skills",
 );
 
+const SELECT_TOOL = "methodologist_select";
+
 export interface MethodologistPiDeps {
-  /** Bridge to the host-neutral Methodologist core. */
+  /** Test/host seam. The default package supplies the real stdio bridge. */
   dispatch: Dispatch;
-  /** Absolute path to the methodologist `skills` directory to contribute. */
   skillsDir?: string;
-  /** Known methodology names, so `/think <name>` is parsed as a request. */
+  /** Optional canonicalisation aid retained for embedding hosts/tests. */
   knownMethodologies?: readonly string[];
 }
 
-/**
- * Build the Pi extension function from its dependencies.
- *
- * This is the real entry point for a host that wires the core: it injects a
- * `dispatch`. Tests inject a fake dispatch to prove registration and
- * translation without the core or the Pi runtime.
- */
+interface CandidateInput {
+  name: string;
+  rationale: string;
+}
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function phasePlan(result: MethodologySelected): string {
+  const lines = result.phases.map((phase, index) => {
+    const number = typeof phase.number === "number" ? phase.number : index + 1;
+    const title =
+      typeof phase.title === "string" && phase.title.length > 0
+        ? phase.title
+        : `Phase ${number}`;
+    return `${number}. ${title}`;
+  });
+  return `Using **${result.methodology}**: ${result.reason}\n\nPhases:\n${lines.join("\n")}`;
+}
+
+function bareSelectionPrompt(skillDir: string): string {
+  const thinkDir = path.join(skillDir, "think");
+  return [
+    "Run the shared Methodologist selection step for the current task.",
+    `Read ${path.join(thinkDir, "SKILL.md")} and first obey its stance requirement.`,
+    `Then read ${path.join(thinkDir, "registry.json")} and semantically compare the current task against every use_when entry.`,
+    "Do not use keyword matching or invent a methodology.",
+    `If one methodology best addresses the primary uncertainty, call ${SELECT_TOOL} with its exact registry name and a one-line reason.`,
+    `If genuinely ambiguous, call ${SELECT_TOOL} with exactly two candidates (name + rationale); the tool will ask the human.`,
+    "After the tool returns the validated six-phase plan, continue with the selected methodology exactly as the shared skill instructs.",
+  ].join("\n");
+}
+
 export function createMethodologistExtension(deps: MethodologistPiDeps) {
   const skillsDir = deps.skillsDir ?? DEFAULT_SKILLS_DIR;
   const known = deps.knownMethodologies ?? [];
 
   return function methodologistExtension(pi: ExtensionAPI): void {
-    // (2) Contribute the shared methodology skill so Pi discovers `/think`'s
-    // instructions and the methodology files — the same resources Claude Code
-    // ships, with no per-host fork.
+    const dispatch = (request: Request): Promise<Response> =>
+      Promise.resolve(deps.dispatch(request));
+
     pi.on("resources_discover", () => ({ skillPaths: [skillsDir] }));
 
-    // (1) Register the command.
-    pi.registerCommand("think", {
+    const runNamed = async (
+      methodology: string,
+      reason: string,
+      ctx: ExtensionContext,
+    ): Promise<Response["result"]> => {
+      const tracker = new PiWidgetTaskTracker(ctx.ui);
+      const human = new PiHumanPort(ctx.ui);
+      const renderDeps = { tracker, human, ui: ctx.ui };
+      let response = await dispatch(
+        selectMethodologyRequest(reason, methodology, randomUUID()),
+      );
+      let outcome = await applyResult(response.result, renderDeps);
+
+      // Preserve the contract-owned ambiguity path for injected/custom cores.
+      if (outcome.kind === "choice") {
+        response = await dispatch(
+          selectMethodologyRequest(reason, outcome.chosen, randomUUID()),
+        );
+        await applyResult(response.result, renderDeps);
+      }
+      return response.result;
+    };
+
+    pi.registerTool({
+      name: SELECT_TOOL,
+      label: "Methodologist Select",
       description:
-        "Select and execute a formal reasoning methodology (methodologist).",
-      handler: async (args, ctx) => {
-        const tracker = new PiWidgetTaskTracker(ctx.ui);
-        const human = new PiHumanPort(ctx.ui);
-        const renderDeps = { tracker, human, ui: ctx.ui };
-        const { intent, requestedMethodology } = parseThinkInvocation(args, known);
-
+        "Enter the validated Methodologist bridge after semantically selecting from the shared registry. Supply one methodology, or exactly two candidates when genuinely ambiguous.",
+      parameters: {
+        type: "object",
+        properties: {
+          methodology: { type: "string" },
+          reason: { type: "string" },
+          candidates: {
+            type: "array",
+            minItems: 2,
+            maxItems: 2,
+            items: {
+              type: "object",
+              required: ["name", "rationale"],
+              properties: {
+                name: { type: "string" },
+                rationale: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<ToolResult> {
         try {
-          const first = await deps.dispatch(
-            selectMethodologyRequest(intent, requestedMethodology, randomUUID()),
-          );
-          let outcome = await applyResult(first.result, renderDeps);
+          let methodology =
+            typeof params.methodology === "string" ? params.methodology.trim() : "";
+          let reason = typeof params.reason === "string" ? params.reason.trim() : "";
+          const candidates = Array.isArray(params.candidates)
+            ? params.candidates.filter(
+                (value): value is CandidateInput =>
+                  value !== null &&
+                  typeof value === "object" &&
+                  typeof (value as CandidateInput).name === "string" &&
+                  typeof (value as CandidateInput).rationale === "string",
+              )
+            : [];
 
-          // (3) On ambiguity, the human picks, then we re-dispatch a resolved
-          // selection. The adapter never invents the decision.
-          if (outcome.kind === "choice") {
-            const resolved = await deps.dispatch(
-              selectMethodologyRequest(intent, outcome.chosen, randomUUID()),
+          if (!methodology && candidates.length === 2) {
+            const labels = candidates.map(
+              (candidate) => `${candidate.name} — ${candidate.rationale}`,
             );
-            outcome = await applyResult(resolved.result, renderDeps);
+            const picked = await new PiHumanPort(ctx.ui).choose(
+              "Two methodologies fit. Which addresses the primary uncertainty?",
+              labels,
+            );
+            const chosen = candidates[labels.indexOf(picked)];
+            if (chosen === undefined) throw new Error("the selected candidate was invalid");
+            methodology = chosen.name;
+            reason = chosen.rationale;
           }
+          if (!methodology || !reason) {
+            throw new Error("provide methodology + reason, or exactly two candidates");
+          }
+
+          const result = await runNamed(methodology, reason, ctx);
+          if (result.type !== "MethodologySelected") {
+            throw new Error(`core returned ${result.type}`);
+          }
+          return {
+            content: [{ type: "text", text: phasePlan(result) }],
+            details: { methodology: result.methodology, phases: result.phases },
+          };
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          ctx.ui.notify(`/think could not run: ${message}`, "error");
+          throw new Error(`methodologist selection failed: ${describe(error)}`);
+        }
+      },
+    });
+
+    pi.registerCommand("think", {
+      description: "Select and execute a formal reasoning methodology (methodologist).",
+      handler: async (args, ctx) => {
+        const parsed = parseThinkInvocation(args, known);
+        if (parsed.requestedMethodology === null) {
+          // Commands bypass skill expansion in Pi. Hand the semantic decision to
+          // the model explicitly, while pointing it at the same shared resources.
+          pi.sendUserMessage(bareSelectionPrompt(skillsDir));
+          return;
+        }
+        try {
+          await runNamed(
+            parsed.requestedMethodology,
+            "Explicitly requested by the user.",
+            ctx,
+          );
+        } catch (error) {
+          ctx.ui.notify(`/think could not run: ${describe(error)}`, "error");
         }
       },
     });
   };
 }
 
-// Default export: the shape Pi loads. A host must configure `dispatch` before
-// selection/phase progression can run; until then the extension still
-// contributes the methodology resources (so the `/think` skill is available to
-// the agent) and reports the unconfigured core honestly rather than faking a
-// decision. See README "Wiring the core".
+// Turnkey default: production stdio transport to the shared host-neutral core.
 const defaultExtension = createMethodologistExtension({
-  dispatch: () => {
-    throw new Error(
-      "methodologist-pi: no core dispatch configured — import " +
-        "createMethodologistExtension({ dispatch }) and wire it to the " +
-        "host-neutral Methodologist core (see README).",
-    );
-  },
+  dispatch: createStdioBridgeDispatch(defaultBridgeConfig()),
 });
 
 export default defaultExtension;

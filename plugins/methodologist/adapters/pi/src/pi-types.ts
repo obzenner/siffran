@@ -39,6 +39,25 @@ export interface ExtensionContext {
   cwd?: string;
 }
 
+export interface ToolResult {
+  content: Array<{ type: "text"; text: string }>;
+  details?: unknown;
+}
+
+export interface ToolDefinition {
+  name: string;
+  label: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  execute(
+    toolCallId: string,
+    params: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+    onUpdate: ((result: ToolResult) => void) | undefined,
+    ctx: ExtensionContext,
+  ): Promise<ToolResult> | ToolResult;
+}
+
 export interface CommandDefinition {
   description: string;
   handler: (args: string, ctx: ExtensionContext) => Promise<void> | void;
@@ -62,6 +81,11 @@ export type ResourcesDiscoverHandler = (
 
 export interface ExtensionAPI {
   registerCommand(name: string, def: CommandDefinition): void;
+  registerTool(def: ToolDefinition): void;
+  sendUserMessage(
+    content: string,
+    options?: { deliverAs?: "steer" | "followUp" },
+  ): void;
   on(event: "resources_discover", handler: ResourcesDiscoverHandler): void;
   on(event: string, handler: (event: unknown, ctx: ExtensionContext) => unknown): void;
 }

@@ -32,7 +32,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_ADAPTER = Path("plugins") / "methodologist" / "adapters" / "pi"
+DEFAULT_ADAPTER = Path("plugins") / "methodologist"
 
 # Runtime filesystem writes and shared-state paths that must never appear in the
 # adapter source: a Pi adapter keeps transient state in memory and moves domain
@@ -77,6 +77,25 @@ def check_manifest(adapter: Path, errors: list[str]) -> dict:
         if not target.is_file():
             errors.append(f"{rel(manifest_path)}: pi.extensions entry {entry!r} does not exist")
     return manifest
+
+
+def runtime_dir(package: Path, manifest: dict) -> Path:
+    """Locate the adapter runtime inside either a flat or bundled package.
+
+    Turnkey packages may put the manifest at the plugin root so the npm/git
+    artifact includes shared core and skill resources. Walk upward from the
+    first extension entry until the Pi tsconfig/test layout is found.
+    """
+    extensions = manifest.get("pi", {}).get("extensions", [])
+    if extensions:
+        candidate = (package / extensions[0]).resolve().parent
+        while candidate == package or package in candidate.parents:
+            if (candidate / "tsconfig.json").is_file() and (candidate / "test").is_dir():
+                return candidate
+            if candidate == package:
+                break
+            candidate = candidate.parent
+    return package
 
 
 def check_layout(adapter: Path, errors: list[str]) -> None:
@@ -166,21 +185,22 @@ def main(argv: list[str]) -> int:
         return 1
 
     errors: list[str] = []
-    check_manifest(adapter, errors)
-    check_layout(adapter, errors)
-    check_no_runtime_writes(adapter, errors)
+    manifest = check_manifest(adapter, errors)
+    runtime = runtime_dir(adapter, manifest)
+    check_layout(runtime, errors)
+    check_no_runtime_writes(runtime, errors)
 
     if errors:
         print("\n".join(f"ERROR: {error}" for error in errors), file=sys.stderr)
         return 1
     print(f"ok: {rel(adapter)} package is well-formed")
 
-    check_bridge_smoke(adapter, errors)
+    check_bridge_smoke(runtime, errors)
     if errors:
         print("\n".join(f"ERROR: {error}" for error in errors), file=sys.stderr)
         return 1
 
-    return run_tests(adapter)
+    return run_tests(runtime)
 
 
 if __name__ == "__main__":

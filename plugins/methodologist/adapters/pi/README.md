@@ -1,75 +1,63 @@
 # `@siffran/methodologist-pi`
 
-Pi ([pi.dev](https://github.com/earendil-works/pi)) adapter for the Methodologist
-plugin. It is a host adapter over the host-neutral Methodologist core: it binds
-the core's ports to Pi's `ExtensionAPI` and translates Pi invocations into the
-`methodologist/v1` contract (ADR-30, ADR-32). It changes no core semantics.
+Turnkey Pi 0.84.1 package for the shared Methodologist plugin. It registers
+`/think`, contributes the existing `think` skill, and translates named choices
+to the host-neutral `methodologist/v1` bridge. The bridge calls the shared
+Python core for registry parsing, structural validation, and the six-phase
+invariant; the Pi adapter contains no duplicate methodology rules.
 
-## What it does
+## Command behavior
 
-| Responsibility (ADR-32) | Pi capability used |
-|---|---|
-| Register `/think` | `pi.registerCommand("think", …)` |
-| Contribute the shared methodology resources | `pi.on("resources_discover")` → `{ skillPaths: [<methodologist/skills>] }` |
-| Render phase progress (the `TaskTracker` port) | `ctx.ui.setWidget` — a live phase checklist below the editor |
-| Human choice on ambiguity (the `HumanPort` port) | `ctx.ui.select` |
+- **`/think <methodology-name>`** — sends the exact name through the production
+  stdio bridge. The core validates it against `registry.json` and the
+  methodology file, then returns all six canonical phases. Pi renders them in a
+  live widget.
+- **bare `/think`** — asks the active model to read the shared `SKILL.md` and
+  `registry.json`, semantically select by the current task's primary
+  uncertainty, and call `methodologist_select`. This is intentionally not a
+  keyword router. The tool enters the same named bridge flow as the explicit
+  command.
+- **genuine ambiguity** — the model can submit exactly two candidates; Pi shows
+  `ctx.ui.select`, then sends the human's choice through the named bridge.
 
-The `/think` invocation is translated to a `SelectMethodology` request; a
-`MethodologySelected` response paints the phase widget, and a
-`HumanDecisionRequired` response is resolved through `ctx.ui.select` and
-re-dispatched as an explicit selection. The adapter never invents a methodology
-choice — that judgement stays in the core / the agent.
+The model receives the validated phase plan from the tool and continues the
+shared skill's six-phase reasoning instructions. Selection rules and
+methodology content remain shared with the Claude plugin.
 
-## Install
+## Install / run
 
-This is a standard Pi extension package (a directory with a `package.json`
-carrying a `pi` manifest). Point Pi at it:
+The plugin root is the standard Pi package; keeping the manifest there makes the
+npm/git artifact self-contained with the shared Python core, bridge, skill, and
+registry:
 
 ```bash
-mkdir -p ~/.pi/agent/extensions/methodologist
-ln -s "$(pwd)/plugins/methodologist/adapters/pi" ~/.pi/agent/extensions/methodologist
+pi -e ./plugins/methodologist
 ```
 
-Pi discovers the extension via the `pi.extensions` entry in `package.json` and
-loads `src/index.ts` (TypeScript is resolved by Pi's `jiti`). The package can
-also be published to and installed from npm.
+It uses `python3` for the stdio bridge by default. Set
+`METHODOLOGIST_PYTHON=/path/to/python` when needed.
 
-## Wiring the core
-
-The adapter reaches the Methodologist core through an injected `dispatch` seam,
-so the transport (in-process, subprocess, RPC) is the host's choice and is not
-baked in:
+The default export is fully wired. Embedding hosts and tests can still replace
+the transport:
 
 ```ts
 import { createMethodologistExtension } from "@siffran/methodologist-pi";
 
-export default createMethodologistExtension({
-  dispatch: myCoreDispatch, // (request: methodologist/v1) => response
-  knownMethodologies: ["invariant-analysis", "first-principles", /* … */],
-});
+export default createMethodologistExtension({ dispatch: myTestOrRpcDispatch });
 ```
 
-The **default export** contributes the methodology resources and registers
-`/think`, but its `dispatch` throws until a host wires the core — reported to
-the user rather than faked (ADR-30: host capability gaps are explicit). One such
-gap is deliberate: `HumanPort.ask` (free-text input) has no reliable `ctx.ui`
-primitive, so it throws `UnsupportedByHost`; the `methodologist/v1` contract
-routes every human decision through `choose` (`ctx.ui.select`) instead.
+## State and UI
 
-## No shared or repository state
-
-The adapter holds phase state only in memory for the duration of a turn and
-renders it to a widget. It writes nothing under `.pi` or `.claude` and performs
-no repository runtime writes.
+The adapter and bridge read shared resources only. They write nothing under the
+repository, `.pi`, or `.claude`. Phase display state is in-memory and rendered
+with `ctx.ui.setWidget`; ambiguity uses `ctx.ui.select`.
 
 ## Develop
 
 ```bash
-make methodologist-pi-check   # static/package validation + tests (from repo root)
-node --test test/*.test.ts    # tests directly (Node ≥ 22.6, native TS type-strip)
-npm run typecheck             # if a TypeScript compiler is installed
+make methodologist-pi-check
+make release-check
 ```
 
-Tests mock `ExtensionAPI`/`ctx` (see `test/fakes.ts`) and assert against the
-shared contract fixture in `contracts/fixtures/`, so a build needs neither the
-Pi runtime nor a network install.
+The adapter tests include a real stdio round trip through the shared core and
+assert that an explicit methodology yields exactly six numbered phases.

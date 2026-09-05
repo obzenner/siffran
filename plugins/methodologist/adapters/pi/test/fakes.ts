@@ -6,6 +6,7 @@ import type {
   ExtensionAPI,
   NotifyLevel,
   ResourcesDiscoverHandler,
+  ToolDefinition,
   UiContext,
   WidgetPlacement,
 } from "../src/pi-types.ts";
@@ -63,10 +64,20 @@ export class FakeUi implements UiContext {
 /** Captures everything an extension registers against the ExtensionAPI. */
 export class FakePi implements ExtensionAPI {
   readonly commands = new Map<string, CommandDefinition>();
+  readonly tools = new Map<string, ToolDefinition>();
+  readonly sentUserMessages: string[] = [];
   readonly handlers = new Map<string, unknown>();
 
   registerCommand(name: string, def: CommandDefinition): void {
     this.commands.set(name, def);
+  }
+
+  registerTool(def: ToolDefinition): void {
+    this.tools.set(def.name, def);
+  }
+
+  sendUserMessage(content: string): void {
+    this.sentUserMessages.push(content);
   }
 
   on(event: string, handler: unknown): void {

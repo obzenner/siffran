@@ -30,6 +30,15 @@ test("registers a /think command with a description", () => {
   assert.equal(typeof command.handler, "function");
 });
 
+test("registers the model-to-bridge selection tool", () => {
+  const pi = new FakePi();
+  createMethodologistExtension({ dispatch: noopDispatch })(pi);
+
+  const tool = pi.tools.get("methodologist_select");
+  assert.ok(tool, "expected the semantic selection bridge tool");
+  assert.match(tool.description, /shared registry/);
+});
+
 test("resources_discover contributes the methodology skills directory", async () => {
   const pi = new FakePi();
   createMethodologistExtension({ dispatch: noopDispatch })(pi);

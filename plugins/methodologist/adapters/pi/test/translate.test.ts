@@ -46,9 +46,9 @@ test("/think <known-name> is parsed as an explicit request", () => {
   assert.equal(parsed.intent, "Invariant-Analysis");
 });
 
-test("free-text /think becomes intent with no requested methodology", () => {
+test("any non-empty /think argument is an explicit name for core validation", () => {
   const parsed = parseThinkInvocation("why does the cache miss", ["invariant-analysis"]);
-  assert.equal(parsed.requestedMethodology, null);
+  assert.equal(parsed.requestedMethodology, "why does the cache miss");
   assert.equal(parsed.intent, "why does the cache miss");
 });
 
@@ -139,49 +139,66 @@ test("HumanPort.ask reports the Pi capability gap rather than faking input", asy
 
 // --- end-to-end through the command handler ---------------------------------
 
-test("/think handler: ambiguous -> human choice -> resolved re-dispatch", async () => {
+test("bare /think delegates semantic selection to the model through shared resources", async () => {
+  const pi = new FakePi();
+  createMethodologistExtension({
+    dispatch: () => {
+      throw new Error("bare selection must not dispatch before the model chooses");
+    },
+  })(pi);
+  const ui = new FakeUi();
+
+  await pi.commands.get("think")!.handler("", { ui });
+
+  assert.equal(pi.sentUserMessages.length, 1);
+  assert.match(pi.sentUserMessages[0], /SKILL\.md/);
+  assert.match(pi.sentUserMessages[0], /registry\.json/);
+  assert.match(pi.sentUserMessages[0], /semantically compare/);
+  assert.match(pi.sentUserMessages[0], /methodologist_select/);
+});
+
+test("model selection tool: ambiguity -> human choice -> named bridge", async () => {
   const requests: string[] = [];
   const dispatch = (request: {
-    command: { requested_methodology?: string | null };
+    request_id: string;
+    command: { intent: string; requested_methodology?: string | null };
   }): Response => {
     requests.push(request.command.requested_methodology ?? "<null>");
-    // First call (no requested methodology) is ambiguous; second (resolved) selects.
-    if (request.command.requested_methodology == null) {
-      return {
-        protocol: PROTOCOL,
-        request_id: "r1",
-        result: {
-          type: "HumanDecisionRequired",
-          question: "which one?",
-          candidates: [
-            { name: "invariant-analysis", rationale: "property" },
-            { name: "first-principles", rationale: "axioms" },
-          ],
-        },
-      };
-    }
     return {
       protocol: PROTOCOL,
-      request_id: "r2",
+      request_id: request.request_id,
       result: {
         type: "MethodologySelected",
         methodology: request.command.requested_methodology!,
-        reason: "resolved by the human",
-        phases: [{ title: "Only phase" }],
+        reason: request.command.intent,
+        phases: Array.from({ length: 6 }, (_, index) => ({
+          number: index + 1,
+          title: `Phase ${index + 1}`,
+        })),
       },
     };
   };
 
-  const ui = new FakeUi(["first-principles — axioms"]); // human picks candidate 2
+  const ui = new FakeUi(["first-principles — axioms"]);
   const pi = new FakePi();
   createMethodologistExtension({ dispatch: dispatch as never })(pi);
-  const handler = pi.commands.get("think")!.handler;
+  const tool = pi.tools.get("methodologist_select")!;
+  const result = await tool.execute(
+    "call-1",
+    {
+      candidates: [
+        { name: "invariant-analysis", rationale: "property" },
+        { name: "first-principles", rationale: "axioms" },
+      ],
+    },
+    undefined,
+    undefined,
+    { ui },
+  );
 
-  await handler("", { ui });
-
-  assert.deepEqual(requests, ["<null>", "first-principles"]); // re-dispatched with the pick
-  assert.match(ui.notifications.at(-1)!.message, /Using first-principles/);
-  assert.deepEqual(ui.lastWidgetLines(), ["[▶] Only phase"]);
+  assert.deepEqual(requests, ["first-principles"]);
+  assert.match(result.content[0].text, /Using \*\*first-principles\*\*/);
+  assert.equal(ui.lastWidgetLines()!.length, 6);
 });
 
 test("/think handler: a thrown dispatch is reported, not swallowed", async () => {
@@ -193,7 +210,7 @@ test("/think handler: a thrown dispatch is reported, not swallowed", async () =>
   })(pi);
   const ui = new FakeUi();
 
-  await pi.commands.get("think")!.handler("", { ui });
+  await pi.commands.get("think")!.handler("formal-reasoning", { ui });
 
   assert.equal(ui.notifications.at(-1)!.level, "error");
   assert.match(ui.notifications.at(-1)!.message, /core offline/);

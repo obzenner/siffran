@@ -14,6 +14,9 @@ export interface SelectMethodologyCommand {
   requested_methodology?: string | null;
 }
 
+// The v1 schema also reserves phase-progression commands for stateful hosts.
+// The shipped turnkey bridge is intentionally stateless and serves
+// SelectMethodology only; the shared skill/model executes the returned phases.
 export interface CompletePhaseCommand {
   type: "CompletePhase";
   run_id: string;

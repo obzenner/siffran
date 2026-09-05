@@ -37,6 +37,15 @@ Analyze the user's current task context — recent conversation, open files, the
 
 Announce your selection: `Using **<methodology-name>**: <one-line reason>`
 
+**Host bridge:** If a `methodologist_select` tool is available, do not open the
+methodology file yourself yet. Call that tool with the exact registry `name` and
+your one-line semantic reason. If the choice is genuinely ambiguous, call it
+with exactly the top two `{name, rationale}` candidates so the host can present
+the human choice UI. The bridge validates the named methodology through
+`methodologist/v1`, returns the canonical six-phase plan, and renders host-native
+phase tracking. Continue below using that returned plan. This is the same named
+bridge used by explicit `/think <name>`; never replace it with keyword routing.
+
 Then — and ONLY then — read the methodology file from `methodologies/<name>.md` relative to this skill.
 
 ## Step 2: Create phase tasks
