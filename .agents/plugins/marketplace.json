@@ -1,0 +1,32 @@
+{
+  "name": "siffran",
+  "interface": {
+    "displayName": "Siffran"
+  },
+  "plugins": [
+    {
+      "name": "methodologist",
+      "source": {
+        "source": "local",
+        "path": "./plugins/methodologist"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
+      "name": "empirica",
+      "source": {
+        "source": "local",
+        "path": "./plugins/empirica"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Development"
+    }
+  ]
+}

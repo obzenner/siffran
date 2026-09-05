@@ -13,9 +13,9 @@ one place that wires the core to storage:
 
 Two entry points, one service:
 
-* :func:`handle` runs the service in-process and returns the response dict. The Claude hooks
-  use this directly (they are already Python), so they reach the same typed operations the Pi
-  adapter reaches over the wire — no second definition of the rules, no host branch in the core.
+* :func:`handle` runs the service in-process and returns the response dict. The Claude and Codex
+  hooks use this directly (they are already Python), so they reach the same typed operations the
+  Pi adapter reaches over the wire — no second definition of the rules, no host branch in the core.
 * :func:`main` is the stdio entry the Pi transport spawns as a subprocess: read one JSON request
   from stdin, write one JSON response to stdout, exit 0.
 

@@ -1,0 +1,29 @@
+{
+  "name": "empirica",
+  "version": "1.1.0",
+  "description": "Empirical-convergence workflow — adjudicates a claim graph (GSN argument with in-toto evidence) where every claim's confidence must be earned by real external evidence: research citations first, deterministic spike verdicts for machine-checkable claims, then an independent auditor before a run may report convergence. Hook-enforced on supported Codex lifecycle surfaces.",
+  "author": {
+    "name": "obzenner"
+  },
+  "keywords": [
+    "empirical",
+    "evidence",
+    "convergence",
+    "verification"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks/codex.json",
+  "interface": {
+    "displayName": "Empirica",
+    "shortDescription": "Evidence-backed convergence for Codex",
+    "longDescription": "Adjudicate a claim graph with cited research, deterministic spikes, and independent audit before reporting convergence.",
+    "developerName": "obzenner",
+    "category": "Development",
+    "capabilities": [
+      "Write"
+    ],
+    "defaultPrompt": [
+      "$empirica design and verify this change"
+    ]
+  }
+}

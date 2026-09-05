@@ -1,0 +1,37 @@
+{
+  "name": "methodologist",
+  "version": "0.8.0",
+  "description": "Select and execute evidence-backed formal reasoning methodologies for engineering decisions.",
+  "author": {
+    "name": "obzenner",
+    "url": "https://github.com/obzenner"
+  },
+  "homepage": "https://github.com/obzenner/siffran#methodologist-for-codex",
+  "repository": "https://github.com/obzenner/siffran",
+  "license": "MIT",
+  "keywords": [
+    "reasoning",
+    "methodology",
+    "engineering",
+    "verification"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Methodologist",
+    "shortDescription": "Evidence-backed formal reasoning",
+    "longDescription": "Select and execute a formal reasoning methodology with evidence-backed phases and a traced conclusion.",
+    "developerName": "obzenner",
+    "category": "Productivity",
+    "capabilities": [
+      "Read"
+    ],
+    "websiteURL": "https://github.com/obzenner/siffran",
+    "defaultPrompt": [
+      "Think through this architecture decision.",
+      "Use $think to verify this change before shipping.",
+      "Use $think in structured bridge mode."
+    ],
+    "brandColor": "#345995"
+  }
+}

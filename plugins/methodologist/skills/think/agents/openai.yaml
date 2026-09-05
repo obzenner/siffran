@@ -1,0 +1,7 @@
+interface:
+  display_name: "Methodologist Think"
+  short_description: "Select and execute a formal reasoning methodology"
+  default_prompt: "Think through this task with the matching formal methodology."
+
+policy:
+  allow_implicit_invocation: true

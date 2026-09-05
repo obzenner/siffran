@@ -1,0 +1,67 @@
+{
+  "description": "Empirica lifecycle adapter for Codex CLI 0.146.0.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/hooks/codex_hook.py\" activate",
+            "timeout": 30,
+            "statusMessage": "Activating Empirica"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/hooks/codex_hook.py\" pre-tool-use",
+            "timeout": 30,
+            "statusMessage": "Checking Empirica spawn budget"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/hooks/codex_hook.py\" pre-tool-use",
+            "timeout": 30,
+            "statusMessage": "Recording Empirica action"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/hooks/codex_hook.py\" stop",
+            "timeout": 30,
+            "statusMessage": "Evaluating Empirica convergence"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/hooks/codex_hook.py\" restore",
+            "timeout": 30,
+            "statusMessage": "Restoring Empirica state",
+            "additionalContextLimit": 20000
+          }
+        ]
+      }
+    ]
+  }
+}
