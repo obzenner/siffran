@@ -501,10 +501,12 @@ ADR-13's rule (the exit code approves, not the author) applied to the plugin's o
   the more damaging one. This resolves once the fix ships and the plugin is reinstalled.
 
 **Non-obvious implementation facts worth keeping:** a stale *installed* plugin copy cannot be fixed
-by the commit that fixes the defect, so `test_hooks.py` gates tree defects and *warns* about install
-staleness — a check that can only go green after release would block its own fix and then be deleted.
-And the two schema flags take different argument forms (claude inline, codex a path), while the
-Bedrock bearer token is short-lived, so an adapter must mint per invocation.
+by the commit that fixes the defect, so the historical compatibility suite gated tree defects and
+*warned* about install staleness — a check that can only go green after release would block its own
+fix and then be deleted. In 1.0 the legacy suite was removed; executable coverage lives in the
+active core, application, and adapter tests. And the two schema flags take different argument forms
+(claude inline, codex a path), while the Bedrock bearer token is short-lived, so an adapter must mint
+per invocation.
 
 ## 0.5.1 — P6 obtained, and the plugin finds a defect in itself
 

@@ -43,13 +43,13 @@ _RETRY = object()
 
 
 class GenerationAllocator(Protocol):
-    """Resolves the :class:`RunKey` a StartRun should open for a ``(project_id, run_id)``.
+    """Resolves run generations for lifecycle start and read-only host lookup.
 
-    Contract (ADR-31): return the *active* run's own key so it resumes in place, or the *next*
-    (empty) generation's key when the latest is terminal or corrupt, so stale budgets and verdicts
-    never become current and the old generation stays intact for rollback. The filesystem
-    ``adapters.state.GenerationAllocator`` satisfies this by shape.
+    ``resolve`` returns the latest existing generation without allocating one. ``allocate`` returns
+    the active generation or the next clean generation for StartRun.
     """
+
+    def resolve(self, project_id: str, run_id: str) -> RunKey | None: ...
 
     def allocate(self, project_id: str, run_id: str) -> RunKey: ...
 
@@ -88,6 +88,8 @@ class EmpiricaService:
         ctype = command["type"]
         if ctype == wire.CMD_START_RUN:
             return self._start_run(command)
+        if ctype == wire.CMD_RESOLVE_RUN:
+            return self._resolve_run(command)
         if ctype == wire.CMD_GET_RUN:
             return self._get_run(command)
         if ctype == wire.CMD_RESTORE_RUN:
@@ -140,6 +142,31 @@ class EmpiricaService:
                 if winner is not None:
                     return self._run_snapshot(key, winner)
             return wire.fault(wire.FAULT_CONFLICT, "run creation raced and the winner is unreadable")
+        return self._run_snapshot(key, state)
+
+    # --- ResolveRun ----------------------------------------------------------
+
+    def _resolve_run(self, command: dict) -> dict:
+        """Resolve a host selector to the latest run without creating a generation.
+
+        This is the only lookup lifecycle adapters need between StartRun and later events.  Keeping
+        it in the application boundary prevents Claude hooks from inspecting the global state
+        layout, and unlike StartRun it can never relaunch a terminal run.
+        """
+        selector = wire.require(command, "selector", dict)
+        project = wire.require(selector, "project", str)
+        session = wire.require(selector, "session", str)
+        key = self._allocator.resolve(project, session)
+        if key is None:
+            return wire.inert("no_run")
+        read = self._runs.read(key)
+        if read is ABSENT:
+            return wire.inert("no_run")
+        if isinstance(read, Corrupt):
+            return wire.fault(wire.FAULT_CORRUPT_RUN, read.reason)
+        state = OperationalState.decode(read.value)
+        if state is None:
+            return wire.fault(wire.FAULT_CORRUPT_RUN, "run document is unreadable")
         return self._run_snapshot(key, state)
 
     # --- GetRun --------------------------------------------------------------

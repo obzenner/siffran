@@ -21,8 +21,8 @@ Two entry points, one service:
 
 State lives only under the machine-local home (``$EMPIRICA_HOME`` or ``~/.empirica-plugin``,
 ADR-31) via :class:`adapters.state.FilesystemRunRepository`; knowledge artifacts live under Git
-shadow refs via :class:`adapters.git.GitArtifactRepository`. Nothing here writes to ``.pi``,
-``.claude``, or the working tree.
+shadow refs via :class:`adapters.git.GitArtifactRepository`. Nothing here writes host-specific
+runtime directories or the working tree.
 
 Both entry points always yield a well-formed response envelope and never raise into the caller:
 any construction/dispatch error is mapped to a closed ``Fault`` so a caller's gate fails closed

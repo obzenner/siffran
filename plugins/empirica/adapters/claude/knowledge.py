@@ -1,15 +1,12 @@
-"""Inactive Claude knowledge-plane translations for the host-neutral application.
+"""Claude knowledge-plane translations for the host-neutral application.
 
-Nothing in this module is registered as a hook.  Normal operations only build ``empirica/v1``
-requests and dispatch them through :class:`BridgeTransport`; they never read or write a Claude/Pi
-run directory.  The one producer of a fresh spike approval is :func:`run_spike`, which invokes the
-existing deterministic ``spike_harness.py`` subprocess and seals its observed result in a
-:class:`SpikeExecution` before a request can be built.
+Normal operations build ``empirica/v1`` requests and dispatch through :class:`BridgeTransport`.
+Evidence validation is pure adapter code and fresh spikes execute the adjacent deterministic
+``spike.py`` executable; no normal path imports a legacy hook or host runtime store.
 """
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import json
 import subprocess
 import sys
@@ -17,22 +14,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from . import evidence
 from .correlation import request_id
 
-_PLUGIN = Path(__file__).resolve().parents[2]
-_HOOKS = _PLUGIN / "hooks"
+_SPIKE_EXECUTABLE = Path(__file__).with_name("spike.py")
 _STATEMENT = "https://in-toto.io/Statement/v1"
 _RESEARCH = "https://empirica.dev/attestation/research/v1"
 _SPIKE = "https://empirica.dev/attestation/spike/v1"
-
-
-def _load_hook(name: str):
-    spec = importlib.util.spec_from_file_location(f"empirica_legacy_{name}", _HOOKS / f"{name}.py")
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load {name}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def _envelope(command: dict, correlation_id: str | None) -> dict:
@@ -48,13 +36,11 @@ def build_graph_request(run_id: str, graph: dict, *, correlation_id: str | None 
 
 
 def _normalised_leaves(statements: Iterable[dict]) -> list[dict]:
-    evidence = _load_hook("evidence")
     return [leaf for statement in statements if (leaf := evidence.validate_leaf(statement))]
 
 
 def _leaf_action(evidence_id: str, statement: dict, graph: dict, statements: Iterable[dict],
                  *, supersedes: str | None = None) -> dict:
-    evidence = _load_hook("evidence")
     leaf = evidence.validate_leaf(statement)
     if leaf is None:
         raise ValueError("evidence is not a valid empirica in-toto statement")
@@ -131,7 +117,7 @@ def run_spike(claim_id: str, claim_text: str, command: list[str], files: list[Pa
     the explicit migration command; every *fresh* normal/regate leaf gets its verdict here from the
     harness process's reported subprocess return code.
     """
-    argv = [sys.executable, str(_HOOKS / "spike_harness.py"), "--report-only",
+    argv = [sys.executable, str(_SPIKE_EXECUTABLE), "--report-only",
             "--timeout", str(timeout), "--repeat", str(max(1, repeat)), *command]
     proc = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8")
     try:
@@ -199,7 +185,6 @@ def build_attribution_request(run_id: str, report: dict, *,
 def build_regate_requests(run_id: str, graph: dict, stored_leaves: list[dict], ts: str, *,
                           timeout: float = 300) -> list[dict]:
     """Re-execute only stale spike heads and return replacement ObserveAction requests."""
-    evidence = _load_hook("evidence")
     superseded = {entry.get("supersedes") for entry in stored_leaves
                   if isinstance(entry.get("supersedes"), str)}
     active = [entry for entry in stored_leaves if entry.get("artifact_id") not in superseded]

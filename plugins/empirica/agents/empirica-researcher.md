@@ -37,6 +37,11 @@ open; a summary of docs you did not read; another model's assertion.
    the most useful thing a run can learn. Do not soften a refutation into "partially supports".
 5. If the evidence is genuinely inconclusive, say so plainly. Do not manufacture a verdict.
 
+The caller supplies the claim through the Empirica adapter/API. Never read or edit runtime state
+under `.claude/` or `.pi/`, and never edit `~/.empirica-plugin/` or `refs/empirica/*` directly.
+Return the structured record below to the caller, which must submit it using
+`adapters.claude.knowledge.build_research_request` through `BridgeTransport`.
+
 ## Output
 
 Return exactly this, and nothing you cannot back:

@@ -8,7 +8,7 @@ These pin the SUBSTANTIVE decision — Allow / Block / Inert / Fault — indepen
 subprocess, no filesystem, no manifest. Every input is constructed in-memory and every oracle is a
 stub, which is the whole point of the extraction. Behaviour is checked against the semantics of
 `hooks/convergence_gate.main`; a full end-to-end fidelity check against the live gate stays in
-`test_hooks.py`.
+the active core/application tests.
 """
 import importlib
 import sys
@@ -344,7 +344,7 @@ executable spec of the contract; a filesystem or database adapter is correct iff
 same suite.
 """
 # The core package uses relative imports, so import it as the package `core` with the plugin
-# root on sys.path (mirrors how test_hooks.py loads the hooks).
+# root on sys.path, matching the production module layout.
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent  # plugins/empirica
 sys.path.insert(0, str(PLUGIN_ROOT))
 core = importlib.import_module("core")
@@ -363,7 +363,7 @@ results: list[tuple[str, bool, str]] = []
 
 def check(name: str, ok: bool, detail: str = "") -> None:
     """Record one assertion. `ok` is coerced to a real bool so a caller that passes a container
-    can never make the summation in main() raise and abort the whole suite (test_hooks.py 2.9)."""
+    can never make the summation in main() raise and abort the whole suite."""
     results.append((name, bool(ok), detail))
 
 

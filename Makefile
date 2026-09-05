@@ -22,7 +22,7 @@ PYTHON ?= python3
 PLUGINS_DIR := plugins
 SCRIPTS := scripts
 ADR_DIR := doc/adr
-EMPIRICA_TESTS := $(PLUGINS_DIR)/empirica/tests/test_hooks.py
+EMPIRICA_ACTIVATION_TESTS := $(PLUGINS_DIR)/empirica/adapters/claude/tests/test_activation_lifecycle.py
 EMPIRICA_CORE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_core.py
 EMPIRICA_APP_TESTS := $(PLUGINS_DIR)/empirica/tests/test_application.py
 EMPIRICA_STATE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_state_adapter.py
@@ -59,13 +59,13 @@ help: ## Show this help (generated from target descriptions)
 ## --- Verify
 
 .PHONY: check
-check: lint test validate contract-check methodologist-pi-check empirica-pi-check adr-check ## Run every check (what CI and pre-commit should run)
+check: lint test validate contract-check activation-check methodologist-pi-check empirica-pi-check adr-check ## Run every check (what CI and pre-commit should run)
 	@printf '\n$(BOLD)All checks passed.$(RESET)\n'
 
 .PHONY: test
 test: ## Run the plugin test suites
 	@printf '$(BOLD)==> tests$(RESET)\n'
-	@$(PYTHON) $(EMPIRICA_TESTS)
+	@$(PYTHON) $(EMPIRICA_ACTIVATION_TESTS)
 	@$(PYTHON) $(EMPIRICA_CORE_TESTS)
 	@$(PYTHON) $(EMPIRICA_APP_TESTS)
 	@$(PYTHON) $(EMPIRICA_STATE_TESTS)
@@ -114,6 +114,11 @@ contract-check: ## Validate host-neutral API schemas and conformance fixtures
 	@printf '$(BOLD)==> contracts$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_contracts.py
 
+.PHONY: activation-check
+activation-check: ## Verify Empirica runtime isolation and thin Claude hook activation
+	@printf '$(BOLD)==> empirica activation$(RESET)\n'
+	@$(PYTHON) $(SCRIPTS)/validate_empirica_activation.py
+
 .PHONY: methodologist-pi-check
 methodologist-pi-check: ## Validate the Methodologist Pi adapter package (static always; tests if node present)
 	@printf '$(BOLD)==> methodologist Pi adapter$(RESET)\n'
@@ -148,7 +153,7 @@ adr-list: ## List all ADRs with their status
 
 .PHONY: doctor
 doctor: ## empirica preflight: what actors can this machine reach? (spends no inference)
-	@python3 plugins/empirica/hooks/doctor.py $(if $(JSON),--json,)
+	@PYTHONPATH=plugins/empirica $(PYTHON) -c 'from adapters.claude.preflight import main; raise SystemExit(main())'
 
 .PHONY: migrate-legacy
 migrate-legacy: ## Explicitly import a legacy run: make migrate-legacy RUN_DIR=... REPO=...
@@ -177,6 +182,10 @@ docs: ## Explain how to regenerate the generated plugin tables
 	@printf 'Do not hand-edit between the BEGIN/END GENERATED markers.\n'
 	@$(MAKE) --no-print-directory docs-check
 
+.PHONY: docs-sync
+docs-sync: ## Deterministically regenerate the marked plugin tables from manifests
+	@$(PYTHON) $(SCRIPTS)/check_generated_docs.py --write
+
 .PHONY: docs-check
 docs-check: ## Verify the generated plugin tables match the manifests
 	@$(PYTHON) $(SCRIPTS)/check_generated_docs.py
@@ -199,12 +208,13 @@ clean: ## Remove Python caches and stray build artifacts
 	@printf '  removed __pycache__, *.pyc, .ruff_cache\n'
 
 .PHONY: clean-runs
-clean-runs: ## Remove transient empirica run directories (.claude/empirica/*)
+clean-runs: ## Remove machine-local empirica operational runs (never legacy .claude paths)
 	@printf '$(BOLD)==> clean-runs$(RESET)\n'
-	@if [ -d .claude/empirica ]; then \
-		n=$$(ls -1 .claude/empirica 2>/dev/null | wc -l | tr -d ' '); \
-		rm -rf .claude/empirica; \
-		printf '  removed %s transient run directory(ies)\n' "$$n"; \
+	@home="$${EMPIRICA_HOME:-$$HOME/.empirica-plugin}"; \
+	if [ -d "$$home/projects" ]; then \
+		n=$$(find "$$home/projects" -name run.json -type f 2>/dev/null | wc -l | tr -d ' '); \
+		rm -rf "$$home/projects"; \
+		printf '  removed %s operational run(s) from %s\n' "$$n" "$$home"; \
 	else \
-		printf '  no run directories to remove\n'; \
+		printf '  no operational runs to remove\n'; \
 	fi

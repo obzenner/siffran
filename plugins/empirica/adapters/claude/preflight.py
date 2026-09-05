@@ -5,7 +5,9 @@ non-inferential version probes.  It returns recommendations; it never mutates or
 """
 from __future__ import annotations
 
+import json
 import subprocess
+import sys
 from collections.abc import Callable
 from typing import Any
 
@@ -103,3 +105,13 @@ def diagnose(
             "spends_inference": False,
             "recommendations": [f"preflight degraded safely ({type(exc).__name__})"],
         }
+
+
+def main() -> int:
+    json.dump(diagnose({}), sys.stdout, indent=2, sort_keys=True)
+    sys.stdout.write("\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

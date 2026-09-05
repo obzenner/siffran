@@ -11,6 +11,7 @@
     "command": {
       "oneOf": [
         {"$ref": "#/$defs/startRun"},
+        {"$ref": "#/$defs/resolveRun"},
         {"$ref": "#/$defs/observeAction"},
         {"$ref": "#/$defs/evaluateRun"},
         {"$ref": "#/$defs/getRun"},
@@ -46,6 +47,15 @@
             "cli_exec": {"type": "boolean"}
           }
         }
+      }
+    },
+    "resolveRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "selector"],
+      "properties": {
+        "type": {"const": "ResolveRun"},
+        "selector": {"$ref": "#/$defs/runSelector"}
       }
     },
     "observeAction": {

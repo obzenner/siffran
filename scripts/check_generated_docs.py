@@ -8,7 +8,10 @@ target can always TELL you the docs are stale, even where it cannot fix them.
 
 Exit 0 = in sync; 1 = stale or markers missing, with the offending file named.
 
-Usage: check_generated_docs.py [--print]   (--print emits the canonical table for pasting)
+Usage: check_generated_docs.py [--print|--write]
+
+``--write`` deterministically replaces only the marked generated regions.  It is used by the
+Makefile when a non-interactive version bump needs the same canonical output as the checkup skill.
 """
 import json
 import re
@@ -39,6 +42,18 @@ def main() -> int:
     want = canonical_table()
     if "--print" in sys.argv[1:]:
         print(want, end="")
+        return 0
+    if "--write" in sys.argv[1:]:
+        for name in TARGETS:
+            path = Path(name)
+            text = path.read_text()
+            match = REGION.search(text)
+            if not match:
+                print(f"  FAIL {name}: BEGIN/END GENERATED markers missing or malformed",
+                      file=sys.stderr)
+                return 1
+            path.write_text(text[:match.start(1)] + want + text[match.end(1):])
+        print(f"  wrote: generated tables in {', '.join(TARGETS)}")
         return 0
 
     problems: list[str] = []

@@ -15,7 +15,7 @@ lands only if the file on disk still hashes to the revision the caller read. Abs
 are kept distinct as ADR-31 requires: a missing file is ``ABSENT`` (safe to create), an
 undecodable one is ``Corrupt`` (must fail closed, never silently overwritten).
 
-Nothing here reads ``.claude`` or ``.pi``; there is no legacy fallback (ADR-31).
+No host-specific runtime directory is read and there is no legacy fallback (ADR-31).
 """
 from __future__ import annotations
 
@@ -185,6 +185,15 @@ class GenerationAllocator:
                  is_active: Callable[[object], bool] = _default_is_active) -> None:
         self._repo = repo
         self._is_active = is_active
+
+    def resolve(self, project_id: str, run_id: str) -> RunKey | None:
+        """Return the latest existing generation without creating or advancing one.
+
+        Lifecycle hooks use this read-only lookup after StartRun.  In particular, a Stop or
+        SessionStart event for a terminal run must not allocate a fresh generation.
+        """
+        gens = self._repo.generations(project_id, run_id)
+        return RunKey(project_id, run_id, gens[-1]) if gens else None
 
     def allocate(self, project_id: str, run_id: str) -> RunKey:
         gens = self._repo.generations(project_id, run_id)

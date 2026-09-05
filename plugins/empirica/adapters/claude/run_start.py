@@ -49,6 +49,17 @@ def _max_passes(environ: Mapping[str, str]) -> int | None:
     return value if value >= 1 else None
 
 
+def _max_spawns(environ: Mapping[str, str]) -> int | None:
+    raw = environ.get("EMPIRICA_MAX_SPAWNS")
+    if raw is None:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if value >= 0 else None
+
+
 def build_start_run_request(
     payload: Mapping[str, object],
     *,
@@ -69,6 +80,9 @@ def build_start_run_request(
     max_passes = _max_passes(os.environ if environ is None else environ)
     if max_passes is not None:
         command["max_passes"] = max_passes
+    max_spawns = _max_spawns(os.environ if environ is None else environ)
+    if max_spawns is not None:
+        command["max_spawns"] = max_spawns
     return {
         "protocol": PROTOCOL,
         "request_id": correlation_id or new_request_id(payload, "run-start"),

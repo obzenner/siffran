@@ -17,10 +17,8 @@ tests:
   guarded by an exclusive OS lock on a per-target ``.lock`` file, so two processes racing a CAS
   serialise rather than lose an update.
 
-This is a sibling of ``hooks/atomicio.py`` by design, not by omission: that module serves the legacy
-``.claude`` scratch layout and is loaded by path (no package imports); the adapter is a separate
-package with its own dependency boundary, so it carries its own hardened IO rather than reaching
-across into the hooks tree.
+This implementation is intentionally self-contained and never imports the older hook-local scratch
+IO retained for explicit migration tests.
 """
 from __future__ import annotations
 

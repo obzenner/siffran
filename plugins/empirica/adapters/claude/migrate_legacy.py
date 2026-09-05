@@ -17,9 +17,9 @@ if str(_PLUGIN) not in sys.path:
     sys.path.insert(0, str(_PLUGIN))
 
 from adapters import bridge  # noqa: E402
+from adapters.claude import evidence as evidence_validation  # noqa: E402
 from adapters.claude.knowledge import (  # noqa: E402
     _build_migrated_leaf_request,
-    _load_hook,
     build_attribution_request,
     build_audit_ticket_request,
     build_audit_verdict_request,
@@ -31,6 +31,43 @@ from application import knowledge  # noqa: E402
 from application.state import OperationalState  # noqa: E402
 from application.wire import decode_handle, encode_handle  # noqa: E402
 from core.records import Corrupt, Present, RunKey  # noqa: E402
+
+
+def _legacy_attribution_report(graph: dict, leaves: list[dict], approved: list[str],
+                               audit_actor: object) -> dict:
+    """Translate legacy attribution into the retained report shape.
+
+    This deliberately lives in the one explicit migration command.  It is compatibility parsing,
+    not a second runtime policy implementation; active runs produce attribution through the shared
+    application bridge.
+    """
+    goals = [node_id for node_id, node in graph["nodes"].items() if node["type"] == "Goal"]
+    by_claim: dict[str, list[dict]] = {}
+    for leaf in leaves:
+        actor = leaf.get("actor")
+        if isinstance(actor, dict) and isinstance(actor.get("model"), str):
+            by_claim.setdefault(leaf["claim_id"], []).append(actor)
+    audit_model = audit_actor.get("model") if isinstance(audit_actor, dict) else None
+    findings = []
+    for claim_id in approved:
+        if isinstance(audit_model, str) and any(
+            actor.get("model") == audit_model for actor in by_claim.get(claim_id, [])
+        ):
+            findings.append({"check": "same_actor_audit", "claim": claim_id,
+                             "model": audit_model,
+                             "detail": "legacy audit and evidence report the same model"})
+    assigned = sum(bool(graph["nodes"][claim_id].get("actor")) for claim_id in goals)
+    model_attributed = len(by_claim)
+    witnessed = sum(any(actor.get("attribution") == "witnessed" for actor in actors)
+                      for actors in by_claim.values())
+    coverage = {"goals": len(goals), "assigned": assigned,
+                "model_attributed": model_attributed, "witnessed": witnessed,
+                "audit_attributed": isinstance(audit_model, str), "audit_is_tier": False,
+                "vacuous": not model_attributed or not isinstance(audit_model, str)}
+    note = (f"{len(findings)} legacy attribution finding(s)" if findings else
+            "legacy attribution imported; independence was not measured"
+            if coverage["vacuous"] else "no legacy attribution clash detected")
+    return {"findings": findings, "coverage": coverage, "note": note}
 
 
 def _read_json(path: Path, default=None):
@@ -129,14 +166,13 @@ def migrate(run_dir: Path, repo: Path, *, session_id: str | None = None) -> dict
     if not isinstance(session, str) or not session:
         raise ValueError("legacy run has no usable session id; pass --session-id")
     goal = manifest.get("goal") if isinstance(manifest.get("goal"), str) else root["text"]
-    evidence_hook = _load_hook("evidence")
-    attribution_hook = _load_hook("attribution")
-    normalised = [leaf for _, raw in leaves if (leaf := evidence_hook.validate_leaf(raw))]
+    normalised = [leaf for _, raw in leaves
+                  if (leaf := evidence_validation.validate_leaf(raw))]
     approved = [nid for nid, node in canonical["nodes"].items()
-                if evidence_hook.verdict(normalised, nid, node["text"], node.get("kind"),
-                                         "approve")[0]]
+                if evidence_validation.verdict(normalised, nid, node["text"], node.get("kind"),
+                                               "approve")[0]]
     actor = next((t.get("actor") for t in reversed(legacy_tickets) if t.get("actor")), None)
-    report = attribution_hook.report(canonical, normalised, approved, actor)
+    report = _legacy_attribution_report(canonical, normalised, approved, actor)
     expected_verdict = None
     if isinstance(verdict, dict):
         expected_verdict = {

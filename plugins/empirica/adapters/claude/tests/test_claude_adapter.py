@@ -2,6 +2,7 @@
 """Parity and isolated persistence tests for the inactive Claude adapter slice."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -446,14 +447,6 @@ class LegacyMigrationIntegrationTests(unittest.TestCase):
         return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True,
                               text=True, env=env).stdout.strip()
 
-    def _hook(self, name: str):
-        import importlib.util
-        path = PLUGIN_ROOT / "hooks" / f"{name}.py"
-        spec = importlib.util.spec_from_file_location(f"migration_test_{name}", path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
-
     def test_explicit_migration_is_idempotent_digest_exact_and_uses_real_stores(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -475,25 +468,44 @@ class LegacyMigrationIntegrationTests(unittest.TestCase):
                                                           "goal": "true succeeds"}),
                                              encoding="utf-8")
             bound = repo / "tracked"
-            evidence = self._hook("evidence")
-            evidence.write_research(legacy, "research-G0", "G0", "true succeeds",
-                                    source="true", kind="runtime", citation="true exits zero",
-                                    result="supports", ts="2026-09-05T20:00:00Z")
-            harness = PLUGIN_ROOT / "hooks" / "spike_harness.py"
-            spike = subprocess.run([sys.executable, str(harness), "--claim", "G0", "--run-dir",
-                                    str(legacy), "--ts", "2026-09-05T20:01:00Z", "--file",
-                                    str(bound), "true"], capture_output=True, text=True)
-            self.assertEqual(spike.returncode, 0, spike.stderr)
-            leaves = evidence.read_leaves(legacy)
-            expected_digest = evidence.evidence_digest(leaves, "G0", "true succeeds")
+            claim_digest = hashlib.sha256(b"true succeeds").hexdigest()
+            research = {
+                "_type": "https://in-toto.io/Statement/v1",
+                "subject": [{"name": "G0", "digest": {"sha256": claim_digest}}],
+                "predicateType": "https://empirica.dev/attestation/research/v1",
+                "predicate": {"fold": "research", "kind": "runtime", "source": "true",
+                              "citation": "true exits zero", "result": "supports",
+                              "ts": "2026-09-05T20:00:00Z"},
+            }
+            spike = run_spike("G0", "true succeeds", ["true"], [bound],
+                              "2026-09-05T20:01:00Z").statement
+            evidence_dir = legacy / "evidence"
+            evidence_dir.mkdir()
+            (evidence_dir / "research-G0.json").write_text(json.dumps(research))
+            (evidence_dir / "spike-G0.json").write_text(json.dumps(spike))
+            leaves = [research, spike]
+            from adapters.claude import evidence as evidence_rules
+            from application import knowledge as app_knowledge
+            from core import claims as core_claims
+            normalised = [evidence_rules.validate_leaf(leaf) for leaf in leaves]
+            records = []
+            for statement in leaves:
+                verdicts = {}
+                for purpose in ("approve", "refute"):
+                    ok, reason = evidence_rules.verdict(
+                        normalised, "G0", "true succeeds", "needs-experiment", purpose)
+                    verdicts[purpose] = {"ok": ok, "reason": reason}
+                records.append({"statement": statement, "verdicts": verdicts})
+            expected_digest = app_knowledge._leaf_digest(records, "G0", "true succeeds")
 
-            audit = self._hook("audit")
-            nonce = audit.record_spawn(legacy, "legacy-session", 1)
-            claims = self._hook("claimgraph")
-            verdict = {"verdict": "pass", "nonce": nonce,
-                       "argument_digest": claims.argument_digest(claims.normalise(graph)),
+            (legacy / "audit-tickets.json").write_text(json.dumps({"tickets": [{
+                "nonce": "legacy-nonce", "actor": {"model": "independent-auditor",
+                                                       "source_type": "LLM_JUDGE"}}]}))
+            verdict = {"verdict": "pass", "nonce": "legacy-nonce",
+                       "argument_digest": core_claims.argument_digest(
+                           app_knowledge.canonicalize_graph(graph)),
                        "claims_reviewed": [{"claim_id": "G0",
-                                            "claim_digest": evidence.claim_digest("true succeeds"),
+                                            "claim_digest": claim_digest,
                                             "evidence_digest": expected_digest}], "findings": []}
             (legacy / "audit-verdict.json").write_text(json.dumps(verdict), encoding="utf-8")
             source_before = {p.relative_to(legacy): p.read_bytes() for p in legacy.rglob("*")

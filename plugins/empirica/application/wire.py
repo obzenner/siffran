@@ -29,6 +29,7 @@ API_VERSION = "empirica/v1"
 
 # Command discriminators (request.command.type) and result discriminators (response.result.type).
 CMD_START_RUN = "StartRun"
+CMD_RESOLVE_RUN = "ResolveRun"
 CMD_OBSERVE_ACTION = "ObserveAction"
 CMD_EVALUATE_RUN = "EvaluateRun"
 CMD_GET_RUN = "GetRun"
@@ -36,8 +37,8 @@ CMD_GET_RUN = "GetRun"
 # phase, modes, freeze, ordering witnesses, tickets) so a host can rebuild its in-session view after
 # a compaction or a resume without reading any side file (ADR-31; mirrors the legacy state_restore).
 CMD_RESTORE_RUN = "RestoreRun"
-_COMMANDS = frozenset({CMD_START_RUN, CMD_OBSERVE_ACTION, CMD_EVALUATE_RUN, CMD_GET_RUN,
-                       CMD_RESTORE_RUN})
+_COMMANDS = frozenset({CMD_START_RUN, CMD_RESOLVE_RUN, CMD_OBSERVE_ACTION,
+                       CMD_EVALUATE_RUN, CMD_GET_RUN, CMD_RESTORE_RUN})
 
 # ObserveAction kinds. Two families: KNOWLEDGE kinds append to the immutable argument (and are
 # refused on a finished run — its argument is sealed), and OPERATIONAL kinds touch the run's control

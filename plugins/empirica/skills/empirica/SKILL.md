@@ -98,27 +98,16 @@ means the goal is `design X`, and the run is in CLI-exec mode. Strip any leading
 read the goal — a claim graph rooted in `--cli-exec design X` has a corrupted intent, and it will be
 the root of every claim in the run.
 
-You do **not** apply the flags yourself. The `run_start.py` hook already parsed `command_args` from
-the invocation Claude Code saw and wrote `<run_dir>/modes.json` before your first turn. That
-ordering is deliberate: the hooks that consume modes (`dispatch_gate.py`, the doctor) are separate
-processes that can read only the environment and the filesystem — they cannot see `$ARGUMENTS` — so
-a mode held in your context could never reach them. Your job is to read the resulting state and
-report it, never to re-implement the parse.
+You do **not** apply the flags yourself. The Claude adapter parses the invocation and sends the
+resolved flags in `StartRun`; the application stores them in the operational document under
+`~/.empirica-plugin/`. Read them only through `RestoreRun` on the `empirica/v1` adapter API.
+A typo such as `--cli-exex` enables nothing and must be surfaced plainly.
 
-If you need the parsed values, ask the code rather than re-deriving them:
-
-```
-python3 -c 'import importlib.util,sys,json
-from pathlib import Path
-s=importlib.util.spec_from_file_location("modes", Path(sys.argv[1])/"modes.py")
-m=importlib.util.module_from_spec(s); s.loader.exec_module(m)
-print(json.dumps({"state": m.state(Path(sys.argv[2])),
-                  "unknown_flags": m.unknown_flags(Path(sys.argv[2]))}, indent=2))' <hooks_dir> <run_dir>
-```
-
-**Surface an unrecognised flag to the user.** A typo like `--cli-exex` enables nothing; the hook
-records it in `modes.json` and the doctor reports it. Say so plainly — a user who believes a run is
-in a mode it is not in will misread everything that follows.
+**Runtime boundary:** use `adapters/claude` request builders and `BridgeTransport` for every graph,
+evidence, spike, regate, route, freeze, audit-ticket, verdict, and restore operation. Operational
+state belongs only under `~/.empirica-plugin/`; knowledge belongs only under `refs/empirica/*`.
+Never create, read, or edit runtime state below `.claude/` or `.pi/`, and never edit either store
+directly. The explicit `make migrate-legacy` command is the sole legacy-path exception.
 
 ## Step 1 — Route BEFORE investigating (P1)
 
@@ -132,28 +121,21 @@ Announce `Route: **known** | **unknown** — <one line why>` and list the unknow
 start investigating. Routing is a commitment made up front, not a label applied retroactively
 to justify a shortcut (ADR-5/20 — the observed inversion).
 
-**Record the announcement**, immediately after making it and before any evidence gathering:
-
-```
-python3 <plugin>/hooks/route_stamp.py --announce-route --session <session_id> --ts <ISO now>
-```
-
-A hook cannot read your prose, so this is what makes P1 checkable: it writes `route_ts` to the
-manifest. Meanwhile a `PreToolUse` hook independently stamps your first investigative tool call
-(`first_tool_ts`), first-write-wins — so if you investigate before announcing, the earlier
-timestamp is already on the record and the gate reports the violation to the auditor. Skipping
-the announcement does not help: a missing `route_ts` is itself reported as a P1 violation.
+**Record the announcement** immediately through
+`adapters.claude.route.build_route_announcement_request` and `BridgeTransport`, before any evidence
+gathering. The application records both route and first investigation with CAS-guarded monotone
+sequence numbers. Skipping the announcement remains a P1 violation.
 
 This is a per-dependency split, not a verdict on the whole task. The "known path" is simply the
 case where the initial unknown set is already empty.
 
 ## Step 2 — Seed the claim graph (state substrate, ADR-22)
 
-Convergence state is a **claim graph**: a GSN assurance argument with in-toto evidence leaves,
-written to `.claude/empirica/<run_id>/claims.json` — the path the manifest records. This is
-transient run memory (ADR-14), **not** a repository deliverable: never write it to the repo
-root, never copy it elsewhere. There are no `spec.md`/`plan.md`/`tasks.md` files; the document
-substrate was superseded precisely because a document invited a model to type its own verdict.
+Convergence state is a **claim graph**: a GSN assurance argument with in-toto evidence leaves.
+Submit it with `adapters.claude.knowledge.build_graph_request` through `BridgeTransport`. The
+application stores immutable knowledge in `refs/empirica/*` and its graph pointer in the operational
+document under `~/.empirica-plugin/`; it is never a worktree file. There are no
+`spec.md`/`plan.md`/`tasks.md` runtime files.
 
 Each unknown becomes a **Goal** node the run must adjudicate. Node types are GSN elements
 (`Goal`, `Strategy`, `Solution`, `Context`, `Assumption`, `Justification`); edges are
@@ -217,7 +199,7 @@ output, a primary source online. **Recall is not evidence.** Reading a repo and 
 conclusions from training data is zero Fold-1 validation, and every confidence written that way
 is unbacked.
 
-Record each one as an in-toto Statement under `<run_dir>/evidence/`:
+Build each in-toto Statement with `build_research_request` and submit it through `BridgeTransport`:
 
 ```json
 {
@@ -241,11 +223,9 @@ evidence no longer counts, because it answered a different question.
 Research what the check should be and what "correct" looks like **first**, then build it. Run it
 through the harness, which is the sole writer of spike records:
 
-```
-python3 <plugin>/hooks/spike_harness.py \
-  --claim G2 --run-dir <run_dir> --ts <ISO timestamp> [--file <path> ...] \
-  <command> [args...]
-```
+Use `adapters.claude.knowledge.run_spike(...)` to execute the deterministic harness, then submit
+its sealed `SpikeExecution` with `build_spike_request(...)` through `BridgeTransport`. Never write
+a spike verdict or evidence leaf directly.
 
 `gate` is `pass` iff the command exited 0 — a real subprocess verdict, never your reading of it.
 The record also carries `samples` — how many times the check actually ran — so a reader can tell a
@@ -259,9 +239,7 @@ detection is correct and stays — a digest that ignored whitespace would be wor
 whitespace is semantic in Python, YAML, Makefiles and string literals. What is automated is the
 *recovery*:
 
-```
-python3 <plugin>/hooks/spike_harness.py --regate --run-dir <run_dir> --ts <ISO now>
-```
+Call `build_regate_requests(...)` and dispatch every returned request through `BridgeTransport`.
 
 It re-runs **only** the stale spikes, using the command each record already stores, at the same
 sample count. This is not a way to bless a stale record: every spike is re-executed and its verdict
@@ -283,10 +261,7 @@ The record carries `samples` (how many runs) and `exit_codes` (the status of eac
 reader can tell 5 clean passes from 4 passes after a failure. A timeout has no exit code and appears
 as `null` rather than a fabricated number. Verify with:
 
-```
-python3 -c 'import json,sys; p=json.load(open(sys.argv[1]))["predicate"]
-print(p["samples"], p["exit_codes"])' <run_dir>/evidence/spike-<claim>.json
-```
+Inspect the returned/stored evidence through the knowledge adapter; do not read a runtime file.
 
 **And be suspicious of your own falsification control.** Building ADR-24 produced the sharpest
 lesson in this plugin's history: a hand-written list of sabotages was falsified by four consecutive
@@ -316,8 +291,8 @@ The currency is **subagent spawns, not tokens** — that is what can be both cou
 and *denied*. (Verified: a `PreToolUse` hook can deny an `Agent` spawn; actual token spend is
 not readable mid-session by any hook. A token budget would be advisory theater.)
 
-Set `max_spawns` in `.claude/empirica/<run>/budget.json` (transient, git-ignored). The spawn
-gate denies any spawn past the cap — exit 2, refused. Fan-out is a **budgeted exception**:
+Set `max_spawns` in `StartRun` (or `ObserveAction(configure_budget)`) through the adapter API. The
+spawn gate denies any spawn past the cap — exit 2, refused. Fan-out is a **budgeted exception**:
 spawn in parallel only when claims are genuinely independent and breadth is real.
 
 | Order | Action | Cost | Gated by |
@@ -378,9 +353,8 @@ finding real things therefore has one terminal path — grind to `max_passes` an
 
 Freeze is the third exit. It commits the run's **scope**:
 
-```
-python3 <plugin>/hooks/route_stamp.py --freeze --session <session_id> --ts <ISO now>
-```
+Submit `ObserveAction(kind="freeze", claims=[...])` through `BridgeTransport`; the application
+makes the first freeze authoritative.
 
 The claims **already gating at that moment** become the set this run must discharge. Claims derived
 afterwards are **deferred**: they do not gate, they are reported in the result by id, and they are
@@ -423,7 +397,8 @@ session registry can fail to resolve a newly added agent even when the name is c
 
 Pass it the run directory and the **nonce** the spawn gate issued. It verifies the run against
 the ADR-20 rubric — above all **re-reading each approved claim's Fold-1 citation to confirm the
-cited source actually supports the claim** — and writes `audit-verdict.json`. The Stop gate
+cited source actually supports the claim** — and submits its verdict with
+`build_audit_verdict_request` through `BridgeTransport`. The Stop gate
 requires a `pass` verdict whose nonce matches a real auditor spawn and whose `claims_reviewed`
 covers **every** approved claim.
 
@@ -502,14 +477,14 @@ Precedence, most specific first — unchanged from ADR-24, with the flags landin
 | Source | Wins over | Use when |
 |---|---|---|
 | `EMPIRICA_MODE_*` env | everything | a Makefile target or CI job must force a mode regardless of what was typed |
-| invocation flags → `<run_dir>/modes.json` | the default | the normal path: per-run, recorded, visible to the doctor |
+| invocation flags → `StartRun.modes` | the default | per-run, recorded in `~/.empirica-plugin/`, visible through `RestoreRun` |
 | off | — | the default everyone gets |
 
 An env var still beats a flag, deliberately: an operator overriding one run from the outside must
 not be silently countermanded by whatever the invocation said.
 
-The preflight `empirica doctor` runs at run-start and writes `<run_dir>/actors.json`. It **spends
-no inference** — version and config reads only — never gates the baseline, and only *recommends*:
+The preflight `empirica doctor` **spends no inference** — version and config reads only — never
+gates the baseline, writes no worktree runtime file, and only *recommends*:
 "available" is not "permitted", and it will not reassign a claim for you. Run it yourself with
 `make doctor`.
 
@@ -543,7 +518,8 @@ forward: it is the input to the next run, not a footnote.
 
 | Tier | Artifacts | Home |
 |---|---|---|
-| **Transient** (ADR-14) | claim graph (`claims.json`), evidence store (`evidence/*.json`), run manifest, spawn ledger, audit tickets + verdict, preflight report (`actors.json`), mode config (`modes.json`), spike scratch, `/think` traces | `.claude/empirica/<run_id>/` at the **project root**, git-ignored |
+| **Operational** | status, phase, modes, spawn budget, audit tickets, graph pointer | `~/.empirica-plugin/` (or `$EMPIRICA_HOME`), accessed only through the API |
+| **Knowledge** | claim graphs, in-toto evidence, audit verdicts, attribution | local Git shadow refs under `refs/empirica/*`, accessed only through the API |
 | **Committable** (SSOT) | the goal's resolved output (code, document, review, …); ADRs when the intent is a decision; tests | git, at the intent's location |
 
 ## Rules

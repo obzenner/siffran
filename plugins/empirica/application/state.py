@@ -3,8 +3,7 @@
 This is the operational plane of ADR-31: the small mutable record a run updates as it progresses.
 ADR-31 assigns this plane a specific inventory — "active-run pointers, status, phases, budgets,
 modes, tickets, locks, and recovery journals" — and this document is where all of it lives so an
-adapter needs no side files (no ``.claude/empirica`` ledger, no ``audit-tickets.json``, no
-``modes.json``). The knowledge plane (the graph and evidence themselves) lives in the append-only
+adapter needs no host-specific side files (no separate ledger, ticket file, or mode file). The knowledge plane (the graph and evidence themselves) lives in the append-only
 :class:`ArtifactRepository`; this document only ever holds the content address of the graph that is
 current, never the graph.
 
