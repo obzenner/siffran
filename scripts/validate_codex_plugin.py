@@ -87,16 +87,27 @@ def _check_mcp_config(errors: list[str]) -> None:
         errors.append(".mcp.json must declare exactly the methodologist server")
         return
     server = servers["methodologist"]
-    expected = {
-        "type": "stdio",
-        "command": "python3",
-        "args": ["adapters/codex/mcp_server.py"],
-        "cwd": ".",
-        "startup_timeout_sec": 10,
-        "tool_timeout_sec": 10,
-    }
-    if server != expected:
-        errors.append(f"methodologist MCP config must be {expected!r}")
+    # The same .mcp.json is consumed by two harnesses that resolve paths
+    # differently: Codex launches with cwd == plugin root, while Claude Code
+    # launches in the user's session dir and only exports CLAUDE_PLUGIN_ROOT.
+    # A static path satisfies neither both — so args is a `python3 -c` bootstrap
+    # that resolves mcp_server.py from CLAUDE_PLUGIN_ROOT (Claude) with a cwd
+    # fallback (Codex). Assert those portability properties, not exact bytes;
+    # `_check_stdio_bridge` covers actual behaviour by running the server.
+    if server.get("type") != "stdio" or server.get("command") != "python3":
+        errors.append("methodologist MCP server must be a stdio python3 server")
+    if server.get("startup_timeout_sec") != 10 or server.get("tool_timeout_sec") != 10:
+        errors.append("methodologist MCP server must keep the 10s timeouts")
+    if "cwd" in server:
+        errors.append("methodologist MCP server must not pin cwd (breaks Claude Code)")
+    args = server.get("args")
+    boot = args[1] if isinstance(args, list) and len(args) == 2 and args[0] == "-c" else ""
+    if not boot:
+        errors.append("methodologist MCP args must be a ['-c', <bootstrap>] pair")
+    else:
+        for needle in ("CLAUDE_PLUGIN_ROOT", "adapters/codex/mcp_server.py", "or '.'"):
+            if needle not in boot:
+                errors.append(f"methodologist MCP bootstrap must reference {needle!r}")
     if not MCP_SERVER.is_file():
         errors.append("Codex MCP server entry point is missing")
 
