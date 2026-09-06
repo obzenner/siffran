@@ -9,3 +9,6 @@
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Node devDependencies (typescript/@types/node for the tsc gate); lockfile is committed
+node_modules/
