@@ -33,6 +33,7 @@ from adapters.state import (  # noqa: E402
     run_id,
 )
 from adapters.state import fsio  # noqa: E402
+from application.state import OperationalState  # noqa: E402
 from core.records import ABSENT, Conflict, Corrupt, Present, Revision, RunKey  # noqa: E402
 
 ACTIVE = {"status": "active", "n": 0}
@@ -317,6 +318,54 @@ class TestNoRepositoryWrites(_Isolated):
         self.assertEqual(before, after, "adapter created files inside the project tree")
         self.assertEqual(_git(root, "status", "--porcelain").stdout, "",
                          "adapter dirtied the project working tree")
+
+
+class TestPreFixDocumentDecode(unittest.TestCase):
+    """The budget fix added three OperationalState fields (working_passes, last_stop_digest,
+    last_progress_ts). Refuting obs #7: a document written by an OLDER build — one that lacks those
+    fields — must still decode (to the None defaults) and still be a usable, active run, so the
+    backward-compatible-decode invariant holds and merely upgrading never wedges a live run."""
+
+    def _prefix_doc(self) -> dict:
+        """A valid stored document with the three post-fix fields removed (as a pre-fix build left
+        it). Everything else is exactly what OperationalState.new writes."""
+        doc = OperationalState.new(goal="g", max_passes=8, max_spawns=None,
+                                   theta=0.8, modes=None).encode()
+        for absent in ("working_passes", "last_stop_digest", "last_progress_ts"):
+            doc.pop(absent)
+        return doc
+
+    def test_prefix_document_decodes_with_none_defaults(self):
+        state = OperationalState.decode(self._prefix_doc())
+        self.assertIsNotNone(state, "a pre-fix document must decode, not read as corrupt")
+        self.assertIsNone(state.working_passes)
+        self.assertIsNone(state.last_stop_digest)
+        self.assertIsNone(state.last_progress_ts)
+
+    def test_prefix_document_still_evaluates_with_ceiling_fallback(self):
+        # No working cap yet -> the pass budget falls back to the a-priori max_passes ceiling, so a
+        # pre-fix run keeps evaluating under the new service rather than wedging on absent fields.
+        state = OperationalState.decode(self._prefix_doc())
+        self.assertTrue(state.is_active)
+        self.assertEqual(state.working_passes or state.max_passes, state.max_passes)
+
+    def test_new_fields_roundtrip_through_encode_decode(self):
+        upgraded = OperationalState.decode(self._prefix_doc()).evolve(
+            working_passes=3, last_stop_digest="a" * 64, last_progress_ts=1234.5)
+        redecoded = OperationalState.decode(upgraded.encode())
+        self.assertEqual(redecoded.working_passes, 3)
+        self.assertEqual(redecoded.last_stop_digest, "a" * 64)
+        self.assertEqual(redecoded.last_progress_ts, 1234.5)
+
+    def test_corrupt_new_fields_fail_closed_to_none(self):
+        # A corrupt (wrong-type) field reads as absent — the conservative bound (mirrors _opt_int).
+        doc = self._prefix_doc()
+        doc.update({"working_passes": "eight", "last_stop_digest": 5, "last_progress_ts": "soon"})
+        state = OperationalState.decode(doc)
+        self.assertIsNotNone(state)
+        self.assertIsNone(state.working_passes)
+        self.assertIsNone(state.last_stop_digest)
+        self.assertIsNone(state.last_progress_ts)
 
 
 if __name__ == "__main__":

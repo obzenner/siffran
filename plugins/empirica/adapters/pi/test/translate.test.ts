@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { PROTOCOL, type Result } from "../src/contract.ts";
+import { PROTOCOL, type EvaluateRunCommand, type Result } from "../src/contract.ts";
 import {
   REPORT_CONVERGENCE_INTENT,
   convergenceNotice,
@@ -67,17 +67,45 @@ test("getRunRequest builds a GetRun envelope", () => {
   });
 });
 
-test("evaluateRunRequest matches the shared contract fixture", () => {
+test("evaluateRunRequest matches the shared contract fixture (plus an observed_at stamp)", () => {
   const fixture = JSON.parse(readFileSync(FIXTURE, "utf-8"));
   const request = evaluateRunRequest(
     fixture.request.command.run_id,
     fixture.request.command.intent,
     fixture.request.request_id,
   );
-  // Byte-for-byte the substrate-neutral envelope every adapter is held to
-  // (ADR-30: "Adapter suites must consume the same fixtures").
-  assert.deepEqual(request, fixture.request);
+  // The stable envelope is byte-for-byte the substrate-neutral shape every
+  // adapter is held to (ADR-30: "Adapter suites must consume the same
+  // fixtures"); observed_at is an additive optional stamp layered on top, so we
+  // strip it before the equality check and assert it separately below.
+  const { observed_at, ...command } = request.command as EvaluateRunCommand;
+  assert.deepEqual({ ...request, command }, fixture.request);
+  assert.equal(typeof observed_at, "number");
   assert.equal(fixture.request.command.intent, REPORT_CONVERGENCE_INTENT);
+});
+
+test("evaluateRunRequest stamps observed_at as epoch SECONDS (not ms) by default", () => {
+  const before = Date.now() / 1000;
+  const request = evaluateRunRequest("handle-x", REPORT_CONVERGENCE_INTENT, "req-obs");
+  const after = Date.now() / 1000;
+  const { observed_at } = request.command as EvaluateRunCommand;
+  assert.equal(typeof observed_at, "number");
+  // Seconds, not milliseconds: the stamp sits within the wall-clock window that
+  // straddles the call. A ms value would be ~1000x above `after`.
+  assert.ok(
+    observed_at! >= before && observed_at! <= after,
+    `observed_at ${observed_at} outside [${before}, ${after}] — wrong unit?`,
+  );
+});
+
+test("evaluateRunRequest honours an explicit observed_at", () => {
+  const request = evaluateRunRequest("h", REPORT_CONVERGENCE_INTENT, "r", 1725000000.5);
+  assert.deepEqual(request.command, {
+    type: "EvaluateRun",
+    run_id: "h",
+    intent: "report_convergence",
+    observed_at: 1725000000.5,
+  });
 });
 
 // --- result -> gate ----------------------------------------------------------

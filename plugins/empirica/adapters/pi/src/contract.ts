@@ -44,6 +44,11 @@ export interface EvaluateRunCommand {
   type: "EvaluateRun";
   run_id: string;
   intent: EvaluateIntent;
+  // Wall-clock observation time in epoch SECONDS (float). The core uses it to
+  // enforce a "time since last progress" stall deadline on a blocking run.
+  // Optional for backward compatibility: an older core ignores it, and an older
+  // adapter that omits it still validates against the request schema.
+  observed_at?: number;
 }
 
 export interface GetRunCommand {

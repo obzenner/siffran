@@ -55,11 +55,17 @@ export function evaluateRunRequest(
   runId: string,
   intent: EvaluateIntent,
   requestId: string,
+  // Epoch SECONDS (float), not milliseconds — Date.now() is ms, so divide by
+  // 1000. The core reads this to enforce a wall-clock stall deadline on a
+  // blocking run. Defaulted here (the sole clock read the adapter needs) so the
+  // requests dispatched from index.ts carry it; a caller may pass an explicit
+  // value to keep the builder deterministic under test.
+  observedAt: number = Date.now() / 1000,
 ): Request {
   return {
     protocol: PROTOCOL,
     request_id: requestId,
-    command: { type: "EvaluateRun", run_id: runId, intent },
+    command: { type: "EvaluateRun", run_id: runId, intent, observed_at: observedAt },
   };
 }
 
