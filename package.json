@@ -23,6 +23,10 @@
       "optional": true
     }
   },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  },
   "pi": {
     "extensions": [
       "./plugins/empirica/adapters/pi/src/index.ts",

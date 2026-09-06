@@ -16,7 +16,14 @@ Layers, so the check is meaningful whether or not tooling exists:
      answers with a well-formed response envelope. Deterministic, no network —
      the bridge must never crash the caller's gate, so even a rejected request
      comes back as a typed ``Fault`` (empirica/v1).
-  3. Dynamic validation (only if ``node`` is on PATH): run the adapter's
+  3. Type validation (only if a ``tsc`` is resolvable — repo ``node_modules`` or
+     PATH): run ``tsc --noEmit`` against the adapter's ``tsconfig.json``. Node's
+     native type-stripping runs the tests WITHOUT type-checking them, so a real
+     type error passes ``node --test`` silently; this layer is the only thing that
+     catches it. ``typescript``/``@types/node`` are declared devDependencies, so
+     ``npm install`` (or CI) turns this into an enforced gate; absent, it degrades
+     to a note like the others.
+  4. Dynamic validation (only if ``node`` is on PATH): run the adapter's
      ``node --test`` suite. Node >= 22.6 strips TypeScript types natively, so this
      needs no install. When ``node`` is absent the dynamic layer is skipped and
      the static layer still gives a verdict.
@@ -161,6 +168,30 @@ def check_bridge_smoke(adapter: Path, errors: list[str]) -> None:
     print(f"ok: {rel(bridge)} answers a request with a typed envelope")
 
 
+def find_tsc() -> str | None:
+    """Prefer a repo-local tsc (present once ``npm install`` ran) over PATH."""
+    local = ROOT / "node_modules" / ".bin" / "tsc"
+    if local.is_file():
+        return str(local)
+    return shutil.which("tsc")
+
+
+def run_typecheck(adapter: Path) -> int:
+    tsc = find_tsc()
+    if tsc is None:
+        print("note: tsc not found — typecheck skipped (run `npm install` to enable)")
+        return 0
+    tsconfig = adapter / "tsconfig.json"
+    print(f"typechecking {rel(tsconfig)} via tsc --noEmit")
+    # cwd=ROOT so the tsconfig's `types: ["node"]` resolves @types/node from the
+    # repo-root node_modules regardless of where the adapter lives.
+    completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [tsc, "-p", str(tsconfig), "--noEmit"],
+        cwd=ROOT,
+    )
+    return completed.returncode
+
+
 def run_tests(adapter: Path) -> int:
     node = shutil.which("node")
     if node is None:
@@ -200,7 +231,11 @@ def main(argv: list[str]) -> int:
         print("\n".join(f"ERROR: {error}" for error in errors), file=sys.stderr)
         return 1
 
-    return run_tests(runtime)
+    # Run both dynamic layers even if the first fails, so one invocation reports
+    # every failure; the gate is red if either the typecheck or the tests fail.
+    typecheck_rc = run_typecheck(runtime)
+    tests_rc = run_tests(runtime)
+    return typecheck_rc or tests_rc
 
 
 if __name__ == "__main__":

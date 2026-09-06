@@ -211,13 +211,19 @@ test("normal named /think remains bridge-backed", async () => {
   createMethodologistExtension({
     dispatch: (request): Response => {
       dispatches += 1;
+      // The named-/think path only ever dispatches SelectMethodology; narrow the
+      // Command union so the mock is type-checked, not just runtime-correct.
+      const { command } = request;
+      if (command.type !== "SelectMethodology") {
+        throw new Error(`expected SelectMethodology, got ${command.type}`);
+      }
       return {
         protocol: PROTOCOL,
         request_id: request.request_id,
         result: {
           type: "MethodologySelected",
-          methodology: request.command.requested_methodology!,
-          reason: request.command.intent,
+          methodology: command.requested_methodology!,
+          reason: command.intent,
           phases: Array.from({ length: 6 }, (_, index) => ({
             number: index + 1,
             title: `Phase ${index + 1}`,
