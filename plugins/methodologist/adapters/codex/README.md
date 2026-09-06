@@ -7,12 +7,21 @@ therefore does not copy or fork methodology semantics. Native implicit or
 This layout follows the official [plugin packaging][plugins] and [skill
 activation][skills] contracts.
 
-Codex CLI 0.146.0 also supports plugin-bundled MCP servers. `.mcp.json` starts
-`mcp_server.py` with the installed plugin root as its working directory. The
-server exposes one read-only tool, `methodologist_select`, and only translates
-MCP JSON-RPC to the existing `methodologist/v1` bridge. The host-neutral core
-validates the registry name and canonical six-phase plan; the shared skill and
-methodology Markdown remain authoritative for reasoning and execution.
+Codex CLI 0.146.0 also supports plugin-bundled MCP servers, and the same
+`.mcp.json` is shared by two harnesses — Codex (via `.codex-plugin/plugin.json`)
+and Claude Code (which auto-loads the plugin-root `.mcp.json`). The two resolve
+paths differently: Codex launches the server with the installed plugin root as
+its working directory, whereas Claude Code launches it in the user's session
+directory and instead exports `CLAUDE_PLUGIN_ROOT` to the subprocess. A static
+path therefore cannot satisfy both — a relative path breaks under Claude Code,
+and `${CLAUDE_PLUGIN_ROOT}` is a Claude-only substitution Codex passes through
+literally. So `args` is a one-line `python3 -c` bootstrap that resolves
+`mcp_server.py` from `CLAUDE_PLUGIN_ROOT` (Claude Code) with a fallback to the
+process cwd (Codex's plugin root). The server exposes one read-only tool,
+`methodologist_select`, and only translates MCP JSON-RPC to the existing
+`methodologist/v1` bridge. The host-neutral core validates the registry name and
+canonical six-phase plan; the shared skill and methodology Markdown remain
+authoritative for reasoning and execution.
 
 This adapter intentionally provides no slash command, task widget, persistence,
 or hooks. An ambiguous two-candidate call returns a decision requirement for

@@ -4,9 +4,9 @@
       "type": "stdio",
       "command": "python3",
       "args": [
-        "adapters/codex/mcp_server.py"
+        "-c",
+        "import os,runpy;runpy.run_path(os.path.join(os.environ.get('CLAUDE_PLUGIN_ROOT') or os.environ.get('PLUGIN_ROOT') or '.','adapters/codex/mcp_server.py'),run_name='__main__')"
       ],
-      "cwd": ".",
       "startup_timeout_sec": 10,
       "tool_timeout_sec": 10
     }
