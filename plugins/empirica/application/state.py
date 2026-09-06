@@ -90,6 +90,21 @@ class OperationalState:
     # --- modes (ADR-24/28) ---
     modes: dict = field(default_factory=dict)
     is_legacy: bool = False
+    # --- scope-derived progress-gated pass budget (see core/budget.py) ---
+    # `max_passes` above is the a-priori CEILING; `working_passes` is the scope-derived cap under it
+    # (None until the first graph, when the service derives it). A pass is counted only when a stop
+    # made knowledge progress: `last_stop_digest` is the progress token at the last real stop, and
+    # `last_progress_ts` is the epoch-seconds clock at that stop, against which the wall-clock stall
+    # deadline is measured. All three default to None so a pre-fix document decodes and runs.
+    working_passes: int | None = None
+    last_stop_digest: str | None = None
+    last_progress_ts: float | None = None
+    # A clock-free backstop: consecutive no-progress (idle) stops since the last progress. Reset to 0
+    # on any progress stop; when it reaches `max_idle_stops` the run terminates `stopped_residual`
+    # WITHOUT depending on any host clock (the wall-clock stall deadline is gated on an optional
+    # `observed_at`, so it alone cannot bound a clockless caller). Defaults to 0 so a pre-fix document
+    # decodes and runs.
+    idle_stops: int = 0
 
     @classmethod
     def new(cls, *, goal: str, max_passes: int, max_spawns: int | None,
@@ -178,6 +193,10 @@ class OperationalState:
             "dispatches": [dict(d) for d in self.dispatches],
             "modes": self.modes,
             "is_legacy": self.is_legacy,
+            "working_passes": self.working_passes,
+            "last_stop_digest": self.last_stop_digest,
+            "last_progress_ts": self.last_progress_ts,
+            "idle_stops": self.idle_stops,
         }
 
     @classmethod
@@ -240,6 +259,16 @@ class OperationalState:
             dispatches=_decode_dispatches(value.get("dispatches")),
             modes=modes if isinstance(modes, dict) else {},
             is_legacy=bool(value.get("is_legacy", False)),
+            # New budget/clock fields fail closed to their None default on absence OR a bad type
+            # (mirroring `_opt_int`): a corrupt working cap falls back to the a-priori `max_passes`
+            # ceiling, and a corrupt token/clock reads as "no prior stop" — the conservative bound.
+            working_passes=_opt_int(value.get("working_passes")),
+            last_stop_digest=(value.get("last_stop_digest")
+                              if isinstance(value.get("last_stop_digest"), str) else None),
+            last_progress_ts=_opt_float(value.get("last_progress_ts")),
+            # A negative/boolean/absent idle counter collapses to 0 (like the other counters) — the
+            # conservative bound, since it only ever grows the run's remaining idle allowance.
+            idle_stops=_nonneg_int(value.get("idle_stops")),
         )
 
 
@@ -248,6 +277,16 @@ def _opt_int(value: object) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         return None
     return value
+
+
+def _opt_float(value: object) -> float | None:
+    """A finite non-negative float (an int is accepted and widened), or None. Bools reject (bool ⊂
+    int) and a NaN/inf or negative clock reads as absent — a corrupt timestamp must not drive the
+    stall deadline, so it fails closed to "no prior progress" exactly like `_opt_int` does."""
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or value < 0 or not math.isfinite(value)):
+        return None
+    return float(value)
 
 
 def _is_plain_int(value: object) -> bool:

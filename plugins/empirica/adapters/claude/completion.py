@@ -7,6 +7,7 @@ exit/stdout/stderr contract.  It registers no hook and reads no run files.
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -45,6 +46,9 @@ def build_stop_request(
             "type": "EvaluateRun",
             "run_id": _handle(run_id),
             "intent": "report_convergence",
+            # The hook stamps its own wall clock (epoch seconds): Claude Code hook input carries no
+            # timestamp, and the service measures the stall deadline against it.
+            "observed_at": time.time(),
         },
     }
 

@@ -27,7 +27,7 @@ from __future__ import annotations
 import hashlib
 from typing import Protocol
 
-from core import Allow, Block, Fault, Inert, Present, RunKey, RunState, adjudicate, claims
+from core import Allow, Block, Fault, Inert, Present, RunKey, RunState, adjudicate, claims, budget
 from core.records import ABSENT, Conflict, Corrupt
 
 from . import actors, knowledge, wire
@@ -59,12 +59,23 @@ class EmpiricaService:
 
     def __init__(self, runs, artifacts, allocator: GenerationAllocator, *,
                  theta: float = DEFAULT_THETA,
-                 default_max_passes: int = DEFAULT_MAX_PASSES) -> None:
+                 default_max_passes: int = DEFAULT_MAX_PASSES,
+                 stall_deadline_sec: float = 1800.0,
+                 max_idle_stops: int = 50) -> None:
         self._runs = runs
         self._artifacts = artifacts
         self._allocator = allocator
         self._theta = theta
         self._default_max_passes = default_max_passes
+        # Wall-clock "time since last knowledge progress" bound for an idle-waiting stop (ADR budget
+        # fix). 30 min ≈ 2.2× the measured 825s worst-case audit; the composition root overrides it
+        # from EMPIRICA_STALL_DEADLINE_SEC. This is what makes an idle wait terminate without a pass.
+        self._stall_deadline_sec = stall_deadline_sec
+        # Clock-free consecutive-no-progress backstop: the wall-clock deadline above is gated on an
+        # OPTIONAL `observed_at`, so a clockless caller (Claude Code hook input carries no timestamp
+        # and the host may omit its stamp) could otherwise block forever. This bounds an idle run in
+        # stop COUNT with no dependence on any clock. Overridden from EMPIRICA_MAX_IDLE_STOPS.
+        self._max_idle_stops = max_idle_stops
 
     # --- dispatch ------------------------------------------------------------
 
@@ -281,6 +292,17 @@ class EmpiricaService:
                                                  spawn=self._spawn_view(state, reserved=True,
                                                      note=f"run is {state.status}; budget not "
                                                           "enforced on a finished run")))
+            # A LATE audit verdict is admissible on a terminal run when its nonce matches an ISSUED
+            # ticket: the auditor may have been dispatched before the run stopped (e.g. on the pass
+            # budget while it waited), so its work should become durable. It CANNOT flip the run to
+            # converged — `adjudicate` refuses to re-judge a finished run — so admitting it is safe;
+            # it is a pure knowledge append that leaves the terminal status unchanged. A verdict with
+            # no matching issued ticket still faults closed (an unattributable late write).
+            if kind == knowledge.KIND_AUDIT_VERDICT:
+                payload = self._verdict_payload(action)
+                if any(t["nonce"] == payload["nonce"] for t in state.audit_tickets):
+                    return self._append_and_ack(
+                        key, state, knowledge.audit_verdict_artifact(payload))
             return wire.fault(wire.FAULT_CONFLICT, f"run is {state.status}, not active")
 
         # --- knowledge-plane appends (immutable argument; revision unchanged) ---
@@ -437,19 +459,41 @@ class EmpiricaService:
             key, result, spawn=self._spawn_view(result, reserved=True)))
 
     def _configure_budget(self, key: RunKey, action: dict) -> dict:
-        """Set (or clear) the spawn cap (ADR-17). ``max_spawns`` is a non-negative int or null
-        (unbounded). Under the same CAS as any state write, so an operator's cap change cannot
-        clobber a concurrent reservation."""
-        if "max_spawns" not in action:
-            raise wire.InvalidRequest("missing field: max_spawns")
-        cap = action["max_spawns"]
-        if cap is not None and (not isinstance(cap, int) or isinstance(cap, bool) or cap < 0):
+        """Set (or clear) the spawn cap and/or RAISE the a-priori pass ceiling (ADR-17/19/28).
+
+        ``max_spawns`` is a non-negative int or null (unbounded). ``max_passes`` is a positive int
+        and may ONLY be raised — the ceiling is lifted by a human here, never by the run (SKILL.md;
+        the run derives its working cap under this fixed ceiling), so a value below the current
+        ceiling is refused as a conflict rather than silently shrinking the budget. At least one of
+        the two fields must be present. Under the same CAS as any state write, so an operator's
+        change cannot clobber a concurrent reservation."""
+        has_spawns = "max_spawns" in action
+        has_passes = "max_passes" in action
+        if not has_spawns and not has_passes:
+            raise wire.InvalidRequest("configure_budget requires max_spawns and/or max_passes")
+        cap = action.get("max_spawns")
+        if has_spawns and cap is not None and (not isinstance(cap, int)
+                                               or isinstance(cap, bool) or cap < 0):
             raise wire.InvalidRequest("max_spawns must be a non-negative integer or null")
+        ceiling = action.get("max_passes")
+        if has_passes and (not isinstance(ceiling, int) or isinstance(ceiling, bool) or ceiling < 1):
+            raise wire.InvalidRequest("max_passes must be a positive integer")
 
         def mutate(state: OperationalState):
-            if state.max_spawns == cap:  # already at this cap — no-op, do not churn the revision
+            changes: dict = {}
+            if has_spawns and state.max_spawns != cap:
+                changes["max_spawns"] = cap
+            if has_passes:
+                if ceiling < state.max_passes:
+                    return wire.fault(
+                        wire.FAULT_CONFLICT,
+                        f"max_passes may only be raised: {ceiling} is below the current ceiling "
+                        f"{state.max_passes} (the run derives its working cap under this ceiling)")
+                if ceiling != state.max_passes:
+                    changes["max_passes"] = ceiling
+            if not changes:  # already at these values — no-op, do not churn the revision
                 return wire.allow(False, self._run_view(key, state, spawn=self._spawn_view(state)))
-            return state.evolve(max_spawns=cap)
+            return state.evolve(**changes)
         result = self._commit(key, mutate)
         if isinstance(result, dict):
             return result
@@ -671,7 +715,32 @@ class EmpiricaService:
                 return wire.fault(wire.FAULT_CONFLICT, f"run is {state.status}, not active")
             if state.claim_graph_artifact_id == art_id:
                 return self._run_snapshot(key, state)  # already current — idempotent no-op
-            new_state = state.evolve(claim_graph_artifact_id=art_id)
+            # On the SAME write that moves the pointer, (re)derive the scope-based WORKING budget.
+            # The a-priori CEILING (`max_passes`) is fixed at the FIRST graph from the seeded scope
+            # and is NEVER raised by the run thereafter — only a human may raise it, via
+            # `configure_budget` (SKILL.md; ADR-19/28). Auto-raising it on every graph update let a
+            # scope-growing loop lift its own ceiling without limit and never terminate, which is the
+            # regression this closes. On later graphs the working cap is re-derived under that FIXED
+            # ceiling (`budget.derive` clamps to `min(max_passes, open+2)`), so scope growth pushes
+            # `working_passes` UP TO but never past the ceiling. `max_spawns` is derived only when no
+            # explicit operator cap is set (never overridden).
+            changes: dict = {"claim_graph_artifact_id": art_id}
+            seed_open = budget.open_gating_claim_count(canonical)
+            if state.working_passes is None:
+                # First graph: fix the ceiling from the seeded scope, never lowering an existing cap.
+                ceiling = max(state.max_passes, budget.ceiling_for(seed_open))
+                derived_passes, derived_spawns = budget.derive(canonical, ceiling)
+                changes["max_passes"] = ceiling
+                changes["working_passes"] = derived_passes
+                if state.max_spawns is None:
+                    changes["max_spawns"] = derived_spawns
+            else:
+                # Later graph: re-derive the working cap under the FIXED ceiling; max_passes unchanged.
+                derived_passes, derived_spawns = budget.derive(canonical, state.max_passes)
+                changes["working_passes"] = derived_passes
+                if state.max_spawns is None:
+                    changes["max_spawns"] = derived_spawns
+            new_state = state.evolve(**changes)
             try:
                 self._runs.compare_and_set(key, new_state.encode(), read.revision)
             except Conflict:
@@ -690,13 +759,17 @@ class EmpiricaService:
         intent = wire.require(command, "intent", str)
         if intent not in wire._INTENTS:
             raise wire.InvalidRequest(f"unknown intent: {intent!r}")
+        # Optional host clock (epoch seconds): the host stamps it because Claude Code hook input
+        # carries no timestamp. It threads through to the stall-deadline decision in _finalize_block.
+        observed_at = wire.optional_epoch(command, "observed_at")
         for _ in range(_MAX_CAS_RETRIES):
-            outcome = self._evaluate_once(key, advisory=(intent == wire.INTENT_CONTINUE))
+            outcome = self._evaluate_once(key, advisory=(intent == wire.INTENT_CONTINUE),
+                                          observed_at=observed_at)
             if outcome is not _RETRY:
                 return outcome
         return wire.fault(wire.FAULT_CONFLICT, "evaluation did not converge under contention")
 
-    def _evaluate_once(self, key: RunKey, *, advisory: bool):
+    def _evaluate_once(self, key: RunKey, *, advisory: bool, observed_at: float | None = None):
         read = self._runs.read(key)
         if read is ABSENT:
             return wire.inert("no_run")
@@ -727,13 +800,20 @@ class EmpiricaService:
                      if isinstance(graph, dict) else None)
         attribution = know.attributions[-1] if know.attributions else None
 
+        # A progress token over what already loaded here: the pointer plus the sizes of the knowledge
+        # sets. It changes ⇔ the argument or its evidence/verdicts/tickets grew since the last stop —
+        # which is exactly what makes a stop count a PASS rather than an idle wait (change B).
+        progress_token = _progress_token(state.claim_graph_artifact_id, know.evidence,
+                                         know.evidence_leaves, know.verdicts, state.audit_tickets)
+
         run_state = RunState(status="active", is_legacy=state.is_legacy,
                              frozen_claims=state.frozen_claims)
         decision = adjudicate(run=run_state, graph=graph, theta=state.theta,
                              evidence=evidence, audit=audit,
                              route_verdict=state.route_p1_verdict(),
                              digest_of=digest_of, attribution=attribution)
-        return self._finalize(key, read, state, decision, advisory=advisory)
+        return self._finalize(key, read, state, decision, advisory=advisory,
+                              progress_token=progress_token, observed_at=observed_at)
 
     def _load_graph(self, key: RunKey, state: OperationalState):
         """Load the graph the run's pointer names, plus the whole knowledge set (cached on self).
@@ -761,8 +841,9 @@ class EmpiricaService:
         return (graph if isinstance(graph, dict) else claims.CORRUPT), None
 
     def _finalize(self, key: RunKey, read: Present, state: OperationalState,
-                  decision, *, advisory: bool) -> dict:
-        """Turn a core :class:`Decision` into a wire result, applying the ``max_passes`` cap and
+                  decision, *, advisory: bool, progress_token: str,
+                  observed_at: float | None) -> dict:
+        """Turn a core :class:`Decision` into a wire result, applying the pass-budget cap and
         persisting the resulting status transition (the one policy the core omits).
 
         ``advisory`` (intent="continue") means the caller is asking "should I keep going?", not
@@ -774,7 +855,8 @@ class EmpiricaService:
         if isinstance(decision, Fault):
             return self._fault_from_reason(decision.reason)
         if isinstance(decision, Block):
-            return self._finalize_block(key, read, state, decision, advisory)
+            return self._finalize_block(key, read, state, decision, advisory,
+                                        progress_token=progress_token, observed_at=observed_at)
         # Allow: the core blesses a stop (converged, residual, refuted, or frozen).
         if advisory:
             return wire.allow(decision.converged, self._decision_run(key, state, decision))
@@ -785,23 +867,74 @@ class EmpiricaService:
         return wire.allow(decision.converged, self._decision_run(key, persisted, decision))
 
     def _finalize_block(self, key: RunKey, read: Present, state: OperationalState,
-                        decision: Block, advisory: bool) -> dict:
-        """A block. Advisory reads report it untouched. A real stop attempt records a pass; when the
-        pass budget is exhausted the block becomes a non-converged ``stopped_budget`` stop (ADR-31 /
-        the ADR-30 note that the *adapter* applies the cap), otherwise the run stays active."""
+                        decision: Block, advisory: bool, *, progress_token: str,
+                        observed_at: float | None) -> dict:
+        """A block. Advisory reads report it untouched. A real stop attempt counts a pass ONLY when
+        it made knowledge progress (change B): an idle wait — an identical stop while an async
+        auditor runs — must not burn the budget. The two outcomes give the termination guarantee:
+
+        * PROGRESS (token changed; a first stop always counts, as the prior token is None) → +1 pass,
+          reset the stall clock AND the idle-stop counter; when the pass count reaches the working
+          cap (``working_passes`` or, absent one, ``max_passes``) the block becomes a non-converged
+          ``stopped_budget`` stop.
+        * NO PROGRESS (identical stop) → pass UNCHANGED, idle-stop counter +1. The run keeps blocking
+          until EITHER bound trips (whichever is earlier): the clock-free consecutive-idle count
+          reaches ``max_idle_stops``, or — when a host clock IS present — the wall-clock time since
+          the last progress exceeds ``stall_deadline_sec``. Either way it stops ``stopped_residual``,
+          so an audit that never returns cannot wedge the run open, WITH OR WITHOUT a host clock.
+        """
         if advisory:
             return wire.block(decision.reason, self._run_view(key, state))
-        new_passes = state.passes + 1
-        if new_passes >= state.max_passes:
-            new_state = state.evolve(passes=new_passes, status=wire.STATUS_STOPPED_BUDGET)
-            persisted = self._cas(key, read.revision, new_state)
+
+        if progress_token != state.last_stop_digest:
+            new_passes = state.passes + 1
+            cap = state.working_passes or state.max_passes
+            # Progress resets both idle backstops (count and clock seed).
+            changes: dict = {"passes": new_passes, "last_stop_digest": progress_token,
+                             "idle_stops": 0}
+            if observed_at is not None:
+                changes["last_progress_ts"] = observed_at
+            if new_passes >= cap:
+                changes["status"] = wire.STATUS_STOPPED_BUDGET
+                persisted = self._cas(key, read.revision, state.evolve(**changes))
+                if persisted is _RETRY:
+                    return _RETRY
+                note = (f"NON-CONVERGED: reached pass budget={cap} without convergence "
+                        f"({decision.reason})")
+                return wire.allow(False, self._run_view(key, persisted, note=note))
+            persisted = self._cas(key, read.revision, state.evolve(**changes))
             if persisted is _RETRY:
                 return _RETRY
-            note = (f"NON-CONVERGED: reached max_passes={state.max_passes} without convergence "
-                    f"({decision.reason})")
+            return wire.block(decision.reason, self._run_view(key, persisted))
+
+        # No progress: an idle wait. Do not cost a pass, but count it against two backstops. The
+        # clock-free count fires REGARDLESS of `observed_at`; the wall-clock deadline is an additional
+        # EARLIER bound when a host clock is present. Terminate on EITHER. Measure the stall from the
+        # last progress — or, on the first stop that lacked a clock, from this observation (so the
+        # window starts at the first stop, never at run creation).
+        new_idle_stops = state.idle_stops + 1
+        seed_ts = state.last_progress_ts if state.last_progress_ts is not None else observed_at
+        stalled_by_clock = (observed_at is not None and seed_ts is not None
+                            and (observed_at - seed_ts) > self._stall_deadline_sec)
+        stalled_by_count = new_idle_stops >= self._max_idle_stops
+        if stalled_by_clock or stalled_by_count:
+            persisted = self._cas(
+                key, read.revision,
+                state.evolve(status=wire.STATUS_STOPPED_RESIDUAL, idle_stops=new_idle_stops))
+            if persisted is _RETRY:
+                return _RETRY
+            note = (f"no knowledge progress for {int(observed_at - seed_ts)}s; "
+                    "audit did not return or the loop stalled") if stalled_by_clock else (
+                f"no knowledge progress across {new_idle_stops} stops; "
+                "audit did not return or the loop stalled")
             return wire.allow(False, self._run_view(key, persisted, note=note))
-        new_state = state.evolve(passes=new_passes)
-        persisted = self._cas(key, read.revision, new_state)
+
+        # Not yet stalled: record the incremented idle count (and seed the stall clock on the first
+        # stop that lacked one) and keep blocking.
+        changes = {"idle_stops": new_idle_stops}
+        if state.last_progress_ts is None and observed_at is not None:
+            changes["last_progress_ts"] = observed_at
+        persisted = self._cas(key, read.revision, state.evolve(**changes))
         if persisted is _RETRY:
             return _RETRY
         return wire.block(decision.reason, self._run_view(key, persisted))
@@ -878,6 +1011,17 @@ def knowledge_artifact(artifact_id: str, body: str):
     from core.records import Artifact
 
     return Artifact(artifact_id, body)
+
+
+def _progress_token(pointer: str | None, evidence, evidence_leaves, verdicts,
+                    audit_tickets) -> str:
+    """A digest of the run's knowledge SIZE at a stop: the graph pointer plus the counts of
+    evidence, evidence leaves, audit verdicts, and issued tickets. It changes exactly when the
+    argument or its evidence grew, so comparing it to the last stop's token tells a real pass from
+    an idle wait (change B) — cheap, since every input already loaded for adjudication."""
+    raw = (f"{pointer}:{len(evidence)}:{len(evidence_leaves)}:"
+           f"{len(verdicts)}:{len(audit_tickets)}")
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _mint_nonce(key: RunKey, seq: int) -> str:

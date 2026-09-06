@@ -32,6 +32,7 @@ already enforce.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -67,7 +68,37 @@ def build_service(cwd: Path | None = None):
 
     runs = FilesystemRunRepository()
     artifacts = GitArtifactRepository(Path(cwd) if cwd is not None else Path.cwd())
-    return EmpiricaService(runs, artifacts, GenerationAllocator(runs))
+    return EmpiricaService(runs, artifacts, GenerationAllocator(runs),
+                           stall_deadline_sec=_stall_deadline_sec(),
+                           max_idle_stops=_max_idle_stops())
+
+
+def _stall_deadline_sec() -> float:
+    """The wall-clock stall deadline (seconds) from ``EMPIRICA_STALL_DEADLINE_SEC``; default 1800.0.
+    A missing, unparseable, or non-positive value falls back to the default rather than disabling the
+    bound — an idle wait must always be able to terminate the run."""
+    raw = os.environ.get("EMPIRICA_STALL_DEADLINE_SEC")
+    if raw is None:
+        return 1800.0
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return 1800.0
+    return value if value > 0 else 1800.0
+
+
+def _max_idle_stops() -> int:
+    """The clock-free consecutive-no-progress backstop from ``EMPIRICA_MAX_IDLE_STOPS``; default 50.
+    A missing, unparseable, or non-positive value falls back to the default rather than disabling the
+    bound — a clockless caller (no ``observed_at``) must still be able to terminate an idle run."""
+    raw = os.environ.get("EMPIRICA_MAX_IDLE_STOPS")
+    if raw is None:
+        return 50
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 50
+    return value if value > 0 else 50
 
 
 def handle(request: object, *, cwd: Path | None = None) -> dict:

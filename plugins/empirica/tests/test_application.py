@@ -137,11 +137,13 @@ class FakeGenerationAllocator:
 # --- drivers -----------------------------------------------------------------
 
 
-def make_service(theta=0.8, default_max_passes=8, order=None):
+def make_service(theta=0.8, default_max_passes=8, order=None, stall_deadline_sec=1800.0,
+                 max_idle_stops=50):
     runs = FakeRunRepository()
     arts = FakeArtifactRepository(order=order)
     svc = EmpiricaService(runs, arts, FakeGenerationAllocator(runs),
-                          theta=theta, default_max_passes=default_max_passes)
+                          theta=theta, default_max_passes=default_max_passes,
+                          stall_deadline_sec=stall_deadline_sec, max_idle_stops=max_idle_stops)
     return svc, runs, arts
 
 
@@ -163,6 +165,14 @@ def evaluate(svc, run_id, intent="report_convergence"):
     return svc.handle(req({"type": "EvaluateRun", "run_id": run_id, "intent": intent}))
 
 
+def evaluate_at(svc, run_id, observed_at, intent="stop"):
+    """Evaluate carrying the host's wall clock (epoch seconds). The service threads ``observed_at``
+    into the progress/stall decision — it is what a stop counts progress against and what the
+    wall-clock stall deadline is measured with (the budget fix, change B/C)."""
+    return svc.handle(req({"type": "EvaluateRun", "run_id": run_id,
+                           "intent": intent, "observed_at": observed_at}))
+
+
 def get(svc, run_id):
     return svc.handle(req({"type": "GetRun", "run_id": run_id}))
 
@@ -182,6 +192,16 @@ def single_goal_graph(text="the intent", confidence=0.9, blocked=None, refuted_b
     return {"root": "G0",
             "nodes": {"G0": {"type": "Goal", "text": text, "confidence": confidence,
                              "blocked": blocked, "refuted_by": refuted_by}},
+            "edges": []}
+
+
+def gating_goal_graph(kind="needs-data", confidence=0.0):
+    """A single open Goal whose ``kind`` is externally-evidenced, so ``core/budget`` counts it as one
+    open gating claim (working_passes = min(ceiling, 1 + PASS_RESERVE) = 3). Confidence 0 keeps it
+    OPEN, so the run keeps blocking as converging rather than converging or dropping to a residual."""
+    return {"root": "G0",
+            "nodes": {"G0": {"type": "Goal", "text": "the intent", "kind": kind,
+                             "confidence": confidence, "blocked": None, "refuted_by": None}},
             "edges": []}
 
 
@@ -215,6 +235,18 @@ def drive_to_converged(svc, **start_kw):
     nonce = result(observe(svc, h, {"kind": "audit_ticket"}))["run"]["ticket"]["nonce"]
     observe(svc, h, passing_verdict(canon, nonce=nonce))
     return h, canon
+
+
+def drive_to_budget_stop(svc, h):
+    """Drive an open (confidence-0) run to a terminal ``stopped_budget`` via the PROGRESS-gated pass
+    budget (change B). With 0 gating claims the derived working cap is PASS_RESERVE=2, so two stops
+    that each make knowledge progress exhaust it. Progress between the two stops is supplied by an
+    audit-ticket append (the token counts issued tickets); two IDENTICAL idle stops would NOT count,
+    which is exactly why the pre-fix ``evaluate; evaluate`` no longer reaches the cap."""
+    observe(svc, h, {"kind": "graph", "graph": single_goal_graph(confidence=0.0)})
+    evaluate(svc, h, intent="stop")            # progress: first stop -> pass 1 of 2
+    observe(svc, h, {"kind": "audit_ticket"})  # knowledge progress -> the next stop counts a pass
+    return evaluate(svc, h, intent="stop")     # progress -> pass 2 == cap -> stopped_budget
 
 
 # --- lifecycle ---------------------------------------------------------------
@@ -264,11 +296,13 @@ def test_resume_same_selector_no_clobber():
 
 
 def test_generation_isolation_after_terminal():
-    svc, runs, _ = make_service(default_max_passes=1)
+    svc, runs, _ = make_service()
     # Drive a run to a terminal budget stop, then StartRun again -> fresh generation, clean state.
+    # (Under the budget fix a single evaluate no longer stops: the a-priori ceiling is raised to 8 by
+    # `ceiling_for`, and only PROGRESS stops count against the derived working cap — see
+    # `drive_to_budget_stop`.)
     h = handle_of(start(svc))
-    observe(svc, h, {"kind": "graph", "graph": single_goal_graph(confidence=0.0)})
-    evaluate(svc, h)  # blocks, max_passes=1 -> stopped_budget
+    drive_to_budget_stop(svc, h)  # -> stopped_budget (terminal)
     r2 = result(start(svc))
     check("G1 StartRun after a terminal run opens a new generation",
           r2["run"]["id"] != h, f"got {r2['run']['id']}")
@@ -434,15 +468,28 @@ def test_cap_converts_block_to_stopped_budget():
     svc, runs, _ = make_service(default_max_passes=2)
     h = handle_of(start(svc, max_passes=2))
     observe(svc, h, {"kind": "graph", "graph": single_goal_graph(confidence=0.0)})
-    r1 = result(evaluate(svc, h, intent="stop"))
+    key = RunKey("proj", "sess", 1)
+    stored = runs.raw_value(key)
+    # (ii) the graph write raises the a-priori ceiling via `ceiling_for` (floor 8) and derives the
+    # scope-based working cap (0 gating claims + PASS_RESERVE = 2) it enforces from now on.
+    check("C0 the graph write raised max_passes to the ceiling floor and set a working cap",
+          stored["max_passes"] == 8 and stored["working_passes"] == 2,
+          f"max_passes={stored['max_passes']} working_passes={stored['working_passes']}")
+    r1 = result(evaluate(svc, h, intent="stop"))  # progress (first stop) -> pass 1 of 2
     check("C1 the first blocked stop attempt stays active (pass 1 of 2)",
           r1["type"] == "Block" and r1["run"]["status"] == "active", f"got {r1}")
-    r2 = result(evaluate(svc, h, intent="stop"))
-    check("C2 exhausting max_passes turns the block into a non-converged stopped_budget Allow",
+    # (i) an IDENTICAL idle stop does not count — the pre-fix repeat no longer advances the budget;
+    # only a stop that made knowledge progress (here, an audit-ticket append) counts pass 2.
+    r_idle = result(evaluate(svc, h, intent="stop"))
+    check("C1b an identical (no-progress) stop stays a Block and burns no pass",
+          r_idle["type"] == "Block" and runs.raw_value(key)["passes"] == 1, f"got {r_idle}")
+    observe(svc, h, {"kind": "audit_ticket"})  # knowledge progress -> the next stop counts a pass
+    r2 = result(evaluate(svc, h, intent="stop"))  # progress -> pass 2 == cap -> stopped_budget
+    check("C2 reaching the working pass cap turns the block into a non-converged stopped_budget Allow",
           r2["type"] == "Allow" and r2["converged"] is False
           and r2["run"]["status"] == "stopped_budget", f"got {r2}")
     check("C3 the budget stop is persisted",
-          runs.raw_value(RunKey("proj", "sess", 1))["status"] == "stopped_budget")
+          runs.raw_value(key)["status"] == "stopped_budget")
 
 
 def test_continue_intent_is_advisory():
@@ -459,6 +506,218 @@ def test_continue_intent_is_advisory():
           runs.raw_value(key)["revision"] == rev_before
           and runs.raw_value(key)["passes"] == passes_before,
           f"rev {runs.raw_value(key)['revision']} passes {runs.raw_value(key)['passes']}")
+
+
+# --- progress-gated budget + wall-clock stall (the budget fix) ---------------
+# The refuting observations for the budget fix: a pass counts PROGRESS not turn-ends (change B),
+# an idle wait terminates on a wall-clock stall deadline as stopped_residual not stopped_budget
+# (change C), and a late audit verdict is admissible on a terminal run (change D). Termination
+# stays bounded either way.
+
+
+def test_idle_stops_do_not_burn_passes():
+    """Refuting obs #1: N consecutive idle (identical-knowledge) stops leave ``passes`` unchanged.
+    Waiting for an async auditor is done by ending turns; the pre-fix code burned a pass on each,
+    hitting the cap before the verdict could land. Now only a stop that made progress costs a pass."""
+    svc, runs, _ = make_service()
+    h = handle_of(start(svc))
+    observe(svc, h, {"kind": "graph", "graph": single_goal_graph(confidence=0.0)})
+    key = RunKey("proj", "sess", 1)
+    result(evaluate(svc, h, intent="stop"))  # first stop makes progress (token None -> X): pass 1
+    passes_after_first = runs.raw_value(key)["passes"]
+    for _ in range(5):  # five further IDENTICAL stops: no knowledge changed between them
+        evaluate(svc, h, intent="stop")
+    check("PB1 the first real stop counts exactly one pass",
+          passes_after_first == 1, f"got {passes_after_first}")
+    check("PB2 N consecutive idle stops burn no further passes (idle waits do not cost the budget)",
+          runs.raw_value(key)["passes"] == 1, f"passes moved to {runs.raw_value(key)['passes']}")
+
+
+def test_progress_between_stops_counts_one_pass_and_resets_timer():
+    """Refuting obs #2: a knowledge append between two stops counts exactly ONE pass and advances
+    ``last_progress_ts`` (resets the stall timer). One open gating claim gives a working cap of 3, so
+    two progress passes stay active — isolating the "one append = one pass, timer moves" property."""
+    svc, runs, _ = make_service()
+    h = handle_of(start(svc))
+    observe(svc, h, {"kind": "graph", "graph": gating_goal_graph()})
+    key = RunKey("proj", "sess", 1)
+    evaluate_at(svc, h, 1000.0)          # first stop makes progress: pass 1, timer seeded to 1000
+    p1 = runs.raw_value(key)["passes"]
+    ts1 = runs.raw_value(key)["last_progress_ts"]
+    observe(svc, h, approve_evidence())  # a knowledge append between the two stops IS progress
+    evaluate_at(svc, h, 1500.0)          # progress again: exactly one further pass, timer -> 1500
+    p2 = runs.raw_value(key)["passes"]
+    ts2 = runs.raw_value(key)["last_progress_ts"]
+    check("PB3 the first progress stop counts one pass and seeds the stall timer",
+          p1 == 1 and ts1 == 1000.0, f"passes={p1} ts={ts1}")
+    check("PB4 a knowledge append between two stops counts exactly ONE further pass",
+          p2 == 2, f"passes={p2}")
+    check("PB5 progress advances last_progress_ts (the stall timer resets on progress)",
+          ts2 == 1500.0, f"ts={ts2}")
+
+
+def test_stall_deadline_stops_residual_not_budget():
+    """Refuting obs #3: exceeding ``stall_deadline_sec`` with no progress stops as stopped_residual —
+    NOT stopped_budget. A small injected deadline and controlled ``observed_at`` values drive it."""
+    svc, runs, _ = make_service(stall_deadline_sec=100.0)
+    h = handle_of(start(svc))
+    observe(svc, h, {"kind": "graph", "graph": gating_goal_graph()})
+    key = RunKey("proj", "sess", 1)
+    evaluate_at(svc, h, 1000.0)                       # progress: pass 1, timer seeded to 1000
+    r_under = result(evaluate_at(svc, h, 1050.0))     # idle, 50s < 100s deadline -> still blocking
+    r_over = result(evaluate_at(svc, h, 1200.0))      # idle, 200s > 100s deadline -> stall
+    check("PB6 an idle stop within the stall deadline keeps blocking (no pass, no stop)",
+          r_under["type"] == "Block" and runs.raw_value(key)["passes"] == 1, f"got {r_under}")
+    check("PB7 exceeding the stall deadline with no progress stops as stopped_residual (NOT budget)",
+          r_over["type"] == "Allow" and r_over["converged"] is False
+          and r_over["run"]["status"] == "stopped_residual", f"got {r_over}")
+
+
+def test_termination_is_bounded_no_infinite_loop():
+    """Refuting obs #6: total stops are bounded — a run that never makes progress cannot loop
+    forever. With a monotone clock and no knowledge change, the wall-clock stall deadline must fire
+    and terminate the run in a bounded number of steps (the hard iteration cap catches a regression
+    to an unbounded loop)."""
+    svc, runs, _ = make_service(stall_deadline_sec=50.0)
+    h = handle_of(start(svc))
+    observe(svc, h, {"kind": "graph", "graph": gating_goal_graph()})
+    key = RunKey("proj", "sess", 1)
+    clock, terminal, steps = 1000.0, None, 0
+    for _ in range(200):  # a hard cap: an unbounded loop would exhaust this without terminating
+        steps += 1
+        r = result(evaluate_at(svc, h, clock))
+        if r["type"] == "Allow":
+            terminal = r["run"]["status"]
+            break
+        clock += 10.0
+    check("PB8 an idle-waiting run terminates via the stall deadline, never looping forever",
+          terminal == "stopped_residual", f"terminal={terminal} after {steps} steps")
+    check("PB9 termination is bounded well under the hard iteration cap",
+          steps < 200 and runs.raw_value(key)["status"] == "stopped_residual",
+          f"steps={steps}")
+
+
+def test_late_audit_verdict_admissible_on_terminal_run():
+    """Refuting obs #4: a KIND_AUDIT_VERDICT whose nonce matches an issued ticket is appended and
+    readable on a TERMINAL run, the status is unchanged (it cannot re-judge a finished run), and a
+    verdict with no matching issued ticket still faults closed."""
+    svc, runs, arts = make_service()
+    h, canon = drive_to_converged(svc)
+    evaluate(svc, h, intent="report_convergence")  # -> converged (terminal)
+    key = RunKey("proj", "sess", 1)
+    check("D5 the run is terminal (converged) before the late verdict",
+          runs.raw_value(key)["status"] == "converged", f"got {runs.raw_value(key)['status']}")
+    nonce = runs.raw_value(key)["audit_tickets"][0]["nonce"]
+    ids_before = arts.ids(key)
+    late = {"kind": "audit_verdict", "verdict": "pass", "nonce": nonce,
+            "argument_digest": C.argument_digest(canon), "claims_reviewed": [], "findings": []}
+    r = result(observe(svc, h, late))
+    check("D6 a late verdict with a matching issued nonce is admitted (appended + readable), not faulted",
+          r["type"] != "Fault" and len(arts.ids(key)) == len(ids_before) + 1,
+          f"got {r} ids={arts.ids(key)}")
+    check("D7 admitting a late verdict leaves the terminal status unchanged",
+          runs.raw_value(key)["status"] == "converged", f"got {runs.raw_value(key)['status']}")
+    bad = dict(late, nonce="deadbeefdeadbeef")
+    r2 = result(observe(svc, h, bad))
+    check("D8 a late verdict with no matching issued ticket still faults closed (conflict)",
+          r2["type"] == "Fault" and r2["code"] == "conflict", f"got {r2}")
+
+
+# --- clock-free termination + fixed ceiling (the corrective patch) -----------
+# Two confirmed termination regressions in the budget change: (1) an idle-waiting run with NO
+# host clock blocked forever because the only backstop was the clock-gated stall deadline; and
+# (2) the run raised its own max_passes on every graph update, so a scope-growing loop lifted its
+# own ceiling and never terminated. These pin the fixes: a clock-free idle backstop, and a ceiling
+# fixed at the first graph (raised only by a human via configure_budget).
+
+
+def growing_gating_graph(n: int) -> dict:
+    """A root Goal supported by n-1 further open gating Goals — n open needs-data claims total, all
+    confidence 0 so the run keeps blocking as converging while its scope grows."""
+    nodes = {"G0": {"type": "Goal", "text": "root", "kind": "needs-data",
+                    "confidence": 0.0, "blocked": None, "refuted_by": None}}
+    edges = []
+    for i in range(1, n):
+        cid = f"C{i}"
+        nodes[cid] = {"type": "Goal", "text": f"claim {i}", "kind": "needs-data",
+                      "confidence": 0.0, "blocked": None, "refuted_by": None}
+        edges.append({"type": "SupportedBy", "from": "G0", "to": cid})
+    return {"root": "G0", "nodes": nodes, "edges": edges}
+
+
+def test_clock_absent_idle_stops_terminate_residual():
+    """FINDING 1: a non-advisory EvaluateRun carrying NO observed_at (the contract makes it optional)
+    with unchanging knowledge must terminate within max_idle_stops as stopped_residual — never an
+    infinite block. The wall-clock stall deadline is gated on observed_at, so absent a host clock the
+    clock-free consecutive-no-progress backstop is the ONLY thing that can bound the run."""
+    svc, runs, _ = make_service(max_idle_stops=5)  # small injected backstop
+    h = handle_of(start(svc))
+    observe(svc, h, {"kind": "graph", "graph": gating_goal_graph()})
+    key = RunKey("proj", "sess", 1)
+    terminal, steps = None, 0
+    for _ in range(200):  # a hard cap: an unbounded loop would exhaust this without terminating
+        steps += 1
+        r = result(evaluate(svc, h, intent="report_convergence"))  # NO observed_at (clockless)
+        if r["type"] == "Allow":
+            terminal = r["run"]["status"]
+            break
+    check("CF1 a clockless idle run terminates as stopped_residual within max_idle_stops",
+          terminal == "stopped_residual" and steps <= 6,
+          f"terminal={terminal} after {steps} steps")
+    check("CF2 the clock-free stop is persisted; the idle waits burned no pass past the first",
+          runs.raw_value(key)["status"] == "stopped_residual"
+          and runs.raw_value(key)["passes"] == 1, f"got {runs.raw_value(key)}")
+
+
+def test_ceiling_is_fixed_at_first_graph_not_raised_by_the_run():
+    """FINDING 2: the run must NOT raise its own max_passes. Drive _update_graph across a GROWING
+    graph: the a-priori ceiling is fixed at the first graph and never rises, working_passes stays
+    clamped to it, and a scope-growth loop eventually trips stopped_budget when passes reach that
+    fixed ceiling — instead of the ceiling climbing forever so the run never terminates."""
+    svc, runs, _ = make_service()
+    h = handle_of(start(svc))
+    key = RunKey("proj", "sess", 1)
+    # First graph: 3 open gating claims -> ceiling_for(3) = max(8, 9) = 9. That is the fixed ceiling.
+    observe(svc, h, {"kind": "graph", "graph": growing_gating_graph(3)})
+    first_ceiling = runs.raw_value(key)["max_passes"]
+    ceiling_held, terminal, t = True, None, 1000.0
+    for n in range(4, 80):
+        observe(svc, h, {"kind": "graph", "graph": growing_gating_graph(n)})  # scope grows each step
+        ceiling_held = ceiling_held and runs.raw_value(key)["max_passes"] == first_ceiling
+        t += 60.0  # real work between stops, well under any stall deadline
+        r = result(evaluate_at(svc, h, observed_at=t, intent="report_convergence"))
+        if r["type"] == "Allow":
+            terminal = r["run"]["status"]
+            break
+    final = runs.raw_value(key)
+    check("RC1 the first graph fixes the a-priori ceiling from seeded scope (ceiling_for(3)=9)",
+          first_ceiling == 9, f"got {first_ceiling}")
+    check("RC2 max_passes never rises above the first-graph ceiling as scope grows",
+          ceiling_held and final["max_passes"] == first_ceiling, f"got {final['max_passes']}")
+    check("RC3 working_passes stays clamped to the fixed ceiling (never exceeds it)",
+          final["working_passes"] <= first_ceiling, f"got {final['working_passes']}")
+    check("RC4 a scope-growth loop terminates stopped_budget at the fixed ceiling, not endlessly",
+          terminal == "stopped_budget", f"terminal={terminal}; final={final}")
+
+
+def test_configure_budget_can_raise_the_pass_ceiling():
+    """FINDING 2 (cont.): a distinct principal RAISES the a-priori ceiling via configure_budget — the
+    one legitimate way it moves (the run never raises its own). A raise sticks; a value below the
+    current ceiling is refused as a conflict; the spawn cap is still settable alongside it."""
+    svc, runs, _ = make_service()
+    h = handle_of(start(svc, max_passes=8))
+    key = RunKey("proj", "sess", 1)
+    r_up = result(observe(svc, h, {"kind": "configure_budget", "max_passes": 20}))
+    check("CB1 configure_budget raises max_passes and the raise is persisted",
+          r_up["type"] == "Allow" and runs.raw_value(key)["max_passes"] == 20,
+          f"got {r_up}; stored={runs.raw_value(key)['max_passes']}")
+    r_down = result(observe(svc, h, {"kind": "configure_budget", "max_passes": 5}))
+    check("CB2 configure_budget refuses to LOWER the ceiling (conflict), leaving it raised",
+          r_down["type"] == "Fault" and r_down["code"] == "conflict"
+          and runs.raw_value(key)["max_passes"] == 20, f"got {r_down}")
+    r_spawn = result(observe(svc, h, {"kind": "configure_budget", "max_spawns": 3}))
+    check("CB3 configure_budget still sets the spawn cap independently of the ceiling",
+          r_spawn["type"] == "Allow" and runs.raw_value(key)["max_spawns"] == 3, f"got {r_spawn}")
 
 
 # --- residual / refuted / frozen --------------------------------------------
@@ -931,20 +1190,18 @@ def test_audit_ticket_consume_unknown_nonce():
 
 
 def test_reserve_spawn_on_terminal_run_fails_open():
-    svc, _, _ = make_service(default_max_passes=1)
+    svc, _, _ = make_service()
     h = handle_of(start(svc, max_spawns=1))
-    observe(svc, h, {"kind": "graph", "graph": single_goal_graph(confidence=0.0)})
-    evaluate(svc, h)  # -> stopped_budget (terminal)
+    drive_to_budget_stop(svc, h)  # -> stopped_budget (terminal)
     r = result(observe(svc, h, {"kind": "reserve_spawn"}))
     check("TF1 reserving a spawn on a terminal run fails OPEN (nothing left to gate)",
           r["type"] == "Allow" and r["run"]["spawn"]["reserved"] is True, f"got {r}")
 
 
 def test_lifecycle_action_on_terminal_run_faults_closed():
-    svc, _, _ = make_service(default_max_passes=1)
+    svc, _, _ = make_service()
     h = handle_of(start(svc, max_spawns=1))
-    observe(svc, h, {"kind": "graph", "graph": single_goal_graph(confidence=0.0)})
-    evaluate(svc, h)  # -> stopped_budget (terminal)
+    drive_to_budget_stop(svc, h)  # -> stopped_budget (terminal)
     r = result(observe(svc, h, {"kind": "phase", "phase": "audit"}))
     r2 = result(observe(svc, h, {"kind": "configure_budget", "max_spawns": 9}))
     check("TF2 a lifecycle transition on a terminal run faults closed (conflict)",

@@ -22,6 +22,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import math
 
 from core.records import RunKey
 
@@ -159,6 +160,21 @@ def require(command: dict, field: str, types: type | tuple[type, ...]) -> object
     if not isinstance(value, types) or (types is int and isinstance(value, bool)):
         raise InvalidRequest(f"field {field} has the wrong type")
     return value
+
+
+def optional_epoch(command: dict, field: str) -> float | None:
+    """Read an OPTIONAL epoch-seconds timestamp: a finite, non-negative number, or ``None`` when the
+    field is absent or explicitly null. A bool, a non-number, or a NaN/inf/negative value is rejected
+    at the wire boundary (like :func:`require`) so a malformed host clock can never silently poison
+    the stall-deadline decision downstream. Used by EvaluateRun's ``observed_at`` (the host stamps
+    it because Claude Code hook input carries no timestamp)."""
+    if field not in command or command[field] is None:
+        return None
+    value = command[field]
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or not math.isfinite(value) or value < 0):
+        raise InvalidRequest(f"field {field} must be a non-negative epoch-seconds number")
+    return float(value)
 
 
 # --- response builders -------------------------------------------------------

@@ -326,9 +326,23 @@ sub-θ, tag them `"blocked": "needs-budget"`. The gate then allows the stop but 
 gating it entirely (by design — it must never re-block a finished run), so raising the cap alone
 does not restart the loop.
 
-**Two independent bounds, both enforced.** `max_spawns` bounds fan-out cost; `max_passes` bounds
-loop length (default 8, `EMPIRICA_MAX_PASSES` overrides) via the ADR-19 variant
-`max_passes − passes`. A run that never converges terminates regardless of budget.
+**Two independent bounds, both enforced.** `max_spawns` bounds fan-out cost; the pass budget
+bounds loop length. **Do not set `max_passes` a priori** — the run derives its own working budget
+from the seeded claim graph (`working_passes = open_claims + 2`, for the audit round and the
+finalize check) and **re-derives it as the graph grows**, so a bigger goal earns a bigger budget
+without you touching a number (ADR-34). `max_passes` is now the a-priori *ceiling* the working
+budget can never exceed; it is raised only by a human via `configure_budget`, never by the run
+(ADR-19/28). `EMPIRICA_MAX_PASSES` sets the ceiling floor. A run that never converges terminates
+regardless of budget.
+
+**A pass counts knowledge progress, not turn-ends — so waiting on the auditor is safe.** A stop
+only spends a pass when the knowledge actually changed (new evidence, verdict, or claim). Idle
+stops while a dispatched auditor runs cost **zero** passes, so an 825s audit no longer burns the
+budget out from under a converging run (ADR-34). Idle waiting is bounded instead by a **wall-clock
+stall deadline** (`EMPIRICA_STALL_DEADLINE_SEC`, default 1800s): if no knowledge progress lands for
+that long, the run terminates `stopped_residual`. The auditor writing its verdict *is* progress —
+it resets the deadline, and the run converges on the next stop. A verdict that lands even after the
+run has terminated is still recorded, so the audit's work is never wasted.
 
 ## Step 4 — Assessor: one convergence pass, then end your turn
 
@@ -353,8 +367,12 @@ loop is durable-resumable (ADR-8/9).
 no narrower claim and move nothing across θ, the loop is **stalled**, not converging. Escalate
 once to `/think` (budget permitting); if it stays stuck, surface the claim as a `blocked:`
 residual. **Nothing detects this for you** — no code compares passes to spot a stall, so it is a
-self-check. The hard backstop is the pass counter: a stalled loop still terminates at
-`max_passes` and reports `stopped_residual`, so a missed stall costs passes, never correctness.
+self-check. The hard backstop is termination itself: a stall that keeps growing scope but never
+converges grinds out the working budget up to the fixed ceiling and reports `stopped_budget`
+(needs-budget — the ceiling is raised only by a human via `configure_budget`, never by the run),
+while one that produces no knowledge at all trips an idle backstop (a consecutive-no-progress stop
+count, or the wall-clock stall deadline when a host clock is present) and reports `stopped_residual`
+(ADR-34) — either way it terminates, so a missed stall costs time or passes, never correctness.
 
 ### Stop discovering and start closing — `--freeze` (ADR-26)
 

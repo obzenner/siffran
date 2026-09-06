@@ -174,6 +174,12 @@ class TranslationTests(unittest.TestCase):
             request = build_stop_request(
                 payload("Stop", Path(tmp)), "opaque", correlation_id="stop",
             )
+            # The hook stamps its own wall clock (Codex supplies no event timestamp), so the stop
+            # request now carries a numeric epoch-seconds `observed_at`. Assert its shape, then the
+            # rest of the command is exactly the one authoritative report_convergence translation.
+            observed_at = request["command"].pop("observed_at")
+            self.assertIsInstance(observed_at, (int, float))
+            self.assertNotIsInstance(observed_at, bool)
             self.assertEqual(request["command"], {
                 "type": "EvaluateRun", "run_id": "opaque",
                 "intent": "report_convergence",

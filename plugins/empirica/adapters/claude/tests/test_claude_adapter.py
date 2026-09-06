@@ -241,6 +241,12 @@ class FinalControlParityTests(unittest.TestCase):
 
     def test_stop_is_exact_report_convergence_translation(self) -> None:
         request = build_stop_request(self.payload, "opaque-run", correlation_id="stop-1")
+        # The hook stamps its own wall clock (Claude Code hook input carries no timestamp), so the
+        # stop request now carries a numeric epoch-seconds `observed_at`. Assert its shape, then that
+        # the rest of the request is exactly the report_convergence translation.
+        observed_at = request["command"].pop("observed_at")
+        self.assertIsInstance(observed_at, (int, float))
+        self.assertNotIsInstance(observed_at, bool)
         self.assertEqual(request, {
             "protocol": "empirica/v1",
             "request_id": "stop-1",

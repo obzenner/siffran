@@ -10,6 +10,7 @@ import os
 import re
 import shlex
 import sys
+import time
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -201,6 +202,9 @@ def build_stop_request(payload: Mapping[str, object], run_handle: str, *,
                        correlation_id: str | None = None) -> dict:
     return _envelope(payload, "stop", {
         "type": "EvaluateRun", "run_id": run_handle, "intent": "report_convergence",
+        # The hook stamps its own wall clock (epoch seconds); Codex supplies no event timestamp, and
+        # the service measures the stall deadline against it (units = SECONDS, matching Claude).
+        "observed_at": time.time(),
     }, correlation_id)
 
 
