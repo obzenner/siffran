@@ -12,6 +12,8 @@ export interface TaskTracker {
   startTask(taskId: string): void;
   /** Mark a task complete. */
   completeTask(taskId: string): void;
+  /** Remove the progress widget entirely (e.g. when no trackable progress exists). */
+  clear(): void;
 }
 
 /**

@@ -45,6 +45,13 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+// The shipped bridge is stateless: nothing advances or clears a phase widget
+// after a turn. Clear any stale one on teardown, on hot-reload, and on error so
+// an interrupted (or pre-fix) run cannot strand progress below the editor.
+function clearPhaseWidget(ctx: ExtensionContext): void {
+  new PiWidgetTaskTracker(ctx.ui).clear();
+}
+
 function phasePlan(result: MethodologySelected): string {
   const lines = result.phases.map((phase, index) => {
     const number = typeof phase.number === "number" ? phase.number : index + 1;
@@ -92,6 +99,15 @@ export function createMethodologistExtension(deps: MethodologistPiDeps) {
       Promise.resolve(deps.dispatch(request));
 
     pi.on("resources_discover", () => ({ skillPaths: [skillsDir] }));
+
+    // Clear any lingering phase widget when the session ends or hot-reloads, so a
+    // widget left by an interrupted or pre-fix run does not persist (ADR-32).
+    pi.on("session_shutdown", (_event, ctx) => clearPhaseWidget(ctx));
+    pi.on("session_start", (event, ctx) => {
+      if ((event as { reason?: string } | null)?.reason === "reload") {
+        clearPhaseWidget(ctx);
+      }
+    });
 
     const runNamed = async (
       methodology: string,
@@ -182,6 +198,7 @@ export function createMethodologistExtension(deps: MethodologistPiDeps) {
             details: { methodology: result.methodology, phases: result.phases },
           };
         } catch (error) {
+          clearPhaseWidget(ctx);
           throw new Error(`methodologist selection failed: ${describe(error)}`);
         }
       },
@@ -215,6 +232,7 @@ export function createMethodologistExtension(deps: MethodologistPiDeps) {
             ctx,
           );
         } catch (error) {
+          clearPhaseWidget(ctx);
           ctx.ui.notify(`/think could not run: ${describe(error)}`, "error");
         }
       },
