@@ -67,7 +67,7 @@ test("selectMethodologyRequest matches the shared contract fixture", () => {
 
 // --- result -> Pi ------------------------------------------------------------
 
-test("MethodologySelected renders a phase widget and announces the choice", async () => {
+test("MethodologySelected announces the choice and renders no persistent phase widget", async () => {
   const ui = new FakeUi();
   const result: Response["result"] = {
     type: "MethodologySelected",
@@ -83,11 +83,13 @@ test("MethodologySelected renders a phase widget and announces the choice", asyn
 
   assert.deepEqual(outcome, { kind: "selected", methodology: "invariant-analysis" });
   assert.match(ui.notifications[0].message, /Using invariant-analysis/);
-  const lines = ui.lastWidgetLines();
-  assert.ok(lines);
-  assert.equal(lines.length, 2);
-  assert.match(lines[0], /^\[▶\] Identify operation and scope$/); // first started
-  assert.match(lines[1], /^\[ \] State preconditions$/); // rest pending
+  // The stateless bridge cannot advance or clear tasks, so no persistent phase
+  // widget is rendered; the phase plan travels in the tool result instead.
+  assert.ok(
+    ui.widgets.every((w) => w.content === undefined),
+    "no phase-task widget content should be rendered",
+  );
+  assert.equal(ui.lastWidgetLines(), undefined);
 });
 
 test("HumanDecisionRequired routes candidates through ctx.ui.select", async () => {
@@ -230,7 +232,10 @@ test("normal named /think remains bridge-backed", async () => {
 
   assert.equal(dispatches, 1);
   assert.equal(pi.sentUserMessages.length, 0);
-  assert.equal(ui.lastWidgetLines()?.length, 6);
+  assert.ok(
+    ui.widgets.every((w) => w.content === undefined),
+    "named /think renders no persistent phase widget",
+  );
 });
 
 test("model selection tool: ambiguity -> human choice -> named bridge", async () => {
@@ -274,7 +279,10 @@ test("model selection tool: ambiguity -> human choice -> named bridge", async ()
 
   assert.deepEqual(requests, ["first-principles"]);
   assert.match(result.content[0].text, /Using \*\*first-principles\*\*/);
-  assert.equal(ui.lastWidgetLines()!.length, 6);
+  assert.ok(
+    ui.widgets.every((w) => w.content === undefined),
+    "selection renders no persistent phase widget",
+  );
 });
 
 test("/think handler: a thrown dispatch is reported, not swallowed", async () => {
@@ -290,4 +298,30 @@ test("/think handler: a thrown dispatch is reported, not swallowed", async () =>
 
   assert.equal(ui.notifications.at(-1)!.level, "error");
   assert.match(ui.notifications.at(-1)!.message, /core offline/);
+  assert.ok(
+    ui.widgets.some((w) => w.content === undefined),
+    "an error clears the phase widget",
+  );
+});
+
+test("session_shutdown clears any lingering phase widget", () => {
+  const pi = new FakePi();
+  createMethodologistExtension({
+    dispatch: () => {
+      throw new Error("unused");
+    },
+  })(pi);
+  const ui = new FakeUi();
+
+  const handler = pi.handlers.get("session_shutdown") as
+    | ((event: unknown, ctx: { ui: FakeUi }) => void)
+    | undefined;
+  assert.equal(typeof handler, "function", "session_shutdown handler must be registered");
+  handler!(undefined, { ui });
+
+  assert.deepEqual(ui.widgets.at(-1), {
+    id: "methodologist:phases",
+    content: undefined,
+    placement: "belowEditor",
+  });
 });

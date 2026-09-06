@@ -9,7 +9,6 @@ import {
   PROTOCOL,
   type FaultCode,
   type MethodologySelected,
-  type PhaseSpec,
   type Request,
   type Result,
 } from "./contract.ts";
@@ -116,17 +115,6 @@ const FAULT_MESSAGE: Record<FaultCode, string> = {
   invalid_run: "that reasoning run is not active",
 };
 
-function phaseTitle(phase: PhaseSpec, index: number): string {
-  if (typeof phase.title === "string" && phase.title.length > 0) {
-    return phase.title;
-  }
-  if (typeof phase.id === "string" && phase.id.length > 0) {
-    return phase.id;
-  }
-  const number = typeof phase.number === "number" ? phase.number : index + 1;
-  return `Phase ${number}`;
-}
-
 /** Human-readable label + the canonical name to re-dispatch for a candidate. */
 function candidateLabelAndName(candidate: unknown): { label: string; name: string } {
   if (typeof candidate === "string") {
@@ -189,11 +177,12 @@ function renderSelected(
   ui: UiContext,
 ): void {
   ui.notify(`Using ${result.methodology}: ${result.reason}`, "info");
-  // Mirror core.runner.register_phase_tasks: one task per phase, first started.
-  const ids = result.phases.map((phase, index) =>
-    tracker.createTask(phaseTitle(phase, index)),
-  );
-  if (ids.length > 0) {
-    tracker.startTask(ids[0]);
-  }
+  // The shipped bridge is stateless and exposes no phase-advance tool, so
+  // persistent phase tasks could never advance or clear themselves — they would
+  // strand permanently-stale progress below the editor. The phase plan is already
+  // returned in the tool result (index.ts::phasePlan), so we announce the
+  // selection and clear any stale widget instead of rendering dead tasks. Real
+  // phase progress needs a stateful lifecycle (a phase-complete tool + a persisted
+  // tracker); until that exists, the honest behaviour is no progress widget.
+  tracker.clear();
 }
