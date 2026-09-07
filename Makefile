@@ -123,8 +123,20 @@ activation-check: ## Verify Empirica runtime isolation and thin Claude hook acti
 	@printf '$(BOLD)==> empirica activation$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_empirica_activation.py
 
+# devDependencies (typescript, @types/node) that turn the Pi adapter typecheck
+# from a skipped note into an enforced gate. Rebuilt when the lockfile changes;
+# graceful when npm is absent — the validator then skips the typecheck itself.
+node_modules: package-lock.json
+	@if command -v npm >/dev/null 2>&1; then \
+		printf '$(BOLD)==> installing pi devDependencies (npm ci)$(RESET)\n'; \
+		npm ci --no-audit --no-fund; \
+		touch node_modules; \
+	else \
+		printf '$(DIM)npm not installed — skipping devDependency install (typecheck will be skipped)$(RESET)\n'; \
+	fi
+
 .PHONY: methodologist-pi-check
-methodologist-pi-check: ## Validate the Methodologist Pi adapter package (static always; tests if node present)
+methodologist-pi-check: node_modules ## Validate the Methodologist Pi adapter package (static always; typecheck + tests if node present)
 	@printf '$(BOLD)==> methodologist Pi adapter$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py plugins/methodologist
 
@@ -139,12 +151,12 @@ methodologist-codex-smoke: ## Run online discovery/invocation smoke tests with c
 	@$(PYTHON) $(SCRIPTS)/smoke_codex_plugin.py
 
 .PHONY: pi-bundle-check
-pi-bundle-check: ## Validate the repository-root Pi package used by `pi install git:...`
+pi-bundle-check: node_modules ## Validate the repository-root Pi package used by `pi install git:...`
 	@printf '$(BOLD)==> Pi bundle$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py .
 
 .PHONY: empirica-pi-check
-empirica-pi-check: ## Validate the Empirica Pi adapter package (static + bridge smoke always; tests if node present)
+empirica-pi-check: node_modules ## Validate the Empirica Pi adapter package (static + bridge smoke always; typecheck + tests if node present)
 	@printf '$(BOLD)==> empirica Pi adapter$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py plugins/empirica/adapters/pi
 
