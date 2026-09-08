@@ -178,6 +178,7 @@ status: ## Show plugin versions, ADR count, and working-tree state
 	@for m in $(PLUGIN_MANIFESTS); do \
 		$(PYTHON) -c "import json,sys; d=json.load(open('$$m')); print(f'  {d[\"name\"]:<16} {d[\"version\"]}')"; \
 	done
+	@$(PYTHON) scripts/check_installed_version.py
 	@printf '$(BOLD)ADRs$(RESET)\n'
 	@printf '  %s records in $(ADR_DIR)\n' "$$(ls $(ADR_DIR)/*.md 2>/dev/null | wc -l | tr -d ' ')"
 	@printf '$(BOLD)Git$(RESET)\n'
@@ -193,8 +194,8 @@ adr-list: ## List all ADRs with their status
 	@if command -v adrs >/dev/null 2>&1; then adrs --ng list; else ls -1 $(ADR_DIR)/*.md; fi
 
 .PHONY: doctor
-doctor: ## empirica preflight: what actors can this machine reach? (spends no inference)
-	@PYTHONPATH=plugins/empirica $(PYTHON) -c 'from adapters.claude.preflight import main; raise SystemExit(main())'
+doctor: ## empirica preflight: actors reachable; pass ARGS="--multi-provider" to probe (no inference)
+	@PYTHONPATH=plugins/empirica $(PYTHON) -c 'from adapters.claude.preflight import main; raise SystemExit(main())' $(ARGS)
 
 .PHONY: migrate-legacy
 migrate-legacy: ## Explicitly import a legacy run: make migrate-legacy RUN_DIR=... REPO=...

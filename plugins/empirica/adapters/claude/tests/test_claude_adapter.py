@@ -698,5 +698,61 @@ class IsolatedBridgeIntegrationTests(unittest.TestCase):
             self.assertEqual(self._git(repo, "write-tree"), index_before)
 
 
+class DogfoodImprovementTests(unittest.TestCase):
+    """ADR-35/36/37: run-time P1 feedback, mode-aware doctor, handle-based route builder."""
+
+    def _capture(self, fn, *args) -> str:
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            fn(*args)
+        return buf.getvalue().strip()
+
+    def test_route_warns_on_p1_violation_via_additional_context_else_silent(self) -> None:
+        # ADR-35: exit-0 PreToolUse stderr is model-invisible, so the warning must ride
+        # hookSpecificOutput.additionalContext; and it must fire ONLY on a real violation verdict.
+        from adapters.claude import lifecycle
+        violation = {"result": {"run": {"route": {
+            "verdict": "violation", "reason": "investigation began before any route was announced."}}}}
+        out = self._capture(lifecycle._warn_if_p1_violation, violation)
+        payload = json.loads(out)["hookSpecificOutput"]
+        self.assertEqual(payload["hookEventName"], "PreToolUse")
+        self.assertIn("P1", payload["additionalContext"])
+        self.assertNotIn("permissionDecision", json.loads(out)["hookSpecificOutput"])
+        for benign in ({"result": {"run": {"route": {"verdict": "ok"}}}}, None, {}, {"result": {}}):
+            self.assertEqual(self._capture(lifecycle._warn_if_p1_violation, benign), "")
+
+    def test_build_route_request_is_handle_based(self) -> None:
+        # ADR-37: an agent holding only a handle can record its route (mirrors build_graph_request).
+        from adapters.claude.knowledge import build_route_request
+        request = build_route_request("HANDLE-123", "routed unknown up front")
+        self.assertEqual(request["command"], {
+            "type": "ObserveAction", "run_id": "HANDLE-123",
+            "action": {"kind": "route", "reason": "routed unknown up front"}})
+        self.assertEqual(request["protocol"], "empirica/v1")
+
+    def test_doctor_main_is_mode_aware_from_argv(self) -> None:
+        # ADR-36: `make doctor ARGS="--multi-provider"` reflects the mode a run would use.
+        from unittest.mock import patch
+        from adapters.claude import preflight
+        stub = {"status": "unavailable", "version": None, "exit_status": None}
+        with patch.object(preflight, "_probe", return_value=stub):
+            with patch.dict(os.environ, {}, clear=False):
+                for key in ("EMPIRICA_MODE_MULTI_PROVIDER", "EMPIRICA_MODE_CLI_EXEC"):
+                    os.environ.pop(key, None)
+                report = json.loads(self._capture(preflight.main, ["--multi-provider"]))
+        self.assertEqual(report["modes"]["multi_provider"],
+                         {"enabled": True, "source": "invocation"})
+        self.assertTrue(report["probed_optional"])
+        # bare invocation stays off (unchanged default behaviour).
+        with patch.dict(os.environ, {}, clear=False):
+            for key in ("EMPIRICA_MODE_MULTI_PROVIDER", "EMPIRICA_MODE_CLI_EXEC"):
+                os.environ.pop(key, None)
+            bare = json.loads(self._capture(preflight.main, []))
+        self.assertFalse(bare["modes"]["multi_provider"]["enabled"])
+        self.assertFalse(bare["probed_optional"])
+
+
 if __name__ == "__main__":
     unittest.main()

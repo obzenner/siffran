@@ -131,11 +131,15 @@ Announce `Route: **known** | **unknown** — <one line why>` and list the unknow
 start investigating. Routing is a commitment made up front, not a label applied retroactively
 to justify a shortcut (ADR-5/20 — the observed inversion).
 
-**Record the announcement** immediately through
-the active host's route operation (`adapters.claude.route.build_route_announcement_request`, or
-Codex's `--empirica-route` no-op witnessed by `PreToolUse:Bash`) before any evidence
-gathering. The application records both route and first investigation with CAS-guarded monotone
-sequence numbers. Skipping the announcement remains a P1 violation.
+**Record the announcement** immediately through the active host's route operation before any
+evidence gathering. An agent driving the run by handle uses the handle-based
+`adapters.claude.knowledge.build_route_request(run_id, reason)` (or submits the raw
+`ObserveAction{"kind":"route","reason":...}` directly); the hook adapter's
+`route.build_route_announcement_request` is payload-based and belongs to the `PreToolUse` hook, not
+to an agent holding only a handle (ADR-37). On Codex use the `--empirica-route` no-op witnessed by
+`PreToolUse:Bash`. The application records both route and first investigation with CAS-guarded
+monotone sequence numbers. Skipping the announcement remains a P1 violation — and the route hook now
+warns you at run time if you investigate first (ADR-35).
 
 This is a per-dependency split, not a verdict on the whole task. The "known path" is simply the
 case where the initial unknown set is already empty.
