@@ -6,12 +6,13 @@ non-inferential version probes.  It returns recommendations; it never mutates or
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from collections.abc import Callable
 from typing import Any
 
-from .invocation import Invocation, MODES
+from .invocation import Invocation, MODES, parse_invocation
 
 _OPTIONAL = {
     "codex": ("codex", "--version"),
@@ -83,7 +84,13 @@ def diagnose(
                 "Unknown invocation flags were ignored: " + ", ".join(unknown))
         if not probe_optional:
             recommendations.append(
-                "multi-provider mode is OFF; optional actor CLIs were not probed.")
+                "multi-provider mode is OFF; optional actor CLIs were not probed. Enable it with "
+                "`make doctor ARGS=\"--multi-provider\"` or EMPIRICA_MODE_MULTI_PROVIDER=1 to probe.")
+        else:
+            recommendations.append(
+                "multi_provider ALLOWS and probes external actors (codex/pi); it does NOT by itself "
+                "route the audit to them — the audit still runs on the Claude auditor unless an "
+                "actor is dispatched via cli_exec.")
         return {
             "baseline": {"harness": "claude-code", "status": "permitted"},
             "departs_from_baseline": any(item["enabled"] for item in modes.values()),
@@ -107,8 +114,14 @@ def diagnose(
         }
 
 
-def main() -> int:
-    json.dump(diagnose({}), sys.stdout, indent=2, sort_keys=True)
+def main(argv: list[str] | None = None) -> int:
+    """Print the preflight report. Mode-aware (ADR-36): ``--multi-provider``/``--cli-exec`` (and the
+    ``EMPIRICA_MODE_*`` env vars) are parsed into an invocation so the report reflects the modes a
+    run would actually use — bare ``make doctor`` is unchanged (all modes default off)."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    invocation = parse_invocation(
+        {"command_args": " ".join(args)}, environ=os.environ, fallback_goal="")
+    json.dump(diagnose({}, invocation=invocation), sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")
     return 0
 

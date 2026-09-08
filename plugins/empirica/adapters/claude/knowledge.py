@@ -35,6 +35,15 @@ def build_graph_request(run_id: str, graph: dict, *, correlation_id: str | None 
                       "action": {"kind": "graph", "graph": graph}}, correlation_id)
 
 
+def build_route_request(run_id: str, reason: str = "", *,
+                        correlation_id: str | None = None) -> dict:
+    """Handle-based route announcement (ADR-37): the agent-facing counterpart to the hook adapter's
+    payload-based ``route.build_route_announcement_request``. Mirrors :func:`build_graph_request` so
+    an agent holding only an opaque run handle can record its route without a hook payload."""
+    return _envelope({"type": "ObserveAction", "run_id": run_id,
+                      "action": {"kind": "route", "reason": reason}}, correlation_id)
+
+
 def _normalised_leaves(statements: Iterable[dict]) -> list[dict]:
     return [leaf for statement in statements if (leaf := evidence.validate_leaf(statement))]
 

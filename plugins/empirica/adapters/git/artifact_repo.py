@@ -215,7 +215,10 @@ class GitArtifactRepository:
             encoding="utf-8",
         )
         if proc.returncode != 0:
-            raise GitError(f"{repo_dir} is not a git repository: {proc.stderr.strip()}")
+            raise GitError(
+                f"{repo_dir} is not a git repository: {proc.stderr.strip()} "
+                "(the empirica knowledge store needs the workspace git repository as the working "
+                "directory; invoke the bridge with cwd set to the repo)")
         return Path(proc.stdout.strip())
 
     def _write_blob(self, content: str) -> str:

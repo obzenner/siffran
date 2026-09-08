@@ -45,6 +45,33 @@ def _resolve(payload: Mapping[str, object]) -> tuple[str | None, dict | None]:
             result if isinstance(result, dict) else None)
 
 
+def _pretooluse_context(text: str) -> None:
+    """Emit non-blocking additional context the model will see, from a PreToolUse hook (exit 0).
+
+    Claude Code sends exit-0 PreToolUse stderr to the debug log only — the model never sees it
+    (code.claude.com/docs/en/hooks, ADR-35). The model-visible channel is
+    ``hookSpecificOutput.additionalContext`` on stdout; omitting ``permissionDecision`` leaves the
+    tool's normal permission flow untouched, so this warns without blocking or auto-approving."""
+    json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": text}},
+              sys.stdout)
+    sys.stdout.write("\n")
+
+
+def _warn_if_p1_violation(response: object) -> None:
+    """Relay the application's P1 ordering verdict to the model when investigation preceded the
+    route (ADR-35). The verdict/reason already ride on the investigate response's ``run.route``
+    fragment; this surfaces them at the moment of violation instead of only at the audit."""
+    result = response.get("result") if isinstance(response, dict) else None
+    run = result.get("run") if isinstance(result, dict) else None
+    route = run.get("route") if isinstance(run, dict) else None
+    if isinstance(route, dict) and route.get("verdict") == "violation":
+        reason = route.get("reason") or "investigation began before the route was announced"
+        _pretooluse_context(
+            f"empirica P1 violation: {reason} Record your route now via "
+            "ObserveAction(kind='route'); this ordering is what the independent audit fails on "
+            "(ADR-20 P1).")
+
+
 def run_start_main() -> int:
     """UserPromptExpansion: best-effort activation, always silent and fail open."""
     payload = _payload()
@@ -85,12 +112,12 @@ def spawn_main() -> int:
 
 
 def route_main() -> int:
-    """PreToolUse investigative observation: best effort and always silent."""
+    """PreToolUse investigative observation: best effort; non-blocking P1 warning to the model."""
     payload = _payload()
     try:
         handle, _ = _resolve(payload)
         if handle is not None:
-            dispatch_investigation(payload, handle)
+            _warn_if_p1_violation(dispatch_investigation(payload, handle))
     except Exception:  # noqa: BLE001 - observational event never blocks tools
         pass
     return 0
@@ -134,7 +161,8 @@ def dispatch_main() -> int:
             })
         advice = dispatch_advice(command, handle)
         if advice:
-            print(advice, file=sys.stderr)
+            # exit-0 PreToolUse stderr is invisible to the model (ADR-35); use the context channel.
+            _pretooluse_context(advice)
     except Exception:  # noqa: BLE001 - unrecognised/failed Bash classification fails open
         return 0
     return 0
