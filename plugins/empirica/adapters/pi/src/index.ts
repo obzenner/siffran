@@ -127,10 +127,11 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       }
     });
 
-    const textResult = (result: { type: string; run?: { id?: string; contract?: import("./obligations.ts").ContractView } }, handle?: string) => {
+    const textResult = (result: { type: string; run?: { id?: string; goal?: string; modes?: unknown; contract?: import("./obligations.ts").ContractView } }, handle?: string) => {
       const view = result.run?.contract;
-      if (!view) return { content: [{ type: "text" as const, text: `Empirica run ${handle ?? result.run?.id ?? "(unknown)"}: no contract yet (no graph).` }], details: result };
-      return { content: [{ type: "text" as const, text: `Empirica run handle: ${handle ?? result.run?.id ?? "(unknown)"}\n${renderText(view)}` }], details: result };
+      const prefix = `${result.run?.goal ? `Goal: ${result.run.goal}\n` : ""}${result.run?.modes ? `Modes: ${JSON.stringify(result.run.modes)}\n` : ""}`;
+      if (!view) return { content: [{ type: "text" as const, text: `${prefix}Empirica run ${handle ?? result.run?.id ?? "(unknown)"}: no contract yet (no graph).` }], details: result };
+      return { content: [{ type: "text" as const, text: `${prefix}Empirica run handle: ${handle ?? result.run?.id ?? "(unknown)"}\n${renderText(view)}` }], details: result };
     };
     // Tool parameter schemas MUST be JSON-Schema objects with `type: "object"`: providers (Bedrock
     // rejects `{}` at request validation) require it. Found live while dogfooding; the fake-host
@@ -147,7 +148,10 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         if (!runHandle) return { content: [{ type: "text", text: "No active Empirica run." }] };
         const response = await dispatch(evaluateRunRequest(runHandle, REPORT_CONVERGENCE_INTENT, randomUUID()));
         const decision = gateFromDecision(response.result);
-        if (decision.kind === "deny") throw new Error(decision.reason);
+        if (decision.kind === "deny") {
+          const contract = decision.contract ? `\n${renderText(decision.contract)}` : "";
+          throw new Error(`${decision.reason}${contract}\nhandle: ${runHandle}`);
+        }
         return textResult(response.result);
       }});
       pi.registerTool({ name: "empirica_status", label: "Empirica status", description: "Show the current run handle and obligation contract.", parameters: EMPTY_PARAMS, async execute() {
@@ -179,7 +183,10 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           if (result.type === "Allow" || result.type === "Block") {
             runHandle = result.run.id; // remember the opaque handle for this session
             pi.appendEntry?.("empirica.run", { runHandle });
-            if (result.run.contract) pi.sendMessage?.({ customType: "empirica", content: `Empirica run handle: ${runHandle}\n${renderText(result.run.contract)}` });
+            const modeText = Object.keys(modes).length ? JSON.stringify(modes) : "{}";
+            const contractText = result.run.contract ? `\n${renderText(result.run.contract)}` : "\nno contract yet (no graph).";
+            // This is deliberately unconditional: the model needs the invocation even before a graph exists.
+            pi.sendMessage?.({ customType: "empirica", content: `Empirica run handle: ${runHandle}\nGoal: ${goal}\nModes: ${modeText}\nUnknown flags: ${parsed.unknownFlags.length ? parsed.unknownFlags.join(" ") : "none"}\nFollow the empirica skill from Step 1.${contractText}` });
           }
           const notice = statusNotice(result);
           ctx.ui.notify(notice.text, notice.type);
@@ -240,11 +247,27 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     // blocks that single call with the reason. Non-gated tools pass untouched — the
     // adapter never round-trips the core for calls it does not gate.
     pi.on("tool_call", async (event: ToolCallEvent): Promise<ToolCallResult | void> => {
-      if (event.toolName === subagentToolName && runHandle !== null) {
+      if (event.toolName === subagentToolName && runHandle !== null && isExecutableSpawn(event.input)) {
         try {
-          const response = await dispatch({ protocol: "empirica/v1", request_id: randomUUID(), command: { type: "ObserveAction", run_id: runHandle, action: { kind: "audit_ticket", actor: { tool: event.toolName, call_id: event.toolCallId }, witnessed: true } } });
-          if (response.result.type === "Block") return { block: true, reason: response.result.reason };
-          if (response.result.type === "Fault" && response.result.fail_direction !== "open") return { block: true, reason: "empirica spawn gate unavailable (failing closed)" };
+          const reservation = await dispatch({ protocol: "empirica/v1", request_id: randomUUID(), command: { type: "ObserveAction", run_id: runHandle, action: { kind: "reserve_spawn" } } });
+          if (reservation.result.type === "Block") return { block: true, reason: `${reservation.result.reason}${reservation.result.run.contract ? `\n${renderText(reservation.result.run.contract)}` : ""}` };
+          if (reservation.result.type === "Fault") {
+            if (reservation.result.code === "invalid_request") throw new Error(`Empirica reserve_spawn request bug: ${reservation.result.message ?? "invalid request"}`);
+            if (reservation.result.fail_direction !== "open") return { block: true, reason: `empirica spawn gate unavailable (failing closed): ${reservation.result.message ?? "core fault"}` };
+          }
+          if (isAuditorSpawn(event.input)) {
+            const model = actorModel(event.input);
+            const ticket = await dispatch({ protocol: "empirica/v1", request_id: randomUUID(), command: { type: "ObserveAction", run_id: runHandle, action: { kind: "audit_ticket", actor: { model, harness: "pi", provider: "pi", source_type: "LLM_JUDGE", attribution: "declared" }, witnessed: false } } });
+            if (ticket.result.type === "Fault" && ticket.result.code === "invalid_request") throw new Error(`Empirica audit_ticket request bug: ${ticket.result.message ?? "invalid request"}`);
+            if (ticket.result.type === "Fault") return { block: true, reason: `empirica audit ticket unavailable: ${ticket.result.message ?? "core fault"}` };
+            if (ticket.result.type === "Block") return { block: true, reason: ticket.result.reason };
+            const nonce = (ticket.result as { run?: { ticket?: { nonce?: string } } }).run?.ticket?.nonce;
+            if (nonce) {
+              const task = typeof event.input.task === "string" ? event.input.task : "";
+              event.input.task = `${task}\nEmpirica audit ticket nonce: ${nonce}`.trim();
+              pi.sendMessage?.({ customType: "empirica", content: `Auditor spawn ticket nonce: ${nonce}` });
+            }
+          }
         } catch (error) { return { block: true, reason: `empirica spawn gate unavailable (failing closed): ${describe(error)}` }; }
       }
       if (!gatedTools.has(event.toolName)) return;
@@ -255,7 +278,10 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         );
         const decision = gateFromDecision(response.result);
         if (decision.kind === "deny") {
-          return { block: true, reason: decision.reason };
+          if (decision.kind === "deny") {
+            const contract = decision.contract ? `\n${renderText(decision.contract)}` : "";
+            return { block: true, reason: `${decision.reason}${contract}${decision.contract ? `\nhandle: ${runHandle}` : ""}` };
+          }
         }
         return; // permit
       } catch (error) {
@@ -273,22 +299,33 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         const response = await dispatch(restoreRunRequest(runHandle, randomUUID()));
         const run = response.result.type === "Allow" || response.result.type === "Block" ? response.result.run : undefined;
         if (!run?.contract) return;
-        return { compaction: { summary: `Empirica obligations (deterministic):\n${renderText(run.contract)}`, firstKeptEntryId: event.preparation.firstKeptEntryId, tokensBefore: event.preparation.tokensBefore, details: { runHandle, contract: run.contract } } };
+        return { compaction: { summary: `Empirica run.goal: ${run.goal ?? "(unknown)"}\nEmpirica obligations (deterministic):\n${renderText(run.contract)}`, firstKeptEntryId: event.preparation.firstKeptEntryId, tokensBefore: event.preparation.tokensBefore, details: { runHandle, contract: run.contract } } };
       } catch { return; }
     });
 
     // (agent_settled) Observational only (ADR-32): Pi cannot veto completion here.
     // We evaluate the run and, if it is active with outstanding work, enqueue a
     // best-effort follow-up nudge. It never blocks and never throws.
-    pi.on("agent_settled", async (_event, _ctx: ExtensionContext) => {
-      if (runHandle === null) return;
+    let lastNudgeKey: string | null = null;
+    let nudgeCount = 0;
+    let pausedNoticeSent = false;
+    const maxNudges = Number.parseInt(process.env.EMPIRICA_PI_MAX_NUDGES ?? "3", 10) || 3;
+    pi.on("agent_settled", async (event, _ctx: ExtensionContext) => {
+      if (runHandle === null || isEmptySettledTurn(event)) return;
       try {
         const response = await dispatch(
           evaluateRunRequest(runHandle, CONTINUE_INTENT, randomUUID()),
         );
         const nudge = settledFollowUp(response.result);
         if (nudge !== null && typeof pi.sendUserMessage === "function") {
-          pi.sendUserMessage(nudge, { deliverAs: "followUp" });
+          const blocked = response.result as Extract<import("./contract.ts").Result, { type: "Block" }>;
+          const key = `${blocked.type}:${blocked.reason}:${blocked.run.revision}:${"converged" in blocked ? blocked.converged : false}`;
+          if (key === lastNudgeKey) return;
+          lastNudgeKey = key;
+          nudgeCount += 1;
+          if (nudgeCount > maxNudges) {
+            if (!pausedNoticeSent) { pausedNoticeSent = true; pi.sendUserMessage("empirica: nudge loop paused after the maximum reminders. Resume by continuing the run or calling report_convergence.", { deliverAs: "followUp" }); }
+          } else pi.sendUserMessage(nudge, { deliverAs: "followUp" });
         }
       } catch {
         // Best-effort: a settled-time evaluation failure is not a gate and is
@@ -296,6 +333,34 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       }
     });
   };
+}
+
+function isExecutableSpawn(input: Record<string, unknown>): boolean {
+  return ["agent", "workflowScript", "resume"].some((key) => input[key] !== undefined && input[key] !== null);
+}
+function isAuditorSpawn(input: Record<string, unknown>): boolean {
+  return JSON.stringify(input).toLowerCase().includes("empirica-auditor");
+}
+function actorModel(input: Record<string, unknown>): string {
+  const model = input.model;
+  if (typeof model === "string" && model.trim()) return model.trim();
+  const agent = input.agent;
+  if (typeof agent === "string" && agent.trim()) return agent.trim();
+  if (agent && typeof agent === "object" && typeof (agent as Record<string, unknown>).model === "string") return String((agent as Record<string, unknown>).model);
+  return "empirica-auditor";
+}
+function isEmptySettledTurn(event: unknown): boolean {
+  if (!event || typeof event !== "object") return false;
+  const value = event as Record<string, unknown>;
+  if (value.aborted === true || value.cancelled === true) return true;
+  const calls = value.toolCalls ?? value.tool_calls;
+  // Pi may omit all turn fields for an idle/aborted model turn. Treat that
+  // shape exactly like an explicit empty calls/text payload: it must not
+  // manufacture a reminder (the lifecycle is observational, not a gate).
+  if (calls === undefined && value.text === undefined && value.content === undefined) return true;
+  if (Array.isArray(calls) && calls.length === 0 && !value.text && !value.content) return true;
+  if ((typeof value.text === "string" && value.text.length === 0) && Array.isArray(calls) && calls.length === 0) return true;
+  return false;
 }
 
 function describe(error: unknown): string {

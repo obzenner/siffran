@@ -39,13 +39,14 @@ A contract revision is an append-only Artifact containing `Contract.to_json()`. 
 
 A changed claim (reworded text, changed kind, or changed hold) is represented as an explicit retirement of the old obligation plus a replacement obligation whose id is the old id suffixed with `/revision-<n>` (for example `empirica/G7/revision-3`); the generic library forbids reusing a retired id, so this is how history stays visible. Consumers must match obligations by `because` (claim id) when following a claim across revisions, and must read `retired` before concluding an obligation vanished. Run-level budget and stall obligations are view-time additions that are never persisted in a revision.
 
-Every wire view re-verifies the persisted revision against current observations before `project()`; graph recomputation is used only for the diff.  The run-level budget and stall obligations are deliberately synthetic **view-time** additions, not durable claim-contract revisions.  Terminal Allow reuses the latest persisted revision and exposes its pointer as `run.contract_artifact_id`; it does not persist a projection merely because it is terminal.
+Every wire view re-verifies the persisted revision against current observations before `project()`; graph recomputation is used only for the diff. When every live gating claim is approved, the view also adds one `empirica/audit/<argument_digest>` requirement with the approved claim ids as `because`; a coverage-valid passing audit observation satisfies it. This audit requirement, and the run-level budget and stall obligations, are deliberately synthetic **view-time** additions, not durable claim-contract revisions, so audit delivery cannot churn B5 revision history. Terminal Allow reuses the latest persisted revision and exposes its pointer as `run.contract_artifact_id`; it does not persist a projection merely because it is terminal.
 
 ### Consequences
 
 * Good, because resume and final handoff retain exact witnesses and provenance.
 * Good, because ArtifactRepository's content-addressed append envelope makes contract projections auditable without mutating knowledge history.
 * Bad, because consumers must understand the additive `run.contract` field and not infer work from counts.
+* Good, because every `run` view also carries the persisted resolved `goal` and boolean `modes`, including before the first graph exists; adapters can inject invocation intent without reconstructing it from history.
 
 ### Confirmation
 

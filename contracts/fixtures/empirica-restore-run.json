@@ -92,6 +92,10 @@
             ],
             "held": []
           }
+        },
+        "goal": "fixture goal",
+        "modes": {
+          "cli_exec": true
         }
       }
     }

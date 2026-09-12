@@ -48,10 +48,11 @@ export class FakePi implements ExtensionAPI {
   readonly handlers = new Map<string, unknown>();
   readonly tools = new Map<string, import("../src/pi-types.ts").ToolDefinition>();
   readonly sentMessages: SentMessage[] = [];
+  readonly modelMessages: Array<{ customType: string; content: string }> = [];
   readonly entries: Array<{ customType: string; data?: unknown }> = [];
   registerTool(def: import("../src/pi-types.ts").ToolDefinition): void { this.tools.set(def.name, def); }
   appendEntry(customType: string, data?: unknown): void { this.entries.push({ customType, data }); }
-  sendMessage(_message: { customType: string; content: string; display?: boolean }): void {}
+  sendMessage(message: { customType: string; content: string; display?: boolean }): void { this.modelMessages.push(message); }
 
   registerCommand(name: string, def: CommandDefinition): void {
     this.commands.set(name, def);

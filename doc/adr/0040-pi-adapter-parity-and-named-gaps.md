@@ -33,7 +33,11 @@ Before this change, `plugins/empirica/adapters/pi/src/index.ts:101-220` parsed `
 
 Implement mode parsing in `translate.ts:22-39` and apply it in `index.ts:154-166` (Pi command arguments are the raw string per the host ExtensionAPI command handler). Register `report_convergence`, `empirica_status`, and `empirica_knowledge` in `index.ts:115-151`; the first is still protected by `tool_call`. Validate knowledge kinds against the Claude builders (`plugins/empirica/adapters/claude/knowledge.py:35-44,65-67,172-191`; `route.py:71-83`) in `index.ts:33-34,137-139`. Intercept the configured subagent in `index.ts:221-231`, issue the `audit_ticket` ObserveAction, and fail closed on transport errors. Persist/reconstruct the handle with `appendEntry` and `session_start` (`index.ts:103-114,153-156`), expose the contract to the model, and return a deterministic contract section plus JSON details from `session_before_compact` (`index.ts:253-262`). Every translator notice appends `renderText(run.contract)` (`translate.ts:120-210`). The mirror and fixture loop are `obligations.ts:1-57` and `test/obligations.test.ts:1-14`.
 
-The impossible gap is explicit: Pi has no completion-veto lifecycle. Enforcement exists only when `report_convergence` is invoked; an agent that never invokes it can complete. Two runtime claims remain UNVERIFIED and require a live spike: whether a blocked-tool reason is visible in model context, and whether follow-up delivery reliably starts another turn. A spawn outside Pi's event stream is likewise un-gated.
+The live Pi dogfood run (`doc/design/reports/dogfood-pi.md`) verified the two previously runtime-only boundaries. StartRun now unconditionally emits one model-visible message containing the opaque handle, resolved goal, modes, unknown flags, and the Step 1 instruction, including the no-graph case (P-1). The report tool's denied error carries the reason, canonical rendered contract, and handle (P-3).
+
+Spawn interception is restricted to executable `subagent` payloads carrying `agent`, `workflowScript`, or `resume`; management actions (`list`, `status`) are not intercepted. Executable calls reserve the spawn budget first. Auditor calls alone issue `audit_ticket` with a normalised declared actor record (`model`, `harness`, `provider`, `source_type`, `attribution`), and return the nonce in the task. A Block renders its contract; transport failures fail closed, while an adapter-generated invalid request is surfaced as a bug (P-4).
+
+Settled nudges are deduplicated by block reason, contract revision, and verdict; empty/aborted turns do not nudge, and `EMPIRICA_PI_MAX_NUDGES` (default 3) caps reminders before one pause/resume message. Pi still cannot veto completion when the report tool is never invoked.
 
 ## Consequences
 
@@ -47,7 +51,8 @@ The impossible gap is explicit: Pi has no completion-veto lifecycle. Enforcement
 
 * Tool interception cannot cover hidden/external spawns or completion without tool invocation.
 * The adapter maintains a structural TypeScript mirror and depends on the application to supply `run.contract`.
-* Custom compaction and follow-up behavior still needs a live Pi runtime spike.
+* Custom compaction and follow-up behavior is host-dependent; nudge delivery is best-effort.
+* Nudge state is in-memory for the extension lifetime.
 
 ## Confirmation
 

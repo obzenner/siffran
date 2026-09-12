@@ -1659,6 +1659,132 @@ def test_b5_persists_revisions_and_projects_complete_live_set():
     check("B5-T4 unchanged claims preserve across consecutive revisions",
           canonical(parse(before))["obligations"] != () and preserved(before, after).ok)
 
+def dogfood_research_leaf(claim_id="G0"):
+    """Minimal adapter-shaped Fold-1 leaf for the live-contract regressions."""
+    return {"kind": "evidence_leaf", "evidence_id": f"research-{claim_id}",
+            "statement": {"subject": [{"name": claim_id}],
+                          "predicateType": "https://empirica.dev/attestation/research/v1",
+                          "predicate": {"result": "supports"}},
+            "verdicts": {"approve": {"ok": True, "reason": "research recorded"},
+                         "refute": {"ok": False, "reason": "not a refutation"}}}
+
+
+def dogfood_spike_leaf(claim_id="G0"):
+    return {"kind": "evidence_leaf", "evidence_id": f"spike-{claim_id}",
+            "statement": {"subject": [{"name": claim_id}],
+                          "predicateType": "https://empirica.dev/attestation/spike/v1",
+                          "predicate": {"gate": "pass"}},
+            "verdicts": {"approve": {"ok": True, "reason": "spike recorded"},
+                         "refute": {"ok": False, "reason": "not a refutation"}}}
+
+
+def test_dogfood_goal_and_modes_are_on_every_run_view():
+    """P-1: adapters can give the model resolved invocation intent before any graph exists."""
+    svc, _, _ = make_service()
+    h = handle_of(start(svc, goal="design retry policy", modes={"multi_provider": True}))
+    for label, response in (("StartRun", start(svc, goal="ignored replacement")),
+                            ("GetRun", get(svc, h)), ("RestoreRun", restore(svc, h))):
+        run = result(response)["run"]
+        check(f"P1 {label} exposes the persisted goal and modes",
+              run["goal"] == "design retry policy" and run["modes"] == {"multi_provider": True},
+              f"got {run}")
+
+
+def test_dogfood_confidence_update_preserves_satisfied_obligations_and_refutation_retires():
+    """P-2: confidence is evidence telemetry, not a contract-significant claim change."""
+    from vendor.obligations import preserved
+    svc, _, artifacts = make_service()
+    h = handle_of(start(svc))
+    graph = single_goal_graph(confidence=0.0)
+    graph["nodes"]["G0"]["kind"] = "needs-experiment"
+    observe(svc, h, {"kind": "graph", "graph": graph})
+    observe(svc, h, approve_evidence())
+    observe(svc, h, dogfood_research_leaf())
+    observe(svc, h, dogfood_spike_leaf())
+    # Confidence then moves only as derived graph telemetry.
+    before = result(get(svc, h))["run"]["contract"]
+    updated = single_goal_graph(confidence=0.9)
+    updated["nodes"]["G0"]["kind"] = "needs-experiment"
+    after = result(observe(svc, h, {"kind": "graph", "graph": updated}))["run"]["contract"]
+    live_before = [o for o in before["obligations"] if o["id"] == "empirica/G0"]
+    live_after = [o for o in after["obligations"] if o["id"] == "empirica/G0"]
+    check("P2 confidence-only graph write preserves the original live obligation revision",
+          after["revision"] == before["revision"] and [o["id"] for o in live_after]
+          == [o["id"] for o in live_before] and not after["retired"], f"got {after}")
+    check("P2 observed witnesses leave the preserved obligation satisfied",
+          all(o["status"] == "satisfied" for o in live_after) and preserved(before, after).ok,
+          f"got {after}")
+    observe(svc, h, {"kind": "evidence", "claim_id": "G0", "purpose": "refute",
+                     "ok": True, "reason": "refutation"})
+    evidence_id = next(a.artifact_id for a in artifacts.read(RunKey("proj", "sess", 1)).value
+                       if __import__("json").loads(a.body).get("kind") == "evidence"
+                       and __import__("json").loads(a.body).get("purpose") == "refute")
+    refuted = single_goal_graph(confidence=0.9, refuted_by=evidence_id)
+    refuted["nodes"]["G0"]["kind"] = "needs-experiment"
+    retired = result(observe(svc, h, {"kind": "graph", "graph": refuted}))["run"]["contract"]
+    check("P2 a real refutation explicitly retires its obligation",
+          not retired["obligations"] and len(retired["retired"]) == 1
+          and evidence_id in retired["retired"][0]["reason"], f"got {retired}")
+
+
+def test_dogfood_audit_obligation_is_visible_and_dischargeable_on_all_views():
+    """P-7: audit owed is a lossless view-time obligation, not prose-only state."""
+    svc, _, artifacts = make_service()
+    h = handle_of(start(svc))
+    raw = single_goal_graph()
+    canon = knowledge.canonicalize_graph(raw)
+    observe(svc, h, {"kind": "graph", "graph": raw})
+    observe(svc, h, approve_evidence())
+    observe(svc, h, dogfood_research_leaf())
+    expected = f"empirica/audit/{C.argument_digest(canon)}"
+    block = result(evaluate(svc, h, intent="report_convergence"))
+    continued = result(evaluate(svc, h, intent="continue"))
+    restored = result(restore(svc, h))
+    gotten = result(get(svc, h))
+    for label, response in (("Block", block), ("EvaluateRun continue", continued),
+                            ("RestoreRun", restored), ("GetRun", gotten)):
+        contract = response["run"]["contract"]
+        residual = [o for o in contract["obligations"] if o["status"] == "residual"]
+        check(f"P7 {label} exposes exactly the residual audit obligation",
+              [o["id"] for o in residual] == [expected] and residual[0]["because"] == ["G0"],
+              f"got {contract}")
+    nonce = result(observe(svc, h, {"kind": "audit_ticket"}))["run"]["ticket"]["nonce"]
+    stored = knowledge.Knowledge.from_artifacts(artifacts.read(RunKey("proj", "sess", 1)).value)
+    digest_of = knowledge.build_digest_of(canon, knowledge.approving_evidence_ids(stored.evidence),
+                                          stored.evidence_leaves)
+    reviewed = digest_of("G0")
+    verdict = {"kind": "audit_verdict", "verdict": "pass", "nonce": nonce,
+               "argument_digest": C.argument_digest(canon),
+               "claims_reviewed": [{"claim_id": "G0", **reviewed}], "findings": []}
+    observe(svc, h, verdict)
+    contract = result(get(svc, h))["run"]["contract"]
+    audit_obligation = next(o for o in contract["obligations"] if o["id"] == expected)
+    check("P7 a coverage-valid passing audit observation satisfies the audit obligation",
+          audit_obligation["status"] == "satisfied" and audit_obligation["witnesses"][0]["observed"] == "pass",
+          f"got {contract}")
+
+
+
+def test_dogfood_every_block_and_allow_carries_run_contract():
+    """Live finding: a spawn-budget Block reached the Pi agent as prose only. B1 (amended) promises
+    `run.contract` on EVERY run view once a graph exists — including ones no earlier test touched."""
+    svc, _, _ = make_service()
+    handle = handle_of(start(svc, max_spawns=1))
+    graph = {"root": "G0", "nodes": {"G0": {"type": "Goal", "text": "root", "confidence": 0.0}}, "edges": []}
+    observe(svc, handle, {"kind": "graph", "graph": graph})
+    first = result(observe(svc, handle, {"kind": "reserve_spawn"}))
+    check("B1 a reserve_spawn Allow carries run.contract",
+          first["type"] == "Allow" and "contract" in first["run"], str(first)[:200])
+    denied = result(observe(svc, handle, {"kind": "reserve_spawn"}))
+    obligations = denied.get("run", {}).get("contract", {}).get("obligations", [])
+    check("B1 a spawn-budget Block carries run.contract with the live obligations",
+          denied["type"] == "Block" and [o["id"] for o in obligations] == ["empirica/G0"],
+          str(denied.get("run"))[:200])
+    route = result(observe(svc, handle, {"kind": "route", "reason": "unknown"}))
+    check("B1 a route stamp acknowledgement carries run.contract", "contract" in route["run"],
+          str(route)[:200])
+
+
 def main() -> int:
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]

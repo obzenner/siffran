@@ -89,7 +89,10 @@ def contract_for_graph(contract_id: str, revision: int, graph: dict, theta: floa
     for claim_id in sorted(claims.gating_goals(graph, theta, ev_ok)):
         node = graph["nodes"][claim_id]
         status = claims.state_of(graph, claim_id, theta, ev_ok)
-        if status == claims.STATE_DISCARDED or status == claims.STATE_APPROVED:
+        # Approval records observed witnesses; it is not retirement.  Keep approved claims in
+        # the live set so verify() can expose their satisfied status across graph revisions.
+        # Only an evidence-linked refutation retires a claim obligation.
+        if status == claims.STATE_DISCARDED:
             continue
         hold = hold_reason = None
         if claim_id in frozen:

@@ -41,7 +41,7 @@ test("agent_settled on an active-but-blocked run enqueues a best-effort follow-u
       : envelope({ type: "Block", reason: "root claim unproven", run: run() }),
   );
   await startRun(w.pi);
-  await w.pi.agentSettled()({}, { ui: new FakeUi() });
+  await w.pi.agentSettled()({ text: "productive" } as never, { ui: new FakeUi() });
 
   // It evaluated with the advisory intent, not the gate intent.
   const evalReq = w.requests.at(-1)!;

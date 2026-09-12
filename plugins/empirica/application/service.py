@@ -1006,8 +1006,17 @@ class EmpiricaService:
 
     def _run_view(self, key: RunKey, state: OperationalState, note: str | None = None,
                   **extra: object) -> dict:
-        return wire.run_obj(wire.encode_handle(key), state.status, state.revision, note=note,
-                            **extra)
+        # Intent is operational state, but it is also model-facing boundary data: before the first
+        # graph there is deliberately no contract, so a host must not have to recover the user's
+        # resolved invocation from history.  These additive fields are present on every run view.
+        extra.setdefault("goal", state.goal)
+        extra.setdefault("modes", dict(state.modes))
+        # B1 (amended): `run.contract` rides on EVERY run view, not only the paths that remembered to
+        # pass it. Found live: a spawn-budget Block reached the Pi agent as prose only. Callers that
+        # need the terminal synthetic obligations still pass an explicit, richer `contract=`.
+        if "contract" not in extra:
+            extra["contract"] = self._contract_view(key, state)
+        return wire.run_obj(wire.encode_handle(key), state.status, state.revision, note=note, **extra)
 
     # --- operation view fragments --------------------------------------------
 
@@ -1048,18 +1057,44 @@ class EmpiricaService:
             return None
         if fault is not None or not isinstance(graph, dict):
             return None
+        evidence = knowledge.build_evidence_oracle(self._knowledge.evidence,
+                                                   self._knowledge.evidence_leaves)
+        def evidence_ok(nid: str, purpose: str) -> bool:
+            return evidence(nid, purpose)[0]
+
+        gating = claims.gating_goals(graph, state.theta, evidence_ok)
+        approved = tuple(sorted(nid for nid in gating
+                                if claims.state_of(graph, nid, state.theta, evidence_ok)
+                                == claims.STATE_APPROVED))
+        # The audit is intentionally a view-time obligation, like budget/stall: whether an
+        # independent review currently covers this immutable argument is an observation, not a
+        # graph-write revision.  It therefore never churns durable B5 lineage.
+        audit_digest = None
+        audit_ok = False
+        if gating and len(approved) == len(gating):
+            audit_digest = claims.argument_digest(graph)
+            digest_of = knowledge.build_digest_of(graph, knowledge.approving_evidence_ids(self._knowledge.evidence),
+                                                  self._knowledge.evidence_leaves)
+            audit = knowledge.build_audit_oracle(list(state.audit_tickets), self._knowledge.verdicts)
+            audit_ok, _ = audit({nid: digest_of(nid) for nid in approved}, audit_digest)
         observations = obligation_projection.observations_from_knowledge(
             self._knowledge.evidence_leaves, self._knowledge.verdicts)
+        # A verdict with the matching digest is not itself coverage: it must also have the issued
+        # nonce and complete approved-claim review.  Do not let an invalid passing verdict satisfy
+        # the rendered audit obligation while the convergence decision correctly remains blocked.
+        if audit_digest is not None and not audit_ok:
+            observations = tuple(item for item in observations
+                                 if not (item.kind == "judgment" and item.ref == f"audit/{audit_digest}"))
         accepted = tuple(item for item in observations if obligation_projection.trusted(item))
-        # Keep synthetic budget/stall obligations out of durable revisions; add them only to this
-        # wire projection, retaining the persisted revision lineage for live claim obligations.
-        if include_budget or include_stall:
-            evidence = knowledge.build_evidence_oracle(self._knowledge.evidence, self._knowledge.evidence_leaves)
+        # Keep synthetic audit/budget/stall obligations out of durable revisions; add them only to
+        # this wire projection, retaining the persisted revision lineage for live claim obligations.
+        if audit_digest is not None or include_budget or include_stall:
             synthetic = obligation_projection.contract_for_graph(
                 contract.contract_id, contract.revision, graph, state.theta, evidence,
                 frozen_claims=state.frozen_claims, include_budget=include_budget,
-                include_stall=include_stall)
-            extras = tuple(item for item in synthetic.obligations if item.id.startswith("empirica/run/"))
+                include_stall=include_stall, audit_digest=audit_digest)
+            extras = tuple(item for item in synthetic.obligations
+                           if item.id.startswith("empirica/run/") or item.id.startswith("empirica/audit/"))
             contract = Contract(contract.contract_id, contract.revision,
                                 contract.obligations + extras, contract.provenance,
                                 contract.parent_revision, contract.supersedes, contract.retired)
