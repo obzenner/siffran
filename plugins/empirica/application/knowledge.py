@@ -361,10 +361,11 @@ def build_audit_oracle(tickets: list[dict], verdicts: list[dict]):
     Block) rather than raising through the wire boundary."""
     from core.audit import coverage_check
 
-    verdict = _normalise_verdict(_select_verdict(verdicts, tickets))
+    live_tickets = [ticket for ticket in tickets if not ticket.get("void")]
+    verdict = _normalise_verdict(_select_verdict(verdicts, live_tickets))
 
     def audit(approved_digests: dict, argument_digest: str) -> tuple[bool, str]:
-        return coverage_check(tickets, verdict, approved_digests, argument_digest)
+        return coverage_check(live_tickets, verdict, approved_digests, argument_digest)
 
     return audit
 

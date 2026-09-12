@@ -446,12 +446,11 @@ ticket. This witnesses a requested spawn, not actor identity or independence. If
 decorrelated model generations, use a witnessed CLI dispatch with an explicit model in `cli_exec`
 mode and report any independence not actually obtained.
 
-Pass it the opaque run handle and the **nonce** the spawn gate issued. It verifies the run against
-the ADR-20 rubric — above all **re-reading each approved claim's Fold-1 citation to confirm the
-cited source actually supports the claim** — and submits its verdict with
-`build_audit_verdict_request` through `BridgeTransport`. The Stop gate
-requires a `pass` verdict whose nonce matches a real auditor spawn and whose `claims_reviewed`
-covers **every** approved claim.
+The host obtains `GetArgument`, injects its rendered dossier and the nonce directly into the
+child task, and does not expose that nonce to the author. The auditor returns an
+`empirica-verdict` fenced JSON block; the host extracts and records it as `audit_verdict`.
+The Stop gate requires a `pass` verdict whose nonce matches a real auditor spawn and whose
+`claims_reviewed` covers **every** approved claim.
 
 **The audit is incremental, per claim (ADR-25).** Each `claims_reviewed` entry is
 `{claim_id, claim_digest, evidence_digest}` — the digests the claim had when the auditor read it.

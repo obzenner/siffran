@@ -73,15 +73,42 @@ test("P-5 real Pi bridge preserves the model-visible contract lifecycle", { skip
   assert.equal(await gate({ toolName: "subagent", toolCallId: "list", input: { action: "list" } }, ctx), undefined);
   const spawnInput: any = { agent: "empirica:empirica-auditor", task: "audit the approved claims" };
   assert.equal((await gate({ toolName: "subagent", toolCallId: "spawn", input: spawnInput }, ctx)), undefined);
-  assert.match(spawnInput.task, /nonce/);
-  assert.match(pi.modelMessages.at(-1)!.content, /nonce/);
+  // E: the child task carries rubric + dossier + nonce + output contract; the AUTHOR never sees the nonce.
+  assert.match(spawnInput.task, /empirica-verdict/);
+  assert.match(spawnInput.task, /Fold-1 citations are REAL/);            // rubric
+  assert.match(spawnInput.task, /bridge retries preserve request identity/); // dossier names every claim
+  assert.match(spawnInput.task, /claim_digest=/);
+  const nonce = /Your nonce: ([0-9a-f]+)/.exec(spawnInput.task)?.[1];
+  assert.ok(nonce, "nonce injected into the child task");
+  assert.equal(spawnInput.async, false, "auditor launch is forced foreground so the verdict returns in the tool result");
+  for (const m of pi.modelMessages) assert.doesNotMatch(m.content, new RegExp(nonce!));
+  assert.match(pi.modelMessages.at(-1)!.content, /verdict is recorded by the host/);
+
+  // P-8/P-3: a second spawn while the first is out is over budget (max_spawns=1) and the denial carries the contract.
   const denied = await gate({ toolName: "subagent", toolCallId: "spawn-2", input: { agent: "empirica:empirica-auditor", task: "again" } }, ctx);
   assert.equal(denied?.block, true);
   assert.match(denied?.reason ?? "", /Obligation contract/); // P-3: denial carries the rendered contract
-  // P-3 + P-7: the convergence denial names the audit in prose AND lists it as an obligation.
-  await assert.rejects(() => pi.tools.get("report_convergence")!.execute("r", {}, new AbortController().signal, () => {}, ctx),
-    (err: Error) => { assert.match(err.message, /audit/); assert.match(err.message, /empirica\/audit\//); assert.match(err.message, /Obligation contract/); return true; });
 
+  // D: the child (played by the test) builds its verdict ONLY from GetArgument — the digests it is
+  // given must be the ones coverage_check recomputes, or this whole design is theatre.
+  const argument = ((await dispatch({ protocol: "empirica/v1", request_id: "arg", command: { type: "GetArgument", run_id: handle } })).result as any).run.argument;
+  assert.ok(argument, "GetArgument returns an argument");
+  assert.equal(argument.tickets.some((t: any) => "nonce" in t), false, "tickets never expose the nonce");
+  assert.deepEqual(argument.claims.map((c: any) => c.id), ["C1", "G0"]);
+  assert.ok(argument.claims.every((c: any) => c.evidence.length >= 1), "every claim lists its evidence leaves");
+  const verdict = { verdict: "pass", nonce, auditor: "test-auditor", argument_digest: argument.argument_digest,
+    claims_reviewed: argument.claims.map((c: any) => ({ claim_id: c.id, claim_digest: c.claim_digest, evidence_digest: c.evidence_digest })),
+    findings: [], ts: "2026-09-12T00:00:00Z" };
+  const toolResult = pi.handlers.get("tool_result") as any;
+  const resultEvent: any = { toolCallId: "spawn", content: [{ type: "text", text: "Audit done.\n```empirica-verdict\n" + JSON.stringify(verdict) + "\n```" }] };
+  await toolResult(resultEvent, ctx);
+  const appended = JSON.stringify(resultEvent.content);
+  assert.match(appended, /host recorded the auditor's verdict \(pass\)/);
+  assert.doesNotMatch(appended, new RegExp(nonce!));
+  // The audit obligation is now satisfied and the run may converge.
+  const converged = await pi.tools.get("report_convergence")!.execute("r2", {}, new AbortController().signal, () => {}, ctx);
+  assert.match(converged.content[0].text, /empirica\/audit\//);
+  assert.equal((converged.details as any).run.contract.verdict.residual.length, 0, "no residual obligation after a valid audit");
   const compact = await (pi.handlers.get("session_before_compact") as any)({ preparation: { firstKeptEntryId: "e", tokensBefore: 10 } }, ctx);
   assert.match(compact.compaction.summary, /retry the bridge/); // run.goal survives compaction
   assert.match(compact.compaction.summary, /Obligation contract/);

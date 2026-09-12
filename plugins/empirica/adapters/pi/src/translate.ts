@@ -52,8 +52,8 @@ export interface StartRunOptions {
   maxPasses?: number;
   maxSpawns?: number | null;
   modes?: RunModes;
+  actor?: { model?: string; harness?: string; provider?: string };
 }
-
 export function startRunRequest(
   selector: RunSelector,
   goal: string,
@@ -64,6 +64,7 @@ export function startRunRequest(
   if (options.maxPasses !== undefined) command.max_passes = options.maxPasses;
   if (options.maxSpawns !== undefined) command.max_spawns = options.maxSpawns;
   if (options.modes !== undefined) command.modes = options.modes;
+  if (options.actor !== undefined) command.actor = options.actor;
   return { protocol: PROTOCOL, request_id: requestId, command };
 }
 

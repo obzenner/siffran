@@ -24,11 +24,10 @@ costs one more loop.
 
 ## Inputs
 
-You will be given an opaque run handle, an application snapshot/knowledge view obtained through the
-Empirica adapter API, and a **nonce** issued when you were spawned. Use `RestoreRun` and the
-knowledge adapter to inspect the graph and evidence. Runtime state belongs under
-`~/.empirica-plugin/` and knowledge under `refs/empirica/*`; never read or edit either directly.
-Never create, read, or edit runtime state under `.claude/` or `.pi/`.
+You are given the rendered audit dossier (`GetArgument.text`) and a nonce. The dossier is the
+complete host-neutral argument: it contains every gating claim, evidence leaf, exact review
+digests, and rendered obligation contract. Never touch `~/.empirica-plugin` or `refs/empirica`;
+never run the bridge yourself.
 
 ## The rubric (ADR-20 P6) — check every item
 
@@ -63,27 +62,13 @@ Never create, read, or edit runtime state under `.claude/` or `.pi/`.
    frozen claim is properly evidenced. Deferring genuine refinements and follow-on work is correct
    and is what the mechanism is for.
 
-## Output — submit the verdict artifact
+## Output — return the host-recorded verdict
 
-Return the verdict object below to the caller. It must be submitted with
-`adapters.claude.knowledge.build_audit_verdict_request` through `BridgeTransport`; do not write a
-verdict file or Git ref yourself. A missing, malformed, or nonce-mismatched verdict blocks
-convergence.
+Return **only** this fenced block. The host extracts it from your final output and records the
+verdict; you must not call an Empirica tool, write a verdict artifact, or submit the bridge yourself.
 
-```json
-{
-  "verdict": "pass" | "fail",
-  "nonce": "<the nonce you were given at spawn>",
-  "auditor": "empirica-auditor",
-  "argument_digest": "<sha256 of the argument's shape, as you walked it>",
-  "claims_reviewed": [
-    {"claim_id": "G1",
-     "claim_digest": "<sha256 of the claim text you read>",
-     "evidence_digest": "<sha256 over the evidence leaves you re-read>"}
-  ],
-  "findings": ["one line per problem found — required when verdict is fail"],
-  "ts": "<ISO timestamp>"
-}
+```empirica-verdict
+{"verdict":"pass"|"fail","nonce":"<nonce>","argument_digest":"<dossier value>","claims_reviewed":[{"claim_id":"G1","claim_digest":"<dossier value>","evidence_digest":"<dossier value>"}],"findings":["..."],"ts":"<ISO timestamp>"}
 ```
 
 `claims_reviewed` must cover **every approved claim**, and each entry records the two digests the
@@ -97,16 +82,15 @@ a run could detach or delete a blocking claim and a verdict written before that 
 still read as full coverage. It moves when a claim is added, deleted, detached, re-parented, blocked
 or discarded; it does **not** move when a confidence changes.
 
-**Do not hand-compute the digests.** Obtain all three from the adapter/application knowledge view
-and its digest helpers. Pass only claim ids you actually reviewed and are willing to sign off. A
-digest you computed without reading the evidence is a false review, and it is the one failure this
-whole mechanism cannot detect — the gate can check that you recorded a digest, never that you
-looked.
+Use the exact digests printed in the dossier; do not recompute or invent them. Pass only claim ids
+you actually reviewed and are willing to sign off. A digest you copied without reading the evidence
+is a false review, and it is the one failure this whole mechanism cannot detect — the gate can check
+that you recorded a digest, never that you looked.
 
 **This is an incremental audit.** On a re-audit, claims whose digests have not moved are still
 covered by your previous verdict, so review what changed — the gate's block message names exactly
 which claims are unreviewed, reworded, or re-evidenced. Re-reviewing an unchanged claim is wasted
 work, not extra rigour.
 
-Report your findings in your final message too, but the API-submitted artifact is what the gate
-reads.
+Your final message may explain your findings in prose as well, but the fenced block is the only
+thing the host records.

@@ -6,6 +6,10 @@ export interface ResourcesDiscoverEvent { cwd: string; reason: "startup" | "relo
 export interface ResourcesDiscoverResult { skillPaths?: string[]; promptPaths?: string[]; themePaths?: string[]; }
 export interface ToolCallEvent { toolName: string; toolCallId: string; input: Record<string, unknown>; }
 export interface ToolCallResult { block?: boolean; reason?: string; terminate?: boolean; }
+/** Pi emits the completed child output through tool_result; its exact payload is
+ * versioned by Pi, so the adapter deliberately accepts the common content/result
+ * shapes while retaining the toolCallId correlation. */
+export interface ToolResultEvent { toolCallId: string; toolName?: string; isError?: boolean; error?: unknown; result?: unknown; content?: unknown; }
 export type ToolCallHandler = (event: ToolCallEvent, ctx: ExtensionContext) => ToolCallResult | void | Promise<ToolCallResult | void>;
 export type AgentSettledHandler = (event: Record<string, never>, ctx: ExtensionContext) => void | Promise<void>;
 export type ResourcesDiscoverHandler = (event: ResourcesDiscoverEvent, ctx: ExtensionContext) => ResourcesDiscoverResult | Promise<ResourcesDiscoverResult>;
@@ -17,6 +21,7 @@ export interface ExtensionAPI {
  registerTool?(def: ToolDefinition): void;
  appendEntry?(customType: string, data?: unknown): void;
  sendMessage?(message: { customType: string; content: string; display?: boolean }, options?: { deliverAs?: MessageDelivery }): void;
+ on(event: "tool_result", handler: (event: ToolResultEvent, ctx: ExtensionContext) => unknown): void;
  on(event: "resources_discover", handler: ResourcesDiscoverHandler): void;
  on(event: "tool_call", handler: ToolCallHandler): void;
  on(event: "agent_settled", handler: AgentSettledHandler): void;

@@ -86,6 +86,8 @@ class OperationalState:
     route_reason: str = ""
     first_investigation_seq: int | None = None
     stamp_seq: int = 0
+    # Author identity is recorded at StartRun; audit tickets must decorrelate from it.
+    author_actor: dict | None = None
     # --- audit tickets (ADR-20 P6): server-minted spawn nonces + dispatch attribution ---
     audit_tickets: tuple[dict, ...] = ()
     # --- actor dispatch attribution (ADR-24) ---
@@ -111,11 +113,11 @@ class OperationalState:
 
     @classmethod
     def new(cls, *, goal: str, max_passes: int, max_spawns: int | None,
-            theta: float, modes: dict | None) -> OperationalState:
+            theta: float, modes: dict | None, author_actor: dict | None = None) -> OperationalState:
         """A fresh active run at revision 0. Starts clean: no graph pointer, zero passes, phase
         `route` — a new generation is empty by construction (ADR-31)."""
         return cls(status=STATUS_ACTIVE, revision=0, passes=0, max_passes=max_passes,
-                   theta=theta, goal=goal, max_spawns=max_spawns, modes=modes or {})
+                   theta=theta, goal=goal, max_spawns=max_spawns, modes=modes or {}, author_actor=author_actor)
 
     def evolve(self, **changes: object) -> OperationalState:
         """A copy with ``changes`` applied and the wire revision advanced by one. Every state write
@@ -194,6 +196,7 @@ class OperationalState:
             "route_reason": self.route_reason,
             "first_investigation_seq": self.first_investigation_seq,
             "stamp_seq": self.stamp_seq,
+            "author_actor": self.author_actor,
             "audit_tickets": [dict(t) for t in self.audit_tickets],
             "dispatches": [dict(d) for d in self.dispatches],
             "modes": self.modes,
@@ -265,6 +268,7 @@ class OperationalState:
                           if isinstance(value.get("route_reason"), str) else ""),
             first_investigation_seq=_opt_int(value.get("first_investigation_seq")),
             stamp_seq=_nonneg_int(value.get("stamp_seq")),
+            author_actor=(value.get("author_actor") if isinstance(value.get("author_actor"), dict) else None),
             audit_tickets=_decode_tickets(value.get("audit_tickets")),
             dispatches=_decode_dispatches(value.get("dispatches")),
             modes=modes if isinstance(modes, dict) else {},

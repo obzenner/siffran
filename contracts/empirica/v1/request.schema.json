@@ -15,6 +15,7 @@
         {"$ref": "#/$defs/observeAction"},
         {"$ref": "#/$defs/evaluateRun"},
         {"$ref": "#/$defs/getRun"},
+        {"$ref": "#/$defs/getArgument"},
         {"$ref": "#/$defs/restoreRun"}
       ]
     }
@@ -69,7 +70,7 @@
           "type": "object",
           "additionalProperties": true,
           "required": ["kind"],
-          "comment": "kind is one of the knowledge kinds (graph|evidence|audit_verdict|attribution) or an operational kind (reserve_spawn|configure_budget|phase|mode|freeze|route|investigate|dispatch|audit_ticket|consume_audit_ticket); per-kind fields are validated by the application handler, so additional properties are allowed here.",
+          "comment": "kind is one of the knowledge kinds (graph|evidence|audit_verdict|attribution) or an operational kind (reserve_spawn|configure_budget|phase|mode|freeze|route|investigate|dispatch|audit_ticket|consume_audit_ticket|void_spawn); per-kind fields are validated by the application handler, so additional properties are allowed here.",
           "properties": {"kind": {"type": "string", "minLength": 1}}
         },
         "observed_at": {"type": ["string", "null"]}
@@ -93,6 +94,11 @@
         "type": {"const": "GetRun"},
         "run_id": {"type": "string", "minLength": 1}
       }
+    },
+    "getArgument": {
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "run_id"],
+      "properties": {"type": {"const": "GetArgument"}, "run_id": {"type": "string", "minLength": 1}}
     },
     "restoreRun": {
       "type": "object",

@@ -31,7 +31,7 @@ from typing import Protocol
 from core import Allow, Block, Fault, Inert, Present, RunKey, RunState, adjudicate, claims, budget
 from core import obligations as obligation_projection
 from core.records import ABSENT, Conflict, Corrupt
-from vendor.obligations import Contract, revise, project, verify
+from vendor.obligations import Contract, revise, project, render_text, verify
 
 from . import actors, knowledge, wire
 from .state import DEFAULT_MAX_PASSES, DEFAULT_THETA, MODES, PHASES, OperationalState
@@ -106,6 +106,8 @@ class EmpiricaService:
             return self._resolve_run(command)
         if ctype == wire.CMD_GET_RUN:
             return self._get_run(command)
+        if ctype == wire.CMD_GET_ARGUMENT:
+            return self._get_argument(command)
         if ctype == wire.CMD_RESTORE_RUN:
             return self._restore_run(command)
         if ctype == wire.CMD_OBSERVE_ACTION:
@@ -129,6 +131,13 @@ class EmpiricaService:
                                        or isinstance(max_spawns, bool) or max_spawns < 0):
             raise wire.InvalidRequest("max_spawns must be a non-negative integer or null")
         modes = command.get("modes") or {}
+        # The author's actor is optional bookkeeping (ADR-24): a record without a usable model
+        # degrades to "no author recorded" rather than refusing to start the run (actors.py). Only a
+        # non-object is a malformed request.
+        raw_actor = command.get("actor")
+        if raw_actor is not None and not isinstance(raw_actor, dict):
+            raise wire.InvalidRequest("actor must be an object")
+        author_actor = actors.normalise(raw_actor) if raw_actor is not None else None
 
         key = self._allocator.allocate(project, session)
         read = self._runs.read(key)
@@ -144,7 +153,7 @@ class EmpiricaService:
             return self._run_snapshot(key, state)
 
         state = OperationalState.new(goal=goal, max_passes=max_passes, max_spawns=max_spawns,
-                                     theta=self._theta, modes=modes)
+                                     theta=self._theta, modes=modes, author_actor=author_actor)
         try:
             self._runs.create(key, state.encode())
         except Conflict:
@@ -196,6 +205,85 @@ class EmpiricaService:
         if state is None:
             return wire.fault(wire.FAULT_CORRUPT_RUN, "run document is unreadable")
         return self._run_snapshot(key, state)
+
+    # --- GetArgument ---------------------------------------------------------
+
+    def _get_argument(self, command: dict) -> dict:
+        """Return a host-neutral, nonce-free audit dossier for the current argument."""
+        key = wire.decode_handle(wire.require(command, "run_id", str))
+        read = self._runs.read(key)
+        if read is ABSENT:
+            return wire.inert("no_run")
+        if isinstance(read, Corrupt):
+            return wire.fault(wire.FAULT_CORRUPT_RUN, read.reason)
+        state = OperationalState.decode(read.value)
+        if state is None:
+            return wire.fault(wire.FAULT_CORRUPT_RUN, "run document is unreadable")
+        try:
+            graph, graph_fault = self._load_graph(key, state)
+        except knowledge.KnowledgeError as exc:
+            return wire.fault(wire.FAULT_CORRUPT_ARTIFACTS, str(exc))
+        if graph_fault is not None:
+            return graph_fault
+        if not isinstance(graph, dict):
+            return wire.allow(False, self._run_view(key, state, argument={
+                "argument_digest": None, "theta": state.theta, "frozen_claims": state.frozen_claims,
+                "claims": [], "tickets": self._public_tickets(state),
+                "text": self._render_dossier(state, None, [], None)}))
+        evidence = knowledge.build_evidence_oracle(self._knowledge.evidence, self._knowledge.evidence_leaves)
+        gating = sorted(claims.gating_goals(graph, state.theta, evidence))
+        approving = knowledge.approving_evidence_ids(self._knowledge.evidence)
+        digest_of = knowledge.build_digest_of(graph, approving, self._knowledge.evidence_leaves)
+        rows = [self._argument_claim(graph, nid, state.theta, evidence, digest_of(nid)) for nid in gating]
+        argument_digest = claims.argument_digest(graph)
+        return wire.allow(False, self._run_view(key, state, argument={
+            "argument_digest": argument_digest, "theta": state.theta,
+            "frozen_claims": list(state.frozen_claims) if state.frozen_claims is not None else None,
+            "claims": rows, "tickets": self._public_tickets(state),
+            "text": self._render_dossier(state, argument_digest, rows, self._contract_view(key, state))}))
+
+    def _public_tickets(self, state: OperationalState) -> list[dict]:
+        return [{k: t[k] for k in ("seq", "model", "harness", "issued_at", "consumed") if k in t}
+                for t in state.audit_tickets]
+
+    def _argument_claim(self, graph, nid, theta, evidence, digests):
+        node = graph["nodes"][nid]
+        leaves = []
+        for record in knowledge.active_evidence_leaves(self._knowledge.evidence_leaves):
+            statement = record.get("statement", {})
+            subject = statement.get("subject", []) if isinstance(statement, dict) else []
+            if not subject or not isinstance(subject[0], dict) or subject[0].get("name") != nid:
+                continue
+            predicate = statement.get("predicate", {})
+            if not isinstance(predicate, dict):
+                continue
+            fold = knowledge.evidence_fold(statement)
+            if fold not in ("research", "spike"):
+                continue
+            leaf = {"evidence_id": record.get("evidence_id"), "fold": fold,
+                    "kind": predicate.get("kind"), "citation": predicate.get("citation") or predicate.get("source"),
+                    "source": predicate.get("source"), "result": predicate.get("result"),
+                    "gate": predicate.get("gate"), "command": predicate.get("command")}
+            leaves.append(leaf)
+        leaves.sort(key=lambda e: str(e.get("evidence_id", "")))
+        return {"id": nid, "text": node["text"], "kind": node.get("kind"),
+                "state": claims.state_of(graph, nid, theta, evidence), "confidence": node["confidence"],
+                "parent": next((e["from"] for e in graph["edges"] if e["type"] == "SupportedBy" and e["to"] == nid), None),
+                **digests, "evidence": leaves}
+
+    def _render_dossier(self, state, argument_digest, rows, contract):
+        lines = [f"Goal: {state.goal}", f"Contract: {contract.get('contract_id') if contract else 'none'}",
+                 f"argument_digest: {argument_digest or 'none'}", f"theta: {state.theta}"]
+        for row in rows:
+            lines.append(f"{row['id']} [{row['state']}] {row['text']}  claim_digest={row['claim_digest']} evidence_digest={row['evidence_digest']}")
+            for leaf in row["evidence"]:
+                if leaf["fold"] == "research":
+                    lines.append(f"  - research: {leaf.get('citation') or leaf.get('source') or ''} → {leaf.get('result') or ''} ({leaf.get('evidence_id')})")
+                else:
+                    lines.append(f"  - spike: {leaf.get('command') or ''} → gate {leaf.get('gate') or ''} ({leaf.get('evidence_id')})")
+        if contract:
+            lines.extend(("", render_text(contract)))
+        return "\n".join(lines)
 
     # --- RestoreRun ----------------------------------------------------------
 
@@ -364,6 +452,8 @@ class EmpiricaService:
             return self._issue_audit_ticket(key, action)
         if kind == wire.KIND_CONSUME_AUDIT_TICKET:
             return self._consume_audit_ticket(key, action)
+        if kind == wire.KIND_VOID_SPAWN:
+            return self._void_spawn(key, action)
         return wire.fault(wire.FAULT_UNSUPPORTED, f"unsupported action kind: {kind}")
 
     def _observe_evidence(self, key: RunKey, state: OperationalState, action: dict) -> dict:
@@ -679,8 +769,12 @@ class EmpiricaService:
                 raise wire.InvalidRequest("actor is not a valid actor record")
 
         def mutate(state: OperationalState):
+            if actor is not None and state.author_actor is not None and actors.same_actor(actor, state.author_actor):
+                return wire.block("audit ticket denied: ADR-24 decorrelation requires an auditor on a different model than the author", self._run_view(key, state))
             seq = len(state.audit_tickets) + 1
-            ticket = {"nonce": _mint_nonce(key, seq), "seq": seq, "consumed": False}
+            ticket = {"nonce": _mint_nonce(key, seq), "seq": seq, "consumed": False,
+                      "model": actor.get("model") if actor else None,
+                      "harness": actor.get("harness") if actor else None, "issued_at": None}
             if actor is not None:
                 ticket["actor"] = actor
             return state.evolve(audit_tickets=(*state.audit_tickets, ticket))
@@ -690,6 +784,22 @@ class EmpiricaService:
         issued = result.audit_tickets[-1]
         return wire.allow(False, self._run_view(
             key, result, ticket={"nonce": issued["nonce"], "seq": issued["seq"]}))
+
+    def _void_spawn(self, key: RunKey, action: dict) -> dict:
+        """Undo one successful reservation after a rejected spawn and void its ticket if supplied."""
+        nonce = action.get("nonce")
+        if nonce is not None and not isinstance(nonce, str):
+            raise wire.InvalidRequest("nonce must be a string or null")
+        def mutate(state: OperationalState):
+            if state.spawns <= 0:
+                return wire.block("no reserved spawn is available to void", self._run_view(key, state))
+            tickets = tuple({**t, "void": True} if nonce is not None and t.get("nonce") == nonce else t
+                            for t in state.audit_tickets)
+            return state.evolve(spawns=max(0, state.spawns - 1), audit_tickets=tickets)
+        result = self._commit(key, mutate)
+        if isinstance(result, dict):
+            return result
+        return wire.allow(False, self._run_view(key, result, spawn=self._spawn_view(result)))
 
     def _consume_audit_ticket(self, key: RunKey, action: dict) -> dict:
         """Mark an issued ticket consumed (ADR-20 P6). Idempotent: consuming an already-consumed

@@ -23,6 +23,7 @@
 import { fileURLToPath } from "node:url";
 import * as path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 import type { Dispatch, Request, RunSelector } from "./contract.ts";
 import { renderText } from "./obligations.ts";
@@ -35,6 +36,7 @@ import type {
   ExtensionContext,
   ToolCallEvent,
   ToolCallResult,
+  ToolResultEvent,
 } from "./pi-types.ts";
 import { createStdioBridgeDispatch, defaultBridgeConfig } from "./stdio-transport.ts";
 import {
@@ -178,7 +180,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         if (parsed.unknownFlags.length) ctx.ui.notify(`empirica: unknown mode flags ignored: ${parsed.unknownFlags.join(" ")}`, "warning");
         try {
           const result = (
-            await dispatch(startRunRequest(selectorOf(ctx), goal, randomUUID(), { ...startOptions, modes }))
+            await dispatch(startRunRequest(selectorOf(ctx), goal, randomUUID(), { ...startOptions, modes, actor: authorActor(ctx) }))
           ).result;
           if (result.type === "Allow" || result.type === "Block") {
             runHandle = result.run.id; // remember the opaque handle for this session
@@ -242,6 +244,73 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       },
     });
 
+    // Child tickets are correlated by Pi's toolCallId, never shown to the author.
+    const auditTickets = new Map<string, string>();
+    const AUDIT_CONTRACT = "```empirica-verdict {\n  {verdict, nonce, argument_digest, claims_reviewed:[{claim_id, claim_digest, evidence_digest}], findings, ts}\n}```";
+    const auditorInstructions = (): string => {
+      const file = path.resolve(skillsDir, "..", "agents", "empirica-auditor.md");
+      try {
+        const raw = readFileSync(file, "utf8");
+        return raw.replace(/^---[\s\S]*?---\s*/, "").trim();
+      } catch { return "Review the supplied argument and return the required verdict block."; }
+    };
+    const verdictBlock = (value: unknown): Record<string, unknown> | null => {
+      const text = typeof value === "string" ? value : JSON.stringify(value ?? "");
+      const match = text.match(/```empirica-verdict\s*\n?([\s\S]*?)```/i);
+      if (!match) return null;
+      try { const parsed = JSON.parse(match[1].trim()); return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : null; } catch { return null; }
+    };
+    const resultText = (event: ToolResultEvent): string => {
+      const value = event.content ?? event.result ?? event.error ?? "";
+      if (typeof value === "string") return value;
+      if (Array.isArray(value)) return value.map((x) => typeof x === "object" && x && "text" in x ? String((x as Record<string, unknown>).text) : String(x)).join("\n");
+      return JSON.stringify(value);
+    };
+    const VERDICT_BLOCK = /```empirica-verdict\s*\n?[\s\S]*?```/gi;
+    const redactVerdict = (event: ToolResultEvent): void => {
+      const marker = "[empirica-verdict block recorded by the host]";
+      if (Array.isArray(event.content)) {
+        for (const part of event.content) {
+          if (part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string") {
+            (part as { text: string }).text = (part as { text: string }).text.replace(VERDICT_BLOCK, marker);
+          }
+        }
+        return;
+      }
+      if (typeof event.content === "string") event.content = event.content.replace(VERDICT_BLOCK, marker);
+    };
+    const appendResult = (event: ToolResultEvent, line: string): void => {
+      if (Array.isArray(event.content)) { event.content.push({ type: "text", text: line }); return; }
+      if (typeof event.content === "string") { event.content += `\n${line}`; return; }
+      event.content = `${resultText(event)}\n${line}`;
+    };
+    pi.on("tool_result", async (event: ToolResultEvent) => {
+      const nonce = auditTickets.get(event.toolCallId);
+      if (!nonce || runHandle === null) return;
+      auditTickets.delete(event.toolCallId);
+      if (event.isError || event.error) {
+        // The child never ran: give the reservation back and void the nonce (P-8).
+        await dispatch({ protocol: "empirica/v1", request_id: randomUUID(), command: { type: "ObserveAction", run_id: runHandle, action: { kind: "void_spawn", nonce } } });
+        appendResult(event, "Empirica: auditor launch failed — spawn reservation released, ticket voided.");
+        return;
+      }
+      const parsed = verdictBlock(resultText(event));
+      if (!parsed || parsed.nonce !== nonce) {
+        // The child ran (budget is spent) but produced no usable verdict. The ticket simply never
+        // gets a matching verdict, so it cannot satisfy coverage; the obligation stays open.
+        appendResult(event, "Empirica: the auditor returned no valid empirica-verdict block; the audit obligation remains open. Spawn another auditor if budget remains.");
+        return;
+      }
+      const response = await dispatch({ protocol: "empirica/v1", request_id: randomUUID(), command: { type: "ObserveAction", run_id: runHandle, action: { kind: "audit_verdict", ...parsed } } });
+      redactVerdict(event); // the author never holds the nonce, not even after the fact
+      const run = (response.result as { run?: { contract?: import("./obligations.ts").ContractView } }).run;
+      const findings = Array.isArray(parsed.findings) && parsed.findings.length ? `\nFindings:\n- ${parsed.findings.join("\n- ")}` : "";
+      const head = response.result.type === "Allow"
+        ? `Empirica: host recorded the auditor's verdict (${parsed.verdict}).${findings}`
+        : `Empirica: the auditor's verdict was not accepted — ${(response.result as { reason?: string; message?: string }).reason ?? (response.result as { message?: string }).message ?? response.result.type}.`;
+      appendResult(event, run?.contract ? `${head}\n${renderText(run.contract)}` : head);
+    });
+
     // (tool_call) The hard gate. A `report_convergence` tool call succeeds only
     // when the core returns Allow; a Block (or a closed-fault / transport failure)
     // blocks that single call with the reason. Non-gated tools pass untouched — the
@@ -263,9 +332,20 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             if (ticket.result.type === "Block") return { block: true, reason: ticket.result.reason };
             const nonce = (ticket.result as { run?: { ticket?: { nonce?: string } } }).run?.ticket?.nonce;
             if (nonce) {
-              const task = typeof event.input.task === "string" ? event.input.task : "";
-              event.input.task = `${task}\nEmpirica audit ticket nonce: ${nonce}`.trim();
-              pi.sendMessage?.({ customType: "empirica", content: `Auditor spawn ticket nonce: ${nonce}` });
+              const argumentResponse = await dispatch({ protocol: "empirica/v1", request_id: randomUUID(), command: { type: "GetArgument", run_id: runHandle } });
+              if (argumentResponse.result.type === "Fault" || argumentResponse.result.type === "Block") {
+                await dispatch({ protocol: "empirica/v1", request_id: randomUUID(), command: { type: "ObserveAction", run_id: runHandle, action: { kind: "void_spawn", nonce } } });
+                return { block: true, reason: "empirica audit argument unavailable" };
+              }
+              const argument = (argumentResponse.result as { run?: { argument?: { text?: string } } }).run?.argument;
+              const text = typeof event.input.task === "string" ? event.input.task : "";
+              event.input.task = `${auditorInstructions()}\n\n${argument?.text ?? ""}\n\nYour nonce: ${nonce}\n\nReturn exactly one fenced block tagged empirica-verdict containing JSON with verdict, nonce, argument_digest, claims_reviewed, findings, and ts.\n${AUDIT_CONTRACT}`.trim();
+              // The verdict must come back in THIS tool result: the host decides the launch is
+              // foreground. A detached run would return only an id here and the verdict would
+              // surface as a notification the host cannot attribute to the ticket.
+              event.input.async = false;
+              auditTickets.set(event.toolCallId, nonce);
+              pi.sendMessage?.({ customType: "empirica", content: "Auditor spawned; verdict is recorded by the host" });
             }
           }
         } catch (error) { return { block: true, reason: `empirica spawn gate unavailable (failing closed): ${describe(error)}` }; }
@@ -335,8 +415,17 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
   };
 }
 
+// The author's actor for ADR-24 decorrelation: sent only when a model is actually known, so the
+// application never has to reject a StartRun over optional bookkeeping.
+function authorActor(ctx: unknown): { model: string; harness: string; provider?: string } | undefined {
+  const model = process.env.PI_MODEL || (ctx as { model?: { id?: string } }).model?.id;
+  if (!model) return undefined;
+  return { model, harness: "pi", provider: process.env.PI_PROVIDER || undefined };
+}
+
 function isExecutableSpawn(input: Record<string, unknown>): boolean {
-  return ["agent", "workflowScript", "resume"].some((key) => input[key] !== undefined && input[key] !== null);
+  const keys = ["agent", "workflowScript", "resume"].filter((key) => input[key] !== undefined && input[key] !== null);
+  return keys.length === 1;
 }
 function isAuditorSpawn(input: Record<string, unknown>): boolean {
   return JSON.stringify(input).toLowerCase().includes("empirica-auditor");
@@ -347,6 +436,8 @@ function actorModel(input: Record<string, unknown>): string {
   const agent = input.agent;
   if (typeof agent === "string" && agent.trim()) return agent.trim();
   if (agent && typeof agent === "object" && typeof (agent as Record<string, unknown>).model === "string") return String((agent as Record<string, unknown>).model);
+  const definition = input.agentDefinition;
+  if (definition && typeof definition === "object" && typeof (definition as Record<string, unknown>).model === "string") return String((definition as Record<string, unknown>).model);
   return "empirica-auditor";
 }
 function isEmptySettledTurn(event: unknown): boolean {

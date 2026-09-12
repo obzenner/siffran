@@ -29,6 +29,7 @@ export interface StartRunCommand {
   max_passes?: number;
   max_spawns?: number | null;
   modes?: RunModes;
+  actor?: { model?: string; harness?: string; provider?: string };
 }
 
 export interface ObserveActionCommand {
@@ -56,6 +57,8 @@ export interface GetRunCommand {
   run_id: string;
 }
 
+export interface GetArgumentCommand { type: "GetArgument"; run_id: string; }
+
 export interface RestoreRunCommand { type: "RestoreRun"; run_id: string; }
 
 export type Command =
@@ -63,6 +66,7 @@ export type Command =
   | ObserveActionCommand
   | EvaluateRunCommand
   | GetRunCommand
+  | GetArgumentCommand
   | RestoreRunCommand;
 
 export interface Request {
