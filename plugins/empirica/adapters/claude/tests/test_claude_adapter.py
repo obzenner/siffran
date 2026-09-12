@@ -60,6 +60,11 @@ from adapters.claude.spawn import (  # noqa: E402
     dispatch_reserve_spawn,
     spawn_decision,
 )
+from adapters.claude.audit import (  # noqa: E402
+    build_audit_verdict_request as build_host_observed_audit_verdict,
+    child_prompt,
+    verdict_from_final_output,
+)
 from adapters.claude.transport import BridgeTransport  # noqa: E402
 
 
@@ -77,7 +82,20 @@ class RecordingTransport:
         }
 
 
-class TranslationParityTests(unittest.TestCase):
+class HostObservedAuditTests(unittest.TestCase):
+    def test_child_prompt_holds_fixture_dossier_and_nonce_but_extract_never_returns_nonce_to_author(self) -> None:
+        fixture = json.loads((PLUGIN_ROOT.parent.parent / "contracts" / "fixtures" / "empirica-get-argument.json").read_text())
+        argument = fixture["expected"]["result"]["run"]["argument"]
+        prompt = child_prompt(argument["text"], "child-only-nonce")
+        self.assertIn("Fold-1 citations are REAL", prompt)
+        self.assertIn(argument["text"], prompt)
+        self.assertIn("Your nonce: child-only-nonce", prompt)
+        verdict = verdict_from_final_output("```empirica-verdict\n" + json.dumps({"verdict": "pass", "nonce": "child-only-nonce"}) + "\n```")
+        self.assertEqual(verdict["nonce"], "child-only-nonce")
+        request = build_host_observed_audit_verdict("opaque", verdict, request_id="host-records")
+        self.assertEqual(request["command"]["action"]["kind"], "audit_verdict")
+        self.assertIsNone(verdict_from_final_output("no verdict"))
+
     def test_minimal_existing_payload_variant(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             request = build_start_run_request(

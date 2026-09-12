@@ -1,0 +1,106 @@
+{
+  "request": {
+    "protocol": "empirica/v1",
+    "request_id": "fixture-get-argument",
+    "command": {
+      "type": "GetArgument",
+      "run_id": "eyJnIjoxLCJwIjoiZml4dHVyZSIsInIiOiJnZXQtYXJndW1lbnQifQ=="
+    }
+  },
+  "expected": {
+    "protocol": "empirica/v1",
+    "request_id": "fixture-get-argument",
+    "result": {
+      "type": "Allow",
+      "converged": false,
+      "run": {
+        "id": "eyJnIjoxLCJwIjoiZml4dHVyZSIsInIiOiJnZXQtYXJndW1lbnQifQ==",
+        "status": "active",
+        "revision": 2,
+        "argument": {
+          "argument_digest": "423318b01f464bbc21ae0bd69398e278dcd38fbdb66cee5ab63aa344822af578",
+          "theta": 0.8,
+          "frozen_claims": null,
+          "claims": [
+            {
+              "id": "G0",
+              "text": "the intent",
+              "kind": null,
+              "state": "approved",
+              "confidence": 0.9,
+              "parent": null,
+              "claim_digest": "5f4c0605215658a8e64aa3334baed7818d6347d889be500a1d54167f4f0e5195",
+              "evidence_digest": "334b3b3d4cf09e108c6961af7508f7ef1e4c36780dd7bc3972f9a8958a114e64",
+              "evidence": []
+            }
+          ],
+          "tickets": [],
+          "text": "Goal: the goal\nContract: empirica/eyJnIjoxLCJwIjoiZml4dHVyZSIsInIiOiJnZXQtYXJndW1lbnQifQ==\nargument_digest: 423318b01f464bbc21ae0bd69398e278dcd38fbdb66cee5ab63aa344822af578\ntheta: 0.8\nG0 [approved] the intent  claim_digest=5f4c0605215658a8e64aa3334baed7818d6347d889be500a1d54167f4f0e5195 evidence_digest=334b3b3d4cf09e108c6961af7508f7ef1e4c36780dd7bc3972f9a8958a114e64\n\nObligation contract empirica/eyJnIjoxLCJwIjoiZml4dHVyZSIsInIiOiJnZXQtYXJndW1lbnQifQ==@1\nempirica/G0 [require] the intent\n  hold: none\n  - artifact:research/G0 (pass) \u2014 recorded Fold-1 research attestation supporting this claim [observed: null]\nempirica/audit/423318b01f464bbc21ae0bd69398e278dcd38fbdb66cee5ab63aa344822af578 [require] obtain an independent audit covering the current argument\n  hold: none\n  - judgment:audit/423318b01f464bbc21ae0bd69398e278dcd38fbdb66cee5ab63aa344822af578 (pass) \u2014 independent audit pass covering the current argument and approved claims [observed: null]\nVerdict: satisfied=-; holds=-; violated=-; residual=empirica/G0, empirica/audit/423318b01f464bbc21ae0bd69398e278dcd38fbdb66cee5ab63aa344822af578; unwitnessed=empirica/G0, empirica/audit/423318b01f464bbc21ae0bd69398e278dcd38fbdb66cee5ab63aa344822af578; held=-"
+        },
+        "goal": "the goal",
+        "modes": {},
+        "contract": {
+          "contract_id": "empirica/eyJnIjoxLCJwIjoiZml4dHVyZSIsInIiOiJnZXQtYXJndW1lbnQifQ==",
+          "revision": 1,
+          "obligations": [
+            {
+              "id": "empirica/G0",
+              "mode": "require",
+              "must": "the intent",
+              "witnesses": [
+                {
+                  "kind": "artifact",
+                  "ref": "research/G0",
+                  "expect": "pass",
+                  "description": "recorded Fold-1 research attestation supporting this claim",
+                  "observed": null
+                }
+              ],
+              "because": [
+                "G0"
+              ],
+              "status": "residual"
+            },
+            {
+              "id": "empirica/audit/423318b01f464bbc21ae0bd69398e278dcd38fbdb66cee5ab63aa344822af578",
+              "mode": "require",
+              "must": "obtain an independent audit covering the current argument",
+              "witnesses": [
+                {
+                  "kind": "judgment",
+                  "ref": "audit/423318b01f464bbc21ae0bd69398e278dcd38fbdb66cee5ab63aa344822af578",
+                  "expect": "pass",
+                  "description": "independent audit pass covering the current argument and approved claims",
+                  "observed": null
+                }
+              ],
+              "because": [
+                "G0"
+              ],
+              "status": "residual"
+            }
+          ],
+          "provenance": [
+            "empirica"
+          ],
+          "supersedes": [],
+          "retired": [],
+          "verdict": {
+            "satisfied": [],
+            "holds": [],
+            "violated": [],
+            "residual": [
+              "empirica/G0",
+              "empirica/audit/423318b01f464bbc21ae0bd69398e278dcd38fbdb66cee5ab63aa344822af578"
+            ],
+            "unwitnessed": [
+              "empirica/G0",
+              "empirica/audit/423318b01f464bbc21ae0bd69398e278dcd38fbdb66cee5ab63aa344822af578"
+            ],
+            "held": []
+          }
+        }
+      }
+    }
+  }
+}

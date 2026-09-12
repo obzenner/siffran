@@ -329,7 +329,16 @@ def _decode_tickets(value: object) -> tuple[dict, ...]:
             continue
         if isinstance(seq, bool) or not isinstance(seq, int):
             continue
-        ticket = {"nonce": nonce, "seq": seq, "consumed": bool(t.get("consumed", False))}
+        ticket = {"nonce": nonce, "seq": seq, "consumed": bool(t.get("consumed", False)),
+                  "void": bool(t.get("void", False))}
+        # Ticket attribution is operational audit metadata. Preserve only typed values so a corrupt
+        # record cannot fabricate an actor, while retaining enough information for GetArgument's
+        # nonce-free public ticket projection.
+        for key in ("model", "harness"):
+            if isinstance(t.get(key), str):
+                ticket[key] = t[key]
+        if t.get("issued_at") is None or isinstance(t.get("issued_at"), (str, int, float)):
+            ticket["issued_at"] = t.get("issued_at")
         if isinstance(t.get("actor"), dict):
             ticket["actor"] = t["actor"]
         out.append(ticket)

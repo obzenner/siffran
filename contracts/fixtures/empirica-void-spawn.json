@@ -1,0 +1,34 @@
+{
+  "request": {
+    "protocol": "empirica/v1",
+    "request_id": "fixture-void-spawn",
+    "command": {
+      "type": "ObserveAction",
+      "run_id": "eyJnIjoxLCJwIjoiZml4dHVyZSIsInIiOiJ2b2lkLXNwYXduIn0=",
+      "action": {
+        "kind": "void_spawn",
+        "nonce": "36b280ce7563687cbd81f87b73613e41"
+      }
+    }
+  },
+  "expected": {
+    "protocol": "empirica/v1",
+    "request_id": "fixture-void-spawn",
+    "result": {
+      "type": "Allow",
+      "converged": false,
+      "run": {
+        "id": "eyJnIjoxLCJwIjoiZml4dHVyZSIsInIiOiJ2b2lkLXNwYXduIn0=",
+        "status": "active",
+        "revision": 3,
+        "spawn": {
+          "spawns": 0,
+          "max_spawns": 1,
+          "remaining": 1
+        },
+        "goal": "the goal",
+        "modes": {}
+      }
+    }
+  }
+}

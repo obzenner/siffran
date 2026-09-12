@@ -40,12 +40,19 @@ def coverage_check(tickets: list[dict], verdict: dict | None,
                        "verify this run before converging (ADR-20 P6 — the author cannot grade "
                        "its own convergence)")
 
+    # A launch failure voids its ticket.  Its nonce is permanently ineligible: otherwise an
+    # author could submit a correctly-shaped verdict for a child that was never launched.
+    live_tickets = [ticket for ticket in tickets if not ticket.get("void")]
+    if not live_tickets:
+        return False, ("no independent audit was performed: every recorded audit spawn was voided; "
+                       "spawn the independent auditor to verify this run before converging")
+
     if verdict is None:
         return False, ("an auditor was spawned but no readable verdict is present; the auditor "
                        "must write its verdict artifact (verdict: pass|fail, nonce, and "
                        "claims_reviewed as {claim_id, claim_digest, evidence_digest} entries)")
 
-    if verdict["nonce"] not in {t["nonce"] for t in tickets}:
+    if verdict["nonce"] not in {t["nonce"] for t in live_tickets}:
         return False, ("the audit verdict's nonce does not match any auditor spawn recorded for "
                        "this run — the verdict must carry the nonce issued to the auditor at "
                        "spawn time")

@@ -62,6 +62,17 @@ action already established the investigation stamp. This is a host sensor gap, n
 ordering and not a reason to report convergence.
 
 The audit ticket proves only that a trusted `PreToolUse:Agent` hook witnessed a requested spawn.
+
+### Auditor round-trip limitation (Codex 0.146.0)
+
+Codex's documented `PreToolUse` hook output has no `updatedInput` field, and its `Stop` payload
+contains only the parent `last_assistant_message`, not a spawned child's final output or a child
+transcript reference. Therefore this adapter can reserve and ticket an auditor spawn, but cannot
+inject the GetArgument dossier/nonce into that child or host-record its fenced verdict. The closest
+available `Stop` hook evaluates the run only; it must leave the audit obligation open. A future
+Codex payload carrying a mutable child input plus child final output (or a documented child
+transcript path) can use `adapters.claude.audit.child_prompt` and `verdict_from_final_output`
+without changing the application contract.
 It does not authenticate the spawned actor or the unsigned verdict; those remain within Empirica's
 documented file-level trust model. Codex plugin bundles also do not load Claude's `agents/`
 definitions, so a Codex auditor spawn must include the literal `empirica-auditor` marker in its

@@ -76,6 +76,9 @@
           "additionalProperties": {
             "type": "boolean"
           }
+        },
+        "argument": {
+          "$ref": "#/$defs/argument"
         }
       }
     },
@@ -170,6 +173,38 @@
             "closed"
           ]
         }
+      }
+    },
+    "argument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["argument_digest", "theta", "frozen_claims", "claims", "tickets", "text"],
+      "properties": {
+        "argument_digest": {"type": ["string", "null"]},
+        "theta": {"type": "number"},
+        "frozen_claims": {"type": ["array", "null"], "items": {"type": "string"}},
+        "claims": {"type": "array", "items": {"$ref": "#/$defs/argument_claim"}},
+        "tickets": {"type": "array", "items": {"$ref": "#/$defs/public_ticket"}},
+        "text": {"type": "string"}
+      }
+    },
+    "argument_claim": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "text", "claim_digest", "evidence_digest", "evidence"],
+      "properties": {
+        "id": {"type": "string"}, "text": {"type": "string"},
+        "claim_digest": {"type": "string"}, "evidence_digest": {"type": "string"},
+        "evidence": {"type": "array", "items": {"type": "object"}}
+      }
+    },
+    "public_ticket": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "seq": {"type": "integer", "minimum": 1}, "model": {"type": ["string", "null"]},
+        "harness": {"type": ["string", "null"]}, "issued_at": {"type": ["string", "number", "null"]},
+        "consumed": {"type": "boolean"}
       }
     },
     "contract_view": {

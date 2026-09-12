@@ -439,18 +439,18 @@ never fire (it must be `^empirica:empirica$`). If the spawn errors with "not fou
 where this plugin was just installed or updated, reload plugins or restart the session — a stale
 session registry can fail to resolve a newly added agent even when the name is correct.
 
-On Codex, plugin bundles do not contribute Claude's `agents/` definitions. Use the native
-`spawn_agent` tool and put the literal `empirica-auditor` marker in its dispatcher-visible
-`agent_type`, `name`, `task_name`, or `message`; the trusted `PreToolUse:Agent` hook issues the
-ticket. This witnesses a requested spawn, not actor identity or independence. If the audit requires
-decorrelated model generations, use a witnessed CLI dispatch with an explicit model in `cli_exec`
-mode and report any independence not actually obtained.
-
-The host obtains `GetArgument`, injects its rendered dossier and the nonce directly into the
-child task, and does not expose that nonce to the author. The auditor returns an
-`empirica-verdict` fenced JSON block; the host extracts and records it as `audit_verdict`.
-The Stop gate requires a `pass` verdict whose nonce matches a real auditor spawn and whose
+All hosts use one audit flow: spawn the auditor; the host reserves the spawn and ticket, obtains
+`GetArgument`, injects the auditor rubric plus rendered dossier plus nonce directly into the **child**
+task, then extracts the child's `empirica-verdict` fenced JSON and records it as `audit_verdict`.
+The author never sees the nonce. A ticket is refused when the recorded auditor model equals the
+recorded concrete author model; unknown attribution and tier aliases are permitted but visibly weaker.
+The Stop gate requires a `pass` verdict whose nonce matches a non-voided auditor spawn and whose
 `claims_reviewed` covers **every** approved claim.
+
+**Codex 0.146.0 limitation:** its hooks presently expose neither mutable child input nor a child's
+final output/transcript. Its adapter can reserve and ticket a requested `spawn_agent`, but cannot
+complete the host-observed round trip, so the obligation correctly remains open. This exact payload
+gap is documented in `adapters/codex/README.md`; do not expose a nonce to work around it.
 
 **The audit is incremental, per claim (ADR-25).** Each `claims_reviewed` entry is
 `{claim_id, claim_digest, evidence_digest}` — the digests the claim had when the auditor read it.

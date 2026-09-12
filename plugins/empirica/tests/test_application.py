@@ -1765,6 +1765,79 @@ def test_dogfood_audit_obligation_is_visible_and_dischargeable_on_all_views():
 
 
 
+def test_audit_dossier_round_trip_and_staleness_and_voiding():
+    """GetArgument is the only source needed for a verdict; stale/voided tickets never cover."""
+    svc, _, _ = make_service()
+    h = handle_of(start(svc, max_spawns=2))
+    raw = single_goal_graph()
+    observe(svc, h, {"kind": "graph", "graph": raw})
+    observe(svc, h, approve_evidence())
+    dossier = result(svc.handle(req({"type": "GetArgument", "run_id": h})))["run"]["argument"]
+    ticket = result(observe(svc, h, {"kind": "audit_ticket"}))["run"]["ticket"]
+    verdict = {"kind": "audit_verdict", "verdict": "pass", "nonce": ticket["nonce"],
+               "argument_digest": dossier["argument_digest"],
+               "claims_reviewed": [{"claim_id": c["id"], "claim_digest": c["claim_digest"],
+                                    "evidence_digest": c["evidence_digest"]}
+                                   for c in dossier["claims"]], "findings": []}
+    observe(svc, h, verdict)
+    check("A1 GetArgument-only verdict covers and converges", result(evaluate(svc, h))["type"] == "Allow"
+          and result(evaluate(svc, h))["converged"], str(result(evaluate(svc, h))))
+    check("A2 public dossier tickets never contain nonce", all("nonce" not in t for t in dossier["tickets"]), str(dossier))
+    check("A3 dossier text names every gating claim and evidence id",
+          all(c["id"] in dossier["text"] and all(e["evidence_id"] in dossier["text"] for e in c["evidence"])
+              for c in dossier["claims"]), dossier["text"])
+
+    svc, _, _ = make_service()
+    h = handle_of(start(svc, max_spawns=2))
+    observe(svc, h, {"kind": "graph", "graph": raw})
+    observe(svc, h, approve_evidence())
+    d = result(svc.handle(req({"type": "GetArgument", "run_id": h})))["run"]["argument"]
+    n = result(observe(svc, h, {"kind": "audit_ticket"}))["run"]["ticket"]["nonce"]
+    v = {"kind": "audit_verdict", "verdict": "pass", "nonce": n, "argument_digest": d["argument_digest"],
+         "claims_reviewed": [{"claim_id": c["id"], "claim_digest": c["claim_digest"], "evidence_digest": c["evidence_digest"]} for c in d["claims"]], "findings": []}
+    observe(svc, h, v)
+    reworded = single_goal_graph(text="the reworded intent")
+    observe(svc, h, {"kind": "graph", "graph": reworded})
+    check("A4 reworded claim rejects stale claim_digest", result(evaluate(svc, h))["type"] == "Block", str(result(evaluate(svc, h))))
+    # A new supporting record changes the evidence digest without changing the claim wording.
+    observe(svc, h, {"kind": "graph", "graph": raw})
+    observe(svc, h, approve_evidence(reason="replacement source"))
+    swapped = result(evaluate(svc, h))
+    check("A5 swapped evidence rejects stale evidence_digest", not swapped["converged"]
+          and any(o["id"].startswith("empirica/audit/") for o in swapped["run"]["contract"]["obligations"]
+                  if o["status"] == "residual"), str(swapped))
+
+    svc, _, _ = make_service()
+    h = handle_of(start(svc, max_spawns=1))
+    observe(svc, h, {"kind": "graph", "graph": raw})
+    observe(svc, h, approve_evidence())
+    d = result(svc.handle(req({"type": "GetArgument", "run_id": h})))["run"]["argument"]
+    observe(svc, h, {"kind": "reserve_spawn"})
+    n = result(observe(svc, h, {"kind": "audit_ticket"}))["run"]["ticket"]["nonce"]
+    observe(svc, h, {"kind": "void_spawn", "nonce": n})
+    observe(svc, h, {"kind": "void_spawn", "nonce": n})
+    v = {"kind": "audit_verdict", "verdict": "pass", "nonce": n, "argument_digest": d["argument_digest"],
+         "claims_reviewed": [{"claim_id": c["id"], "claim_digest": c["claim_digest"], "evidence_digest": c["evidence_digest"]} for c in d["claims"]], "findings": []}
+    observe(svc, h, v)
+    snapshot = result(restore(svc, h))["run"]["snapshot"]
+    check("A6 void_spawn releases once, floors at zero, and voided nonce cannot cover",
+          snapshot["spawn"]["spawns"] == 0 and result(evaluate(svc, h))["type"] == "Block", str(snapshot))
+
+
+def test_audit_ticket_actor_decorrelation_and_unknown_author():
+    svc, _, _ = make_service()
+    h = handle_of(start(svc, actor={"model": "author-model-1"}))
+    same = result(observe(svc, h, {"kind": "audit_ticket", "actor": {"model": "author-model-1"}}))
+    unknown = result(observe(svc, h, {"kind": "audit_ticket"}))
+    tier = result(observe(svc, h, {"kind": "audit_ticket", "actor": {"model": "capable"}}))
+    check("A7 audit_ticket blocks same concrete author model and permits unknown or tier auditor",
+          same["type"] == "Block" and unknown["type"] == "Allow" and tier["type"] == "Allow",
+          f"same={same}, unknown={unknown}, tier={tier}")
+    unrecorded = result(start(svc, project="other", session="unknown-author", actor={"harness": "host"}))
+    check("A8 StartRun without actor model records no author and does not fail",
+          unrecorded["type"] == "Allow" and unrecorded["run"]["status"] == "active", str(unrecorded))
+
+
 def test_dogfood_every_block_and_allow_carries_run_contract():
     """Live finding: a spawn-budget Block reached the Pi agent as prose only. B1 (amended) promises
     `run.contract` on EVERY run view once a graph exists — including ones no earlier test touched."""

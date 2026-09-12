@@ -37,7 +37,12 @@ for path in sorted(CONTRACTS.glob("*/*/*.schema.json")):
     if not isinstance(data.get("$id"), str):
         errors.append(f"{path.relative_to(ROOT)}: missing $id")
 
-for path in sorted((CONTRACTS / "fixtures").glob("*.json")):
+REQUIRED_EMPIRICA_FIXTURES = frozenset({"empirica-get-argument.json", "empirica-void-spawn.json"})
+fixture_paths = sorted((CONTRACTS / "fixtures").glob("*.json"))
+missing = REQUIRED_EMPIRICA_FIXTURES - {path.name for path in fixture_paths}
+for name in sorted(missing):
+    errors.append(f"contracts/fixtures/{name}: required Empirica audit fixture is missing")
+for path in fixture_paths:
     fixture = load(path)
     for field, kind in (("request", "request"), ("expected", "response")):
         envelope = fixture.get(field)
@@ -73,4 +78,4 @@ if errors:
     print("\n".join(f"ERROR: {error}" for error in errors), file=sys.stderr)
     raise SystemExit(1)
 print(f"ok: {len(schemas)} schemas, "
-      f"{len(list((CONTRACTS / 'fixtures').glob('*.json')))} fixtures")
+      f"{len(fixture_paths)} fixtures")

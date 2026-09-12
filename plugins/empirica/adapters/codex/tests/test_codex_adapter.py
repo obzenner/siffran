@@ -16,6 +16,7 @@ PLUGIN = Path(__file__).resolve().parents[3]
 if str(PLUGIN) not in sys.path:
     sys.path.insert(0, str(PLUGIN))
 
+from adapters.claude.audit import child_prompt, verdict_from_final_output  # noqa: E402
 from adapters.codex.knowledge import (  # noqa: E402
     build_audit_verdict_request,
     build_graph_request,
@@ -150,7 +151,18 @@ class TranslationTests(unittest.TestCase):
                              "codex:turn:turn-1:tool:call-1")
             self.assertEqual(event_stamp(value), "codex:turn:turn-1:tool:call-1")
 
-    def test_route_marker_is_not_misclassified_as_investigation(self) -> None:
+    def test_codex_pretool_payload_has_no_updated_input_or_child_output_field(self) -> None:
+        """0.146.0 cannot inject a child task or observe its final output through hooks."""
+        with tempfile.TemporaryDirectory() as tmp:
+            value = payload("PreToolUse", Path(tmp), tool_name="spawn_agent",
+                            tool_input={"message": "empirica-auditor"})
+            self.assertNotIn("updatedInput", OFFICIAL_OUTPUT_ALLOWED["PreToolUse"])
+            self.assertNotIn("final_output", value)
+            self.assertIsNone(value.get("last_assistant_message"))
+            prompt = child_prompt("fixture dossier", "child-only")
+            self.assertIn("Your nonce: child-only", prompt)
+            self.assertEqual(verdict_from_final_output("not a fenced verdict"), None)
+
         with tempfile.TemporaryDirectory() as tmp:
             value = payload("PreToolUse", Path(tmp), tool_input={
                 "command": "python3 -c 'pass' -- --empirica-route 'runtime unknown'",
