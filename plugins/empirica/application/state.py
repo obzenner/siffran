@@ -71,6 +71,9 @@ class OperationalState:
     theta: float
     goal: str
     claim_graph_artifact_id: str | None = None
+    # Pointer/revision for the append-only obligation contract history (ADR-0039).
+    contract_artifact_id: str | None = None
+    contract_revision: int = 0
     phase: str = DEFAULT_PHASE
     # --- spawn budget (ADR-17) ---
     max_spawns: int | None = None
@@ -179,6 +182,8 @@ class OperationalState:
             "theta": self.theta,
             "goal": self.goal,
             "claim_graph_artifact_id": self.claim_graph_artifact_id,
+            "contract_artifact_id": self.contract_artifact_id,
+            "contract_revision": self.contract_revision,
             "phase": self.phase,
             "max_spawns": self.max_spawns,
             "spawns": self.spawns,
@@ -235,6 +240,9 @@ class OperationalState:
                          if isinstance(frozen, list) else None)
         pointer = value.get("claim_graph_artifact_id")
         pointer = pointer if isinstance(pointer, str) else None
+        contract_pointer = value.get("contract_artifact_id")
+        contract_pointer = contract_pointer if isinstance(contract_pointer, str) else None
+        contract_revision = _nonneg_int(value.get("contract_revision"))
         modes = value.get("modes")
         phase = value.get("phase")
         return cls(
@@ -245,6 +253,8 @@ class OperationalState:
             theta=float(theta),
             goal=goal,
             claim_graph_artifact_id=pointer,
+            contract_artifact_id=contract_pointer,
+            contract_revision=contract_revision,
             phase=phase if phase in PHASES else DEFAULT_PHASE,
             max_spawns=_opt_int(value.get("max_spawns")),
             spawns=_nonneg_int(value.get("spawns")),

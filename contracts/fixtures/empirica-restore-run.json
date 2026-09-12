@@ -22,14 +22,76 @@
           "passes": 2,
           "max_passes": 8,
           "theta": 0.8,
-          "spawn": {"spawns": 1, "max_spawns": 4, "remaining": 3},
-          "modes": {"cli_exec": true},
-          "route": {"route_seq": 1, "first_investigation_seq": 2, "verdict": "ok",
-                    "reason": "route was announced before investigation began (by write order)"},
-          "audit_tickets": [{"nonce": "b1946ac92492d2347c6235b4d2611184", "seq": 1, "consumed": false}],
+          "spawn": {
+            "spawns": 1,
+            "max_spawns": 4,
+            "remaining": 3
+          },
+          "modes": {
+            "cli_exec": true
+          },
+          "route": {
+            "route_seq": 1,
+            "first_investigation_seq": 2,
+            "verdict": "ok",
+            "reason": "route was announced before investigation began (by write order)"
+          },
+          "audit_tickets": [
+            {
+              "nonce": "b1946ac92492d2347c6235b4d2611184",
+              "seq": 1,
+              "consumed": false
+            }
+          ],
           "dispatches": [],
           "has_graph": true,
-          "graph": {"gating": 3, "open": 1, "blocked": 0, "deferred": 0}
+          "graph": {
+            "gating": 3,
+            "open": 1,
+            "blocked": 0,
+            "deferred": 0
+          }
+        },
+        "contract": {
+          "contract_id": "empirica/fixture",
+          "revision": 1,
+          "provenance": [
+            "empirica"
+          ],
+          "supersedes": [],
+          "retired": [],
+          "obligations": [
+            {
+              "id": "empirica/G0",
+              "mode": "require",
+              "must": "record research",
+              "witnesses": [
+                {
+                  "kind": "artifact",
+                  "ref": "research/G0",
+                  "expect": "pass",
+                  "description": "recorded Fold-1 research attestation supporting this claim",
+                  "observed": null
+                }
+              ],
+              "because": [
+                "G0"
+              ],
+              "status": "residual"
+            }
+          ],
+          "verdict": {
+            "satisfied": [],
+            "holds": [],
+            "violated": [],
+            "residual": [
+              "empirica/G0"
+            ],
+            "unwitnessed": [
+              "empirica/G0"
+            ],
+            "held": []
+          }
         }
       }
     }

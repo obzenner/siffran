@@ -1,0 +1,98 @@
+{
+  "contract": {
+    "contract_id": "fixture",
+    "obligations": [
+      {
+        "because": [
+          "G1"
+        ],
+        "id": "O1",
+        "mode": "require",
+        "must": "the deterministic check passes",
+        "witnesses": [
+          {
+            "description": "spike exits 0",
+            "expect": "pass",
+            "kind": "exit_code",
+            "ref": "spike/G1"
+          }
+        ]
+      }
+    ],
+    "provenance": [
+      "fixture"
+    ],
+    "retired": [],
+    "revision": 1,
+    "supersedes": []
+  },
+  "expect": {
+    "text": "Obligation contract fixture@1\nO1 [require] the deterministic check passes\n  hold: none\n  - exit_code:spike/G1 (pass) — spike exits 0 [observed: null]\nVerdict: satisfied=-; holds=-; violated=-; residual=O1; unwitnessed=O1; held=-",
+    "verdict": {
+      "held": [],
+      "holds": [],
+      "residual": [
+        "O1"
+      ],
+      "satisfied": [],
+      "unwitnessed": [
+        "O1"
+      ],
+      "violated": []
+    },
+    "view": {
+      "contract_id": "fixture",
+      "obligations": [
+        {
+          "because": [
+            "G1"
+          ],
+          "id": "O1",
+          "mode": "require",
+          "must": "the deterministic check passes",
+          "status": "residual",
+          "witnesses": [
+            {
+              "description": "spike exits 0",
+              "expect": "pass",
+              "kind": "exit_code",
+              "observed": null,
+              "ref": "spike/G1"
+            }
+          ]
+        }
+      ],
+      "provenance": [
+        "fixture"
+      ],
+      "retired": [],
+      "revision": 1,
+      "supersedes": [],
+      "verdict": {
+        "held": [],
+        "holds": [],
+        "residual": [
+          "O1"
+        ],
+        "satisfied": [],
+        "unwitnessed": [
+          "O1"
+        ],
+        "violated": []
+      }
+    }
+  },
+  "name": "F16-judgment-same-ref-cannot-discharge-machine",
+  "observations": [
+    {
+      "at": "2026-01-01T00:00:00Z",
+      "kind": "judgment",
+      "outcome": "pass",
+      "ref": "spike/G1",
+      "source": "auditor-1"
+    }
+  ],
+  "trusted_sources": [
+    "auditor-1"
+  ]
+}

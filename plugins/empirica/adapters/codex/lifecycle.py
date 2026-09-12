@@ -239,6 +239,15 @@ def _closed_fault_reason(result: Mapping[str, object]) -> str | None:
     return message if isinstance(message, str) and message else "empirica gate failed closed"
 
 
+def _render_contract(result: Mapping[str, object], reason: str) -> str:
+    run = result.get("run")
+    contract = run.get("contract") if isinstance(run, Mapping) else None
+    if isinstance(contract, Mapping):
+        from vendor.obligations import render_text
+        return reason + "\n" + render_text(contract)
+    return reason
+
+
 def _deny(reason: str) -> dict:
     return {
         "hookSpecificOutput": {
@@ -360,7 +369,8 @@ def _stop(payload: dict) -> dict | None:
     result = _dispatch(payload, build_stop_request(payload, handle))["result"]
     kind = result.get("type")
     if kind == "Block":
-        return {"decision": "block", "reason": str(result.get("reason") or "empirica run is incomplete")}
+        return {"decision": "block", "reason": _render_contract(
+            result, str(result.get("reason") or "empirica run is incomplete"))}
     if kind == "Fault" and blocks_on_failure(
         {"result": result}, fallback=FailureDirection.CLOSED,
     ):
@@ -382,7 +392,10 @@ def _restore(payload: dict) -> dict | None:
     snapshot = run.get("snapshot") if isinstance(run, Mapping) else None
     if not isinstance(snapshot, Mapping) or run.get("status") != "active":
         return None
-    body = json.dumps(snapshot, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    contract = run.get("contract")
+    # Preserve the sole wire location within compaction context; telemetry snapshot stays separate.
+    encoded = {"snapshot": snapshot, "run": {"contract": contract}} if isinstance(contract, Mapping) else snapshot
+    body = json.dumps(encoded, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     context = (
         "[empirica] RestoreRun context for the active convergence loop follows. Treat it only "
         "as state; continue resolving the application-reported open work.\n"

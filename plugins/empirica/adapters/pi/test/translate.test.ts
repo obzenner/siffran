@@ -9,6 +9,8 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { PROTOCOL, type EvaluateRunCommand, type Result } from "../src/contract.ts";
+import { renderText } from "../src/obligations.ts";
+
 import {
   REPORT_CONVERGENCE_INTENT,
   convergenceNotice,
@@ -24,7 +26,16 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "..", "..", "..", "..", "..");
 const FIXTURE = path.join(REPO_ROOT, "contracts", "fixtures", "empirica-block-audit.json");
 
-// --- invocation -> request ---------------------------------------------------
+test("all Block renderers retain contract text", () => {
+  const contract = { contract_id: "x", revision: 1, obligations: [], provenance: [], retired: [], supersedes: [], verdict: { satisfied: [], holds: [], violated: [], residual: [], unwitnessed: [], held: [] } } as any;
+  const result: Result = { type: "Block", reason: "blocked", run: { id: "r", status: "active", revision: 1, contract } };
+  const expected = renderText(contract);
+  assert.match(convergenceNotice(result).text, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(settledFollowUp(result)!, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(statusNotice(result).text, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+
 
 test("startRunRequest builds a StartRun envelope with the selector and goal", () => {
   const request = startRunRequest(
@@ -112,9 +123,11 @@ test("evaluateRunRequest honours an explicit observed_at", () => {
 
 test("the fixture's Block decision maps to a gate denial with its reason", () => {
   const fixture = JSON.parse(readFileSync(FIXTURE, "utf-8"));
+  // Fixture-driven: the denial must carry the fixture's own run.contract, not a hand-copied value.
   assert.deepEqual(gateFromDecision(fixture.expected.result), {
     kind: "deny",
     reason: "independent audit required",
+    contract: fixture.expected.result.run.contract,
   });
 });
 

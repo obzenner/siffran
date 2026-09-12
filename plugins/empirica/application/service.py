@@ -25,10 +25,13 @@ an orphan artifact (harmless, immutable) but never makes an orphan *current*.
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import Protocol
 
 from core import Allow, Block, Fault, Inert, Present, RunKey, RunState, adjudicate, claims, budget
+from core import obligations as obligation_projection
 from core.records import ABSENT, Conflict, Corrupt
+from vendor.obligations import Contract, revise, project, verify
 
 from . import actors, knowledge, wire
 from .state import DEFAULT_MAX_PASSES, DEFAULT_THETA, MODES, PHASES, OperationalState
@@ -238,8 +241,9 @@ class EmpiricaService:
                 return graph_view["__fault__"]
             if graph_view is not None:
                 snapshot["graph"] = graph_view
+        contract = self._contract_view(key, state)
         return wire.allow(state.status == wire.STATUS_CONVERGED,
-                          self._run_view(key, state, snapshot=snapshot))
+                          self._run_view(key, state, snapshot=snapshot, contract=contract))
 
     def _restore_graph_view(self, key: RunKey, state: OperationalState):
         """The gating/open/blocked/deferred counts for the run's current graph, or a fault wrapper on
@@ -552,18 +556,42 @@ class EmpiricaService:
             raise wire.InvalidRequest("claims must be a list of claim-id strings")
         committed = tuple(sorted({c for c in raw if c}))
 
-        def mutate(state: OperationalState):
+        # A freeze is an application knowledge event.  Its immutable artifact is the authority for
+        # the hold-transition revision; append it before the CAS just like a graph artifact.
+        freeze_body = json.dumps({"kind": "freeze", "claims": list(committed)}, sort_keys=True,
+                                 separators=(",", ":"))
+        freeze_artifact_id = knowledge.content_address(freeze_body)
+        self._artifacts.append(key, knowledge_artifact(freeze_artifact_id, freeze_body))
+        for _ in range(_MAX_CAS_RETRIES):
+            read = self._runs.read(key)
+            if not isinstance(read, Present):
+                return wire.fault(wire.FAULT_CONFLICT, "run disappeared during freeze")
+            state = OperationalState.decode(read.value)
+            if state is None or not state.is_active:
+                return wire.fault(wire.FAULT_CONFLICT, "run is not active")
             if state.frozen_claims is not None:
                 return wire.allow(False, self._run_view(
                     key, state, frozen_claims=list(state.frozen_claims),
                     note="already frozen (first write wins)"))
             seq = state.stamp_seq + 1
-            return state.evolve(frozen_claims=committed, freeze_seq=seq, stamp_seq=seq)
-        result = self._commit(key, mutate)
-        if isinstance(result, dict):
-            return result
-        return wire.allow(False, self._run_view(
-            key, result, frozen_claims=list(result.frozen_claims)))
+            candidate = state.evolve(frozen_claims=committed, freeze_seq=seq, stamp_seq=seq)
+            try:
+                graph, fault = self._load_graph(key, candidate)
+            except knowledge.KnowledgeError:
+                graph, fault = None, True
+            if isinstance(graph, dict) and fault is None:
+                revised = self._revise_contract(key, candidate, graph, freeze_artifact_id, "frozen scope")
+                if revised is not None:
+                    candidate = revised
+            try:
+                self._runs.compare_and_set(key, candidate.encode(), read.revision)
+            except Conflict:
+                continue
+            return wire.allow(False, self._run_view(
+                key, candidate, frozen_claims=list(candidate.frozen_claims),
+                contract=self._contract_view(key, candidate)))
+        return wire.fault(wire.FAULT_CONFLICT, "freeze did not converge under contention")
+
 
     def _stamp_route(self, key: RunKey, action: dict) -> dict:
         """Record that the run announced its route (ADR-20 P1). FIRST WRITE WINS, and the position is
@@ -740,7 +768,12 @@ class EmpiricaService:
                 changes["working_passes"] = derived_passes
                 if state.max_spawns is None:
                     changes["max_spawns"] = derived_spawns
+            # The graph artifact is the authority for this contract revision.  Build the
+            # revision before the CAS so the graph pointer and contract pointer move together.
             new_state = state.evolve(**changes)
+            revised = self._revise_contract(key, new_state, canonical, art_id, "graph write")
+            if revised is not None:
+                new_state = revised
             try:
                 self._runs.compare_and_set(key, new_state.encode(), read.revision)
             except Conflict:
@@ -859,12 +892,16 @@ class EmpiricaService:
                                         progress_token=progress_token, observed_at=observed_at)
         # Allow: the core blesses a stop (converged, residual, refuted, or frozen).
         if advisory:
-            return wire.allow(decision.converged, self._decision_run(key, state, decision))
+            return wire.allow(decision.converged, self._decision_run(
+                key, state, decision, contract=self._contract_view(key, state)))
         new_state = state.evolve(status=decision.status)
         persisted = self._cas(key, read.revision, new_state)
         if persisted is _RETRY:
             return _RETRY
-        return wire.allow(decision.converged, self._decision_run(key, persisted, decision))
+        contract = self._contract_view(key, persisted)
+        artifact_id = persisted.contract_artifact_id
+        return wire.allow(decision.converged, self._decision_run(
+            key, persisted, decision, contract=contract, contract_artifact_id=artifact_id))
 
     def _finalize_block(self, key: RunKey, read: Present, state: OperationalState,
                         decision: Block, advisory: bool, *, progress_token: str,
@@ -884,7 +921,8 @@ class EmpiricaService:
           so an audit that never returns cannot wedge the run open, WITH OR WITHOUT a host clock.
         """
         if advisory:
-            return wire.block(decision.reason, self._run_view(key, state))
+            return wire.block(decision.reason, self._run_view(key, state),
+                              contract=self._contract_view(key, state))
 
         if progress_token != state.last_stop_digest:
             new_passes = state.passes + 1
@@ -901,11 +939,15 @@ class EmpiricaService:
                     return _RETRY
                 note = (f"NON-CONVERGED: reached pass budget={cap} without convergence "
                         f"({decision.reason})")
-                return wire.allow(False, self._run_view(key, persisted, note=note))
+                contract = self._contract_view(key, persisted, include_budget=True)
+                artifact_id = persisted.contract_artifact_id
+                return wire.allow(False, self._run_view(key, persisted, note=note, contract=contract,
+                                                        contract_artifact_id=artifact_id))
             persisted = self._cas(key, read.revision, state.evolve(**changes))
             if persisted is _RETRY:
                 return _RETRY
-            return wire.block(decision.reason, self._run_view(key, persisted))
+            return wire.block(decision.reason, self._run_view(key, persisted),
+                              contract=self._contract_view(key, persisted))
 
         # No progress: an idle wait. Do not cost a pass, but count it against two backstops. The
         # clock-free count fires REGARDLESS of `observed_at`; the wall-clock deadline is an additional
@@ -927,7 +969,10 @@ class EmpiricaService:
                     "audit did not return or the loop stalled") if stalled_by_clock else (
                 f"no knowledge progress across {new_idle_stops} stops; "
                 "audit did not return or the loop stalled")
-            return wire.allow(False, self._run_view(key, persisted, note=note))
+            contract = self._contract_view(key, persisted, include_stall=True)
+            artifact_id = persisted.contract_artifact_id
+            return wire.allow(False, self._run_view(key, persisted, note=note, contract=contract,
+                                                    contract_artifact_id=artifact_id))
 
         # Not yet stalled: record the incremented idle count (and seed the stall clock on the first
         # stop that lacked one) and keep blocking.
@@ -937,7 +982,8 @@ class EmpiricaService:
         persisted = self._cas(key, read.revision, state.evolve(**changes))
         if persisted is _RETRY:
             return _RETRY
-        return wire.block(decision.reason, self._run_view(key, persisted))
+        return wire.block(decision.reason, self._run_view(key, persisted),
+                          contract=self._contract_view(key, persisted))
 
     # --- persistence + views -------------------------------------------------
 
@@ -955,7 +1001,8 @@ class EmpiricaService:
     def _run_snapshot(self, key: RunKey, state: OperationalState) -> dict:
         """A read-only acknowledgement: an Allow carrying the run's current status. Used by StartRun/
         GetRun/ObserveAction, where there is no stop decision to make — just the run's state."""
-        return wire.allow(state.status == wire.STATUS_CONVERGED, self._run_view(key, state))
+        return wire.allow(state.status == wire.STATUS_CONVERGED,
+                          self._run_view(key, state, contract=self._contract_view(key, state)))
 
     def _run_view(self, key: RunKey, state: OperationalState, note: str | None = None,
                   **extra: object) -> dict:
@@ -984,7 +1031,124 @@ class EmpiricaService:
                 "first_investigation_seq": state.first_investigation_seq,
                 "verdict": verdict, "reason": reason}
 
-    def _decision_run(self, key: RunKey, state: OperationalState, decision: Allow) -> dict:
+    def _contract_view(self, key: RunKey, state: OperationalState, *, include_budget: bool = False,
+                       include_stall: bool = False) -> dict | None:
+        """Project the persisted revision against current observations.
+
+        The graph is consulted only for current observations and the two synthetic run-level
+        budget/stall obligations.  Those synthetic obligations are intentionally view-time only:
+        they describe a terminal gate, not a revision of the claim contract.
+        """
+        contract = self._load_contract(key, state.contract_artifact_id)
+        if contract is None:
+            return None
+        try:
+            graph, fault = self._load_graph(key, state)
+        except knowledge.KnowledgeError:
+            return None
+        if fault is not None or not isinstance(graph, dict):
+            return None
+        observations = obligation_projection.observations_from_knowledge(
+            self._knowledge.evidence_leaves, self._knowledge.verdicts)
+        accepted = tuple(item for item in observations if obligation_projection.trusted(item))
+        # Keep synthetic budget/stall obligations out of durable revisions; add them only to this
+        # wire projection, retaining the persisted revision lineage for live claim obligations.
+        if include_budget or include_stall:
+            evidence = knowledge.build_evidence_oracle(self._knowledge.evidence, self._knowledge.evidence_leaves)
+            synthetic = obligation_projection.contract_for_graph(
+                contract.contract_id, contract.revision, graph, state.theta, evidence,
+                frozen_claims=state.frozen_claims, include_budget=include_budget,
+                include_stall=include_stall)
+            extras = tuple(item for item in synthetic.obligations if item.id.startswith("empirica/run/"))
+            contract = Contract(contract.contract_id, contract.revision,
+                                contract.obligations + extras, contract.provenance,
+                                contract.parent_revision, contract.supersedes, contract.retired)
+        return project(contract, verify(contract, accepted, obligation_projection.trusted), accepted)
+
+    def _load_contract(self, key: RunKey, artifact_id: str | None) -> Contract | None:
+        if artifact_id is None:
+            return None
+        records = self._artifacts.read(key)
+        if not isinstance(records, Present):
+            return None
+        for artifact in records.value:
+            if artifact.artifact_id == artifact_id:
+                try:
+                    return Contract.from_json(json.loads(artifact.body))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    return None
+        return None
+
+    def _revise_contract(self, key: RunKey, state: OperationalState, graph: dict,
+                         authority: str, reason: str) -> OperationalState | None:
+        """Append a real contract revision when the canonical claim-obligation set changes.
+
+        Called inside the graph/freeze CAS retry loops: a retry re-loads the persisted revision and
+        recomputes this diff, so no stale revision pointer can win a concurrent update.
+        """
+        records = self._artifacts.read(key)
+        if isinstance(records, Corrupt):
+            return None
+        know = knowledge.Knowledge.from_artifacts(records.value if isinstance(records, Present) else frozenset())
+        evidence = knowledge.build_evidence_oracle(know.evidence, know.evidence_leaves)
+        desired = obligation_projection.contract_for_graph(
+            f"empirica/{wire.encode_handle(key)}", 1, graph, state.theta, evidence,
+            frozen_claims=state.frozen_claims)
+        previous = self._load_contract(key, state.contract_artifact_id)
+        if previous is None:
+            if not desired.obligations:
+                return None
+            # Contract's frozen public constructor starts at revision 1; this is the initial,
+            # all-additions revision corresponding to the requested conceptual empty revision 0.
+            next_contract = Contract(desired.contract_id, 1, desired.obligations, desired.provenance)
+        else:
+            # Revision-qualified replacement ids are an implementation consequence of the frozen
+            # library's global no-id-reuse rule.  Match later graph projections back to that live
+            # id by provenance before diffing, so an unrelated graph write does not re-add a retired
+            # base id.
+            prior_by_claim = {item.because[0]: item.id for item in previous.obligations if item.because}
+            normalized_desired = []
+            for item in desired.obligations:
+                prior_id = prior_by_claim.get(item.because[0]) if item.because else None
+                if prior_id and prior_id != item.id:
+                    item = type(item)(prior_id, item.mode, item.must, item.witnesses, item.because,
+                                      item.hold, item.hold_reason, item.severity)
+                normalized_desired.append(item)
+            old = {item.id: item for item in previous.obligations}
+            new = {item.id: item for item in normalized_desired}
+            retire = set(old) - set(new)
+            additions = [item for ident, item in new.items() if ident not in old]
+            changed = [ident for ident in set(old) & set(new) if old[ident].to_json() != new[ident].to_json()]
+            # The frozen library forbids reusing a retired id.  A changed claim therefore gets a
+            # stable revision-qualified replacement while retaining the old obligation explicitly.
+            for ident in changed:
+                retire.add(ident)
+                item = new[ident]
+                additions.append(type(item)(f"{ident}/revision-{previous.revision + 1}", item.mode,
+                                             item.must, item.witnesses, item.because,
+                                             item.hold, item.hold_reason, item.severity))
+            if not retire and not additions:
+                return None
+            refuted = next((graph["nodes"][item.because[0]].get("refuted_by")
+                             for item in previous.obligations
+                             if item.id in retire and item.because
+                             and graph["nodes"].get(item.because[0], {}).get("refuted_by")), None)
+            revision_reason = (f"refuted by {refuted}" if isinstance(refuted, str) and refuted
+                               else ("claim reworded" if changed else reason))
+            revision_authority = refuted if isinstance(refuted, str) and refuted else authority
+            next_contract = revise(previous, add=additions, retire=sorted(retire),
+                                   reason=revision_reason, authority=revision_authority)
+        body = json.dumps(next_contract.to_json(), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        artifact_id = knowledge.content_address(body)
+        self._artifacts.append(key, knowledge_artifact(artifact_id, body))
+        return state.evolve(contract_artifact_id=artifact_id, contract_revision=next_contract.revision)
+
+    def _persist_contract(self, key: RunKey, contract: dict | None) -> str | None:
+        """Compatibility helper: terminal paths reuse, rather than append, the current revision."""
+        return None
+
+    def _decision_run(self, key: RunKey, state: OperationalState, decision: Allow,
+                      **extra: object) -> dict:
         """The run view for a finalised Allow, carrying the adjudicator's advisory reporting fields
         (note, deferred, blocked, audit, P1) so a caller sees *why* a stop is or is not convergence."""
         return wire.run_obj(
@@ -995,7 +1159,7 @@ class EmpiricaService:
             audit=decision.audit, p1_violation=decision.p1_violation,
             p1_unverified=decision.p1_unverified,
             root_refuted=decision.root_refuted or None,
-            attribution=decision.attribution)
+            attribution=decision.attribution, **extra)
 
     def _fault_from_reason(self, reason: str) -> dict:
         """Map an adjudicator ``Fault`` reason onto a wire fault code. A graph-related fault is a

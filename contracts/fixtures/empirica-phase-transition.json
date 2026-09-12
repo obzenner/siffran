@@ -5,7 +5,10 @@
     "command": {
       "type": "ObserveAction",
       "run_id": "run-fixture",
-      "action": {"kind": "phase", "phase": "audit"}
+      "action": {
+        "kind": "phase",
+        "phase": "audit"
+      }
     }
   },
   "expected": {
@@ -14,7 +17,12 @@
     "result": {
       "type": "Allow",
       "converged": false,
-      "run": {"id": "run-fixture", "status": "active", "revision": 8, "phase": "audit"}
+      "run": {
+        "id": "run-fixture",
+        "status": "active",
+        "revision": 8,
+        "phase": "audit"
+      }
     }
   }
 }

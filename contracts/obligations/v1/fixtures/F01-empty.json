@@ -1,0 +1,46 @@
+{
+  "contract": {
+    "contract_id": "fixture",
+    "obligations": [],
+    "provenance": [
+      "fixture"
+    ],
+    "retired": [],
+    "revision": 1,
+    "supersedes": []
+  },
+  "expect": {
+    "text": "Obligation contract fixture@1\nVerdict: satisfied=-; holds=-; violated=-; residual=-; unwitnessed=-; held=-",
+    "verdict": {
+      "held": [],
+      "holds": [],
+      "residual": [],
+      "satisfied": [],
+      "unwitnessed": [],
+      "violated": []
+    },
+    "view": {
+      "contract_id": "fixture",
+      "obligations": [],
+      "provenance": [
+        "fixture"
+      ],
+      "retired": [],
+      "revision": 1,
+      "supersedes": [],
+      "verdict": {
+        "held": [],
+        "holds": [],
+        "residual": [],
+        "satisfied": [],
+        "unwitnessed": [],
+        "violated": []
+      }
+    }
+  },
+  "name": "F01-empty",
+  "observations": [],
+  "trusted_sources": [
+    "runner"
+  ]
+}

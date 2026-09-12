@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://siffran.dev/contracts/obligations/v1/observation.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["kind", "ref", "outcome", "source", "at"],
+  "properties": {
+    "kind": {"enum": ["test", "exit_code", "event", "artifact", "predicate", "judgment"]},
+    "ref": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*(/[A-Za-z0-9._:@-]+)+$"},
+    "outcome": {"enum": ["pass", "fail"]}, "source": {"type": "string", "minLength": 1},
+    "at": {"type": "string", "minLength": 1}, "payload": {"type": ["object", "null"]}
+  }
+}

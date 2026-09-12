@@ -37,6 +37,7 @@ from adapters.state import project_id, run_id  # noqa: E402
 from application import knowledge  # noqa: E402
 from application.knowledge import canonicalize_graph  # noqa: E402
 from core import claims as C  # noqa: E402
+from vendor.obligations import canonical, parse, render_text  # noqa: E402
 
 
 OFFICIAL_REQUIRED = {
@@ -284,6 +285,15 @@ class IsolatedLifecycleTests(unittest.TestCase):
                     "confidence": 0.9,
                 }}, "edges": []}
                 transport.dispatch(build_graph_request(handle, graph, correlation_id="graph"))
+                # Codex's native deny/block string channel must carry the same canonical rendering.
+                blocked_contract = self.hook("stop", payload("Stop", repo), repo, home)
+                blocked_contract_output = json.loads(blocked_contract.stdout)
+                current = transport.dispatch({
+                    "protocol": "empirica/v1", "request_id": "contract",
+                    "command": {"type": "GetRun", "run_id": handle},
+                })
+                self.assertIn(render_text(current["result"]["run"]["contract"]),
+                              blocked_contract_output["reason"])
                 digest = hashlib.sha256(b"true exits zero").hexdigest()
                 research = {
                     "_type": "https://in-toto.io/Statement/v1",
@@ -307,6 +317,19 @@ class IsolatedLifecycleTests(unittest.TestCase):
                     handle, "spike-G0", spike, graph, [research], correlation_id="spike",
                 )
                 transport.dispatch(spike_request)
+
+                # Compaction preserves the sole run.contract wire location; it is parseable,
+                # not an obligation count that a model has to interpret.
+                active_contract = transport.dispatch({
+                    "protocol": "empirica/v1", "request_id": "contract-restore",
+                    "command": {"type": "RestoreRun", "run_id": handle},
+                })["result"]["run"]["contract"]
+                compact_contract = self.hook("restore", payload("SessionStart", repo), repo, home)
+                compact_contract_output = json.loads(compact_contract.stdout)
+                compact_data = compact_contract_output["hookSpecificOutput"]["additionalContext"]
+                compact_json = compact_data.split("-----\n", 1)[1].split("\n----- END", 1)[0]
+                embedded_contract = json.loads(compact_json)["run"]["contract"]
+                self.assertEqual(canonical(parse(embedded_contract)), canonical(parse(active_contract)))
 
                 auditor = self.hook("pre-tool-use", payload(
                     "PreToolUse", repo, tool_name="spawn_agent", tool_input={

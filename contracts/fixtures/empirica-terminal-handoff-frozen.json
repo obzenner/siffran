@@ -1,0 +1,65 @@
+{
+  "request": {
+    "protocol": "empirica/v1",
+    "request_id": "fixture-frozen",
+    "command": {
+      "type": "RestoreRun",
+      "run_id": "run-fixture"
+    }
+  },
+  "expected": {
+    "protocol": "empirica/v1",
+    "request_id": "fixture-frozen",
+    "result": {
+      "type": "Allow",
+      "converged": false,
+      "run": {
+        "id": "run-fixture",
+        "status": "stopped_frozen",
+        "revision": 8,
+        "contract": {
+          "contract_id": "empirica/fixture",
+          "revision": 1,
+          "provenance": [
+            "empirica"
+          ],
+          "supersedes": [],
+          "retired": [],
+          "obligations": [
+            {
+              "id": "empirica/G0",
+              "mode": "require",
+              "must": "record research",
+              "witnesses": [
+                {
+                  "kind": "artifact",
+                  "ref": "research/G0",
+                  "expect": "pass",
+                  "description": "recorded Fold-1 research attestation supporting this claim",
+                  "observed": null
+                }
+              ],
+              "because": [
+                "G0"
+              ],
+              "status": "residual"
+            }
+          ],
+          "verdict": {
+            "satisfied": [],
+            "holds": [],
+            "violated": [],
+            "residual": [
+              "empirica/G0"
+            ],
+            "unwitnessed": [
+              "empirica/G0"
+            ],
+            "held": []
+          }
+        },
+        "contract_artifact_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    }
+  }
+}

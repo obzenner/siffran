@@ -110,6 +110,13 @@ state belongs only under `~/.empirica-plugin/`; knowledge belongs only under `re
 Never create, read, or edit runtime state below `.claude/`, `.codex/`, or `.pi/`, and never edit
 either store directly. The explicit `make migrate-legacy` command is the sole legacy-path exception.
 
+**Pi runtime boundary:** The Pi adapter parses leading ADR-28 mode flags, persists and re-injects the opaque Empirica run handle through Pi session entries, and exposes the current `run.contract` view to the model through `empirica_status` and deterministic compaction summaries. It registers `report_convergence` as a real model-callable tool and enforces it at Pi’s `tool_call` boundary, failing closed on transport faults; it also exposes `empirica_knowledge` for the same typed ObserveAction payloads as the Claude adapter. A configured `subagent` tool is intercepted for spawn-budget/audit-ticket enforcement, but any spawn outside Pi’s event stream is un-gated. Pi has no completion-veto lifecycle: an agent that never invokes `report_convergence` can complete, so settled nudges are reminders rather than gates. Whether blocked reasons are visible in model context and whether follow-up delivery reliably starts another turn are UNVERIFIED pending a live runtime spike.
+
+**Resume contract:** `RestoreRun`, `Block`, and every terminal `Allow` expose the one canonical
+`run.contract` view. It lists every obligation's `must`, provenance, hold, exact witness, and
+per-witness observation; graph counts are telemetry only. Never infer outstanding work from counts,
+history, or a reason string. A terminal Allow also names `run.contract_artifact_id`.
+
 **Codex activation and sensor boundary:** Codex runs start only when the prompt begins with
 `$empirica` (the namespaced `$empirica:empirica` and legacy `/empirica` spellings are also
 accepted). After classifying the goal, record the route before investigative Bash with
@@ -362,8 +369,10 @@ The Assessor is the fixed-point function `f` (ADR-7). One pass does exactly thre
 
 Write the graph and **end your turn**. The Stop hook reads it: any open claim on the path to the
 goal blocks, and the block message tells you *which evidence fold each claim still owes*. Across
-compaction, `SessionStart:compact` re-injects the graph — including the missing folds — so the
-loop is durable-resumable (ADR-8/9).
+compaction, `SessionStart:compact` receives the same `run.contract` resume contract as Block and
+RestoreRun; it lists each obligation, witness, and observation while graph counts remain telemetry.
+String-only channels render that view with `render_text`, so no actor infers a missing fold from
+history or prose.
 
 **Do not hand-declare convergence.** Convergence is what the gate says, not what you assert.
 

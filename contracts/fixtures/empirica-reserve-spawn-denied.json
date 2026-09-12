@@ -5,7 +5,9 @@
     "command": {
       "type": "ObserveAction",
       "run_id": "run-fixture",
-      "action": {"kind": "reserve_spawn"}
+      "action": {
+        "kind": "reserve_spawn"
+      }
     }
   },
   "expected": {
@@ -18,7 +20,53 @@
         "id": "run-fixture",
         "status": "active",
         "revision": 5,
-        "spawn": {"spawns": 4, "max_spawns": 4, "remaining": 0, "reserved": false}
+        "spawn": {
+          "spawns": 4,
+          "max_spawns": 4,
+          "remaining": 0,
+          "reserved": false
+        },
+        "contract": {
+          "contract_id": "empirica/fixture",
+          "revision": 1,
+          "provenance": [
+            "empirica"
+          ],
+          "supersedes": [],
+          "retired": [],
+          "obligations": [
+            {
+              "id": "empirica/G0",
+              "mode": "require",
+              "must": "record research",
+              "witnesses": [
+                {
+                  "kind": "artifact",
+                  "ref": "research/G0",
+                  "expect": "pass",
+                  "description": "recorded Fold-1 research attestation supporting this claim",
+                  "observed": null
+                }
+              ],
+              "because": [
+                "G0"
+              ],
+              "status": "residual"
+            }
+          ],
+          "verdict": {
+            "satisfied": [],
+            "holds": [],
+            "violated": [],
+            "residual": [
+              "empirica/G0"
+            ],
+            "unwitnessed": [
+              "empirica/G0"
+            ],
+            "held": []
+          }
+        }
       }
     }
   }

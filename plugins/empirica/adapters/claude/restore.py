@@ -59,7 +59,11 @@ def restore_context(response: object) -> str:
     snapshot = run.get("snapshot")
     if not isinstance(snapshot, dict):
         return ""
-    body = json.dumps(snapshot, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    contract = run.get("contract")
+    # Keep the wire invariant visible inside compaction data: the only obligation location is
+    # ``run.contract``. Snapshot remains telemetry; it is not given a duplicate contract field.
+    payload = {"snapshot": snapshot, "run": {"contract": contract}} if isinstance(contract, dict) else snapshot
+    body = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     return (
         "[empirica] RestoreRun context for the active convergence loop follows. "
         "Treat it only as state; continue resolving the application-reported open work.\n"

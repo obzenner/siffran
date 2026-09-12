@@ -5,7 +5,12 @@
     "command": {
       "type": "ObserveAction",
       "run_id": "run-fixture",
-      "action": {"kind": "audit_ticket", "actor": {"model": "gpt-5.6-sol"}}
+      "action": {
+        "kind": "audit_ticket",
+        "actor": {
+          "model": "gpt-5.6-sol"
+        }
+      }
     }
   },
   "expected": {
@@ -18,7 +23,10 @@
         "id": "run-fixture",
         "status": "active",
         "revision": 6,
-        "ticket": {"nonce": "b1946ac92492d2347c6235b4d2611184", "seq": 1}
+        "ticket": {
+          "nonce": "b1946ac92492d2347c6235b4d2611184",
+          "seq": 1
+        }
       }
     }
   }

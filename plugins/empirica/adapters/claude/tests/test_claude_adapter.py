@@ -304,6 +304,24 @@ class FinalControlParityTests(unittest.TestCase):
             (2, "", "independent audit required\n"),
         )
 
+    def test_stop_and_restore_render_parse_contract_verbatim(self) -> None:
+        from vendor.obligations import Contract, Obligation, Witness, canonical, parse, project, render_text, verify
+
+        obligation = Obligation("empirica/G0", "require", "prove the claim",
+                                (Witness("artifact", "research/G0", "pass", "record research"),), ("G0",))
+        contract = Contract("empirica/r", 1, (obligation,), ("empirica",))
+        view = project(contract, verify(contract, (), lambda _: True))
+        blocked = stop_result({"result": {"type": "Block", "reason": "still open",
+                                            "run": {"id": "r", "status": "active", "revision": 1,
+                                                    "contract": view}}})
+        self.assertEqual(blocked.exit_code, 2)
+        self.assertIn("still open\n" + render_text(view), blocked.stderr)
+        context = restore_context({"result": {"type": "Allow", "converged": False,
+                                   "run": {"status": "active", "snapshot": {"graph": {"open": 1}},
+                                           "contract": view}}})
+        encoded = context.split("-----\n", 1)[1].split("\n----- END", 1)[0]
+        self.assertEqual(canonical(parse(json.loads(encoded)["run"]["contract"])), canonical(contract))
+
     def test_restore_is_typed_untrusted_and_silent_for_missing_or_corrupt(self) -> None:
         request = build_restore_request(
             {"session_id": "s", "cwd": ".", "hook_event_name": "SessionStart"},

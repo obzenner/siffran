@@ -61,7 +61,7 @@ help: ## Show this help (generated from target descriptions)
 ## --- Verify
 
 .PHONY: check
-check: lint test validate contract-check activation-check methodologist-codex-check empirica-codex-check pi-bundle-check methodologist-pi-check empirica-pi-check adr-check ## Run every check (what CI and pre-commit should run)
+check: lint test validate contract-check obligations-check vendor-check activation-check methodologist-codex-check empirica-codex-check pi-bundle-check methodologist-pi-check empirica-pi-check adr-check ## Run every check (what CI and pre-commit should run)
 	@printf '\n$(BOLD)All checks passed.$(RESET)\n'
 
 .PHONY: test
@@ -76,12 +76,13 @@ test: ## Run the plugin test suites
 	@$(PYTHON) $(EMPIRICA_CODEX_ADAPTER_TESTS)
 	@$(PYTHON) $(METHODOLOGIST_CORE_TESTS)
 	@$(PYTHON) $(METHODOLOGIST_CODEX_TESTS)
+	@$(PYTHON) lib/obligations/tests/test_obligations.py
 
 .PHONY: lint
 lint: ## Lint Python hooks, tests, and scripts (ruff, if installed)
 	@printf '$(BOLD)==> lint$(RESET)\n'
 	@if command -v ruff >/dev/null 2>&1; then \
-		ruff check $(PLUGINS_DIR) $(SCRIPTS); \
+		ruff check $(PLUGINS_DIR) lib $(SCRIPTS); \
 	else \
 		printf '$(DIM)ruff not installed — skipping (pip install ruff)$(RESET)\n'; \
 	fi
@@ -90,7 +91,7 @@ lint: ## Lint Python hooks, tests, and scripts (ruff, if installed)
 fmt: ## Auto-fix what the linter can fix
 	@printf '$(BOLD)==> fmt$(RESET)\n'
 	@if command -v ruff >/dev/null 2>&1; then \
-		ruff check --fix $(PLUGINS_DIR) $(SCRIPTS); \
+		ruff check --fix $(PLUGINS_DIR) lib $(SCRIPTS); \
 	else \
 		printf '$(DIM)ruff not installed — nothing to do$(RESET)\n'; \
 	fi
@@ -117,6 +118,16 @@ adr-check: ## Check ADR link health and numbering (adrs doctor)
 contract-check: ## Validate host-neutral API schemas and conformance fixtures
 	@printf '$(BOLD)==> contracts$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_contracts.py
+
+.PHONY: obligations-check
+obligations-check: ## Validate obligation schemas and substrate-neutral fixtures
+	@printf '$(BOLD)==> obligations$(RESET)\n'
+	@$(PYTHON) $(SCRIPTS)/validate_obligations.py
+
+.PHONY: vendor-check
+vendor-check: ## Verify Empirica's obligation package is byte-identical to the generic source
+	@printf '$(BOLD)==> obligation vendor$(RESET)\n'
+	@$(PYTHON) $(SCRIPTS)/check_vendor.py
 
 .PHONY: activation-check
 activation-check: ## Verify Empirica runtime isolation and thin Claude hook activation

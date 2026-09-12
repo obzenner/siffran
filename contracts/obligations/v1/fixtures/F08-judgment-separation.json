@@ -1,0 +1,136 @@
+{
+  "contract": {
+    "contract_id": "fixture",
+    "obligations": [
+      {
+        "because": [
+          "G1"
+        ],
+        "id": "O1",
+        "mode": "require",
+        "must": "required effect occurs",
+        "witnesses": [
+          {
+            "description": "auditor approves",
+            "expect": "pass",
+            "kind": "judgment",
+            "ref": "audit/run"
+          }
+        ]
+      },
+      {
+        "because": [
+          "G1"
+        ],
+        "id": "O2",
+        "mode": "require",
+        "must": "required effect occurs",
+        "witnesses": [
+          {
+            "description": "the witness has the expected outcome",
+            "expect": "pass",
+            "kind": "test",
+            "ref": "test/case"
+          }
+        ]
+      }
+    ],
+    "provenance": [
+      "fixture"
+    ],
+    "retired": [],
+    "revision": 1,
+    "supersedes": []
+  },
+  "expect": {
+    "text": "Obligation contract fixture@1\nO1 [require] required effect occurs\n  hold: none\n  - judgment:audit/run (pass) \u2014 auditor approves [observed: pass]\nO2 [require] required effect occurs\n  hold: none\n  - test:test/case (pass) \u2014 the witness has the expected outcome [observed: null]\nVerdict: satisfied=O1; holds=-; violated=-; residual=O2; unwitnessed=O2; held=-",
+    "verdict": {
+      "held": [],
+      "holds": [],
+      "residual": [
+        "O2"
+      ],
+      "satisfied": [
+        "O1"
+      ],
+      "unwitnessed": [
+        "O2"
+      ],
+      "violated": []
+    },
+    "view": {
+      "contract_id": "fixture",
+      "obligations": [
+        {
+          "because": [
+            "G1"
+          ],
+          "id": "O1",
+          "mode": "require",
+          "must": "required effect occurs",
+          "status": "satisfied",
+          "witnesses": [
+            {
+              "description": "auditor approves",
+              "expect": "pass",
+              "kind": "judgment",
+              "observed": "pass",
+              "ref": "audit/run"
+            }
+          ]
+        },
+        {
+          "because": [
+            "G1"
+          ],
+          "id": "O2",
+          "mode": "require",
+          "must": "required effect occurs",
+          "status": "residual",
+          "witnesses": [
+            {
+              "description": "the witness has the expected outcome",
+              "expect": "pass",
+              "kind": "test",
+              "observed": null,
+              "ref": "test/case"
+            }
+          ]
+        }
+      ],
+      "provenance": [
+        "fixture"
+      ],
+      "retired": [],
+      "revision": 1,
+      "supersedes": [],
+      "verdict": {
+        "held": [],
+        "holds": [],
+        "residual": [
+          "O2"
+        ],
+        "satisfied": [
+          "O1"
+        ],
+        "unwitnessed": [
+          "O2"
+        ],
+        "violated": []
+      }
+    }
+  },
+  "name": "F08-judgment-separation",
+  "observations": [
+    {
+      "at": "2026-01-01T00:00:00Z",
+      "kind": "judgment",
+      "outcome": "pass",
+      "ref": "audit/run",
+      "source": "auditor-1"
+    }
+  ],
+  "trusted_sources": [
+    "auditor-1"
+  ]
+}

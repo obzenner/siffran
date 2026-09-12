@@ -1,0 +1,86 @@
+{
+  "contract": {
+    "contract_id": "fixture",
+    "obligations": [
+      {
+        "because": [
+          "G1"
+        ],
+        "id": "O1",
+        "mode": "forbid",
+        "must": "forbidden effect occurs",
+        "witnesses": [
+          {
+            "description": "the witness has the expected outcome",
+            "expect": "pass",
+            "kind": "test",
+            "ref": "test/case"
+          }
+        ]
+      }
+    ],
+    "provenance": [
+      "fixture"
+    ],
+    "retired": [],
+    "revision": 1,
+    "supersedes": []
+  },
+  "expect": {
+    "text": "Obligation contract fixture@1\nO1 [forbid] forbidden effect occurs\n  hold: none\n  - test:test/case (pass) \u2014 the witness has the expected outcome [observed: null]\nVerdict: satisfied=-; holds=O1; violated=-; residual=-; unwitnessed=-; held=-",
+    "verdict": {
+      "held": [],
+      "holds": [
+        "O1"
+      ],
+      "residual": [],
+      "satisfied": [],
+      "unwitnessed": [],
+      "violated": []
+    },
+    "view": {
+      "contract_id": "fixture",
+      "obligations": [
+        {
+          "because": [
+            "G1"
+          ],
+          "id": "O1",
+          "mode": "forbid",
+          "must": "forbidden effect occurs",
+          "status": "holds",
+          "witnesses": [
+            {
+              "description": "the witness has the expected outcome",
+              "expect": "pass",
+              "kind": "test",
+              "observed": null,
+              "ref": "test/case"
+            }
+          ]
+        }
+      ],
+      "provenance": [
+        "fixture"
+      ],
+      "retired": [],
+      "revision": 1,
+      "supersedes": [],
+      "verdict": {
+        "held": [],
+        "holds": [
+          "O1"
+        ],
+        "residual": [],
+        "satisfied": [],
+        "unwitnessed": [],
+        "violated": []
+      }
+    }
+  },
+  "name": "F07-forbid-absent",
+  "observations": [],
+  "trusted_sources": [
+    "runner"
+  ]
+}

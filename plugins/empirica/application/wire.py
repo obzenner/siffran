@@ -192,7 +192,11 @@ def allow(converged: bool, run: dict) -> dict:
     return {"type": "Allow", "converged": converged, "run": run}
 
 
-def block(reason: str, run: dict) -> dict:
+def block(reason: str, run: dict, *, contract: dict | None = None) -> dict:
+    """Build a Block whose sole agent-facing obligation location is ``run.contract``."""
+    if contract is not None:
+        run = dict(run)
+        run["contract"] = contract
     return {"type": "Block", "reason": reason, "run": run}
 
 

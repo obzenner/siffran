@@ -1,0 +1,61 @@
+{
+  "after": {
+    "contract_id": "fixture",
+    "obligations": [
+      {
+        "because": [
+          "G1"
+        ],
+        "id": "O1",
+        "mode": "require",
+        "must": "required effect occurs",
+        "witnesses": [
+          {
+            "description": "the witness has the expected outcome",
+            "expect": "pass",
+            "kind": "test",
+            "ref": "test/case"
+          }
+        ]
+      }
+    ],
+    "provenance": [
+      "fixture"
+    ],
+    "retired": [],
+    "revision": 1,
+    "supersedes": []
+  },
+  "before": {
+    "contract_id": "fixture",
+    "obligations": [
+      {
+        "because": [
+          "G1"
+        ],
+        "id": "O1",
+        "mode": "require",
+        "must": "required effect occurs",
+        "witnesses": [
+          {
+            "description": "the witness has the expected outcome",
+            "expect": "pass",
+            "kind": "test",
+            "ref": "test/case"
+          }
+        ]
+      }
+    ],
+    "provenance": [
+      "fixture"
+    ],
+    "retired": [],
+    "revision": 1,
+    "supersedes": []
+  },
+  "expect": {
+    "ok": true,
+    "reasons": []
+  },
+  "name": "P04-whitespace-normalized"
+}

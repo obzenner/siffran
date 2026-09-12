@@ -25,6 +25,11 @@ import * as path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 
 import type { Dispatch, Request, RunSelector } from "./contract.ts";
+import { renderText } from "./obligations.ts";
+
+export const KNOWLEDGE_ACTION_KINDS = new Set(["graph", "route", "evidence_leaf", "attribution", "freeze"]);
+
+
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -42,7 +47,9 @@ import {
   getRunRequest,
   settledFollowUp,
   startRunRequest,
+  restoreRunRequest,
   statusNotice,
+  parseModeFlags,
   type StartRunOptions,
 } from "./translate.ts";
 
@@ -69,6 +76,8 @@ export interface EmpiricaPiDeps {
   deriveSelector?: SelectorProvider;
   /** Tool names whose call is the convergence report and must be gated. */
   gatedTools?: readonly string[];
+  /** Tool name for subagent spawn interception; undefined disables this hook. */
+  subagentToolName?: string;
   /** StartRun options (max_passes, max_spawns, modes). */
   startRunOptions?: StartRunOptions;
 }
@@ -96,6 +105,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
   const skillsDir = deps.skillsDir ?? DEFAULT_SKILLS_DIR;
   const selectorOf = deps.deriveSelector ?? defaultSelectorProvider();
   const gatedTools = new Set(deps.gatedTools ?? [REPORT_CONVERGENCE_TOOL]);
+  const subagentToolName = deps.subagentToolName ?? "subagent";
   const startOptions = deps.startRunOptions ?? {};
 
   return function empiricaExtension(pi: ExtensionAPI): void {
@@ -109,17 +119,57 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     // workflow instructions — the same resource Claude Code ships, no per-host fork.
     pi.on("resources_discover", () => ({ skillPaths: [skillsDir] }));
 
-    // (/empirica) Open or resume a run for this session.
+    pi.on("session_start", async (_event, ctx) => {
+      const entries = ctx.sessionManager?.getEntries() ?? [];
+      for (const entry of [...entries].reverse()) {
+        const data = entry.data as { runHandle?: unknown } | undefined;
+        if (entry.customType === "empirica.run" && typeof data?.runHandle === "string") { runHandle = data.runHandle; break; }
+      }
+    });
+
+    const textResult = (result: { type: string; run?: { id?: string; contract?: import("./obligations.ts").ContractView } }, handle?: string) => {
+      const view = result.run?.contract;
+      if (!view) return { content: [{ type: "text" as const, text: `Empirica run ${handle ?? result.run?.id ?? "(unknown)"}: no contract yet (no graph).` }], details: result };
+      return { content: [{ type: "text" as const, text: `Empirica run handle: ${handle ?? result.run?.id ?? "(unknown)"}\n${renderText(view)}` }], details: result };
+    };
+    if (pi.registerTool) {
+      pi.registerTool({ name: REPORT_CONVERGENCE_TOOL, label: "Report convergence", description: "Ask Empirica to verify convergence.", parameters: {}, async execute() {
+        if (!runHandle) return { content: [{ type: "text", text: "No active Empirica run." }] };
+        const response = await dispatch(evaluateRunRequest(runHandle, REPORT_CONVERGENCE_INTENT, randomUUID()));
+        const decision = gateFromDecision(response.result);
+        if (decision.kind === "deny") throw new Error(decision.reason);
+        return textResult(response.result);
+      }});
+      pi.registerTool({ name: "empirica_status", label: "Empirica status", description: "Show the current run handle and obligation contract.", parameters: {}, async execute() {
+        if (!runHandle) return { content: [{ type: "text", text: "No active Empirica run." }] };
+        const response = await dispatch(getRunRequest(runHandle, randomUUID()));
+        return textResult(response.result, runHandle);
+      }});
+      pi.registerTool({ name: "empirica_knowledge", label: "Empirica knowledge", description: "Submit an Empirica ObserveAction payload.", parameters: {}, async execute(_id, params) {
+        if (!runHandle) return { content: [{ type: "text", text: "No active Empirica run." }] };
+        const action = params as Record<string, unknown>;
+        const kind = String(action.kind ?? "graph");
+        if (!KNOWLEDGE_ACTION_KINDS.has(kind)) throw new Error(`unknown empirica knowledge action: ${kind}`);
+        const response = await dispatch({ protocol: "empirica/v1", request_id: randomUUID(), command: { type: "ObserveAction", run_id: runHandle, action: { kind, ...action } } });
+        return textResult(response.result);
+      }});
+    }
+
     pi.registerCommand("empirica", {
       description: "Start an empirical-convergence run for the current goal (empirica).",
       handler: async (args, ctx) => {
-        const goal = args.trim() || "(goal to be refined from the current task)";
+        const parsed = parseModeFlags(args);
+        const goal = parsed.goal || "(goal to be refined from the current task)";
+        const modes = { ...startOptions.modes, ...parsed.modes };
+        if (parsed.unknownFlags.length) ctx.ui.notify(`empirica: unknown mode flags ignored: ${parsed.unknownFlags.join(" ")}`, "warning");
         try {
           const result = (
-            await dispatch(startRunRequest(selectorOf(ctx), goal, randomUUID(), startOptions))
+            await dispatch(startRunRequest(selectorOf(ctx), goal, randomUUID(), { ...startOptions, modes }))
           ).result;
           if (result.type === "Allow" || result.type === "Block") {
             runHandle = result.run.id; // remember the opaque handle for this session
+            pi.appendEntry?.("empirica.run", { runHandle });
+            if (result.run.contract) pi.sendMessage?.({ customType: "empirica", content: `Empirica run handle: ${runHandle}\n${renderText(result.run.contract)}` });
           }
           const notice = statusNotice(result);
           ctx.ui.notify(notice.text, notice.type);
@@ -180,6 +230,13 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     // blocks that single call with the reason. Non-gated tools pass untouched — the
     // adapter never round-trips the core for calls it does not gate.
     pi.on("tool_call", async (event: ToolCallEvent): Promise<ToolCallResult | void> => {
+      if (event.toolName === subagentToolName && runHandle !== null) {
+        try {
+          const response = await dispatch({ protocol: "empirica/v1", request_id: randomUUID(), command: { type: "ObserveAction", run_id: runHandle, action: { kind: "audit_ticket", actor: { tool: event.toolName, call_id: event.toolCallId }, witnessed: true } } });
+          if (response.result.type === "Block") return { block: true, reason: response.result.reason };
+          if (response.result.type === "Fault" && response.result.fail_direction !== "open") return { block: true, reason: "empirica spawn gate unavailable (failing closed)" };
+        } catch (error) { return { block: true, reason: `empirica spawn gate unavailable (failing closed): ${describe(error)}` }; }
+      }
       if (!gatedTools.has(event.toolName)) return;
       if (runHandle === null) return; // no run to gate against
       try {
@@ -198,6 +255,16 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           reason: `empirica gate unavailable (failing closed): ${describe(error)}`,
         };
       }
+    });
+
+    pi.on("session_before_compact", async (event) => {
+      if (!runHandle) return;
+      try {
+        const response = await dispatch(restoreRunRequest(runHandle, randomUUID()));
+        const run = response.result.type === "Allow" || response.result.type === "Block" ? response.result.run : undefined;
+        if (!run?.contract) return;
+        return { compaction: { summary: `Empirica obligations (deterministic):\n${renderText(run.contract)}`, firstKeptEntryId: event.preparation.firstKeptEntryId, tokensBefore: event.preparation.tokensBefore, details: { runHandle, contract: run.contract } } };
+      } catch { return; }
     });
 
     // (agent_settled) Observational only (ADR-32): Pi cannot veto completion here.

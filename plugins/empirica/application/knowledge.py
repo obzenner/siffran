@@ -25,6 +25,7 @@ import json
 import re
 
 from core import claims
+from core.evidence import evidence_fold
 
 KIND_GRAPH = "graph"
 KIND_EVIDENCE = "evidence"
@@ -35,6 +36,9 @@ KIND_EVIDENCE_LEAF = "evidence_leaf"
 KIND_AUDIT_TICKET = "audit_ticket"
 KIND_AUDIT_VERDICT = "audit_verdict"
 KIND_ATTRIBUTION = "attribution"
+# Terminal consumer contract projections are immutable artifacts too. They are retained for audit,
+# but do not participate in graph/evidence derivation.
+KIND_OBLIGATION_CONTRACT = "obligation_contract"
 
 PURPOSE_APPROVE = "approve"
 PURPOSE_REFUTE = "refute"
@@ -224,6 +228,14 @@ class Knowledge:
                 k.verdicts.append(record)
             elif kind == KIND_ATTRIBUTION:
                 k.attributions.append(record.get("report"))
+            elif kind == KIND_OBLIGATION_CONTRACT or (
+                    kind is None and {"contract_id", "revision", "obligations"} <= set(record)):
+                # Contract revisions are application metadata encoded as Contract.to_json(), not
+                # claim knowledge; retain fail-closed decoding for every other unknown artifact.
+                continue
+            elif kind == "freeze":
+                # The immutable freeze authority records the scope transition for ADR-0039.
+                continue
             else:
                 raise KnowledgeError(f"artifact {art.artifact_id} has unknown kind {kind!r}")
         return k
@@ -387,8 +399,9 @@ def _leaf_digest(records: list[dict], claim_id: str, claim_text: str) -> str:
         if (subject[0].get("name") != claim_id or not isinstance(digest, dict)
                 or digest.get("sha256") != expected_claim):
             continue
-        ptype = statement.get("predicateType", "")
-        fold = "research" if ptype.endswith("/research/v1") else "spike"
+        fold = evidence_fold(statement)
+        if fold is None:
+            continue
         hashes = predicate.get("hashes") if isinstance(predicate.get("hashes"), dict) else {}
         bound.append({"fold": fold,
                       "kind": predicate.get("kind") if fold == "research" else None,
