@@ -12,3 +12,4 @@ __pycache__/
 
 # Node devDependencies (typescript/@types/node for the tsc gate); lockfile is committed
 node_modules/
+.pi-dev-sessions/

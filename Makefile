@@ -217,6 +217,23 @@ migrate-legacy: ## Explicitly import a legacy run: make migrate-legacy RUN_DIR=.
 	@$(PYTHON) plugins/empirica/adapters/claude/migrate_legacy.py \
 		--run-dir "$(RUN_DIR)" --repo "$(REPO)" $(if $(SESSION_ID),--session-id "$(SESSION_ID)",)
 
+# Dogfooding: run Pi against THIS checkout's Empirica + Methodologist adapters and skills, not the
+# installed siffran package. `--no-extensions` keeps the installed copy from registering a second
+# `/empirica`; `-e` loads the worktree extension, so the bridge it spawns is this tree's Python.
+# Sessions land in PI_DEV_SESSION_DIR so an observer (human or agent) can tail them.
+PI ?= pi
+PI_DEV_SESSION_DIR ?= $(CURDIR)/.pi-dev-sessions
+.PHONY: pi-dev
+pi-dev: ## Run a dev Pi on this checkout's plugins (dogfood): make pi-dev [ARGS="..."] [PI_DEV_SESSION_DIR=...]
+	@command -v $(PI) >/dev/null 2>&1 || { printf 'pi-dev: `$(PI)` not found on PATH (set PI=/path/to/pi)\n' >&2; exit 2; }
+	@mkdir -p "$(PI_DEV_SESSION_DIR)"
+	@printf '$(BOLD)==> dev pi$(RESET) extensions + skills from %s; sessions in %s\n' "$(CURDIR)" "$(PI_DEV_SESSION_DIR)"
+	@$(PI) --no-extensions --no-skills \
+		-e ./plugins/empirica/adapters/pi/src/index.ts \
+		-e ./plugins/methodologist/adapters/pi/src/index.ts \
+		--skill ./plugins/empirica/skills --skill ./plugins/methodologist/skills \
+		--session-dir "$(PI_DEV_SESSION_DIR)" $(ARGS)
+
 ## --- Release
 
 .PHONY: bump

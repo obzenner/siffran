@@ -13,6 +13,7 @@ Why this is a rule and not a preference: a command that lives only in a chat mes
 | running the test file by path | `make test` |
 | ad-hoc `ruff` invocations | `make lint` (`make fmt` to auto-fix) |
 | hand-checking manifests | `make validate` |
+| hand-assembling a `pi -e … --skill …` command to dogfood the Pi adapters | `make pi-dev` |
 | hand-checking the Codex package | `make methodologist-codex-check` |
 | ad-hoc Codex installation/invocation tests | `make methodologist-codex-smoke` |
 | `adrs --ng doctor` | `make adr-check` |
