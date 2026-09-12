@@ -21,3 +21,18 @@ test("status explicitly reports no contract when GetRun has no graph", async () 
 
 test("appendEntry and session_start reconstruct handle; compaction carries text and JSON details", async () => { const pi=setup(async (_r:any) => allow); await pi.command("empirica").handler("goal", fakeCtx()); const start = pi.handlers.get("session_start") as any; const ctx=fakeCtx("/work", [{customType:"empirica.run",data:{runHandle:"restored"}}]); await start({},ctx); const compact=pi.handlers.get("session_before_compact") as any; const out=await compact({preparation:{firstKeptEntryId:"e",tokensBefore:4}},ctx); assert.match(out.compaction.summary,/Obligation contract/); assert.deepEqual(out.compaction.details.contract,contract); assert.equal(pi.entries.length,1); });
 test("subagent is allowed, budget Block denies, and transport failure closes", async () => { let mode="allow"; const pi=setup(async (r:any) => { if (r.command.type === "StartRun") return allow; if (mode === "fail") throw new Error("offline"); return mode === "deny" ? block : allow; }); await pi.command("empirica").handler("goal", fakeCtx()); const gate=pi.toolCall(); assert.equal((await gate({toolName:"subagent",toolCallId:"1",input:{}},fakeCtx())), undefined); mode="deny"; assert.equal((await gate({toolName:"subagent",toolCallId:"2",input:{}},fakeCtx()))!.block,true); mode="fail"; assert.equal((await gate({toolName:"subagent",toolCallId:"3",input:{}},fakeCtx()))!.block,true); });
+
+// Providers validate tool schemas: Amazon Bedrock rejected `parameters: {}` live with
+// "inputSchema.json.type must be one of the following: object". Pin the shape so a fake host
+// cannot hide it again.
+test("every registered tool declares a JSON-Schema object parameters block", () => {
+  const host = new FakePi();
+  createEmpiricaExtension({ dispatch: async () => allow })(host as never);
+  const names = [...host.tools.keys()].sort();
+  assert.deepEqual(names, ["empirica_knowledge", "empirica_status", "report_convergence"]);
+  for (const def of host.tools.values()) {
+    const schema = def.parameters as { type?: unknown; properties?: unknown };
+    assert.equal(schema.type, "object", `${def.name}: parameters.type must be "object"`);
+    assert.equal(typeof schema.properties, "object", `${def.name}: parameters.properties missing`);
+  }
+});

@@ -132,20 +132,30 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       if (!view) return { content: [{ type: "text" as const, text: `Empirica run ${handle ?? result.run?.id ?? "(unknown)"}: no contract yet (no graph).` }], details: result };
       return { content: [{ type: "text" as const, text: `Empirica run handle: ${handle ?? result.run?.id ?? "(unknown)"}\n${renderText(view)}` }], details: result };
     };
+    // Tool parameter schemas MUST be JSON-Schema objects with `type: "object"`: providers (Bedrock
+    // rejects `{}` at request validation) require it. Found live while dogfooding; the fake-host
+    // tests cannot see provider validation, so keep these explicit.
+    const EMPTY_PARAMS = { type: "object", properties: {}, additionalProperties: false };
+    const KNOWLEDGE_PARAMS = {
+      type: "object",
+      required: ["kind"],
+      properties: { kind: { type: "string", enum: [...KNOWLEDGE_ACTION_KINDS].sort() } },
+      additionalProperties: true,
+    };
     if (pi.registerTool) {
-      pi.registerTool({ name: REPORT_CONVERGENCE_TOOL, label: "Report convergence", description: "Ask Empirica to verify convergence.", parameters: {}, async execute() {
+      pi.registerTool({ name: REPORT_CONVERGENCE_TOOL, label: "Report convergence", description: "Ask Empirica to verify convergence.", parameters: EMPTY_PARAMS, async execute() {
         if (!runHandle) return { content: [{ type: "text", text: "No active Empirica run." }] };
         const response = await dispatch(evaluateRunRequest(runHandle, REPORT_CONVERGENCE_INTENT, randomUUID()));
         const decision = gateFromDecision(response.result);
         if (decision.kind === "deny") throw new Error(decision.reason);
         return textResult(response.result);
       }});
-      pi.registerTool({ name: "empirica_status", label: "Empirica status", description: "Show the current run handle and obligation contract.", parameters: {}, async execute() {
+      pi.registerTool({ name: "empirica_status", label: "Empirica status", description: "Show the current run handle and obligation contract.", parameters: EMPTY_PARAMS, async execute() {
         if (!runHandle) return { content: [{ type: "text", text: "No active Empirica run." }] };
         const response = await dispatch(getRunRequest(runHandle, randomUUID()));
         return textResult(response.result, runHandle);
       }});
-      pi.registerTool({ name: "empirica_knowledge", label: "Empirica knowledge", description: "Submit an Empirica ObserveAction payload.", parameters: {}, async execute(_id, params) {
+      pi.registerTool({ name: "empirica_knowledge", label: "Empirica knowledge", description: "Submit an Empirica ObserveAction payload (kind + the same fields the Claude knowledge builders emit).", parameters: KNOWLEDGE_PARAMS, async execute(_id, params) {
         if (!runHandle) return { content: [{ type: "text", text: "No active Empirica run." }] };
         const action = params as Record<string, unknown>;
         const kind = String(action.kind ?? "graph");

@@ -12,4 +12,5 @@ __pycache__/
 
 # Node devDependencies (typescript/@types/node for the tsc gate); lockfile is committed
 node_modules/
-.pi-dev-sessions/
+# pi project-local package clones (pi install -l git:...) — never commit
+.pi/git/

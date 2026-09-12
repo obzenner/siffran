@@ -217,22 +217,31 @@ migrate-legacy: ## Explicitly import a legacy run: make migrate-legacy RUN_DIR=.
 	@$(PYTHON) plugins/empirica/adapters/claude/migrate_legacy.py \
 		--run-dir "$(RUN_DIR)" --repo "$(REPO)" $(if $(SESSION_ID),--session-id "$(SESSION_ID)",)
 
-# Dogfooding: run Pi against THIS checkout's Empirica + Methodologist adapters and skills, not the
-# installed siffran package. `--no-extensions` keeps the installed copy from registering a second
-# `/empirica`; `-e` loads the worktree extension, so the bridge it spawns is this tree's Python.
-# Sessions land in PI_DEV_SESSION_DIR so an observer (human or agent) can tail them.
+# Dogfooding (see docs/packages.md "Scope and Deduplication" in pi): the committed .pi/settings.json
+# adds this checkout as a project-local package and applies an autoload:false DELTA over the globally
+# installed siffran package that force-excludes its Pi extensions/skills. Everything else in the
+# user's Pi setup (pi-subagents, providers, other packages) loads unchanged; only siffran is
+# overridden by this tree. Local edits hot-reload with /reload. Pi asks to trust the folder once.
 PI ?= pi
-PI_DEV_SESSION_DIR ?= $(CURDIR)/.pi-dev-sessions
 .PHONY: pi-dev
-pi-dev: ## Run a dev Pi on this checkout's plugins (dogfood): make pi-dev [ARGS="..."] [PI_DEV_SESSION_DIR=...]
+pi-dev: ## Run Pi with siffran overridden by THIS checkout (dogfood; other packages unchanged): make pi-dev [ARGS="..."]
 	@command -v $(PI) >/dev/null 2>&1 || { printf 'pi-dev: `$(PI)` not found on PATH (set PI=/path/to/pi)\n' >&2; exit 2; }
-	@mkdir -p "$(PI_DEV_SESSION_DIR)"
-	@printf '$(BOLD)==> dev pi$(RESET) extensions + skills from %s; sessions in %s\n' "$(CURDIR)" "$(PI_DEV_SESSION_DIR)"
-	@$(PI) --no-extensions --no-skills \
-		-e ./plugins/empirica/adapters/pi/src/index.ts \
-		-e ./plugins/methodologist/adapters/pi/src/index.ts \
-		--skill ./plugins/empirica/skills --skill ./plugins/methodologist/skills \
-		--session-dir "$(PI_DEV_SESSION_DIR)" $(ARGS)
+	@test -f .pi/settings.json || { printf 'pi-dev: .pi/settings.json is missing (it is committed; restore it)\n' >&2; exit 2; }
+	@printf '$(BOLD)==> dev pi$(RESET) siffran from %s (project override); answer YES if pi asks to trust this folder\n' "$(CURDIR)"
+	@$(PI) $(ARGS)
+
+# Canary: dogfood a pushed PR branch inside a REAL project, not inside siffran. Installs the branch
+# as a project-local package there (project wins over the global install; identity is the repo URL,
+# so the global entry is shadowed, not duplicated). `pi update --extensions` reconciles the clone.
+SIFFRAN_GIT ?= git:github.com/obzenner/siffran
+.PHONY: pi-canary pi-canary-remove
+pi-canary: ## Install a siffran branch project-locally in DIR for dogfooding: make pi-canary REF=<branch> [DIR=<project>]
+	@if [ -z "$(REF)" ]; then printf 'usage: make pi-canary REF=<branch-or-tag> [DIR=<project dir, default: this checkout>]\n' >&2; exit 2; fi
+	@cd "$(or $(DIR),$(CURDIR))" && $(PI) install -l "$(SIFFRAN_GIT)@$(REF)"
+	@printf '$(BOLD)==> canary$(RESET) %s@%s installed project-locally in %s; run `pi` there (trust the folder when asked); `make pi-canary-remove DIR=...` to undo\n' "$(SIFFRAN_GIT)" "$(REF)" "$(or $(DIR),$(CURDIR))"
+
+pi-canary-remove: ## Remove the project-local siffran canary from DIR: make pi-canary-remove [DIR=<project>]
+	@cd "$(or $(DIR),$(CURDIR))" && $(PI) remove -l "$(SIFFRAN_GIT)"
 
 ## --- Release
 
