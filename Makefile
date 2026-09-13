@@ -119,6 +119,13 @@ contract-check: ## Validate host-neutral API schemas and conformance fixtures
 	@printf '$(BOLD)==> contracts$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_contracts.py
 
+# Design spike from the first Pi dogfood run (doc/design/bridge-transport-retry-policy.md). It is a
+# design model, not a product check, so it is NOT part of `make check`.
+.PHONY: bridge-retry-spike
+bridge-retry-spike: ## Run the bridge retry-policy design model spike (design evidence, not a release gate)
+	@printf '$(BOLD)==> bridge retry-policy spike$(RESET)\n'
+	@$(PYTHON) doc/design/spikes/bridge_retry_policy_model.py
+
 .PHONY: obligations-check
 obligations-check: ## Validate obligation schemas and substrate-neutral fixtures
 	@printf '$(BOLD)==> obligations$(RESET)\n'

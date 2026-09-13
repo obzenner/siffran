@@ -35,16 +35,30 @@ Stance adopted before starting: “parametric knowledge = hypothesis only; every
 ### P-3 — Graph-backed Block omitted `run.contract` from the model-visible tool error
 
 - **Expected:** `RestoreRun`, `Block`, and terminal `Allow` expose the canonical `run.contract`; string-only channels render that same view so the actor never infers outstanding work from a reason string (SKILL.md lines 115–118 and 372–374; ADR-0039 lines 23 and 36; ADR-0040 lines 21 and 34).
-- **Observed:** With graph claims approved but audit absent, `report_convergence` returned only this verbatim reason: `Claim graph is converged, but the run may not report converged: no independent audit was performed: spawn the independent auditor to verify this run before converging (ADR-20 P6 — the author cannot grade its own convergence). The auditor must re-read each approved claim's Fold-1 citation, confirm the source supports the claim, and write a verdict carrying the nonce from its spawn (ADR-20 P6, ADR-25).` No rendered contract, handle, obligation must, witness, hold, or provenance appeared in that tool error.
-- **Result:** FAIL — blocked-reason visibility passed, but the graph-backed Block boundary reduced the model-visible result to prose and omitted its canonical contract.
-- **Fix request (not applied):** When the Pi tool gate denies `report_convergence`, include `renderText(result.run.contract)` and the opaque handle in the thrown/model-visible error rather than throwing only `decision.reason`.
+- **Observed:** With graph claims approved but audit absent, the original `report_convergence` returned only this verbatim reason: `Claim graph is converged, but the run may not report converged: no independent audit was performed: spawn the independent auditor to verify this run before converging (ADR-20 P6 — the author cannot grade its own convergence). The auditor must re-read each approved claim's Fold-1 citation, confirm the source supports the claim, and write a verdict carrying the nonce from its spawn (ADR-20 P6, ADR-25).` No rendered contract, handle, obligation must, witness, hold, or provenance appeared. After the user stated Empirica was fixed mid-run, the same tool boundary did render the full contract and handle, including the open `empirica/audit/0ebc2725b2d27b03f154978aaa02da4f574001cc6cb038515d04657702d6065f` obligation and its missing judgment witness.
+- **Result:** FAIL for the original code under test; post-fix retest PASS.
+- **Fix request:** Preserve the post-fix behavior: when the Pi tool gate denies `report_convergence`, include `renderText(result.run.contract)` and the opaque handle in the model-visible error.
 
 ### P-4 — Subagent interception blocked discovery before ticketing or audit spawn
 
 - **Expected:** Pi intercepts the configured `subagent` tool, issues an audit ticket, enforces the spawn budget, and permits the scoped `empirica:empirica-auditor` while budget remains (SKILL.md lines 113 and 438–456; ADR-0040 lines 22 and 34). The subagent runtime independently requires `action: "list"` before execution so only executable/non-disabled agents are launched.
-- **Observed:** The mandatory discovery call `subagent({action: "list"})` was intercepted and returned verbatim: `empirica spawn gate unavailable (failing closed)`. No agent registry, audit nonce, ticket, or obligation contract reached model context, so safely launching the auditor was impossible. The failure occurred before any actual spawn and therefore also prevented a meaningful past-budget denial test.
-- **Result:** FAIL — interception treated a non-spawn management call as an auditor spawn and failed closed before the required auditor could be discovered or ticketed.
-- **Fix request (not applied):** Intercept only executable `subagent` invocations; do not ticket management/control actions such as `list`. For executable audit calls, send an actor shape accepted by the core, return the issued nonce to the audit task, reserve/enforce one spawn, and render the returned contract on denial.
+- **Observed:** Initially, the mandatory discovery call `subagent({action: "list"})` was intercepted and returned verbatim: `empirica spawn gate unavailable (failing closed)`. No agent registry, audit nonce, ticket, or obligation contract reached model context, so safely launching the auditor was impossible. After the user stated `empirica was fixed`, the same management call succeeded and returned the executable registry; a distinct-provider `bedrock--claude-opus-5` auditor was then launched.
+- **Result:** FAIL for the code originally under test; PASS only after an external mid-run fix changed the measured runtime. The original past-budget denial remains UNVERIFIED.
+- **Fix request:** Intercept only executable `subagent` invocations; do not ticket management/control actions such as `list`. For executable audit calls, send an actor shape accepted by the core, return the issued nonce to the audit task, reserve/enforce one spawn, and render the returned contract on denial.
+
+### P-6 — Audit tickets were issued before downstream spawn acceptance
+
+- **Expected:** A spawn ticket witnesses a requested/accepted auditor spawn and supplies the nonce bound to that spawn (SKILL.md lines 438–458; ADR-0040 line 34).
+- **Observed:** The first post-fix execution attempt was rejected by pi-subagents before launching a child with `Structured single-child execution cannot be combined with workflowScript.`, yet the user received ticket nonce `917db2e6a7245932c747619e6bd74f28`. The subsequent accepted distinct-provider spawn produced a second nonce, `e5ac38f5292c78e98adb1bca346dc683`, only after its task had already been dispatched carrying the first nonce.
+- **Result:** FAIL — pre-tool interception ticketed an invocation that the downstream tool rejected, and the nonce corresponding to the actual spawn arrived too late to be included in the child task. Ticket issuance witnesses a tool-call attempt, not a successful spawn, and nonce delivery is racy.
+- **Fix request:** Finalize the ticket only after downstream spawn acceptance, or inject a provisional nonce into the child call and cancel it deterministically on downstream rejection; ensure the actual child receives the nonce bound to its own spawn.
+
+### P-7 — Settled reminders accumulated into one duplicated message
+
+- **Expected:** A settled nudge is a best-effort reminder that starts a follow-up turn once; it should preserve the contract without flooding or concatenating duplicate reminders (SKILL.md line 113; ADR-0040 lines 28, 36, and 50).
+- **Observed:** One user-visible turn contained four back-to-back copies of the complete reminder and contract, with boundaries concatenated as `held=-empirica (reminder, not a gate)`.
+- **Result:** FAIL — follow-up delivery worked, but duplicate queued nudges accumulated and were concatenated without separators.
+- **Fix request:** Coalesce pending reminders by run/revision, suppress a reminder when an equivalent one is already queued, and preserve a delimiter if multiple messages must be delivered.
 
 ### Settled-nudge delivery
 
@@ -69,6 +83,20 @@ Stance adopted before starting: “parametric knowledge = hypothesis only; every
 - **Observed:** `make check` completed with `All checks passed.` It included 139/139 application checks, 67/67 Pi tests (twice through bundle/package validation), the new retry-policy spike, and ADR health. Its Pi output explicitly said `all Block renderers retain contract text` and `subagent is allowed, budget Block denies, and transport failure closes`, despite this live run observing P-3’s contract-less Block and P-4’s denial of the mandatory non-spawn `subagent list` call.
 - **Result:** FAIL — the deterministic confirmation set does not exercise the real model-callable error boundary or actual pi-subagents management/execution payload shapes, and it did not reject P-2’s all-retired terminal-facing contract.
 - **Fix request (not applied):** Add live-shaped fixtures for `report_convergence.execute` after the `tool_call` denial, management versus execution subagent payloads, core-valid audit actor records/nonces, and confidence-only graph transitions through terminal handoff.
+
+### P-8 — Auditor can return a verdict but cannot submit the required verdict artifact
+
+- **Expected:** The independent auditor receives the opaque handle and issued nonce, computes per-claim and argument digests from the canonical evidence functions, and submits `audit_verdict` through `BridgeTransport`; convergence then observes that verdict (SKILL.md lines 438–474; ADR-0040 lines 22 and 34).
+- **Observed:** The distinct-provider fallback re-audit independently re-read G0–G4’s citations, ran `make bridge-retry-spike` three times, and returned `Verdict: PASS.` However its model-callable `empirica_knowledge` surface allowed only `attribution`, `evidence_leaf`, `freeze`, `graph`, and `route`; it had no `audit_verdict` kind and `empirica_status` reported no active run in the child session. The parent is forbidden to author its own verdict and the auditor was told not to invent digests. The next `report_convergence` therefore returned: `an auditor was spawned but no readable verdict is present` and exposed an open audit judgment witness.
+- **Result:** FAIL — ticketing and independent review can occur, but Pi provides no end-to-end auditor-to-verdict submission path, so the mandatory audit obligation cannot be discharged honestly.
+- **Fix request:** Provide the ticketed auditor a scoped verdict submission tool carrying the active run handle and its own nonce, backed by the canonical digest functions; do not require the parent author to translate or author the auditor’s verdict.
+
+### P-9 — Expected spawn-budget denial was not demonstrated
+
+- **Expected:** The intercepted Pi subagent execution reserves against ADR-17’s run spawn budget and denies the first spawn past the cap (SKILL.md lines 306–337; ADR-0040 lines 22 and 34).
+- **Observed:** The run accepted a primary auditor spawn, a fallback spawn, and a second fallback re-audit spawn. Pi-subagents reported its separate fan-out budget as `64`, but no Empirica denial or model-visible Empirica spawn count/cap was returned. The invalid pre-spawn workflow call also minted a ticket without launching.
+- **Result:** UNVERIFIED for the exact past-cap boundary — the active cap was not visible in the obligation/status boundary, and deliberately buying further model calls solely to search for it would be wasteful. The accepted repeated spawns plus P-6 remain risk evidence, not proof that the configured cap was exceeded.
+- **Fix request:** Expose the current run spawn obligation/cap through `run.contract` or status, atomically reserve on accepted execution, and add a zero-inference deterministic way to probe the next reservation.
 
 ### Compaction preservation
 
