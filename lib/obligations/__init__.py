@@ -16,12 +16,13 @@ from .model import (
     from_json,
     to_json,
 )
-from .project import canonical, parse, preserved, project, render_text
+from .project import canonical, parse, preserved, project, render_text, same_contract
 from .revise import revise
 from .verify import verify
 
 __all__ = [
     "Witness", "Obligation", "Observation", "Contract", "Retirement", "Verdict",
     "Preservation", "verify", "revise", "project", "parse", "canonical", "preserved",
+    "same_contract",
     "render_text", "to_json", "from_json",
 ]

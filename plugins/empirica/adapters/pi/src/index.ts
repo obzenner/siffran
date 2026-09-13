@@ -23,6 +23,7 @@
 import { fileURLToPath } from "node:url";
 import * as path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 import { readFileSync } from "node:fs";
 
 import type { Dispatch, Request, RunSelector } from "./contract.ts";
@@ -121,14 +122,22 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     // workflow instructions — the same resource Claude Code ships, no per-host fork.
     pi.on("resources_discover", () => ({ skillPaths: [skillsDir] }));
 
+    const auditTickets = new Map<string, { runHandle: string; nonce: string }>();
     pi.on("session_start", async (_event, ctx) => {
       const entries = ctx.sessionManager?.getEntries() ?? [];
-      for (const entry of [...entries].reverse()) {
-        const data = entry.data as { runHandle?: unknown } | undefined;
-        if (entry.customType === "empirica.run" && typeof data?.runHandle === "string") { runHandle = data.runHandle; break; }
+      for (const entry of entries) {
+        const data = entry.data as { runHandle?: unknown; toolCallId?: unknown; nonce?: unknown } | undefined;
+        if (entry.customType === "empirica.run" && typeof data?.runHandle === "string") runHandle = data.runHandle;
+        if (entry.customType === "empirica.ticket" && typeof data?.runHandle === "string"
+            && typeof data.toolCallId === "string" && typeof data.nonce === "string")
+          auditTickets.set(data.toolCallId, { runHandle: data.runHandle, nonce: data.nonce });
       }
     });
 
+    const renderDenial = (result: { reason?: string; message?: string; run?: { contract?: import("./obligations.ts").ContractView } }, fallback: string): string => {
+      const reason = result.reason ?? result.message ?? fallback;
+      return result.run?.contract ? `${reason}\n${renderText(result.run.contract)}` : reason;
+    };
     const textResult = (result: { type: string; run?: { id?: string; goal?: string; modes?: unknown; contract?: import("./obligations.ts").ContractView } }, handle?: string) => {
       const view = result.run?.contract;
       const prefix = `${result.run?.goal ? `Goal: ${result.run.goal}\n` : ""}${result.run?.modes ? `Modes: ${JSON.stringify(result.run.modes)}\n` : ""}`;
@@ -244,8 +253,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       },
     });
 
-    // Child tickets are correlated by Pi's toolCallId, never shown to the author.
-    const auditTickets = new Map<string, string>();
+    // Child tickets are correlated by Pi's toolCallId and persisted by the host.
     const AUDIT_CONTRACT = "```empirica-verdict {\n  {verdict, nonce, argument_digest, claims_reviewed:[{claim_id, claim_digest, evidence_digest}], findings, ts}\n}```";
     const auditorInstructions = (): string => {
       const file = path.resolve(skillsDir, "..", "agents", "empirica-auditor.md");
@@ -267,17 +275,18 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       return JSON.stringify(value);
     };
     const VERDICT_BLOCK = /```empirica-verdict\s*\n?[\s\S]*?```/gi;
-    const redactVerdict = (event: ToolResultEvent): void => {
+    const redactValue = (value: unknown): unknown => {
       const marker = "[empirica-verdict block recorded by the host]";
-      if (Array.isArray(event.content)) {
-        for (const part of event.content) {
-          if (part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string") {
-            (part as { text: string }).text = (part as { text: string }).text.replace(VERDICT_BLOCK, marker);
-          }
-        }
-        return;
-      }
-      if (typeof event.content === "string") event.content = event.content.replace(VERDICT_BLOCK, marker);
+      if (typeof value === "string") return value.replace(VERDICT_BLOCK, marker);
+      if (Array.isArray(value)) return value.map(redactValue);
+      if (value && typeof value === "object") return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, redactValue(item)]));
+      return value;
+    };
+    const redactVerdict = (event: ToolResultEvent): void => {
+      event.content = redactValue(event.content);
+      event.result = redactValue(event.result);
+      event.error = redactValue(event.error);
     };
     const appendResult = (event: ToolResultEvent, line: string): void => {
       if (Array.isArray(event.content)) { event.content.push({ type: "text", text: line }); return; }
@@ -285,30 +294,34 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       event.content = `${resultText(event)}\n${line}`;
     };
     pi.on("tool_result", async (event: ToolResultEvent) => {
-      const nonce = auditTickets.get(event.toolCallId);
-      if (!nonce || runHandle === null) return;
+      const correlation = auditTickets.get(event.toolCallId);
+      if (!correlation) return;
+      const rawText = resultText(event);
+      redactVerdict(event); // before every await, on success/malformed/error/transport paths
       auditTickets.delete(event.toolCallId);
-      if (event.isError || event.error) {
-        // The child never ran: give the reservation back and void the nonce (P-8).
+      if (runHandle === null || correlation.runHandle !== runHandle) {
+        console.warn(`empirica: ignored auditor result for stale run ${correlation.runHandle}`);
+        return { content: event.content, details: event.result };
+      }
+      const { nonce } = correlation;
+      if ((event.isError || event.error) && isLaunchRejection(rawText)) {
         await dispatch({ protocol: "empirica/v1", request_id: randomUUID(), command: { type: "ObserveAction", run_id: runHandle, action: { kind: "void_spawn", nonce } } });
         appendResult(event, "Empirica: auditor launch failed — spawn reservation released, ticket voided.");
-        return;
+        return { content: event.content, details: event.result };
       }
-      const parsed = verdictBlock(resultText(event));
+      const parsed = verdictBlock(rawText);
       if (!parsed || parsed.nonce !== nonce) {
-        // The child ran (budget is spent) but produced no usable verdict. The ticket simply never
-        // gets a matching verdict, so it cannot satisfy coverage; the obligation stays open.
         appendResult(event, "Empirica: the auditor returned no valid empirica-verdict block; the audit obligation remains open. Spawn another auditor if budget remains.");
-        return;
+        return { content: event.content, details: event.result };
       }
       const response = await dispatch({ protocol: "empirica/v1", request_id: randomUUID(), command: { type: "ObserveAction", run_id: runHandle, action: { kind: "audit_verdict", ...parsed } } });
-      redactVerdict(event); // the author never holds the nonce, not even after the fact
       const run = (response.result as { run?: { contract?: import("./obligations.ts").ContractView } }).run;
       const findings = Array.isArray(parsed.findings) && parsed.findings.length ? `\nFindings:\n- ${parsed.findings.join("\n- ")}` : "";
       const head = response.result.type === "Allow"
         ? `Empirica: host recorded the auditor's verdict (${parsed.verdict}).${findings}`
-        : `Empirica: the auditor's verdict was not accepted — ${(response.result as { reason?: string; message?: string }).reason ?? (response.result as { message?: string }).message ?? response.result.type}.`;
+        : `Empirica: the auditor's verdict was not accepted — ${renderDenial(response.result, response.result.type)}.`;
       appendResult(event, run?.contract ? `${head}\n${renderText(run.contract)}` : head);
+      return { content: event.content, details: event.result };
     });
 
     // (tool_call) The hard gate. A `report_convergence` tool call succeeds only
@@ -317,25 +330,36 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     // adapter never round-trips the core for calls it does not gate.
     pi.on("tool_call", async (event: ToolCallEvent): Promise<ToolCallResult | void> => {
       if (event.toolName === subagentToolName && runHandle !== null && isExecutableSpawn(event.input)) {
+        let pendingReservationId: string | undefined;
+        let pendingNonce: string | undefined;
         try {
           const reservation = await dispatch({ protocol: "empirica/v1", request_id: randomUUID(), command: { type: "ObserveAction", run_id: runHandle, action: { kind: "reserve_spawn" } } });
-          if (reservation.result.type === "Block") return { block: true, reason: `${reservation.result.reason}${reservation.result.run.contract ? `\n${renderText(reservation.result.run.contract)}` : ""}` };
+          if (reservation.result.type === "Block") return { block: true, reason: renderDenial(reservation.result, "empirica spawn denied") };
           if (reservation.result.type === "Fault") {
             if (reservation.result.code === "invalid_request") throw new Error(`Empirica reserve_spawn request bug: ${reservation.result.message ?? "invalid request"}`);
             if (reservation.result.fail_direction !== "open") return { block: true, reason: `empirica spawn gate unavailable (failing closed): ${reservation.result.message ?? "core fault"}` };
           }
           if (isAuditorSpawn(event.input)) {
+            const reservationId = (reservation.result as { run?: { spawn?: { reservation_id?: string } } }).run?.spawn?.reservation_id;
+            pendingReservationId = reservationId;
             const model = actorModel(event.input);
-            const ticket = await dispatch({ protocol: "empirica/v1", request_id: randomUUID(), command: { type: "ObserveAction", run_id: runHandle, action: { kind: "audit_ticket", actor: { model, harness: "pi", provider: "pi", source_type: "LLM_JUDGE", attribution: "declared" }, witnessed: false } } });
+            const action: { kind: string; [key: string]: unknown } = { kind: "audit_ticket", witnessed: false };
+            if (reservationId) action.reservation_id = reservationId;
+            if (model) action.actor = { model, harness: "pi", provider: "pi", source_type: "LLM_JUDGE", attribution: "declared" };
+            const ticket = await dispatch({ protocol: "empirica/v1", request_id: randomUUID(), command: { type: "ObserveAction", run_id: runHandle, action } });
             if (ticket.result.type === "Fault" && ticket.result.code === "invalid_request") throw new Error(`Empirica audit_ticket request bug: ${ticket.result.message ?? "invalid request"}`);
-            if (ticket.result.type === "Fault") return { block: true, reason: `empirica audit ticket unavailable: ${ticket.result.message ?? "core fault"}` };
-            if (ticket.result.type === "Block") return { block: true, reason: ticket.result.reason };
+            if (ticket.result.type === "Fault" || ticket.result.type === "Block") {
+              if (reservationId) await dispatch({ protocol: "empirica/v1", request_id: randomUUID(), command: { type: "ObserveAction", run_id: runHandle, action: { kind: "void_spawn", reservation_id: reservationId } } });
+              return { block: true, reason: renderDenial(ticket.result,
+                ticket.result.type === "Block" ? "empirica audit ticket denied" : "empirica audit ticket unavailable") };
+            }
             const nonce = (ticket.result as { run?: { ticket?: { nonce?: string } } }).run?.ticket?.nonce;
+            pendingNonce = nonce;
             if (nonce) {
               const argumentResponse = await dispatch({ protocol: "empirica/v1", request_id: randomUUID(), command: { type: "GetArgument", run_id: runHandle } });
               if (argumentResponse.result.type === "Fault" || argumentResponse.result.type === "Block") {
                 await dispatch({ protocol: "empirica/v1", request_id: randomUUID(), command: { type: "ObserveAction", run_id: runHandle, action: { kind: "void_spawn", nonce } } });
-                return { block: true, reason: "empirica audit argument unavailable" };
+                return { block: true, reason: renderDenial(argumentResponse.result, "empirica audit argument unavailable") };
               }
               const argument = (argumentResponse.result as { run?: { argument?: { text?: string } } }).run?.argument;
               const text = typeof event.input.task === "string" ? event.input.task : "";
@@ -344,11 +368,19 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
               // foreground. A detached run would return only an id here and the verdict would
               // surface as a notification the host cannot attribute to the ticket.
               event.input.async = false;
-              auditTickets.set(event.toolCallId, nonce);
+              const correlation = { runHandle, nonce };
+              auditTickets.set(event.toolCallId, correlation);
+              pi.appendEntry?.("empirica.ticket", { toolCallId: event.toolCallId, ...correlation });
               pi.sendMessage?.({ customType: "empirica", content: "Auditor spawned; verdict is recorded by the host" });
             }
           }
-        } catch (error) { return { block: true, reason: `empirica spawn gate unavailable (failing closed): ${describe(error)}` }; }
+        } catch (error) {
+          try {
+            if (pendingNonce) await dispatch({ protocol: "empirica/v1", request_id: randomUUID(), command: { type: "ObserveAction", run_id: runHandle, action: { kind: "void_spawn", nonce: pendingNonce } } });
+            else if (pendingReservationId) await dispatch({ protocol: "empirica/v1", request_id: randomUUID(), command: { type: "ObserveAction", run_id: runHandle, action: { kind: "void_spawn", reservation_id: pendingReservationId } } });
+          } catch { /* original transport failure remains the denial reason */ }
+          return { block: true, reason: `empirica spawn gate unavailable (failing closed): ${describe(error)}` };
+        }
       }
       if (!gatedTools.has(event.toolName)) return;
       if (runHandle === null) return; // no run to gate against
@@ -358,10 +390,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         );
         const decision = gateFromDecision(response.result);
         if (decision.kind === "deny") {
-          if (decision.kind === "deny") {
-            const contract = decision.contract ? `\n${renderText(decision.contract)}` : "";
-            return { block: true, reason: `${decision.reason}${contract}${decision.contract ? `\nhandle: ${runHandle}` : ""}` };
-          }
+          return { block: true, reason: `${renderDenial(response.result, decision.reason)}${decision.contract ? `\nhandle: ${runHandle}` : ""}` };
         }
         return; // permit
       } catch (error) {
@@ -389,9 +418,17 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     let lastNudgeKey: string | null = null;
     let nudgeCount = 0;
     let pausedNoticeSent = false;
-    const maxNudges = Number.parseInt(process.env.EMPIRICA_PI_MAX_NUDGES ?? "3", 10) || 3;
+    let nudgeRunHandle: string | null = null;
+    const configuredNudges = process.env.EMPIRICA_PI_MAX_NUDGES;
+    const parsedNudges = configuredNudges === undefined ? 3 : Number(configuredNudges);
+    const maxNudges = Number.isInteger(parsedNudges) && parsedNudges >= 0 ? parsedNudges : 3;
+    if (configuredNudges !== undefined && (!Number.isInteger(parsedNudges) || parsedNudges < 0))
+      console.warn(`empirica: invalid EMPIRICA_PI_MAX_NUDGES=${configuredNudges}; using 3`);
     pi.on("agent_settled", async (event, _ctx: ExtensionContext) => {
-      if (runHandle === null || isEmptySettledTurn(event)) return;
+      if (runHandle === null || isEmptySettledTurn(event) || maxNudges === 0) return;
+      if (nudgeRunHandle !== runHandle) {
+        nudgeRunHandle = runHandle; lastNudgeKey = null; nudgeCount = 0; pausedNoticeSent = false;
+      }
       try {
         const response = await dispatch(
           evaluateRunRequest(runHandle, CONTINUE_INTENT, randomUUID()),
@@ -399,12 +436,17 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         const nudge = settledFollowUp(response.result);
         if (nudge !== null && typeof pi.sendUserMessage === "function") {
           const blocked = response.result as Extract<import("./contract.ts").Result, { type: "Block" }>;
-          const key = `${blocked.type}:${blocked.reason}:${blocked.run.revision}:${"converged" in blocked ? blocked.converged : false}`;
+          const digest = createHash("sha256").update(canonicalJson(blocked.run.contract ?? null)).digest("hex");
+          const key = `${runHandle}:${digest}:${JSON.stringify(blocked.run.contract?.verdict ?? {})}`;
           if (key === lastNudgeKey) return;
           lastNudgeKey = key;
           nudgeCount += 1;
           if (nudgeCount > maxNudges) {
-            if (!pausedNoticeSent) { pausedNoticeSent = true; pi.sendUserMessage("empirica: nudge loop paused after the maximum reminders. Resume by continuing the run or calling report_convergence.", { deliverAs: "followUp" }); }
+            if (!pausedNoticeSent) {
+              pausedNoticeSent = true;
+              const contract = blocked.run.contract ? `\n${renderText(blocked.run.contract)}` : "";
+              pi.sendUserMessage(`empirica: nudge loop paused after the maximum reminders. Resume by continuing the run or calling report_convergence.${contract}`, { deliverAs: "followUp" });
+            }
           } else pi.sendUserMessage(nudge, { deliverAs: "followUp" });
         }
       } catch {
@@ -430,15 +472,48 @@ function isExecutableSpawn(input: Record<string, unknown>): boolean {
 function isAuditorSpawn(input: Record<string, unknown>): boolean {
   return JSON.stringify(input).toLowerCase().includes("empirica-auditor");
 }
-function actorModel(input: Record<string, unknown>): string {
-  const model = input.model;
-  if (typeof model === "string" && model.trim()) return model.trim();
-  const agent = input.agent;
-  if (typeof agent === "string" && agent.trim()) return agent.trim();
-  if (agent && typeof agent === "object" && typeof (agent as Record<string, unknown>).model === "string") return String((agent as Record<string, unknown>).model);
+function stripProvider(model: string): string {
+  const trimmed = model.trim();
+  return trimmed.includes("/") ? trimmed.slice(trimmed.indexOf("/") + 1) : trimmed;
+}
+function actorModel(input: Record<string, unknown>): string | undefined {
+  const direct = input.model;
+  if (typeof direct === "string" && direct.trim()) return stripProvider(direct);
+  const embedded = input.agent;
+  if (embedded && typeof embedded === "object" && typeof (embedded as Record<string, unknown>).model === "string")
+    return stripProvider(String((embedded as Record<string, unknown>).model));
   const definition = input.agentDefinition;
-  if (definition && typeof definition === "object" && typeof (definition as Record<string, unknown>).model === "string") return String((definition as Record<string, unknown>).model);
-  return "empirica-auditor";
+  if (definition && typeof definition === "object" && typeof (definition as Record<string, unknown>).model === "string")
+    return stripProvider(String((definition as Record<string, unknown>).model));
+  const name = typeof input.agent === "string" ? input.agent.trim() : "";
+  if (!name) return undefined;
+  const dotPi = "." + "pi";
+  // Honour Pi's config-dir override (docs/environment-variables.md) before the default ~/.pi/agent.
+  const agentDir = process.env.PI_CODING_AGENT_DIR;
+  const piHome = agentDir ? path.dirname(agentDir) : path.join(homedir(), dotPi);
+  const piProject = path.join(process.cwd(), dotPi);
+  for (const file of [agentDir ? path.join(agentDir, "agents", `${name}.md`) : path.join(piHome, "agent", "agents", `${name}.md`),
+                      path.join(piProject, "agents", `${name}.md`)]) {
+    try {
+      const frontmatter = readFileSync(file, "utf8").match(/^---\s*\n([\s\S]*?)\n---/);
+      const model = frontmatter?.[1].match(/^model:\s*["']?([^\s"']+)/m)?.[1];
+      if (model) return stripProvider(model);
+    } catch { /* unresolved actor is explicitly unverified */ }
+  }
+  return undefined;
+}
+// pi-subagents' own launch-validation messages: the child never ran, so the reservation is refunded.
+// The first alternative is the exact text observed live when `agent` was combined with
+// `workflowScript` (doc/design/reports/dogfood-pi.md, P-8). Anything else that errors is treated
+// as a child that ran and failed — budget stays spent.
+function isLaunchRejection(text: string): boolean {
+  return /cannot be combined with workflowScript|exactly one of agent|cannot combine agent|invalid (?:agent|workflow)|unknown agent|agent .* (?:not found|is disabled|not executable)|workflowScript.*agent/i.test(text);
+}
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.entries(value as Record<string, unknown>)
+    .sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
+  return JSON.stringify(value) ?? "null";
 }
 function isEmptySettledTurn(event: unknown): boolean {
   if (!event || typeof event !== "object") return false;

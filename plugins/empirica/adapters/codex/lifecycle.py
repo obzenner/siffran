@@ -307,7 +307,7 @@ def _pre_tool_use(payload: dict) -> dict | None:
         response = _dispatch(payload, request) if request is not None else None
         result = response.get("result", {}) if isinstance(response, dict) else {}
         if result.get("type") == "Block":
-            return _deny(str(result.get("reason") or "empirica spawn denied"))
+            return _deny(_render_contract(result, str(result.get("reason") or "empirica spawn denied")))
         if (reason := _closed_fault_reason(result)) is not None:
             return _deny(reason)
         if _is_auditor_spawn(payload):
@@ -341,7 +341,7 @@ def _pre_tool_use(payload: dict) -> dict | None:
     )
     reserved = _dispatch(payload, reserve).get("result", {})
     if reserved.get("type") == "Block":
-        return _deny(str(reserved.get("reason") or "empirica CLI dispatch denied"))
+        return _deny(_render_contract(reserved, str(reserved.get("reason") or "empirica CLI dispatch denied")))
     if (reason := _closed_fault_reason(reserved)) is not None:
         return _deny(reason)
 

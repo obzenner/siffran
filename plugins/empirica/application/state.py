@@ -78,6 +78,8 @@ class OperationalState:
     # --- spawn budget (ADR-17) ---
     max_spawns: int | None = None
     spawns: int = 0
+    reservation_seq: int = 0
+    reservations: tuple[dict, ...] = ()
     # --- scope freeze (ADR-26): the claims already gating at freeze time ---
     frozen_claims: tuple[str, ...] | None = None
     freeze_seq: int | None = None
@@ -189,6 +191,8 @@ class OperationalState:
             "phase": self.phase,
             "max_spawns": self.max_spawns,
             "spawns": self.spawns,
+            "reservation_seq": self.reservation_seq,
+            "reservations": [dict(r) for r in self.reservations],
             "frozen_claims": (list(self.frozen_claims)
                               if self.frozen_claims is not None else None),
             "freeze_seq": self.freeze_seq,
@@ -261,6 +265,8 @@ class OperationalState:
             phase=phase if phase in PHASES else DEFAULT_PHASE,
             max_spawns=_opt_int(value.get("max_spawns")),
             spawns=_nonneg_int(value.get("spawns")),
+            reservation_seq=_nonneg_int(value.get("reservation_seq")),
+            reservations=_decode_reservations(value.get("reservations")),
             frozen_claims=frozen_claims,
             freeze_seq=_opt_int(value.get("freeze_seq")),
             route_seq=_opt_int(value.get("route_seq")),
@@ -341,8 +347,19 @@ def _decode_tickets(value: object) -> tuple[dict, ...]:
             ticket["issued_at"] = t.get("issued_at")
         if isinstance(t.get("actor"), dict):
             ticket["actor"] = t["actor"]
+        if isinstance(t.get("reservation_id"), str):
+            ticket["reservation_id"] = t["reservation_id"]
         out.append(ticket)
     return tuple(out)
+
+
+def _decode_reservations(value: object) -> tuple[dict, ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple({"id": item["id"], "state": item.get("state", "reserved")}
+                 for item in value if isinstance(item, dict)
+                 and isinstance(item.get("id"), str)
+                 and item.get("state", "reserved") in {"reserved", "void"})
 
 
 def _decode_dispatches(value: object) -> tuple[dict, ...]:

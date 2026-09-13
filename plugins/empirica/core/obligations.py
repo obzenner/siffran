@@ -95,7 +95,7 @@ def contract_for_graph(contract_id: str, revision: int, graph: dict, theta: floa
         if status == claims.STATE_DISCARDED:
             continue
         hold = hold_reason = None
-        if claim_id in frozen:
+        if frozen_claims is not None and claim_id not in frozen:
             hold, hold_reason = "deferred", "claim is outside frozen scope"
         elif status == claims.STATE_BLOCKED:
             hold, hold_reason = "blocked", str(node.get("blocked") or "claim requires external action")

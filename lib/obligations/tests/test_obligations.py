@@ -22,6 +22,7 @@ from obligations import (  # noqa: E402
     project,
     render_text,
     revise,
+    same_contract,
     to_json,
     verify,
 )
@@ -106,7 +107,8 @@ class Fixtures(unittest.TestCase):
 
     def _execute(self, fixture):
         if "before" in fixture:
-            actual = preserved(fixture["before"], fixture["after"])
+            compare = same_contract if fixture.get("comparison") == "same_contract" else preserved
+            actual = compare(fixture["before"], fixture["after"])
             self.assertEqual(fixture["expect"], actual.to_json())
             return
         if "operation" in fixture:

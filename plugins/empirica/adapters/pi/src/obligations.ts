@@ -40,3 +40,21 @@ export function preserved(before: ContractView, after: ContractView): Preservati
   }
   return { ok: reasons.length === 0, reasons };
 }
+export function sameContract(before: ContractView, after: ContractView): Preservation {
+  const reasons = [...preserved(before, after).reasons];
+  if (before.contract_id !== after.contract_id) reasons.push("contract_id changed");
+  if (after.revision < before.revision) reasons.push("revision went backwards");
+  const laterRetired = new Map(after.retired.map(r => [r.obligation.id, JSON.stringify(r)]));
+  for (const retirement of before.retired) {
+    if (laterRetired.get(retirement.obligation.id) !== JSON.stringify(retirement))
+      reasons.push(`${retirement.obligation.id}: prior retirement was dropped or changed`);
+  }
+  const live = new Map(after.obligations.map(o => [o.id, o]));
+  const retired = new Set(after.retired.map(r => r.obligation.id));
+  for (const old of before.obligations) if (old.hold && !retired.has(old.id)) {
+    const next = live.get(old.id);
+    if (next && (next.hold !== old.hold || next.hold_reason !== old.hold_reason))
+      reasons.push(`${old.id}: hold was silently changed or dropped`);
+  }
+  return { ok: reasons.length === 0, reasons };
+}

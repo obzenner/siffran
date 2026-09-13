@@ -60,23 +60,46 @@ help: ## Show this help (generated from target descriptions)
 
 ## --- Verify
 
-.PHONY: check
-check: lint test validate contract-check obligations-check vendor-check activation-check methodologist-codex-check empirica-codex-check pi-bundle-check methodologist-pi-check empirica-pi-check adr-check ## Run every check (what CI and pre-commit should run)
+# `check` is composed of subject-matter suites so a contributor can run the one that matters for
+# their change and CI can pick what its runners support. Each suite is self-contained and prints
+# its own banner; `check` is simply all of them, `check-ci` is all of them minus the Pi suite
+# (CI runners do not carry Node/Pi — set PI_CHECKS=1 there to opt in). Measured locally: static ~3s,
+# core ~2s, claude ~30s, codex ~30s, pi ~30s.
+.PHONY: check check-ci check-static check-core check-claude check-codex check-pi
+check: check-static check-core check-claude check-codex check-pi ## Run every suite (local pre-commit gate)
 	@printf '\n$(BOLD)All checks passed.$(RESET)\n'
 
-.PHONY: test
-test: ## Run the plugin test suites
-	@printf '$(BOLD)==> tests$(RESET)\n'
-	@$(PYTHON) $(EMPIRICA_ACTIVATION_TESTS)
+check-ci: check-static check-core check-claude check-codex ## Every suite except Pi (add PI_CHECKS=1 to include it)
+	@if [ "$(PI_CHECKS)" = "1" ]; then $(MAKE) check-pi; else printf '$(DIM)Pi suite skipped in CI (PI_CHECKS=1 to include)$(RESET)\n'; fi
+	@printf '\n$(BOLD)CI checks passed.$(RESET)\n'
+
+check-static: lint validate docs-check adr-check contract-check obligations-check vendor-check activation-check ## Lint, manifests, generated docs, ADR health, API/obligation contracts, vendor copy, activation isolation
+	@printf '$(BOLD)==> static suite ok$(RESET)\n'
+
+check-core: ## Host-neutral core: obligations lib, Empirica core/application/state/git store, Methodologist core
+	@printf '$(BOLD)==> core suite$(RESET)\n'
+	@$(PYTHON) lib/obligations/tests/test_obligations.py
 	@$(PYTHON) $(EMPIRICA_CORE_TESTS)
 	@$(PYTHON) $(EMPIRICA_APP_TESTS)
 	@$(PYTHON) $(EMPIRICA_STATE_TESTS)
 	@$(PYTHON) $(EMPIRICA_GIT_ADAPTER_TESTS)
-	@$(PYTHON) $(EMPIRICA_CLAUDE_ADAPTER_TESTS)
-	@$(PYTHON) $(EMPIRICA_CODEX_ADAPTER_TESTS)
 	@$(PYTHON) $(METHODOLOGIST_CORE_TESTS)
+
+check-claude: ## Claude Code host: activation lifecycle + Claude adapter tests
+	@printf '$(BOLD)==> claude suite$(RESET)\n'
+	@$(PYTHON) $(EMPIRICA_ACTIVATION_TESTS)
+	@$(PYTHON) $(EMPIRICA_CLAUDE_ADAPTER_TESTS)
+
+check-codex: methodologist-codex-check empirica-codex-check ## Codex host: adapter tests + package/hook validation for both plugins
+	@printf '$(BOLD)==> codex suite$(RESET)\n'
+	@$(PYTHON) $(EMPIRICA_CODEX_ADAPTER_TESTS)
 	@$(PYTHON) $(METHODOLOGIST_CODEX_TESTS)
-	@$(PYTHON) lib/obligations/tests/test_obligations.py
+
+check-pi: pi-bundle-check methodologist-pi-check empirica-pi-check ## Pi host: bundle + both adapters (static, typecheck, tests, live bridge) — needs Node
+	@printf '$(BOLD)==> pi suite ok$(RESET)\n'
+
+.PHONY: test
+test: check-core check-claude check-codex ## Run every test suite (core + claude + codex; Pi tests live in check-pi)
 
 .PHONY: lint
 lint: ## Lint Python hooks, tests, and scripts (ruff, if installed)
@@ -277,7 +300,7 @@ docs-check: ## Verify the generated plugin tables match the manifests
 	@$(PYTHON) $(SCRIPTS)/check_generated_docs.py
 
 .PHONY: release-check
-release-check: check docs-check ## Pre-release gate: all checks plus generated docs in sync
+release-check: check ## Pre-release gate: every suite (docs-check is part of check-static)
 	@printf '\n$(BOLD)Ready to release.$(RESET) Remaining steps are yours:\n'
 	@printf '  1. confirm the version bump is in plugin.json (make status)\n'
 	@printf '  2. commit and push\n'

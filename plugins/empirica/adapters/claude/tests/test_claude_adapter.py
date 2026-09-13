@@ -109,6 +109,7 @@ class HostObservedAuditTests(unittest.TestCase):
         self.assertEqual(request["command"]["type"], "StartRun")
         self.assertEqual(request["command"]["goal"], FALLBACK_GOAL)
         self.assertNotIn("modes", request["command"])
+        self.assertNotIn("actor", request["command"])
         self.assertTrue(request["command"]["selector"]["project"])
         self.assertTrue(request["command"]["selector"]["session"])
 
@@ -126,10 +127,13 @@ class HostObservedAuditTests(unittest.TestCase):
                 "command_args": "design something",
                 "command_source": "plugin",
                 "prompt": "/empirica:empirica ignored fallback",
+                "model": "claude-sonnet-4-5",
             }
             transport = RecordingTransport()
             dispatch_start_run(payload, transport=transport, correlation_id="captured", environ={})
         self.assertEqual(transport.requests[0]["command"]["goal"], "design something")
+        self.assertEqual(transport.requests[0]["command"]["actor"]["model"],
+                         "claude-sonnet-4-5")
 
     def test_prompt_fallback_flags_and_max_passes_match_current_variants(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -823,7 +827,7 @@ class ClaudeAuditLifecycleTests(unittest.TestCase):
         nonce = "child-only-nonce"
         responses = iter([
             {"result": {"type": "Allow", "run": {"id": "run-1"}}},  # ResolveRun
-            {"result": {"type": "Allow", "run": {"id": "run-1"}}},  # reserve
+            {"result": {"type": "Allow", "run": {"spawn": {"reservation_id": "reservation-2"}}}},  # reserve
             {"result": {"type": "Allow", "run": {"ticket": {"nonce": nonce}}}},
             {"result": {"type": "Allow", "run": {"argument": {"text": "DOSSIER claim_digest=abc"}}}},
         ])
@@ -838,6 +842,8 @@ class ClaudeAuditLifecycleTests(unittest.TestCase):
         self.assertIn("DOSSIER claim_digest=abc", prompt)
         self.assertIn("empirica-verdict", prompt)
         self.assertIn(nonce, prompt)
+        self.assertEqual(transport.requests[2]["command"]["action"]["reservation_id"],
+                         "reservation-2")
         self.assertEqual(transport.requests[2]["command"]["action"]["actor"], {
             "model": "claude-opus-4-8", "harness": "claude-code", "provider": "anthropic",
             "source_type": "LLM_JUDGE", "attribution": "declared",
@@ -849,14 +855,18 @@ class ClaudeAuditLifecycleTests(unittest.TestCase):
         block_transport = RecordingTransport()
         block_transport.dispatch = lambda request: (block_transport.requests.append(request) or next(iter([])))
         block_responses = iter([
-            {"result": {"type": "Allow", "run": {"id": "run-1"}}}, {"result": {"type": "Allow"}},
+            {"result": {"type": "Allow", "run": {"id": "run-1"}}},
+            {"result": {"type": "Allow", "run": {"spawn": {"reservation_id": "reservation-1"}}}},
             {"result": {"type": "Block", "reason": "same actor", "run": {"contract": contract}}},
+            {"result": {"type": "Allow", "run": {"id": "run-1"}}},
         ])
         block_transport.dispatch = lambda request: (block_transport.requests.append(request) or next(block_responses))
         code, out, err = self._run(spawn_main, self._payload({"agent": "empirica-auditor"}), block_transport)
         self.assertEqual((code, out), (2, ""))
         self.assertIn("same actor", err)
         self.assertIn("Contract", err)
+        self.assertEqual(block_transport.requests[-1]["command"]["action"],
+                         {"kind": "void_spawn", "reservation_id": "reservation-1"})
 
         responses = iter([
             {"result": {"type": "Allow", "run": {"id": "run-1"}}}, {"result": {"type": "Allow"}},

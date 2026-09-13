@@ -232,6 +232,7 @@ def drive_to_converged(svc, **start_kw):
     canon = knowledge.canonicalize_graph(raw)
     observe(svc, h, {"kind": "graph", "graph": raw})
     observe(svc, h, approve_evidence())
+    observe(svc, h, {"kind": "reserve_spawn"})
     nonce = result(observe(svc, h, {"kind": "audit_ticket"}))["run"]["ticket"]["nonce"]
     observe(svc, h, passing_verdict(canon, nonce=nonce))
     return h, canon
@@ -245,6 +246,7 @@ def drive_to_budget_stop(svc, h):
     which is exactly why the pre-fix ``evaluate; evaluate`` no longer reaches the cap."""
     observe(svc, h, {"kind": "graph", "graph": single_goal_graph(confidence=0.0)})
     evaluate(svc, h, intent="stop")            # progress: first stop -> pass 1 of 2
+    observe(svc, h, {"kind": "reserve_spawn"})
     observe(svc, h, {"kind": "audit_ticket"})  # knowledge progress -> the next stop counts a pass
     return evaluate(svc, h, intent="stop")     # progress -> pass 2 == cap -> stopped_budget
 
@@ -460,8 +462,9 @@ def test_audit_verdict_must_cover_current_state():
     h = handle_of(start(svc))
     observe(svc, h, {"kind": "graph", "graph": single_goal_graph()})
     observe(svc, h, approve_evidence())
-    observe(svc, h, {"kind": "audit_ticket", "nonce": "n1"})
-    observe(svc, h, {"kind": "audit_verdict", "verdict": "pass", "nonce": "n1",
+    observe(svc, h, {"kind": "reserve_spawn"})
+    issued = result(observe(svc, h, {"kind": "audit_ticket"}))["run"]["ticket"]["nonce"]
+    observe(svc, h, {"kind": "audit_verdict", "verdict": "pass", "nonce": issued,
                      "argument_digest": "deadbeef", "claims_reviewed": [], "findings": []})
     r = result(evaluate(svc, h))
     check("E7 a verdict that does not cover the current argument blocks",
@@ -490,6 +493,7 @@ def test_cap_converts_block_to_stopped_budget():
     r_idle = result(evaluate(svc, h, intent="stop"))
     check("C1b an identical (no-progress) stop stays a Block and burns no pass",
           r_idle["type"] == "Block" and runs.raw_value(key)["passes"] == 1, f"got {r_idle}")
+    observe(svc, h, {"kind": "reserve_spawn"})
     observe(svc, h, {"kind": "audit_ticket"})  # knowledge progress -> the next stop counts a pass
     r2 = result(evaluate(svc, h, intent="stop"))  # progress -> pass 2 == cap -> stopped_budget
     check("C2 reaching the working pass cap turns the block into a non-converged stopped_budget Allow",
@@ -619,15 +623,15 @@ def test_late_audit_verdict_admissible_on_terminal_run():
     late = {"kind": "audit_verdict", "verdict": "pass", "nonce": nonce,
             "argument_digest": C.argument_digest(canon), "claims_reviewed": [], "findings": []}
     r = result(observe(svc, h, late))
-    check("D6 a late verdict with a matching issued nonce is admitted (appended + readable), not faulted",
-          r["type"] != "Fault" and len(arts.ids(key)) == len(ids_before) + 1,
-          f"got {r} ids={arts.ids(key)}")
+    check("D6 a consumed ticket rejects a late replay without appending",
+          r["type"] == "Block" and "replay" in r["reason"]
+          and arts.ids(key) == ids_before, f"got {r} ids={arts.ids(key)}")
     check("D7 admitting a late verdict leaves the terminal status unchanged",
           runs.raw_value(key)["status"] == "converged", f"got {runs.raw_value(key)['status']}")
     bad = dict(late, nonce="deadbeefdeadbeef")
     r2 = result(observe(svc, h, bad))
-    check("D8 a late verdict with no matching issued ticket still faults closed (conflict)",
-          r2["type"] == "Fault" and r2["code"] == "conflict", f"got {r2}")
+    check("D8 a late verdict with no matching issued ticket Blocks",
+          r2["type"] == "Block" and "no issued ticket" in r2["reason"], f"got {r2}")
 
 
 # --- clock-free termination + fixed ceiling (the corrective patch) -----------
@@ -765,6 +769,7 @@ def test_frozen_run_defers_post_freeze_claims():
     canon = knowledge.canonicalize_graph(raw)
     observe(svc, h, {"kind": "graph", "graph": raw})
     observe(svc, h, approve_evidence("G0"))
+    observe(svc, h, {"kind": "reserve_spawn"})
     nonce = result(observe(svc, h, {"kind": "audit_ticket"}))["run"]["ticket"]["nonce"]
     observe(svc, h, passing_verdict(canon, "G0", nonce=nonce))
     # Freeze committed only G0.
@@ -867,11 +872,12 @@ def test_reserve_spawn_unbounded_does_not_count():
     svc, runs, _ = make_service()
     h = handle_of(start(svc))  # no max_spawns -> unbounded
     r = result(observe(svc, h, {"kind": "reserve_spawn"}))
-    check("B3 an unbounded budget reserves without counting",
+    check("B3 an unbounded budget reserves an id without counting",
           r["type"] == "Allow" and r["run"]["spawn"]["remaining"] is None
-          and r["run"]["spawn"]["spawns"] == 0, f"got {r}")
-    check("B3b the run's revision did not advance (no write for an unbounded reserve)",
-          runs.raw_value(RunKey("proj", "sess", 1))["revision"] == 0)
+          and r["run"]["spawn"]["spawns"] == 0
+          and r["run"]["spawn"]["reservation_id"] == "reservation-1", f"got {r}")
+    check("B3b unbounded reservation persists its exact identity",
+          runs.raw_value(RunKey("proj", "sess", 1))["revision"] == 1)
 
 
 def test_configure_budget_sets_cap():
@@ -1151,20 +1157,25 @@ def test_dispatch_rejects_policy_excluded_model():
 # --- audit ticket issue / consume (ADR-20 P6, ADR-31) ------------------------
 
 
-def test_audit_ticket_issue_mints_deterministic_nonce():
-    from application.service import _mint_nonce
-    svc, _, _ = make_service()
+def test_audit_ticket_issue_mints_unpredictable_persisted_nonce():
+    import re
+    svc, runs, _ = make_service()
     h = handle_of(start(svc))
+    observe(svc, h, {"kind": "reserve_spawn"})
     r = result(observe(svc, h, {"kind": "audit_ticket"}))
     tk = r["run"]["ticket"]
-    check("A1 issuing a ticket mints the derived per-spawn nonce",
-          tk["seq"] == 1 and tk["nonce"] == _mint_nonce(RunKey("proj", "sess", 1), 1), f"got {tk}")
+    stored = runs.raw_value(RunKey("proj", "sess", 1))["audit_tickets"][0]
+    check("A1 issuing a ticket mints and persists a 128-bit random nonce",
+          tk["seq"] == 1 and re.fullmatch(r"[0-9a-f]{32}", tk["nonce"])
+          and stored["nonce"] == tk["nonce"], f"got {tk}")
 
 
 def test_audit_ticket_issue_increments_seq():
     svc, _, _ = make_service()
     h = handle_of(start(svc))
+    observe(svc, h, {"kind": "reserve_spawn"})
     n1 = result(observe(svc, h, {"kind": "audit_ticket"}))["run"]["ticket"]
+    observe(svc, h, {"kind": "reserve_spawn"})
     n2 = result(observe(svc, h, {"kind": "audit_ticket"}))["run"]["ticket"]
     check("A2 a second issue gets a distinct nonce at the next ordinal",
           n2["seq"] == 2 and n2["nonce"] != n1["nonce"], f"got {n1} {n2}")
@@ -1173,6 +1184,7 @@ def test_audit_ticket_issue_increments_seq():
 def test_audit_ticket_consume_is_idempotent():
     svc, runs, _ = make_service()
     h = handle_of(start(svc))
+    observe(svc, h, {"kind": "reserve_spawn"})
     nonce = result(observe(svc, h, {"kind": "audit_ticket"}))["run"]["ticket"]["nonce"]
     observe(svc, h, {"kind": "consume_audit_ticket", "nonce": nonce})
     tickets = runs.raw_value(RunKey("proj", "sess", 1))["audit_tickets"]
@@ -1327,7 +1339,7 @@ def test_obligations_survive_block_restore_adapters_and_terminal_handoff():
     import json
     from adapters.claude.completion import stop_result
     from adapters.claude.restore import restore_context
-    from vendor.obligations import canonical, parse, preserved, render_text
+    from vendor.obligations import canonical, parse, preserved, render_text, same_contract
 
     svc, _, artifacts = make_service(default_max_passes=2)
     h = handle_of(start(svc, max_passes=2))
@@ -1350,6 +1362,7 @@ def test_obligations_survive_block_restore_adapters_and_terminal_handoff():
     check("OB4 Claude compact embed parses to the canonical contract",
           canonical(parse(embedded)) == canonical(parse(contract)) and preserved(before, embedded).ok,
           f"got {embedded}")
+    observe(svc, h, {"kind": "reserve_spawn"})
     observe(svc, h, {"kind": "audit_ticket"})
     terminal = result(evaluate(svc, h, intent="stop"))
     handoff = terminal["run"].get("contract")
@@ -1362,6 +1375,10 @@ def test_obligations_survive_block_restore_adapters_and_terminal_handoff():
           and canonical(parse(stored_contract)) == canonical(parse(before))
           and preserved(before, handoff).ok and preserved(before, stored_contract).ok,
           f"got {terminal}")
+    restored_terminal = result(restore(svc, h))["run"]["contract"]
+    comparison = same_contract(handoff, restored_terminal)
+    check("OB5b adjacent terminal handoff to RestoreRun is the same contract",
+          comparison.ok, str(comparison.reasons))
 
 
 def test_restore_corrupt_faults_closed():
@@ -1437,6 +1454,7 @@ def test_malformed_verdict_blocks_not_crashes():
     raw = single_goal_graph()
     observe(svc, h, {"kind": "graph", "graph": raw})
     observe(svc, h, approve_evidence())
+    observe(svc, h, {"kind": "reserve_spawn"})
     nonce = result(observe(svc, h, {"kind": "audit_ticket"}))["run"]["ticket"]["nonce"]
     # Inject a structurally broken verdict artifact directly into the knowledge store.
     from application.service import knowledge_artifact
@@ -1521,18 +1539,18 @@ class _OneShotConflict:
 def test_audit_ticket_issue_race_distinct_nonces():
     """Two concurrent issues both compute seq=1; a lost CAS must re-read (len=1) and re-mint seq=2,
     so no two live tickets ever share a nonce or ordinal."""
-    from application.service import _mint_nonce
     runs = FakeRunRepository()
     arts = FakeArtifactRepository()
 
     def winner(doc):
         seq = len(doc.get("audit_tickets", [])) + 1
         doc.setdefault("audit_tickets", []).append(
-            {"nonce": _mint_nonce(RunKey("proj", "sess", 1), seq), "seq": seq, "consumed": False})
+            {"nonce": "0" * 32, "seq": seq, "consumed": False})
 
     wrapped = _OneShotConflict(runs, winner)
     svc = EmpiricaService(wrapped, arts, FakeGenerationAllocator(runs))
     h = handle_of(start(svc))
+    observe(svc, h, {"kind": "reserve_spawn"})
     tk = result(observe(svc, h, {"kind": "audit_ticket"}))["run"]["ticket"]
     stored = runs.raw_value(RunKey("proj", "sess", 1))["audit_tickets"]
     nonces = {t["nonce"] for t in stored}
@@ -1636,9 +1654,12 @@ def test_b5_persists_revisions_and_projects_complete_live_set():
           contract2.revision == 2 and contract2.parent_revision == 1
           and contract2.supersedes == (f"{contract1.contract_id}@1",), f"got {contract2}")
     frozen = result(observe(svc, h, {"kind": "freeze", "claims": ["G0"]}))["run"]["contract"]
-    check("B5-T3 freeze creates deferred holds and m5 does not cap/filter the wire set",
-          len(frozen["obligations"]) == 13 and any(o.get("hold") == "deferred" for o in frozen["obligations"])
-          and any(o.get("hold") == "blocked" for o in frozen["obligations"]), f"got {frozen}")
+    held_claims = {o["because"][0] for o in frozen["obligations"] if o.get("hold") == "deferred"}
+    unheld_claims = {o["because"][0] for o in frozen["obligations"] if o.get("hold") is None}
+    check("B5-T3 freeze holds exactly the claims outside the committed scope",
+          len(frozen["obligations"]) == 13
+          and held_claims == {f"C{i}" for i in range(1, 13)}
+          and unheld_claims == {"G0"}, f"got {frozen}")
     check("B5-T6 every projected obligation carries graph claim text",
           all(o["must"] == second["nodes"][o["because"][0]]["text"] for o in frozen["obligations"]),
           f"got {frozen}")
@@ -1652,12 +1673,26 @@ def test_b5_persists_revisions_and_projects_complete_live_set():
     refuted["nodes"]["C1"]["blocked"] = "needs-decision"
     refuted["nodes"]["C2"]["refuted_by"] = evidence_id
     after = result(observe(svc, h, {"kind": "graph", "graph": refuted}))["run"]["contract"]
-    retirement = next(r for r in after["retired"] if r["obligation"]["because"] == ["C2"])
+    retirement = next(r for r in reversed(after["retired"])
+                      if r["obligation"]["because"] == ["C2"])
     check("B5-T2 refutation retains evidence-attributed retirement and preservation",
           evidence_id in retirement["reason"] and retirement["authority"] == evidence_id
           and preserved(before, after).ok, f"got {retirement}")
     check("B5-T4 unchanged claims preserve across consecutive revisions",
           canonical(parse(before))["obligations"] != () and preserved(before, after).ok)
+
+def test_freeze_empty_committed_scope_defers_every_gating_claim():
+    svc, _, _ = make_service()
+    h = handle_of(start(svc))
+    graph = growing_gating_graph(3)
+    observe(svc, h, {"kind": "graph", "graph": graph})
+    view = result(observe(svc, h, {"kind": "freeze", "claims": []}))["run"]["contract"]
+    held = {item["because"][0] for item in view["obligations"]
+            if item.get("hold") == "deferred"}
+    unheld = {item["because"][0] for item in view["obligations"] if item.get("hold") is None}
+    check("B5-T3b empty committed scope defers exactly every gating claim",
+          held == {"G0", "C1", "C2"} and unheld == set(), str(view))
+
 
 def dogfood_research_leaf(claim_id="G0"):
     """Minimal adapter-shaped Fold-1 leaf for the live-contract regressions."""
@@ -1676,6 +1711,25 @@ def dogfood_spike_leaf(claim_id="G0"):
                           "predicate": {"gate": "pass"}},
             "verdicts": {"approve": {"ok": True, "reason": "spike recorded"},
                          "refute": {"ok": False, "reason": "not a refutation"}}}
+
+
+def test_audit_obligation_retires_with_authority_when_approval_shape_changes():
+    from vendor.obligations import preserved
+    svc, _, _ = make_service()
+    h = handle_of(start(svc))
+    approved = single_goal_graph(confidence=0.9)
+    observe(svc, h, {"kind": "graph", "graph": approved})
+    observe(svc, h, approve_evidence())
+    before = result(get(svc, h))["run"]["contract"]
+    audit_id = next(item["id"] for item in before["obligations"]
+                    if item["id"].startswith("empirica/audit/"))
+    lowered = single_goal_graph(confidence=0.1)
+    after_response = result(observe(svc, h, {"kind": "graph", "graph": lowered}))
+    after = after_response["run"]["contract"]
+    retirement = next(item for item in after["retired"] if item["obligation"]["id"] == audit_id)
+    check("P8 all-approved to confidence-lowered explicitly retires audit with graph authority",
+          preserved(before, after).ok and retirement["authority"]
+          and retirement["reason"] == "graph write", f"before={before} after={after}")
 
 
 def test_dogfood_goal_and_modes_are_on_every_run_view():
@@ -1708,9 +1762,11 @@ def test_dogfood_confidence_update_preserves_satisfied_obligations_and_refutatio
     after = result(observe(svc, h, {"kind": "graph", "graph": updated}))["run"]["contract"]
     live_before = [o for o in before["obligations"] if o["id"] == "empirica/G0"]
     live_after = [o for o in after["obligations"] if o["id"] == "empirica/G0"]
-    check("P2 confidence-only graph write preserves the original live obligation revision",
-          after["revision"] == before["revision"] and [o["id"] for o in live_after]
-          == [o["id"] for o in live_before] and not after["retired"], f"got {after}")
+    check("P2 confidence-only graph write preserves the claim and durably adds audit lifecycle",
+          after["revision"] == before["revision"] + 1 and [o["id"] for o in live_after]
+          == [o["id"] for o in live_before] and not after["retired"]
+          and len([o for o in after["obligations"] if o["id"].startswith("empirica/audit/")]) == 1,
+          f"got {after}")
     check("P2 observed witnesses leave the preserved obligation satisfied",
           all(o["status"] == "satisfied" for o in live_after) and preserved(before, after).ok,
           f"got {after}")
@@ -1722,9 +1778,9 @@ def test_dogfood_confidence_update_preserves_satisfied_obligations_and_refutatio
     refuted = single_goal_graph(confidence=0.9, refuted_by=evidence_id)
     refuted["nodes"]["G0"]["kind"] = "needs-experiment"
     retired = result(observe(svc, h, {"kind": "graph", "graph": refuted}))["run"]["contract"]
-    check("P2 a real refutation explicitly retires its obligation",
-          not retired["obligations"] and len(retired["retired"]) == 1
-          and evidence_id in retired["retired"][0]["reason"], f"got {retired}")
+    check("P2 a real refutation explicitly retires claim and audit obligations",
+          not retired["obligations"] and len(retired["retired"]) == 2
+          and all(evidence_id in item["reason"] for item in retired["retired"]), f"got {retired}")
 
 
 def test_dogfood_audit_obligation_is_visible_and_dischargeable_on_all_views():
@@ -1748,6 +1804,7 @@ def test_dogfood_audit_obligation_is_visible_and_dischargeable_on_all_views():
         check(f"P7 {label} exposes exactly the residual audit obligation",
               [o["id"] for o in residual] == [expected] and residual[0]["because"] == ["G0"],
               f"got {contract}")
+    observe(svc, h, {"kind": "reserve_spawn"})
     nonce = result(observe(svc, h, {"kind": "audit_ticket"}))["run"]["ticket"]["nonce"]
     stored = knowledge.Knowledge.from_artifacts(artifacts.read(RunKey("proj", "sess", 1)).value)
     digest_of = knowledge.build_digest_of(canon, knowledge.approving_evidence_ids(stored.evidence),
@@ -1773,6 +1830,7 @@ def test_audit_dossier_round_trip_and_staleness_and_voiding():
     observe(svc, h, {"kind": "graph", "graph": raw})
     observe(svc, h, approve_evidence())
     dossier = result(svc.handle(req({"type": "GetArgument", "run_id": h})))["run"]["argument"]
+    observe(svc, h, {"kind": "reserve_spawn"})
     ticket = result(observe(svc, h, {"kind": "audit_ticket"}))["run"]["ticket"]
     verdict = {"kind": "audit_verdict", "verdict": "pass", "nonce": ticket["nonce"],
                "argument_digest": dossier["argument_digest"],
@@ -1792,6 +1850,7 @@ def test_audit_dossier_round_trip_and_staleness_and_voiding():
     observe(svc, h, {"kind": "graph", "graph": raw})
     observe(svc, h, approve_evidence())
     d = result(svc.handle(req({"type": "GetArgument", "run_id": h})))["run"]["argument"]
+    observe(svc, h, {"kind": "reserve_spawn"})
     n = result(observe(svc, h, {"kind": "audit_ticket"}))["run"]["ticket"]["nonce"]
     v = {"kind": "audit_verdict", "verdict": "pass", "nonce": n, "argument_digest": d["argument_digest"],
          "claims_reviewed": [{"claim_id": c["id"], "claim_digest": c["claim_digest"], "evidence_digest": c["evidence_digest"]} for c in d["claims"]], "findings": []}
@@ -1824,14 +1883,115 @@ def test_audit_dossier_round_trip_and_staleness_and_voiding():
           snapshot["spawn"]["spawns"] == 0 and result(evaluate(svc, h))["type"] == "Block", str(snapshot))
 
 
+def test_leaf_digest_is_permutation_and_hashseed_stable_across_processes():
+    """Astra 6: every hashed leaf field participates in canonical ordering."""
+    import json
+    import os
+    import subprocess
+    import sys
+    text = "canonical claim"
+    digest = __import__("hashlib").sha256(text.encode()).hexdigest()
+    def leaf(kind, gate, result_hash):
+        return {"statement": {"subject": [{"name": "G0", "digest": {"sha256": digest}}],
+                "predicateType": "https://empirica.dev/attestation/research/v1",
+                "predicate": {"fold": "research", "kind": kind, "source": "same",
+                              "citation": "same", "result": "supports", "gate": gate,
+                              "hashes": {"result": result_hash}}}}
+    records = [leaf("runtime", "pass", "a"), leaf("documentation", "fail", "b")]
+    expected = knowledge._leaf_digest(records, "G0", text)
+    check("A15 leaf digest is invariant under input permutation",
+          expected == knowledge._leaf_digest(list(reversed(records)), "G0", text), expected)
+    code = ("import json,sys; from application.knowledge import _leaf_digest; "
+            "v=json.loads(sys.stdin.read()); print(_leaf_digest(v,'G0','canonical claim'))")
+    outputs = []
+    for seed, value in (("1", records), ("777", list(reversed(records)))):
+        env = dict(os.environ, PYTHONHASHSEED=seed,
+                   PYTHONPATH=str(PLUGIN))
+        outputs.append(subprocess.check_output([sys.executable, "-c", code],
+                                               input=json.dumps(value), text=True, env=env).strip())
+    check("A16 separate PYTHONHASHSEED processes produce identical full-leaf digests",
+          outputs == [expected, expected], str(outputs))
+
+
+def test_get_argument_uses_boolean_evidence_oracle_and_matches_restore_gating():
+    svc, _, _ = make_service()
+    h = handle_of(start(svc))
+    observe(svc, h, {"kind": "graph", "graph": single_goal_graph(confidence=0.9)})
+    dossier = result(svc.handle(req({"type": "GetArgument", "run_id": h})))["run"]["argument"]
+    restored = result(restore(svc, h))["run"]["snapshot"]["graph"]
+    check("A12 evidence-less confidence-0.9 claim is not approved in dossier",
+          len(dossier["claims"]) == 1 and dossier["claims"][0]["state"] != "approved",
+          str(dossier))
+    check("A13 GetArgument claim set equals RestoreRun gating set size",
+          len(dossier["claims"]) == restored["gating"], f"dossier={dossier} restore={restored}")
+
+    graph = single_goal_graph(confidence=0.9)
+    graph["nodes"]["G0"]["refuted_by"] = "unsupported-evidence-id"
+    observe(svc, h, {"kind": "graph", "graph": graph})
+    dossier = result(svc.handle(req({"type": "GetArgument", "run_id": h})))["run"]["argument"]
+    check("A14 unsupported refuted_by keeps the claim in the dossier",
+          [item["id"] for item in dossier["claims"]] == ["G0"], str(dossier))
+
+
+def test_nonce_redaction_one_shot_and_independence_reporting():
+    """Astra 1/4: only ticket issuance discloses the capability; reads redact it and replay Blocks."""
+    import json
+    svc, _, _ = make_service()
+    h = handle_of(start(svc, max_spawns=1, actor={"model": "author-model"}))
+    observe(svc, h, {"kind": "graph", "graph": single_goal_graph()})
+    observe(svc, h, approve_evidence())
+    reservation = result(observe(svc, h, {"kind": "reserve_spawn"}))["run"]["spawn"]
+    issued = result(observe(svc, h, {"kind": "audit_ticket",
+                                     "reservation_id": reservation["reservation_id"],
+                                     "actor": {"model": "auditor-model"}}))
+    nonce = issued["run"]["ticket"]["nonce"]
+    views = [result(get(svc, h)), result(restore(svc, h)),
+             result(svc.handle(req({"type": "GetArgument", "run_id": h}))),
+             result(observe(svc, h, {"kind": "reserve_spawn"}))]
+    check("A9 nonce is absent from every non-ticket read/Block view",
+          all(nonce not in json.dumps(view, sort_keys=True) for view in views), str(views))
+    check("A10 concrete distinct author/auditor models report decorrelated independence",
+          all(view.get("run", {}).get("audit", {}).get("independence") == "decorrelated"
+              for view in views), str(views))
+    dossier = views[2]["run"]["argument"]
+    verdict = {"kind": "audit_verdict", "verdict": "pass", "nonce": nonce,
+               "argument_digest": dossier["argument_digest"], "claims_reviewed": [
+                   {"claim_id": c["id"], "claim_digest": c["claim_digest"],
+                    "evidence_digest": c["evidence_digest"]} for c in dossier["claims"]],
+               "findings": []}
+    first = result(observe(svc, h, verdict))
+    replay = result(observe(svc, h, verdict))
+    check("A11 a consumed ticket is one-shot and replay Blocks by name",
+          first["type"] == "Allow" and replay["type"] == "Block"
+          and "replay" in replay["reason"], f"first={first} replay={replay}")
+
+
+def test_reservation_binding_prevents_double_void_from_refunding_another_spawn():
+    svc, _, _ = make_service()
+    h = handle_of(start(svc, max_spawns=2))
+    first = result(observe(svc, h, {"kind": "reserve_spawn"}))["run"]["spawn"]
+    result(observe(svc, h, {"kind": "reserve_spawn"}))
+    ticket = result(observe(svc, h, {"kind": "audit_ticket",
+                                     "reservation_id": first["reservation_id"]}))["run"]["ticket"]
+    released = result(observe(svc, h, {"kind": "void_spawn", "nonce": ticket["nonce"]}))
+    duplicate = result(observe(svc, h, {"kind": "void_spawn", "nonce": ticket["nonce"]}))
+    after_duplicate = result(restore(svc, h))["run"]["snapshot"]["spawn"]
+    check("A6b reserve twice and void the same ticket twice leaves exactly one spent spawn",
+          released["run"]["spawn"]["spawns"] == 1 and duplicate["type"] == "Block"
+          and after_duplicate["spawns"] == 1, f"released={released} duplicate={duplicate}")
+
+
 def test_audit_ticket_actor_decorrelation_and_unknown_author():
     svc, _, _ = make_service()
     h = handle_of(start(svc, actor={"model": "author-model-1"}))
     same = result(observe(svc, h, {"kind": "audit_ticket", "actor": {"model": "author-model-1"}}))
+    observe(svc, h, {"kind": "reserve_spawn"})
     unknown = result(observe(svc, h, {"kind": "audit_ticket"}))
+    observe(svc, h, {"kind": "reserve_spawn"})
     tier = result(observe(svc, h, {"kind": "audit_ticket", "actor": {"model": "capable"}}))
     check("A7 audit_ticket blocks same concrete author model and permits unknown or tier auditor",
-          same["type"] == "Block" and unknown["type"] == "Allow" and tier["type"] == "Allow",
+          same["type"] == "Block" and same["run"]["audit"]["independence"] == "same_model"
+          and unknown["type"] == "Allow" and tier["type"] == "Allow",
           f"same={same}, unknown={unknown}, tier={tier}")
     unrecorded = result(start(svc, project="other", session="unknown-author", actor={"harness": "host"}))
     check("A8 StartRun without actor model records no author and does not fail",
@@ -1844,7 +2004,12 @@ def test_dogfood_every_block_and_allow_carries_run_contract():
     svc, _, _ = make_service()
     handle = handle_of(start(svc, max_spawns=1))
     graph = {"root": "G0", "nodes": {"G0": {"type": "Goal", "text": "root", "confidence": 0.0}}, "edges": []}
-    observe(svc, handle, {"kind": "graph", "graph": graph})
+    graph_written = result(observe(svc, handle, {"kind": "graph", "graph": graph}))["run"]["contract"]
+    from vendor.obligations import same_contract
+    read_after_write = result(get(svc, handle))["run"]["contract"]
+    check("B1 adjacent graph write to GetRun is the same contract",
+          same_contract(graph_written, read_after_write).ok,
+          str(same_contract(graph_written, read_after_write).reasons))
     first = result(observe(svc, handle, {"kind": "reserve_spawn"}))
     check("B1 a reserve_spawn Allow carries run.contract",
           first["type"] == "Allow" and "contract" in first["run"], str(first)[:200])

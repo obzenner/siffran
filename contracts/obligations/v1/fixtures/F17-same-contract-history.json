@@ -1,0 +1,30 @@
+{
+  "name": "F17-same-contract-history",
+  "comparison": "same_contract",
+  "before": {
+    "contract_id": "fixture",
+    "revision": 2,
+    "parent_revision": 1,
+    "obligations": [],
+    "provenance": ["fixture", "refutation"],
+    "supersedes": ["fixture@1"],
+    "retired": [{
+      "obligation": {"id": "O1", "mode": "require", "must": "effect", "witnesses": [], "because": []},
+      "reason": "obsolete",
+      "authority": "human",
+      "at_revision": 2
+    }]
+  },
+  "after": {
+    "contract_id": "fixture",
+    "revision": 1,
+    "obligations": [],
+    "provenance": ["fixture"],
+    "supersedes": [],
+    "retired": []
+  },
+  "expect": {
+    "ok": false,
+    "reasons": ["revision went backwards", "O1: prior retirement was dropped or changed"]
+  }
+}

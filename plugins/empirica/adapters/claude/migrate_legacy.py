@@ -253,8 +253,17 @@ def migrate(run_dir: Path, repo: Path, *, session_id: str | None = None) -> dict
     state, _, _ = _existing_graph(service, handle)
     nonce = state.audit_tickets[0]["nonce"] if state and state.audit_tickets else None
     if nonce is None and (legacy_tickets or isinstance(verdict, dict)):
-        ticket_response = transport.dispatch(build_audit_ticket_request(
-            handle, actor, correlation_id="legacy-migrate-ticket"))
+        reserve_response = transport.dispatch({
+            "protocol": "empirica/v1", "request_id": "legacy-migrate-reserve",
+            "command": {"type": "ObserveAction", "run_id": handle,
+                        "action": {"kind": "reserve_spawn"}},
+        })
+        reserve_run = reserve_response.get("result", {}).get("run", {})
+        reservation_id = reserve_run.get("spawn", {}).get("reservation_id")
+        request = build_audit_ticket_request(handle, actor, correlation_id="legacy-migrate-ticket")
+        if reservation_id:
+            request["command"]["action"]["reservation_id"] = reservation_id
+        ticket_response = transport.dispatch(request)
         if ticket_response["result"].get("type") != "Allow":
             raise RuntimeError(f"ticket import failed: {ticket_response['result']}")
         nonce = ticket_response["result"]["run"]["ticket"]["nonce"]

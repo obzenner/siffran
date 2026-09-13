@@ -27,7 +27,13 @@ test("P-5 real Pi bridge preserves the model-visible contract lifecycle", { skip
   const bridge = createStdioBridgeDispatch({ command: py, args: [join(process.cwd(), "bridge.py")], cwd,
     env: { ...process.env, EMPIRICA_HOME: home, EMPIRICA_MAX_IDLE_STOPS: "10" }, timeoutMs: 10_000 });
   const requests: any[] = [];
-  const dispatch = async (request: any) => { requests.push(request); return bridge(request); };
+  let startedHandle: string | undefined;
+  const dispatch = async (request: any) => {
+    requests.push(request);
+    const response = await bridge(request) as any;
+    if (request.command.type === "StartRun") startedHandle = response.result?.run?.id;
+    return response;
+  };
   const pi = new FakePi();
   createEmpiricaExtension({ dispatch, deriveSelector: () => ({ project: "p5", session: "live" }), startRunOptions: { maxSpawns: 1 } })(pi);
   const ctx = { ui: new FakeUi(), cwd };
@@ -36,7 +42,8 @@ test("P-5 real Pi bridge preserves the model-visible contract lifecycle", { skip
   assert.match(pi.modelMessages[0].content, /Goal: retry the bridge/);
   assert.match(pi.modelMessages[0].content, /multi_provider/);
   assert.match(pi.modelMessages[0].content, /no contract yet/);
-  const handle = (await bridge(requests[0]) as any).result.run.id;
+  const handle = startedHandle!;
+  assert.ok(handle, "StartRun response supplied the opaque handle");
   // The extension's opaque handle is the authoritative one (and is intentionally not inferred).
   const status = await pi.tools.get("empirica_status")!.execute("s", {}, new AbortController().signal, () => {}, ctx);
   assert.match(status.content[0].text, /retry the bridge/);

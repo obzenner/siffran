@@ -75,6 +75,12 @@ def build_start_run_request(
         "selector": selector_from_payload(payload),
         "goal": goal,
     }
+    model = payload.get("model")
+    # Claude hook payloads document the active model as top-level `model` when the event supplies
+    # it.  Older events omit it; absence remains unverified rather than inventing an identity.
+    if isinstance(model, str) and model.strip():
+        command["actor"] = {"model": model.strip(), "harness": "claude-code",
+                            "provider": "anthropic", "source_type": "LLM_JUDGE"}
     if modes:
         command["modes"] = modes
     max_passes = _max_passes(os.environ if environ is None else environ)

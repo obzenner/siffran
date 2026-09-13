@@ -19,12 +19,14 @@ Why this is a rule and not a preference: a command that lives only in a chat mes
 | ad-hoc Codex installation/invocation tests | `make methodologist-codex-smoke` |
 | `adrs --ng doctor` | `make adr-check` |
 | **everything, before you commit** | **`make check`** |
+| only the suite you touched | `make check-static` / `check-core` / `check-claude` / `check-codex` / `check-pi` |
+| what CI runs (no Node/Pi on the runner) | `make check-ci` (`PI_CHECKS=1` to include the Pi suite) |
 | hand-editing a `version` field | `make bump PLUGIN=<name> PART=minor` |
 | guessing whether the doc tables are current | `make docs-check` |
 
 Rules that follow from this:
 
-- **`make check` must be green before you commit.** It runs lint, tests, manifest validation, and ADR health. If you changed anything under `plugins/`, run it.
+- **`make check` must be green before you commit.** It is the composition of five subject-matter suites — `check-static` (lint, manifests, docs, ADRs, contracts, vendor copy, activation), `check-core` (host-neutral lib/core/application), `check-claude`, `check-codex`, `check-pi` — so run the one suite that matters while iterating and the whole thing before committing. `check-ci` is everything except Pi, because CI runners carry no Node/Pi.
 - **Add new lifecycle operations as targets**, with a `## description` so they appear in `make help`. If you find yourself explaining a multi-step command in prose, that command belongs in the Makefile.
 - **No target commits, pushes, or rewrites history**, by design. `make release-check` verifies and then tells you what is left; publishing stays a human decision.
 - **Non-obvious exception:** the generated plugin tables in `CLAUDE.md`/`README.md` are rewritten by the `checkup` skill, which needs a Claude session. `make docs-check` can *detect* drift but not fix it; `make docs` tells you what to run.
@@ -82,7 +84,9 @@ All methodologies must be rooted in computer science, mathematics, or establishe
 ## Validation
 
 ```
-make check          # lint + tests + manifests + ADR health — run before every commit
+make check          # every suite — run before every commit
+make check-ci       # every suite except Pi (what CI runs); PI_CHECKS=1 opts the Pi suite in
+make check-<suite>  # static | core | claude | codex | pi — the one you are working in
 make validate       # manifests only
 /plugin validate .  # Claude Code's own manifest check, complementary to make validate
 ```

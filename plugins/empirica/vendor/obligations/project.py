@@ -122,6 +122,37 @@ def preserved(before_view: Mapping[str, Any], after_view: Mapping[str, Any]) -> 
     return Preservation(not reasons, tuple(reasons))
 
 
+def same_contract(before_view: Mapping[str, Any], after_view: Mapping[str, Any]) -> Preservation:
+    """Check identity and append-only history in addition to non-weakening.
+
+    Use this at adjacent application boundaries where the value is claimed to be the same durable
+    contract, rather than merely a compatible successor.
+    """
+    before = parse(before_view)
+    after = parse(after_view)
+    reasons = list(preserved(before_view, after_view).reasons)
+    if before.contract_id != after.contract_id:
+        reasons.append("contract_id changed")
+    if after.revision < before.revision:
+        reasons.append("revision went backwards")
+    prior_retired = {item.obligation.id: item.to_json() for item in before.retired}
+    later_retired = {item.obligation.id: item.to_json() for item in after.retired}
+    for ident, retirement in prior_retired.items():
+        if later_retired.get(ident) != retirement:
+            reasons.append(f"{ident}: prior retirement was dropped or changed")
+    before_holds = {item.id: (item.hold, item.hold_reason) for item in before.obligations
+                    if item.hold is not None}
+    after_live = {item.id: item for item in after.obligations}
+    after_retired_ids = {item.obligation.id for item in after.retired}
+    for ident, hold in before_holds.items():
+        if ident in after_retired_ids:
+            continue
+        item = after_live.get(ident)
+        if item is not None and (item.hold, item.hold_reason) != hold:
+            reasons.append(f"{ident}: hold was silently changed or dropped")
+    return Preservation(not reasons, tuple(reasons))
+
+
 def _ids(values: list[str]) -> str:
     return ", ".join(values) if values else "-"
 

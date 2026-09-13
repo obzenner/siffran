@@ -32,6 +32,7 @@ Layers, so the check is meaningful whether or not tooling exists:
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -179,8 +180,11 @@ def find_tsc() -> str | None:
 def run_typecheck(adapter: Path) -> int:
     tsc = find_tsc()
     if tsc is None:
-        print("note: tsc not found — typecheck skipped (run `npm install` to enable)")
-        return 0
+        if os.environ.get("EMPIRICA_ALLOW_SKIP") == "1":
+            print("note: tsc not found — typecheck explicitly skipped (EMPIRICA_ALLOW_SKIP=1)")
+            return 0
+        print("error: tsc not found (install dependencies or set EMPIRICA_ALLOW_SKIP=1)")
+        return 1
     tsconfig = adapter / "tsconfig.json"
     print(f"typechecking {rel(tsconfig)} via tsc --noEmit")
     # cwd=ROOT so the tsconfig's `types: ["node"]` resolves @types/node from the
@@ -195,8 +199,11 @@ def run_typecheck(adapter: Path) -> int:
 def run_tests(adapter: Path) -> int:
     node = shutil.which("node")
     if node is None:
-        print("note: node not found — static/package validation only (tests skipped)")
-        return 0
+        if os.environ.get("EMPIRICA_ALLOW_SKIP") == "1":
+            print("note: node not found — tests explicitly skipped (EMPIRICA_ALLOW_SKIP=1)")
+            return 0
+        print("error: node not found (install Node or set EMPIRICA_ALLOW_SKIP=1)")
+        return 1
     tests = sorted(str(p) for p in (adapter / "test").glob("*.test.ts"))
     if not tests:
         return 0

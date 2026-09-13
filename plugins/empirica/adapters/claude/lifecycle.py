@@ -137,10 +137,16 @@ def _fault_is_our_invalid_request(response: object, operation: str) -> bool:
     return False
 
 
-def _void_spawn(transport: BridgeTransport, handle: str, nonce: str) -> None:
+def _void_spawn(transport: BridgeTransport, handle: str, nonce: str | None = None,
+                reservation_id: str | None = None) -> None:
+    action = {"kind": "void_spawn"}
+    if nonce is not None:
+        action["nonce"] = nonce
+    if reservation_id is not None:
+        action["reservation_id"] = reservation_id
     transport.dispatch({"protocol": "empirica/v1", "request_id": "claude-void-spawn",
                         "command": {"type": "ObserveAction", "run_id": handle,
-                                    "action": {"kind": "void_spawn", "nonce": nonce}}})
+                                    "action": action}})
 
 
 def spawn_main() -> int:
@@ -164,19 +170,30 @@ def spawn_main() -> int:
         if not _is_auditor(tool_input):
             return 0
         transport = BridgeTransport(context_from_payload(payload).cwd)
+        reserve_result = response.get("result") if isinstance(response, Mapping) else None
+        reserve_run = reserve_result.get("run") if isinstance(reserve_result, Mapping) else None
+        reserve_view = reserve_run.get("spawn") if isinstance(reserve_run, Mapping) else None
+        reservation_id = reserve_view.get("reservation_id") if isinstance(reserve_view, Mapping) else None
         actor = {"model": _auditor_model(tool_input), "harness": "claude-code",
                  "provider": "anthropic", "source_type": "LLM_JUDGE", "attribution": "declared"}
         ticket = transport.dispatch({"protocol": "empirica/v1", "request_id": "claude-audit-ticket",
                                      "command": {"type": "ObserveAction", "run_id": handle,
                                                  "action": {"kind": "audit_ticket", "actor": actor,
+                                                            "reservation_id": reservation_id,
                                                             "witnessed": False}}})
         if _fault_is_our_invalid_request(ticket, "audit_ticket"):
+            if isinstance(reservation_id, str):
+                _void_spawn(transport, handle, reservation_id=reservation_id)
             return 2
         ticket_result = ticket.get("result") if isinstance(ticket, Mapping) else None
         if isinstance(ticket_result, Mapping) and ticket_result.get("type") == "Block":
+            if isinstance(reservation_id, str):
+                _void_spawn(transport, handle, reservation_id=reservation_id)
             return _deny(str(ticket_result.get("reason") or "empirica audit ticket denied"), ticket_result)
         if not isinstance(ticket_result, Mapping) or ticket_result.get("type") == "Fault":
-            return _deny(str(ticket_result.get("message") if isinstance(ticket_result, Mapping) else "empirica audit ticket unavailable"))
+            if isinstance(reservation_id, str):
+                _void_spawn(transport, handle, reservation_id=reservation_id)
+            return _deny(str(ticket_result.get("message") if isinstance(ticket_result, Mapping) else "empirica audit ticket unavailable"), ticket_result if isinstance(ticket_result, Mapping) else None)
         run = ticket_result.get("run")
         ticket_view = run.get("ticket") if isinstance(run, Mapping) else None
         nonce = ticket_view.get("nonce") if isinstance(ticket_view, Mapping) else None
@@ -186,14 +203,14 @@ def spawn_main() -> int:
                                                 "command": {"type": "GetArgument", "run_id": handle}})
         if _fault_is_our_invalid_request(argument_response, "GetArgument"):
             _void_spawn(transport, handle, nonce)
-            return _deny("empirica audit argument unavailable")
+            return _deny("empirica audit argument unavailable", argument_response.get("result") if isinstance(argument_response, Mapping) else None)
         argument_result = argument_response.get("result") if isinstance(argument_response, Mapping) else None
         argument_run = argument_result.get("run") if isinstance(argument_result, Mapping) else None
         argument = argument_run.get("argument") if isinstance(argument_run, Mapping) else None
         text = argument.get("text") if isinstance(argument, Mapping) else None
         if not isinstance(argument_result, Mapping) or argument_result.get("type") in {"Fault", "Block"} or not isinstance(text, str):
             _void_spawn(transport, handle, nonce)
-            return _deny("empirica audit argument unavailable")
+            return _deny("empirica audit argument unavailable", argument_result if isinstance(argument_result, Mapping) else None)
         updated = dict(tool_input)
         existing = updated.get("prompt")
         updated["prompt"] = ((str(existing) + "\n\n") if isinstance(existing, str) and existing else "") + child_prompt(text, nonce)
@@ -292,8 +309,8 @@ def dispatch_main() -> int:
         reserved = dispatch_reserve_spawn({**payload, "tool_name": "Agent"}, handle)
         decision = spawn_decision(reserved)
         if decision.exit_code:
-            print(decision.reason or "empirica CLI dispatch denied", file=sys.stderr)
-            return decision.exit_code
+            return _deny(decision.reason or "empirica CLI dispatch denied",
+                         reserved.get("result") if isinstance(reserved, Mapping) else None)
         model = _model_from_command(command or "")
         if model:
             BridgeTransport(context.cwd).dispatch({

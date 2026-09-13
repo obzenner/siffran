@@ -410,13 +410,17 @@ def _leaf_digest(records: list[dict], claim_id: str, claim_text: str) -> str:
                       "result": predicate.get("result"), "gate": predicate.get("gate"),
                       "command_hash": predicate.get("command_hash"),
                       "files_hash": hashes.get("files"), "result_hash": hashes.get("result")})
-    bound.sort(key=lambda lf: (lf["fold"], lf.get("result") or "", lf.get("source") or "",
-                               lf.get("citation") or "", lf.get("command_hash") or "",
-                               lf.get("files_hash") or ""))
+    # Sort by the complete canonical representation that is hashed.  Partial-key sorting left
+    # ties dependent on set iteration / PYTHONHASHSEED across separate bridge processes.
+    fields = ("fold", "kind", "source", "citation", "result", "gate",
+              "command_hash", "files_hash", "result_hash")
+    def canonical(leaf):
+        return tuple("\0" if leaf.get(field) is None else str(leaf.get(field))
+                     for field in fields)
+    bound.sort(key=canonical)
     h = hashlib.sha256()
     for leaf in bound:
-        for field in ("fold", "kind", "source", "citation", "result", "gate",
-                      "command_hash", "files_hash", "result_hash"):
+        for field in fields:
             value = leaf.get(field)
             h.update(b"\0" if value is None else str(value).encode("utf-8"))
             h.update(b"\0")
