@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -17,6 +16,7 @@ ENTRYPOINTS = {
     "dispatch_gate.py": "dispatch_main",
     "convergence_gate.py": "completion_main",
     "state_restore.py": "restore_main",
+    "subagent_stop.py": "subagent_stop_main",
 }
 FORBIDDEN = re.compile(r"(?:^|[/'\"`])\.(?:claude|pi)(?:/|[\"'`])")
 
@@ -43,8 +43,8 @@ def main() -> int:
     quarantine = ROOT / "quarantine"
     if quarantine.exists():
         fail(f"retired duplicate authority still exists: {quarantine}")
-    # Codex has its own command-string hook schema and one thin multiplexer. Claude's
-    # hooks.json remains byte-for-byte frozen so adding that adapter cannot change this one.
+    # Codex has its own command-string hook schema and one thin multiplexer. Claude hooks are
+    # constrained below to registered thin entrypoints.
     allowed_hooks = {"hooks.json", "codex.json", "codex_hook.py", *ENTRYPOINTS}
     extra_hooks = sorted(path.name for path in HOOKS.iterdir()
                          if path.is_file() and path.name not in allowed_hooks)
@@ -68,14 +68,17 @@ def main() -> int:
             fail(f"{path} bypasses the Claude lifecycle adapter")
 
     hooks = json.loads((HOOKS / "hooks.json").read_text(encoding="utf-8"))
-    expected = subprocess.run(
-        ["git", "show", "HEAD:plugins/empirica/hooks/hooks.json"],
-        check=True, capture_output=True, text=True,
-    ).stdout
-    if (HOOKS / "hooks.json").read_text(encoding="utf-8") != expected:
-        fail("hooks.json changed from HEAD")
-    if set(hooks["hooks"]) != {"UserPromptExpansion", "PreToolUse", "Stop", "SessionStart"}:
+    # Validate the invariant (only registered thin entrypoints), rather than freezing hook config.
+    if set(hooks["hooks"]) != {"UserPromptExpansion", "PreToolUse", "Stop", "SubagentStop", "SessionStart"}:
         fail("hooks.json lifecycle events changed")
+    for groups in hooks["hooks"].values():
+        for group in groups:
+            for hook in group.get("hooks", []):
+                parts = [hook.get("command"), *hook.get("args", [])]
+                names = [match.group(1) for part in parts if isinstance(part, str)
+                         for match in [re.search(r"hooks/([^/]+\.py)", part)] if match]
+                if len(names) != 1 or names[0] not in ENTRYPOINTS:
+                    fail(f"hooks.json bypasses a registered thin entrypoint: {hook}")
 
     for path in [ROOT / "skills/empirica/SKILL.md", *sorted((ROOT / "agents").glob("*.md"))]:
         text = path.read_text(encoding="utf-8")
@@ -89,7 +92,7 @@ def main() -> int:
             if bad:
                 fail(f"instruction contains a non-prohibitive legacy path reference: {path}")
 
-    print(f"ok: {len(normal_runtime_files())} runtime files and six thin hooks enforce activation")
+    print(f"ok: {len(normal_runtime_files())} runtime files and {len(ENTRYPOINTS)} thin hooks enforce activation")
     return 0
 
 

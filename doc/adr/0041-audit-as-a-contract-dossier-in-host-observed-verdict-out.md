@@ -128,11 +128,13 @@ is what failed live.
 | Host | Inject dossier + nonce into the child | Host-observed verdict ingest | Status |
 |---|---|---|---|
 | Pi | `tool_call` rewrites `input.task`, forces `async=false` | `tool_result` of the ticketed call | **Complete**, proven live (`live-bridge.test.ts`) |
-| Claude Code | PreToolUse `updatedInput` (host supports it) | `SubagentStop` (host supports it) | **Helpers only**: `adapters/claude/audit.py` builds the child prompt and extracts the block, tested; `spawn_main` is not yet wired to `GetArgument`/`updatedInput`, and `hooks/hooks.json` declares `Stop` but no `SubagentStop`. Open work, not a host gap. |
+| Claude Code | PreToolUse `hookSpecificOutput.updatedInput` rewrites the Agent prompt | `SubagentStop.last_assistant_message` (with transcript fallback) | **Complete**: launch shape is validated before reservation; auditor ticket carries declared Claude actor attribution; `GetArgument` dossier and nonce are injected only into the child; `SubagentStop` host-records the parsed verdict. |
 | Codex 0.146.0 | no `updatedInput` in the documented PreToolUse output | `Stop` carries only the parent's `last_assistant_message` | **Blocked by the host API** (`adapters/codex/README.md`, "Auditor round-trip limitation"). Codex can reserve and ticket; it cannot inject or ingest. The audit obligation stays open there. |
 
-Until Claude is wired, the nonce on Claude Code still reaches the author's hook output as before;
-that is the pre-existing weakness this ADR names, now confined to one host and tracked as open.
+On Claude Code the nonce necessarily travels in the hook's `updatedInput` JSON on stdout — that is
+the host-native channel for mutating the child's request, read by Claude Code, not shown to the
+author model. No diagnostic line on either host prints it. Codex is the one host where the author's
+spawn still cannot be rewritten; there the audit obligation simply stays open.
 
 ### Consequences
 
@@ -166,7 +168,8 @@ that is the pre-existing weakness this ADR names, now confined to one host and t
 * `adapters/pi/test/audit.test.ts` — every interception and ingestion branch with a fake dispatch,
   asserting the exact request sequence, redaction across content shapes, and nonce absence.
 * `adapters/claude/tests/test_claude_adapter.py`, `adapters/codex/tests/test_codex_adapter.py` —
-  the shared prompt/extraction helpers, and the Codex payload gap pinned as a test rather than prose.
+  Claude pins launch-shape validation, declared ticket actor, native `updatedInput` injection, ticket voiding,
+  host-observed verdict ingestion, and JSONL transcript fallback; Codex pins its payload gap rather than prose.
 * `contracts/fixtures/empirica-get-argument.json`, `empirica-void-spawn.json` — generated from the
   real service, validated by `make contract-check`.
 * Live: the next `make pi-dev` run reaching the audit step is the acceptance test for this ADR; its

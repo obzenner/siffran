@@ -7,7 +7,9 @@
           {
             "type": "command",
             "command": "python3",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/run_start.py"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/run_start.py"
+            ],
             "timeout": 30
           }
         ]
@@ -20,7 +22,9 @@
           {
             "type": "command",
             "command": "python3",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/spawn_gate.py"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/spawn_gate.py"
+            ],
             "timeout": 30
           }
         ]
@@ -31,7 +35,9 @@
           {
             "type": "command",
             "command": "python3",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/route_stamp.py"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/route_stamp.py"
+            ],
             "timeout": 10
           }
         ]
@@ -42,7 +48,9 @@
           {
             "type": "command",
             "command": "python3",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/dispatch_gate.py"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/dispatch_gate.py"
+            ],
             "timeout": 30
           }
         ]
@@ -54,7 +62,9 @@
           {
             "type": "command",
             "command": "python3",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/convergence_gate.py"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/convergence_gate.py"
+            ],
             "timeout": 30
           }
         ]
@@ -67,7 +77,24 @@
           {
             "type": "command",
             "command": "python3",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/state_restore.py"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/state_restore.py"
+            ],
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "^empirica:empirica-auditor$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/subagent_stop.py"
+            ],
             "timeout": 30
           }
         ]

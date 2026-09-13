@@ -792,3 +792,108 @@ class DogfoodImprovementTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class ClaudeAuditLifecycleTests(unittest.TestCase):
+    """Claude-specific wire round trip: no ticket nonce may escape the child prompt."""
+
+    def _run(self, fn, payload, transport):
+        from adapters.claude import lifecycle
+        stdin, stdout, stderr = sys.stdin, sys.stdout, sys.stderr
+        try:
+            sys.stdin, sys.stdout, sys.stderr = __import__("io").StringIO(json.dumps(payload)), __import__("io").StringIO(), __import__("io").StringIO()
+            with patch.object(lifecycle, "BridgeTransport", return_value=transport):
+                code = fn()
+            return code, sys.stdout.getvalue(), sys.stderr.getvalue()
+        finally:
+            sys.stdin, sys.stdout, sys.stderr = stdin, stdout, stderr
+
+    def _payload(self, tool_input):
+        return {"session_id": "audit-session", "cwd": ".", "tool_name": "Agent", "tool_input": tool_input}
+
+    def test_spawn_shape_validation_does_not_reserve_management_or_ambiguous_calls(self):
+        from adapters.claude.lifecycle import spawn_main
+        transport = RecordingTransport()
+        for tool_input in ({"action": "list"}, {"agent": "x", "resume": "r"}, {}):
+            code, out, err = self._run(spawn_main, self._payload(tool_input), transport)
+            self.assertEqual((code, out, err), (0, "", ""))
+        self.assertEqual(transport.requests, [])
+
+    def test_auditor_ticket_actor_and_updated_input_keep_nonce_off_hook_streams(self):
+        from adapters.claude.lifecycle import spawn_main
+        nonce = "child-only-nonce"
+        responses = iter([
+            {"result": {"type": "Allow", "run": {"id": "run-1"}}},  # ResolveRun
+            {"result": {"type": "Allow", "run": {"id": "run-1"}}},  # reserve
+            {"result": {"type": "Allow", "run": {"ticket": {"nonce": nonce}}}},
+            {"result": {"type": "Allow", "run": {"argument": {"text": "DOSSIER claim_digest=abc"}}}},
+        ])
+        transport = RecordingTransport()
+        transport.dispatch = lambda request: (transport.requests.append(request) or next(responses))
+        code, out, err = self._run(spawn_main, self._payload({"subagent_type": "empirica:empirica-auditor", "prompt": "original"}), transport)
+        self.assertEqual(code, 0)
+        self.assertNotIn(nonce, err)
+        native = json.loads(out)  # The only stdout occurrence is Claude's private updatedInput.
+        prompt = native["hookSpecificOutput"]["updatedInput"]["prompt"]
+        self.assertIn("original", prompt)
+        self.assertIn("DOSSIER claim_digest=abc", prompt)
+        self.assertIn("empirica-verdict", prompt)
+        self.assertIn(nonce, prompt)
+        self.assertEqual(transport.requests[2]["command"]["action"]["actor"], {
+            "model": "claude-opus-4-8", "harness": "claude-code", "provider": "anthropic",
+            "source_type": "LLM_JUDGE", "attribution": "declared",
+        })
+
+    def test_ticket_block_denies_with_contract_and_get_argument_fault_voids_ticket(self):
+        from adapters.claude.lifecycle import spawn_main
+        contract = {"contract_id": "c", "revision": 1, "obligations": [], "provenance": [], "supersedes": [], "retired": [], "verdict": {"satisfied": [], "holds": [], "violated": [], "residual": [], "unwitnessed": [], "held": []}}
+        block_transport = RecordingTransport()
+        block_transport.dispatch = lambda request: (block_transport.requests.append(request) or next(iter([])))
+        block_responses = iter([
+            {"result": {"type": "Allow", "run": {"id": "run-1"}}}, {"result": {"type": "Allow"}},
+            {"result": {"type": "Block", "reason": "same actor", "run": {"contract": contract}}},
+        ])
+        block_transport.dispatch = lambda request: (block_transport.requests.append(request) or next(block_responses))
+        code, out, err = self._run(spawn_main, self._payload({"agent": "empirica-auditor"}), block_transport)
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("same actor", err)
+        self.assertIn("Contract", err)
+
+        responses = iter([
+            {"result": {"type": "Allow", "run": {"id": "run-1"}}}, {"result": {"type": "Allow"}},
+            {"result": {"type": "Allow", "run": {"ticket": {"nonce": "n-secret"}}}},
+            {"result": {"type": "Fault", "message": "argument failed"}}, {"result": {"type": "Allow"}},
+        ])
+        transport = RecordingTransport()
+        transport.dispatch = lambda request: (transport.requests.append(request) or next(responses))
+        code, out, err = self._run(spawn_main, self._payload({"agent": "empirica-auditor"}), transport)
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("argument unavailable", err)
+        self.assertNotIn("n-secret", err)
+        self.assertEqual(transport.requests[-1]["command"]["action"], {"kind": "void_spawn", "nonce": "n-secret"})
+
+    def test_subagent_stop_only_ingests_a_valid_final_verdict_and_transcript_fallback(self):
+        from adapters.claude.lifecycle import subagent_stop_main
+        verdict = {"verdict": "pass", "nonce": "child-nonce", "argument_digest": "a", "claims_reviewed": [], "findings": [], "ts": "2026-01-01T00:00:00Z"}
+        transport = RecordingTransport()
+        responses = iter([{"result": {"type": "Allow", "run": {"id": "run-1"}}}, {"result": {"type": "Allow", "run": {"contract": {}}}}])
+        transport.dispatch = lambda request: (transport.requests.append(request) or next(responses))
+        payload = {"session_id": "s", "cwd": ".", "agent_type": "empirica:empirica-auditor", "last_assistant_message": "```empirica-verdict\n" + json.dumps(verdict) + "\n```"}
+        code, out, err = self._run(subagent_stop_main, payload, transport)
+        self.assertEqual((code, out), (0, ""))
+        self.assertNotIn("child-nonce", err)
+        self.assertEqual(transport.requests[-1]["command"]["action"], {"kind": "audit_verdict", **verdict})
+
+        fixture = Path(__file__).with_name("fixtures") / "subagent-final.jsonl"
+        fallback_transport = RecordingTransport()
+        fallback_responses = iter([{"result": {"type": "Allow", "run": {"id": "run-1"}}}, {"result": {"type": "Allow", "run": {"contract": {}}}}])
+        fallback_transport.dispatch = lambda request: (fallback_transport.requests.append(request) or next(fallback_responses))
+        fallback = {"session_id": "s", "cwd": ".", "agent_type": "empirica:empirica-auditor", "agent_transcript_path": str(fixture)}
+        code, _, _ = self._run(subagent_stop_main, fallback, fallback_transport)
+        self.assertEqual(code, 0)
+        self.assertEqual(fallback_transport.requests[-1]["command"]["action"]["nonce"], "fixture-nonce")
+
+        no_block = RecordingTransport()
+        no_block.dispatch = lambda request: ({"result": {"type": "Allow", "run": {"id": "run-1"}}} if not no_block.requests else {"result": {"type": "Allow"}})
+        code, _, err = self._run(subagent_stop_main, {**payload, "last_assistant_message": "no verdict"}, no_block)
+        self.assertEqual(code, 0)
+        self.assertIn("remains open", err)
