@@ -38,15 +38,21 @@ export class FakeUi implements UiContext {
   }
 }
 
-export function fakeCtx(cwd = "/work/repo"): ExtensionContext {
-  return { ui: new FakeUi(), cwd };
+export function fakeCtx(cwd = "/work/repo", entries: Array<{ type?: string; customType?: string; data?: unknown }> = []): ExtensionContext {
+  return { ui: new FakeUi(), cwd, sessionManager: { getEntries: () => entries } };
 }
 
 /** Captures everything an extension registers against the ExtensionAPI. */
 export class FakePi implements ExtensionAPI {
   readonly commands = new Map<string, CommandDefinition>();
   readonly handlers = new Map<string, unknown>();
+  readonly tools = new Map<string, import("../src/pi-types.ts").ToolDefinition>();
   readonly sentMessages: SentMessage[] = [];
+  readonly modelMessages: Array<{ customType: string; content: string }> = [];
+  readonly entries: Array<{ customType: string; data?: unknown }> = [];
+  registerTool(def: import("../src/pi-types.ts").ToolDefinition): void { this.tools.set(def.name, def); }
+  appendEntry(customType: string, data?: unknown): void { this.entries.push({ customType, data }); }
+  sendMessage(message: { customType: string; content: string; display?: boolean }): void { this.modelMessages.push(message); }
 
   registerCommand(name: string, def: CommandDefinition): void {
     this.commands.set(name, def);

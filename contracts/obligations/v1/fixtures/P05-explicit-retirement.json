@@ -1,0 +1,71 @@
+{
+  "after": {
+    "contract_id": "fixture",
+    "obligations": [],
+    "parent_revision": 1,
+    "provenance": [
+      "evidence/E1",
+      "fixture",
+      "refuted by E1"
+    ],
+    "retired": [
+      {
+        "at_revision": 2,
+        "authority": "evidence/E1",
+        "obligation": {
+          "because": [
+            "G1"
+          ],
+          "id": "O1",
+          "mode": "require",
+          "must": "required effect occurs",
+          "witnesses": [
+            {
+              "description": "the witness has the expected outcome",
+              "expect": "pass",
+              "kind": "test",
+              "ref": "test/case"
+            }
+          ]
+        },
+        "reason": "refuted by E1"
+      }
+    ],
+    "revision": 2,
+    "supersedes": [
+      "fixture@1"
+    ]
+  },
+  "before": {
+    "contract_id": "fixture",
+    "obligations": [
+      {
+        "because": [
+          "G1"
+        ],
+        "id": "O1",
+        "mode": "require",
+        "must": "required effect occurs",
+        "witnesses": [
+          {
+            "description": "the witness has the expected outcome",
+            "expect": "pass",
+            "kind": "test",
+            "ref": "test/case"
+          }
+        ]
+      }
+    ],
+    "provenance": [
+      "fixture"
+    ],
+    "retired": [],
+    "revision": 1,
+    "supersedes": []
+  },
+  "expect": {
+    "ok": true,
+    "reasons": []
+  },
+  "name": "P05-explicit-retirement"
+}

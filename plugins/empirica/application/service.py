@@ -25,10 +25,14 @@ an orphan artifact (harmless, immutable) but never makes an orphan *current*.
 from __future__ import annotations
 
 import hashlib
+import secrets
+import json
 from typing import Protocol
 
 from core import Allow, Block, Fault, Inert, Present, RunKey, RunState, adjudicate, claims, budget
+from core import obligations as obligation_projection
 from core.records import ABSENT, Conflict, Corrupt
+from vendor.obligations import Contract, revise, project, render_text, verify
 
 from . import actors, knowledge, wire
 from .state import DEFAULT_MAX_PASSES, DEFAULT_THETA, MODES, PHASES, OperationalState
@@ -103,6 +107,8 @@ class EmpiricaService:
             return self._resolve_run(command)
         if ctype == wire.CMD_GET_RUN:
             return self._get_run(command)
+        if ctype == wire.CMD_GET_ARGUMENT:
+            return self._get_argument(command)
         if ctype == wire.CMD_RESTORE_RUN:
             return self._restore_run(command)
         if ctype == wire.CMD_OBSERVE_ACTION:
@@ -126,6 +132,13 @@ class EmpiricaService:
                                        or isinstance(max_spawns, bool) or max_spawns < 0):
             raise wire.InvalidRequest("max_spawns must be a non-negative integer or null")
         modes = command.get("modes") or {}
+        # The author's actor is optional bookkeeping (ADR-24): a record without a usable model
+        # degrades to "no author recorded" rather than refusing to start the run (actors.py). Only a
+        # non-object is a malformed request.
+        raw_actor = command.get("actor")
+        if raw_actor is not None and not isinstance(raw_actor, dict):
+            raise wire.InvalidRequest("actor must be an object")
+        author_actor = actors.normalise(raw_actor) if raw_actor is not None else None
 
         key = self._allocator.allocate(project, session)
         read = self._runs.read(key)
@@ -141,7 +154,7 @@ class EmpiricaService:
             return self._run_snapshot(key, state)
 
         state = OperationalState.new(goal=goal, max_passes=max_passes, max_spawns=max_spawns,
-                                     theta=self._theta, modes=modes)
+                                     theta=self._theta, modes=modes, author_actor=author_actor)
         try:
             self._runs.create(key, state.encode())
         except Conflict:
@@ -194,6 +207,87 @@ class EmpiricaService:
             return wire.fault(wire.FAULT_CORRUPT_RUN, "run document is unreadable")
         return self._run_snapshot(key, state)
 
+    # --- GetArgument ---------------------------------------------------------
+
+    def _get_argument(self, command: dict) -> dict:
+        """Return a host-neutral, nonce-free audit dossier for the current argument."""
+        key = wire.decode_handle(wire.require(command, "run_id", str))
+        read = self._runs.read(key)
+        if read is ABSENT:
+            return wire.inert("no_run")
+        if isinstance(read, Corrupt):
+            return wire.fault(wire.FAULT_CORRUPT_RUN, read.reason)
+        state = OperationalState.decode(read.value)
+        if state is None:
+            return wire.fault(wire.FAULT_CORRUPT_RUN, "run document is unreadable")
+        try:
+            graph, graph_fault = self._load_graph(key, state)
+        except knowledge.KnowledgeError as exc:
+            return wire.fault(wire.FAULT_CORRUPT_ARTIFACTS, str(exc))
+        if graph_fault is not None:
+            return graph_fault
+        if not isinstance(graph, dict):
+            return wire.allow(False, self._run_view(key, state, argument={
+                "argument_digest": None, "theta": state.theta, "frozen_claims": state.frozen_claims,
+                "claims": [], "tickets": self._public_tickets(state),
+                "text": self._render_dossier(state, None, [], None)}))
+        evidence = knowledge.build_evidence_oracle(self._knowledge.evidence, self._knowledge.evidence_leaves)
+        def evidence_ok(nid, purpose):
+            return evidence(nid, purpose)[0]
+        gating = sorted(claims.gating_goals(graph, state.theta, evidence_ok))
+        approving = knowledge.approving_evidence_ids(self._knowledge.evidence)
+        digest_of = knowledge.build_digest_of(graph, approving, self._knowledge.evidence_leaves)
+        rows = [self._argument_claim(graph, nid, state.theta, evidence_ok, digest_of(nid)) for nid in gating]
+        argument_digest = claims.argument_digest(graph)
+        return wire.allow(False, self._run_view(key, state, argument={
+            "argument_digest": argument_digest, "theta": state.theta,
+            "frozen_claims": list(state.frozen_claims) if state.frozen_claims is not None else None,
+            "claims": rows, "tickets": self._public_tickets(state),
+            "text": self._render_dossier(state, argument_digest, rows, self._contract_view(key, state))}))
+
+    def _public_tickets(self, state: OperationalState) -> list[dict]:
+        return [{k: t[k] for k in ("seq", "model", "harness", "issued_at", "consumed") if k in t}
+                for t in state.audit_tickets]
+
+    def _argument_claim(self, graph, nid, theta, evidence, digests):
+        node = graph["nodes"][nid]
+        leaves = []
+        for record in knowledge.active_evidence_leaves(self._knowledge.evidence_leaves):
+            statement = record.get("statement", {})
+            subject = statement.get("subject", []) if isinstance(statement, dict) else []
+            if not subject or not isinstance(subject[0], dict) or subject[0].get("name") != nid:
+                continue
+            predicate = statement.get("predicate", {})
+            if not isinstance(predicate, dict):
+                continue
+            fold = knowledge.evidence_fold(statement)
+            if fold not in ("research", "spike"):
+                continue
+            leaf = {"evidence_id": record.get("evidence_id"), "fold": fold,
+                    "kind": predicate.get("kind"), "citation": predicate.get("citation") or predicate.get("source"),
+                    "source": predicate.get("source"), "result": predicate.get("result"),
+                    "gate": predicate.get("gate"), "command": predicate.get("command")}
+            leaves.append(leaf)
+        leaves.sort(key=lambda e: str(e.get("evidence_id", "")))
+        return {"id": nid, "text": node["text"], "kind": node.get("kind"),
+                "state": claims.state_of(graph, nid, theta, evidence), "confidence": node["confidence"],
+                "parent": next((e["from"] for e in graph["edges"] if e["type"] == "SupportedBy" and e["to"] == nid), None),
+                **digests, "evidence": leaves}
+
+    def _render_dossier(self, state, argument_digest, rows, contract):
+        lines = [f"Goal: {state.goal}", f"Contract: {contract.get('contract_id') if contract else 'none'}",
+                 f"argument_digest: {argument_digest or 'none'}", f"theta: {state.theta}"]
+        for row in rows:
+            lines.append(f"{row['id']} [{row['state']}] {row['text']}  claim_digest={row['claim_digest']} evidence_digest={row['evidence_digest']}")
+            for leaf in row["evidence"]:
+                if leaf["fold"] == "research":
+                    lines.append(f"  - research: {leaf.get('citation') or leaf.get('source') or ''} → {leaf.get('result') or ''} ({leaf.get('evidence_id')})")
+                else:
+                    lines.append(f"  - spike: {leaf.get('command') or ''} → gate {leaf.get('gate') or ''} ({leaf.get('evidence_id')})")
+        if contract:
+            lines.extend(("", render_text(contract)))
+        return "\n".join(lines)
+
     # --- RestoreRun ----------------------------------------------------------
 
     def _restore_run(self, command: dict) -> dict:
@@ -222,7 +316,7 @@ class EmpiricaService:
             "spawn": self._spawn_view(state),
             "modes": dict(state.modes),
             "route": self._route_view(state),
-            "audit_tickets": [dict(t) for t in state.audit_tickets],
+            "audit_tickets": self._public_tickets(state),
             "dispatches": [dict(d) for d in state.dispatches],
             "has_graph": state.claim_graph_artifact_id is not None,
         }
@@ -238,8 +332,9 @@ class EmpiricaService:
                 return graph_view["__fault__"]
             if graph_view is not None:
                 snapshot["graph"] = graph_view
+        contract = self._contract_view(key, state)
         return wire.allow(state.status == wire.STATUS_CONVERGED,
-                          self._run_view(key, state, snapshot=snapshot))
+                          self._run_view(key, state, snapshot=snapshot, contract=contract))
 
     def _restore_graph_view(self, key: RunKey, state: OperationalState):
         """The gating/open/blocked/deferred counts for the run's current graph, or a fault wrapper on
@@ -300,9 +395,10 @@ class EmpiricaService:
             # no matching issued ticket still faults closed (an unattributable late write).
             if kind == knowledge.KIND_AUDIT_VERDICT:
                 payload = self._verdict_payload(action)
-                if any(t["nonce"] == payload["nonce"] for t in state.audit_tickets):
-                    return self._append_and_ack(
-                        key, state, knowledge.audit_verdict_artifact(payload))
+                rejected = self._reject_ticket_use(key, state, payload["nonce"])
+                if rejected is not None:
+                    return rejected
+                return self._record_audit_verdict(key, payload)
             return wire.fault(wire.FAULT_CONFLICT, f"run is {state.status}, not active")
 
         # --- knowledge-plane appends (immutable argument; revision unchanged) ---
@@ -329,11 +425,14 @@ class EmpiricaService:
                 raise wire.InvalidRequest("supersedes must be an artifact id or null")
             return self._append_and_ack(
                 key, state,
-                knowledge.evidence_leaf_artifact(evidence_id, statement, verdicts, supersedes))
+                knowledge.evidence_leaf_artifact(evidence_id, statement, verdicts, supersedes),
+                sync_contract=True)
         if kind == knowledge.KIND_AUDIT_VERDICT:
-            return self._append_and_ack(key, state,
-                                        knowledge.audit_verdict_artifact(
-                                            self._verdict_payload(action)))
+            payload = self._verdict_payload(action)
+            rejected = self._reject_ticket_use(key, state, payload["nonce"])
+            if rejected is not None:
+                return rejected
+            return self._record_audit_verdict(key, payload)
         if kind == knowledge.KIND_ATTRIBUTION:
             return self._append_and_ack(key, state,
                                         knowledge.attribution_artifact(
@@ -360,6 +459,8 @@ class EmpiricaService:
             return self._issue_audit_ticket(key, action)
         if kind == wire.KIND_CONSUME_AUDIT_TICKET:
             return self._consume_audit_ticket(key, action)
+        if kind == wire.KIND_VOID_SPAWN:
+            return self._void_spawn(key, action)
         return wire.fault(wire.FAULT_UNSUPPORTED, f"unsupported action kind: {kind}")
 
     def _observe_evidence(self, key: RunKey, state: OperationalState, action: dict) -> dict:
@@ -372,7 +473,8 @@ class EmpiricaService:
         if not isinstance(reason, str):
             raise wire.InvalidRequest("reason must be a string")
         return self._append_and_ack(
-            key, state, knowledge.evidence_artifact(claim_id, purpose, ok, reason))
+            key, state, knowledge.evidence_artifact(claim_id, purpose, ok, reason),
+            sync_contract=True)
 
     def _verdict_payload(self, action: dict) -> dict:
         """Extract the audit-verdict fields ``core.audit.coverage_check`` reads. Missing/mis-typed
@@ -394,13 +496,33 @@ class EmpiricaService:
         }
 
     def _append_and_ack(self, key: RunKey, state: OperationalState,
-                         artifact_pair: tuple[str, str]) -> dict:
+                         artifact_pair: tuple[str, str], *, sync_contract: bool = False) -> dict:
         """Append one immutable knowledge artifact and acknowledge with the (unchanged) run snapshot.
 
         Evidence and audit records do not touch the operational state — they are pure appends to the
         knowledge plane — so the run's revision is unchanged (ADR-31 append is unconditional)."""
         art_id, body = artifact_pair
         self._artifacts.append(key, knowledge_artifact(art_id, body))
+        # Evidence can make the complete argument audit-ready.  That synthetic requirement has a
+        # real append-only lifecycle: add it at the first all-approved observation and let later
+        # graph revisions explicitly retire/replace it.
+        if sync_contract and state.is_active:
+            read = self._runs.read(key)
+            current = OperationalState.decode(read.value) if isinstance(read, Present) else None
+            if current is not None and current.claim_graph_artifact_id is not None:
+                try:
+                    graph, fault = self._load_graph(key, current)
+                except knowledge.KnowledgeError:
+                    graph, fault = None, True
+                if isinstance(graph, dict) and fault is None:
+                    revised = self._revise_contract(key, current, graph, art_id,
+                                                    "argument evidence changed")
+                    if revised is not None:
+                        try:
+                            self._runs.compare_and_set(key, revised.encode(), read.revision)
+                            state = revised
+                        except Conflict:
+                            pass
         return self._run_snapshot(key, state)
 
     # --- operational-plane operations (CAS-guarded) --------------------------
@@ -436,27 +558,58 @@ class EmpiricaService:
             return outcome
         return wire.fault(wire.FAULT_CONFLICT, "operation did not converge under contention")
 
+    def _reject_ticket_use(self, key: RunKey, state: OperationalState, nonce: str) -> dict | None:
+        ticket = next((item for item in state.audit_tickets if item.get("nonce") == nonce), None)
+        if ticket is None:
+            return wire.block("audit verdict rejected: no issued ticket matches that nonce",
+                              self._run_view(key, state))
+        if ticket.get("void"):
+            return wire.block("audit verdict rejected: ticket was voided",
+                              self._run_view(key, state))
+        if ticket.get("consumed"):
+            return wire.block("audit verdict rejected: consumed ticket replay",
+                              self._run_view(key, state))
+        return None
+
+    def _record_audit_verdict(self, key: RunKey, payload: dict) -> dict:
+        """Consume the one-shot capability before appending its verdict.
+
+        Consumption first is fail-closed: a crash can leave an audit owed, but can never leave an
+        accepted verdict with a reusable ticket.
+        """
+        consumed = self._consume_audit_ticket(
+            key, {"nonce": payload["nonce"], "reject_replay": True})
+        if not isinstance(consumed, dict) or consumed.get("type") != "Allow":
+            return consumed
+        art_id, body = knowledge.audit_verdict_artifact(payload)
+        self._artifacts.append(key, knowledge_artifact(art_id, body))
+        return consumed
+
     def _reserve_spawn(self, key: RunKey) -> dict:
         """Atomically reserve ONE spawn against the cap (ADR-17). Unbounded → allow and count nothing.
         Cap reached → Block, count unchanged (a denied spawn did not happen). Otherwise increment the
         counter under CAS — the ground-truth reservation a host gate enforces on."""
         def mutate(state: OperationalState):
+            reservation_id = f"reservation-{state.reservation_seq + 1}"
+            reservation = {"id": reservation_id, "state": "reserved"}
             if state.max_spawns is None:
-                return wire.allow(False, self._run_view(
-                    key, state, spawn=self._spawn_view(state, reserved=True,
-                                                       note="unbounded budget")))
+                return state.evolve(reservation_seq=state.reservation_seq + 1,
+                                    reservations=(*state.reservations, reservation))
             if not state.can_reserve_spawn():
                 return wire.block(
                     f"spawn budget exhausted: {state.spawns}/{state.max_spawns} used; the spawn is "
                     f"DENIED (ADR-17). Resolve remaining unknowns without spawning, tag them "
                     f"blocked=needs-budget, or raise max_spawns.",
                     self._run_view(key, state, spawn=self._spawn_view(state, reserved=False)))
-            return state.evolve(spawns=state.spawns + 1)
+            return state.evolve(spawns=state.spawns + 1,
+                                reservation_seq=state.reservation_seq + 1,
+                                reservations=(*state.reservations, reservation))
         result = self._commit(key, mutate)
         if isinstance(result, dict):
             return result
         return wire.allow(False, self._run_view(
-            key, result, spawn=self._spawn_view(result, reserved=True)))
+            key, result, spawn=self._spawn_view(
+                result, reserved=True, reservation_id=result.reservations[-1]["id"])))
 
     def _configure_budget(self, key: RunKey, action: dict) -> dict:
         """Set (or clear) the spawn cap and/or RAISE the a-priori pass ceiling (ADR-17/19/28).
@@ -552,18 +705,42 @@ class EmpiricaService:
             raise wire.InvalidRequest("claims must be a list of claim-id strings")
         committed = tuple(sorted({c for c in raw if c}))
 
-        def mutate(state: OperationalState):
+        # A freeze is an application knowledge event.  Its immutable artifact is the authority for
+        # the hold-transition revision; append it before the CAS just like a graph artifact.
+        freeze_body = json.dumps({"kind": "freeze", "claims": list(committed)}, sort_keys=True,
+                                 separators=(",", ":"))
+        freeze_artifact_id = knowledge.content_address(freeze_body)
+        self._artifacts.append(key, knowledge_artifact(freeze_artifact_id, freeze_body))
+        for _ in range(_MAX_CAS_RETRIES):
+            read = self._runs.read(key)
+            if not isinstance(read, Present):
+                return wire.fault(wire.FAULT_CONFLICT, "run disappeared during freeze")
+            state = OperationalState.decode(read.value)
+            if state is None or not state.is_active:
+                return wire.fault(wire.FAULT_CONFLICT, "run is not active")
             if state.frozen_claims is not None:
                 return wire.allow(False, self._run_view(
                     key, state, frozen_claims=list(state.frozen_claims),
                     note="already frozen (first write wins)"))
             seq = state.stamp_seq + 1
-            return state.evolve(frozen_claims=committed, freeze_seq=seq, stamp_seq=seq)
-        result = self._commit(key, mutate)
-        if isinstance(result, dict):
-            return result
-        return wire.allow(False, self._run_view(
-            key, result, frozen_claims=list(result.frozen_claims)))
+            candidate = state.evolve(frozen_claims=committed, freeze_seq=seq, stamp_seq=seq)
+            try:
+                graph, fault = self._load_graph(key, candidate)
+            except knowledge.KnowledgeError:
+                graph, fault = None, True
+            if isinstance(graph, dict) and fault is None:
+                revised = self._revise_contract(key, candidate, graph, freeze_artifact_id, "frozen scope")
+                if revised is not None:
+                    candidate = revised
+            try:
+                self._runs.compare_and_set(key, candidate.encode(), read.revision)
+            except Conflict:
+                continue
+            return wire.allow(False, self._run_view(
+                key, candidate, frozen_claims=list(candidate.frozen_claims),
+                contract=self._contract_view(key, candidate)))
+        return wire.fault(wire.FAULT_CONFLICT, "freeze did not converge under contention")
+
 
     def _stamp_route(self, key: RunKey, action: dict) -> dict:
         """Record that the run announced its route (ADR-20 P1). FIRST WRITE WINS, and the position is
@@ -633,12 +810,7 @@ class EmpiricaService:
             key, result, dispatch=dict(result.dispatches[-1])))
 
     def _issue_audit_ticket(self, key: RunKey, action: dict) -> dict:
-        """Issue a fresh audit ticket (ADR-20 P6): mint a per-spawn nonce and record it on the
-        operational plane (ADR-31 puts tickets there, not in the knowledge plane). The nonce is
-        DERIVED from the run key and the ticket's ordinal — deterministic (no clock, no randomness)
-        and computable by anything that can read the run, because its job is BINDING a verdict to a
-        recorded spawn, not secrecy. An optional ``actor`` records dispatch attribution (declared
-        for an in-session spawn, witnessed only when the caller marks it so)."""
+        """Mint and persist one unpredictable, one-shot ticket bound to one reservation."""
         raw_actor = action.get("actor")
         witnessed = action.get("witnessed", False)
         if not isinstance(witnessed, bool):
@@ -650,9 +822,26 @@ class EmpiricaService:
             if actor is None:
                 raise wire.InvalidRequest("actor is not a valid actor record")
 
+        requested_reservation = action.get("reservation_id")
+        if requested_reservation is not None and not isinstance(requested_reservation, str):
+            raise wire.InvalidRequest("reservation_id must be a string")
+
         def mutate(state: OperationalState):
+            if actor is not None and state.author_actor is not None and actors.same_actor(actor, state.author_actor):
+                return wire.block("audit ticket denied: ADR-24 decorrelation requires an auditor on a different model than the author", self._run_view(key, state, audit={"independence": "same_model"}))
+            available = [r for r in state.reservations if r.get("state") == "reserved"
+                         and not any(t.get("reservation_id") == r.get("id") for t in state.audit_tickets)]
+            reservation = next((r for r in available if r.get("id") == requested_reservation), None)
+            if reservation is None and requested_reservation is None and len(available) == 1:
+                reservation = available[0]
+            if reservation is None:
+                return wire.block("audit ticket denied: no matching unbound spawn reservation",
+                                  self._run_view(key, state))
             seq = len(state.audit_tickets) + 1
-            ticket = {"nonce": _mint_nonce(key, seq), "seq": seq, "consumed": False}
+            ticket = {"nonce": secrets.token_hex(16), "seq": seq, "consumed": False,
+                      "reservation_id": reservation.get("id") if reservation else None,
+                      "model": actor.get("model") if actor else None,
+                      "harness": actor.get("harness") if actor else None, "issued_at": None}
             if actor is not None:
                 ticket["actor"] = actor
             return state.evolve(audit_tickets=(*state.audit_tickets, ticket))
@@ -663,27 +852,75 @@ class EmpiricaService:
         return wire.allow(False, self._run_view(
             key, result, ticket={"nonce": issued["nonce"], "seq": issued["seq"]}))
 
+    def _void_spawn(self, key: RunKey, action: dict) -> dict:
+        """Idempotently release the exact reservation bound to a named ticket."""
+        nonce = action.get("nonce")
+        reservation_arg = action.get("reservation_id")
+        if nonce is not None and not isinstance(nonce, str):
+            raise wire.InvalidRequest("nonce must be a string or null")
+        if reservation_arg is not None and not isinstance(reservation_arg, str):
+            raise wire.InvalidRequest("reservation_id must be a string or null")
+        def mutate(state: OperationalState):
+            ticket = next((t for t in state.audit_tickets if nonce is not None
+                           and t.get("nonce") == nonce), None)
+            reservation_id = ticket.get("reservation_id") if ticket is not None else reservation_arg
+            if nonce is not None and (ticket is None or ticket.get("void")):
+                return wire.block("spawn void ignored: unknown or already-void ticket",
+                                  self._run_view(key, state))
+            reservation = next((r for r in state.reservations
+                                if r.get("id") == reservation_id), None)
+            if reservation is None or reservation.get("state") != "reserved":
+                return wire.block("spawn void ignored: reservation is not releasable",
+                                  self._run_view(key, state))
+            tickets = tuple({**t, "void": True} if nonce is not None and t.get("nonce") == nonce else t
+                            for t in state.audit_tickets)
+            reservations = tuple({**r, "state": "void"} if r.get("id") == reservation_id else r
+                                 for r in state.reservations)
+            return state.evolve(spawns=max(0, state.spawns - 1), audit_tickets=tickets,
+                                reservations=reservations)
+        result = self._commit(key, mutate)
+        if isinstance(result, dict):
+            return result
+        return wire.allow(False, self._run_view(key, result, spawn=self._spawn_view(result)))
+
     def _consume_audit_ticket(self, key: RunKey, action: dict) -> dict:
         """Mark an issued ticket consumed (ADR-20 P6). Idempotent: consuming an already-consumed
         ticket is a no-op. An unknown nonce is a caller error, not a race — rejected as
         invalid_request. Consumption is bookkeeping; the audit coverage decision still binds on the
         issued nonce, so this never changes whether a run may converge."""
         nonce = wire.require(action, "nonce", str)
+        reject_replay = action.get("reject_replay", False) is True
 
         def mutate(state: OperationalState):
             if not any(t["nonce"] == nonce for t in state.audit_tickets):
                 return wire.fault(wire.FAULT_INVALID_REQUEST,
                                   "no audit ticket matches that nonce")
             if all(t.get("consumed") for t in state.audit_tickets if t["nonce"] == nonce):
+                if reject_replay:
+                    return wire.block("audit verdict rejected: consumed ticket replay",
+                                      self._run_view(key, state))
                 return wire.allow(False, self._run_view(
                     key, state, note="ticket already consumed"))
             updated = tuple({**t, "consumed": True} if t["nonce"] == nonce else t
                             for t in state.audit_tickets)
             return state.evolve(audit_tickets=updated)
-        result = self._commit(key, mutate)
-        if isinstance(result, dict):
-            return result
-        return wire.allow(False, self._run_view(key, result))
+        for _ in range(_MAX_CAS_RETRIES):
+            read = self._runs.read(key)
+            if not isinstance(read, Present):
+                return wire.fault(wire.FAULT_CONFLICT, "run unavailable while consuming ticket")
+            state = OperationalState.decode(read.value)
+            if state is None:
+                return wire.fault(wire.FAULT_CORRUPT_RUN, "run document is unreadable")
+            outcome = mutate(state)
+            if isinstance(outcome, dict):
+                return outcome
+            try:
+                self._runs.compare_and_set(key, outcome.encode(), read.revision)
+            except Conflict:
+                continue
+            return wire.allow(state.status == wire.STATUS_CONVERGED,
+                              self._run_view(key, outcome))
+        return wire.fault(wire.FAULT_CONFLICT, "ticket consumption did not converge")
 
     def _update_graph(self, key: RunKey, raw_graph: object) -> dict:
         """The graph-update transaction: validate/canonicalise, content-address, append the immutable
@@ -740,7 +977,12 @@ class EmpiricaService:
                 changes["working_passes"] = derived_passes
                 if state.max_spawns is None:
                     changes["max_spawns"] = derived_spawns
+            # The graph artifact is the authority for this contract revision.  Build the
+            # revision before the CAS so the graph pointer and contract pointer move together.
             new_state = state.evolve(**changes)
+            revised = self._revise_contract(key, new_state, canonical, art_id, "graph write")
+            if revised is not None:
+                new_state = revised
             try:
                 self._runs.compare_and_set(key, new_state.encode(), read.revision)
             except Conflict:
@@ -859,12 +1101,16 @@ class EmpiricaService:
                                         progress_token=progress_token, observed_at=observed_at)
         # Allow: the core blesses a stop (converged, residual, refuted, or frozen).
         if advisory:
-            return wire.allow(decision.converged, self._decision_run(key, state, decision))
+            return wire.allow(decision.converged, self._decision_run(
+                key, state, decision, contract=self._contract_view(key, state)))
         new_state = state.evolve(status=decision.status)
         persisted = self._cas(key, read.revision, new_state)
         if persisted is _RETRY:
             return _RETRY
-        return wire.allow(decision.converged, self._decision_run(key, persisted, decision))
+        contract = self._contract_view(key, persisted)
+        artifact_id = persisted.contract_artifact_id
+        return wire.allow(decision.converged, self._decision_run(
+            key, persisted, decision, contract=contract, contract_artifact_id=artifact_id))
 
     def _finalize_block(self, key: RunKey, read: Present, state: OperationalState,
                         decision: Block, advisory: bool, *, progress_token: str,
@@ -884,7 +1130,8 @@ class EmpiricaService:
           so an audit that never returns cannot wedge the run open, WITH OR WITHOUT a host clock.
         """
         if advisory:
-            return wire.block(decision.reason, self._run_view(key, state))
+            return wire.block(decision.reason, self._run_view(key, state),
+                              contract=self._contract_view(key, state))
 
         if progress_token != state.last_stop_digest:
             new_passes = state.passes + 1
@@ -901,11 +1148,15 @@ class EmpiricaService:
                     return _RETRY
                 note = (f"NON-CONVERGED: reached pass budget={cap} without convergence "
                         f"({decision.reason})")
-                return wire.allow(False, self._run_view(key, persisted, note=note))
+                contract = self._contract_view(key, persisted, include_budget=True)
+                artifact_id = persisted.contract_artifact_id
+                return wire.allow(False, self._run_view(key, persisted, note=note, contract=contract,
+                                                        contract_artifact_id=artifact_id))
             persisted = self._cas(key, read.revision, state.evolve(**changes))
             if persisted is _RETRY:
                 return _RETRY
-            return wire.block(decision.reason, self._run_view(key, persisted))
+            return wire.block(decision.reason, self._run_view(key, persisted),
+                              contract=self._contract_view(key, persisted))
 
         # No progress: an idle wait. Do not cost a pass, but count it against two backstops. The
         # clock-free count fires REGARDLESS of `observed_at`; the wall-clock deadline is an additional
@@ -927,7 +1178,10 @@ class EmpiricaService:
                     "audit did not return or the loop stalled") if stalled_by_clock else (
                 f"no knowledge progress across {new_idle_stops} stops; "
                 "audit did not return or the loop stalled")
-            return wire.allow(False, self._run_view(key, persisted, note=note))
+            contract = self._contract_view(key, persisted, include_stall=True)
+            artifact_id = persisted.contract_artifact_id
+            return wire.allow(False, self._run_view(key, persisted, note=note, contract=contract,
+                                                    contract_artifact_id=artifact_id))
 
         # Not yet stalled: record the incremented idle count (and seed the stall clock on the first
         # stop that lacked one) and keep blocking.
@@ -937,7 +1191,8 @@ class EmpiricaService:
         persisted = self._cas(key, read.revision, state.evolve(**changes))
         if persisted is _RETRY:
             return _RETRY
-        return wire.block(decision.reason, self._run_view(key, persisted))
+        return wire.block(decision.reason, self._run_view(key, persisted),
+                          contract=self._contract_view(key, persisted))
 
     # --- persistence + views -------------------------------------------------
 
@@ -955,17 +1210,32 @@ class EmpiricaService:
     def _run_snapshot(self, key: RunKey, state: OperationalState) -> dict:
         """A read-only acknowledgement: an Allow carrying the run's current status. Used by StartRun/
         GetRun/ObserveAction, where there is no stop decision to make — just the run's state."""
-        return wire.allow(state.status == wire.STATUS_CONVERGED, self._run_view(key, state))
+        return wire.allow(state.status == wire.STATUS_CONVERGED,
+                          self._run_view(key, state, contract=self._contract_view(key, state)))
 
     def _run_view(self, key: RunKey, state: OperationalState, note: str | None = None,
                   **extra: object) -> dict:
-        return wire.run_obj(wire.encode_handle(key), state.status, state.revision, note=note,
-                            **extra)
+        # Intent is operational state, but it is also model-facing boundary data: before the first
+        # graph there is deliberately no contract, so a host must not have to recover the user's
+        # resolved invocation from history.  These additive fields are present on every run view.
+        extra.setdefault("goal", state.goal)
+        extra.setdefault("modes", dict(state.modes))
+        audit = extra.get("audit")
+        if not isinstance(audit, dict):
+            audit = {"result": audit} if audit is not None else {}
+        audit.setdefault("independence", self._independence(state))
+        extra["audit"] = audit
+        # B1 (amended): `run.contract` rides on EVERY run view, not only the paths that remembered to
+        # pass it. Found live: a spawn-budget Block reached the Pi agent as prose only. Callers that
+        # need the terminal synthetic obligations still pass an explicit, richer `contract=`.
+        if "contract" not in extra:
+            extra["contract"] = self._contract_view(key, state)
+        return wire.run_obj(wire.encode_handle(key), state.status, state.revision, note=note, **extra)
 
     # --- operation view fragments --------------------------------------------
 
     def _spawn_view(self, state: OperationalState, *, reserved: bool | None = None,
-                    note: str | None = None) -> dict:
+                    reservation_id: str | None = None, note: str | None = None) -> dict:
         """The spawn-budget fragment for a reserve/configure acknowledgement. ``remaining`` is null
         when unbounded (JSON has no infinity), which the wire distinguishes from a numeric cap."""
         view: dict = {"spawns": state.spawns, "max_spawns": state.max_spawns,
@@ -973,9 +1243,22 @@ class EmpiricaService:
                       else int(state.spawns_remaining)}
         if reserved is not None:
             view["reserved"] = reserved
+        if reservation_id is not None:
+            view["reservation_id"] = reservation_id
         if note:
             view["note"] = note
         return view
+
+    def _independence(self, state: OperationalState) -> str:
+        """Report, without overclaiming, what recorded concrete model identities establish."""
+        auditor = next((t.get("actor") for t in reversed(state.audit_tickets)
+                        if isinstance(t.get("actor"), dict)), None)
+        author = state.author_actor
+        if not isinstance(author, dict) or not isinstance(auditor, dict):
+            return "unverified"
+        if actors.is_tier_alias(author.get("model")) or actors.is_tier_alias(auditor.get("model")):
+            return "unverified"
+        return "same_model" if actors.same_actor(author, auditor) else "decorrelated"
 
     def _route_view(self, state: OperationalState) -> dict:
         """The P1 ordering fragment: the write-order witnesses and the derived verdict."""
@@ -984,18 +1267,177 @@ class EmpiricaService:
                 "first_investigation_seq": state.first_investigation_seq,
                 "verdict": verdict, "reason": reason}
 
-    def _decision_run(self, key: RunKey, state: OperationalState, decision: Allow) -> dict:
+    def _contract_view(self, key: RunKey, state: OperationalState, *, include_budget: bool = False,
+                       include_stall: bool = False) -> dict | None:
+        """Project the persisted revision against current observations.
+
+        The graph is consulted only for current observations and the two synthetic run-level
+        budget/stall obligations.  Those synthetic obligations are intentionally view-time only:
+        they describe a terminal gate, not a revision of the claim contract.
+        """
+        contract = self._load_contract(key, state.contract_artifact_id)
+        if contract is None:
+            return None
+        try:
+            graph, fault = self._load_graph(key, state)
+        except knowledge.KnowledgeError:
+            return None
+        if fault is not None or not isinstance(graph, dict):
+            return None
+        evidence = knowledge.build_evidence_oracle(self._knowledge.evidence,
+                                                   self._knowledge.evidence_leaves)
+        def evidence_ok(nid: str, purpose: str) -> bool:
+            return evidence(nid, purpose)[0]
+
+        gating = claims.gating_goals(graph, state.theta, evidence_ok)
+        approved = tuple(sorted(nid for nid in gating
+                                if claims.state_of(graph, nid, state.theta, evidence_ok)
+                                == claims.STATE_APPROVED))
+        # The audit is intentionally a view-time obligation, like budget/stall: whether an
+        # independent review currently covers this immutable argument is an observation, not a
+        # graph-write revision.  It therefore never churns durable B5 lineage.
+        audit_digest = None
+        audit_ok = False
+        if gating and len(approved) == len(gating):
+            audit_digest = claims.argument_digest(graph)
+            digest_of = knowledge.build_digest_of(graph, knowledge.approving_evidence_ids(self._knowledge.evidence),
+                                                  self._knowledge.evidence_leaves)
+            audit = knowledge.build_audit_oracle(list(state.audit_tickets), self._knowledge.verdicts)
+            audit_ok, _ = audit({nid: digest_of(nid) for nid in approved}, audit_digest)
+        observations = obligation_projection.observations_from_knowledge(
+            self._knowledge.evidence_leaves, self._knowledge.verdicts)
+        # A verdict with the matching digest is not itself coverage: it must also have the issued
+        # nonce and complete approved-claim review.  Do not let an invalid passing verdict satisfy
+        # the rendered audit obligation while the convergence decision correctly remains blocked.
+        if audit_digest is not None and not audit_ok:
+            observations = tuple(item for item in observations
+                                 if not (item.kind == "judgment" and item.ref == f"audit/{audit_digest}"))
+        accepted = tuple(item for item in observations if obligation_projection.trusted(item))
+        # Keep synthetic audit/budget/stall obligations out of durable revisions; add them only to
+        # this wire projection, retaining the persisted revision lineage for live claim obligations.
+        include_budget = include_budget or state.status == wire.STATUS_STOPPED_BUDGET
+        include_stall = include_stall or state.status == wire.STATUS_STOPPED_RESIDUAL
+        if audit_digest is not None or include_budget or include_stall:
+            synthetic = obligation_projection.contract_for_graph(
+                contract.contract_id, contract.revision, graph, state.theta, evidence,
+                frozen_claims=state.frozen_claims, include_budget=include_budget,
+                include_stall=include_stall, audit_digest=audit_digest)
+            existing_ids = {item.id for item in contract.obligations}
+            extras = tuple(item for item in synthetic.obligations
+                           if (item.id.startswith("empirica/run/") or item.id.startswith("empirica/audit/"))
+                           and item.id not in existing_ids)
+            contract = Contract(contract.contract_id, contract.revision,
+                                contract.obligations + extras, contract.provenance,
+                                contract.parent_revision, contract.supersedes, contract.retired)
+        return project(contract, verify(contract, accepted, obligation_projection.trusted), accepted)
+
+    def _load_contract(self, key: RunKey, artifact_id: str | None) -> Contract | None:
+        if artifact_id is None:
+            return None
+        records = self._artifacts.read(key)
+        if not isinstance(records, Present):
+            return None
+        for artifact in records.value:
+            if artifact.artifact_id == artifact_id:
+                try:
+                    return Contract.from_json(json.loads(artifact.body))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    return None
+        return None
+
+    def _revise_contract(self, key: RunKey, state: OperationalState, graph: dict,
+                         authority: str, reason: str) -> OperationalState | None:
+        """Append a real contract revision when the canonical claim-obligation set changes.
+
+        Called inside the graph/freeze CAS retry loops: a retry re-loads the persisted revision and
+        recomputes this diff, so no stale revision pointer can win a concurrent update.
+        """
+        records = self._artifacts.read(key)
+        if isinstance(records, Corrupt):
+            return None
+        know = knowledge.Knowledge.from_artifacts(records.value if isinstance(records, Present) else frozenset())
+        evidence = knowledge.build_evidence_oracle(know.evidence, know.evidence_leaves)
+        def evidence_ok(nid: str, purpose: str) -> bool:
+            return evidence(nid, purpose)[0]
+        gating = claims.gating_goals(graph, state.theta, evidence_ok)
+        approved = [nid for nid in gating if claims.state_of(
+            graph, nid, state.theta, evidence_ok) == claims.STATE_APPROVED]
+        audit_digest = claims.argument_digest(graph) if gating and len(approved) == len(gating) else None
+        desired = obligation_projection.contract_for_graph(
+            f"empirica/{wire.encode_handle(key)}", 1, graph, state.theta, evidence,
+            frozen_claims=state.frozen_claims, audit_digest=audit_digest)
+        previous = self._load_contract(key, state.contract_artifact_id)
+        if previous is None:
+            if not desired.obligations:
+                return None
+            # Contract's frozen public constructor starts at revision 1; this is the initial,
+            # all-additions revision corresponding to the requested conceptual empty revision 0.
+            next_contract = Contract(desired.contract_id, 1, desired.obligations, desired.provenance)
+        else:
+            # Revision-qualified replacement ids are an implementation consequence of the frozen
+            # library's global no-id-reuse rule.  Match later graph projections back to that live
+            # id by provenance before diffing, so an unrelated graph write does not re-add a retired
+            # base id.
+            prior_by_claim = {item.because[0]: item.id for item in previous.obligations
+                              if item.because and not item.id.startswith("empirica/audit/")
+                              and not item.id.startswith("empirica/run/")}
+            normalized_desired = []
+            for item in desired.obligations:
+                prior_id = (prior_by_claim.get(item.because[0]) if item.because
+                            and not item.id.startswith("empirica/audit/")
+                            and not item.id.startswith("empirica/run/") else None)
+                if prior_id and prior_id != item.id:
+                    item = type(item)(prior_id, item.mode, item.must, item.witnesses, item.because,
+                                      item.hold, item.hold_reason, item.severity)
+                normalized_desired.append(item)
+            old = {item.id: item for item in previous.obligations}
+            new = {item.id: item for item in normalized_desired}
+            retire = set(old) - set(new)
+            additions = [item for ident, item in new.items() if ident not in old]
+            changed = [ident for ident in set(old) & set(new) if old[ident].to_json() != new[ident].to_json()]
+            # The frozen library forbids reusing a retired id.  A changed claim therefore gets a
+            # stable revision-qualified replacement while retaining the old obligation explicitly.
+            for ident in changed:
+                retire.add(ident)
+                item = new[ident]
+                additions.append(type(item)(f"{ident}/revision-{previous.revision + 1}", item.mode,
+                                             item.must, item.witnesses, item.because,
+                                             item.hold, item.hold_reason, item.severity))
+            if not retire and not additions:
+                return None
+            refuted = next((graph["nodes"][item.because[0]].get("refuted_by")
+                             for item in previous.obligations
+                             if item.id in retire and item.because
+                             and graph["nodes"].get(item.because[0], {}).get("refuted_by")), None)
+            revision_reason = (f"refuted by {refuted}" if isinstance(refuted, str) and refuted
+                               else (_change_reason(old, new, changed) if changed else reason))
+            revision_authority = refuted if isinstance(refuted, str) and refuted else authority
+            next_contract = revise(previous, add=additions, retire=sorted(retire),
+                                   reason=revision_reason, authority=revision_authority)
+        body = json.dumps(next_contract.to_json(), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        artifact_id = knowledge.content_address(body)
+        self._artifacts.append(key, knowledge_artifact(artifact_id, body))
+        return state.evolve(contract_artifact_id=artifact_id, contract_revision=next_contract.revision)
+
+    def _persist_contract(self, key: RunKey, contract: dict | None) -> str | None:
+        """Compatibility helper: terminal paths reuse, rather than append, the current revision."""
+        return None
+
+    def _decision_run(self, key: RunKey, state: OperationalState, decision: Allow,
+                      **extra: object) -> dict:
         """The run view for a finalised Allow, carrying the adjudicator's advisory reporting fields
         (note, deferred, blocked, audit, P1) so a caller sees *why* a stop is or is not convergence."""
+        audit = decision.audit if isinstance(decision.audit, dict) else {"result": decision.audit}
+        audit.setdefault("independence", self._independence(state))
         return wire.run_obj(
             wire.encode_handle(key), state.status, state.revision,
             note=decision.note, deferred=list(decision.deferred) or None,
             blocked=list(decision.blocked) or None,
             budget_blocked=list(decision.budget_blocked) or None,
-            audit=decision.audit, p1_violation=decision.p1_violation,
+            audit=audit, p1_violation=decision.p1_violation,
             p1_unverified=decision.p1_unverified,
             root_refuted=decision.root_refuted or None,
-            attribution=decision.attribution)
+            attribution=decision.attribution, **extra)
 
     def _fault_from_reason(self, reason: str) -> dict:
         """Map an adjudicator ``Fault`` reason onto a wire fault code. A graph-related fault is a
@@ -1024,10 +1466,19 @@ def _progress_token(pointer: str | None, evidence, evidence_leaves, verdicts,
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _mint_nonce(key: RunKey, seq: int) -> str:
-    """A per-spawn audit nonce, DERIVED from the run key and the ticket's ordinal. Deterministic (no
-    clock, no randomness — a resumable run must recompute identically) and host-neutral (it names
-    only the opaque :class:`RunKey` fields, never a path). Its job is BINDING a verdict to a
-    recorded spawn of this run, not secrecy — anything that can read the run can recompute it."""
-    raw = f"{key.project_id}:{key.run_id}:{key.generation}:audit:{seq}"
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+def _change_reason(old: dict, new: dict, changed: list) -> str:
+    """Name what actually changed on the replaced obligations — text, hold, or several things — so
+    a retirement record never says "reworded" about a claim whose wording did not move (e.g. a
+    freeze that only changed its hold)."""
+    kinds: set[str] = set()
+    for ident in changed:
+        before, after = old[ident], new[ident]
+        if before.must != after.must:
+            kinds.add("reworded")
+        if (before.hold, before.hold_reason) != (after.hold, after.hold_reason):
+            kinds.add("hold changed")
+        if before.witnesses != after.witnesses or before.mode != after.mode:
+            kinds.add("witnesses changed")
+    if len(kinds) == 1:
+        return f"claim {kinds.pop()}"
+    return "claim changed (" + ", ".join(sorted(kinds)) + ")" if kinds else "claim changed"

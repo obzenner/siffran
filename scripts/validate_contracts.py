@@ -4,6 +4,11 @@ import json
 import sys
 from pathlib import Path
 
+try:
+    from jsonschema import Draft202012Validator, RefResolver
+except ImportError:  # The structural gate below still validates required wire fields.
+    Draft202012Validator = RefResolver = None
+
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = ROOT / "contracts"
 errors: list[str] = []
@@ -32,7 +37,12 @@ for path in sorted(CONTRACTS.glob("*/*/*.schema.json")):
     if not isinstance(data.get("$id"), str):
         errors.append(f"{path.relative_to(ROOT)}: missing $id")
 
-for path in sorted((CONTRACTS / "fixtures").glob("*.json")):
+REQUIRED_EMPIRICA_FIXTURES = frozenset({"empirica-get-argument.json", "empirica-void-spawn.json"})
+fixture_paths = sorted((CONTRACTS / "fixtures").glob("*.json"))
+missing = REQUIRED_EMPIRICA_FIXTURES - {path.name for path in fixture_paths}
+for name in sorted(missing):
+    errors.append(f"contracts/fixtures/{name}: required Empirica audit fixture is missing")
+for path in fixture_paths:
     fixture = load(path)
     for field, kind in (("request", "request"), ("expected", "response")):
         envelope = fixture.get(field)
@@ -50,9 +60,22 @@ for path in sorted((CONTRACTS / "fixtures").glob("*.json")):
         errors.append(f"{path.relative_to(ROOT)}: request/expected protocols differ")
     if request.get("request_id") != expected.get("request_id"):
         errors.append(f"{path.relative_to(ROOT)}: request/expected ids differ")
+    # Fixture envelopes are contract instances, not illustrative JSON. Validate them when the
+    # standard validator is available; refs resolve from the schema's on-disk directory.
+    if Draft202012Validator is not None:
+        for field, kind in (("request", "request"), ("expected", "response")):
+            schema = schemas.get((fixture.get(field, {}).get("protocol"), kind))
+            if schema is not None:
+                store = {value.get("$id"): value for value in schemas.values()
+                         if isinstance(value.get("$id"), str)}
+                resolver = RefResolver((CONTRACTS / fixture[field]["protocol"].split("/")[0]
+                                        / fixture[field]["protocol"].split("/")[1]).as_uri() + "/", schema,
+                                       store=store)
+                for error in Draft202012Validator(schema, resolver=resolver).iter_errors(fixture[field]):
+                    errors.append(f"{path.relative_to(ROOT)}: {field}: {error.message}")
 
 if errors:
     print("\n".join(f"ERROR: {error}" for error in errors), file=sys.stderr)
     raise SystemExit(1)
 print(f"ok: {len(schemas)} schemas, "
-      f"{len(list((CONTRACTS / 'fixtures').glob('*.json')))} fixtures")
+      f"{len(fixture_paths)} fixtures")

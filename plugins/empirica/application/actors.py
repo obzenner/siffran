@@ -106,4 +106,4 @@ def same_actor(a: object, b: object) -> bool:
     na, nb = normalise(a), normalise(b)
     if na is None or nb is None or na["is_tier"] or nb["is_tier"]:
         return False
-    return na["model"] == nb["model"]
+    return na["model"].casefold() == nb["model"].casefold()

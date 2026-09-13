@@ -34,12 +34,13 @@ CMD_RESOLVE_RUN = "ResolveRun"
 CMD_OBSERVE_ACTION = "ObserveAction"
 CMD_EVALUATE_RUN = "EvaluateRun"
 CMD_GET_RUN = "GetRun"
+CMD_GET_ARGUMENT = "GetArgument"
 # RestoreRun returns an enriched read-only snapshot of the whole operational plane (status, budget,
 # phase, modes, freeze, ordering witnesses, tickets) so a host can rebuild its in-session view after
 # a compaction or a resume without reading any side file (ADR-31; mirrors the legacy state_restore).
 CMD_RESTORE_RUN = "RestoreRun"
 _COMMANDS = frozenset({CMD_START_RUN, CMD_RESOLVE_RUN, CMD_OBSERVE_ACTION,
-                       CMD_EVALUATE_RUN, CMD_GET_RUN, CMD_RESTORE_RUN})
+                       CMD_EVALUATE_RUN, CMD_GET_RUN, CMD_GET_ARGUMENT, CMD_RESTORE_RUN})
 
 # ObserveAction kinds. Two families: KNOWLEDGE kinds append to the immutable argument (and are
 # refused on a finished run — its argument is sealed), and OPERATIONAL kinds touch the run's control
@@ -54,6 +55,7 @@ KIND_ROUTE = "route"
 KIND_INVESTIGATE = "investigate"
 KIND_DISPATCH = "dispatch"
 KIND_CONSUME_AUDIT_TICKET = "consume_audit_ticket"
+KIND_VOID_SPAWN = "void_spawn"
 # Actions that fail OPEN on a terminal run: a resource gate and pure resource/config reads have no
 # bearing on a finished run's sealed argument, so refusing them would wedge unrelated work.
 _TERMINAL_FAIL_OPEN_KINDS = frozenset({KIND_RESERVE_SPAWN})
@@ -192,7 +194,11 @@ def allow(converged: bool, run: dict) -> dict:
     return {"type": "Allow", "converged": converged, "run": run}
 
 
-def block(reason: str, run: dict) -> dict:
+def block(reason: str, run: dict, *, contract: dict | None = None) -> dict:
+    """Build a Block whose sole agent-facing obligation location is ``run.contract``."""
+    if contract is not None:
+        run = dict(run)
+        run["contract"] = contract
     return {"type": "Block", "reason": reason, "run": run}
 
 

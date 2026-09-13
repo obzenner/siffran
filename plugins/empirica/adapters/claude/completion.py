@@ -90,6 +90,10 @@ def stop_result(response: object) -> StopResult:
     if kind == "Block":
         reason = result.get("reason")
         text = reason if isinstance(reason, str) and reason else "empirica run is not complete"
+        contract = result.get("run", {}).get("contract") if isinstance(result.get("run"), dict) else None
+        if isinstance(contract, dict):
+            from vendor.obligations import render_text
+            text += "\n" + render_text(contract)
         return StopResult(2, stderr=text + "\n")
     if kind == "Fault":
         message = result.get("message")

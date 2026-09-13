@@ -1,0 +1,235 @@
+{
+  "contract": {
+    "contract_id": "fixture",
+    "obligations": [
+      {
+        "because": [
+          "G1"
+        ],
+        "id": "O1",
+        "mode": "require",
+        "must": "required effect occurs",
+        "witnesses": [
+          {
+            "description": "the witness has the expected outcome",
+            "expect": "pass",
+            "kind": "test",
+            "ref": "test/one"
+          }
+        ]
+      },
+      {
+        "because": [
+          "G1"
+        ],
+        "id": "O2",
+        "mode": "require",
+        "must": "required effect occurs",
+        "witnesses": [
+          {
+            "description": "the witness has the expected outcome",
+            "expect": "pass",
+            "kind": "artifact",
+            "ref": "artifact/two"
+          }
+        ]
+      },
+      {
+        "because": [
+          "G1"
+        ],
+        "hold": "blocked",
+        "hold_reason": "waiting for operator",
+        "id": "O3",
+        "mode": "require",
+        "must": "required effect occurs",
+        "witnesses": [
+          {
+            "description": "the witness has the expected outcome",
+            "expect": "pass",
+            "kind": "event",
+            "ref": "event/three"
+          }
+        ]
+      }
+    ],
+    "provenance": [
+      "fixture"
+    ],
+    "retired": [],
+    "revision": 1,
+    "supersedes": []
+  },
+  "expect": {
+    "round_trip": {
+      "contract_id": "fixture",
+      "obligations": [
+        {
+          "because": [
+            "G1"
+          ],
+          "id": "O1",
+          "mode": "require",
+          "must": "required effect occurs",
+          "witnesses": [
+            {
+              "description": "the witness has the expected outcome",
+              "expect": "pass",
+              "kind": "test",
+              "ref": "test/one"
+            }
+          ]
+        },
+        {
+          "because": [
+            "G1"
+          ],
+          "id": "O2",
+          "mode": "require",
+          "must": "required effect occurs",
+          "witnesses": [
+            {
+              "description": "the witness has the expected outcome",
+              "expect": "pass",
+              "kind": "artifact",
+              "ref": "artifact/two"
+            }
+          ]
+        },
+        {
+          "because": [
+            "G1"
+          ],
+          "hold": "blocked",
+          "hold_reason": "waiting for operator",
+          "id": "O3",
+          "mode": "require",
+          "must": "required effect occurs",
+          "witnesses": [
+            {
+              "description": "the witness has the expected outcome",
+              "expect": "pass",
+              "kind": "event",
+              "ref": "event/three"
+            }
+          ]
+        }
+      ],
+      "provenance": [
+        "fixture"
+      ],
+      "retired": [],
+      "revision": 1,
+      "supersedes": []
+    },
+    "text": "Obligation contract fixture@1\nO1 [require] required effect occurs\n  hold: none\n  - test:test/one (pass) \u2014 the witness has the expected outcome [observed: null]\nO2 [require] required effect occurs\n  hold: none\n  - artifact:artifact/two (pass) \u2014 the witness has the expected outcome [observed: null]\nO3 [require] required effect occurs\n  hold: blocked \u2014 waiting for operator\n  - event:event/three (pass) \u2014 the witness has the expected outcome [observed: null]\nVerdict: satisfied=-; holds=-; violated=-; residual=O1, O2, O3; unwitnessed=O1, O2, O3; held=O3",
+    "verdict": {
+      "held": [
+        "O3"
+      ],
+      "holds": [],
+      "residual": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "satisfied": [],
+      "unwitnessed": [
+        "O1",
+        "O2",
+        "O3"
+      ],
+      "violated": []
+    },
+    "view": {
+      "contract_id": "fixture",
+      "obligations": [
+        {
+          "because": [
+            "G1"
+          ],
+          "id": "O1",
+          "mode": "require",
+          "must": "required effect occurs",
+          "status": "residual",
+          "witnesses": [
+            {
+              "description": "the witness has the expected outcome",
+              "expect": "pass",
+              "kind": "test",
+              "observed": null,
+              "ref": "test/one"
+            }
+          ]
+        },
+        {
+          "because": [
+            "G1"
+          ],
+          "id": "O2",
+          "mode": "require",
+          "must": "required effect occurs",
+          "status": "residual",
+          "witnesses": [
+            {
+              "description": "the witness has the expected outcome",
+              "expect": "pass",
+              "kind": "artifact",
+              "observed": null,
+              "ref": "artifact/two"
+            }
+          ]
+        },
+        {
+          "because": [
+            "G1"
+          ],
+          "hold": "blocked",
+          "hold_reason": "waiting for operator",
+          "id": "O3",
+          "mode": "require",
+          "must": "required effect occurs",
+          "status": "residual",
+          "witnesses": [
+            {
+              "description": "the witness has the expected outcome",
+              "expect": "pass",
+              "kind": "event",
+              "observed": null,
+              "ref": "event/three"
+            }
+          ]
+        }
+      ],
+      "provenance": [
+        "fixture"
+      ],
+      "retired": [],
+      "revision": 1,
+      "supersedes": [],
+      "verdict": {
+        "held": [
+          "O3"
+        ],
+        "holds": [],
+        "residual": [
+          "O1",
+          "O2",
+          "O3"
+        ],
+        "satisfied": [],
+        "unwitnessed": [
+          "O1",
+          "O2",
+          "O3"
+        ],
+        "violated": []
+      }
+    }
+  },
+  "name": "F15-cold-start",
+  "observations": [],
+  "trusted_sources": [
+    "runner"
+  ]
+}

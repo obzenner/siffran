@@ -1,0 +1,204 @@
+{
+  "base": {
+    "contract_id": "fixture",
+    "obligations": [
+      {
+        "because": [
+          "G1"
+        ],
+        "id": "O1",
+        "mode": "require",
+        "must": "required effect occurs",
+        "witnesses": [
+          {
+            "description": "the witness has the expected outcome",
+            "expect": "pass",
+            "kind": "test",
+            "ref": "test/old"
+          }
+        ]
+      }
+    ],
+    "provenance": [
+      "fixture"
+    ],
+    "retired": [],
+    "revision": 1,
+    "supersedes": []
+  },
+  "expect": {
+    "contract": {
+      "contract_id": "fixture",
+      "obligations": [
+        {
+          "because": [
+            "G1"
+          ],
+          "id": "O2",
+          "mode": "require",
+          "must": "required effect occurs",
+          "witnesses": [
+            {
+              "description": "the witness has the expected outcome",
+              "expect": "pass",
+              "kind": "test",
+              "ref": "test/new"
+            }
+          ]
+        }
+      ],
+      "parent_revision": 1,
+      "provenance": [
+        "fixture",
+        "human/product",
+        "requirement replaced"
+      ],
+      "retired": [
+        {
+          "at_revision": 2,
+          "authority": "human/product",
+          "obligation": {
+            "because": [
+              "G1"
+            ],
+            "id": "O1",
+            "mode": "require",
+            "must": "required effect occurs",
+            "witnesses": [
+              {
+                "description": "the witness has the expected outcome",
+                "expect": "pass",
+                "kind": "test",
+                "ref": "test/old"
+              }
+            ]
+          },
+          "reason": "requirement replaced"
+        }
+      ],
+      "revision": 2,
+      "supersedes": [
+        "fixture@1"
+      ]
+    },
+    "text": "Obligation contract fixture@2\nO2 [require] required effect occurs\n  hold: none\n  - test:test/new (pass) \u2014 the witness has the expected outcome [observed: null]\nO1 [retired@2] requirement replaced \u2014 authority: human/product\nVerdict: satisfied=-; holds=-; violated=-; residual=O2; unwitnessed=O2; held=-",
+    "verdict": {
+      "held": [],
+      "holds": [],
+      "residual": [
+        "O2"
+      ],
+      "satisfied": [],
+      "unwitnessed": [
+        "O2"
+      ],
+      "violated": []
+    },
+    "view": {
+      "contract_id": "fixture",
+      "obligations": [
+        {
+          "because": [
+            "G1"
+          ],
+          "id": "O2",
+          "mode": "require",
+          "must": "required effect occurs",
+          "status": "residual",
+          "witnesses": [
+            {
+              "description": "the witness has the expected outcome",
+              "expect": "pass",
+              "kind": "test",
+              "observed": null,
+              "ref": "test/new"
+            }
+          ]
+        }
+      ],
+      "parent_revision": 1,
+      "provenance": [
+        "fixture",
+        "human/product",
+        "requirement replaced"
+      ],
+      "retired": [
+        {
+          "at_revision": 2,
+          "authority": "human/product",
+          "obligation": {
+            "because": [
+              "G1"
+            ],
+            "id": "O1",
+            "mode": "require",
+            "must": "required effect occurs",
+            "witnesses": [
+              {
+                "description": "the witness has the expected outcome",
+                "expect": "pass",
+                "kind": "test",
+                "ref": "test/old"
+              }
+            ]
+          },
+          "reason": "requirement replaced"
+        }
+      ],
+      "revision": 2,
+      "supersedes": [
+        "fixture@1"
+      ],
+      "verdict": {
+        "held": [],
+        "holds": [],
+        "residual": [
+          "O2"
+        ],
+        "satisfied": [],
+        "unwitnessed": [
+          "O2"
+        ],
+        "violated": []
+      }
+    }
+  },
+  "name": "F11-revision",
+  "observations": [
+    {
+      "at": "2026-01-01T00:00:00Z",
+      "kind": "test",
+      "outcome": "pass",
+      "ref": "test/old",
+      "source": "runner"
+    }
+  ],
+  "operation": {
+    "add": [
+      {
+        "because": [
+          "G1"
+        ],
+        "id": "O2",
+        "mode": "require",
+        "must": "required effect occurs",
+        "witnesses": [
+          {
+            "description": "the witness has the expected outcome",
+            "expect": "pass",
+            "kind": "test",
+            "ref": "test/new"
+          }
+        ]
+      }
+    ],
+    "authority": "human/product",
+    "reason": "requirement replaced",
+    "retire": [
+      "O1"
+    ]
+  },
+  "trusted_sources": [
+    "runner"
+  ]
+}

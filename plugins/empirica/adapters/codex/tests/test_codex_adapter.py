@@ -16,8 +16,8 @@ PLUGIN = Path(__file__).resolve().parents[3]
 if str(PLUGIN) not in sys.path:
     sys.path.insert(0, str(PLUGIN))
 
+from adapters.claude.audit import child_prompt, verdict_from_final_output  # noqa: E402
 from adapters.codex.knowledge import (  # noqa: E402
-    build_audit_verdict_request,
     build_graph_request,
     build_research_request,
     build_spike_request,
@@ -34,9 +34,7 @@ from adapters.codex.lifecycle import (  # noqa: E402
 )
 from adapters.codex.transport import BridgeTransport  # noqa: E402
 from adapters.state import project_id, run_id  # noqa: E402
-from application import knowledge  # noqa: E402
-from application.knowledge import canonicalize_graph  # noqa: E402
-from core import claims as C  # noqa: E402
+from vendor.obligations import canonical, parse, render_text  # noqa: E402
 
 
 OFFICIAL_REQUIRED = {
@@ -149,7 +147,18 @@ class TranslationTests(unittest.TestCase):
                              "codex:turn:turn-1:tool:call-1")
             self.assertEqual(event_stamp(value), "codex:turn:turn-1:tool:call-1")
 
-    def test_route_marker_is_not_misclassified_as_investigation(self) -> None:
+    def test_codex_pretool_payload_has_no_updated_input_or_child_output_field(self) -> None:
+        """0.146.0 cannot inject a child task or observe its final output through hooks."""
+        with tempfile.TemporaryDirectory() as tmp:
+            value = payload("PreToolUse", Path(tmp), tool_name="spawn_agent",
+                            tool_input={"message": "empirica-auditor"})
+            self.assertNotIn("updatedInput", OFFICIAL_OUTPUT_ALLOWED["PreToolUse"])
+            self.assertNotIn("final_output", value)
+            self.assertIsNone(value.get("last_assistant_message"))
+            prompt = child_prompt("fixture dossier", "child-only")
+            self.assertIn("Your nonce: child-only", prompt)
+            self.assertEqual(verdict_from_final_output("not a fenced verdict"), None)
+
         with tempfile.TemporaryDirectory() as tmp:
             value = payload("PreToolUse", Path(tmp), tool_input={
                 "command": "python3 -c 'pass' -- --empirica-route 'runtime unknown'",
@@ -284,6 +293,15 @@ class IsolatedLifecycleTests(unittest.TestCase):
                     "confidence": 0.9,
                 }}, "edges": []}
                 transport.dispatch(build_graph_request(handle, graph, correlation_id="graph"))
+                # Codex's native deny/block string channel must carry the same canonical rendering.
+                blocked_contract = self.hook("stop", payload("Stop", repo), repo, home)
+                blocked_contract_output = json.loads(blocked_contract.stdout)
+                current = transport.dispatch({
+                    "protocol": "empirica/v1", "request_id": "contract",
+                    "command": {"type": "GetRun", "run_id": handle},
+                })
+                self.assertIn(render_text(current["result"]["run"]["contract"]),
+                              blocked_contract_output["reason"])
                 digest = hashlib.sha256(b"true exits zero").hexdigest()
                 research = {
                     "_type": "https://in-toto.io/Statement/v1",
@@ -308,6 +326,19 @@ class IsolatedLifecycleTests(unittest.TestCase):
                 )
                 transport.dispatch(spike_request)
 
+                # Compaction preserves the sole run.contract wire location; it is parseable,
+                # not an obligation count that a model has to interpret.
+                active_contract = transport.dispatch({
+                    "protocol": "empirica/v1", "request_id": "contract-restore",
+                    "command": {"type": "RestoreRun", "run_id": handle},
+                })["result"]["run"]["contract"]
+                compact_contract = self.hook("restore", payload("SessionStart", repo), repo, home)
+                compact_contract_output = json.loads(compact_contract.stdout)
+                compact_data = compact_contract_output["hookSpecificOutput"]["additionalContext"]
+                compact_json = compact_data.split("-----\n", 1)[1].split("\n----- END", 1)[0]
+                embedded_contract = json.loads(compact_json)["run"]["contract"]
+                self.assertEqual(canonical(parse(embedded_contract)), canonical(parse(active_contract)))
+
                 auditor = self.hook("pre-tool-use", payload(
                     "PreToolUse", repo, tool_name="spawn_agent", tool_input={
                         "message": "Act as empirica-auditor and audit this run",
@@ -328,36 +359,22 @@ class IsolatedLifecycleTests(unittest.TestCase):
                     "protocol": "empirica/v1", "request_id": "ticketed",
                     "command": {"type": "RestoreRun", "run_id": handle},
                 })
-                nonce = ticketed["result"]["run"]["snapshot"]["audit_tickets"][0]["nonce"]
-                leaves = [
-                    {"statement": request["command"]["action"]["statement"],
-                     "verdicts": request["command"]["action"]["verdicts"]}
-                    for request in (research_request, spike_request)
-                ]
-                verdict = {
-                    "verdict": "pass", "nonce": nonce,
-                    "argument_digest": C.argument_digest(canonicalize_graph(graph)),
-                    "claims_reviewed": [{
-                        "claim_id": "G0", "claim_digest": digest,
-                        "evidence_digest": knowledge._leaf_digest(
-                            leaves, "G0", "true exits zero",
-                        ),
-                    }],
-                    "findings": [],
-                }
-                transport.dispatch(build_audit_verdict_request(
-                    handle, verdict, correlation_id="audit",
-                ))
+                tickets = ticketed["result"]["run"]["snapshot"]["audit_tickets"]
+                self.assertTrue(tickets)
+                self.assertNotIn("nonce", tickets[0])
 
+                # Codex has no private child-output ingest channel.  A model-facing RestoreRun can
+                # no longer recover the capability, so the audit obligation honestly remains open.
                 completed = self.hook("stop", payload("Stop", repo), repo, home)
                 completion_output = json.loads(completed.stdout)
                 assert_official_output(self, "Stop", completion_output)
-                self.assertNotIn("decision", completion_output)
-                self.assertTrue(json.loads(completion_output["systemMessage"])["converged"])
+                self.assertEqual(completion_output["decision"], "block")
+                self.assertIn("Obligation contract", completion_output["reason"])
 
                 compact = self.hook("restore", payload("SessionStart", repo), repo, home)
-                # A terminal run is intentionally not re-injected.
-                self.assertEqual((compact.returncode, compact.stdout, compact.stderr), (0, "", ""))
+                self.assertEqual(compact.returncode, 0)
+                self.assertIn('"contract_id"', json.loads(compact.stdout)["hookSpecificOutput"]["additionalContext"])
+                self.assertNotIn("nonce", compact.stdout)
 
             self.assertEqual(self.git(repo, "rev-parse", "HEAD"), head)
             self.assertEqual(self.git(repo, "write-tree"), tree)

@@ -6,6 +6,14 @@
 // report is blocked — those are the core's rules, reached over the transport
 // (ADR-30). The adapter only speaks the protocol and obeys the returned decision.
 
+import { renderText, type ContractView } from "./obligations.ts";
+
+
+// The convergence gate's intent and the tool/command name it guards. A run may
+// report convergence only through EvaluateRun(report_convergence) (ADR-32).
+export const REPORT_CONVERGENCE_INTENT: EvaluateIntent = "report_convergence";
+export const CONTINUE_INTENT: EvaluateIntent = "continue";
+export const REPORT_CONVERGENCE_TOOL = "report_convergence";
 import {
   PROTOCOL,
   type EvaluateIntent,
@@ -16,11 +24,27 @@ import {
   type RunSelector,
 } from "./contract.ts";
 
-// The convergence gate's intent and the tool/command name it guards. A run may
-// report convergence only through EvaluateRun(report_convergence) (ADR-32).
-export const REPORT_CONVERGENCE_INTENT: EvaluateIntent = "report_convergence";
-export const CONTINUE_INTENT: EvaluateIntent = "continue";
-export const REPORT_CONVERGENCE_TOOL = "report_convergence";
+export interface ParsedModeFlags { goal: string; modes: RunModes; unknownFlags: string[]; }
+/** ADR-28: consume only leading recognized flags; unknown flags are surfaced, never enabled. */
+export function parseModeFlags(args: string): ParsedModeFlags {
+  const tokens = args.trim().split(/\s+/).filter(Boolean);
+  const modes: RunModes = {}; const unknownFlags: string[] = [];
+  let i = 0;
+  while (i < tokens.length && tokens[i].startsWith("--")) {
+    const flag = tokens[i++];
+    if (flag === "--cli-exec") modes.cli_exec = true;
+    else if (flag === "--no-cli-exec") modes.cli_exec = false;
+    else if (flag === "--multi-provider") modes.multi_provider = true;
+    else if (flag === "--no-multi-provider") modes.multi_provider = false;
+    else unknownFlags.push(flag);
+  }
+  return { goal: tokens.slice(i).join(" "), modes, unknownFlags };
+}
+function contractText(result: Result): string {
+  const view = (result.type === "Allow" || result.type === "Block") ? result.run.contract : undefined;
+  return view ? `\n\n${renderText(view)}` : "";
+}
+
 
 // --- Pi invocation -> Request -----------------------------------------------
 
@@ -28,8 +52,8 @@ export interface StartRunOptions {
   maxPasses?: number;
   maxSpawns?: number | null;
   modes?: RunModes;
+  actor?: { model?: string; harness?: string; provider?: string };
 }
-
 export function startRunRequest(
   selector: RunSelector,
   goal: string,
@@ -40,6 +64,7 @@ export function startRunRequest(
   if (options.maxPasses !== undefined) command.max_passes = options.maxPasses;
   if (options.maxSpawns !== undefined) command.max_spawns = options.maxSpawns;
   if (options.modes !== undefined) command.modes = options.modes;
+  if (options.actor !== undefined) command.actor = options.actor;
   return { protocol: PROTOCOL, request_id: requestId, command };
 }
 
@@ -69,12 +94,16 @@ export function evaluateRunRequest(
   };
 }
 
-// --- Result -> host-neutral outcomes ----------------------------------------
+export function restoreRunRequest(runId: string, requestId: string): Request {
+  return { protocol: PROTOCOL, request_id: requestId, command: { type: "RestoreRun", run_id: runId } };
+}
+
+
 
 /** A gate decision, independent of Pi's own return shape (mapped in index.ts). */
 export type GateDecision =
   | { kind: "permit" }
-  | { kind: "deny"; reason: string };
+  | { kind: "deny"; reason: string; contract?: ContractView };
 
 const FAULT_MESSAGE: Record<FaultCode, string> = {
   invalid_request: "the request was rejected as malformed",
@@ -100,7 +129,7 @@ export function gateFromDecision(result: Result): GateDecision {
     case "Allow":
       return { kind: "permit" };
     case "Block":
-      return { kind: "deny", reason: result.reason };
+      return result.run.contract ? { kind: "deny", reason: result.reason, contract: result.run.contract } : { kind: "deny", reason: result.reason };
     case "Inert":
       // No active run (or an event the core does not act on) — not gated.
       return { kind: "permit" };
@@ -124,12 +153,12 @@ export function convergenceNotice(result: Result): Notice {
         ? { type: "info", text: "empirica: run converged — convergence report allowed." }
         : {
             type: "warning",
-            text: "empirica: allowed, but the run is not marked converged.",
+            text: `empirica: allowed, but the run is not marked converged.${contractText(result)}`,
           };
     case "Block":
       return {
         type: "error",
-        text: `empirica: convergence report blocked — ${result.reason}`,
+        text: `empirica: convergence report blocked — ${result.reason}${contractText(result)}`,
       };
     case "Inert":
       return {
@@ -155,7 +184,8 @@ export function statusNotice(result: Result): Notice {
         type: "info",
         text:
           `empirica run ${run.id}: status=${run.status}, revision=${run.revision}` +
-          (converged ? " (converged)" : ""),
+          (converged ? " (converged)" : "") + contractText(result),
+
       };
     }
     case "Inert":
@@ -181,6 +211,6 @@ export function settledFollowUp(result: Result): string | null {
   return (
     `empirica (reminder, not a gate): this run has outstanding work before it can ` +
     `report convergence — ${result.reason}. ` +
-    `Continue, or call the ${REPORT_CONVERGENCE_TOOL} tool once the evidence is in.`
+    `Continue, or call the ${REPORT_CONVERGENCE_TOOL} tool once the evidence is in.` + contractText(result)
   );
 }

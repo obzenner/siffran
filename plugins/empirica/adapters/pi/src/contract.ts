@@ -29,6 +29,7 @@ export interface StartRunCommand {
   max_passes?: number;
   max_spawns?: number | null;
   modes?: RunModes;
+  actor?: { model?: string; harness?: string; provider?: string };
 }
 
 export interface ObserveActionCommand {
@@ -56,11 +57,17 @@ export interface GetRunCommand {
   run_id: string;
 }
 
+export interface GetArgumentCommand { type: "GetArgument"; run_id: string; }
+
+export interface RestoreRunCommand { type: "RestoreRun"; run_id: string; }
+
 export type Command =
   | StartRunCommand
   | ObserveActionCommand
   | EvaluateRunCommand
-  | GetRunCommand;
+  | GetRunCommand
+  | GetArgumentCommand
+  | RestoreRunCommand;
 
 export interface Request {
   protocol: typeof PROTOCOL;
@@ -80,10 +87,14 @@ export type RunStatus =
 // The response schema pins only id/status/revision on `run` and allows further
 // advisory reporting fields (note, deferred, blocked, audit, …), so we read it
 // as an open record.
+import type { ContractView } from "./obligations.ts";
+
 export interface RunSnapshot {
   id: string;
   status: RunStatus;
   revision: number;
+  contract?: ContractView;
+  contract_artifact_id?: string;
   [key: string]: unknown;
 }
 

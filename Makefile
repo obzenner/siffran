@@ -60,28 +60,52 @@ help: ## Show this help (generated from target descriptions)
 
 ## --- Verify
 
-.PHONY: check
-check: lint test validate contract-check activation-check methodologist-codex-check empirica-codex-check pi-bundle-check methodologist-pi-check empirica-pi-check adr-check ## Run every check (what CI and pre-commit should run)
+# `check` is composed of subject-matter suites so a contributor can run the one that matters for
+# their change and CI can pick what its runners support. Each suite is self-contained and prints
+# its own banner; `check` is simply all of them, `check-ci` is all of them minus the Pi suite
+# (CI runners do not carry Node/Pi — set PI_CHECKS=1 there to opt in). Measured locally: static ~3s,
+# core ~2s, claude ~30s, codex ~30s, pi ~30s.
+.PHONY: check check-ci check-static check-core check-claude check-codex check-pi
+check: check-static check-core check-claude check-codex check-pi ## Run every suite (local pre-commit gate)
 	@printf '\n$(BOLD)All checks passed.$(RESET)\n'
 
-.PHONY: test
-test: ## Run the plugin test suites
-	@printf '$(BOLD)==> tests$(RESET)\n'
-	@$(PYTHON) $(EMPIRICA_ACTIVATION_TESTS)
+check-ci: check-static check-core check-claude check-codex ## Every suite except Pi (add PI_CHECKS=1 to include it)
+	@if [ "$(PI_CHECKS)" = "1" ]; then $(MAKE) check-pi; else printf '$(DIM)Pi suite skipped in CI (PI_CHECKS=1 to include)$(RESET)\n'; fi
+	@printf '\n$(BOLD)CI checks passed.$(RESET)\n'
+
+check-static: lint validate docs-check adr-check contract-check obligations-check vendor-check activation-check ## Lint, manifests, generated docs, ADR health, API/obligation contracts, vendor copy, activation isolation
+	@printf '$(BOLD)==> static suite ok$(RESET)\n'
+
+check-core: ## Host-neutral core: obligations lib, Empirica core/application/state/git store, Methodologist core
+	@printf '$(BOLD)==> core suite$(RESET)\n'
+	@$(PYTHON) lib/obligations/tests/test_obligations.py
 	@$(PYTHON) $(EMPIRICA_CORE_TESTS)
 	@$(PYTHON) $(EMPIRICA_APP_TESTS)
 	@$(PYTHON) $(EMPIRICA_STATE_TESTS)
 	@$(PYTHON) $(EMPIRICA_GIT_ADAPTER_TESTS)
-	@$(PYTHON) $(EMPIRICA_CLAUDE_ADAPTER_TESTS)
-	@$(PYTHON) $(EMPIRICA_CODEX_ADAPTER_TESTS)
 	@$(PYTHON) $(METHODOLOGIST_CORE_TESTS)
+
+check-claude: ## Claude Code host: activation lifecycle + Claude adapter tests
+	@printf '$(BOLD)==> claude suite$(RESET)\n'
+	@$(PYTHON) $(EMPIRICA_ACTIVATION_TESTS)
+	@$(PYTHON) $(EMPIRICA_CLAUDE_ADAPTER_TESTS)
+
+check-codex: methodologist-codex-check empirica-codex-check ## Codex host: adapter tests + package/hook validation for both plugins
+	@printf '$(BOLD)==> codex suite$(RESET)\n'
+	@$(PYTHON) $(EMPIRICA_CODEX_ADAPTER_TESTS)
 	@$(PYTHON) $(METHODOLOGIST_CODEX_TESTS)
+
+check-pi: pi-bundle-check methodologist-pi-check empirica-pi-check ## Pi host: bundle + both adapters (static, typecheck, tests, live bridge) — needs Node
+	@printf '$(BOLD)==> pi suite ok$(RESET)\n'
+
+.PHONY: test
+test: check-core check-claude check-codex ## Run every test suite (core + claude + codex; Pi tests live in check-pi)
 
 .PHONY: lint
 lint: ## Lint Python hooks, tests, and scripts (ruff, if installed)
 	@printf '$(BOLD)==> lint$(RESET)\n'
 	@if command -v ruff >/dev/null 2>&1; then \
-		ruff check $(PLUGINS_DIR) $(SCRIPTS); \
+		ruff check $(PLUGINS_DIR) lib $(SCRIPTS); \
 	else \
 		printf '$(DIM)ruff not installed — skipping (pip install ruff)$(RESET)\n'; \
 	fi
@@ -90,7 +114,7 @@ lint: ## Lint Python hooks, tests, and scripts (ruff, if installed)
 fmt: ## Auto-fix what the linter can fix
 	@printf '$(BOLD)==> fmt$(RESET)\n'
 	@if command -v ruff >/dev/null 2>&1; then \
-		ruff check --fix $(PLUGINS_DIR) $(SCRIPTS); \
+		ruff check --fix $(PLUGINS_DIR) lib $(SCRIPTS); \
 	else \
 		printf '$(DIM)ruff not installed — nothing to do$(RESET)\n'; \
 	fi
@@ -117,6 +141,23 @@ adr-check: ## Check ADR link health and numbering (adrs doctor)
 contract-check: ## Validate host-neutral API schemas and conformance fixtures
 	@printf '$(BOLD)==> contracts$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_contracts.py
+
+# Design spike from the first Pi dogfood run (doc/design/bridge-transport-retry-policy.md). It is a
+# design model, not a product check, so it is NOT part of `make check`.
+.PHONY: bridge-retry-spike
+bridge-retry-spike: ## Run the bridge retry-policy design model spike (design evidence, not a release gate)
+	@printf '$(BOLD)==> bridge retry-policy spike$(RESET)\n'
+	@$(PYTHON) doc/design/spikes/bridge_retry_policy_model.py
+
+.PHONY: obligations-check
+obligations-check: ## Validate obligation schemas and substrate-neutral fixtures
+	@printf '$(BOLD)==> obligations$(RESET)\n'
+	@$(PYTHON) $(SCRIPTS)/validate_obligations.py
+
+.PHONY: vendor-check
+vendor-check: ## Verify Empirica's obligation package is byte-identical to the generic source
+	@printf '$(BOLD)==> obligation vendor$(RESET)\n'
+	@$(PYTHON) $(SCRIPTS)/check_vendor.py
 
 .PHONY: activation-check
 activation-check: ## Verify Empirica runtime isolation and thin Claude hook activation
@@ -206,6 +247,32 @@ migrate-legacy: ## Explicitly import a legacy run: make migrate-legacy RUN_DIR=.
 	@$(PYTHON) plugins/empirica/adapters/claude/migrate_legacy.py \
 		--run-dir "$(RUN_DIR)" --repo "$(REPO)" $(if $(SESSION_ID),--session-id "$(SESSION_ID)",)
 
+# Dogfooding (see docs/packages.md "Scope and Deduplication" in pi): the committed .pi/settings.json
+# adds this checkout as a project-local package and applies an autoload:false DELTA over the globally
+# installed siffran package that force-excludes its Pi extensions/skills. Everything else in the
+# user's Pi setup (pi-subagents, providers, other packages) loads unchanged; only siffran is
+# overridden by this tree. Local edits hot-reload with /reload. Pi asks to trust the folder once.
+PI ?= pi
+.PHONY: pi-dev
+pi-dev: ## Run Pi with siffran overridden by THIS checkout (dogfood; other packages unchanged): make pi-dev [ARGS="..."]
+	@command -v $(PI) >/dev/null 2>&1 || { printf 'pi-dev: `$(PI)` not found on PATH (set PI=/path/to/pi)\n' >&2; exit 2; }
+	@test -f .pi/settings.json || { printf 'pi-dev: .pi/settings.json is missing (it is committed; restore it)\n' >&2; exit 2; }
+	@printf '$(BOLD)==> dev pi$(RESET) siffran from %s (project override); answer YES if pi asks to trust this folder\n' "$(CURDIR)"
+	@$(PI) $(ARGS)
+
+# Canary: dogfood a pushed PR branch inside a REAL project, not inside siffran. Installs the branch
+# as a project-local package there (project wins over the global install; identity is the repo URL,
+# so the global entry is shadowed, not duplicated). `pi update --extensions` reconciles the clone.
+SIFFRAN_GIT ?= git:github.com/obzenner/siffran
+.PHONY: pi-canary pi-canary-remove
+pi-canary: ## Install a siffran branch project-locally in DIR for dogfooding: make pi-canary REF=<branch> [DIR=<project>]
+	@if [ -z "$(REF)" ]; then printf 'usage: make pi-canary REF=<branch-or-tag> [DIR=<project dir, default: this checkout>]\n' >&2; exit 2; fi
+	@cd "$(or $(DIR),$(CURDIR))" && $(PI) install -l "$(SIFFRAN_GIT)@$(REF)"
+	@printf '$(BOLD)==> canary$(RESET) %s@%s installed project-locally in %s; run `pi` there (trust the folder when asked); `make pi-canary-remove DIR=...` to undo\n' "$(SIFFRAN_GIT)" "$(REF)" "$(or $(DIR),$(CURDIR))"
+
+pi-canary-remove: ## Remove the project-local siffran canary from DIR: make pi-canary-remove [DIR=<project>]
+	@cd "$(or $(DIR),$(CURDIR))" && $(PI) remove -l "$(SIFFRAN_GIT)"
+
 ## --- Release
 
 .PHONY: bump
@@ -233,7 +300,7 @@ docs-check: ## Verify the generated plugin tables match the manifests
 	@$(PYTHON) $(SCRIPTS)/check_generated_docs.py
 
 .PHONY: release-check
-release-check: check docs-check ## Pre-release gate: all checks plus generated docs in sync
+release-check: check ## Pre-release gate: every suite (docs-check is part of check-static)
 	@printf '\n$(BOLD)Ready to release.$(RESET) Remaining steps are yours:\n'
 	@printf '  1. confirm the version bump is in plugin.json (make status)\n'
 	@printf '  2. commit and push\n'

@@ -1,0 +1,17 @@
+{
+  "packages": [
+    "..",
+    {
+      "source": "https://github.com/obzenner/siffran",
+      "autoload": false,
+      "extensions": [
+        "-plugins/empirica/adapters/pi/src/index.ts",
+        "-plugins/methodologist/adapters/pi/src/index.ts"
+      ],
+      "skills": [
+        "-plugins/empirica/skills/empirica",
+        "-plugins/methodologist/skills/think"
+      ]
+    }
+  ]
+}

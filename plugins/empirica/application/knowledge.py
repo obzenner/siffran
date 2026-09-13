@@ -25,6 +25,7 @@ import json
 import re
 
 from core import claims
+from core.evidence import evidence_fold
 
 KIND_GRAPH = "graph"
 KIND_EVIDENCE = "evidence"
@@ -35,6 +36,9 @@ KIND_EVIDENCE_LEAF = "evidence_leaf"
 KIND_AUDIT_TICKET = "audit_ticket"
 KIND_AUDIT_VERDICT = "audit_verdict"
 KIND_ATTRIBUTION = "attribution"
+# Terminal consumer contract projections are immutable artifacts too. They are retained for audit,
+# but do not participate in graph/evidence derivation.
+KIND_OBLIGATION_CONTRACT = "obligation_contract"
 
 PURPOSE_APPROVE = "approve"
 PURPOSE_REFUTE = "refute"
@@ -224,6 +228,14 @@ class Knowledge:
                 k.verdicts.append(record)
             elif kind == KIND_ATTRIBUTION:
                 k.attributions.append(record.get("report"))
+            elif kind == KIND_OBLIGATION_CONTRACT or (
+                    kind is None and {"contract_id", "revision", "obligations"} <= set(record)):
+                # Contract revisions are application metadata encoded as Contract.to_json(), not
+                # claim knowledge; retain fail-closed decoding for every other unknown artifact.
+                continue
+            elif kind == "freeze":
+                # The immutable freeze authority records the scope transition for ADR-0039.
+                continue
             else:
                 raise KnowledgeError(f"artifact {art.artifact_id} has unknown kind {kind!r}")
         return k
@@ -349,10 +361,11 @@ def build_audit_oracle(tickets: list[dict], verdicts: list[dict]):
     Block) rather than raising through the wire boundary."""
     from core.audit import coverage_check
 
-    verdict = _normalise_verdict(_select_verdict(verdicts, tickets))
+    live_tickets = [ticket for ticket in tickets if not ticket.get("void")]
+    verdict = _normalise_verdict(_select_verdict(verdicts, live_tickets))
 
     def audit(approved_digests: dict, argument_digest: str) -> tuple[bool, str]:
-        return coverage_check(tickets, verdict, approved_digests, argument_digest)
+        return coverage_check(live_tickets, verdict, approved_digests, argument_digest)
 
     return audit
 
@@ -387,8 +400,9 @@ def _leaf_digest(records: list[dict], claim_id: str, claim_text: str) -> str:
         if (subject[0].get("name") != claim_id or not isinstance(digest, dict)
                 or digest.get("sha256") != expected_claim):
             continue
-        ptype = statement.get("predicateType", "")
-        fold = "research" if ptype.endswith("/research/v1") else "spike"
+        fold = evidence_fold(statement)
+        if fold is None:
+            continue
         hashes = predicate.get("hashes") if isinstance(predicate.get("hashes"), dict) else {}
         bound.append({"fold": fold,
                       "kind": predicate.get("kind") if fold == "research" else None,
@@ -396,13 +410,17 @@ def _leaf_digest(records: list[dict], claim_id: str, claim_text: str) -> str:
                       "result": predicate.get("result"), "gate": predicate.get("gate"),
                       "command_hash": predicate.get("command_hash"),
                       "files_hash": hashes.get("files"), "result_hash": hashes.get("result")})
-    bound.sort(key=lambda lf: (lf["fold"], lf.get("result") or "", lf.get("source") or "",
-                               lf.get("citation") or "", lf.get("command_hash") or "",
-                               lf.get("files_hash") or ""))
+    # Sort by the complete canonical representation that is hashed.  Partial-key sorting left
+    # ties dependent on set iteration / PYTHONHASHSEED across separate bridge processes.
+    fields = ("fold", "kind", "source", "citation", "result", "gate",
+              "command_hash", "files_hash", "result_hash")
+    def canonical(leaf):
+        return tuple("\0" if leaf.get(field) is None else str(leaf.get(field))
+                     for field in fields)
+    bound.sort(key=canonical)
     h = hashlib.sha256()
     for leaf in bound:
-        for field in ("fold", "kind", "source", "citation", "result", "gate",
-                      "command_hash", "files_hash", "result_hash"):
+        for field in fields:
             value = leaf.get(field)
             h.update(b"\0" if value is None else str(value).encode("utf-8"))
             h.update(b"\0")

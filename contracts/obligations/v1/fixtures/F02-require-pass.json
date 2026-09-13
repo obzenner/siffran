@@ -1,0 +1,94 @@
+{
+  "contract": {
+    "contract_id": "fixture",
+    "obligations": [
+      {
+        "because": [
+          "G1"
+        ],
+        "id": "O1",
+        "mode": "require",
+        "must": "required effect occurs",
+        "witnesses": [
+          {
+            "description": "the witness has the expected outcome",
+            "expect": "pass",
+            "kind": "test",
+            "ref": "test/case"
+          }
+        ]
+      }
+    ],
+    "provenance": [
+      "fixture"
+    ],
+    "retired": [],
+    "revision": 1,
+    "supersedes": []
+  },
+  "expect": {
+    "text": "Obligation contract fixture@1\nO1 [require] required effect occurs\n  hold: none\n  - test:test/case (pass) \u2014 the witness has the expected outcome [observed: pass]\nVerdict: satisfied=O1; holds=-; violated=-; residual=-; unwitnessed=-; held=-",
+    "verdict": {
+      "held": [],
+      "holds": [],
+      "residual": [],
+      "satisfied": [
+        "O1"
+      ],
+      "unwitnessed": [],
+      "violated": []
+    },
+    "view": {
+      "contract_id": "fixture",
+      "obligations": [
+        {
+          "because": [
+            "G1"
+          ],
+          "id": "O1",
+          "mode": "require",
+          "must": "required effect occurs",
+          "status": "satisfied",
+          "witnesses": [
+            {
+              "description": "the witness has the expected outcome",
+              "expect": "pass",
+              "kind": "test",
+              "observed": "pass",
+              "ref": "test/case"
+            }
+          ]
+        }
+      ],
+      "provenance": [
+        "fixture"
+      ],
+      "retired": [],
+      "revision": 1,
+      "supersedes": [],
+      "verdict": {
+        "held": [],
+        "holds": [],
+        "residual": [],
+        "satisfied": [
+          "O1"
+        ],
+        "unwitnessed": [],
+        "violated": []
+      }
+    }
+  },
+  "name": "F02-require-pass",
+  "observations": [
+    {
+      "at": "2026-01-01T00:00:00Z",
+      "kind": "test",
+      "outcome": "pass",
+      "ref": "test/case",
+      "source": "runner"
+    }
+  ],
+  "trusted_sources": [
+    "runner"
+  ]
+}

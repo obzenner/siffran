@@ -1,0 +1,395 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://siffran.dev/contracts/obligations/v1/contract.schema.json",
+  "title": "Obligation contract and view v1",
+  "$ref": "#/$defs/contract",
+  "$defs": {
+    "witness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "ref",
+        "expect",
+        "description"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "test",
+            "exit_code",
+            "event",
+            "artifact",
+            "predicate",
+            "judgment"
+          ]
+        },
+        "ref": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*(/[A-Za-z0-9._:@-]+)+$"
+        },
+        "expect": {
+          "enum": [
+            "pass",
+            "fail"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "view_witness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "ref",
+        "expect",
+        "description",
+        "observed"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "test",
+            "exit_code",
+            "event",
+            "artifact",
+            "predicate",
+            "judgment"
+          ]
+        },
+        "ref": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*(/[A-Za-z0-9._:@-]+)+$"
+        },
+        "expect": {
+          "enum": [
+            "pass",
+            "fail"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observed": {
+          "enum": [
+            "pass",
+            "fail",
+            null
+          ]
+        }
+      }
+    },
+    "obligation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "mode",
+        "must",
+        "witnesses",
+        "because"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "enum": [
+            "require",
+            "forbid"
+          ]
+        },
+        "must": {
+          "type": "string",
+          "minLength": 1
+        },
+        "witnesses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/witness"
+          }
+        },
+        "because": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "hold": {
+          "enum": [
+            "blocked",
+            "deferred"
+          ]
+        },
+        "hold_reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "dependentRequired": {
+        "hold": [
+          "hold_reason"
+        ],
+        "hold_reason": [
+          "hold"
+        ]
+      }
+    },
+    "view_obligation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "mode",
+        "must",
+        "witnesses",
+        "because",
+        "status"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "enum": [
+            "require",
+            "forbid"
+          ]
+        },
+        "must": {
+          "type": "string",
+          "minLength": 1
+        },
+        "witnesses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/view_witness"
+          }
+        },
+        "because": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "hold": {
+          "enum": [
+            "blocked",
+            "deferred"
+          ]
+        },
+        "hold_reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "satisfied",
+            "holds",
+            "violated",
+            "residual"
+          ]
+        }
+      },
+      "dependentRequired": {
+        "hold": [
+          "hold_reason"
+        ],
+        "hold_reason": [
+          "hold"
+        ]
+      }
+    },
+    "retirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "obligation",
+        "reason",
+        "authority",
+        "at_revision"
+      ],
+      "properties": {
+        "obligation": {
+          "$ref": "#/$defs/obligation"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authority": {
+          "type": "string",
+          "minLength": 1
+        },
+        "at_revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_id",
+        "revision",
+        "obligations",
+        "provenance",
+        "supersedes",
+        "retired"
+      ],
+      "properties": {
+        "contract_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "parent_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "obligations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/obligation"
+          }
+        },
+        "provenance": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "supersedes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "retired": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/retirement"
+          }
+        }
+      }
+    },
+    "verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "satisfied",
+        "holds",
+        "violated",
+        "residual",
+        "unwitnessed",
+        "held"
+      ],
+      "properties": {
+        "satisfied": {
+          "$ref": "#/$defs/ids"
+        },
+        "holds": {
+          "$ref": "#/$defs/ids"
+        },
+        "violated": {
+          "$ref": "#/$defs/ids"
+        },
+        "residual": {
+          "$ref": "#/$defs/ids"
+        },
+        "unwitnessed": {
+          "$ref": "#/$defs/ids"
+        },
+        "held": {
+          "$ref": "#/$defs/ids"
+        }
+      }
+    },
+    "ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "view": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_id",
+        "revision",
+        "obligations",
+        "provenance",
+        "supersedes",
+        "retired",
+        "verdict"
+      ],
+      "properties": {
+        "contract_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "parent_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "obligations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/view_obligation"
+          }
+        },
+        "provenance": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "supersedes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "retired": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/retirement"
+          }
+        },
+        "verdict": {
+          "$ref": "#/$defs/verdict"
+        }
+      }
+    }
+  }
+}

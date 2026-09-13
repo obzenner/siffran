@@ -110,6 +110,13 @@ state belongs only under `~/.empirica-plugin/`; knowledge belongs only under `re
 Never create, read, or edit runtime state below `.claude/`, `.codex/`, or `.pi/`, and never edit
 either store directly. The explicit `make migrate-legacy` command is the sole legacy-path exception.
 
+**Pi runtime boundary:** The Pi adapter parses leading ADR-28 mode flags, persists and re-injects the opaque Empirica run handle through Pi session entries, and exposes the persisted resolved `run.goal`, `run.modes`, and current `run.contract` view to the model through `empirica_status` and deterministic compaction summaries. It registers `report_convergence` as a real model-callable tool and enforces it at Pi’s `tool_call` boundary, failing closed on transport faults; it also exposes `empirica_knowledge` for the same typed ObserveAction payloads as the Claude adapter. A configured `subagent` tool is intercepted for spawn-budget/audit-ticket enforcement, but any spawn outside Pi’s event stream is un-gated. Pi has no completion-veto lifecycle: an agent that never invokes `report_convergence` can complete, so settled nudges are reminders rather than gates. Whether blocked reasons are visible in model context and whether follow-up delivery reliably starts another turn are UNVERIFIED pending a live runtime spike.
+
+**Resume contract:** `RestoreRun`, `Block`, and every terminal `Allow` expose the one canonical
+`run.contract` view. It lists every obligation's `must`, provenance, hold, exact witness, and
+per-witness observation; graph counts are telemetry only. Never infer outstanding work from counts,
+history, or a reason string. A terminal Allow also names `run.contract_artifact_id`.
+
 **Codex activation and sensor boundary:** Codex runs start only when the prompt begins with
 `$empirica` (the namespaced `$empirica:empirica` and legacy `/empirica` spellings are also
 accepted). After classifying the goal, record the route before investigative Bash with
@@ -362,8 +369,10 @@ The Assessor is the fixed-point function `f` (ADR-7). One pass does exactly thre
 
 Write the graph and **end your turn**. The Stop hook reads it: any open claim on the path to the
 goal blocks, and the block message tells you *which evidence fold each claim still owes*. Across
-compaction, `SessionStart:compact` re-injects the graph — including the missing folds — so the
-loop is durable-resumable (ADR-8/9).
+compaction, `SessionStart:compact` receives the same `run.contract` resume contract as Block and
+RestoreRun; it lists each obligation, witness, and observation while graph counts remain telemetry.
+String-only channels render that view with `render_text`, so no actor infers a missing fold from
+history or prose.
 
 **Do not hand-declare convergence.** Convergence is what the gate says, not what you assert.
 
@@ -430,19 +439,18 @@ never fire (it must be `^empirica:empirica$`). If the spawn errors with "not fou
 where this plugin was just installed or updated, reload plugins or restart the session — a stale
 session registry can fail to resolve a newly added agent even when the name is correct.
 
-On Codex, plugin bundles do not contribute Claude's `agents/` definitions. Use the native
-`spawn_agent` tool and put the literal `empirica-auditor` marker in its dispatcher-visible
-`agent_type`, `name`, `task_name`, or `message`; the trusted `PreToolUse:Agent` hook issues the
-ticket. This witnesses a requested spawn, not actor identity or independence. If the audit requires
-decorrelated model generations, use a witnessed CLI dispatch with an explicit model in `cli_exec`
-mode and report any independence not actually obtained.
+All hosts use one audit flow: spawn the auditor; the host reserves the spawn and ticket, obtains
+`GetArgument`, injects the auditor rubric plus rendered dossier plus nonce directly into the **child**
+task, then extracts the child's `empirica-verdict` fenced JSON and records it as `audit_verdict`.
+The author never sees the nonce. A ticket is refused when the recorded auditor model equals the
+recorded concrete author model; unknown attribution and tier aliases are permitted but visibly weaker.
+The Stop gate requires a `pass` verdict whose nonce matches a non-voided auditor spawn and whose
+`claims_reviewed` covers **every** approved claim.
 
-Pass it the opaque run handle and the **nonce** the spawn gate issued. It verifies the run against
-the ADR-20 rubric — above all **re-reading each approved claim's Fold-1 citation to confirm the
-cited source actually supports the claim** — and submits its verdict with
-`build_audit_verdict_request` through `BridgeTransport`. The Stop gate
-requires a `pass` verdict whose nonce matches a real auditor spawn and whose `claims_reviewed`
-covers **every** approved claim.
+**Codex 0.146.0 limitation:** its hooks presently expose neither mutable child input nor a child's
+final output/transcript. Its adapter can reserve and ticket a requested `spawn_agent`, but cannot
+complete the host-observed round trip, so the obligation correctly remains open. This exact payload
+gap is documented in `adapters/codex/README.md`; do not expose a nonce to work around it.
 
 **The audit is incremental, per claim (ADR-25).** Each `claims_reviewed` entry is
 `{claim_id, claim_digest, evidence_digest}` — the digests the claim had when the auditor read it.

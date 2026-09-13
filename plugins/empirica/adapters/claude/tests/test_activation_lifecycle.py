@@ -120,9 +120,11 @@ class ActivatedLifecycleTests(unittest.TestCase):
             auditor = self.hook("spawn_gate.py", {**payload, "tool_name": "Agent", "tool_input": {
                 "subagent_type": "empirica:empirica-auditor"}}, repo, home)
             self.assertEqual(auditor.returncode, 0, auditor.stderr)
+            injected = json.loads(auditor.stdout)["hookSpecificOutput"]["updatedInput"]["prompt"]
+            nonce = injected.split("Your nonce: ", 1)[1].splitlines()[0]
             restored_response = transport.dispatch({"protocol": "empirica/v1", "request_id": "r",
                 "command": {"type": "RestoreRun", "run_id": handle}})
-            nonce = restored_response["result"]["run"]["snapshot"]["audit_tickets"][0]["nonce"]
+            self.assertNotIn(nonce, json.dumps(restored_response))
             records = [research_req["command"]["action"], spike_req["command"]["action"]]
             leaf_records = [{"statement": r["statement"], "verdicts": r["verdicts"]} for r in records]
             verdict = {"verdict": "pass", "nonce": nonce,
@@ -150,9 +152,11 @@ class ActivatedLifecycleTests(unittest.TestCase):
             fresh_auditor = self.hook("spawn_gate.py", {**payload, "tool_name": "Agent",
                 "tool_input": {"subagent_type": "empirica:empirica-auditor"}}, repo, home)
             self.assertEqual(fresh_auditor.returncode, 0, fresh_auditor.stderr)
+            fresh_prompt = json.loads(fresh_auditor.stdout)["hookSpecificOutput"]["updatedInput"]["prompt"]
+            fresh_nonce = fresh_prompt.split("Your nonce: ", 1)[1].splitlines()[0]
             refreshed = transport.dispatch({"protocol": "empirica/v1", "request_id": "fresh-ticket",
                 "command": {"type": "RestoreRun", "run_id": handle}})
-            fresh_nonce = refreshed["result"]["run"]["snapshot"]["audit_tickets"][-1]["nonce"]
+            self.assertNotIn(fresh_nonce, json.dumps(refreshed))
             fresh_verdict = {**verdict, "nonce": fresh_nonce,
                              "argument_digest": C.argument_digest(
                                  canonicalize_graph(refreshed_graph))}

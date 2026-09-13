@@ -1,0 +1,72 @@
+{
+  "after": {
+    "contract_id": "fixture",
+    "obligations": [],
+    "provenance": [
+      "fixture"
+    ],
+    "retired": [],
+    "revision": 1,
+    "supersedes": [],
+    "verdict": {
+      "held": [],
+      "holds": [],
+      "residual": [
+        "O1"
+      ],
+      "satisfied": [],
+      "unwitnessed": [
+        "O1"
+      ],
+      "violated": []
+    }
+  },
+  "before": {
+    "contract_id": "fixture",
+    "obligations": [
+      {
+        "because": [
+          "G1"
+        ],
+        "id": "O1",
+        "mode": "require",
+        "must": "required effect occurs",
+        "status": "residual",
+        "witnesses": [
+          {
+            "description": "the witness has the expected outcome",
+            "expect": "pass",
+            "kind": "test",
+            "observed": null,
+            "ref": "test/case"
+          }
+        ]
+      }
+    ],
+    "provenance": [
+      "fixture"
+    ],
+    "retired": [],
+    "revision": 1,
+    "supersedes": [],
+    "verdict": {
+      "held": [],
+      "holds": [],
+      "residual": [
+        "O1"
+      ],
+      "satisfied": [],
+      "unwitnessed": [
+        "O1"
+      ],
+      "violated": []
+    }
+  },
+  "expect": {
+    "ok": false,
+    "reasons": [
+      "O1: obligation disappeared without retirement"
+    ]
+  },
+  "name": "F12-preserved-drop"
+}

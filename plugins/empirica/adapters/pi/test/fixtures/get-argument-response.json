@@ -1,0 +1,21 @@
+{
+  "protocol": "empirica/v1",
+  "request_id": "fixture",
+  "result": {
+    "type": "Allow",
+    "run": {
+      "id": "run-fixture",
+      "status": "active",
+      "revision": 7,
+      "contract": {"version": 1, "revision": 7, "obligations": [], "verdict": {"satisfied": [], "residual": [], "inert": []}}
+    },
+    "argument": {
+      "argument_digest": "sha256:argument",
+      "theta": 0.9,
+      "frozen_claims": null,
+      "claims": [{"id":"G1","text":"fixture claim","kind":"needs-data","state":"pass","confidence":0.9,"parent":null,"claim_digest":"sha256:claim","evidence_digest":"sha256:evidence","evidence":[]}],
+      "tickets": [{"seq":1,"model":"judge","harness":"pi","issued_at":"2026-09-12T00:00:00Z","consumed":false}],
+      "text": "Goal: fixture\nG1 [needs-data/pass] fixture claim  claim_digest=sha256:claim evidence_digest=sha256:evidence"
+    }
+  }
+}

@@ -71,10 +71,15 @@ class OperationalState:
     theta: float
     goal: str
     claim_graph_artifact_id: str | None = None
+    # Pointer/revision for the append-only obligation contract history (ADR-0039).
+    contract_artifact_id: str | None = None
+    contract_revision: int = 0
     phase: str = DEFAULT_PHASE
     # --- spawn budget (ADR-17) ---
     max_spawns: int | None = None
     spawns: int = 0
+    reservation_seq: int = 0
+    reservations: tuple[dict, ...] = ()
     # --- scope freeze (ADR-26): the claims already gating at freeze time ---
     frozen_claims: tuple[str, ...] | None = None
     freeze_seq: int | None = None
@@ -83,6 +88,8 @@ class OperationalState:
     route_reason: str = ""
     first_investigation_seq: int | None = None
     stamp_seq: int = 0
+    # Author identity is recorded at StartRun; audit tickets must decorrelate from it.
+    author_actor: dict | None = None
     # --- audit tickets (ADR-20 P6): server-minted spawn nonces + dispatch attribution ---
     audit_tickets: tuple[dict, ...] = ()
     # --- actor dispatch attribution (ADR-24) ---
@@ -108,11 +115,11 @@ class OperationalState:
 
     @classmethod
     def new(cls, *, goal: str, max_passes: int, max_spawns: int | None,
-            theta: float, modes: dict | None) -> OperationalState:
+            theta: float, modes: dict | None, author_actor: dict | None = None) -> OperationalState:
         """A fresh active run at revision 0. Starts clean: no graph pointer, zero passes, phase
         `route` — a new generation is empty by construction (ADR-31)."""
         return cls(status=STATUS_ACTIVE, revision=0, passes=0, max_passes=max_passes,
-                   theta=theta, goal=goal, max_spawns=max_spawns, modes=modes or {})
+                   theta=theta, goal=goal, max_spawns=max_spawns, modes=modes or {}, author_actor=author_actor)
 
     def evolve(self, **changes: object) -> OperationalState:
         """A copy with ``changes`` applied and the wire revision advanced by one. Every state write
@@ -179,9 +186,13 @@ class OperationalState:
             "theta": self.theta,
             "goal": self.goal,
             "claim_graph_artifact_id": self.claim_graph_artifact_id,
+            "contract_artifact_id": self.contract_artifact_id,
+            "contract_revision": self.contract_revision,
             "phase": self.phase,
             "max_spawns": self.max_spawns,
             "spawns": self.spawns,
+            "reservation_seq": self.reservation_seq,
+            "reservations": [dict(r) for r in self.reservations],
             "frozen_claims": (list(self.frozen_claims)
                               if self.frozen_claims is not None else None),
             "freeze_seq": self.freeze_seq,
@@ -189,6 +200,7 @@ class OperationalState:
             "route_reason": self.route_reason,
             "first_investigation_seq": self.first_investigation_seq,
             "stamp_seq": self.stamp_seq,
+            "author_actor": self.author_actor,
             "audit_tickets": [dict(t) for t in self.audit_tickets],
             "dispatches": [dict(d) for d in self.dispatches],
             "modes": self.modes,
@@ -235,6 +247,9 @@ class OperationalState:
                          if isinstance(frozen, list) else None)
         pointer = value.get("claim_graph_artifact_id")
         pointer = pointer if isinstance(pointer, str) else None
+        contract_pointer = value.get("contract_artifact_id")
+        contract_pointer = contract_pointer if isinstance(contract_pointer, str) else None
+        contract_revision = _nonneg_int(value.get("contract_revision"))
         modes = value.get("modes")
         phase = value.get("phase")
         return cls(
@@ -245,9 +260,13 @@ class OperationalState:
             theta=float(theta),
             goal=goal,
             claim_graph_artifact_id=pointer,
+            contract_artifact_id=contract_pointer,
+            contract_revision=contract_revision,
             phase=phase if phase in PHASES else DEFAULT_PHASE,
             max_spawns=_opt_int(value.get("max_spawns")),
             spawns=_nonneg_int(value.get("spawns")),
+            reservation_seq=_nonneg_int(value.get("reservation_seq")),
+            reservations=_decode_reservations(value.get("reservations")),
             frozen_claims=frozen_claims,
             freeze_seq=_opt_int(value.get("freeze_seq")),
             route_seq=_opt_int(value.get("route_seq")),
@@ -255,6 +274,7 @@ class OperationalState:
                           if isinstance(value.get("route_reason"), str) else ""),
             first_investigation_seq=_opt_int(value.get("first_investigation_seq")),
             stamp_seq=_nonneg_int(value.get("stamp_seq")),
+            author_actor=(value.get("author_actor") if isinstance(value.get("author_actor"), dict) else None),
             audit_tickets=_decode_tickets(value.get("audit_tickets")),
             dispatches=_decode_dispatches(value.get("dispatches")),
             modes=modes if isinstance(modes, dict) else {},
@@ -315,11 +335,31 @@ def _decode_tickets(value: object) -> tuple[dict, ...]:
             continue
         if isinstance(seq, bool) or not isinstance(seq, int):
             continue
-        ticket = {"nonce": nonce, "seq": seq, "consumed": bool(t.get("consumed", False))}
+        ticket = {"nonce": nonce, "seq": seq, "consumed": bool(t.get("consumed", False)),
+                  "void": bool(t.get("void", False))}
+        # Ticket attribution is operational audit metadata. Preserve only typed values so a corrupt
+        # record cannot fabricate an actor, while retaining enough information for GetArgument's
+        # nonce-free public ticket projection.
+        for key in ("model", "harness"):
+            if isinstance(t.get(key), str):
+                ticket[key] = t[key]
+        if t.get("issued_at") is None or isinstance(t.get("issued_at"), (str, int, float)):
+            ticket["issued_at"] = t.get("issued_at")
         if isinstance(t.get("actor"), dict):
             ticket["actor"] = t["actor"]
+        if isinstance(t.get("reservation_id"), str):
+            ticket["reservation_id"] = t["reservation_id"]
         out.append(ticket)
     return tuple(out)
+
+
+def _decode_reservations(value: object) -> tuple[dict, ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple({"id": item["id"], "state": item.get("state", "reserved")}
+                 for item in value if isinstance(item, dict)
+                 and isinstance(item.get("id"), str)
+                 and item.get("state", "reserved") in {"reserved", "void"})
 
 
 def _decode_dispatches(value: object) -> tuple[dict, ...]:
