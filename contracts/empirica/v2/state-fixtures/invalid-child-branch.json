@@ -1,0 +1,36 @@
+{
+  "protocol": "empirica/v2",
+  "state_schema": "empirica.run/2",
+  "goal": "Prove child branch shape is rejected by schema.",
+  "status": "active",
+  "modes": {
+    "multi_provider": false,
+    "cli_exec": false
+  },
+  "budgets": {
+    "max_passes": 1,
+    "passes_used": 0,
+    "max_spawns": 0,
+    "spawns_used": 0
+  },
+  "selected_graph_artifact_id": null,
+  "frozen_claim_ids": null,
+  "route_stamp": null,
+  "investigation_stamp": null,
+  "stamp_seq": 0,
+  "last_derivation_digest": null,
+  "children": [
+    {
+      "child_id": "child-bad",
+      "purpose": "audit",
+      "state": "reserved",
+      "spent": true,
+      "refunded": false,
+      "deadline": null,
+      "native_id": null,
+      "first_terminal_fingerprint": null,
+      "capability_ref": "cap-001"
+    }
+  ],
+  "committed_artifact_head_id": null
+}

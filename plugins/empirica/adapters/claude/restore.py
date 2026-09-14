@@ -1,4 +1,4 @@
-"""Inactive ``SessionStart:compact`` translation through ``RestoreRun``.
+"""Inactive ``SessionStart:compact`` translation through exact v2 ``RestoreRun``/``GetArgument``.
 
 The application snapshot is the sole source of resume state.  Rendering treats every returned
 field as untrusted run data: it is delimited, JSON encoded, and explicitly framed as data rather
@@ -9,11 +9,9 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 
-from .correlation import request_id as new_request_id
+from .correlation import PROTOCOL, request_id as new_request_id
 from .selector import context_from_payload
 from .transport import BridgeTransport, Transport
-
-PROTOCOL = "empirica/v1"
 
 
 def _handle(run_id: object) -> str:
@@ -33,13 +31,31 @@ def build_restore_request(
     }
 
 
+def build_get_argument_request(
+    payload: Mapping[str, object], run_id: str, *, correlation_id: str | None = None,
+) -> dict:
+    context_from_payload(payload)
+    return {
+        "protocol": PROTOCOL,
+        "request_id": correlation_id or new_request_id(payload, "get-argument"),
+        "command": {"type": "GetArgument", "run_id": _handle(run_id)},
+    }
+
+
 def dispatch_restore(
     payload: Mapping[str, object], run_id: str, *, transport: Transport | None = None,
     correlation_id: str | None = None,
 ) -> dict:
-    context = context_from_payload(payload)
     request = build_restore_request(payload, run_id, correlation_id=correlation_id)
-    return (transport if transport is not None else BridgeTransport(context.cwd)).dispatch(request)
+    return (transport if transport is not None else BridgeTransport()).dispatch(request)
+
+
+def dispatch_get_argument(
+    payload: Mapping[str, object], run_id: str, *, transport: Transport | None = None,
+    correlation_id: str | None = None,
+) -> dict:
+    request = build_get_argument_request(payload, run_id, correlation_id=correlation_id)
+    return (transport if transport is not None else BridgeTransport()).dispatch(request)
 
 
 def restore_context(response: object) -> str:

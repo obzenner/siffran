@@ -1,10 +1,15 @@
-"""Request/response correlation helpers shared by Claude adapter slices."""
+"""Request/response correlation helpers for the Empirica v2 bridge (D6-C).
+
+The request id is transport metadata only; run identity comes exclusively from the
+``StartRun``/``ResolveRun`` selector.  :func:`correlate` proves a bridge response answers the
+request that was sent by checking the exact v2 protocol and request-id echo.
+"""
 from __future__ import annotations
 
 from collections.abc import Mapping
 from uuid import uuid4
 
-_PROTOCOL = "empirica/v1"
+PROTOCOL = "empirica/v2"
 
 
 class CorrelationError(RuntimeError):
@@ -15,7 +20,6 @@ def request_id(payload: Mapping[str, object], operation: str) -> str:
     """Mint a request id, retaining Claude's prompt id as a reviewable correlation hint.
 
     A random suffix keeps repeated hook deliveries distinct even when Claude reuses a prompt id.
-    The id is transport metadata only; run identity comes exclusively from the selector.
     """
     prompt_id = payload.get("prompt_id")
     hint = prompt_id if isinstance(prompt_id, str) and prompt_id else "event"
@@ -24,11 +28,11 @@ def request_id(payload: Mapping[str, object], operation: str) -> str:
 
 
 def correlate(request: Mapping[str, object], response: object) -> dict:
-    """Validate protocol and request-id echo, returning a plain response dictionary."""
+    """Validate the exact v2 protocol and request-id echo, returning the response dictionary."""
     expected = request.get("request_id")
     if not isinstance(response, dict):
         raise CorrelationError("bridge response must be an object")
-    if response.get("protocol") != _PROTOCOL:
+    if response.get("protocol") != PROTOCOL:
         raise CorrelationError("bridge response used an unexpected protocol")
     if not isinstance(expected, str) or not expected or response.get("request_id") != expected:
         raise CorrelationError("bridge response did not echo the request_id")

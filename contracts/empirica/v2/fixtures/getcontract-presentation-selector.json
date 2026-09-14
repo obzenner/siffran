@@ -1,0 +1,15 @@
+{
+  "request": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-getcontract-presentation-selector",
+    "command": {
+      "type": "GetContract",
+      "target": "section",
+      "section_id": "presentation/selector"
+    }
+  },
+  "expected_from_registry": {
+    "target": "section",
+    "section_id": "presentation/selector"
+  }
+}

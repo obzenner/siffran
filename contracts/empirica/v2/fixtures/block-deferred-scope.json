@@ -1,0 +1,90 @@
+{
+  "request": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-deferred",
+    "command": {
+      "type": "EvaluateRun",
+      "run_id": "run-fx",
+      "intent": "report_convergence"
+    }
+  },
+  "expected": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-deferred",
+    "result": {
+      "type": "Block",
+      "run": {
+        "id": "run-fx",
+        "goal": "Prove the public contract is internally consistent.",
+        "status": "active",
+        "modes": {
+          "multi_provider": false,
+          "cli_exec": false
+        },
+        "contract": {
+          "id": "empirica/public",
+          "version": "2.0.0",
+          "relevant_sections": [
+            "freeze"
+          ],
+          "digest": "sha256:49bdf99832e3862a74060e3be8e45ea10b88f5029a0658fde9032a35a1b42b65"
+        },
+        "obligations": {
+          "active": [],
+          "deferred": []
+        },
+        "residuals": [
+          {
+            "code": "freeze.deferred",
+            "parameters": {
+              "claim_ids": [
+                "G-later"
+              ],
+              "deferred_scope_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            },
+            "next_actions": [
+              "residual.accept"
+            ],
+            "sections": [
+              "freeze"
+            ]
+          }
+        ],
+        "freshness": {
+          "changes": []
+        },
+        "children": [],
+        "host": {
+          "profile_id": "claude-code@2.1.270",
+          "tier": "foreground_only",
+          "missing_capabilities": [
+            "host.async_unsupported"
+          ]
+        },
+        "next_actions": [],
+        "untrusted_delimiters": {
+          "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+          "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+        }
+      },
+      "reasons": [
+        {
+          "code": "freeze.deferred",
+          "parameters": {
+            "claim_ids": [
+              "G-later"
+            ],
+            "deferred_scope_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          },
+          "next_actions": [
+            "residual.accept"
+          ],
+          "sections": [
+            "freeze"
+          ],
+          "message": "Deferred claims are residual; accept."
+        }
+      ]
+    }
+  }
+}

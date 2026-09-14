@@ -1,0 +1,15 @@
+{
+  "request": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-getcontract-section",
+    "command": {
+      "type": "GetContract",
+      "target": "section",
+      "section_id": "evidence/freshness"
+    }
+  },
+  "expected_from_registry": {
+    "target": "section",
+    "section_id": "evidence/freshness"
+  }
+}

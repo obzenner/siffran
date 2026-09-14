@@ -52,14 +52,13 @@ the exact failure this plugin exists to prevent.
 - **Whether a citation is TRUE.** A hook can verify a citation was recorded; it cannot read the
   source. A fabricated URL or an irrelevant quote passes the hook. **This is the auditor's job**
   (`empirica-auditor` re-reads every citation) — an agentic sensor, not a deterministic gate.
-- **Any artifact, against deliberate forgery.** The claim graph, evidence leaves, spike records,
-  audit tickets and verdicts are all unsigned JSON in a directory the agent holds Write on, and
-  no hook intercepts Write/Edit. An agent that *chooses* to hand-write them can converge a run —
-  independently verified end to end. The nonce binds a verdict to a recorded spawn but is
-  **computable, not secret** (`sha256(run_id:audit:seq)`, both inputs readable), so it is not
-  authentication. What the gates actually buy: accidental and lazy skipping becomes impossible,
-  and deliberate fabrication becomes a distinct, visible act that leaves artifacts on disk. That
-  is file-level trust (ADR-19 G3) — not a security boundary.
+- **Any artifact, against deliberate forgery.** The claim graph, evidence, spike records, audit
+  verdicts, and attribution are all stored artifacts, and the author submits them as trusted,
+  host-observed actions through the `empirica/v2` bridge — never directly. The host's trusted
+  ingress is private; the author never holds a capability reference or nonce to admit a verdict
+  by hand. What the gates actually buy: accidental and lazy skipping becomes impossible, and
+  deliberate fabrication becomes a distinct, visible act that leaves artifacts on disk. That is
+  file-level trust (ADR-19 G3) — not a security boundary.
 - **Claims you never wrote down.** The graph gates the claims in it. A material unknown that was
   never recorded, or a claim detached from the goal, is invisible to every hook. Mitigations:
   the auditor compares the graph against the intent (rubric item 8), and route-before-investigate
@@ -100,28 +99,33 @@ the root of every claim in the run.
 
 You do **not** apply the flags yourself. The active host adapter parses the invocation and sends the
 resolved flags in `StartRun`; the application stores them in the operational document under
-`~/.empirica-plugin/`. Read them only through `RestoreRun` on the `empirica/v1` adapter API.
+`~/.empirica-plugin/`. Read them only through `RestoreRun` on the `empirica/v2` adapter API.
 A typo such as `--cli-exex` enables nothing and must be surfaced plainly.
 
-**Runtime boundary:** on Claude use `adapters/claude`; on Codex use `adapters/codex` and
-`adapters.codex.knowledge`; in both cases use the host's `BridgeTransport` for every graph,
-evidence, spike, regate, route, freeze, audit-ticket, verdict, and restore operation. Operational
-state belongs only under `~/.empirica-plugin/`; knowledge belongs only under `refs/empirica/*`.
-Never create, read, or edit runtime state below `.claude/`, `.codex/`, or `.pi/`, and never edit
-either store directly. The explicit `make migrate-legacy` command is the sole legacy-path exception.
+**Runtime boundary (empirica/v2):** each host adapter reaches the shared bridge with its own
+fixed exact registry profile (Claude `claude-code@2.1.270`, Codex `codex-cli@0.146.0`) and no
+`cwd`. Trusted ingress — `evidence_leaf`, `attribution`, `child_event`, `audit_verdict` — is
+**private**: the author never submits it directly; the host observes and records it. Removed
+operations (`void_spawn`, `audit_ticket`, `consume` ticket, `phase`) have no builder and fail closed
+locally. Operational state belongs only under `~/.empirica-plugin/`; knowledge belongs only under
+`refs/empirica/*`. Never create, read, or edit runtime state below `.claude/`, `.codex/`, or
+`.pi/`, and never edit either store directly.
 
-**Pi runtime boundary:** The Pi adapter parses leading ADR-28 mode flags, persists and re-injects the opaque Empirica run handle through Pi session entries, and exposes the persisted resolved `run.goal`, `run.modes`, and current `run.contract` view to the model through `empirica_status` and deterministic compaction summaries. It registers `report_convergence` as a real model-callable tool and enforces it at Pi’s `tool_call` boundary, failing closed on transport faults; it also exposes `empirica_knowledge` for the same typed ObserveAction payloads as the Claude adapter. A configured `subagent` tool is intercepted for spawn-budget/audit-ticket enforcement, but any spawn outside Pi’s event stream is un-gated. Pi has no completion-veto lifecycle: an agent that never invokes `report_convergence` can complete, so settled nudges are reminders rather than gates. Whether blocked reasons are visible in model context and whether follow-up delivery reliably starts another turn are UNVERIFIED pending a live runtime spike.
+**Pi runtime boundary:** The Pi adapter parses leading ADR-28 mode flags, persists and re-injects the opaque Empirica run handle through Pi session entries, and exposes the persisted resolved `run.goal`, `run.modes`, and current `run.contract` view to the model through `empirica_status` and deterministic compaction summaries. It registers `report_convergence` as a real model-callable tool and enforces it at Pi’s `tool_call` boundary, failing closed on transport faults. A configured `subagent` tool is intercepted for spawn-budget enforcement, but any spawn outside Pi’s event stream is un-gated. Pi has no completion-veto lifecycle: an agent that never invokes `report_convergence` can complete, so settled nudges are reminders rather than gates. Whether blocked reasons are visible in model context and whether follow-up delivery reliably starts another turn are UNVERIFIED pending a live runtime spike.
 
 **Resume contract:** `RestoreRun`, `Block`, and every terminal `Allow` expose the one canonical
 `run.contract` view. It lists every obligation's `must`, provenance, hold, exact witness, and
 per-witness observation; graph counts are telemetry only. Never infer outstanding work from counts,
-history, or a reason string. A terminal Allow also names `run.contract_artifact_id`.
+history, or a reason string.
 
 **Codex activation and sensor boundary:** Codex runs start only when the prompt begins with
 `$empirica` (the namespaced `$empirica:empirica` and legacy `/empirica` spellings are also
-accepted). After classifying the goal, record the route before investigative Bash with
-`python3 -c 'pass' -- --empirica-route '<reason>'`; the trusted `PreToolUse:Bash` hook stamps it
-through the application before the no-op executes. Codex 0.146.0 hosted Responses API WebSearch
+accepted). The adapter retains only the `StartRun` builder (activation) and the `ResolveRun`
+builder; the four hook entrypoints `ResolveRun` through the strict bridge shell and return inert
+when unresolved (D6 no-location run port). Route, investigation, dispatch, child-reserve, audit,
+and convergence-gate operations are D7-D10-owned and **unavailable in the Codex D6 strict shell**;
+the adapter does not record them, does not fabricate an active run handle, and renders the exact
+Fault code (`unsupported`) on activation failure. Codex 0.146.0 hosted Responses API WebSearch
 does not pass through `PreToolUse`, so its ordering is UNVERIFIED; cite its result normally, but do
 not claim the hook witnessed it. Plugin installation also does not trust hooks: if the relevant
 hashes are not trusted and enabled in `/hooks`, no hook-enforcement claim is valid.
@@ -139,13 +143,13 @@ start investigating. Routing is a commitment made up front, not a label applied 
 to justify a shortcut (ADR-5/20 — the observed inversion).
 
 **Record the announcement** immediately through the active host's route operation before any
-evidence gathering. An agent driving the run by handle uses the handle-based
-`adapters.claude.knowledge.build_route_request(run_id, reason)` (or submits the raw
-`ObserveAction{"kind":"route","reason":...}` directly); the hook adapter's
-`route.build_route_announcement_request` is payload-based and belongs to the `PreToolUse` hook, not
-to an agent holding only a handle (ADR-37). On Codex use the `--empirica-route` no-op witnessed by
-`PreToolUse:Bash`. The application records both route and first investigation with CAS-guarded
-monotone sequence numbers. Skipping the announcement remains a P1 violation — and the route hook now
+evidence gathering. An agent driving the run submits the raw
+`ObserveAction{"kind":"route","reason":...}` through the host's `empirica/v2` bridge; the hook
+adapter's route builder is payload-based and belongs to the `PreToolUse` hook, not to an agent
+holding only a handle (ADR-37). On Claude and Pi hosts the application records both route and first
+investigation with CAS-guarded monotone sequence numbers; on Codex the D6 strict shell does not
+record route, investigation, dispatch, or audit operations — they are D7-D10-owned and
+unavailable. Skipping the announcement remains a P1 violation — and the route hook now
 warns you at run time if you investigate first (ADR-35).
 
 This is a per-dependency split, not a verdict on the whole task. The "known path" is simply the
@@ -154,7 +158,7 @@ case where the initial unknown set is already empty.
 ## Step 2 — Seed the claim graph (state substrate, ADR-22)
 
 Convergence state is a **claim graph**: a GSN assurance argument with in-toto evidence leaves.
-Submit it with the active host's `knowledge.build_graph_request` through `BridgeTransport`. The
+Submit it as an `ObserveAction{"kind":"graph",...}` through the host's `empirica/v2` bridge. The
 application stores immutable knowledge in `refs/empirica/*` and its graph pointer in the operational
 document under `~/.empirica-plugin/`; it is never a worktree file. There are no
 `spec.md`/`plan.md`/`tasks.md` runtime files.
@@ -221,8 +225,8 @@ output, a primary source online. **Recall is not evidence.** Reading a repo and 
 conclusions from training data is zero Fold-1 validation, and every confidence written that way
 is unbacked.
 
-Build each in-toto Statement with the active host's `build_research_request` and submit it through
-`BridgeTransport`:
+Build each in-toto Statement and submit it as an `ObserveAction{"kind":"research",...}` through
+the host's `empirica/v2` bridge:
 
 ```json
 {
@@ -246,9 +250,9 @@ evidence no longer counts, because it answered a different question.
 Research what the check should be and what "correct" looks like **first**, then build it. Run it
 through the harness, which is the sole writer of spike records:
 
-Use the active host's `knowledge.run_spike(...)` to execute the deterministic harness, then submit
-its sealed `SpikeExecution` with `build_spike_request(...)` through `BridgeTransport`. Never write
-a spike verdict or evidence leaf directly.
+Execute the deterministic harness and report the command, exit code, and file bindings; the host
+records the sealed `evidence_leaf` as a trusted, host-observed action. The author never submits the
+trusted ingress directly and never writes a spike verdict or evidence leaf by hand.
 
 `gate` is `pass` iff the command exited 0 — a real subprocess verdict, never your reading of it.
 The record also carries `samples` — how many times the check actually ran — so a reader can tell a
@@ -262,8 +266,8 @@ detection is correct and stays — a digest that ignored whitespace would be wor
 whitespace is semantic in Python, YAML, Makefiles and string literals. What is automated is the
 *recovery*:
 
-Call the active host's `build_regate_requests(...)` and dispatch every returned request through
-`BridgeTransport`.
+Call the active host's re-gate operation and dispatch every returned request through the
+`empirica/v2` bridge.
 
 It re-runs **only** the stale spikes, using the command each record already stores, at the same
 sample count. This is not a way to bless a stale record: every spike is re-executed and its verdict
@@ -397,7 +401,7 @@ finding real things therefore has one terminal path — grind to `max_passes` an
 
 Freeze is the third exit. It commits the run's **scope**:
 
-Submit `ObserveAction(kind="freeze", claims=[...])` through `BridgeTransport`; the application
+Submit `ObserveAction(kind="freeze")` through the host's `empirica/v2` bridge; the application
 makes the first freeze authoritative.
 
 The claims **already gating at that moment** become the set this run must discharge. Claims derived
@@ -433,24 +437,20 @@ Agent(subagent_type="empirica:empirica-auditor", ...)
 
 **The `empirica:` prefix is load-bearing — do not drop it.** A plugin-provided subagent resolves
 only under its plugin-scoped name; the bare `empirica-auditor` raises "Agent type not found",
-so the spawn never happens, no audit ticket is written, and the run can never converge. This is
-the same namespacing trap that once made the skill's own `UserPromptExpansion` matcher silently
-never fire (it must be `^empirica:empirica$`). If the spawn errors with "not found" in a session
-where this plugin was just installed or updated, reload plugins or restart the session — a stale
-session registry can fail to resolve a newly added agent even when the name is correct.
+so the spawn never happens, and the run can never converge. This is the same namespacing trap
+that once made the skill's own `UserPromptExpansion` matcher silently never fire (it must be
+`^empirica:empirica$`). If the spawn errors with "not found" in a session where this plugin was
+just installed or updated, reload plugins or restart the session — a stale session registry can
+fail to resolve a newly added agent even when the name is correct.
 
-All hosts use one audit flow: spawn the auditor; the host reserves the spawn and ticket, obtains
-`GetArgument`, injects the auditor rubric plus rendered dossier plus nonce directly into the **child**
-task, then extracts the child's `empirica-verdict` fenced JSON and records it as `audit_verdict`.
-The author never sees the nonce. A ticket is refused when the recorded auditor model equals the
-recorded concrete author model; unknown attribution and tier aliases are permitted but visibly weaker.
-The Stop gate requires a `pass` verdict whose nonce matches a non-voided auditor spawn and whose
-`claims_reviewed` covers **every** approved claim.
-
-**Codex 0.146.0 limitation:** its hooks presently expose neither mutable child input nor a child's
-final output/transcript. Its adapter can reserve and ticket a requested `spawn_agent`, but cannot
-complete the host-observed round trip, so the obligation correctly remains open. This exact payload
-gap is documented in `adapters/codex/README.md`; do not expose a nonce to work around it.
+All hosts use one audit flow: spawn the auditor; the host reserves the spawn (`child_reserve`),
+obtains `GetArgument`, and injects the auditor rubric plus rendered dossier into the **child**
+task as a trusted, private ingress. The child returns its `empirica-verdict` fenced JSON, and the
+host records it as a trusted `audit_verdict` — a **host-observed** action the author never submits.
+There is no author nonce and no capability fabrication; the verdict is admitted only through the
+host's trusted ingress. The Stop gate requires a `pass` verdict whose `claims_reviewed` covers
+**every** approved claim. Until D8–D10 provide native child binding, a host that cannot observe
+the child's output honestly leaves the audit obligation open.
 
 **The audit is incremental, per claim (ADR-25).** Each `claims_reviewed` entry is
 `{claim_id, claim_digest, evidence_digest}` — the digests the claim had when the auditor read it.
@@ -473,10 +473,9 @@ everything.
 
 A failing audit therefore no longer costs you the whole graph: fix what it found, re-audit **those**
 claims, and the untouched ones stay covered. The block message names exactly which claims are
-unreviewed, reworded, or re-evidenced. Both digests come from `evidence.py` and the auditor calls
-those functions rather than hashing by hand — one definition, so the writer and the checker cannot
-drift. There is **no backwards compatibility**: a verdict listing bare claim-id strings reads as
-absent, and absent blocks.
+unreviewed, reworded, or re-evidenced. Both digests are computed by the application from the
+sealed artifacts — one definition, so the writer and the checker cannot drift. There is **no
+backwards compatibility**: a verdict listing bare claim-id strings reads as absent, and absent blocks.
 
 **You cannot satisfy this by writing the verdict yourself.** The author grading its own work is
 the failure P6 exists to close (ADR-13; moai-adk's `plan-auditor` split). If the audit fails,
@@ -568,8 +567,8 @@ forward: it is the input to the next run, not a footnote.
 
 | Tier | Artifacts | Home |
 |---|---|---|
-| **Operational** | status, phase, modes, spawn budget, audit tickets, graph pointer | `~/.empirica-plugin/` (or `$EMPIRICA_HOME`), accessed only through the API |
-| **Knowledge** | claim graphs, in-toto evidence, audit verdicts, attribution | local Git shadow refs under `refs/empirica/*`, accessed only through the API |
+| **Operational** | status, modes, spawn budget, graph pointer | `~/.empirica-plugin/` (or `$EMPIRICA_HOME`), accessed only through the API |
+| **Knowledge** | claim graphs, in-toto evidence, audit verdicts (host-observed), attribution | local Git shadow refs under `refs/empirica/*`, accessed only through the API |
 | **Committable** (SSOT) | the goal's resolved output (code, document, review, …); ADRs when the intent is a decision; tests | git, at the intent's location |
 
 ## Rules

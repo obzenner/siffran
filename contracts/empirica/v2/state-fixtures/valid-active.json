@@ -1,0 +1,36 @@
+{
+  "protocol": "empirica/v2",
+  "state_schema": "empirica.run/2",
+  "goal": "Prove strict v2 state codec roundtrip with no defaults.",
+  "status": "active",
+  "modes": {
+    "multi_provider": true,
+    "cli_exec": false
+  },
+  "budgets": {
+    "max_passes": 10,
+    "passes_used": 3,
+    "max_spawns": 5,
+    "spawns_used": 1
+  },
+  "selected_graph_artifact_id": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "frozen_claim_ids": null,
+  "route_stamp": 2,
+  "investigation_stamp": 3,
+  "stamp_seq": 5,
+  "last_derivation_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "children": [
+    {
+      "child_id": "child-001",
+      "purpose": "audit",
+      "state": "reserved",
+      "spent": false,
+      "refunded": false,
+      "deadline": null,
+      "native_id": null,
+      "first_terminal_fingerprint": null,
+      "capability_ref": "cap-001"
+    }
+  ],
+  "committed_artifact_head_id": null
+}

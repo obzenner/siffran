@@ -1,15 +1,27 @@
 #!/usr/bin/env python3
-"""The shared JSON bridge between any host adapter and the Empirica core (ADR-30/31/32).
+"""The shared JSON bridge between any host adapter and the Empirica v2 core (ADR-30/31/32, D6-C).
 
-A host adapter — the Pi extension in ``pi/src`` over stdio, or the Claude Code hooks in
-``hooks/`` in-process — speaks the ``empirica/v1`` contract but owns no domain rules. This
-module is the single transport target that runs the host-neutral
-:class:`application.EmpiricaService` against the real persistence adapters, so there is exactly
-one place that wires the core to storage:
+A host adapter — the Pi extension over stdio, or the Claude/Codex hooks in-process — speaks the
+``empirica/v2`` contract but owns no domain rules. This module is the single transport target that
+composes the host-neutral ``application.v2`` service, so there is exactly one place that wires the
+core to storage:
 
     request envelope (dict)
-      -> EmpiricaService.handle(request)            (all decisions live here)
+      -> application.v2 service (composed with an explicit exact registry profile)
       -> response envelope (dict)
+
+D7 composition boundary: the bridge composes ``application.v2`` with the hardened located run
+facade and Git artifact repository. Public handles are decoded only by the strict ``er2`` codec;
+raw selectors are hashed into safe storage IDs and no selector index or legacy decoder exists.
+
+Each host supplies an exact registry ``profile_id`` at bridge construction, never in a public
+request. The generic bridge has no host default. Missing, malformed, or unknown profile returns
+correlated v2 ``unavailable``/closed and never projects another host's facts.
+
+Invalid requests are validated by ``application.protocol.dispatch_request`` and return
+``invalid_request``/closed BEFORE profile composition. The bridge does not catch an invalid
+request and relabel it unavailable. Bridge construction/configuration errors return exact v2
+``unavailable``/closed.
 
 Two entry points, one service:
 
@@ -17,17 +29,13 @@ Two entry points, one service:
   hooks use this directly (they are already Python), so they reach the same typed operations the
   Pi adapter reaches over the wire — no second definition of the rules, no host branch in the core.
 * :func:`main` is the stdio entry the Pi transport spawns as a subprocess: read one JSON request
-  from stdin, write one JSON response to stdout, exit 0.
-
-State lives only under the machine-local home (``$EMPIRICA_HOME`` or ``~/.empirica-plugin``,
-ADR-31) via :class:`adapters.state.FilesystemRunRepository`; knowledge artifacts live under Git
-shadow refs via :class:`adapters.git.GitArtifactRepository`. Nothing here writes host-specific
-runtime directories or the working tree.
+  from stdin, write one JSON response to stdout, exit 0. The exact caller-supplied profile is
+  taken from ``EMPIRICA_HOST_PROFILE_ID`` only; there is no default.
 
 Both entry points always yield a well-formed response envelope and never raise into the caller:
-any construction/dispatch error is mapped to a closed ``Fault`` so a caller's gate fails closed
-rather than parsing a crash. This is a transport, not a policy: it adds no rule the core does not
-already enforce.
+any construction/dispatch error is mapped to a closed Fault so a caller's gate fails closed
+rather than parsing a crash. This is a transport, not a policy: it adds no rule the core does
+not already enforce.
 """
 from __future__ import annotations
 
@@ -41,91 +49,89 @@ _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 if str(_PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_ROOT))
 
-API_VERSION = "empirica/v1"
+from application import protocol as _proto  # noqa: E402
+from application import v2 as _v2  # noqa: E402
+from adapters.execution import FilesystemWorkspace, SubprocessSpikeHarness  # noqa: E402
+from adapters.git.artifact_repo import GitArtifactRepository  # noqa: E402
+from adapters.state.located import LocatedRunRepository  # noqa: E402
+
+_PROTOCOL = _proto._PROTOCOL
+_PROFILES = _proto._PROFILES
 
 
-def _fault_envelope(request_id: str, message: str) -> dict:
-    """A closed Fault the caller's gate treats as a denial (never a silent pass)."""
+def _fault(code: str, request_id: str) -> dict:
+    """A schema-valid v2 Fault envelope (closed). The caller's gate treats it as a denial."""
     return {
-        "protocol": API_VERSION,
-        "request_id": request_id or "unknown",
-        "result": {
-            "type": "Fault",
-            "code": "unavailable",
-            "message": message,
-            "fail_direction": "closed",
-        },
+        "protocol": _PROTOCOL,
+        "request_id": request_id,
+        "result": {"type": "Fault", "code": code, "fail_direction": "closed"},
     }
 
 
-def build_service(cwd: Path | None = None):
-    """Wire the service against the real persistence adapters. Operational state is machine-local
-    (``$EMPIRICA_HOME``); knowledge artifacts are Git-backed and rooted at ``cwd`` (the workspace,
-    the bridge's working directory by default)."""
-    from adapters.git import GitArtifactRepository
-    from adapters.state import FilesystemRunRepository, GenerationAllocator
-    from application import EmpiricaService
+def build_service(profile_id: str):
+    """Compose the v2 service with an explicit exact registry ``profile_id`` (D6-C §4).
 
-    runs = FilesystemRunRepository()
-    artifacts = GitArtifactRepository(Path(cwd) if cwd is not None else Path.cwd())
-    return EmpiricaService(runs, artifacts, GenerationAllocator(runs),
-                           stall_deadline_sec=_stall_deadline_sec(),
-                           max_idle_stops=_max_idle_stops())
-
-
-def _stall_deadline_sec() -> float:
-    """The wall-clock stall deadline (seconds) from ``EMPIRICA_STALL_DEADLINE_SEC``; default 1800.0.
-    A missing, unparseable, or non-positive value falls back to the default rather than disabling the
-    bound — an idle wait must always be able to terminate the run."""
-    raw = os.environ.get("EMPIRICA_STALL_DEADLINE_SEC")
-    if raw is None:
-        return 1800.0
-    try:
-        value = float(raw)
-    except (TypeError, ValueError):
-        return 1800.0
-    return value if value > 0 else 1800.0
+    Requires an explicit exact ``profile_id``; there is no host default. A missing (``None``) or
+    unknown profile raises :class:`ValueError`. The service uses the hardened machine-local run
+    repository and a Git-backed append-only artifact store rooted at ``EMPIRICA_REPO_DIR`` or cwd.
+    """
+    if not isinstance(profile_id, str) or not profile_id:
+        raise ValueError("an explicit exact registry profile_id is required")
+    if profile_id not in _PROFILES:
+        raise ValueError(f"unknown host profile_id: {profile_id!r}")
+    runs = LocatedRunRepository()
+    repo_dir = Path(os.environ.get("EMPIRICA_REPO_DIR", Path.cwd()))
+    artifacts = GitArtifactRepository(repo_dir)
+    return _v2.compose(
+        workspace=FilesystemWorkspace(Path.cwd()), harness=SubprocessSpikeHarness(),
+        runs=runs, artifacts=artifacts,
+        host=None, profile_id=profile_id, limits={}, clock=None,
+    )
 
 
-def _max_idle_stops() -> int:
-    """The clock-free consecutive-no-progress backstop from ``EMPIRICA_MAX_IDLE_STOPS``; default 50.
-    A missing, unparseable, or non-positive value falls back to the default rather than disabling the
-    bound — a clockless caller (no ``observed_at``) must still be able to terminate an idle run."""
-    raw = os.environ.get("EMPIRICA_MAX_IDLE_STOPS")
-    if raw is None:
-        return 50
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        return 50
-    return value if value > 0 else 50
+def trusted_child_event(profile_id: str, run_id: str, child_id: str, event: dict) -> dict:
+    """Host-adapter-only lifecycle ingress; never exposed by the public wire dispatcher."""
+    return build_service(profile_id).trusted_child_event(
+        run_id=run_id, child_id=child_id, event=event)
 
 
-def handle(request: object, *, cwd: Path | None = None) -> dict:
-    """Run one ``empirica/v1`` request against the real adapters, in-process, returning the
-    response envelope. Never raises: a construction/dispatch failure becomes a closed Fault so an
-    in-process caller (the Claude hooks) gets the same fail-closed transport guarantee the stdio
-    bridge gives the Pi adapter."""
-    request_id = request.get("request_id") if isinstance(request, dict) else None
-    request_id = request_id if isinstance(request_id, str) and request_id else "unknown"
-    try:
-        service = build_service(cwd)
-        return service.handle(request)
-    except Exception as exc:  # noqa: BLE001 - the bridge must never crash the caller's gate
-        return _fault_envelope(request_id, f"empirica core error: {exc}")
+def trusted_audit_verdict(profile_id: str, run_id: str, child_id: str, payload: dict) -> dict:
+    return build_service(profile_id).trusted_audit_verdict(
+        run_id=run_id, child_id=child_id, payload=payload)
+
+
+def trusted_attribution(profile_id: str, run_id: str, payload: dict) -> dict:
+    return build_service(profile_id).trusted_attribution(run_id=run_id, payload=payload)
+
+
+def handle(request: object, profile_id: str) -> dict:
+    """Run one ``empirica/v2`` request in-process, returning the response envelope. Never
+    raises: a construction/dispatch failure becomes a closed Fault. Invalid requests return
+    ``invalid_request``/closed BEFORE profile composition. A missing/unknown profile on a valid
+    request returns correlated ``unavailable``/closed. The handler calls the service's private
+    ``_dispatch_validated`` seam (not ``dispatch``) so the request and response are validated
+    exactly once by this outer protocol gateway.
+    """
+    def handler(envelope: dict) -> dict:
+        try:
+            service = build_service(profile_id)
+        except ValueError:
+            return _fault("unavailable", envelope["request_id"])
+        return service._dispatch_validated(envelope)
+
+    return _proto.dispatch_request(request, handler)
 
 
 def main() -> int:
+    profile_id = os.environ.get("EMPIRICA_HOST_PROFILE_ID")
     raw = sys.stdin.read()
     try:
         request = json.loads(raw)
     except (ValueError, TypeError):
-        # A malformed request still gets a correlated fault; the service would do the same, but it
-        # cannot run if we cannot even decode the envelope.
-        json.dump(_fault_envelope("unknown", "request was not valid JSON"), sys.stdout)
-        return 0
-
-    json.dump(handle(request), sys.stdout)
+        # Route the non-envelope through handle/protocol gateway: invalid_request/closed
+        # with request_id "invalid-request" (no direct duplicate fault).
+        request = None
+    json.dump(handle(request, profile_id), sys.stdout)
     return 0
 
 

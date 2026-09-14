@@ -1,25 +1,34 @@
-"""Active Claude lifecycle entry points.
+"""Active Claude lifecycle entry points (D6-C).
 
-Every function in this module translates one native hook event, resolves the run through the
-versioned application API, and maps the typed result back to Claude's process contract.  It never
-reads the operational store, Git refs, or host-specific runtime directories directly.
+Each function translates one native hook event, dispatches an exact v2 request through the shared
+bridge, and maps the typed result back to Claude's process contract with honest native
+unsupported/fail-closed behavior.  Run identity/location is D7-owned: at D6 the no-location run
+port reports every opaque ID unresolved, so ``ResolveRun`` returns unsupported/closed and no run
+handle is resolved — state-bearing gates therefore have no active run to enforce and are inert,
+while their fail-closed response mapping (``stop_result``/``spawn_decision``) is retained and
+exercised for the D7+ cases that do return a handle.
+
+Removed operations (``void_spawn``/``audit_ticket``/``consume``/``phase``) and author-submitted
+trusted actions (``evidence_leaf``/``attribution``/``child_event``/``audit_verdict``) are never
+dispatched and never fabricated into another v2 action: the adapter fails closed locally instead.
+No run file, Git ref, or host runtime directory is read directly.
 """
 from __future__ import annotations
 
+import hashlib
 import json
-import re
 import sys
 from collections.abc import Mapping
 
-from .audit import build_audit_verdict_request, child_prompt, verdict_from_final_output
+from adapters import bridge as application_bridge
+from .audit import child_prompt, verdict_from_final_output
 from .completion import dispatch_stop, stop_result
-from .dispatch import bash_command, dispatch_advice, dispatched_harness
+from .dispatch import bash_command, dispatched_harness
 from .restore import dispatch_restore, restore_context
 from .route import dispatch_investigation
-from .run_start import dispatch_start_run
-from .selector import context_from_payload, selector_from_payload
-from .spawn import dispatch_reserve_spawn, spawn_decision
-from .transport import BridgeTransport
+from .run_start import dispatch_resolve, dispatch_start_run
+from .spawn import dispatch_child_reserve, spawn_decision
+from .transport import CLAUDE_PROFILE_ID
 
 
 def _payload() -> dict:
@@ -31,14 +40,15 @@ def _payload() -> dict:
 
 
 def _resolve(payload: Mapping[str, object]) -> tuple[str | None, dict | None]:
-    """Return ``(handle, result)`` using only ResolveRun through the shared bridge."""
-    context = context_from_payload(payload)
-    request = {
-        "protocol": "empirica/v1",
-        "request_id": "claude-resolve",
-        "command": {"type": "ResolveRun", "selector": selector_from_payload(payload)},
-    }
-    response = BridgeTransport(context.cwd).dispatch(request)
+    """Return ``(handle, result)`` using only ``ResolveRun`` through the shared bridge.
+
+    At D6 the no-location run port reports unresolved, so no handle is returned.  Any transport
+    failure is treated as no resolvable run rather than wedging the host event.
+    """
+    try:
+        response = dispatch_resolve(payload, correlation_id="claude-resolve")
+    except Exception:  # noqa: BLE001 - never wedge a host event on transport failure
+        return None, None
     result = response.get("result") if isinstance(response, dict) else None
     run = result.get("run") if isinstance(result, dict) else None
     handle = run.get("id") if isinstance(run, dict) else None
@@ -46,59 +56,14 @@ def _resolve(payload: Mapping[str, object]) -> tuple[str | None, dict | None]:
             result if isinstance(result, dict) else None)
 
 
-def _pretooluse_context(text: str) -> None:
-    """Emit non-blocking additional context the model will see, from a PreToolUse hook (exit 0).
-
-    Claude Code sends exit-0 PreToolUse stderr to the debug log only — the model never sees it
-    (code.claude.com/docs/en/hooks, ADR-35). The model-visible channel is
-    ``hookSpecificOutput.additionalContext`` on stdout; omitting ``permissionDecision`` leaves the
-    tool's normal permission flow untouched, so this warns without blocking or auto-approving."""
-    json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": text}},
-              sys.stdout)
-    sys.stdout.write("\n")
-
-
-def _warn_if_p1_violation(response: object) -> None:
-    """Relay the application's P1 ordering verdict to the model when investigation preceded the
-    route (ADR-35). The verdict/reason already ride on the investigate response's ``run.route``
-    fragment; this surfaces them at the moment of violation instead of only at the audit."""
-    result = response.get("result") if isinstance(response, dict) else None
-    run = result.get("run") if isinstance(result, dict) else None
-    route = run.get("route") if isinstance(run, dict) else None
-    if isinstance(route, dict) and route.get("verdict") == "violation":
-        reason = route.get("reason") or "investigation began before the route was announced"
-        _pretooluse_context(
-            f"empirica P1 violation: {reason} Record your route now via "
-            "ObserveAction(kind='route'); this ordering is what the independent audit fails on "
-            "(ADR-20 P1).")
-
-
-def run_start_main() -> int:
-    """UserPromptExpansion: best-effort activation, always silent and fail open."""
-    payload = _payload()
-    try:
-        dispatch_start_run(payload)
-    except Exception:  # noqa: BLE001 - this event must never wedge prompt expansion
-        pass
-    return 0
-
-
-def _contract_text(result: Mapping[str, object]) -> str:
-    run = result.get("run")
-    contract = run.get("contract") if isinstance(run, Mapping) else None
-    if not isinstance(contract, Mapping):
-        return ""
-    from vendor.obligations import render_text
-    return render_text(contract)
-
-
 def _deny(reason: str, result: Mapping[str, object] | None = None) -> int:
-    text = reason
+    print(reason, file=sys.stderr)
     if result is not None:
-        contract = _contract_text(result)
-        if contract:
-            text += "\n" + contract
-    print(text, file=sys.stderr)
+        run = result.get("run") if isinstance(result, Mapping) else None
+        contract = run.get("contract") if isinstance(run, Mapping) else None
+        if isinstance(contract, Mapping):
+            from vendor.obligations import render_text
+            print(render_text(contract), file=sys.stderr)
     return 2
 
 
@@ -114,232 +79,159 @@ def _launch_is_executable(tool_input: object) -> bool:
     return sum(keys) == 1
 
 
-def _is_auditor(tool_input: Mapping[str, object]) -> bool:
-    return "empirica-auditor" in json.dumps(dict(tool_input), sort_keys=True).lower()
+def _agent_identity(tool_input: Mapping[str, object]) -> tuple[str | None, str | None]:
+    """Return ``(purpose, role_profile)`` as real host inputs, else ``(None, None)``."""
+    purpose = tool_input.get("prompt")
+    purpose = purpose if isinstance(purpose, str) and purpose.strip() else None
+    role_profile = None
+    for key in ("subagent_type", "agent", "subagentType", "agentType", "agent_type"):
+        value = tool_input.get(key)
+        if isinstance(value, str) and value.strip():
+            role_profile = value.strip()
+            break
+    return purpose, role_profile
 
 
-def _auditor_model(tool_input: Mapping[str, object]) -> str:
-    model = tool_input.get("model")
-    if isinstance(model, str) and model.strip():
-        return model.strip()
-    # This is the declared model in agents/empirica-auditor.md, the source of the rubric too.
-    from .audit import _AUDITOR
-    frontmatter = _AUDITOR.read_text(encoding="utf-8").split("---", 2)[1]
-    match = re.search(r"^model:\s*(\S+)", frontmatter, re.MULTILINE)
-    return match.group(1) if match else "empirica-auditor"
+def run_start_main() -> int:
+    """UserPromptExpansion: best-effort activation, always silent and fail open."""
+    payload = _payload()
+    try:
+        dispatch_start_run(payload)
+    except Exception:  # noqa: BLE001 - this event must never wedge prompt expansion
+        pass
+    return 0
 
 
-def _fault_is_our_invalid_request(response: object, operation: str) -> bool:
-    result = response.get("result") if isinstance(response, Mapping) else None
-    if isinstance(result, Mapping) and result.get("type") == "Fault" and result.get("code") == "invalid_request":
-        print(f"empirica adapter bug: {operation} payload rejected: {result.get('message', 'invalid request')}", file=sys.stderr)
-        return True
-    return False
+def _event(state: str, native_id: str, result_digest: str | None = None) -> dict:
+    raw = {"state": state, "native_id": native_id, "result_digest": result_digest}
+    fingerprint = "sha256:" + hashlib.sha256(
+        json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return {**raw, "fingerprint": fingerprint}
 
 
-def _void_spawn(transport: BridgeTransport, handle: str, nonce: str | None = None,
-                reservation_id: str | None = None) -> None:
-    action = {"kind": "void_spawn"}
-    if nonce is not None:
-        action["nonce"] = nonce
-    if reservation_id is not None:
-        action["reservation_id"] = reservation_id
-    transport.dispatch({"protocol": "empirica/v1", "request_id": "claude-void-spawn",
-                        "command": {"type": "ObserveAction", "run_id": handle,
-                                    "action": action}})
+def _argument(handle: str) -> dict | None:
+    response = application_bridge.handle({"protocol": "empirica/v2",
+        "request_id": "claude-audit-argument",
+        "command": {"type": "GetArgument", "run_id": handle}}, CLAUDE_PROFILE_ID)
+    result = response.get("result", {})
+    value = result.get("argument") if result.get("type") == "Allow" else None
+    return value if isinstance(value, dict) else None
 
 
 def spawn_main() -> int:
-    """PreToolUse:Agent: reserve, ticket, and privately inject an auditor's dossier."""
+    """PreToolUse:Agent: reserve a real launch via ``child_reserve``, else inert.
+
+    A real launch with real ``purpose``/``role_profile``/``execution`` dispatches ``child_reserve``;
+    the D6 service returns unsupported/closed (D8 owns admission), which the gate maps to a deny
+    when a handle exists.  Non-launch (list/management/ambiguous) calls are inert.  Missing real
+    inputs fail closed locally.  When an active run exists, a malformed response, a closed
+    ``Fault``, or an adapter exception all deny the native launch — never silently admitted.
+    No ``void_spawn``/``audit_ticket`` is dispatched or fabricated.
+    """
     payload = _payload()
     tool_input = payload.get("tool_input")
     if not _launch_is_executable(tool_input):
         return 0
     assert isinstance(tool_input, Mapping)
+    purpose, role_profile = _agent_identity(tool_input)
+    if not purpose or not role_profile:
+        return _deny("empirica spawn denied: missing real purpose or role profile")
+    is_auditor = "empirica-auditor" in role_profile.lower()
+    reservation_purpose = "audit" if is_auditor else purpose
+    handle, _ = _resolve(payload)
+    if handle is None:
+        return 0  # no active run → no cap to enforce (D8 owns the spawn cap)
     try:
-        handle, _ = _resolve(payload)
-        if handle is None:
-            return 0
-        response = dispatch_reserve_spawn(payload, handle)
-        if _fault_is_our_invalid_request(response, "reserve_spawn"):
-            return 2
+        response = dispatch_child_reserve(
+            payload, handle, purpose=reservation_purpose, role_profile=role_profile, execution="foreground",
+            correlation_id="claude-child-reserve",
+        )
         decision = spawn_decision(response)
         if decision.exit_code:
             return _deny(decision.reason or "empirica spawn denied",
                          response.get("result") if isinstance(response, Mapping) else None)
-        if not _is_auditor(tool_input):
-            return 0
-        transport = BridgeTransport(context_from_payload(payload).cwd)
-        reserve_result = response.get("result") if isinstance(response, Mapping) else None
-        reserve_run = reserve_result.get("run") if isinstance(reserve_result, Mapping) else None
-        reserve_view = reserve_run.get("spawn") if isinstance(reserve_run, Mapping) else None
-        reservation_id = reserve_view.get("reservation_id") if isinstance(reserve_view, Mapping) else None
-        actor = {"model": _auditor_model(tool_input), "harness": "claude-code",
-                 "provider": "anthropic", "source_type": "LLM_JUDGE", "attribution": "declared"}
-        ticket = transport.dispatch({"protocol": "empirica/v1", "request_id": "claude-audit-ticket",
-                                     "command": {"type": "ObserveAction", "run_id": handle,
-                                                 "action": {"kind": "audit_ticket", "actor": actor,
-                                                            "reservation_id": reservation_id,
-                                                            "witnessed": False}}})
-        if _fault_is_our_invalid_request(ticket, "audit_ticket"):
-            if isinstance(reservation_id, str):
-                _void_spawn(transport, handle, reservation_id=reservation_id)
-            return 2
-        ticket_result = ticket.get("result") if isinstance(ticket, Mapping) else None
-        if isinstance(ticket_result, Mapping) and ticket_result.get("type") == "Block":
-            if isinstance(reservation_id, str):
-                _void_spawn(transport, handle, reservation_id=reservation_id)
-            return _deny(str(ticket_result.get("reason") or "empirica audit ticket denied"), ticket_result)
-        if not isinstance(ticket_result, Mapping) or ticket_result.get("type") == "Fault":
-            if isinstance(reservation_id, str):
-                _void_spawn(transport, handle, reservation_id=reservation_id)
-            return _deny(str(ticket_result.get("message") if isinstance(ticket_result, Mapping) else "empirica audit ticket unavailable"), ticket_result if isinstance(ticket_result, Mapping) else None)
-        run = ticket_result.get("run")
-        ticket_view = run.get("ticket") if isinstance(run, Mapping) else None
-        nonce = ticket_view.get("nonce") if isinstance(ticket_view, Mapping) else None
-        if not isinstance(nonce, str) or not nonce:
-            return _deny("empirica audit ticket unavailable")
-        argument_response = transport.dispatch({"protocol": "empirica/v1", "request_id": "claude-get-argument",
-                                                "command": {"type": "GetArgument", "run_id": handle}})
-        if _fault_is_our_invalid_request(argument_response, "GetArgument"):
-            _void_spawn(transport, handle, nonce)
-            return _deny("empirica audit argument unavailable", argument_response.get("result") if isinstance(argument_response, Mapping) else None)
-        argument_result = argument_response.get("result") if isinstance(argument_response, Mapping) else None
-        argument_run = argument_result.get("run") if isinstance(argument_result, Mapping) else None
-        argument = argument_run.get("argument") if isinstance(argument_run, Mapping) else None
-        text = argument.get("text") if isinstance(argument, Mapping) else None
-        if not isinstance(argument_result, Mapping) or argument_result.get("type") in {"Fault", "Block"} or not isinstance(text, str):
-            _void_spawn(transport, handle, nonce)
-            return _deny("empirica audit argument unavailable", argument_result if isinstance(argument_result, Mapping) else None)
-        updated = dict(tool_input)
-        existing = updated.get("prompt")
-        updated["prompt"] = ((str(existing) + "\n\n") if isinstance(existing, str) and existing else "") + child_prompt(text, nonce)
-        json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": updated}}, sys.stdout)
-        sys.stdout.write("\n")
-    except Exception:  # noqa: BLE001 - PreToolUse resource gates fail open on adapter failure
-        return 0
-    return 0
-
-
-def _transcript_final_assistant(path: object) -> str | None:
-    """Best-effort fallback for older payloads missing documented last_assistant_message."""
-    if not isinstance(path, str) or not path:
-        return None
-    final: str | None = None
-    try:
-        for line in open(path, encoding="utf-8"):
-            event = json.loads(line)
-            if not isinstance(event, Mapping):
-                continue
-            message = event.get("message")
-            role = message.get("role") if isinstance(message, Mapping) else event.get("role")
-            if event.get("type") != "assistant" and role != "assistant":
-                continue
-            content = message.get("content") if isinstance(message, Mapping) else event.get("content")
-            if isinstance(content, str):
-                final = content
-            elif isinstance(content, list):
-                final = "\n".join(str(part.get("text", "")) for part in content if isinstance(part, Mapping) and part.get("type", "text") == "text")
-    except (OSError, ValueError, TypeError):
-        return None
-    return final
-
-
-def subagent_stop_main() -> int:
-    """SubagentStop observes an auditor's final answer; it never blocks the child."""
-    payload = _payload()
-    try:
-        if "empirica-auditor" not in str(payload.get("agent_type", "")).lower():
-            return 0
-        handle, _ = _resolve(payload)
-        if handle is None:
-            return 0
-        final = payload.get("last_assistant_message")
-        text = final if isinstance(final, str) else _transcript_final_assistant(payload.get("agent_transcript_path"))
-        verdict = verdict_from_final_output(text)
-        if verdict is None:
-            print("empirica: auditor returned no valid verdict; audit obligation remains open.", file=sys.stderr)
-            return 0
-        response = BridgeTransport(context_from_payload(payload).cwd).dispatch(
-            build_audit_verdict_request(handle, verdict, request_id="claude-audit-verdict"))
-        result = response.get("result") if isinstance(response, Mapping) else None
-        outcome = result.get("type") if isinstance(result, Mapping) else "unavailable"
-        contract = _contract_text(result) if isinstance(result, Mapping) else ""
-        print(f"empirica: host recorded auditor verdict ({verdict.get('verdict', 'unknown')}): {outcome}" +
-              ("\n" + contract if contract else ""), file=sys.stderr)
-    except Exception:  # noqa: BLE001 - SubagentStop is strictly observational
-        return 0
+        if is_auditor:
+            result = response.get("result", {})
+            run = result.get("run", {}) if isinstance(result, Mapping) else {}
+            children = run.get("children", []) if isinstance(run, Mapping) else []
+            child = next((c for c in reversed(children)
+                          if c.get("purpose") == reservation_purpose and c.get("state") == "reserved"), None)
+            argument = _argument(handle)
+            if not isinstance(child, Mapping) or argument is None:
+                return _deny("empirica auditor admission unavailable")
+            child_id = child["child_id"]
+            native_id = str(payload.get("tool_use_id") or child_id)
+            application_bridge.trusted_child_event(
+                CLAUDE_PROFILE_ID, handle, child_id, _event("launching", native_id))
+            application_bridge.trusted_child_event(
+                CLAUDE_PROFILE_ID, handle, child_id, _event("pending", native_id))
+            evidence_ids = [a["artifact_id"] for a in argument.get("artifacts", [])
+                            if a.get("kind") in {"research", "spike"}]
+            model = payload.get("model") if isinstance(payload.get("model"), str) else None
+            application_bridge.trusted_attribution(CLAUDE_PROFILE_ID, handle, {
+                "subject_kind": "covered_actor", "subject_id": "claude-author",
+                "child_id": None, "provider_id": "anthropic" if model else None,
+                "model_id": model, "observed_by": "host",
+                "covered_artifact_ids": evidence_ids})
+            auditor_model = (tool_input.get("model")
+                             if isinstance(tool_input.get("model"), str)
+                             else "claude-opus-4-8")
+            application_bridge.trusted_attribution(CLAUDE_PROFILE_ID, handle, {
+                "subject_kind": "auditor", "subject_id": "claude-auditor",
+                "child_id": child_id, "provider_id": "anthropic",
+                "model_id": auditor_model, "observed_by": "configuration",
+                "covered_artifact_ids": []})
+            updated = dict(tool_input)
+            updated["prompt"] = ((str(updated.get("prompt")) + "\n\n")
+                                 if updated.get("prompt") else "") + child_prompt(argument)
+            json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                              "updatedInput": updated}}, sys.stdout)
+            sys.stdout.write("\n")
+    except Exception:  # noqa: BLE001 - active-run launch failures deny below
+        return _deny("empirica spawn denied: adapter failure")
     return 0
 
 
 def route_main() -> int:
-    """PreToolUse investigative observation: best effort; non-blocking P1 warning to the model."""
+    """PreToolUse: investigative observation; best effort and non-blocking."""
     payload = _payload()
     try:
         handle, _ = _resolve(payload)
         if handle is not None:
-            _warn_if_p1_violation(dispatch_investigation(payload, handle))
+            dispatch_investigation(payload, handle)
     except Exception:  # noqa: BLE001 - observational event never blocks tools
         pass
     return 0
 
 
-def _model_from_command(command: str) -> str | None:
-    match = re.search(r"(?:--model(?:=|\s+)|-m\s+)([^\s'\"]+)", command)
-    return match.group(1) if match else None
-
-
 def dispatch_main() -> int:
-    """PreToolUse:Bash: gate recognised CLI actors and record witnessed attribution."""
+    """PreToolUse:Bash: record a recognized CLI actor dispatch; fail open."""
     payload = _payload()
     try:
-        command = bash_command(payload)
-        harness = dispatched_harness(command)
+        harness = dispatched_harness(bash_command(payload))
         if harness is None:
             return 0
-        handle, result = _resolve(payload)
-        if handle is None or not isinstance(result, dict):
-            return 0
-        context = context_from_payload(payload)
-        restored = dispatch_restore(payload, handle)
-        run = restored.get("result", {}).get("run", {})
-        modes = run.get("snapshot", {}).get("modes", {}) if isinstance(run, dict) else {}
-        if not isinstance(modes, dict) or not modes.get("cli_exec"):
-            return 0
-        reserved = dispatch_reserve_spawn({**payload, "tool_name": "Agent"}, handle)
-        decision = spawn_decision(reserved)
-        if decision.exit_code:
-            return _deny(decision.reason or "empirica CLI dispatch denied",
-                         reserved.get("result") if isinstance(reserved, Mapping) else None)
-        model = _model_from_command(command or "")
-        if model:
-            BridgeTransport(context.cwd).dispatch({
-                "protocol": "empirica/v1", "request_id": "claude-dispatch",
-                "command": {"type": "ObserveAction", "run_id": handle,
-                            "action": {"kind": "dispatch", "witnessed": True,
-                                       "actor": {"model": model, "harness": harness,
-                                                 "source_type": "LLM_JUDGE"}}},
-            })
-        advice = dispatch_advice(command, handle)
+        handle, _ = _resolve(payload)
+        if handle is None:
+            return 0  # no active run → nothing to attribute
+        from .dispatch import dispatch_dispatch
+        _, advice = dispatch_dispatch(payload, handle, correlation_id="claude-dispatch")
         if advice:
-            # exit-0 PreToolUse stderr is invisible to the model (ADR-35); use the context channel.
-            _pretooluse_context(advice)
+            json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                              "additionalContext": advice}}, sys.stdout)
+            sys.stdout.write("\n")
     except Exception:  # noqa: BLE001 - unrecognised/failed Bash classification fails open
         return 0
     return 0
 
 
 def completion_main() -> int:
-    """Stop: fail closed for an active/corrupt run, silent when no run exists."""
+    """Stop: fail closed for an active/blocked run, silent when no run exists."""
     payload = _payload()
     try:
-        handle, resolved = _resolve(payload)
+        handle, _ = _resolve(payload)
         if handle is None:
-            if isinstance(resolved, dict) and resolved.get("type") == "Fault":
-                message = resolved.get("message") or "empirica run lookup failed"
-                print(message, file=sys.stderr)
-                return 2
-            return 0
+            return 0  # no active run to gate (D7 owns run identity/evaluation)
         mapped = stop_result(dispatch_stop(payload, handle))
     except Exception as exc:  # noqa: BLE001 - completion is the fail-closed boundary
         print(f"empirica completion gate unavailable: {exc}", file=sys.stderr)
@@ -362,4 +254,50 @@ def restore_main() -> int:
                 print(context)
     except Exception:  # noqa: BLE001 - restore never wedges session start
         pass
+    return 0
+
+
+def _transcript_final(path: object) -> str | None:
+    if not isinstance(path, str) or not path:
+        return None
+    final = None
+    try:
+        with open(path, encoding="utf-8") as stream:
+            for line in stream:
+                row = json.loads(line)
+                message = row.get("message", {}) if isinstance(row, dict) else {}
+                if message.get("role") == "assistant":
+                    content = message.get("content")
+                    if isinstance(content, str):
+                        final = content
+    except (OSError, ValueError, TypeError):
+        return None
+    return final
+
+
+def subagent_stop_main() -> int:
+    """SubagentStop records a foreground auditor verdict through private application ingress."""
+    payload = _payload()
+    try:
+        if "empirica-auditor" not in str(payload.get("agent_type", "")).lower():
+            return 0
+        handle, result = _resolve(payload)
+        if handle is None or not isinstance(result, Mapping):
+            return 0
+        run = result.get("run", {})
+        children = run.get("children", []) if isinstance(run, Mapping) else []
+        child = next((c for c in reversed(children)
+                      if c.get("purpose") == "audit" and c.get("state") == "pending"), None)
+        output = payload.get("last_assistant_message") or _transcript_final(
+            payload.get("agent_transcript_path") or payload.get("transcript_path"))
+        verdict = verdict_from_final_output(output)
+        if not isinstance(child, Mapping) or verdict is None:
+            print("empirica: auditor returned no valid verdict; audit remains open.", file=sys.stderr)
+            return 0
+        response = application_bridge.trusted_audit_verdict(
+            CLAUDE_PROFILE_ID, handle, child["child_id"], verdict)
+        if response.get("result", {}).get("type") not in {"Allow", "Inert"}:
+            print("empirica: auditor verdict rejected; audit remains open.", file=sys.stderr)
+    except Exception:  # noqa: BLE001 - SubagentStop is observational to the host
+        return 0
     return 0

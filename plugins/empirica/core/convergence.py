@@ -41,17 +41,14 @@ class RunState:
 
     `status`        — "active" | "converged" | "stopped_residual" | "stopped_frozen" | ... , or
                       CORRUPT_STATUS when the manifest could not be parsed.
-    `is_legacy`     — a pre-substrate manifest (spec_path, no graph_path): its state cannot be read.
     `frozen_claims` — the claims that were gating when the run committed its scope (ADR-26), or None
                       when the run is not frozen. `deferred` is derived from this and the graph.
     """
 
-    __slots__ = ("status", "is_legacy", "frozen_claims")
+    __slots__ = ("status", "frozen_claims")
 
-    def __init__(self, status: str, is_legacy: bool = False,
-                 frozen_claims: tuple[str, ...] | None = None):
+    def __init__(self, status: str, frozen_claims: tuple[str, ...] | None = None):
         self.status = status
-        self.is_legacy = is_legacy
         self.frozen_claims = frozen_claims
 
 
@@ -64,7 +61,7 @@ def adjudicate(*, run: RunState | None, graph, theta: float,
       `evidence(node_id, purpose) -> (ok, reason)` — the two-fold evidence verdict, or None for a
           bare structural read (nothing can then approve/discard → fails closed).
       `audit(approved_digests, argument_digest) -> (ok, reason)` — the independent-audit coverage
-          decision (see `core.audit.coverage_check`). Called ONLY when an audit is owed.
+          decision. Called ONLY when an audit is owed.
       `route_verdict` — the P1 ordering verdict `(verdict, reason)` where verdict is
           "ok"|"violation"|"inconclusive".
       `digest_of(node_id) -> {"claim_digest", "evidence_digest"}` — the digests an approved claim
@@ -79,11 +76,6 @@ def adjudicate(*, run: RunState | None, graph, theta: float,
         return Allow(converged=(run.status == "converged"), status="finished")
 
     # --- active run: classify the graph (ADR-19 fail matrix) ---
-    if run.is_legacy and graph is None:
-        return Allow(converged=False, status="legacy",
-                     note=("NON-CONVERGED: this run predates the claim-graph substrate (ADR-22) "
-                           "and cannot be evaluated by the current core. Start a fresh run on the "
-                           "new substrate."))
     if graph is None:
         return Fault("active run but the claim graph is missing; refusing to stop (fail closed)")
     if graph == claims.CORRUPT:

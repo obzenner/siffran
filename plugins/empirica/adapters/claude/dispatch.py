@@ -1,9 +1,9 @@
-"""Inactive ``PreToolUse:Bash`` actor-dispatch attribution translation.
+"""Inactive ``PreToolUse:Bash`` actor-dispatch translation to exact v2 ``dispatch``.
 
 Classification is intentionally conservative: only an actor CLI in command position (or behind a
-small transparent-wrapper set) plus its execution flag counts.  Ordinary Bash is inert.  The caller
-supplies the dispatcher-side actor it selected; the application operation forces CLI attribution to
-``witnessed`` and persists it under CAS.
+small transparent-wrapper set) plus its execution flag counts.  Ordinary Bash is inert.  The
+adapter emits only ``{kind: "dispatch", target, claim_id?}``; actor/witnessed telemetry is not
+public admission (D6-C spec §3/C2).
 """
 from __future__ import annotations
 
@@ -12,12 +12,11 @@ import shlex
 from collections.abc import Mapping
 from pathlib import Path
 
-from .correlation import request_id as new_request_id
+from .correlation import PROTOCOL, request_id as new_request_id
 from .route import observed_at
 from .selector import context_from_payload
 from .transport import BridgeTransport, Transport
 
-PROTOCOL = "empirica/v1"
 DISPATCH_SIGNATURES = {
     "claude": ("-p", "--print"),
     "codex": ("exec",),
@@ -83,57 +82,47 @@ def dispatch_advice(command: object, run_id: str) -> str | None:
 
 
 def build_dispatch_request(
-    payload: Mapping[str, object], run_id: str, actor: Mapping[str, object], *,
-    claim_id: str | None = None, correlation_id: str | None = None,
+    payload: Mapping[str, object], run_id: str, *, claim_id: str | None = None,
+    correlation_id: str | None = None,
 ) -> dict | None:
     """Build ``ObserveAction(dispatch)`` for a Bash actor invocation, else ``None``.
 
-    ``actor`` is dispatcher-side input, not actor self-report.  Harness and source type are filled
-    when omitted; model/provider fields are passed through for application validation.  CLI exec is
-    marked witnessed because this adapter observed the exact process the dispatcher selected.
+    Only ``target`` (the dispatched actor CLI) and an optional ``claim_id`` are emitted; no actor
+    or witnessed telemetry is fabricated as public admission.
     """
     context_from_payload(payload)
     command_text = bash_command(payload)
     harness = dispatched_harness(command_text)
     if harness is None:
         return None
-    if not isinstance(actor, Mapping):
-        raise ValueError("actor must be a mapping supplied by the dispatcher")
-    typed_actor = dict(actor)
-    typed_actor.setdefault("source_type", "LLM_JUDGE")
-    typed_actor.setdefault("harness", harness)
-    action: dict = {"kind": "dispatch", "actor": typed_actor, "witnessed": True}
+    action: dict = {"kind": "dispatch", "target": harness}
     if claim_id is not None:
         if not isinstance(claim_id, str):
             raise ValueError("claim_id must be a string or null")
         if claim_id:
             action["claim_id"] = claim_id
-    envelope_command: dict = {
-        "type": "ObserveAction", "run_id": _handle(run_id), "action": action,
-    }
+    command: dict = {"type": "ObserveAction", "run_id": _handle(run_id), "action": action}
     stamp = observed_at(payload)
     if stamp is not None:
-        envelope_command["observed_at"] = stamp
+        command["observed_at"] = stamp
     return {
         "protocol": PROTOCOL,
         "request_id": correlation_id or new_request_id(payload, "dispatch"),
-        "command": envelope_command,
+        "command": command,
     }
 
 
-def dispatch_actor(
-    payload: Mapping[str, object], run_id: str, actor: Mapping[str, object], *,
-    claim_id: str | None = None, transport: Transport | None = None,
-    correlation_id: str | None = None,
+def dispatch_dispatch(
+    payload: Mapping[str, object], run_id: str, *, claim_id: str | None = None,
+    transport: Transport | None = None, correlation_id: str | None = None,
 ) -> tuple[dict | None, str | None]:
     """Dispatch typed attribution and return ``(response, advice)`` for the host to surface."""
-    context = context_from_payload(payload)
+    context_from_payload(payload)
     request = build_dispatch_request(
-        payload, run_id, actor, claim_id=claim_id, correlation_id=correlation_id,
+        payload, run_id, claim_id=claim_id, correlation_id=correlation_id,
     )
     command = bash_command(payload)
     advice = dispatch_advice(command, run_id)
     if request is None:
         return None, None
-    target = transport if transport is not None else BridgeTransport(context.cwd)
-    return target.dispatch(request), advice
+    return (transport if transport is not None else BridgeTransport()).dispatch(request), advice

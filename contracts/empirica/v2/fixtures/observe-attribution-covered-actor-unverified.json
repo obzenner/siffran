@@ -1,0 +1,174 @@
+{
+  "request": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-attr-unverified",
+    "command": {
+      "type": "ObserveAction",
+      "run_id": "run-fx",
+      "action": {
+        "kind": "attribution",
+        "trusted": {
+          "capability_ref": "<redacted>",
+          "boundary": "host"
+        },
+        "payload": {
+          "subject_kind": "covered_actor",
+          "subject_id": "author-1",
+          "child_id": null,
+          "provider_id": null,
+          "model_id": null,
+          "observed_by": "host",
+          "covered_artifact_ids": [
+            "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+          ]
+        }
+      }
+    }
+  },
+  "expected": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-attr-unverified",
+    "result": {
+      "type": "Allow",
+      "converged": false,
+      "run": {
+        "id": "run-fx",
+        "goal": "Prove the public contract is internally consistent.",
+        "status": "active",
+        "modes": {
+          "multi_provider": false,
+          "cli_exec": false
+        },
+        "contract": {
+          "id": "empirica/public",
+          "version": "2.0.0",
+          "relevant_sections": [
+            "evidence/research",
+            "evidence/spike",
+            "audit"
+          ],
+          "digest": "sha256:49bdf99832e3862a74060e3be8e45ea10b88f5029a0658fde9032a35a1b42b65"
+        },
+        "obligations": {
+          "active": [],
+          "deferred": []
+        },
+        "residuals": [],
+        "freshness": {
+          "changes": []
+        },
+        "children": [],
+        "host": {
+          "profile_id": "claude-code@2.1.270",
+          "tier": "foreground_only",
+          "missing_capabilities": [
+            "host.async_unsupported"
+          ]
+        },
+        "next_actions": [],
+        "untrusted_delimiters": {
+          "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+          "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+        }
+      },
+      "argument": {
+        "root_claim_id": "G0",
+        "argument_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "goal_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "frozen_scope_digest": null,
+        "deferred_scope_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "untrusted_delimiters": {
+          "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+          "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+        },
+        "claims": [
+          {
+            "claim_id": "G0",
+            "text": "Root",
+            "wording_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": "approved",
+            "gating": true,
+            "evidence_digest": "sha256:19bb853825d02234b33f1bc5a6eec6d6486a22b7af28669447c8aaaf9ec78756",
+            "active_evidence_ids": [
+              "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+              "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "kind": "needs-experiment"
+          }
+        ],
+        "edges": [],
+        "artifacts": [
+          {
+            "sequence": 0,
+            "artifact_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "claim_id": "G0",
+            "claim_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "kind": "research",
+            "statement_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "active": true,
+            "outcome": "supporting",
+            "source_kind": "web",
+            "source_ref": "https://example.test/s"
+          },
+          {
+            "sequence": 1,
+            "artifact_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+            "claim_id": "G0",
+            "claim_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "kind": "spike_request",
+            "statement_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "harness_request_id": "h1",
+            "command": "pytest -q tests/a_test.py",
+            "command_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "dependent_files": [
+              "src/a.py",
+              "tests/a_test.py"
+            ],
+            "prerequisite_research_ids": [
+              "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+            ]
+          },
+          {
+            "sequence": 2,
+            "artifact_id": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+            "claim_id": "G0",
+            "claim_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "kind": "spike",
+            "statement_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "active": true,
+            "outcome": "pass",
+            "harness_request_id": "h1",
+            "command": "pytest -q tests/a_test.py",
+            "command_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "prerequisite_research_ids": [
+              "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+            ],
+            "file_bindings": [
+              {
+                "path": "src/a.py",
+                "sha256": "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+              },
+              {
+                "path": "tests/a_test.py",
+                "sha256": "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+              }
+            ],
+            "exit_code": 0,
+            "spike_gate": "pass",
+            "supersedes": null
+          }
+        ],
+        "audit": {
+          "state": "required",
+          "independence": "unverified",
+          "reviewed_argument_digest": null,
+          "reviewed_goal_digest": null,
+          "reviewed_frozen_scope_digest": null,
+          "reviewed_deferred_scope_digest": null,
+          "reviewed_claims": []
+        }
+      }
+    }
+  }
+}

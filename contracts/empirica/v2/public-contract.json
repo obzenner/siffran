@@ -1,0 +1,380 @@
+{
+  "id": "empirica/public",
+  "version": "2.0.0",
+  "protocol": "empirica/v2",
+  "commands": [
+    "StartRun", "ResolveRun", "ObserveAction", "EvaluateRun",
+    "GetRun", "GetArgument", "GetContract", "RestoreRun"
+  ],
+  "decisions": ["Allow", "Block", "Inert", "Fault"],
+  "statuses": ["active", "converged", "stopped_residual", "stopped_frozen", "stopped_budget"],
+  "actions": {
+    "author": [
+      "graph", "research", "spike_request", "configure_run",
+      "route", "investigate", "dispatch", "freeze", "child_reserve"
+    ],
+    "trusted": ["evidence_leaf", "attribution", "child_event", "audit_verdict"]
+  },
+  "child_lifecycle": {
+    "states": [
+      "reserved", "launching", "pending", "completed",
+      "launch_rejected", "failed", "cancelled", "timed_out", "orphaned"
+    ],
+    "terminal_states": ["completed", "launch_rejected", "failed", "cancelled", "timed_out", "orphaned"],
+    "transitions": [
+      {"from": "reserved", "to": "launching"},
+      {"from": "reserved", "to": "launch_rejected"},
+      {"from": "launching", "to": "pending"},
+      {"from": "launching", "to": "launch_rejected"},
+      {"from": "launching", "to": "failed"},
+      {"from": "pending", "to": "completed"},
+      {"from": "pending", "to": "failed"},
+      {"from": "pending", "to": "cancelled"},
+      {"from": "pending", "to": "timed_out"},
+      {"from": "pending", "to": "orphaned"}
+    ]
+  },
+  "host_tiers": ["full_async", "foreground_only", "observational"],
+  "claim_states": ["open", "approved", "blocked", "discarded"],
+  "claim_kinds": ["ordinary", "needs-experiment", "needs-decision"],
+  "audit_states": ["not_required", "required", "pending", "passed", "failed", "stale"],
+  "independence_states": ["decorrelated", "same_model", "unverified"],
+  "freshness_states": ["present", "missing", "unreadable", "non_regular", "outside_workspace"],
+  "artifact_kinds": ["research", "spike_request", "spike"],
+  "artifact_outcomes": ["supporting", "refuting", "pass", "fail"],
+  "spike_gates": ["pass", "fail"],
+  "attribution_subject_kinds": ["covered_actor", "auditor"],
+  "attribution_observers": ["host", "configuration"],
+  "audit_verdicts": ["pass", "fail"],
+  "scope_reviews": ["pass", "fail"],
+  "mode_fields": ["multi_provider", "cli_exec"],
+  "operation_contexts": ["bootstrap", "block", "auditor", "restore", "terminal", "on_demand"],
+  "untrusted_delimiters": {
+    "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+    "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+  },
+  "presentation_selector": {
+    "context_sections": {
+      "bootstrap": ["core", "roles", "hosts/capabilities"],
+      "block": [],
+      "auditor": ["audit", "audit/independence", "evidence/research", "evidence/spike", "evidence/order", "evidence/freshness"],
+      "restore": ["core", "run/lifecycle", "children", "hosts/capabilities", "recovery"],
+      "terminal": ["terminal"],
+      "on_demand": []
+    },
+    "terminal_sections": ["terminal"],
+    "unknown_reason_sections": ["core", "run/lifecycle", "recovery"]
+  },
+  "next_actions": {
+    "run.start_fresh": {
+      "description": "Start a fresh v2 run.",
+      "params": {
+        "type": "object", "additionalProperties": false, "required": ["selector", "goal"],
+        "properties": {
+          "selector": {"type": "object", "additionalProperties": false, "required": ["project", "session"], "properties": {"project": {"type": "string", "minLength": 1}, "session": {"type": "string", "minLength": 1}}},
+          "goal": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "run.inspect": {
+      "description": "Inspect the current run residuals and state.",
+      "params": {"type": "object", "additionalProperties": false, "properties": {}}
+    },
+    "route.record": {
+      "description": "Record a routing commitment before investigation.",
+      "params": {"type": "object", "additionalProperties": false, "required": ["label"], "properties": {"label": {"type": "string", "minLength": 1}}}
+    },
+    "research.record": {
+      "description": "Record one externally observed Fold-1 research citation bound to a claim.",
+      "params": {
+        "type": "object", "additionalProperties": false, "required": ["claim_id", "source_kind", "result"],
+        "properties": {
+          "claim_id": {"type": "string", "minLength": 1},
+          "source_kind": {"enum": ["docs", "code", "runtime", "web"]},
+          "locator": {"type": "string"},
+          "citation": {"type": "string"},
+          "result": {"enum": ["supports", "refutes"]}
+        }
+      }
+    },
+    "spike.run": {
+      "description": "Request a deterministic harness spike against active research.",
+      "params": {"type": "object", "additionalProperties": false, "required": ["claim_id", "command"], "properties": {"claim_id": {"type": "string", "minLength": 1}, "command": {"type": "string", "minLength": 1}}}
+    },
+    "spike.regate": {
+      "description": "Re-gate a stale spike with current prerequisites.",
+      "params": {"type": "object", "additionalProperties": false, "required": ["claim_id"], "properties": {"claim_id": {"type": "string", "minLength": 1}}}
+    },
+    "claim.record_refutation": {
+      "description": "Record an active refutation that supersedes a prior support.",
+      "params": {"type": "object", "additionalProperties": false, "required": ["claim_id", "research_id"], "properties": {"claim_id": {"type": "string", "minLength": 1}, "research_id": {"type": "string", "minLength": 1}}}
+    },
+    "human.request_decision": {
+      "description": "Request a human decision for a residual claim.",
+      "params": {"type": "object", "additionalProperties": false, "required": ["claim_id"], "properties": {"claim_id": {"type": "string", "minLength": 1}, "question": {"type": "string"}}}
+    },
+    "budget.raise": {
+      "description": "Raise a spawn or pass budget.",
+      "params": {"type": "object", "additionalProperties": false, "required": ["resource"], "properties": {"resource": {"enum": ["spawn", "pass"]}, "amount": {"type": "integer", "minimum": 1}}}
+    },
+    "child.spawn_auditor": {
+      "description": "Spawn an independent auditor child.",
+      "params": {"type": "object", "additionalProperties": false, "required": ["purpose"], "properties": {"purpose": {"const": "audit"}, "deadline": {"type": ["string", "null"]}}}
+    },
+    "child.wait": {
+      "description": "Wait for a pending child.",
+      "params": {"type": "object", "additionalProperties": false, "properties": {"child_id": {"type": "string", "minLength": 1}}}
+    },
+    "child.retry": {
+      "description": "Retry a failed or rejected child.",
+      "params": {"type": "object", "additionalProperties": false, "required": ["child_id"], "properties": {"child_id": {"type": "string", "minLength": 1}}}
+    },
+    "child.cancel": {
+      "description": "Cancel a pending child.",
+      "params": {"type": "object", "additionalProperties": false, "required": ["child_id"], "properties": {"child_id": {"type": "string", "minLength": 1}}}
+    },
+    "residual.accept": {
+      "description": "Accept the current residual and stop or continue with it recorded.",
+      "params": {"type": "object", "additionalProperties": false, "properties": {"note": {"type": "string"}}}
+    },
+    "contract.get_section": {
+      "description": "Retrieve one contract section by ID.",
+      "params": {"type": "object", "additionalProperties": false, "required": ["section_id"], "properties": {"section_id": {"type": "string", "minLength": 1}}}
+    }
+  },
+  "reasons": {
+    "run.no_active": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["run.start_fresh"], "sections": ["run/lifecycle"], "message": "No active run for this selector; start a fresh run."},
+    "run.old_version": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["run.start_fresh"], "sections": ["run/lifecycle"], "message": "Run state is not empirica/v2; start a fresh run."},
+    "run.terminal": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["run.inspect"], "sections": ["terminal"], "message": "Run is terminal; inspect residuals."},
+    "run.corrupt": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["run.start_fresh"], "sections": ["run/lifecycle"], "message": "Run state is corrupt; start a fresh run."},
+    "graph.missing": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["run.inspect"], "sections": ["claims/graph"], "message": "No selected argument graph."},
+    "graph.invalid": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["run.inspect"], "sections": ["claims/graph"], "message": "Argument graph is malformed or unsupported."},
+    "route.required": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["route.record"], "sections": ["route"], "message": "Record a route before investigation."},
+    "route.late": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["run.inspect"], "sections": ["route"], "message": "Route observed after investigation is a permanent violation."},
+    "claim.research_missing": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["research.record"], "sections": ["evidence/research"], "message": "Record Fold-1 research for this claim."},
+    "claim.research_unbound": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["research.record"], "sections": ["evidence/research"], "message": "Research is not bound to the current claim digest."},
+    "claim.spike_missing": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["spike.run"], "sections": ["evidence/spike"], "message": "Run a deterministic spike for this claim."},
+    "claim.spike_prerequisite_missing": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["research.record", "spike.run"], "sections": ["evidence/order"], "message": "Spike has no active supporting research prerequisite."},
+    "claim.spike_stale": {"params": {"type": "object", "additionalProperties": false, "required": ["changes"], "properties": {"changes": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "object", "additionalProperties": false, "required": ["path", "state"], "properties": {"path": {"type": "string", "minLength": 1, "pattern": "^(?!(?:\\.(?:/|$)))(?!(?:\\.\\.(?:/|$)))(?!.*/\\.(?:/|$))(?!.*/\\.\\.(?:/|$))[^\\\\/:]+(?:/[^\\\\/:]+)*$"}, "state": {"enum": ["present", "missing", "unreadable", "non_regular", "outside_workspace"]}}}}}}, "next_actions": ["spike.regate"], "sections": ["evidence/freshness"], "message": "Spike prerequisites changed; re-gate."},
+    "claim.human_decision": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["human.request_decision"], "sections": ["claims/residuals"], "message": "Claim requires a human decision."},
+    "claim.refuted": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["run.inspect"], "sections": ["claims/refutation"], "message": "Active evidence refutes this claim."},
+    "evidence.conflict": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["run.inspect", "residual.accept"], "sections": ["claims/refutation"], "message": "Simultaneous support and refutation fails closed; resolve or stop with residual."},
+    "budget.exhausted": {"params": {"type": "object", "additionalProperties": false, "required": ["resource"], "properties": {"resource": {"enum": ["spawn", "pass"]}}}, "next_actions": ["budget.raise", "residual.accept"], "sections": ["budget"], "message": "{resource} budget exhausted."},
+    "audit.required": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["child.spawn_auditor"], "sections": ["audit"], "message": "Audit is owed; spawn an independent auditor."},
+    "audit.pending": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["child.wait"], "sections": ["audit"], "message": "Audit child is pending; wait."},
+    "audit.unreadable": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["child.retry"], "sections": ["audit"], "message": "Audit output is unreadable; retry."},
+    "audit.failed": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["run.inspect", "child.retry"], "sections": ["audit"], "message": "Audit failed; inspect or retry."},
+    "audit.stale": {"params": {"type": "object", "additionalProperties": false, "required": ["scope"], "properties": {"scope": {"enum": ["argument", "claim", "freeze"]}, "claim_id": {"type": "string", "minLength": 1}}}, "next_actions": ["child.spawn_auditor"], "sections": ["audit"], "message": "Audit coverage is stale for {scope}; re-audit."},
+    "audit.same_model": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["child.spawn_auditor"], "sections": ["audit/independence"], "message": "Auditor is the same model as covered evidence; spawn a decorrelated auditor."},
+    "audit.independence_unverified": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["child.spawn_auditor"], "sections": ["audit/independence"], "message": "Audit independence is unverified; spawn a decorrelated auditor."},
+    "child.terminal": {"params": {"type": "object", "additionalProperties": false, "required": ["state"], "properties": {"state": {"enum": ["launch_rejected", "failed", "cancelled", "timed_out", "orphaned"]}}}, "next_actions": ["child.retry", "residual.accept"], "sections": ["children"], "message": "Child terminated in state {state}."},
+    "host.async_unsupported": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["residual.accept"], "sections": ["hosts/capabilities"], "message": "Host does not support async children; accept residual or run foreground."},
+    "host.audit_output_unobservable": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["residual.accept"], "sections": ["hosts/capabilities"], "message": "Host cannot observe audit output; accept residual."},
+    "freeze.deferred": {"params": {"type": "object", "additionalProperties": false, "required": ["claim_ids", "deferred_scope_digest"], "properties": {"claim_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}, "deferred_scope_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}}, "next_actions": ["residual.accept"], "sections": ["freeze"], "message": "Deferred claims are residual; accept."}
+  },
+  "sections": {
+    "core": {
+      "title": "Core concepts",
+      "summary": "The seven author-facing concepts and the single authority for argument state.",
+      "clauses": [
+        {"id": "core/concepts", "text": "An Empirica run advances seven concepts: goal, outstanding obligation, valid next action, trusted observation, residual/handoff, terminal distinction, and the author, deterministic harness, auditor, human, and host-adapter roles."},
+        {"id": "core/single_authority", "text": "Argument state is derived from the complete active evidence set on every read; there is no per-request or persisted composite verdict."},
+        {"id": "core/no_policy_dsl", "text": "The public contract is inert structured data, not an interpreted policy or rules engine."}
+      ]
+    },
+    "roles": {
+      "title": "Role authority",
+      "summary": "What each role may and must not do.",
+      "clauses": [
+        {"id": "roles/author", "text": "The author proposes graphs and claims, fetches research, requests spikes, responds to obligations, and may stop with a residual; the author must not create convergence-relevant attribution, approve its own evidence, or audit its own convergence."},
+        {"id": "roles/harness", "text": "The deterministic harness executes a declared command and reports exit code and file bindings; it must not decide claim meaning or convergence."},
+        {"id": "roles/auditor", "text": "The auditor re-reads cited evidence and argument and returns pass/fail findings; it must not approve machine evidence or alter the graph."},
+        {"id": "roles/human", "text": "The human resolves judgment, budget, and product decisions and accepts residuals; the human must not be silently simulated by an agent."}
+      ]
+    },
+    "run/lifecycle": {
+      "title": "Run lifecycle",
+      "summary": "Run statuses, terminality, and old or corrupt state refusal.",
+      "clauses": [
+        {"id": "run/lifecycle/statuses", "text": "A run is active, converged, stopped_residual, stopped_frozen, or stopped_budget; every status except active is terminal."},
+        {"id": "run/lifecycle/terminal_immutable", "text": "A terminal run never changes status and never produces a later convergence result, though append-only diagnostic facts may be admitted where explicitly allowed."},
+        {"id": "run/lifecycle/old_version", "text": "Persisted state that is not exactly empirica/v2 is old or unsupported; it is never decoded, migrated, or adjudicated, and returns run.old_version with run.start_fresh."},
+        {"id": "run/lifecycle/corrupt", "text": "Corrupt v2 identity or encoding returns run.corrupt with run.start_fresh; no field defaults or terminal inference run on bad state."}
+      ]
+    },
+    "claims/graph": {
+      "title": "Argument graph",
+      "summary": "Graph shape and missing or invalid graph handling.",
+      "clauses": [
+        {"id": "claims/graph/shape", "text": "The argument graph contains claim identity, text, confidence, kind and tags, and root and support edges; it does not contain trusted claim state."},
+        {"id": "claims/graph/missing", "text": "A missing selected graph yields graph.missing with run.inspect."},
+        {"id": "claims/graph/invalid", "text": "A malformed graph, unsupported edge or type, or corrupt active artifact yields graph.invalid and fails closed."}
+      ]
+    },
+    "claims/residuals": {
+      "title": "Claim residuals",
+      "summary": "Human and data holds surfaced as residuals.",
+      "clauses": [
+        {"id": "claims/residuals/human_decision", "text": "A declared human or data hold that is valid and surfaced is a residual with claim.human_decision and human.request_decision."},
+        {"id": "claims/residuals/needs_decision", "text": "A needs-decision claim cannot be agent-approved and becomes a human residual."}
+      ]
+    },
+    "claims/refutation": {
+      "title": "Refutation and conflict",
+      "summary": "Active refutation and simultaneous support/refutation.",
+      "clauses": [
+        {"id": "claims/refutation/refuted", "text": "Active refuting research or an active failing spike discards the claim with claim.refuted."},
+        {"id": "claims/refutation/conflict", "text": "Simultaneous active support and refutation fails closed as evidence.conflict; it does not select the truthy result, and the author must resolve or stop with residual."}
+      ]
+    },
+    "evidence/research": {
+      "title": "Research evidence",
+      "summary": "Content-addressed Fold-1 research leaves.",
+      "clauses": [
+        {"id": "evidence/research/leaf", "text": "A research leaf is content-addressed and binds claim_id, claim_digest, source kind, locator, verbatim citation, result, and observed content digest where available."},
+        {"id": "evidence/research/fetched", "text": "Model recall is not evidence; the source must be fetched, read, or observed during the run."},
+        {"id": "evidence/research/missing", "text": "An ordinary claim with no active supporting research yields claim.research_missing with research.record."}
+      ]
+    },
+    "evidence/spike": {
+      "title": "Spike evidence",
+      "summary": "Deterministic harness spikes and the sealed request.",
+      "clauses": [
+        {"id": "evidence/spike/attestation", "text": "A spike leaf is created only from a real harness execution and binds command, exit_code, gate, result digest, harness_request_id, prerequisite snapshot, and file bindings."},
+        {"id": "evidence/spike/request", "text": "Before execution an immutable spike_request is appended with a server-generated harness_request_id, current claim digest, and ordered active supporting research; the author cannot append a spike leaf directly."},
+        {"id": "evidence/spike/exit_code", "text": "exit_code is the sole machine approval authority; gate is derived from exit_code and is never caller-selected."},
+        {"id": "evidence/spike/missing", "text": "A needs-experiment claim with no active passing spike yields claim.spike_missing with spike.run."}
+      ]
+    },
+    "evidence/order": {
+      "title": "Evidence ordering",
+      "summary": "Research before experiment and prerequisites.",
+      "clauses": [
+        {"id": "evidence/order/research_first", "text": "Research-before-experiment is proved by the trusted pre-execution spike_request, not timestamps or append inference."},
+        {"id": "evidence/order/prerequisite", "text": "A spike without an active named supporting research prerequisite yields claim.spike_prerequisite_missing with research.record and spike.run."}
+      ]
+    },
+    "evidence/freshness": {
+      "title": "Evidence freshness",
+      "summary": "Workspace observation and re-gating of stale spikes.",
+      "clauses": [
+        {"id": "evidence/freshness/observe", "text": "Workspace.observe is the sole current-file observation port; every state-bearing run evaluation observes all files bound by active spikes."},
+        {"id": "evidence/freshness/stale", "text": "Any path, state, or digest mismatch yields claim.spike_stale with spike.regate and names changed paths without exposing hashes."},
+        {"id": "evidence/freshness/regate", "text": "Re-gate runs only stale active spike heads with their current active research prerequisites and appends a superseding attestation."}
+      ]
+    },
+    "audit": {
+      "title": "Audit",
+      "summary": "When audit is owed and how pending, unreadable, and failed audits surface.",
+      "clauses": [
+        {"id": "audit/owed", "text": "Audit is owed only after committed gating claims are otherwise terminal and approvable."},
+        {"id": "audit/binding", "text": "A valid audit binds one pending-audit child_id through a private adapter capability, a structured pass or fail verdict, current argument digest, and reviewed claim and evidence digests for every approved gating claim."},
+        {"id": "audit/pending", "text": "An owed audit with a pending child yields audit.pending with child.wait and no respawn guidance."},
+        {"id": "audit/unreadable", "text": "Invalid or missing audit output yields audit.unreadable with child.retry."},
+        {"id": "audit/failed", "text": "A failed audit yields audit.failed with run.inspect and child.retry."}
+      ]
+    },
+    "audit/independence": {
+      "title": "Audit independence",
+      "summary": "Derived independence and the non-decorrelated residuals.",
+      "clauses": [
+        {"id": "audit/independence/derived", "text": "Independence is derived by the application as decorrelated, same_model, or unverified from trusted normalized identities; it is never supplied in the verdict."},
+        {"id": "audit/independence/required", "text": "same_model and unverified cannot satisfy an independent-audit obligation and yield audit.same_model or audit.independence_unverified with child.spawn_auditor."}
+      ]
+    },
+    "children": {
+      "title": "Child lifecycle",
+      "summary": "The single child record, transitions, and terminal handling.",
+      "clauses": [
+        {"id": "children/record", "text": "A child is one operational record keyed by a server-generated child_id containing purpose, state, spent and refunded fact, deadline, optional native id, first-terminal fingerprint, and private completion capability."},
+        {"id": "children/transitions", "text": "Child states and allowed transitions are owned solely by the public contract; a host maps native evidence onto them and does not redefine a profile-specific state machine."},
+        {"id": "children/idempotent", "text": "child_event owns the terminal fingerprint; an identical replay of it returns the exact Inert unchanged, and a conflicting terminal replay returns the exact Fault unchanged; D4 proves this behavior."},
+        {"id": "children/refund", "text": "Launch rejection refunds once; any observed start permanently spends the spawn, and a terminal child yields child.terminal with child.retry and residual.accept."}
+      ]
+    },
+    "budget": {
+      "title": "Budget",
+      "summary": "Spawn and derivation budgets and exhaustion.",
+      "clauses": [
+        {"id": "budget/operational", "text": "Spawn and derivation budgets are operational state; a derivation pass is consumed only when argument, evidence, or obligation state makes semantic progress."},
+        {"id": "budget/no_idle_spend", "text": "Idle checks, pending-child waits, repeated equivalent Stop, and host status polling consume no pass."},
+        {"id": "budget/exhausted", "text": "An exhausted spawn or pass budget yields budget.exhausted with budget.raise and residual.accept."}
+      ]
+    },
+    "route": {
+      "title": "Route",
+      "summary": "Route-before-investigation and the late-route violation.",
+      "clauses": [
+        {"id": "route/before_investigation", "text": "A route must be observed before investigation; first route and first investigation are first-write-wins witnesses."},
+        {"id": "route/late", "text": "A late route is a permanent reported violation with route.late and run.inspect; it is not retroactively repaired by writing another label."}
+      ]
+    },
+    "freeze": {
+      "title": "Freeze",
+      "summary": "First-write-wins committed scope and deferred residuals.",
+      "clauses": [
+        {"id": "freeze/first_write_wins", "text": "Freeze is first-write-wins and commits the current gating claim IDs; those claims still require fresh evidence and audit."},
+        {"id": "freeze/deferred", "text": "Later derived claims are visible as deferred residuals with freeze.deferred and residual.accept and cannot silently enter the committed scope."}
+      ]
+    },
+    "terminal": {
+      "title": "Terminal behavior",
+      "summary": "The terminal statuses and the convergence condition.",
+      "clauses": [
+        {"id": "terminal/root_refuted", "text": "A refuted root claim is stopped_residual and never converged."},
+        {"id": "terminal/frozen", "text": "A committed frozen scope discharged with later claims is stopped_frozen and non-converged, though it owes scope audit."},
+        {"id": "terminal/budget", "text": "An exhausted budget is stopped_budget and non-converged."},
+        {"id": "terminal/converged", "text": "Convergence requires all committed claims approved and fresh and an independent audit that is current and passing."}
+      ]
+    },
+    "hosts/capabilities": {
+      "title": "Host capabilities",
+      "summary": "Capability tiers and the unsupported-capability residuals.",
+      "clauses": [
+        {"id": "hosts/capabilities/tiers", "text": "A host profile is full_async, foreground_only, or observational; only an exact conformance-listed profile receives its declared tier."},
+        {"id": "hosts/capabilities/async_unsupported", "text": "A host that cannot run async children returns host.async_unsupported with residual.accept rather than silently downgrading."},
+        {"id": "hosts/capabilities/audit_unobservable", "text": "A host that cannot observe trusted audit output returns host.audit_output_unobservable with residual.accept and stops honestly with residual."}
+      ]
+    },
+    "trusted/ingress": {
+      "title": "Trusted ingress payloads",
+      "summary": "Closed trusted action payloads, private capability admission, and exact sealed correlation.",
+      "clauses": [
+        {"id": "trusted/ingress/closure", "text": "Trusted action payloads are closed by the request schema; a trusted action never accepts an open payload, and an author action never carries a trusted envelope."},
+        {"id": "trusted/ingress/capability", "text": "A trusted action carries a private capability reference that is application/host-held and non-public; payload validity never grants trust, and author dispatch with a forged or reflected reference still fails capability admission."},
+        {"id": "trusted/ingress/replay", "text": "child_event owns the terminal fingerprint, and a complete closed-bound audit_verdict (scope, coverage, and content) is its replay identity; an identical replay of either returns the exact Inert unchanged, and a conflicting terminal or verdict replay returns the exact Fault unchanged; this section statically requires those facts and canonical clauses only and adds no persisted replay machine — real idempotent and fault replay semantics are exercised by D4 bound-SUT cases, not by independent one-request fixtures, and D4 proves this behavior."},
+        {"id": "trusted/ingress/attribution", "text": "An attribution payload carries normalized identity facts only (subject, child, provider, model, observed-by, and covered artifacts); independence is application-derived from provider/model facts and is never a payload field."},
+        {"id": "trusted/ingress/audit_atomic", "text": "An audit_verdict is the trusted host-observed completion bound from a previously pending audit child; it atomically admits the verdict and the terminal child result, its child_id resolves to exactly one audit-purpose completed child, and its reviewed_claims cover exactly the current approved gating claims in canonical ArgumentView order — deferred claims are never included."},
+        {"id": "trusted/ingress/evidence_sealed", "text": "An evidence_leaf is a deterministic spike result; its file_bindings, exit_code, command digest, prerequisite research IDs, and result digest correlate exactly and in order to the admitted sealed spike result bindings, not only to request dependent paths."}
+      ]
+    },
+    "recovery": {
+      "title": "Recovery and restore",
+      "summary": "Bounded restore context, late results, and orphan recovery.",
+      "clauses": [
+        {"id": "recovery/restore", "text": "RestoreRun is bounded context restoring contract identity, goal, active and deferred obligations, reasons, next actions, pending children, and host limitations; it is not a dump of operational counters."},
+        {"id": "recovery/late_result", "text": "A late child result never reopens a terminal run or child; after a first child terminal, no later event may admit audit output or change child, audit, budget, or convergence state."},
+        {"id": "recovery/orphan", "text": "Timeout, cancellation, and orphan are residuals with explicit recovery action."}
+      ]
+    },
+    "protocol": {
+      "title": "Protocol identity",
+      "summary": "Exact v2 identity and the refusal of old state and internal fields.",
+      "clauses": [
+        {"id": "protocol/identity", "text": "The protocol identifier is exactly empirica/v2; missing, null, unknown, future, or v1 identity is old or unsupported state."},
+        {"id": "protocol/no_migration", "text": "There is no compatibility writer, migration target, or v1 adjudication; old state returns run.old_version and run.start_fresh."},
+        {"id": "protocol/no_internal_fields", "text": "There is no public nonce, reservation entity, ticket, phase enum, CAS revision arithmetic, or artifact path in the public contract."}
+      ]
+    },
+    "presentation/selector": {
+      "title": "Presentation selector",
+      "summary": "Deterministic, domain-state-free ordered section selection for progressive disclosure.",
+      "clauses": [
+        {"id": "presentation/selector/inputs", "text": "Selector input is exactly the operation context, the ordered emitted reason codes, and the terminal run status; it inspects no obligations, witnesses, budgets, child records, workspace observations, host capabilities, or other domain state."},
+        {"id": "presentation/selector/ordered_union", "text": "For a known operation context and known reason codes, the output is the ordered, duplicate-free union of context_sections[operation_context], then each reason's registered sections in input reason order, then terminal_sections when the terminal status is a registered terminal status, first occurrence wins, with no other sections."},
+        {"id": "presentation/selector/exact_fallback", "text": "An unknown operation context, unknown reason code, unknown reason-linked action, unresolved section, or a nonterminal or unknown non-null terminal status returns exactly unknown_reason_sections and never partially unions known inputs."},
+        {"id": "presentation/selector/domain_state_independence", "text": "Identical structured inputs yield identical ordered output; the selector is a pure function of its inputs and the canonical presentation_selector registry and never of runtime state."}
+      ]
+    }
+  }
+}

@@ -1,7 +1,7 @@
 {
   "name": "@siffran/empirica-pi",
   "version": "0.1.0",
-  "description": "Pi (pi.dev) adapter for the Empirica plugin: registers /empirica and /empirica-status, gates the report_convergence tool/command, and contributes the Empirica skill via resources_discover. Translates Pi lifecycle/tool events to the empirica/v1 contract through an injected transport; the production transport is a JSON stdio bridge to the host-neutral core (ADR-30, ADR-32).",
+  "description": "Pi (pi.dev) adapter for the Empirica plugin: registers /empirica, gates the report_convergence tool, and contributes the Empirica skill via resources_discover. Translates Pi lifecycle/tool events to the empirica/v2 contract through an injected transport; the production transport is a JSON stdio bridge to the host-neutral core (ADR-30, D6-C).",
   "type": "module",
   "license": "MIT",
   "keywords": [

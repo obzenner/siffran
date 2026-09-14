@@ -1,2 +1,0 @@
-{"type":"user","message":{"role":"user","content":"audit this"}}
-{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"```empirica-verdict\n{\"verdict\":\"pass\",\"nonce\":\"fixture-nonce\",\"argument_digest\":\"a\",\"claims_reviewed\":[],\"findings\":[],\"ts\":\"2026-01-01T00:00:00Z\"}\n```"}]}}

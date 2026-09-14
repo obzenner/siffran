@@ -1,25 +1,39 @@
-"""In-process Codex transport to the shared Empirica composition bridge."""
+"""In-process Codex transport to the shared v2 composition bridge (D6-C C2b).
+
+The Codex hooks run in-process and reach the one shared bridge (:mod:`adapters.bridge`) with a
+fixed exact registry profile (``codex-cli@0.146.0``); there is no host default, no ``cwd`` and no
+fallback to another host (D6-C spec §3/C2, §4).  Correlation is exact v2 (:func:`correlate`).
+"""
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Protocol
 
 from adapters import bridge
 
 from .correlation import correlate
 
+#: Fixed exact registry profile supplied at bridge construction, never in a public request.
+CODEX_PROFILE_ID = "codex-cli@0.146.0"
+
 
 class Transport(Protocol):
+    """Narrow injectable transport seam used by translators and their parity tests."""
+
     def dispatch(self, request: dict) -> dict: ...
 
 
 class BridgeTransport:
-    def __init__(self, cwd: str | Path) -> None:
-        self.cwd = Path(cwd)
+    """Dispatch requests through :mod:`adapters.bridge`, never through a hook-local service."""
+
+    __slots__ = ()
+
+    def __init__(self) -> None:
+        pass
 
     def dispatch(self, request: dict) -> dict:
-        return correlate(request, bridge.handle(request, cwd=self.cwd))
+        return correlate(request, bridge.handle(request, profile_id=CODEX_PROFILE_ID))
 
 
-def dispatch(request: dict, *, cwd: str | Path) -> dict:
-    return BridgeTransport(cwd).dispatch(request)
+def dispatch(request: dict) -> dict:
+    """One-shot convenience form of :class:`BridgeTransport`."""
+    return BridgeTransport().dispatch(request)

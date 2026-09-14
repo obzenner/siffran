@@ -1,0 +1,81 @@
+{
+  "request": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-stopped-frozen",
+    "command": {
+      "type": "EvaluateRun",
+      "run_id": "run-fx",
+      "intent": "stop"
+    }
+  },
+  "expected": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-stopped-frozen",
+    "result": {
+      "type": "Allow",
+      "converged": false,
+      "run": {
+        "id": "run-fx",
+        "goal": "Prove the public contract is internally consistent.",
+        "status": "stopped_frozen",
+        "modes": {
+          "multi_provider": false,
+          "cli_exec": false
+        },
+        "contract": {
+          "id": "empirica/public",
+          "version": "2.0.0",
+          "relevant_sections": [
+            "freeze",
+            "terminal"
+          ],
+          "digest": "sha256:49bdf99832e3862a74060e3be8e45ea10b88f5029a0658fde9032a35a1b42b65"
+        },
+        "obligations": {
+          "active": [],
+          "deferred": []
+        },
+        "residuals": [
+          {
+            "code": "freeze.deferred",
+            "parameters": {
+              "claim_ids": [
+                "G-later"
+              ],
+              "deferred_scope_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+            },
+            "next_actions": [
+              "residual.accept"
+            ],
+            "sections": [
+              "freeze"
+            ]
+          }
+        ],
+        "freshness": {
+          "changes": []
+        },
+        "children": [
+          {
+            "child_id": "ch-audit-1",
+            "purpose": "audit",
+            "state": "completed"
+          }
+        ],
+        "host": {
+          "profile_id": "claude-code@2.1.270",
+          "tier": "foreground_only",
+          "missing_capabilities": [
+            "host.async_unsupported"
+          ]
+        },
+        "terminal_note": "Frozen scope discharged; deferred claims remain residual.",
+        "next_actions": [],
+        "untrusted_delimiters": {
+          "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+          "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+        }
+      }
+    }
+  }
+}

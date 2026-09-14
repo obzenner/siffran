@@ -39,8 +39,8 @@ open; a summary of docs you did not read; another model's assertion.
 
 The caller supplies the claim through the Empirica adapter/API. Never read or edit runtime state
 under `.claude/` or `.pi/`, and never edit `~/.empirica-plugin/` or `refs/empirica/*` directly.
-Return the structured record below to the caller, which must submit it using
-`adapters.claude.knowledge.build_research_request` through `BridgeTransport`.
+Return the structured record below to the caller; the host records the trusted evidence as a
+host-observed action — the author never submits the trusted ingress directly.
 
 ## Output
 

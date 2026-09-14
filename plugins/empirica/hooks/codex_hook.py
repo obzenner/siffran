@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Thin Codex hook entry point; all policy lives behind ``empirica/v1``."""
+"""Thin Codex hook entry point; all policy lives behind ``empirica/v2``."""
 import sys
 from pathlib import Path
 

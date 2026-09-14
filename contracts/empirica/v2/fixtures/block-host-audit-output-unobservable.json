@@ -1,0 +1,70 @@
+{
+  "request": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-host-audit-output",
+    "command": {
+      "type": "EvaluateRun",
+      "run_id": "run-fx",
+      "intent": "report_convergence"
+    }
+  },
+  "expected": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-host-audit-output",
+    "result": {
+      "type": "Block",
+      "run": {
+        "id": "run-fx",
+        "goal": "Prove the public contract is internally consistent.",
+        "status": "active",
+        "modes": {
+          "multi_provider": false,
+          "cli_exec": false
+        },
+        "contract": {
+          "id": "empirica/public",
+          "version": "2.0.0",
+          "relevant_sections": [
+            "hosts/capabilities",
+            "audit"
+          ],
+          "digest": "sha256:49bdf99832e3862a74060e3be8e45ea10b88f5029a0658fde9032a35a1b42b65"
+        },
+        "obligations": {
+          "active": [],
+          "deferred": []
+        },
+        "residuals": [],
+        "freshness": {
+          "changes": []
+        },
+        "children": [],
+        "host": {
+          "profile_id": "codex-cli@0.146.0",
+          "tier": "observational",
+          "missing_capabilities": [
+            "host.audit_output_unobservable"
+          ]
+        },
+        "next_actions": [],
+        "untrusted_delimiters": {
+          "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+          "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+        }
+      },
+      "reasons": [
+        {
+          "code": "host.audit_output_unobservable",
+          "parameters": {},
+          "next_actions": [
+            "residual.accept"
+          ],
+          "sections": [
+            "hosts/capabilities"
+          ],
+          "message": "Host cannot observe audit output; accept residual."
+        }
+      ]
+    }
+  }
+}

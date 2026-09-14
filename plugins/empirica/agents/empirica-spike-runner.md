@@ -33,10 +33,10 @@ rejected anyway.
 3. **Use an external temporary directory for scratch**, never `.claude/`, `.pi/`, or the repository
    proper. Runtime state belongs to `~/.empirica-plugin/` and knowledge to `refs/empirica/*`; never
    edit either directly.
-4. **Run it through the Claude knowledge adapter** using
-   `adapters.claude.knowledge.run_spike(...)`, then submit the sealed result with
-   `build_spike_request(...)` through `BridgeTransport`. This is the only normal writer of a Fold-2
-   record. Do not construct `SpikeExecution` or a gate value by hand.
+4. **Run it through the host's deterministic harness.** The sealed `evidence_leaf` (the spike
+   result attestation) is a trusted, host-observed action — the author reports the command, exit
+   code, and file bindings, and the host records it; the author never submits the trusted ingress
+   directly or constructs a gate value by hand.
 5. **Read the real verdict.** `gate: pass` iff exit 0. Do not reinterpret a failure as a pass
    because the failure looked incidental — investigate it. A flaky check is not evidence.
 

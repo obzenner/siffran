@@ -21,7 +21,6 @@ PLUGIN = HERE.parent  # plugins/empirica — makes `core` importable as a packag
 sys.path.insert(0, str(PLUGIN))
 
 from core import Allow, Block, Fault, Inert, RunState, adjudicate, claims  # noqa: E402
-from core.audit import coverage_check  # noqa: E402
 
 THETA = 0.8
 
@@ -96,13 +95,6 @@ class IdentityMatrix(unittest.TestCase):
     def test_finished_residual_run_allows_not_converged(self):
         d = adjudicate(run=RunState(status="stopped_residual"), graph=None, theta=THETA)
         self.assertIsInstance(d, Allow)
-        self.assertFalse(d.converged)
-
-    def test_legacy_run_without_graph_allows_not_converged(self):
-        run = RunState(status="active", is_legacy=True)
-        d = adjudicate(run=run, graph=None, theta=THETA)
-        self.assertIsInstance(d, Allow)
-        self.assertEqual(d.status, "legacy")
         self.assertFalse(d.converged)
 
     def test_active_run_missing_graph_faults(self):
@@ -273,59 +265,6 @@ class ClaimState(unittest.TestCase):
         without_edge = _graph(dict(nodes), edges=[])
         self.assertNotEqual(claims.argument_digest(with_edge),
                             claims.argument_digest(without_edge))
-
-
-# --- pure audit coverage decision ---------------------------------------------
-
-class AuditCoverage(unittest.TestCase):
-    APPROVED = {"G0": {"claim_digest": "c" * 64, "evidence_digest": "e" * 64}}
-
-    def _verdict(self, **over):
-        base = {"verdict": "pass", "nonce": "n1", "argument_digest": "d" * 64,
-                "claims_reviewed": [{"claim_id": "G0", "claim_digest": "c" * 64,
-                                     "evidence_digest": "e" * 64}],
-                "findings": []}
-        base.update(over)
-        return base
-
-    def test_no_tickets_fails(self):
-        ok, why = coverage_check([], self._verdict(), self.APPROVED)
-        self.assertFalse(ok)
-        self.assertIn("no independent audit", why)
-
-    def test_missing_verdict_fails(self):
-        ok, _ = coverage_check([{"nonce": "n1"}], None, self.APPROVED)
-        self.assertFalse(ok)
-
-    def test_nonce_mismatch_fails(self):
-        ok, why = coverage_check([{"nonce": "other"}], self._verdict(), self.APPROVED)
-        self.assertFalse(ok)
-        self.assertIn("nonce", why)
-
-    def test_failing_verdict_fails(self):
-        v = self._verdict(verdict="fail", findings=["citation does not support the claim"])
-        ok, why = coverage_check([{"nonce": "n1"}], v, self.APPROVED)
-        self.assertFalse(ok)
-        self.assertIn("citation does not support", why)
-
-    def test_full_coverage_passes(self):
-        ok, why = coverage_check([{"nonce": "n1"}], self._verdict(), self.APPROVED,
-                                 argument_digest="d" * 64)
-        self.assertTrue(ok)
-        self.assertIn("passed", why)
-
-    def test_reworded_claim_is_uncovered(self):
-        v = self._verdict(claims_reviewed=[{"claim_id": "G0", "claim_digest": "STALE" + "c" * 59,
-                                            "evidence_digest": "e" * 64}])
-        ok, why = coverage_check([{"nonce": "n1"}], v, self.APPROVED)
-        self.assertFalse(ok)
-        self.assertIn("REWORDED", why)
-
-    def test_argument_digest_mismatch_fails(self):
-        ok, why = coverage_check([{"nonce": "n1"}], self._verdict(argument_digest="x" * 64),
-                                 self.APPROVED, argument_digest="d" * 64)
-        self.assertFalse(ok)
-        self.assertIn("DIFFERENT argument", why)
 
 
 """Contract tests for the empirica persistence ports (ADR-31).

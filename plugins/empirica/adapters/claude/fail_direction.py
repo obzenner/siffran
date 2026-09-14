@@ -1,4 +1,4 @@
-"""Interpret the explicit failure direction on ``empirica/v1`` Fault results.
+"""Interpret the explicit failure direction on ``empirica/v2`` Fault results.
 
 A host event supplies the fallback because native events differ: a completion gate defaults closed,
 while observational/run-start events default open so an unavailable adapter cannot wedge a prompt.

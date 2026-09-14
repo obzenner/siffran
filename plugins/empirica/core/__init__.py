@@ -13,14 +13,12 @@ Public API — the smallest surface a caller needs:
     from empirica_core import adjudicate, RunState
     from empirica_core import Allow, Block, Inert, Fault, ClaimReason, Decision
     from empirica_core import claims           # pure claim-graph state derivation
-    from empirica_core.audit import coverage_check   # pure independent-audit coverage decision
 
-`adjudicate` is the entry point. `claims` and `audit.coverage_check` are the extracted pure
-decision helpers an adapter composes to build `adjudicate`'s injected verdicts. The package is
-importable both as a package (`from . import ...`) and by direct path-load; see `tests/test_core.py`
-for the reference wiring.
+`adjudicate` is the entry point. `claims` is the extracted pure decision helper an adapter
+composes to build `adjudicate`'s injected verdicts. The package is importable both as a package
+(`from . import ...`) and by direct path-load; see `tests/test_core.py` for the reference wiring.
 """
-from . import audit, claims
+from . import claims
 from .convergence import CORRUPT_STATUS, RunState, adjudicate
 from .decisions import Allow, Block, ClaimReason, Decision, Fault, Inert
 from .ports import ArtifactRepository, MigrationPort, RunRepository
@@ -48,7 +46,6 @@ __all__ = [
     "Fault",
     "ClaimReason",
     "claims",
-    "audit",
     "ABSENT",
     "Absent",
     "Artifact",

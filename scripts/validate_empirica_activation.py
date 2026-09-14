@@ -32,8 +32,6 @@ def normal_runtime_files() -> list[Path]:
         for path in base.rglob("*.py"):
             if "tests" in path.parts or "quarantine" in path.parts:
                 continue
-            if path.name == "migrate_legacy.py":
-                continue
             files.append(path)
     files.extend(HOOKS / name for name in ENTRYPOINTS)
     return files

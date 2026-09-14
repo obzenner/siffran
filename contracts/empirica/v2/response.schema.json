@@ -1,0 +1,2515 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://siffran.dev/contracts/empirica/v2/response.schema.json",
+  "title": "Empirica v2 response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "request_id",
+    "result"
+  ],
+  "properties": {
+    "protocol": {
+      "const": "empirica/v2"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "result": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/allow"
+        },
+        {
+          "$ref": "#/$defs/block"
+        },
+        {
+          "$ref": "#/$defs/inert"
+        },
+        {
+          "$ref": "#/$defs/fault"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "contractIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version",
+        "digest",
+        "relevant_sections"
+      ],
+      "properties": {
+        "id": {
+          "const": "empirica/public"
+        },
+        "version": {
+          "const": "2.0.0"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "relevant_sections": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "runModes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "multi_provider",
+        "cli_exec"
+      ],
+      "description": "Effective run modes; output always reports both effective values.",
+      "properties": {
+        "multi_provider": {
+          "type": "boolean"
+        },
+        "cli_exec": {
+          "type": "boolean"
+        }
+      }
+    },
+    "obligations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "active",
+        "deferred"
+      ],
+      "properties": {
+        "active": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/obligationSummary"
+          }
+        },
+        "deferred": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/obligationSummary"
+          }
+        }
+      }
+    },
+    "emptyParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "spikeStaleParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "changes"
+      ],
+      "properties": {
+        "changes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/freshnessChangeItem"
+          }
+        }
+      }
+    },
+    "budgetExhaustedParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resource"
+      ],
+      "properties": {
+        "resource": {
+          "enum": [
+            "spawn",
+            "pass"
+          ]
+        }
+      }
+    },
+    "auditStaleParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope"
+      ],
+      "properties": {
+        "scope": {
+          "enum": [
+            "argument",
+            "claim",
+            "freeze"
+          ]
+        },
+        "claim_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "childTerminalParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "launch_rejected",
+            "failed",
+            "cancelled",
+            "timed_out",
+            "orphaned"
+          ]
+        }
+      }
+    },
+    "freezeDeferredParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim_ids",
+        "deferred_scope_digest"
+      ],
+      "properties": {
+        "claim_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "deferred_scope_digest": {
+          "$ref": "#/$defs/digest256"
+        }
+      }
+    },
+    "reasonPayload": {
+      "description": "Discriminated union of every canonical reason code with its registry parameter schema. Raw consumers reject unknown codes and malformed parameters without the repository validator.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "run.no_active"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "run.old_version"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "run.terminal"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "run.corrupt"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "graph.missing"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "graph.invalid"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "route.required"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "route.late"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "claim.research_missing"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "claim.research_unbound"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "claim.spike_missing"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "claim.spike_prerequisite_missing"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "claim.spike_stale"
+            },
+            "parameters": {
+              "$ref": "#/$defs/spikeStaleParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "claim.human_decision"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "claim.refuted"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "evidence.conflict"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "budget.exhausted"
+            },
+            "parameters": {
+              "$ref": "#/$defs/budgetExhaustedParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "audit.required"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "audit.pending"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "audit.unreadable"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "audit.failed"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "audit.stale"
+            },
+            "parameters": {
+              "$ref": "#/$defs/auditStaleParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "audit.same_model"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "audit.independence_unverified"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "child.terminal"
+            },
+            "parameters": {
+              "$ref": "#/$defs/childTerminalParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "host.async_unsupported"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "host.audit_output_unobservable"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "freeze.deferred"
+            },
+            "parameters": {
+              "$ref": "#/$defs/freezeDeferredParams"
+            }
+          }
+        }
+      ]
+    },
+    "residualItem": {
+      "description": "Residual reuses the typed reason payload and permits only code and parameters.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/reasonPayload"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "parameters",
+            "next_actions",
+            "sections"
+          ],
+          "properties": {
+            "code": {
+              "type": "string",
+              "minLength": 1
+            },
+            "parameters": {
+              "type": "object"
+            },
+            "next_actions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "sections": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            }
+          }
+        }
+      ]
+    },
+    "relativePosixPath": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Strict normalized repo-relative POSIX path: no leading slash, drive/colon prefix, backslash/UNC, empty/repeated separator, or dot/dotdot segment. Shared by RunView freshness and claim.spike_stale reason changes.",
+      "pattern": "^(?!(?:\\.(?:/|$)))(?!(?:\\.\\.(?:/|$)))(?!.*/\\.(?:/|$))(?!.*/\\.\\.(?:/|$))[^\\\\/:]+(?:/[^\\\\/:]+)*$"
+    },
+    "freshnessChangeItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "state"
+      ],
+      "description": "Closed freshness change; only normalized path and canonical state, no hash.",
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/relativePosixPath"
+        },
+        "state": {
+          "enum": [
+            "present",
+            "missing",
+            "unreadable",
+            "non_regular",
+            "outside_workspace"
+          ]
+        }
+      }
+    },
+    "freshnessView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "changes"
+      ],
+      "properties": {
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/freshnessChangeItem"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "obligationSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "must",
+        "status"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "must": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "satisfied",
+            "holds",
+            "violated",
+            "residual"
+          ]
+        },
+        "hold": {
+          "enum": [
+            "blocked",
+            "deferred"
+          ]
+        }
+      }
+    },
+    "childSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "child_id",
+        "purpose",
+        "state"
+      ],
+      "properties": {
+        "child_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state": {
+          "enum": [
+            "reserved",
+            "launching",
+            "pending",
+            "completed",
+            "launch_rejected",
+            "failed",
+            "cancelled",
+            "timed_out",
+            "orphaned"
+          ]
+        },
+        "deadline": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "recovery_action": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "launch_rejected",
+                  "failed",
+                  "cancelled",
+                  "timed_out",
+                  "orphaned"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "required": [
+              "recovery_action"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "completed"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "recovery_action"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "hostView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_id",
+        "tier"
+      ],
+      "properties": {
+        "profile_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tier": {
+          "enum": [
+            "full_async",
+            "foreground_only",
+            "observational"
+          ]
+        },
+        "missing_capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "runView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "goal",
+        "status",
+        "modes",
+        "contract",
+        "obligations",
+        "residuals",
+        "freshness",
+        "children",
+        "host",
+        "next_actions",
+        "untrusted_delimiters"
+      ],
+      "description": "Public run view. converged lives only on Allow, never duplicated here.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "goal": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "converged",
+            "stopped_residual",
+            "stopped_frozen",
+            "stopped_budget"
+          ]
+        },
+        "modes": {
+          "$ref": "#/$defs/runModes"
+        },
+        "contract": {
+          "$ref": "#/$defs/contractIdentity"
+        },
+        "obligations": {
+          "$ref": "#/$defs/obligations"
+        },
+        "residuals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/residualItem"
+          }
+        },
+        "freshness": {
+          "$ref": "#/$defs/freshnessView"
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/childSummary"
+          }
+        },
+        "host": {
+          "$ref": "#/$defs/hostView"
+        },
+        "terminal_note": {
+          "type": "string"
+        },
+        "next_actions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "untrusted_delimiters": {
+          "$ref": "#/$defs/untrustedDelimiters"
+        }
+      }
+    },
+    "reasonEntry": {
+      "description": "Block reason: the typed reason payload layered with required next_actions/sections and optional affected/message in a closed shape.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/reasonPayload"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "parameters",
+            "next_actions",
+            "sections"
+          ],
+          "properties": {
+            "code": {
+              "type": "string",
+              "minLength": 1
+            },
+            "parameters": {
+              "type": "object"
+            },
+            "affected": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "obligation_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "witness_ref": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "next_actions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "sections": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "allow": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/allowConverged"
+        },
+        {
+          "$ref": "#/$defs/allowNonConverged"
+        },
+        {
+          "$ref": "#/$defs/allowArgument"
+        },
+        {
+          "$ref": "#/$defs/allowContractResult"
+        }
+      ]
+    },
+    "allowConverged": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "converged",
+        "run"
+      ],
+      "description": "Allow with converged=true is schema-compatible only with run.status=converged.",
+      "properties": {
+        "type": {
+          "const": "Allow"
+        },
+        "converged": {
+          "const": true
+        },
+        "run": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/runView"
+            },
+            {
+              "properties": {
+                "status": {
+                  "const": "converged"
+                }
+              },
+              "required": [
+                "status"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "allowNonConverged": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "converged",
+        "run"
+      ],
+      "description": "Allow with converged=false requires a non-converged terminal or active run status.",
+      "properties": {
+        "type": {
+          "const": "Allow"
+        },
+        "converged": {
+          "const": false
+        },
+        "run": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/runView"
+            },
+            {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "active",
+                    "stopped_residual",
+                    "stopped_frozen",
+                    "stopped_budget"
+                  ]
+                }
+              },
+              "required": [
+                "status"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "allowContractResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "contract_result"
+      ],
+      "description": "GetContract success carries static contract data; it carries no run state.",
+      "properties": {
+        "type": {
+          "const": "Allow"
+        },
+        "contract_result": {
+          "$ref": "#/$defs/contractResult"
+        }
+      }
+    },
+    "allowArgument": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/allowArgumentConverged"
+        },
+        {
+          "$ref": "#/$defs/allowArgumentNonConverged"
+        }
+      ]
+    },
+    "allowArgumentConverged": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "converged",
+        "run",
+        "argument"
+      ],
+      "description": "GetArgument Allow with the current argument projection; converged=true requires run.status=converged.",
+      "properties": {
+        "type": {
+          "const": "Allow"
+        },
+        "converged": {
+          "const": true
+        },
+        "run": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/runView"
+            },
+            {
+              "properties": {
+                "status": {
+                  "const": "converged"
+                }
+              },
+              "required": [
+                "status"
+              ]
+            }
+          ]
+        },
+        "argument": {
+          "$ref": "#/$defs/argumentView"
+        }
+      }
+    },
+    "allowArgumentNonConverged": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "converged",
+        "run",
+        "argument"
+      ],
+      "description": "GetArgument Allow with the current argument projection; converged=false requires a non-converged status.",
+      "properties": {
+        "type": {
+          "const": "Allow"
+        },
+        "converged": {
+          "const": false
+        },
+        "run": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/runView"
+            },
+            {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "active",
+                    "stopped_residual",
+                    "stopped_frozen",
+                    "stopped_budget"
+                  ]
+                }
+              },
+              "required": [
+                "status"
+              ]
+            }
+          ]
+        },
+        "argument": {
+          "$ref": "#/$defs/argumentView"
+        }
+      }
+    },
+    "contractResult": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/contractResultIndex"
+        },
+        {
+          "$ref": "#/$defs/contractResultSection"
+        },
+        {
+          "$ref": "#/$defs/contractResultFull"
+        }
+      ]
+    },
+    "contractResultIndex": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "digest",
+        "index"
+      ],
+      "description": "GetContract index result carries the canonical PublicContract digest so on-demand discovery can be correlated with RunView contract identity; the digest is not embedded inside PublicContract itself.",
+      "properties": {
+        "target": {
+          "const": "index"
+        },
+        "digest": {
+          "$ref": "#/$defs/digest256",
+          "description": "Canonical digest of public-contract.json computed by the registry_digest algorithm; exact-equal to RunView contract.digest."
+        },
+        "index": {
+          "$ref": "#/$defs/contractIndex"
+        }
+      }
+    },
+    "contractResultSection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "digest",
+        "section_id",
+        "section"
+      ],
+      "description": "GetContract section result carries the canonical PublicContract digest so on-demand discovery can be correlated with RunView contract identity; the digest is not embedded inside PublicContract itself.",
+      "properties": {
+        "target": {
+          "const": "section"
+        },
+        "digest": {
+          "$ref": "#/$defs/digest256",
+          "description": "Canonical digest of public-contract.json computed by the registry_digest algorithm; exact-equal to RunView contract.digest."
+        },
+        "section_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "section": {
+          "$ref": "#/$defs/contractSection"
+        }
+      }
+    },
+    "contractResultFull": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "digest",
+        "full"
+      ],
+      "description": "GetContract full result carries the canonical PublicContract digest so on-demand discovery can be correlated with RunView contract identity; the digest is not embedded inside PublicContract itself.",
+      "properties": {
+        "target": {
+          "const": "full"
+        },
+        "digest": {
+          "$ref": "#/$defs/digest256",
+          "description": "Canonical digest of public-contract.json computed by the registry_digest algorithm; exact-equal to RunView contract.digest."
+        },
+        "full": {
+          "$ref": "#/$defs/publicContract"
+        }
+      }
+    },
+    "contractIndex": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version",
+        "sections",
+        "reasons",
+        "next_actions"
+      ],
+      "properties": {
+        "id": {
+          "const": "empirica/public"
+        },
+        "version": {
+          "const": "2.0.0"
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "title"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "uniqueItems": true
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "sections"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "sections": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "uniqueItems": true
+        },
+        "next_actions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "description"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              }
+            }
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "contractSection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "summary",
+        "clauses"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "summary": {
+          "type": "string"
+        },
+        "clauses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "text"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "digest256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "nullableDigest256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "untrustedDelimiters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "open",
+        "close"
+      ],
+      "description": "Canonical untrusted-data delimiters; values exactly equal the registry.",
+      "properties": {
+        "open": {
+          "const": "<<<EMPIRICA_UNTRUSTED_DATA>>>"
+        },
+        "close": {
+          "const": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+        }
+      }
+    },
+    "argumentView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "root_claim_id",
+        "argument_digest",
+        "goal_digest",
+        "frozen_scope_digest",
+        "deferred_scope_digest",
+        "untrusted_delimiters",
+        "claims",
+        "edges",
+        "artifacts",
+        "audit"
+      ],
+      "description": "Closed GetArgument projection; no generic argument extension map.",
+      "properties": {
+        "root_claim_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "argument_digest": {
+          "$ref": "#/$defs/digest256"
+        },
+        "goal_digest": {
+          "$ref": "#/$defs/digest256"
+        },
+        "frozen_scope_digest": {
+          "$ref": "#/$defs/nullableDigest256"
+        },
+        "deferred_scope_digest": {
+          "$ref": "#/$defs/digest256"
+        },
+        "untrusted_delimiters": {
+          "$ref": "#/$defs/untrustedDelimiters"
+        },
+        "claims": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/claimItem"
+          },
+          "uniqueItems": true
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/edgeItem"
+          },
+          "uniqueItems": true
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/artifactItem"
+          },
+          "uniqueItems": true
+        },
+        "audit": {
+          "$ref": "#/$defs/auditView"
+        }
+      }
+    },
+    "claimItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim_id",
+        "text",
+        "wording_digest",
+        "state",
+        "kind",
+        "gating",
+        "evidence_digest",
+        "active_evidence_ids"
+      ],
+      "properties": {
+        "claim_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "text": {
+          "type": "string"
+        },
+        "wording_digest": {
+          "$ref": "#/$defs/digest256"
+        },
+        "state": {
+          "enum": [
+            "open",
+            "approved",
+            "blocked",
+            "discarded"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "ordinary",
+            "needs-experiment",
+            "needs-decision"
+          ],
+          "description": "D1 claim kind, derived from the graph and never inferred by the validator from available artifacts."
+        },
+        "gating": {
+          "type": "boolean",
+          "description": "Bounded public fact that the claim is in the current committed support scope and therefore participates in audit coverage; derived, never editable state."
+        },
+        "evidence_digest": {
+          "$ref": "#/$defs/digest256"
+        },
+        "active_evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "edgeItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "to",
+        "type"
+      ],
+      "properties": {
+        "from": {
+          "type": "string",
+          "minLength": 1
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "enum": [
+            "SupportedBy",
+            "InContextOf"
+          ]
+        }
+      }
+    },
+    "artifactItem": {
+      "description": "Ordered canonical provenance artifact union; discriminated by kind. Raw schema enforces closure, discriminator, required/forbidden fields, enums, digests, and path invariants per D2C. Per-kind outcomes and spike_gate enums are derived from the registry vocabularies (artifact_kinds/artifact_outcomes/spike_gates).",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/researchArtifact"
+        },
+        {
+          "$ref": "#/$defs/spikeRequestArtifact"
+        },
+        {
+          "$ref": "#/$defs/spikeArtifact"
+        }
+      ]
+    },
+    "researchArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "artifact_id",
+        "claim_id",
+        "claim_digest",
+        "kind",
+        "statement_digest",
+        "active",
+        "outcome",
+        "source_kind",
+        "source_ref"
+      ],
+      "description": "Fold-1 research citation; no spike fields.",
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "artifact_id": {
+          "$ref": "#/$defs/digest256"
+        },
+        "claim_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "claim_digest": {
+          "$ref": "#/$defs/digest256"
+        },
+        "kind": {
+          "const": "research"
+        },
+        "statement_digest": {
+          "$ref": "#/$defs/digest256"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "outcome": {
+          "enum": [
+            "supporting",
+            "refuting"
+          ]
+        },
+        "source_kind": {
+          "enum": [
+            "docs",
+            "code",
+            "runtime",
+            "web"
+          ]
+        },
+        "source_ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "spikeRequestArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "artifact_id",
+        "claim_id",
+        "claim_digest",
+        "kind",
+        "statement_digest",
+        "harness_request_id",
+        "command",
+        "command_digest",
+        "dependent_files",
+        "prerequisite_research_ids"
+      ],
+      "description": "Immutable sealed pre-execution spike request; no caller-selected gate/exit/outcome, no active flag, no file result binding, no supersedes.",
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "artifact_id": {
+          "$ref": "#/$defs/digest256"
+        },
+        "claim_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "claim_digest": {
+          "$ref": "#/$defs/digest256"
+        },
+        "kind": {
+          "const": "spike_request"
+        },
+        "statement_digest": {
+          "$ref": "#/$defs/digest256"
+        },
+        "harness_request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command_digest": {
+          "$ref": "#/$defs/digest256"
+        },
+        "dependent_files": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/relativePosixPath"
+          }
+        },
+        "prerequisite_research_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/digest256"
+          }
+        }
+      }
+    },
+    "spikeArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "artifact_id",
+        "claim_id",
+        "claim_digest",
+        "kind",
+        "statement_digest",
+        "active",
+        "outcome",
+        "harness_request_id",
+        "command",
+        "command_digest",
+        "prerequisite_research_ids",
+        "file_bindings",
+        "exit_code",
+        "spike_gate",
+        "supersedes"
+      ],
+      "description": "Spike result attestation; no source fields or dependent_files duplicate.",
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "artifact_id": {
+          "$ref": "#/$defs/digest256"
+        },
+        "claim_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "claim_digest": {
+          "$ref": "#/$defs/digest256"
+        },
+        "kind": {
+          "const": "spike"
+        },
+        "statement_digest": {
+          "$ref": "#/$defs/digest256"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "outcome": {
+          "enum": [
+            "pass",
+            "fail"
+          ]
+        },
+        "harness_request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command_digest": {
+          "$ref": "#/$defs/digest256"
+        },
+        "prerequisite_research_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/digest256"
+          }
+        },
+        "file_bindings": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/fileBinding"
+          }
+        },
+        "exit_code": {
+          "type": "integer"
+        },
+        "spike_gate": {
+          "enum": [
+            "pass",
+            "fail"
+          ]
+        },
+        "supersedes": {
+          "$ref": "#/$defs/nullableDigest256"
+        }
+      }
+    },
+    "fileBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "description": "Closed file result binding; path is a strict normalized repo-relative POSIX path and sha256 is a digest256.",
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/relativePosixPath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest256"
+        }
+      }
+    },
+    "auditView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "independence",
+        "reviewed_argument_digest",
+        "reviewed_goal_digest",
+        "reviewed_frozen_scope_digest",
+        "reviewed_deferred_scope_digest",
+        "reviewed_claims"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "not_required",
+            "required",
+            "pending",
+            "passed",
+            "failed",
+            "stale"
+          ]
+        },
+        "independence": {
+          "enum": [
+            "decorrelated",
+            "same_model",
+            "unverified"
+          ]
+        },
+        "reviewed_argument_digest": {
+          "$ref": "#/$defs/nullableDigest256"
+        },
+        "reviewed_goal_digest": {
+          "$ref": "#/$defs/nullableDigest256"
+        },
+        "reviewed_frozen_scope_digest": {
+          "$ref": "#/$defs/nullableDigest256"
+        },
+        "reviewed_deferred_scope_digest": {
+          "$ref": "#/$defs/nullableDigest256"
+        },
+        "reviewed_claims": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reviewedClaimItem"
+          },
+          "uniqueItems": true
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "not_required",
+                  "required",
+                  "pending"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reviewed_argument_digest": {
+                "type": "null"
+              },
+              "reviewed_goal_digest": {
+                "type": "null"
+              },
+              "reviewed_frozen_scope_digest": {
+                "type": "null"
+              },
+              "reviewed_deferred_scope_digest": {
+                "type": "null"
+              },
+              "reviewed_claims": {
+                "maxItems": 0
+              }
+            },
+            "required": [
+              "reviewed_argument_digest",
+              "reviewed_goal_digest",
+              "reviewed_frozen_scope_digest",
+              "reviewed_deferred_scope_digest",
+              "reviewed_claims"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "passed",
+                  "failed",
+                  "stale"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reviewed_argument_digest": {
+                "$ref": "#/$defs/digest256"
+              },
+              "reviewed_goal_digest": {
+                "$ref": "#/$defs/digest256"
+              },
+              "reviewed_deferred_scope_digest": {
+                "$ref": "#/$defs/digest256"
+              },
+              "reviewed_claims": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "reviewed_argument_digest",
+              "reviewed_goal_digest",
+              "reviewed_deferred_scope_digest",
+              "reviewed_claims"
+            ]
+          }
+        }
+      ]
+    },
+    "reviewedClaimItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim_id",
+        "evidence_digest"
+      ],
+      "properties": {
+        "claim_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence_digest": {
+          "$ref": "#/$defs/digest256"
+        }
+      }
+    },
+    "block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "run",
+        "reasons"
+      ],
+      "properties": {
+        "type": {
+          "const": "Block"
+        },
+        "run": {
+          "$ref": "#/$defs/runView"
+        },
+        "reasons": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/reasonEntry"
+          }
+        }
+      }
+    },
+    "inert": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "reason"
+      ],
+      "properties": {
+        "type": {
+          "const": "Inert"
+        },
+        "reason": {
+          "enum": [
+            "no_run",
+            "unsupported_host_event"
+          ]
+        },
+        "run": {
+          "$ref": "#/$defs/runView"
+        }
+      }
+    },
+    "fault": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "code",
+        "fail_direction"
+      ],
+      "properties": {
+        "type": {
+          "const": "Fault"
+        },
+        "code": {
+          "enum": [
+            "invalid_request",
+            "unsupported",
+            "conflict",
+            "corrupt_run",
+            "corrupt_artifacts",
+            "unavailable"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "fail_direction": {
+          "enum": [
+            "open",
+            "closed"
+          ]
+        },
+        "run": {
+          "$ref": "#/$defs/runView"
+        }
+      }
+    },
+    "publicContract": {
+      "title": "Empirica v2 public contract registry",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version",
+        "protocol",
+        "commands",
+        "decisions",
+        "statuses",
+        "actions",
+        "child_lifecycle",
+        "host_tiers",
+        "claim_states",
+        "claim_kinds",
+        "audit_states",
+        "independence_states",
+        "freshness_states",
+        "artifact_kinds",
+        "artifact_outcomes",
+        "spike_gates",
+        "attribution_subject_kinds",
+        "attribution_observers",
+        "audit_verdicts",
+        "scope_reviews",
+        "mode_fields",
+        "operation_contexts",
+        "untrusted_delimiters",
+        "presentation_selector",
+        "next_actions",
+        "reasons",
+        "sections"
+      ],
+      "properties": {
+        "id": {
+          "const": "empirica/public"
+        },
+        "version": {
+          "const": "2.0.0"
+        },
+        "protocol": {
+          "const": "empirica/v2"
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "decisions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "statuses": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "actions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "author",
+            "trusted"
+          ],
+          "properties": {
+            "author": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "trusted": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            }
+          }
+        },
+        "child_lifecycle": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "states",
+            "terminal_states",
+            "transitions"
+          ],
+          "properties": {
+            "states": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "terminal_states": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "transitions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "from",
+                  "to"
+                ],
+                "properties": {
+                  "from": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "to": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "uniqueItems": true
+            }
+          }
+        },
+        "host_tiers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "claim_states": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "claim_kinds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "audit_states": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "independence_states": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "freshness_states": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "artifact_kinds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "artifact_outcomes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "spike_gates": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "attribution_subject_kinds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "attribution_observers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "audit_verdicts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "scope_reviews": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "mode_fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "operation_contexts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "untrusted_delimiters": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "open",
+            "close"
+          ],
+          "properties": {
+            "open": {
+              "type": "string",
+              "minLength": 1
+            },
+            "close": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "presentation_selector": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "context_sections",
+            "terminal_sections",
+            "unknown_reason_sections"
+          ],
+          "description": "Canonical ordered presentation selector registry (D1 §12). The JSON registry is the executable SSOT; exact operation-context key parity and section resolution are enforced procedurally (no Python selector mapping).",
+          "properties": {
+            "context_sections": {
+              "type": "object",
+              "additionalProperties": false,
+              "patternProperties": {
+                "^[a-z][a-z0-9_.-]*$": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "uniqueItems": true
+                }
+              }
+            },
+            "terminal_sections": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true,
+              "minItems": 1
+            },
+            "unknown_reason_sections": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true,
+              "minItems": 1
+            }
+          }
+        },
+        "next_actions": {
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[a-z][a-z0-9_.-]*$": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "description",
+                "params"
+              ],
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "params": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "reasons": {
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[a-z][a-z0-9_.-]*$": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "params",
+                "next_actions",
+                "sections",
+                "message"
+              ],
+              "properties": {
+                "params": {
+                  "type": "object"
+                },
+                "next_actions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "uniqueItems": true
+                },
+                "sections": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "uniqueItems": true
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "sections": {
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[a-z][a-z0-9_/.-]*$": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "title",
+                "summary",
+                "clauses"
+              ],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "summary": {
+                  "type": "string"
+                },
+                "clauses": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "text"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "uniqueItems": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "publicContractDefs": {}
+  }
+}

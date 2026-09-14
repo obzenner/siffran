@@ -1,87 +1,101 @@
-"""Inactive Claude Code adapter building blocks for the ``empirica/v1`` bridge.
+"""Inactive Claude Code adapter building blocks for the ``empirica/v2`` bridge (D6-C).
 
-These modules translate Claude-shaped lifecycle payloads without registering hooks.  Activation is
-intentionally separate: existing hooks and ``hooks.json`` remain the active implementation until a
-later cutover.
+These modules translate Claude-shaped lifecycle payloads into exact v2 requests without
+registering hooks.  Removed operations (``void_spawn``/``audit_ticket``/``consume``/``phase``) and
+author-submitted trusted actions (``evidence_leaf``/``attribution``/``child_event``/
+``audit_verdict``) have no public builder here: the adapter fails closed locally rather than
+fabricating capability.  Activation is intentionally separate: the thin hooks under ``hooks/``
+remain the active implementation.
 """
 
-from .completion import StopResult, build_stop_request, dispatch_stop, stop_result
-from .correlation import CorrelationError, correlate, request_id
+from .completion import REPORT_CONVERGENCE, StopResult, build_stop_request, dispatch_stop, stop_result
+from .correlation import PROTOCOL, CorrelationError, correlate, request_id
 from .dispatch import (
+    bash_command,
     build_dispatch_request,
-    dispatch_actor,
     dispatch_advice,
+    dispatch_dispatch,
     dispatched_harness,
 )
 from .fail_direction import FailureDirection, blocks_on_failure, failure_direction
-from .invocation import Invocation, build_mode_request, parse_invocation
-from .knowledge import (
-    SpikeExecution,
-    build_attribution_request,
-    build_audit_ticket_request,
-    build_audit_verdict_request,
-    build_graph_request,
-    build_regate_requests,
-    build_research_request,
-    build_spike_request,
-    run_spike,
+from .invocation import (
+    Invocation,
+    MODES,
+    build_configure_run_request,
+    parse_invocation,
 )
 from .preflight import diagnose
+from .restore import (
+    build_get_argument_request,
+    build_restore_request,
+    dispatch_get_argument,
+    dispatch_restore,
+    restore_context,
+)
 from .route import (
     INVESTIGATIVE_TOOLS,
     build_investigation_request,
     build_route_announcement_request,
     dispatch_investigation,
     dispatch_route_announcement,
+    is_route_command,
     observed_at,
 )
-from .restore import build_restore_request, dispatch_restore, restore_context
-from .run_start import build_start_run_request, dispatch_start_run, invocation_details
+from .run_start import (
+    FALLBACK_GOAL,
+    build_resolve_request,
+    build_start_run_request,
+    dispatch_resolve,
+    dispatch_start_run,
+    invocation_details,
+)
 from .selector import PayloadContext, SelectorError, context_from_payload, selector_from_payload
 from .spawn import (
     SpawnDecision,
-    build_reserve_spawn_request,
-    dispatch_reserve_spawn,
+    build_child_reserve_request,
+    dispatch_child_reserve,
     spawn_decision,
 )
-from .transport import BridgeTransport, Transport, dispatch
+from .transport import CLAUDE_PROFILE_ID, BridgeTransport, Transport, dispatch
 
 __all__ = [
     "BridgeTransport",
+    "CLAUDE_PROFILE_ID",
     "CorrelationError",
+    "FALLBACK_GOAL",
     "FailureDirection",
+    "INVESTIGATIVE_TOOLS",
     "Invocation",
+    "MODES",
     "PayloadContext",
+    "PROTOCOL",
+    "REPORT_CONVERGENCE",
     "SelectorError",
     "SpawnDecision",
     "StopResult",
-    "SpikeExecution",
     "Transport",
-    "INVESTIGATIVE_TOOLS",
+    "bash_command",
     "blocks_on_failure",
+    "build_child_reserve_request",
+    "build_configure_run_request",
     "build_dispatch_request",
-    "build_attribution_request",
-    "build_audit_ticket_request",
-    "build_audit_verdict_request",
-    "build_graph_request",
+    "build_get_argument_request",
     "build_investigation_request",
-    "build_mode_request",
-    "build_reserve_spawn_request",
-    "build_regate_requests",
-    "build_research_request",
+    "build_resolve_request",
     "build_restore_request",
     "build_route_announcement_request",
     "build_start_run_request",
-    "build_spike_request",
     "build_stop_request",
     "context_from_payload",
     "correlate",
-    "dispatch",
-    "dispatch_actor",
-    "dispatch_advice",
     "diagnose",
+    "dispatch",
+    "dispatch_advice",
+    "dispatch_child_reserve",
+    "dispatch_dispatch",
+    "dispatch_get_argument",
     "dispatch_investigation",
-    "dispatch_reserve_spawn",
+    "dispatch_resolve",
     "dispatch_restore",
     "dispatch_route_announcement",
     "dispatch_start_run",
@@ -89,10 +103,10 @@ __all__ = [
     "dispatched_harness",
     "failure_direction",
     "invocation_details",
+    "is_route_command",
     "observed_at",
     "parse_invocation",
     "request_id",
-    "run_spike",
     "restore_context",
     "selector_from_payload",
     "spawn_decision",

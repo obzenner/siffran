@@ -1,34 +1,38 @@
-// Translation between Pi events and the empirica/v1 contract.
+// Translation between Pi events and the empirica/v2 contract (D6-C C3).
 //
-// This module is pure: it builds Request envelopes from Pi invocations and maps a
-// typed Result to a host-neutral gate/notification outcome. It contains no
-// convergence *judgement* — whether a run has converged, what is gated, why a
-// report is blocked — those are the core's rules, reached over the transport
-// (ADR-30). The adapter only speaks the protocol and obeys the returned decision.
+// This module is pure: it builds Request envelopes from Pi invocations and maps
+// a guarded Result to a gate/notification outcome. It contains no convergence
+// judgement — whether a run has converged, what is gated, why a report is
+// blocked — those are the core's rules, reached through the transport. The
+// adapter only speaks the protocol and obeys the returned decision.
 
-import { renderText, type ContractView } from "./obligations.ts";
-
+import {
+  PROTOCOL,
+  type Budgets,
+  type EvaluateIntent,
+  type FaultCode,
+  type Modes,
+  type Request,
+  type Result,
+  type RunSelector,
+} from "./contract.ts";
 
 // The convergence gate's intent and the tool/command name it guards. A run may
 // report convergence only through EvaluateRun(report_convergence) (ADR-32).
 export const REPORT_CONVERGENCE_INTENT: EvaluateIntent = "report_convergence";
-export const CONTINUE_INTENT: EvaluateIntent = "continue";
 export const REPORT_CONVERGENCE_TOOL = "report_convergence";
-import {
-  PROTOCOL,
-  type EvaluateIntent,
-  type FaultCode,
-  type Request,
-  type Result,
-  type RunModes,
-  type RunSelector,
-} from "./contract.ts";
 
-export interface ParsedModeFlags { goal: string; modes: RunModes; unknownFlags: string[]; }
-/** ADR-28: consume only leading recognized flags; unknown flags are surfaced, never enabled. */
+export interface ParsedModeFlags {
+  goal: string;
+  modes: Modes;
+  unknownFlags: string[];
+}
+
+/** Consume only leading recognized flags; unknown flags are surfaced, never enabled. */
 export function parseModeFlags(args: string): ParsedModeFlags {
   const tokens = args.trim().split(/\s+/).filter(Boolean);
-  const modes: RunModes = {}; const unknownFlags: string[] = [];
+  const modes: Modes = {};
+  const unknownFlags: string[] = [];
   let i = 0;
   while (i < tokens.length && tokens[i].startsWith("--")) {
     const flag = tokens[i++];
@@ -40,39 +44,44 @@ export function parseModeFlags(args: string): ParsedModeFlags {
   }
   return { goal: tokens.slice(i).join(" "), modes, unknownFlags };
 }
-function contractText(result: Result): string {
-  const view = (result.type === "Allow" || result.type === "Block") ? result.run.contract : undefined;
-  return view ? `\n\n${renderText(view)}` : "";
-}
-
 
 // --- Pi invocation -> Request -----------------------------------------------
 
 export interface StartRunOptions {
   maxPasses?: number;
-  maxSpawns?: number | null;
-  modes?: RunModes;
-  actor?: { model?: string; harness?: string; provider?: string };
+  maxSpawns?: number;
+  modes?: Modes;
 }
+
 export function startRunRequest(
   selector: RunSelector,
   goal: string,
   requestId: string,
   options: StartRunOptions = {},
 ): Request {
-  const command: Request["command"] = { type: "StartRun", selector, goal };
-  if (options.maxPasses !== undefined) command.max_passes = options.maxPasses;
-  if (options.maxSpawns !== undefined) command.max_spawns = options.maxSpawns;
+  const command: Extract<Request["command"], { type: "StartRun" }> = {
+    type: "StartRun",
+    selector,
+    goal,
+  };
+  if (options.maxPasses !== undefined || options.maxSpawns !== undefined) {
+    const budgets: Budgets = {};
+    if (options.maxPasses !== undefined) budgets.max_passes = options.maxPasses;
+    if (options.maxSpawns !== undefined) budgets.max_spawns = options.maxSpawns;
+    command.budgets = budgets;
+  }
   if (options.modes !== undefined) command.modes = options.modes;
-  if (options.actor !== undefined) command.actor = options.actor;
   return { protocol: PROTOCOL, request_id: requestId, command };
 }
 
-export function getRunRequest(runId: string, requestId: string): Request {
+export function resolveRunRequest(
+  selector: RunSelector,
+  requestId: string,
+): Request {
   return {
     protocol: PROTOCOL,
     request_id: requestId,
-    command: { type: "GetRun", run_id: runId },
+    command: { type: "ResolveRun", selector },
   };
 }
 
@@ -80,30 +89,28 @@ export function evaluateRunRequest(
   runId: string,
   intent: EvaluateIntent,
   requestId: string,
-  // Epoch SECONDS (float), not milliseconds — Date.now() is ms, so divide by
-  // 1000. The core reads this to enforce a wall-clock stall deadline on a
-  // blocking run. Defaulted here (the sole clock read the adapter needs) so the
-  // requests dispatched from index.ts carry it; a caller may pass an explicit
-  // value to keep the builder deterministic under test.
-  observedAt: number = Date.now() / 1000,
 ): Request {
   return {
     protocol: PROTOCOL,
     request_id: requestId,
-    command: { type: "EvaluateRun", run_id: runId, intent, observed_at: observedAt },
+    command: { type: "EvaluateRun", run_id: runId, intent },
   };
 }
 
 export function restoreRunRequest(runId: string, requestId: string): Request {
-  return { protocol: PROTOCOL, request_id: requestId, command: { type: "RestoreRun", run_id: runId } };
+  return {
+    protocol: PROTOCOL,
+    request_id: requestId,
+    command: { type: "RestoreRun", run_id: runId },
+  };
 }
 
+// --- Result -> gate / notice ------------------------------------------------
 
-
-/** A gate decision, independent of Pi's own return shape (mapped in index.ts). */
+/** A gate decision for a hard-gated operation (the convergence report). */
 export type GateDecision =
   | { kind: "permit" }
-  | { kind: "deny"; reason: string; contract?: ContractView };
+  | { kind: "deny"; reason: string };
 
 const FAULT_MESSAGE: Record<FaultCode, string> = {
   invalid_request: "the request was rejected as malformed",
@@ -118,25 +125,32 @@ function faultReason(code: FaultCode, message?: string): string {
   return message && message.length > 0 ? message : FAULT_MESSAGE[code];
 }
 
+/** Extract a human-readable denial reason from a v2 Block's reasons array. */
+function blockReason(result: Extract<Result, { type: "Block" }>): string {
+  const first = result.reasons[0];
+  if (first && typeof first.message === "string" && first.message.length > 0)
+    return first.message;
+  return first?.code ?? "blocked";
+}
+
 /**
- * Map a decision to a gate outcome for a *hard-gated* operation (the convergence
- * report). This is the trust boundary, so it fails **closed**: an explicit Block
- * denies, and a Fault denies unless the core explicitly says `fail_direction:
- * "open"`. An `Allow` or `Inert` (no active run — nothing to gate) permits.
+ * Map a guarded decision to a gate outcome for a *hard-gated* operation (the
+ * convergence report). This is the trust boundary, so it fails **closed**: with
+ * a nonnull run handle, ONLY a guarded Allow permits — a Block, an Inert (the
+ * run is gone but a handle exists), an open *or* closed Fault, and a transport
+ * error all deny. An Allow with converged=false is still a valid, guarded
+ * Allow: it is a machine-approved non-convergence report, not a denial.
  */
 export function gateFromDecision(result: Result): GateDecision {
   switch (result.type) {
     case "Allow":
       return { kind: "permit" };
     case "Block":
-      return result.run.contract ? { kind: "deny", reason: result.reason, contract: result.run.contract } : { kind: "deny", reason: result.reason };
+      return { kind: "deny", reason: blockReason(result) };
     case "Inert":
-      // No active run (or an event the core does not act on) — not gated.
-      return { kind: "permit" };
+      return { kind: "deny", reason: "no active run to report" };
     case "Fault":
-      return result.fail_direction === "open"
-        ? { kind: "permit" }
-        : { kind: "deny", reason: faultReason(result.code, result.message) };
+      return { kind: "deny", reason: faultReason(result.code, result.message) };
   }
 }
 
@@ -145,35 +159,43 @@ export interface Notice {
   text: string;
 }
 
+/** A user-facing notice describing a StartRun attempt (D6). Truthful about the
+ * attempt and any failure — never relabels a start as a status read. */
+export function startRunNotice(result: Result): Notice {
+  switch (result.type) {
+    case "Allow":
+      return {
+        type: "info",
+        text: result.converged
+          ? `empirica: D6 StartRun attempt — run ${result.run.id} already converged.`
+          : `empirica: D6 StartRun attempt — run ${result.run.id} active.`,
+      };
+    case "Block":
+      return { type: "warning", text: `empirica: D6 StartRun attempt blocked — ${blockReason(result)}` };
+    case "Inert":
+      return { type: "warning", text: "empirica: D6 StartRun attempt — no run created." };
+    case "Fault":
+      return { type: "error", text: `empirica: D6 StartRun attempt could not start — ${result.code}: ${faultReason(result.code, result.message)}` };
+  }
+}
+
 /** A user-facing notice describing a convergence-report decision (command path). */
 export function convergenceNotice(result: Result): Notice {
   switch (result.type) {
     case "Allow":
       return result.converged
         ? { type: "info", text: "empirica: run converged — convergence report allowed." }
-        : {
-            type: "warning",
-            text: `empirica: allowed, but the run is not marked converged.${contractText(result)}`,
-          };
+        : { type: "warning", text: "empirica: allowed, but the run is not marked converged." };
     case "Block":
-      return {
-        type: "error",
-        text: `empirica: convergence report blocked — ${result.reason}${contractText(result)}`,
-      };
+      return { type: "error", text: `empirica: convergence report blocked — ${blockReason(result)}` };
     case "Inert":
-      return {
-        type: "info",
-        text: "empirica: no active run — nothing to report.",
-      };
+      return { type: "info", text: "empirica: no active run — nothing to report." };
     case "Fault":
-      return {
-        type: "error",
-        text: `empirica: cannot evaluate convergence — ${faultReason(result.code, result.message)}`,
-      };
+      return { type: "error", text: `empirica: cannot evaluate convergence — ${faultReason(result.code, result.message)}` };
   }
 }
 
-/** A user-facing notice describing a run snapshot (status command path). */
+/** A user-facing notice describing a run snapshot (status path). */
 export function statusNotice(result: Result): Notice {
   switch (result.type) {
     case "Allow":
@@ -182,35 +204,51 @@ export function statusNotice(result: Result): Notice {
       const converged = result.type === "Allow" && result.converged;
       return {
         type: "info",
-        text:
-          `empirica run ${run.id}: status=${run.status}, revision=${run.revision}` +
-          (converged ? " (converged)" : "") + contractText(result),
-
+        text: `empirica run ${run.id}: status=${run.status}${converged ? " (converged)" : ""}`,
       };
     }
     case "Inert":
       return { type: "info", text: "empirica: no active run in this session." };
     case "Fault":
-      return {
-        type: "error",
-        text: `empirica: cannot read run — ${faultReason(result.code, result.message)}`,
-      };
+      return { type: "error", text: `empirica: cannot read run — ${faultReason(result.code, result.message)}` };
   }
 }
 
+// --- subagent local fail-closed (D6-C C3, D8-owned) --------------------------
+//
+// The foreground-only `pi@0.84.1` profile does not support child admission (D8):
+// there is no subagent extension and no async child protocol. When a real
+// Empirica run handle exists, an executable subagent tool launch is denied
+// locally — no dispatch, no child protocol/state. Read-only management calls
+// (list/status) and no-handle launches are inert. The denial is owned by D8
+// (child admission), not by the adapter's convergence gate.
+
+/** The Pi subagent tool name. */
+export const SUBAGENT_TOOL = "subagent";
+
+const LAUNCH_KEYS = ["agent", "workflowScript", "resume"] as const;
+
 /**
- * Build the best-effort follow-up nudge for `agent_settled`, or `null` when there
- * is nothing to say. This is explicitly **not** a completion gate (ADR-32): Pi's
- * settled lifecycle is observational and cannot be vetoed, so the text names
- * itself a reminder, and the caller enqueues it without blocking anything.
+ * Classify a Pi `subagent` tool call. Returns true only for a *fresh, structured
+ * executable launch* — exactly one of `agent`, `workflowScript`, or `resume` is
+ * present and non-null. Management calls (list/status) and malformed
+ * multi-key launches return false (they are inert, never denied).
  */
-export function settledFollowUp(result: Result): string | null {
-  // Only nudge while a run is genuinely active and unconverged. Everything else —
-  // converged, terminal, no run, or a fault — means there is nothing to prompt.
-  if (result.type !== "Block") return null;
+export function isExecutableSubagentLaunch(
+  toolName: string,
+  input: Record<string, unknown> | undefined,
+): boolean {
+  if (toolName !== SUBAGENT_TOOL) return false;
+  const inp = input ?? {};
+  const present = LAUNCH_KEYS.filter((k) => k in inp && inp[k] != null);
+  return present.length === 1;
+}
+
+/** The D8-owned local denial reason for an executable subagent launch while a
+ * real Empirica run is active on the foreground-only pi@0.84.1 profile. */
+export function subagentUnsupportedReason(): string {
   return (
-    `empirica (reminder, not a gate): this run has outstanding work before it can ` +
-    `report convergence — ${result.reason}. ` +
-    `Continue, or call the ${REPORT_CONVERGENCE_TOOL} tool once the evidence is in.` + contractText(result)
+    "empirica: executable subagent launch unsupported — " +
+    "child admission (D8) unavailable for host profile pi@0.84.1 (foreground_only)"
   );
 }

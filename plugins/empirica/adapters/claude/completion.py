@@ -2,21 +2,23 @@
 
 The adapter owns only host mechanics: ``Stop`` asks the application to
 ``EvaluateRun(report_convergence)`` and maps the typed result to Claude's documented
-exit/stdout/stderr contract.  It registers no hook and reads no run files.
+exit/stdout/stderr contract.  ``observed_at`` is only ever a string or null (a numeric timestamp is
+never emitted); it is omitted when the host event carries no timestamp.  This module registers no
+hook and reads no run files.
 """
 from __future__ import annotations
 
 import json
-import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from .correlation import request_id as new_request_id
+from .correlation import PROTOCOL, request_id as new_request_id
 from .fail_direction import FailureDirection, blocks_on_failure
+from .route import observed_at
 from .selector import context_from_payload
 from .transport import BridgeTransport, Transport
 
-PROTOCOL = "empirica/v1"
+REPORT_CONVERGENCE = "report_convergence"
 
 
 @dataclass(frozen=True)
@@ -37,19 +39,24 @@ def _handle(run_id: object) -> str:
 def build_stop_request(
     payload: Mapping[str, object], run_id: str, *, correlation_id: str | None = None,
 ) -> dict:
-    """Translate a Claude ``Stop`` payload to the one authoritative convergence gate."""
+    """Translate a Claude ``Stop`` payload to the one authoritative convergence gate.
+
+    ``observed_at`` is forwarded only as a string when the host event supplies one; a numeric
+    timestamp is never fabricated.
+    """
     context_from_payload(payload)
+    command: dict = {
+        "type": "EvaluateRun",
+        "run_id": _handle(run_id),
+        "intent": REPORT_CONVERGENCE,
+    }
+    stamp = observed_at(payload)
+    if stamp is not None:
+        command["observed_at"] = stamp
     return {
         "protocol": PROTOCOL,
         "request_id": correlation_id or new_request_id(payload, "stop"),
-        "command": {
-            "type": "EvaluateRun",
-            "run_id": _handle(run_id),
-            "intent": "report_convergence",
-            # The hook stamps its own wall clock (epoch seconds): Claude Code hook input carries no
-            # timestamp, and the service measures the stall deadline against it.
-            "observed_at": time.time(),
-        },
+        "command": command,
     }
 
 
@@ -57,9 +64,8 @@ def dispatch_stop(
     payload: Mapping[str, object], run_id: str, *, transport: Transport | None = None,
     correlation_id: str | None = None,
 ) -> dict:
-    context = context_from_payload(payload)
     request = build_stop_request(payload, run_id, correlation_id=correlation_id)
-    return (transport if transport is not None else BridgeTransport(context.cwd)).dispatch(request)
+    return (transport if transport is not None else BridgeTransport()).dispatch(request)
 
 
 def _json_line(result: dict) -> str:

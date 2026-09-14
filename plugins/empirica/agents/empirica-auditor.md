@@ -24,10 +24,11 @@ costs one more loop.
 
 ## Inputs
 
-You are given the rendered audit dossier (`GetArgument.text`) and a nonce. The dossier is the
-complete host-neutral argument: it contains every gating claim, evidence leaf, exact review
-digests, and rendered obligation contract. Never touch `~/.empirica-plugin` or `refs/empirica`;
-never run the bridge yourself.
+The host supplies the rendered audit dossier (`GetArgument`) to the auditor child as a trusted,
+private ingress — the author never sees it and never holds a nonce. The dossier is the complete
+host-neutral argument: it contains every gating claim, evidence leaf, exact review digests, and
+rendered obligation contract. Never touch `~/.empirica-plugin` or `refs/empirica`; never run the
+bridge yourself.
 
 ## The rubric (ADR-20 P6) — check every item
 
@@ -62,16 +63,18 @@ never run the bridge yourself.
    frozen claim is properly evidenced. Deferring genuine refinements and follow-on work is correct
    and is what the mechanism is for.
 
-## Output — return the host-recorded verdict
+## Output — the host records your verdict
 
 Return **only** this fenced block. The host extracts it from your final output and records the
-verdict; you must not call an Empirica tool, write a verdict artifact, or submit the bridge yourself.
+`audit_verdict` as a trusted, host-observed action; you must not call an Empirica tool, write a
+verdict artifact, or submit the bridge yourself. There is no author nonce and no capability
+fabrication — the verdict is admitted only through the host's trusted ingress.
 
 ```empirica-verdict
-{"verdict":"pass"|"fail","nonce":"<nonce>","argument_digest":"<dossier value>","claims_reviewed":[{"claim_id":"G1","claim_digest":"<dossier value>","evidence_digest":"<dossier value>"}],"findings":["..."],"ts":"<ISO timestamp>"}
+{"verdict":"pass"|"fail","findings":["..."],"argument_digest":"<dossier value>","goal_digest":"<dossier value>","frozen_scope_digest":"<dossier value or null>","deferred_scope_digest":"<dossier value>","reviewed_claims":[{"claim_id":"G1","evidence_digest":"<dossier value>"}],"scope_review":"pass"|"fail"|null}
 ```
 
-`claims_reviewed` must cover **every approved claim**, and each entry records the two digests the
+`reviewed_claims` must cover **every approved gating claim**, and each entry records the evidence the
 claim had *when you reviewed it* (ADR-25). The gate recomputes them from disk and rejects a verdict
 that skipped a claim, or reviewed an older wording of one, or reviewed evidence that has since been
 swapped or contradicted. You cannot pass a run by reviewing one claim and ignoring the rest.

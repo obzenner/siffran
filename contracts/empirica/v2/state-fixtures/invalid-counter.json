@@ -1,0 +1,24 @@
+{
+  "protocol": "empirica/v2",
+  "state_schema": "empirica.run/2",
+  "goal": "Prove counter overflow is rejected procedurally.",
+  "status": "active",
+  "modes": {
+    "multi_provider": false,
+    "cli_exec": false
+  },
+  "budgets": {
+    "max_passes": 3,
+    "passes_used": 5,
+    "max_spawns": 2,
+    "spawns_used": 1
+  },
+  "selected_graph_artifact_id": null,
+  "frozen_claim_ids": null,
+  "route_stamp": null,
+  "investigation_stamp": null,
+  "stamp_seq": 0,
+  "last_derivation_digest": null,
+  "children": [],
+  "committed_artifact_head_id": null
+}

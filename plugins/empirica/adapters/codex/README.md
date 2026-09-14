@@ -1,11 +1,10 @@
 # Empirica adapter for Codex CLI
 
-This is a thin Codex-native adapter over the existing `empirica/v1` application service. It
-translates Codex hook payloads and decisions; it does not reimplement claim, evidence, budget,
-audit, or convergence rules. The shared bridge still wires the same operational repository under
-`$EMPIRICA_HOME` (default `~/.empirica-plugin`) and the same Git artifact repository under
-`refs/empirica/*`. No normal adapter operation writes `.codex` or any other runtime state into the
-repository.
+This is a thin Codex-native adapter over the shared `empirica/v2` composition bridge. It translates
+Codex 0.146.0 hook payloads and decisions; it does not reimplement claim, evidence, budget,
+audit, or convergence rules. The shared bridge composes the host-neutral `application.v2` service
+with a fixed exact registry profile and a no-location run port; it owns no host default and
+accepts no `cwd`.
 
 ## Pinned host contract
 
@@ -23,25 +22,34 @@ Codex hook config uses a shell `command` string. The plugin manifest therefore p
 `hooks/codex.json`, rather than reusing Claude's `hooks/hooks.json`, whose `command` plus `args`
 shape is not the Codex 0.146.0 bundled-hook contract.
 
-| Codex surface | Adapter mapping | Enforcement |
+| Codex surface | Adapter mapping | Behaviour |
 |---|---|---|
-| explicit `$empirica ...` at prompt start | `StartRun` | activation is best-effort and otherwise inert |
-| `PreToolUse`, matcher `Agent` | `ObserveAction(reserve_spawn)`; auditor marker also issues a ticket | cap denial and closed corrupt-state faults deny the spawn |
-| `PreToolUse`, matcher `Bash` | first-write route/investigation stamps; recognized CLI actors reserve and record dispatch | route is witnessed; CLI spawn cap is enforced when `cli_exec` is enabled |
-| `Stop` | `EvaluateRun(report_convergence)` | `Block` and closed faults return native `decision: block` |
-| `SessionStart:compact` | `RestoreRun` | observational, bounded context, never a completion gate |
-| `adapters.codex.knowledge` | graph, research, deterministic spike/re-gate, audit ticket/verdict, attribution | shared validation and application service |
+| explicit `$empirica ...` at prompt start | `StartRun` | best-effort activation, fail open; renders exact Fault code when unsupported |
+| `PreToolUse` (Agent, Bash) | `ResolveRun` through strict shell | inert when unresolved (D6); no pre-resolution denial |
+| `Stop` | `ResolveRun` through strict shell | inert when unresolved (D6) |
+| `SessionStart:compact` | `ResolveRun` through strict shell | inert when unresolved (D6) |
 
-After choosing known/unknown, record the route before any investigative Bash command with a
-portable no-op. The `PreToolUse:Bash` hook recognizes this marker and submits the route first:
+Codex 0.146.0 does not put a timestamp in hook stdin. `turn_id` and `tool_use_id` are retained as
+a correlation hint inside the request id; `observed_at` is omitted (a numeric timestamp is never
+fabricated).
 
-```sh
-python3 -c 'pass' -- --empirica-route 'runtime behavior is unknown'
-```
+## Observational truth (D6-C C2b)
 
-Codex 0.146.0 does not put a timestamp in hook stdin. `turn_id` and `tool_use_id` are copied as
-review metadata, while the existing service's CAS-assigned monotone sequence is the authoritative
-route/action ordering witness.
+Codex is an **observational** host (`codex-cli@0.146.0`, tier `observational`). The adapter
+reaches the shared bridge with the fixed exact profile and **no `cwd`**; correlation is exact
+`empirica/v2`. The retained public request builders (`StartRun`, `ResolveRun`) each produce a
+`contracts/empirica/v2/request.schema.json`-valid envelope.
+
+Run identity/location is D7-owned. At D6 the bridge's no-location run port reports every opaque
+ID unresolved, so `ResolveRun` returns `unsupported`/closed and no run handle is resolved. The
+four hook entrypoints (PreToolUse, Stop, restore) `ResolveRun` through the strict bridge shell
+and return inert when unresolved, without pre-resolution denial. Route, investigation, dispatch,
+child-reserve, EvaluateRun, RestoreRun, and response-mapping builders are **deleted**: these
+operations are D7-D10-owned and unavailable in the D6 strict shell. The adapter does not
+fabricate an active run handle, a trusted capability reference, audit/nonce admission, D7 state,
+D8 child admission, D9 projection, or D10 policy. The `adapters.codex.knowledge` module and its
+graph/research/spike/regate/audit-ticket/verdict/attribution builders are deleted; Codex owns
+local translators and helpers with **zero** `adapters.claude` imports.
 
 ## Trust boundary and visibility limits
 
@@ -55,37 +63,27 @@ enforcement boundary.
 
 Hosted Responses API WebSearch is not dispatched through Codex's ordinary tool registry in
 0.146.0, so `PreToolUse` cannot observe, stamp, or deny it. Standalone/extension search may be
-hook-visible when it is a registered tool, but this adapter makes no blanket claim. A research
-citation can still be recorded after hosted search, and the independent auditor can re-read it,
-but P1 route ordering for that hosted action is **unverified** unless an earlier hook-visible
-action already established the investigation stamp. This is a host sensor gap, not evidence of
-ordering and not a reason to report convergence.
-
-The audit ticket proves only that a trusted `PreToolUse:Agent` hook witnessed a requested spawn.
+hook-visible when it is a registered tool, but this adapter makes no blanket claim. This is a host
+sensor gap, not evidence of ordering and not a reason to report convergence.
 
 ### Auditor round-trip limitation (Codex 0.146.0)
 
 Codex's documented `PreToolUse` hook output has no `updatedInput` field, and its `Stop` payload
 contains only the parent `last_assistant_message`, not a spawned child's final output or a child
-transcript reference. Therefore this adapter can reserve and ticket an auditor spawn, but cannot
-inject the GetArgument dossier/nonce into that child or host-record its fenced verdict. The closest
-available `Stop` hook evaluates the run only; it must leave the audit obligation open. A future
-Codex payload carrying a mutable child input plus child final output (or a documented child
-transcript path) can use `adapters.claude.audit.child_prompt` and `verdict_from_final_output`
-without changing the application contract.
-It does not authenticate the spawned actor or the unsigned verdict; those remain within Empirica's
-documented file-level trust model. Codex plugin bundles also do not load Claude's `agents/`
-definitions, so a Codex auditor spawn must include the literal `empirica-auditor` marker in its
-dispatcher-visible `agent_type`, `name`, `task_name`, or `message` for the ticket to be issued.
+transcript reference. Therefore this adapter can neither inject a `GetArgument` dossier into a
+child nor host-record its verdict. The audit obligation honestly remains open until a future
+Codex payload carries a mutable child input plus child final output (or a documented child
+transcript path). The adapter does not fabricate a nonce, a trusted `audit_verdict`, or capability
+admission to work around this gap.
 
 ## Validation
 
 ```sh
-make empirica-codex-check
+make check-codex
 make codex-live-check CODEX='npx -y @openai/codex@0.146.0'
 ```
 
-The first target validates manifests, hook shapes, official payload fixtures, and a complete
-isolated bridge lifecycle without inference. The second asks the pinned executable to add this
-local marketplace, install Empirica into a temporary `CODEX_HOME`, and list the installed bundle;
-it exercises the real plugin loader without using credentials or calling a model.
+The first target validates manifests, hook shapes, official payload fixtures, and the bounded
+adapter suite without inference. The second asks the pinned executable to add this local
+marketplace, install Empirica into a temporary `CODEX_HOME`, and list the installed bundle; it
+exercises the real plugin loader without using credentials or calling a model.

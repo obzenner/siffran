@@ -1,18 +1,17 @@
-"""Inactive Claude route-order translations using typed first-write-wins operations.
+"""Inactive Claude route-order translations using exact v2 first-write-wins operations.
 
 No timestamp or ordering decision is made here.  A harness timestamp is forwarded as transport
-metadata when present; the application service establishes the authoritative total order with its
-CAS-guarded monotone sequence and implements first-write-wins for both operations.
+metadata (a string) when present; the application service establishes the authoritative total order
+with its CAS-guarded monotone sequence and implements first-write-wins for both operations.
 """
 from __future__ import annotations
 
 from collections.abc import Mapping
 
-from .correlation import request_id as new_request_id
+from .correlation import PROTOCOL, request_id as new_request_id
 from .selector import context_from_payload
 from .transport import BridgeTransport, Transport
 
-PROTOCOL = "empirica/v1"
 INVESTIGATIVE_TOOLS = frozenset({
     "Read", "Glob", "Grep", "Bash", "WebFetch", "WebSearch", "NotebookRead", "LSP",
 })
@@ -25,13 +24,15 @@ def _handle(run_id: object) -> str:
 
 
 def observed_at(payload: Mapping[str, object]) -> str | None:
-    """Return a caller-supplied timestamp/sequence without consulting a clock."""
+    """Return a genuine nonempty string host timestamp without consulting a clock.
+
+    Only real string timestamps from the host event are forwarded; numeric, bool, and null
+    values are omitted — never stringified as a ``seq:`` stamp (D6-C §3/C2).
+    """
     for key in ("timestamp", "ts", "time", "event_ts"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
             return value
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            return f"seq:{value}"
     return None
 
 
@@ -88,19 +89,17 @@ def dispatch_investigation(
     payload: Mapping[str, object], run_id: str, *, transport: Transport | None = None,
     correlation_id: str | None = None,
 ) -> dict | None:
-    context = context_from_payload(payload)
     request = build_investigation_request(payload, run_id, correlation_id=correlation_id)
     if request is None:
         return None
-    return (transport if transport is not None else BridgeTransport(context.cwd)).dispatch(request)
+    return (transport if transport is not None else BridgeTransport()).dispatch(request)
 
 
 def dispatch_route_announcement(
     payload: Mapping[str, object], run_id: str, *, reason: str = "",
     transport: Transport | None = None, correlation_id: str | None = None,
 ) -> dict:
-    context = context_from_payload(payload)
     request = build_route_announcement_request(
         payload, run_id, reason=reason, correlation_id=correlation_id,
     )
-    return (transport if transport is not None else BridgeTransport(context.cwd)).dispatch(request)
+    return (transport if transport is not None else BridgeTransport()).dispatch(request)
