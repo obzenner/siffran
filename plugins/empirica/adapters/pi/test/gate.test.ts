@@ -50,37 +50,28 @@ function toolEvent(toolName: string): ToolCallEvent {
   return { toolName, toolCallId: "tc-1", input: {} };
 }
 
-async function startRun(w: Wired): Promise<FakeUi> {
-  const ui = new FakeUi();
-  await w.pi.command("empirica").handler("build the thing", { ui });
-  return ui;
+async function startRun(w: Wired): Promise<void> {
+  const ctx = fakeCtx("/work", [
+    { customType: "empirica.run", data: { runHandle: HANDLE } },
+  ]);
+  await (w.pi.handlers.get("session_start") as (e: unknown, c: unknown) => unknown)({}, ctx);
 }
 
 // --- /empirica ---------------------------------------------------------------
 
-test("/empirica dispatches StartRun with the derived selector and stores the handle", async () => {
-  const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
-  const ui = await startRun(w);
-
-  const start = w.requests[0];
-  assert.equal(start.command.type, "StartRun");
-  assert.deepEqual(
-    start.command.type === "StartRun" ? start.command.selector : null,
-    { project: "p", session: "s" },
-  );
-  assert.match(ui.last()!.message, new RegExp(HANDLE));
-  assert.equal(w.pi.entries.length, 1);
-  assert.equal(w.pi.entries[0].customType, "empirica.run");
-});
-
-test("/empirica reports a start failure rather than throwing", async () => {
+test("/empirica refuses before StartRun because the profile cannot progress", async () => {
   const w = wire(() => {
-    throw new Error("bridge offline");
+    throw new Error("the unsupported preflight must not dispatch");
   });
   const ui = new FakeUi();
-  await w.pi.command("empirica").handler("g", { ui });
+
+  await w.pi.command("empirica").handler("build the thing", { ui });
+
+  assert.equal(w.requests.length, 0);
+  assert.equal(w.pi.entries.length, 0);
   assert.equal(ui.last()!.type, "error");
-  assert.match(ui.last()!.message, /bridge offline/);
+  assert.match(ui.last()!.message, /author actions and the bound audit lifecycle are unavailable/);
+  assert.match(ui.last()!.message, /No run was created/);
 });
 
 // --- tool_call gate ----------------------------------------------------------
@@ -134,16 +125,10 @@ test("gate: with no active run the gated tool passes (nothing to gate)", async (
 });
 
 test("gate: an unavailable transport fails CLOSED (blocks the report)", async () => {
-  let started = false;
-  const w = wire((req) => {
-    if (req.command.type === "StartRun") {
-      started = true;
-      return envelope({ type: "Allow", converged: false, run: run() });
-    }
+  const w = wire(() => {
     throw new Error("core unreachable");
   });
   await startRun(w);
-  assert.ok(started);
   const decision = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), { ui: new FakeUi() });
   assert.equal(decision?.block, true);
   assert.match(decision!.reason!, /failing closed/);
@@ -309,11 +294,32 @@ test("direct tool: report_convergence execute rejects on open Fault with active 
   await assert.rejects(() => execTool(w, "report_convergence"), /unavailable/);
 });
 
-test("status tool resolves the run via ResolveRun and renders id+status", async () => {
-  const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+test("status uses the restored opaque handle across selector changes", async () => {
+  const w = wire((req) => {
+    assert.equal(req.command.type, "RestoreRun");
+    assert.equal(req.command.type === "RestoreRun" ? req.command.run_id : null, HANDLE);
+    return envelope({ type: "Allow", converged: false, run: run() });
+  });
   await startRun(w);
   const result = await execTool(w, "empirica_status");
   assert.match(result.content[0].text, /empirica run run-handle-1: status=active/);
+  assert.equal(w.requests.length, 1);
+});
+
+test("status without a restored handle resolves the current selector", async () => {
+  const w = wire((req) => {
+    assert.equal(req.command.type, "ResolveRun");
+    assert.deepEqual(
+      req.command.type === "ResolveRun" ? req.command.selector : null,
+      { project: "p", session: "s" },
+    );
+    return envelope({ type: "Inert", reason: "no_run" });
+  });
+
+  const result = await execTool(w, "empirica_status");
+
+  assert.match(result.content[0].text, /no active run/);
+  assert.equal(w.requests.length, 1);
 });
 
 test("session_start reconstructs the handle; compaction carries the handle text", async () => {
@@ -323,5 +329,5 @@ test("session_start reconstructs the handle; compaction carries the handle text"
   await (w.pi.handlers.get("session_start") as (e: unknown, c: unknown) => unknown)({}, ctx);
   const out = await (w.pi.handlers.get("session_before_compact") as (e: unknown, c: unknown) => unknown)({ preparation: { firstKeptEntryId: "e", tokensBefore: 4 } }, ctx);
   assert.match((out as { compaction: { summary: string } }).compaction.summary, /restored/);
-  assert.equal(w.pi.entries.length, 1);
+  assert.equal(w.pi.entries.length, 0);
 });

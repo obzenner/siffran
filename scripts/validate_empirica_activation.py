@@ -19,6 +19,16 @@ ENTRYPOINTS = {
     "subagent_stop.py": "subagent_stop_main",
 }
 FORBIDDEN = re.compile(r"(?:^|[/'\"`])\.(?:claude|pi)(?:/|[\"'`])")
+SKILL = ROOT / "skills/empirica/SKILL.md"
+REQUIRED_SKILL_REFERENCES = {
+    "host-capabilities.md",
+    "claim-graph.md",
+    "evidence.md",
+    "budget-freeze.md",
+    "audit.md",
+    "handoff.md",
+}
+STALE_SKILL_TERMS = {"spike_harness.py", "EMPIRICA_STALL_DEADLINE_SEC"}
 
 
 def fail(message: str) -> None:
@@ -78,7 +88,24 @@ def main() -> int:
                 if len(names) != 1 or names[0] not in ENTRYPOINTS:
                     fail(f"hooks.json bypasses a registered thin entrypoint: {hook}")
 
-    for path in [ROOT / "skills/empirica/SKILL.md", *sorted((ROOT / "agents").glob("*.md"))]:
+    skill_text = SKILL.read_text(encoding="utf-8")
+    if len(skill_text.splitlines()) > 300:
+        fail("SKILL.md exceeds the 300-line progressive-disclosure budget")
+    if len(skill_text.split()) > 3500:
+        fail("SKILL.md exceeds the conservative 3,500-word context budget")
+    references = SKILL.parent / "references"
+    for name in REQUIRED_SKILL_REFERENCES:
+        if not (references / name).is_file():
+            fail(f"required progressive-disclosure reference is missing: {name}")
+        if f"references/{name}" not in skill_text:
+            fail(f"SKILL.md does not route to reference: {name}")
+    for term in STALE_SKILL_TERMS:
+        if term in skill_text:
+            fail(f"SKILL.md retains stale runtime term: {term}")
+    if "Pi cannot execute the convergence workflow" not in skill_text:
+        fail("SKILL.md does not disclose the current Pi capability boundary")
+
+    for path in [SKILL, *sorted((ROOT / "agents").glob("*.md"))]:
         text = path.read_text(encoding="utf-8")
         if "~/.empirica-plugin" not in text or "refs/empirica" not in text:
             fail(f"instruction omits authoritative storage locations: {path}")

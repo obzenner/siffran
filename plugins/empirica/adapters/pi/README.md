@@ -5,13 +5,13 @@ contract: it maps Pi's native events into requests and maps the guarded typed
 decision back onto Pi's enforcement/UI. It holds no convergence rules — those
 live in the host-neutral core, reached through the injected `dispatch` seam.
 
-## D6 surface (what the adapter does)
+## Current surface (honest unsupported preflight)
 
 | Pi surface | v2 request | Notes |
 |---|---|---|
 | `resources_discover` | — | Contributes the shared Empirica skill directory. |
-| `/empirica <goal>` | `StartRun` | Attempts StartRun; D6 strict shell returns unsupported. Truthful UX: reports the StartRun attempt and any unsupported result — never relabels a start as a status read. |
-| `empirica_status` tool | `ResolveRun` | Reports the run id and status only — no goal/modes/contract rendering. |
+| `/empirica <goal>` | — | Rejects before `StartRun`: this exact profile cannot submit author actions or complete a bound audit. No unusable active run is created. |
+| `empirica_status` tool | `RestoreRun` when a handle was restored; otherwise `ResolveRun` | Reports the run id and status only — no goal/modes/contract rendering. The opaque handle wins across extension reloads. |
 | `report_convergence` tool | `EvaluateRun(report_convergence)` | Hard gate: the tool is blocked unless the core returns a **guarded Allow**. |
 | `tool_call` interception | `EvaluateRun(report_convergence)` | The hard gate (registered tool execute and `tool_call`). Also denies executable `subagent` launches locally. |
 | `session_before_compact` | `RestoreRun` | Only if a real handle exists. |
@@ -55,7 +55,10 @@ dispatch). A launch with **no handle** is also inert (nothing to deny against).
 
 The exact conservative profile is `pi@0.84.1` (foreground-only). There is no
 capability detection and no default — the bridge requires this exact profile and
-fails closed if it is absent.
+fails closed if it is absent. Because the profile cannot execute the mandatory
+author and audit paths, `/empirica` refuses before creating a run. Existing
+handles can still be inspected and fail-closed convergence decisions remain
+available for recovery/diagnosis.
 
 ## Gaps (D6 boundary, not implemented by this adapter)
 

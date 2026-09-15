@@ -7,8 +7,9 @@
 //
 // Minimal Pi surfaces (D6 strict boundary):
 //   * resources_discover     -> contributes the shared Empirica skill.
-//   * /empirica <goal>        -> Attempt StartRun for the current goal (D6 strict shell currently returns unsupported)
-//   * empirica_status tool   -> ResolveRun          (reports the session's run)
+//   * /empirica <goal>        -> reject before StartRun because this exact profile cannot progress
+//   * empirica_status tool   -> RestoreRun(handle) or ResolveRun(selector)
+//        (reports only id/status; a restored handle wins across extension reload)
 //   * report_convergence tool -> EvaluateRun(report_convergence) (hard gate:
 //        the tool is blocked unless the core returns a guarded Allow; Block,
 //        Inert, open or closed Fault, and transport errors all deny)
@@ -40,14 +41,10 @@ import {
   evaluateRunRequest,
   gateFromDecision,
   isExecutableSubagentLaunch,
-  parseModeFlags,
   resolveRunRequest,
   restoreRunRequest,
-  startRunNotice,
-  startRunRequest,
   statusNotice,
   subagentUnsupportedReason,
-  type StartRunOptions,
 } from "./translate.ts";
 
 // plugins/empirica/adapters/pi/src/index.ts -> plugins/empirica/skills
@@ -71,8 +68,6 @@ export interface EmpiricaPiDeps {
   deriveSelector?: SelectorProvider;
   /** Tool names whose call is the convergence report and must be gated. */
   gatedTools?: readonly string[];
-  /** StartRun options (max_passes, max_spawns, modes). */
-  startRunOptions?: StartRunOptions;
 }
 
 function defaultSelectorProvider(): SelectorProvider {
@@ -98,7 +93,6 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
   const skillsDir = deps.skillsDir ?? DEFAULT_SKILLS_DIR;
   const selectorOf = deps.deriveSelector ?? defaultSelectorProvider();
   const gatedTools = new Set(deps.gatedTools ?? [REPORT_CONVERGENCE_TOOL]);
-  const startOptions = deps.startRunOptions ?? {};
 
   return function empiricaExtension(pi: ExtensionAPI): void {
     // The active run's opaque handle, held only in memory for this session.
@@ -155,8 +149,10 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         description: "Show the current run id and status only.",
         parameters: EMPTY_PARAMS,
         async execute(_id, _params, _signal, _onUpdate, ctx) {
-          const selector = selectorOf(ctx);
-          const response = await dispatch(resolveRunRequest(selector, randomUUID()));
+          const request = runHandle
+            ? restoreRunRequest(runHandle, randomUUID())
+            : resolveRunRequest(selectorOf(ctx), randomUUID());
+          const response = await dispatch(request);
           const notice = statusNotice(response.result);
           return { content: [{ type: "text", text: notice.text }] };
         },
@@ -164,38 +160,12 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     }
 
     pi.registerCommand("empirica", {
-      description: "Attempt StartRun for the current goal (D6 strict shell currently returns unsupported).",
-      handler: async (args, ctx) => {
-        const parsed = parseModeFlags(args);
-        const goal = parsed.goal || "(goal to be refined from the current task)";
-        const modes = { ...startOptions.modes, ...parsed.modes };
-        if (parsed.unknownFlags.length)
-          ctx.ui.notify(
-            `empirica: unknown mode flags ignored: ${parsed.unknownFlags.join(" ")}`,
-            "warning",
-          );
-        try {
-          const response = await dispatch(
-            startRunRequest(selectorOf(ctx), goal, randomUUID(), {
-              ...startOptions,
-              modes,
-            }),
-          );
-          const result = response.result;
-          if (result.type === "Allow" || result.type === "Block") {
-            runHandle = result.run.id;
-            pi.appendEntry?.("empirica.run", { runHandle });
-            const modeText = Object.keys(modes).length ? JSON.stringify(modes) : "{}";
-            pi.sendMessage?.({
-              customType: "empirica",
-              content: `Empirica run handle: ${runHandle}\nGoal: ${goal}\nModes: ${modeText}\nFollow the empirica skill from Step 1.`,
-            });
-          }
-          const notice = startRunNotice(result);
-          ctx.ui.notify(notice.text, notice.type);
-        } catch (error) {
-          ctx.ui.notify(`/empirica could not start a run: ${describe(error)}`, "error");
-        }
+      description: "Explain why the current Pi v2 profile cannot run Empirica to convergence.",
+      handler: async (_args, ctx) => {
+        ctx.ui.notify(
+          "Empirica cannot start on pi@0.84.1: this profile exposes status and convergence reporting only; author actions and the bound audit lifecycle are unavailable. No run was created.",
+          "error",
+        );
       },
     });
 
