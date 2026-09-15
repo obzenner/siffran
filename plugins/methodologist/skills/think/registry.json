@@ -36,6 +36,12 @@
       "prevents": "Premature detail, analysis paralysis, incoherent architectures"
     },
     {
+      "name": "evidence-preserving-refinement",
+      "lineage": "Wirth (stepwise refinement, 1971), Parnas (information hiding, 1972), Hoare (pre/postconditions, 1969), Popper (falsifiability, 1934)",
+      "use_when": "Planning or promoting a large cross-cutting change from uncertain discovery into multiple reviewable PRs. 'How should we split this migration?' 'How do decisions trace to implementation?' 'Preserve the experiments but keep production history clean.'",
+      "prevents": "Giant changes that mix discovery with delivery, retroactive rationale, untraceable implementation, permanent migration scaffolding, and unfocused review"
+    },
+    {
       "name": "empirical-falsification",
       "lineage": "Popper (falsifiability, 1934), Fisher (experimental design), Feynman",
       "use_when": "Uncertain claims or assumptions. 'Will this scale?' 'Is this actually faster?' Design the cheapest disproving experiment.",

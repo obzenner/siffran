@@ -2,10 +2,12 @@
 
 The Codex package is rooted at `plugins/methodologist`. Its
 `.codex-plugin/plugin.json` points `skills` at the existing `./skills/` tree and
-therefore does not copy or fork methodology semantics. Native implicit or
-`$think` activation runs that shared skill directly in stateless simple mode.
-This layout follows the official [plugin packaging][plugins] and [skill
-activation][skills] contracts.
+therefore does not copy or fork methodology semantics. Native implicit
+activation runs the shared skill directly in stateless automation mode. An
+explicit bare `$think` follows the shared catalog-first UX: it lists every
+registry entry in conversation and waits for the user to choose; `$think
+<methodology-name>` remains the expert shortcut. This layout follows the official
+[plugin packaging][plugins] and [skill activation][skills] contracts.
 
 Codex CLI 0.146.0 also supports plugin-bundled MCP servers, and the same
 `.mcp.json` is shared by two harnesses — Codex (via `.codex-plugin/plugin.json`)
@@ -24,8 +26,8 @@ canonical six-phase plan; the shared skill and methodology Markdown remain
 authoritative for reasoning and execution.
 
 This adapter intentionally provides no slash command, task widget, persistence,
-or hooks. An ambiguous two-candidate call returns a decision requirement for
-Codex to ask in conversation; it does not pretend MCP itself supplies human UI.
+or hooks. Catalog presentation and human choice happen in the shared skill;
+`methodologist_select` validates only the name already chosen by the user.
 
 Run the deterministic and real-host checks from the repository root:
 

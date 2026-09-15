@@ -4,7 +4,19 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { createStdioBridgeDispatch, defaultBridgeConfig } from "../src/stdio-transport.ts";
-import { selectMethodologyRequest } from "../src/translate.ts";
+import { listMethodologiesRequest, selectMethodologyRequest } from "../src/translate.ts";
+
+test("default bridge returns the complete ordered methodology catalog", async () => {
+  const dispatch = createStdioBridgeDispatch(defaultBridgeConfig());
+  const response = await dispatch(listMethodologiesRequest("runtime-catalog"));
+
+  assert.equal(response.result.type, "MethodologyCatalog");
+  if (response.result.type !== "MethodologyCatalog") return;
+  assert.ok(response.result.methodologies.length >= 9);
+  assert.equal(response.result.methodologies[0]?.name, "formal-reasoning");
+  assert.ok(response.result.methodologies.some((entry) => entry.name === "evidence-preserving-refinement"));
+  assert.ok(response.result.methodologies.every((entry) => entry.use_when.length > 0));
+});
 
 test("default bridge validates an explicit name and returns six phases", async () => {
   const dispatch = createStdioBridgeDispatch(defaultBridgeConfig());

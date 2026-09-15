@@ -1,0 +1,22 @@
+{
+  "request": {
+    "protocol": "methodologist/v1",
+    "request_id": "fixture-catalog",
+    "command": {"type": "ListMethodologies"}
+  },
+  "expected": {
+    "protocol": "methodologist/v1",
+    "request_id": "fixture-catalog",
+    "result": {
+      "type": "MethodologyCatalog",
+      "methodologies": [
+        {
+          "name": "formal-reasoning",
+          "lineage": "Mathematical logic",
+          "use_when": "Rules or standards need examination.",
+          "prevents": "Unjustified exceptions."
+        }
+      ]
+    }
+  }
+}
