@@ -51,26 +51,17 @@ class TestMessages(unittest.TestCase):
         self.assertEqual(result["structuredContent"]["methodology"], "formal-reasoning")
         self.assertEqual(len(result["structuredContent"]["phases"]), 6)
 
-    def test_two_candidates_return_decision_requirement_without_state(self):
+    def test_tool_refuses_selection_before_the_user_has_chosen(self):
         response = handle_message(
             {
                 "jsonrpc": "2.0",
                 "id": 4,
                 "method": "tools/call",
-                "params": {
-                    "name": TOOL_NAME,
-                    "arguments": {
-                        "candidates": [
-                            {"name": "decomposition", "rationale": "find boundaries"},
-                            {"name": "contradiction", "rationale": "choose an option"},
-                        ]
-                    },
-                },
+                "params": {"name": TOOL_NAME, "arguments": {}},
             }
         )
-        content = response["result"]["structuredContent"]
-        self.assertEqual(content["type"], "HumanDecisionRequired")
-        self.assertEqual(len(content["candidates"]), 2)
+        self.assertTrue(response["result"]["isError"])
+        self.assertIn("chosen by the user", response["result"]["content"][0]["text"])
 
     def test_unknown_method_is_json_rpc_error(self):
         response = handle_message({"jsonrpc": "2.0", "id": 5, "method": "unknown"})

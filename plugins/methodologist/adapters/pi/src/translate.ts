@@ -26,14 +26,15 @@ export interface ParsedInvocation {
 // required (minLength 1) by the schema, but a slash command only sees its
 // argument string; the richer task context is the agent's, supplied when the
 // core resolves the selection.
-const UNSPECIFIED_INTENT = "(auto-select from current task context)";
+const UNSPECIFIED_INTENT = "(choose from complete methodology catalog)";
 
 /**
  * Parse a `/think` argument string into a selection intent and an optional
  * explicitly-requested methodology.
  *
- * Mirrors SKILL.md: bare `/think` asks the model to select, while any non-empty
- * argument is a requested methodology name. `knownMethodologies` is retained
+ * Mirrors SKILL.md: bare `/think` requests the complete catalog for human
+ * selection, while any non-empty argument is an expert-requested methodology
+ * name. `knownMethodologies` is retained
  * only to canonicalise case for embedding hosts; validation belongs to the
  * methodologist/v1 core, not to a keyword/free-text router in this adapter.
  */
@@ -51,6 +52,14 @@ export function parseThinkInvocation(
   return {
     intent: trimmed,
     requestedMethodology: match ?? trimmed,
+  };
+}
+
+export function listMethodologiesRequest(requestId: string): Request {
+  return {
+    protocol: PROTOCOL,
+    request_id: requestId,
+    command: { type: "ListMethodologies" },
   };
 }
 
@@ -103,6 +112,7 @@ export interface RenderDeps {
 }
 
 export type RenderOutcome =
+  | { kind: "catalog"; methodologies: string[] }
   | { kind: "selected"; methodology: string }
   | { kind: "choice"; chosen: string }
   | { kind: "advanced"; nextPhase: number | null }
@@ -143,6 +153,8 @@ export async function applyResult(
   deps: RenderDeps,
 ): Promise<RenderOutcome> {
   switch (result.type) {
+    case "MethodologyCatalog":
+      return { kind: "catalog", methodologies: result.methodologies.map((item) => item.name) };
     case "MethodologySelected": {
       renderSelected(result, deps.tracker, deps.ui);
       return { kind: "selected", methodology: result.methodology };

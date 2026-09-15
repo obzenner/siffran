@@ -1,7 +1,7 @@
 ---
 name: think
-description: "Select and execute a formal reasoning methodology for the current task. Use when facing architectural decisions, debugging, rule enforcement, design tradeoffs, assumption validation, or any situation requiring structured thinking. Trigger phrases: 'think through this', 'reason about', 'which approach', 'analyze this decision', 'first principles', 'what are the assumptions', 'prove this', 'why does this break'. In Codex, activate implicitly or mention $think for native stateless execution; request 'structured bridge mode' only when the methodologist_select tool is available. In Methodologist Pi, use /think or /think --simple <intent>."
-argument-hint: "[--simple <intent> | methodology-name]"
+description: "Select and execute a formal reasoning methodology for the current task. Explicit bare /think or $think invocations present the complete methodology catalog and wait for the user to choose; an explicit methodology name is the expert shortcut, while implicit activation may select semantically. Use for architectural decisions, debugging, rule enforcement, design tradeoffs, assumption validation, or structured reasoning. In Methodologist Pi, use /think; --simple is the non-interactive automation path."
+argument-hint: "[methodology-name | --simple <intent>]"
 allowed-tools: [Read, Glob, Grep, Bash, Agent, TaskCreate, TaskUpdate]
 ---
 
@@ -17,58 +17,77 @@ Host invocation arguments, when the host expands them: `$ARGUMENTS`
 
 Choose the host mode before routing:
 
-- **Native simple mode:** use this mode when the host kickoff identifies
-  Methodologist Pi's `--simple <intent>` path, or when Codex activates this skill
-  implicitly or through `$think` and the user did not explicitly request
-  structured bridge mode. In Codex, the current user request is the intent;
-  `$ARGUMENTS` may remain a literal compatibility placeholder and is not required.
-  This is a direct, stateless execution path. Do not invoke a slash command,
-  `methodologist_select`, or any other bridge/tool; do not use HumanPort, render a
-  widget, or create/persist workflow or task state. Continue with Step 1, read the
-  selected methodology from the shared files, announce the phase plan, and execute
-  all phases directly. The kickoff/current request is already the sole user prompt,
-  so do not recursively dispatch Methodologist again.
-- **Structured bridge mode:** enter this mode only when the user or a host kickoff
-  explicitly requests it and a `methodologist_select` tool is actually available.
-  The bridge validates the semantic selection and canonical phase plan; it does
-  not execute methodology semantics. If the tool is unavailable, say structured
-  mode is unsupported on this surface and offer native simple mode. Never claim a
-  custom `/think` command, task widget, or host-native phase tracking in Codex.
+- **Native simple mode:** Codex activates this skill implicitly in native simple
+  mode; Methodologist Pi also uses it for the explicit `--simple <intent>`
+  automation path. This is a direct, stateless execution path: semantically select from the registry,
+  announce the choice, and execute it without bridge/UI/workflow state. Do not
+  invoke a slash command, `methodologist_select`, HumanPort, a widget, or
+  persisted task state. The kickoff/current request is already the sole user
+  prompt, so do not recursively dispatch Methodologist again.
+- **Interactive invocation mode:** use this when the user explicitly invokes
+  `/think`, `$think`, or the `think` skill without naming a methodology. Read the
+  registry, show the complete catalog, and ask the user to choose. Do not select
+  on the user's behalf, read a methodology file, call the bridge, or execute a
+  phase until the user replies. Host-native selection UI is preferred when the
+  host provides it; otherwise render the catalog in conversation.
+- **Structured bridge mode:** enter this mode only after a methodology has been
+  chosen, when the user or host kickoff explicitly requests it and a
+  `methodologist_select` tool is actually available. The bridge validates the
+  chosen registry name and canonical phase plan; it does not choose or execute
+  methodology semantics. If the tool is unavailable, use native execution and
+  never claim bridge-backed validation.
 
 **If a methodology name was provided** in the host arguments or current request
 (e.g., `/think formal-reasoning` in a host that exposes that command):
 - Read the methodology file from `methodologies/<name>.md` relative to this skill
 - Skip to Step 2
 
-**If no methodology was provided** (just `/think`):
-- Proceed to Step 1
+**If no methodology was provided:**
+- For an explicit invocation, proceed to the catalog-first interaction in Step 1
+  and stop after asking the user to choose.
+- For implicit native activation, proceed to Step 1's semantic-selection path.
 
-## Step 1: Select methodology
+## Step 1: Present the catalog or select for implicit automation
 
-Read `registry.json` (located next to this SKILL.md). This file contains every available methodology with its `name`, `use_when` trigger description, `lineage`, and what it `prevents`.
+Read `registry.json` (located next to this SKILL.md). It is the single source of
+truth for methodology names and descriptions. **Do not read any methodology
+`.md` file before a methodology has been chosen.**
 
-**Do NOT read any methodology .md files yet.** The registry has everything you need to select.
+### Explicit invocation without a name: catalog first
 
-Analyze the user's current task context — recent conversation, open files, the task at hand. Match against the `use_when` field of each registry entry.
+Present every registry entry, in registry order, with:
 
-**Selection rules:**
-1. If the task clearly matches one methodology, use it
-2. If it could match multiple, pick the one that addresses the PRIMARY uncertainty
-3. If genuinely ambiguous, state the top 2 candidates with one-line rationale each and ask the user to pick
+- exact `name`;
+- one-line `use_when` guidance;
+- the failure mode from `prevents`.
 
-Announce your selection: `Using **<methodology-name>**: <one-line reason>`
+Then ask: `Which methodology should I run?` and stop the turn. Do not recommend,
+preselect, narrow to two candidates, call `methodologist_select`, or start phase
+work. The user's reply supplies the explicit methodology name; validate it
+against the registry, then continue to Step 2. If the host provides a native
+picker, use the same complete registry catalog in that picker.
 
-**Host bridge (structured bridge mode only):** Do not open the methodology file
-yourself yet. Call `methodologist_select` with the exact registry `name` and your
-one-line semantic reason. If the choice is genuinely ambiguous, call it with
-exactly the top two `{name, rationale}` candidates. A host with choice UI may
-present it directly; otherwise ask the user to choose from the validated result
-and call the tool again with the chosen name. The bridge validates the named
-methodology through `methodologist/v1` and returns the canonical six-phase plan.
-Continue below using that returned plan. Never replace semantic selection with
-keyword routing. In native simple mode, skip this entire bridge path.
+An explicit `/think <methodology-name>` remains an expert shortcut and skips the
+catalog. An unknown name must fail closed and show the available names.
 
-Then — and ONLY then — read the methodology file from `methodologies/<name>.md` relative to this skill.
+### Implicit or explicit automation mode only
+
+When the skill was activated implicitly by task semantics, or the user chose the
+explicit `--simple` automation path, semantically compare the current task
+against every `use_when` entry:
+
+1. If one methodology clearly addresses the primary uncertainty, select it.
+2. If genuinely ambiguous, present the complete catalog and ask the user rather
+   than silently choosing.
+
+Announce an automatic selection as:
+`Using **<methodology-name>**: <one-line reason>`
+
+**Structured bridge mode only, after selection:** call `methodologist_select`
+with the exact chosen registry name and one-line reason. The bridge validates
+that name and returns the canonical phase plan. It never chooses for the user.
+
+Then—and only then—read `methodologies/<name>.md` relative to this skill.
 
 ## Step 2: Create phase tasks
 

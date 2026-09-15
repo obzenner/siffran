@@ -97,7 +97,7 @@ pi install "$(pwd)"
 <!-- BEGIN GENERATED: plugins (managed by the checkup skill — do not edit by hand) -->
 | Plugin | Version | Description |
 |--------|---------|-------------|
-| `methodologist` | 0.8.1 | Methodology router — picks and executes formal CS/math reasoning methodologies with tracked phases and structured output. |
+| `methodologist` | 0.9.0 | Formal reasoning catalog — lets users choose and execute evidence-backed CS/math methodologies with traced phases and structured output. |
 | `empirica` | 1.3.0 | Empirical-convergence workflow — adjudicates a claim graph (GSN argument with in-toto evidence) where every claim's confidence must be earned by real external evidence: research citations first, deterministic spike verdicts for machine-checkable claims, then an independent auditor on a different model before a run may report convergence. Records which model actually answered each claim, and reports when audit independence was not obtained. Hook-enforced. |
 <!-- END GENERATED: plugins -->
 

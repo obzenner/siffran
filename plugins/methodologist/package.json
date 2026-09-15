@@ -1,7 +1,7 @@
 {
   "name": "@siffran/methodologist-pi",
-  "version": "0.8.1",
-  "description": "Turnkey Pi 0.84.1 package for Methodologist: normal /think remains bridge-backed, while /think --simple <intent> delegates one stateless direct execution prompt to the shared skill and registry.",
+  "version": "0.9.0",
+  "description": "Turnkey Pi 0.84.1 package for Methodologist: bare /think presents the complete registry catalog and starts the human-selected methodology; named and --simple expert paths remain available.",
   "type": "module",
   "license": "MIT",
   "keywords": [
