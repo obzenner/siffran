@@ -2139,10 +2139,19 @@
           "additionalProperties": false,
           "required": [
             "author",
+            "host",
             "trusted"
           ],
           "properties": {
             "author": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "host": {
               "type": "array",
               "items": {
                 "type": "string",

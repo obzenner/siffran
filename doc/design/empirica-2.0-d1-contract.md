@@ -159,7 +159,7 @@ Trusted adapter/application only:
 
 ```text
 evidence_leaf     append validated research or application-sealed spike statement
-attribution       host/configuration-observed actor identity; never author-supplied
+attribution       concrete host-observed actor identity; never author-supplied or alias-derived
 child_event       launch/start/terminal native observation bound to a private capability
 audit_verdict     emitted only as part of a trusted bound child completion
 ```

@@ -37,7 +37,9 @@ export function fakeCtx(
   cwd = "/work/repo",
   entries: Array<{ type?: string; customType?: string; data?: unknown }> = [],
 ): ExtensionContext {
-  return { ui: new FakeUi(), cwd, sessionManager: { getEntries: () => entries } };
+  return { ui: new FakeUi(), cwd,
+    model: { provider: "bedrock", id: "author-model" },
+    sessionManager: { getEntries: () => entries } };
 }
 
 /** Captures everything an extension registers against the ExtensionAPI. */

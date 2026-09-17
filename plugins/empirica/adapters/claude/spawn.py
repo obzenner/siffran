@@ -1,9 +1,9 @@
-"""Inactive Claude ``PreToolUse:Agent`` translation to exact v2 ``child_reserve``.
+"""Claude host translation for ordinary-child ``child_reserve`` operations.
 
-A spawn reservation uses ``child_reserve`` only when ``purpose``, ``role_profile`` and
-``execution`` are real host inputs; otherwise the host adapter fails closed locally and never
-synthesizes a capability (D6-C spec §3/C2).  The application service remains the sole owner of the
-spawn cap and its atomic reservation (D8 owns admission).
+Audit reservation bypasses this translator and is owned by ``AuditProtocol``. Ordinary native
+Agent launches use it only when purpose, role profile, and execution are concrete host inputs;
+otherwise it fails closed and never synthesizes a capability. The application service remains the
+sole owner of the spawn cap and its atomic reservation (D8 owns admission).
 """
 from __future__ import annotations
 

@@ -29,6 +29,10 @@ import { type Request } from "../src/contract.ts";
 import {
   startRunRequest,
   resolveRunRequest,
+  observeActionRequest,
+  getRunRequest,
+  getArgumentRequest,
+  getContractRequest,
   evaluateRunRequest,
   restoreRunRequest,
 } from "../src/translate.ts";
@@ -78,6 +82,9 @@ function parseInterfaceFields(
 const COMMAND_MAP: Record<string, string> = {
   StartRunCommand: "startRun",
   ResolveRunCommand: "resolveRun",
+  ObserveActionCommand: "observeAction",
+  GetRunCommand: "getRun",
+  GetArgumentCommand: "getArgument",
   EvaluateRunCommand: "evaluateRun",
   RestoreRunCommand: "restoreRun",
 };
@@ -109,10 +116,14 @@ function assertCanonicalRequiredExactOptionalSubsetNoExtras(iface: string, defNa
   }
 }
 
-test("lexical projection: Command union is the four retained command interfaces", () => {
+test("lexical projection: Command union is the retained public command interfaces", () => {
   assert.deepEqual(parseCommandUnion(contractSrc), [
     "StartRunCommand",
     "ResolveRunCommand",
+    "ObserveActionCommand",
+    "GetRunCommand",
+    "GetArgumentCommand",
+    "GetContractCommand",
     "EvaluateRunCommand",
     "RestoreRunCommand",
   ]);
@@ -152,6 +163,10 @@ const BUILDER_TABLE: Array<{ type: string; build: () => Request }> = [
   { type: "StartRun", build: () => startRunRequest({ project: "p", session: "s" }, "goal", "r1") },
   { type: "StartRun", build: () => startRunRequest({ project: "p", session: "s" }, "g", "r2", { maxPasses: 3, maxSpawns: 1, modes: { cli_exec: true, multi_provider: false } }) },
   { type: "ResolveRun", build: () => resolveRunRequest({ project: "p", session: "s" }, "r3") },
+  { type: "ObserveAction", build: () => observeActionRequest("h", { kind: "route", reason: "r" }, "r-observe") },
+  { type: "GetRun", build: () => getRunRequest("h", "r-get") },
+  { type: "GetArgument", build: () => getArgumentRequest("h", "r-argument") },
+  { type: "GetContract", build: () => getContractRequest("index", "r-contract") },
   { type: "EvaluateRun", build: () => evaluateRunRequest("h", "continue", "r4") },
   { type: "EvaluateRun", build: () => evaluateRunRequest("h", "report_convergence", "r5") },
   { type: "EvaluateRun", build: () => evaluateRunRequest("h", "stop", "r6") },

@@ -88,6 +88,22 @@ def contract_result(target: str, section_id: str | None = None) -> dict | None:
     return None
 
 
+def validate_trusted_payload(name: str, payload: object) -> bool:
+    """Validate one adapter-private payload against the canonical closed schema."""
+    schema = {
+        "$schema": _REQUEST_SCHEMA.get("$schema", "https://json-schema.org/draft/2020-12/schema"),
+        "$defs": _REQUEST_SCHEMA.get("$defs", {}),
+        "$ref": f"#/$defs/{name}",
+    }
+    if name not in schema["$defs"]:
+        return False
+    try:
+        jsonschema.validate(instance=payload, schema=schema)
+    except jsonschema.ValidationError:
+        return False
+    return True
+
+
 def dispatch_request(raw, handler):
     """Validate ``raw``, call ``handler`` once with the valid envelope, validate the
     response, require response request_id == request request_id, and apply the fallback.

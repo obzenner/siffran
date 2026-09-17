@@ -1,12 +1,13 @@
 """Single-writer transaction coordinator for Empirica v2."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
 from core.context_selector import select_sections
 from core.evaluation import (Decision, EvaluationSnapshot, audit_binding, digest, evaluate_snapshot,
-                             plan_spike_request, plan_spike_result)
+                             plan_spike_request, plan_spike_result, valid_attribution)
 from core.freshness import canonical_digest
 from core.projection import project_argument, project_runview
 from core.records import Conflict, Corrupt, RunKey
@@ -18,6 +19,14 @@ from .observation import (HarnessContractError, HarnessUnavailable, ObservationU
                           build_observation_snapshot, execute_spike_bound)
 from .snapshot import (GraphInvalid, HistoryCorrupt, active_spike_heads as captured_heads,
                        assemble, graph_from_history, make_artifact, state_digest, traverse_history)
+
+
+def _plain(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _plain(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_plain(item) for item in value]
+    return value
 
 
 class Coordinator:
@@ -178,7 +187,8 @@ class Coordinator:
             require_graph = command["type"] == "GetArgument" or (
                 command["type"] == "EvaluateRun" and state.selected_graph_artifact_id is not None)
             if command["type"] == "ObserveAction":
-                require_graph = command["action"]["kind"] in {"research", "freeze"}
+                action = command["action"]
+                require_graph = action["kind"] in {"research", "freeze"}
             try:
                 snapshot = self._assemble(key, state, command, require_graph=require_graph)
             except HistoryCorrupt:
@@ -204,9 +214,26 @@ class Coordinator:
                     continue
                 self.last_state = state
                 return self._response(request_id, snapshot, decision)
+            next_state = decision.intent.state
+            if (command["type"] == "ObserveAction"
+                    and command["action"]["kind"] == "child_reserve"
+                    and command["action"].get("purpose") == "audit"
+                    and next_state != state):
+                dossier = project_argument(snapshot)
+                children = list(next_state.children)
+                child = dict(children[-1])
+                child["audit_argument"] = dossier
+                child["audit_role_profile"] = command["action"]["role_profile"]
+                child["audit_operation_id"] = digest({
+                    "run_id": snapshot.run_id, "child_id": child["child_id"],
+                    "argument_digest": dossier["argument_digest"],
+                })
+                children[-1] = child
+                next_state = replace(next_state, children=tuple(children))
+                decision = replace(decision, intent=replace(decision.intent, state=next_state))
             try:
                 state, _, _, committed = self._commit(
-                    key, read.revision, snapshot, decision.intent.state,
+                    key, read.revision, snapshot, next_state,
                     decision.intent.artifacts)
             except Exception as exc:
                 if self._is_conflict(exc):
@@ -216,6 +243,28 @@ class Coordinator:
             return self._response(request_id, committed,
                                   replace(decision, intent=replace(decision.intent, state=state)))
         return self._fault(request_id, "conflict")
+
+    def trusted_audit_plan(self, run_id: str, child_id: str) -> dict[str, Any] | None:
+        """Load the immutable dossier committed with one host-owned audit reservation."""
+        key = decode_handle(run_id)
+        if key is None:
+            return None
+        read = self.runs.read(key)
+        if not self._present(read):
+            return None
+        classified = run_state.classify_and_decode(read.value)
+        if classified.kind != "valid":
+            return None
+        child = next((row for row in classified.state.children
+                      if row["child_id"] == child_id and row["purpose"] == "audit"), None)
+        if child is None or not isinstance(child.get("audit_argument"), Mapping):
+            return None
+        return {
+            "operation_id": child["audit_operation_id"],
+            "child_id": child_id,
+            "role_profile": child["audit_role_profile"],
+            "argument": _plain(child["audit_argument"]),
+        }
 
     def trusted_attribution(self, run_id: str, payload: dict[str, Any],
                             request_id: str = "trusted-ingress") -> dict[str, Any]:
@@ -240,13 +289,20 @@ class Coordinator:
                                       require_graph=False)
             same_key = [a for a in snapshot.history if a.get("kind") == kind and (
                 (kind == "audit_verdict" and a.get("child_id") == child_id) or
-                (kind == "attribution" and a.get("subject_kind") == payload.get("subject_kind")
-                 and a.get("subject_id") == payload.get("subject_id")))]
+                (kind == "attribution" and (
+                    (payload.get("subject_kind") == "auditor"
+                     and a.get("subject_kind") == "auditor"
+                     and a.get("child_id") == payload.get("child_id")) or
+                    (payload.get("subject_kind") == "covered_actor"
+                     and a.get("subject_kind") == "covered_actor"
+                     and a.get("covered_artifact_ids") == payload.get("covered_artifact_ids")))))]
             if same_key:
                 if same_key[-1]["artifact_id"] == planned_artifact["artifact_id"]:
                     return self._inert_with_run(request_id, snapshot)
                 return self._fault_with_run(request_id, snapshot)
             next_state = state
+            if kind == "attribution" and not valid_attribution(snapshot, payload):
+                return self._fault_with_run(request_id, snapshot)
             if kind == "audit_verdict":
                 expected = audit_binding(snapshot)
                 bound_keys = ("argument_digest", "goal_digest", "frozen_scope_digest",
@@ -291,8 +347,10 @@ class Coordinator:
             return self._inert(request_id)
         terminal = {"completed", "launch_rejected", "failed", "cancelled", "timed_out", "orphaned"}
         edges = {("reserved", "launching"), ("reserved", "launch_rejected"),
+                 ("reserved", "orphaned"),
                  ("launching", "pending"), ("launching", "launch_rejected"),
-                 ("launching", "failed"), ("pending", "completed"),
+                 ("launching", "failed"), ("launching", "orphaned"),
+                 ("pending", "completed"),
                  ("pending", "failed"), ("pending", "cancelled"),
                  ("pending", "timed_out"), ("pending", "orphaned")}
         for _ in range(8):

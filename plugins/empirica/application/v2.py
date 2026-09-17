@@ -68,8 +68,39 @@ class _Service:
         if type(key) is str:
             self._coordinator.injected_run_ids.add(key)
 
+    @staticmethod
+    def _valid_trusted(name: str, payload: object) -> bool:
+        return _proto.validate_trusted_payload(name, payload)
+
+    def trusted_resolve_child(self, *, run_id, native_id, purpose="audit") -> str | None:
+        """Resolve one native execution through private host correlation only."""
+        key = decode_handle(run_id)
+        if key is None or not isinstance(native_id, str) or not native_id:
+            return None
+        read = self._runs.read(key)
+        if not hasattr(read, "value"):
+            return None
+        classification = classify_and_decode(read.value)
+        if classification.kind != "valid":
+            return None
+        matches = [child["child_id"] for child in classification.state.children
+                   if child["purpose"] == purpose and child.get("native_id") == native_id]
+        return matches[0] if len(matches) == 1 else None
+
+    def trusted_audit_plan(self, *, run_id, child_id) -> dict | None:
+        """Return one immutable host-owned audit operation; never projected publicly."""
+        if not isinstance(child_id, str) or not child_id:
+            return None
+        result = self._coordinator.trusted_audit_plan(run_id, child_id)
+        return result
+
     def trusted_child_event(self, *, run_id, child_id, event) -> dict:
-        return self._trusted_terminal(run_id) or self._coordinator.trusted_child_event(
+        terminal = self._trusted_terminal(run_id)
+        if terminal:
+            return terminal
+        if not self._valid_trusted("childEventPayload", event):
+            return Coordinator._fault("trusted-ingress", "invalid_request")
+        return self._coordinator.trusted_child_event(
             run_id, child_id, event)
 
     def trusted_evidence_leaf(self, *, run_id, payload) -> dict:
@@ -88,11 +119,21 @@ class _Service:
         return Coordinator._fault("trusted-ingress", "unsupported")
 
     def trusted_audit_verdict(self, *, run_id, child_id, payload) -> dict:
-        return self._trusted_terminal(run_id) or self._coordinator.trusted_audit_verdict(
+        terminal = self._trusted_terminal(run_id)
+        if terminal:
+            return terminal
+        if not self._valid_trusted("auditVerdictPayload", payload):
+            return Coordinator._fault("trusted-ingress", "invalid_request")
+        return self._coordinator.trusted_audit_verdict(
             run_id, child_id, payload)
 
     def trusted_attribution(self, *, run_id, payload) -> dict:
-        return self._trusted_terminal(run_id) or self._coordinator.trusted_attribution(
+        terminal = self._trusted_terminal(run_id)
+        if terminal:
+            return terminal
+        if not self._valid_trusted("attributionPayload", payload):
+            return Coordinator._fault("trusted-ingress", "invalid_request")
+        return self._coordinator.trusted_attribution(
             run_id, payload)
 
 

@@ -11,11 +11,14 @@ intentionally absent.
 from __future__ import annotations
 
 import json
+import io
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from contextlib import redirect_stdout
+from unittest.mock import patch
 
 PLUGIN = Path(__file__).resolve().parents[3]
 HOOKS = PLUGIN / "hooks"
@@ -79,11 +82,34 @@ class HookNativeBehaviorTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
-    def test_run_start_is_silent_and_fail_open(self) -> None:
-        code, out, err = _run("run_start.py",
-                              _payload(command_name="empirica:empirica", command_args="prove X"),
-                              self.cwd)
-        self.assertEqual((code, out, err), (0, "", ""))
+    def test_run_start_remains_fail_open_when_workspace_cannot_start(self) -> None:
+        code, _out, err = _run("run_start.py",
+                               _payload(command_name="empirica:empirica", command_args="prove X"),
+                               self.cwd)
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "")
+
+    def test_run_start_injects_handle_and_public_tool_contract(self) -> None:
+        from adapters.claude import lifecycle
+
+        response = {"protocol": "empirica/v2", "request_id": "r", "result": {
+            "type": "Allow", "converged": False,
+            "run": {"id": "er2:opaque:checksum", "status": "active"},
+        }}
+        output = io.StringIO()
+        with patch.object(lifecycle, "_payload", return_value={}), \
+             patch.object(lifecycle, "dispatch_start_run", return_value=response), \
+             redirect_stdout(output):
+            code = lifecycle.run_start_main()
+
+        self.assertEqual(code, 0)
+        value = json.loads(output.getvalue())
+        context = value["hookSpecificOutput"]["additionalContext"]
+        self.assertEqual(value["hookSpecificOutput"]["hookEventName"], "UserPromptExpansion")
+        self.assertIn("Opaque run handle: er2:opaque:checksum", context)
+        self.assertIn("empirica_observe", context)
+        self.assertIn("empirica_read", context)
+        self.assertIn("report_convergence", context)
 
     def test_spawn_non_launch_is_inert(self) -> None:
         code, out, err = _run("spawn_gate.py",

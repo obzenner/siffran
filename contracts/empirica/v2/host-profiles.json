@@ -9,7 +9,8 @@
       "candidate_tier": "full_async",
       "candidate_probe_ids": ["claude-full-async-promotion"],
       "required_fixture_ids": ["start-bootstrap-allow", "block-host-async-unsupported", "observe-child-event-redacted"],
-      "required_live_probe_ids": ["claude-full-async-promotion"],
+      "required_live_probe_ids": ["claude-managed-foreground-audit", "claude-full-async-promotion"],
+      "promotion_status": "pending_live",
       "input_private": "unverified",
       "output_private": false,
       "unsupported_reason_ids": ["host.async_unsupported"],
@@ -27,22 +28,8 @@
       "candidate_tier": "full_async",
       "candidate_probe_ids": ["pi-subagents-full-async-promotion"],
       "required_fixture_ids": ["start-bootstrap-allow", "block-host-async-unsupported", "observe-child-event-redacted"],
-      "required_live_probe_ids": ["pi-subagents-full-async-promotion"],
-      "input_private": "unverified",
-      "output_private": false,
-      "unsupported_reason_ids": ["host.async_unsupported"],
-      "sources": [
-        "doc/design/empirica-2.0-d1h-host-capabilities.md §2",
-        "doc/design/empirica-2.0-d1h-host-capabilities.md §4"
-      ]
-    },
-    {
-      "host_id": "pi",
-      "profile_id": "pi@0.84.1",
-      "version": "0.84.1",
-      "current_tier": "foreground_only",
-      "required_fixture_ids": ["start-bootstrap-allow", "block-host-async-unsupported"],
-      "required_live_probe_ids": ["pi-native-foreground"],
+      "required_live_probe_ids": ["pi-subagents-foreground-audit", "pi-subagents-full-async-promotion"],
+      "promotion_status": "pending_live",
       "input_private": "unverified",
       "output_private": false,
       "unsupported_reason_ids": ["host.async_unsupported"],
@@ -55,15 +42,17 @@
       "host_id": "codex-cli",
       "profile_id": "codex-cli@0.146.0",
       "version": "0.146.0",
-      "current_tier": "observational",
-      "required_fixture_ids": ["block-host-audit-output-unobservable", "observe-child-event-redacted"],
-      "required_live_probe_ids": ["codex-observational"],
+      "current_tier": "foreground_only",
+      "required_fixture_ids": ["start-bootstrap-allow", "block-host-async-unsupported", "observe-child-event-redacted"],
+      "required_live_probe_ids": ["codex-managed-foreground-audit"],
+      "promotion_status": "pending_live",
       "input_private": "unverified",
-      "output_private": "unverified",
-      "unsupported_reason_ids": ["host.audit_output_unobservable"],
+      "output_private": false,
+      "unsupported_reason_ids": ["host.async_unsupported"],
       "sources": [
         "doc/design/empirica-2.0-d1h-host-capabilities.md §2",
-        "doc/design/empirica-2.0-d1h-host-capabilities.md §5"
+        "doc/design/empirica-2.0-d1h-host-capabilities.md §5",
+        "doc/design/specs/empirica-2.0-d11-three-host-reachability.md"
       ]
     }
   ]

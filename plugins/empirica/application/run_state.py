@@ -74,6 +74,14 @@ def _procedural_ok(doc: dict) -> bool:
         if cid in seen:
             return False
         seen.add(cid)
+        if ch.get("purpose") == "audit":
+            if (not isinstance(ch.get("audit_operation_id"), str)
+                    or not isinstance(ch.get("audit_argument"), dict)
+                    or not isinstance(ch.get("audit_role_profile"), str)):
+                return False
+        elif (ch.get("audit_operation_id") is not None or ch.get("audit_argument") is not None
+              or ch.get("audit_role_profile") is not None):
+            return False
         dl = ch.get("deadline")
         if dl is not None and (
             isinstance(dl, bool) or not isinstance(dl, (int, float)) or not math.isfinite(dl)

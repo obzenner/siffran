@@ -3,19 +3,15 @@
 This module owns native payload parsing and native JSON hook output only.  Run allocation,
 ordering, budgets, evidence, audit coverage, and convergence remain in the application/core.
 
-Codex is an **observational** host (profile ``codex-cli@0.146.0``, tier ``observational``).
-Run identity/location is D7-owned: at D6 the no-location run port reports every opaque ID
-unresolved, so ``ResolveRun`` returns unsupported/closed and no run handle is resolved.
-The state-bearing gates (PreToolUse, Stop, restore) therefore have no active run to enforce
-and are inert: they ``ResolveRun`` through the strict bridge shell and return inert when
-unresolved, without pre-resolution denial.  Route, investigation, dispatch, and audit
-operations are D7-D10-owned and unavailable in this D6 strict shell.
+Codex is a complete exact-profile host (``codex-cli@0.146.0``). Public author/read
+operations are exposed through the shared MCP server. Hooks allocate and resolve durable runs,
+inject the opaque handle, enforce Stop, and own a bounded ``codex exec`` foreground auditor
+because native 0.146.0 hooks cannot observe arbitrary child output. Trusted evidence,
+attribution, child events, and audit verdicts remain adapter-private.
 
-Removed operations (``void_spawn``/``audit_ticket``/``consume`` ticket/``phase``) and
-author-submitted trusted actions (``evidence_leaf``/``attribution``/``child_event``/
-``audit_verdict``) have no public builder: they fail closed locally and are never mapped to a
-semantically different v2 action or fabricated.  No trusted capability reference, audit/nonce
-admission, D7 state, D8 child admission, D9 projection, or D10 policy is invented here.
+The deterministic spike harness remains the only machine approver. The managed auditor may
+block convergence but cannot manufacture machine evidence or write trusted state through a
+model-callable surface.
 """
 from __future__ import annotations
 
@@ -30,6 +26,7 @@ from adapters.state import project_id, run_id
 
 from .correlation import PROTOCOL, request_id as new_request_id
 from .transport import BridgeTransport, Transport
+from .audit import execute_audit
 
 _ACTIVATION = re.compile(
     r"^\s*(?:\$empirica(?::empirica)?|/empirica(?::empirica)?)\b(?P<args>.*)$",
@@ -229,9 +226,11 @@ def _start(payload: dict) -> dict | None:
     run = result.get("run", {}) if isinstance(result, dict) else {}
     handle = run.get("id", "unresolved")
     context = (
-        f"Empirica is active for this session (opaque run handle: {handle}). "
-        "Run identity, route, investigation, dispatch, and audit operations are "
-        "D7-D10-owned and unavailable in this D6 strict shell."
+        f"Empirica v2 is active. Opaque run handle: {handle}. "
+        "Use empirica_observe for route/graph/research/spike/freeze actions, "
+        "empirica_read for the complete RunView and audit argument, and "
+        "report_convergence only after the Codex Stop hook's bound managed audit. "
+        "Trusted ingress is never model-callable."
     )
     return _context_output("UserPromptSubmit", context)
 
@@ -248,14 +247,27 @@ def build_evaluate_request(payload: Mapping[str, object], run_id: str) -> dict:
                         "intent": "report_convergence"}}
 
 
+def _audit_required(result: Mapping[str, object]) -> bool:
+    reasons = result.get("reasons")
+    if not isinstance(reasons, list):
+        return False
+    return any(isinstance(reason, Mapping)
+               and reason.get("code") in {"audit.required", "audit.pending", "audit.stale"}
+               for reason in reasons)
+
+
 def _stop(payload: dict) -> dict | None:
-    """Stop: enforce the parent convergence gate whenever a located run is active."""
+    """Stop: enforce convergence and run one adapter-owned bound audit when it is due."""
     handle = _resolve_run(payload)
     if handle is None:
         return None
     try:
         response = _dispatch(payload, build_evaluate_request(payload, handle))
-    except Exception:  # active located run: evaluation failure must deny Stop
+        result = response.get("result", {}) if isinstance(response, dict) else {}
+        if isinstance(result, Mapping) and _audit_required(result):
+            execute_audit(payload, handle)
+            response = _dispatch(payload, build_evaluate_request(payload, handle))
+    except Exception:  # active located run: evaluation/audit failure must deny Stop
         return {"decision": "block", "reason": "Empirica convergence gate unavailable."}
     result = response.get("result", {}) if isinstance(response, dict) else {}
     if result.get("type") == "Allow" and result.get("converged") is True:

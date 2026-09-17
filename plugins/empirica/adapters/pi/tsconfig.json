@@ -3,6 +3,8 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "baseUrl": ".",
+    "paths": {"pi-subagents/preflight": ["src/pi-subagents-preflight.d.ts"]},
     "lib": ["ES2022"],
     "strict": true,
     "noUncheckedIndexedAccess": false,

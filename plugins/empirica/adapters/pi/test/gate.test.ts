@@ -7,10 +7,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { PROTOCOL, type Request, type Response, type Result } from "../src/contract.ts";
-import { REPORT_CONVERGENCE_TOOL, SUBAGENT_TOOL, subagentUnsupportedReason } from "../src/translate.ts";
-import { createEmpiricaExtension } from "../src/index.ts";
+import { REPORT_CONVERGENCE_TOOL, SUBAGENT_TOOL } from "../src/translate.ts";
+import { createEmpiricaExtension, DEFAULT_SKILLS_DIR } from "../src/index.ts";
+import { resolve } from "node:path";
 import { FakePi, FakeUi, fakeCtx } from "./fakes.ts";
-import type { ToolCallEvent } from "../src/pi-types.ts";
+import type { ToolCallEvent, ToolResultEvent } from "../src/pi-types.ts";
+import type { PrivateIngressRequest } from "../src/private-transport.ts";
 
 const HANDLE = "run-handle-1";
 
@@ -24,6 +26,7 @@ function run(status = "active") {
 interface Wired {
   pi: FakePi;
   requests: Request[];
+  privateRequests: PrivateIngressRequest[];
 }
 
 function wire(
@@ -31,6 +34,7 @@ function wire(
   echoRequestId = true,
 ): Wired {
   const requests: Request[] = [];
+  const privateRequests: PrivateIngressRequest[] = [];
   const pi = new FakePi();
   const dispatch = (req: Request): Response => {
     requests.push(req);
@@ -42,8 +46,24 @@ function wire(
   createEmpiricaExtension({
     dispatch,
     deriveSelector: () => ({ project: "p", session: "s" }),
+    privateIngress: async (request) => {
+      privateRequests.push(request);
+      if (request.operation === "audit_prepare") return {
+        type: "audit_plan",
+        plan: { child_id: "ch-1", role_profile: "empirica.empirica-auditor",
+          operation_id: `sha256:${"b".repeat(64)}`,
+          argument: { argument_digest: `sha256:${"a".repeat(64)}`, claims: [] } },
+      };
+      if (request.operation === "audit_verdict")
+        return { type: "audit_verdict", admitted: true };
+      return { type: "ok" };
+    },
+    resolveAuditContract: async () => ({
+      agentFilePath: resolve(DEFAULT_SKILLS_DIR, "..", "agents", "pi", "empirica-auditor.md"),
+      model: "bedrock/auditor-model",
+    }),
   })(pi);
-  return { pi, requests };
+  return { pi, requests, privateRequests };
 }
 
 function toolEvent(toolName: string): ToolCallEvent {
@@ -59,19 +79,17 @@ async function startRun(w: Wired): Promise<void> {
 
 // --- /empirica ---------------------------------------------------------------
 
-test("/empirica refuses before StartRun because the profile cannot progress", async () => {
-  const w = wire(() => {
-    throw new Error("the unsupported preflight must not dispatch");
-  });
+test("/empirica dispatches StartRun and persists the opaque handle", async () => {
+  const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
   const ui = new FakeUi();
 
   await w.pi.command("empirica").handler("build the thing", { ui });
 
-  assert.equal(w.requests.length, 0);
-  assert.equal(w.pi.entries.length, 0);
-  assert.equal(ui.last()!.type, "error");
-  assert.match(ui.last()!.message, /author actions and the bound audit lifecycle are unavailable/);
-  assert.match(ui.last()!.message, /No run was created/);
+  assert.equal(w.requests.length, 1);
+  assert.equal(w.requests[0].command.type, "StartRun");
+  assert.equal(w.pi.entries.length, 1);
+  assert.equal(w.pi.entries[0].customType, "empirica.run");
+  assert.match(w.pi.modelMessages[0].content, /empirica_observe/);
 });
 
 // --- tool_call gate ----------------------------------------------------------
@@ -199,25 +217,221 @@ test("gate: a well-formed Inert is denied (run gone but handle exists)", async (
   assert.match(decision!.reason!, /no active run to report/);
 });
 
-// --- subagent local fail-closed (D8-owned, no dispatch) --------------------
+// --- bound foreground auditor lifecycle -------------------------------------
 
-test("subagent: executable launch with a real handle is denied with D8 reason and no dispatch", async () => {
-  const w = wire((req) =>
-    req.command.type === "StartRun"
-      ? envelope({ type: "Allow", converged: false, run: run() })
-      : envelope({ type: "Allow", converged: true, run: run("converged") }),
-  );
+test("subagent: canonical auditor is reserved, bound, attributed, and prompt-injected", async () => {
+  const child = { child_id: "ch-1", purpose: "audit", state: "reserved" };
+  const w = wire((req) => {
+    if (req.command.type === "ObserveAction")
+      return envelope({ type: "Allow", converged: false,
+        run: { ...run(), children: [child] } as never });
+    if (req.command.type === "GetArgument")
+      return envelope({ type: "Allow", converged: false, run: run(),
+        argument: { artifacts: [{ kind: "research", artifact_id: `sha256:${"1".repeat(64)}` }] }
+      } as never);
+    return envelope({ type: "Allow", converged: false, run: run() });
+  });
   await startRun(w);
-  const before = w.requests.length;
+  const input: Record<string, unknown> = {
+    agent: "empirica.empirica-auditor", task: "audit",
+  };
   const decision = await w.pi.toolCall()(
-    { toolName: SUBAGENT_TOOL, toolCallId: "tc-sub", input: { agent: "empirica:empirica-auditor" } },
-    { ui: new FakeUi() },
+    { toolName: SUBAGENT_TOOL, toolCallId: "tc-sub", input }, fakeCtx(),
   );
+  assert.equal(decision, undefined);
+  assert.equal(input.async, false);
+  assert.equal(input.timeoutMs, 900_000);
+  assert.deepEqual(input.turnBudget, { maxTurns: 8, graceTurns: 1 });
+  assert.deepEqual(input.toolBudget, { soft: 20, hard: 30, block: ["write", "edit"] });
+  assert.match(String(input.task), /AUDIT DOSSIER/);
+  assert.deepEqual(w.privateRequests.map((item) => item.operation), ["audit_prepare"]);
+  assert.equal(w.pi.entries.at(-1)?.customType, "empirica.audit");
+});
+
+test("tool_result redacts before privately admitting the correlated verdict", async () => {
+  const child = { child_id: "ch-1", purpose: "audit", state: "reserved" };
+  const w = wire((req) => {
+    if (req.command.type === "ObserveAction")
+      return envelope({ type: "Allow", converged: false,
+        run: { ...run(), children: [child] } as never });
+    if (req.command.type === "GetArgument")
+      return envelope({ type: "Allow", converged: false, run: run(),
+        argument: { artifacts: [{ kind: "research", artifact_id: `sha256:${"1".repeat(64)}` }] }
+      } as never);
+    return envelope({ type: "Allow", converged: false, run: run() });
+  });
+  await startRun(w);
+  await w.pi.toolCall()(
+    { toolName: SUBAGENT_TOOL, toolCallId: "tc-result",
+      input: { agent: "empirica.empirica-auditor", task: "audit" } },
+    fakeCtx(),
+  );
+  const event = {
+    toolCallId: "tc-result", toolName: SUBAGENT_TOOL,
+    content: [{ type: "text", text: "```empirica-verdict\n{\"verdict\":\"pass\"}\n```" }],
+    details: { results: [{ model: "bedrock/auditor-model",
+      output: "```empirica-verdict\n{\"verdict\":\"pass\"}\n```" }] },
+  };
+  const handler = w.pi.handlers.get("tool_result") as
+    (event: ToolResultEvent, ctx: ReturnType<typeof fakeCtx>) => Promise<unknown>;
+  const replacement = await handler(event, fakeCtx()) as { content?: unknown; details?: unknown };
+
+  assert.doesNotMatch(JSON.stringify(replacement.content), /```empirica-verdict/);
+  assert.doesNotMatch(JSON.stringify(replacement.details), /```empirica-verdict/);
+  assert.match(JSON.stringify(replacement.content), /recorded by host/);
+  assert.equal(w.privateRequests.at(-1)?.operation, "audit_verdict");
+  const identity = w.privateRequests.find((request) => request.operation === "audit_identity");
+  assert.equal(identity?.auditor?.provider_id, null);
+  assert.equal(identity?.auditor?.model_id, null);
+  assert.equal(w.pi.entries.at(-1)?.customType, "empirica.audit.done");
+});
+
+test("session restore orphans unresolved audits and tombstones completed correlations", async () => {
+  const plan = { child_id: "ch-1", role_profile: "empirica.empirica-auditor",
+    operation_id: `sha256:${"b".repeat(64)}`,
+    argument: { argument_digest: `sha256:${"a".repeat(64)}`, claims: [] } };
+  const correlation = { toolCallId: "tc-restored", runHandle: HANDLE, nativeId: "tc-restored",
+    plan,
+    author: { provider_id: "bedrock", model_id: "author-model", observed_by: "host", source: "pi" },
+    auditor: { provider_id: "bedrock", model_id: "auditor-model",
+      observed_by: "configuration", source: "preflight" } };
+  const unresolved = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+  await (unresolved.pi.handlers.get("session_start") as (e: unknown, c: unknown) => unknown)(
+    {}, fakeCtx("/work", [
+      { customType: "empirica.run", data: { runHandle: HANDLE } },
+      { customType: "empirica.audit", data: correlation },
+    ]));
+  const unresolvedEvent: ToolResultEvent = { toolCallId: "tc-restored",
+    content: "```empirica-verdict\n{\"verdict\":\"pass\"}\n```" };
+  const unresolvedReplacement = await (unresolved.pi.handlers.get("tool_result") as
+    (event: ToolResultEvent, ctx: ReturnType<typeof fakeCtx>) => Promise<unknown>)(
+      unresolvedEvent, fakeCtx()) as { content?: unknown };
+  assert.deepEqual(unresolved.privateRequests.map((item) => [item.operation, item.state]),
+    [["audit_failure", "orphaned"]]);
+  assert.doesNotMatch(JSON.stringify(unresolvedReplacement.content), /```empirica-verdict/);
+
+  const completed = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+  await (completed.pi.handlers.get("session_start") as (e: unknown, c: unknown) => unknown)(
+    {}, fakeCtx("/work", [
+      { customType: "empirica.run", data: { runHandle: HANDLE } },
+      { customType: "empirica.audit", data: correlation },
+      { customType: "empirica.audit.done", data: { toolCallId: "tc-restored" } },
+    ]));
+  const replay: ToolResultEvent = { toolCallId: "tc-restored",
+    content: "```empirica-verdict\n{\"verdict\":\"pass\"}\n```" };
+  const replayReplacement = await (completed.pi.handlers.get("tool_result") as
+    (event: ToolResultEvent, ctx: ReturnType<typeof fakeCtx>) => Promise<unknown>)(
+      replay, fakeCtx()) as { content?: unknown };
+  assert.equal(completed.privateRequests.length, 0);
+  assert.doesNotMatch(JSON.stringify(replayReplacement.content), /```empirica-verdict/);
+});
+
+test("session shutdown orphans a newly admitted unresolved audit", async () => {
+  const child = { child_id: "ch-orphan", purpose: "audit", state: "reserved" };
+  const w = wire((req) => {
+    if (req.command.type === "ObserveAction")
+      return envelope({ type: "Allow", converged: false,
+        run: { ...run(), children: [child] } as never });
+    if (req.command.type === "GetArgument")
+      return envelope({ type: "Allow", converged: false, run: run(),
+        argument: { argument_digest: `sha256:${"a".repeat(64)}`, claims: [] } } as never);
+    return envelope({ type: "Allow", converged: false, run: run() });
+  });
+  await startRun(w);
+  await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "tc-orphan",
+    input: { agent: "empirica.empirica-auditor", task: "audit" } }, fakeCtx());
+  await (w.pi.handlers.get("session_shutdown") as () => Promise<unknown>)();
+  assert.equal(w.privateRequests.at(-1)?.operation, "audit_failure");
+  assert.equal(w.privateRequests.at(-1)?.state, "orphaned");
+  assert.equal(w.pi.entries.at(-1)?.customType, "empirica.audit.done");
+});
+
+test("malformed auditor result returns a propagated redacted replacement", async () => {
+  const child = { child_id: "ch-malformed", purpose: "audit", state: "reserved" };
+  const w = wire((req) => {
+    if (req.command.type === "ObserveAction")
+      return envelope({ type: "Allow", converged: false,
+        run: { ...run(), children: [child] } as never });
+    if (req.command.type === "GetArgument")
+      return envelope({ type: "Allow", converged: false, run: run(),
+        argument: { argument_digest: `sha256:${"a".repeat(64)}`, claims: [] } } as never);
+    return envelope({ type: "Allow", converged: false, run: run() });
+  });
+  await startRun(w);
+  await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "tc-malformed",
+    input: { agent: "empirica.empirica-auditor", task: "audit" } }, fakeCtx());
+  const event: ToolResultEvent = {
+    toolCallId: "tc-malformed",
+    content: [{ type: "text", text: "not a verdict" }],
+    details: { output: "```empirica-verdict\n{\"verdict\":\"pass\"}\n```" },
+  };
+  const replacement = await (w.pi.handlers.get("tool_result") as
+    (event: ToolResultEvent, ctx: ReturnType<typeof fakeCtx>) => Promise<unknown>)(
+      event, fakeCtx()) as { content?: unknown; details?: unknown };
+  assert.doesNotMatch(JSON.stringify(replacement.details), /```empirica-verdict/);
+  assert.equal(w.privateRequests.at(-1)?.operation, "audit_failure");
+  assert.equal(w.privateRequests.at(-1)?.state, "failed");
+});
+
+test("errored auditor output is redacted and cannot admit a fenced verdict", async () => {
+  const child = { child_id: "ch-error", purpose: "audit", state: "reserved" };
+  const w = wire((req) => {
+    if (req.command.type === "ObserveAction")
+      return envelope({ type: "Allow", converged: false,
+        run: { ...run(), children: [child] } as never });
+    if (req.command.type === "GetArgument")
+      return envelope({ type: "Allow", converged: false, run: run(),
+        argument: { artifacts: [{ kind: "research", artifact_id: `sha256:${"1".repeat(64)}` }] }
+      } as never);
+    return envelope({ type: "Allow", converged: false, run: run() });
+  });
+  await startRun(w);
+  await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "tc-error",
+    input: { agent: "empirica.empirica-auditor", task: "audit" } }, fakeCtx());
+  const event: ToolResultEvent = { toolCallId: "tc-error", isError: true,
+    content: "```empirica-verdict\n{\"verdict\":\"pass\"}\n```" };
+  const handler = w.pi.handlers.get("tool_result") as
+    (event: ToolResultEvent, ctx: ReturnType<typeof fakeCtx>) => Promise<unknown>;
+  await handler(event, fakeCtx());
+  assert.doesNotMatch(String(event.content), /```empirica-verdict/);
+  assert.equal(w.privateRequests.at(-1)?.operation, "audit_failure");
+  assert.equal(w.privateRequests.at(-1)?.state, "failed");
+  assert.equal(w.privateRequests.filter((item) => item.operation === "audit_verdict").length, 0);
+});
+
+test("non-canonical auditors stay ordinary budgeted children; model overrides get no trusted admission", async () => {
+  const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+  await startRun(w);
+  const before = w.privateRequests.length;
+  const evil = await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "evil",
+    input: { agent: "evil-empirica-auditor", task: "audit" } }, fakeCtx());
+  assert.equal(evil?.block, true);
+  const overridden = await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "override",
+    input: { agent: "empirica.empirica-auditor", task: "audit", model: "author-model" } }, fakeCtx());
+  assert.equal(overridden?.block, true);
+  assert.equal(w.privateRequests.length, before);
+});
+
+test("shadowed packaged auditor identity is blocked before reservation", async () => {
+  const requests: Request[] = [];
+  const pi = new FakePi();
+  createEmpiricaExtension({
+    dispatch: (request) => { requests.push(request); return {
+      ...envelope({ type: "Allow", converged: false, run: run() }),
+      request_id: request.request_id,
+    }; },
+    deriveSelector: () => ({ project: "p", session: "s" }),
+    privateIngress: async () => ({ type: "ok" }),
+    resolveAuditContract: async () => ({ agentFilePath: "/project/.pi/agents/shadow.md",
+                                         model: "bedrock/auditor-model" }),
+  })(pi);
+  await (pi.handlers.get("session_start") as (e: unknown, c: unknown) => unknown)(
+    {}, fakeCtx("/work", [{ customType: "empirica.run", data: { runHandle: HANDLE } }]));
+  const decision = await pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "shadow",
+    input: { agent: "empirica.empirica-auditor", task: "audit" } }, fakeCtx());
   assert.equal(decision?.block, true);
-  assert.equal(decision!.reason, subagentUnsupportedReason());
-  assert.match(decision!.reason!, /D8/);
-  // No dispatch occurred for the subagent call.
-  assert.equal(w.requests.length, before);
+  assert.match(decision!.reason!, /shadowed/);
+  assert.equal(requests.length, 0);
 });
 
 test("subagent: management list with a real handle is inert (no denial)", async () => {
@@ -268,8 +482,9 @@ test("subagent: malformed multi-key launch with a real handle is inert", async (
 // The registered report_convergence tool's execute() throws on a guarded deny;
 // the tool_call gate (above) returns {block}. Both route through gateFromDecision.
 
-async function execTool(w: Wired, name: string) {
-  return w.pi.tools.get(name)!.execute("x", {}, new AbortController().signal, () => {}, { ui: new FakeUi() });
+async function execTool(w: Wired, name: string, params: unknown = {}) {
+  return w.pi.tools.get(name)!.execute(
+    "x", params, new AbortController().signal, () => {}, fakeCtx());
 }
 
 /** StartRun -> Allow; every later command returns the scripted deny result. */
@@ -294,19 +509,19 @@ test("direct tool: report_convergence execute rejects on open Fault with active 
   await assert.rejects(() => execTool(w, "report_convergence"), /unavailable/);
 });
 
-test("status uses the restored opaque handle across selector changes", async () => {
+test("empirica_read uses the restored opaque handle", async () => {
   const w = wire((req) => {
-    assert.equal(req.command.type, "RestoreRun");
-    assert.equal(req.command.type === "RestoreRun" ? req.command.run_id : null, HANDLE);
+    assert.equal(req.command.type, "GetRun");
+    assert.equal(req.command.type === "GetRun" ? req.command.run_id : null, HANDLE);
     return envelope({ type: "Allow", converged: false, run: run() });
   });
   await startRun(w);
-  const result = await execTool(w, "empirica_status");
-  assert.match(result.content[0].text, /empirica run run-handle-1: status=active/);
+  const result = await execTool(w, "empirica_read", { operation: "GetRun" });
+  assert.match(result.content[0].text, /run-handle-1/);
   assert.equal(w.requests.length, 1);
 });
 
-test("status without a restored handle resolves the current selector", async () => {
+test("empirica_read without a restored handle resolves the current selector", async () => {
   const w = wire((req) => {
     assert.equal(req.command.type, "ResolveRun");
     assert.deepEqual(
@@ -316,9 +531,9 @@ test("status without a restored handle resolves the current selector", async () 
     return envelope({ type: "Inert", reason: "no_run" });
   });
 
-  const result = await execTool(w, "empirica_status");
+  const result = await execTool(w, "empirica_read", { operation: "GetRun" });
 
-  assert.match(result.content[0].text, /no active run/);
+  assert.match(result.content[0].text, /No active Empirica run/);
   assert.equal(w.requests.length, 1);
 });
 

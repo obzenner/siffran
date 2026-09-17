@@ -99,7 +99,7 @@ The table below and the `## Plugins` table in `README.md` are **generated** — 
 | Plugin | Version | Description |
 |--------|---------|-------------|
 | `methodologist` | 0.8.1 | Methodology router — picks and executes formal CS/math reasoning methodologies with tracked phases and structured output. |
-| `empirica` | 2.0.0 | Host-neutral empirical-convergence workflow — routes uncertainty into a claim graph, requires cited research before deterministic spikes, derives claim state, and binds convergence to a current independent audit. Full execution is hook-enforced only on profiles with author-action and bound-audit capabilities; unsupported profiles fail explicitly before starting. |
+| `empirica` | 2.0.1 | Host-neutral empirical-convergence workflow — routes uncertainty into a claim graph, requires cited research before deterministic spikes, derives claim state, and binds convergence to a current independent audit. Full execution is hook-enforced only on profiles with author-action and bound-audit capabilities; unsupported profiles fail explicitly before starting. |
 <!-- END GENERATED: plugins -->
 
 ## README

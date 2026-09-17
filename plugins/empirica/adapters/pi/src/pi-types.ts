@@ -11,6 +11,10 @@ export interface UiContext {
 export interface ExtensionContext {
   ui: UiContext;
   cwd?: string;
+  model?: { id: string; provider: string };
+  modelRegistry?: {
+    getAvailable(): Array<{ id: string; provider: string; fullId?: string; reasoning?: boolean }>;
+  };
   sessionManager?: {
     getEntries(): Array<{ type?: string; customType?: string; data?: unknown }>;
   };
@@ -36,6 +40,15 @@ export interface ToolCallEvent {
   toolName: string;
   toolCallId: string;
   input: Record<string, unknown>;
+}
+
+export interface ToolResultEvent {
+  toolCallId: string;
+  toolName?: string;
+  isError?: boolean;
+  error?: unknown;
+  details?: unknown;
+  content?: unknown;
 }
 
 export interface ToolCallResult {
@@ -70,7 +83,7 @@ export interface ToolDefinition {
     signal: AbortSignal,
     onUpdate: (u: unknown) => void,
     ctx: ExtensionContext,
-  ) => Promise<{ content: Array<{ type: "text"; text: string }> }>;
+  ) => Promise<{ content: Array<{ type: "text"; text: string }>; details?: unknown }>;
 }
 
 export interface ExtensionAPI {
@@ -80,6 +93,7 @@ export interface ExtensionAPI {
   sendMessage?(
     message: { customType: string; content: string; display?: boolean },
   ): void;
+  on(event: "tool_result", handler: (event: ToolResultEvent, ctx: ExtensionContext) => unknown): void;
   on(event: "resources_discover", handler: ResourcesDiscoverHandler): void;
   on(event: "tool_call", handler: ToolCallHandler): void;
   on(

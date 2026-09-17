@@ -1,11 +1,7 @@
-"""Inactive Claude Code adapter building blocks for the ``empirica/v2`` bridge (D6-C).
+"""Claude Code 2.1.270 driver and request translators for ``empirica/v2``.
 
-These modules translate Claude-shaped lifecycle payloads into exact v2 requests without
-registering hooks.  Removed operations (``void_spawn``/``audit_ticket``/``consume``/``phase``) and
-author-submitted trusted actions (``evidence_leaf``/``attribution``/``child_event``/
-``audit_verdict``) have no public builder here: the adapter fails closed locally rather than
-fabricating capability.  Activation is intentionally separate: the thin hooks under ``hooks/``
-remain the active implementation.
+Thin hooks in ``hooks/`` activate these modules. Public builders exclude trusted ingress; the
+Claude lifecycle binds the shared durable audit operation to exact SubagentStart/Stop native IDs.
 """
 
 from .completion import REPORT_CONVERGENCE, StopResult, build_stop_request, dispatch_stop, stop_result

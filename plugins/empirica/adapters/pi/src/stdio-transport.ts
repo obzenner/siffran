@@ -21,11 +21,8 @@ import * as path from "node:path";
 import type { Dispatch, Request, Response } from "./contract.ts";
 import { assertResponse, GuardError } from "./guard.ts";
 
-/** The exact conservative registry profile for this Pi adapter (D6-C §4).
- * `pi@0.84.1` is the foreground-only profile with no subagent extension —
- * there is no capability detection and no default; the bridge requires this
- * exact profile and fails closed if it is absent. */
-export const HOST_PROFILE_ID = "pi@0.84.1";
+/** Exact Pi + pi-subagents profile required for complete foreground audit binding. */
+export const HOST_PROFILE_ID = "pi@0.84.1+pi-subagents@0.50.0";
 
 export interface StdioBridgeConfig {
   /** Executable to run (e.g. "python3"). */

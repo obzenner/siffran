@@ -1,7 +1,7 @@
 {
   "name": "empirica",
-  "version": "2.0.0",
-  "description": "Host-neutral empirical-convergence package with an observational Codex adapter. The current Codex profile reports typed capability gaps and does not claim the author-action or bound-audit lifecycle required for full convergence.",
+  "version": "2.0.1",
+  "description": "Empirical convergence for Codex 0.146.0 with canonical public MCP tools, durable runs, deterministic spikes, a managed foreground auditor, and a fail-closed Stop gate.",
   "author": {
     "name": "obzenner"
   },

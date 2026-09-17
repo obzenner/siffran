@@ -15,7 +15,7 @@
         "additionalProperties": false,
         "required": [
           "host_id", "profile_id", "version", "current_tier",
-          "required_fixture_ids", "required_live_probe_ids",
+          "required_fixture_ids", "required_live_probe_ids", "promotion_status",
           "input_private", "output_private", "unsupported_reason_ids", "sources"
         ],
         "properties": {
@@ -27,6 +27,7 @@
           "candidate_probe_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
           "required_fixture_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
           "required_live_probe_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+          "promotion_status": {"enum": ["pending_live", "promoted"]},
           "input_private": {"oneOf": [{"type": "boolean"}, {"const": "unverified"}]},
           "output_private": {"oneOf": [{"type": "boolean"}, {"const": "unverified"}]},
           "unsupported_reason_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},

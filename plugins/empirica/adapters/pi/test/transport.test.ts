@@ -104,5 +104,5 @@ test("rejects when the bridge command cannot be spawned", async () => {
 });
 
 test("HOST_PROFILE_ID is the exact pi profile with no default", () => {
-  assert.equal(HOST_PROFILE_ID, "pi@0.84.1");
+  assert.equal(HOST_PROFILE_ID, "pi@0.84.1+pi-subagents@0.50.0");
 });

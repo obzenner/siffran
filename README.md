@@ -50,10 +50,12 @@ small MCP adapter. The Methodologist package contains no hooks. Codex's normal
 sandbox and MCP approval policy still apply.
 
 Empirica's command hooks require a separate trust step. Open `/hooks`, review the
-installed definitions, and trust them before use. The current Codex profile is
-observational: it cannot provide the author-action, bound-audit, or completion
-lifecycle required for convergence. An explicit invocation therefore reports a
-typed capability gap rather than starting a full run:
+installed definitions, and trust them before use. The exact Codex 0.146.0 profile
+exposes the canonical public MCP tools and a fail-closed Stop gate. Because native
+hooks cannot observe arbitrary child output, the adapter owns a bounded foreground
+`codex exec` auditor and privately admits only its correlated final verdict. Codex
+cannot independently observe the resolved auditor model, so identity remains
+unverified and convergence blocks rather than trusting configured argv:
 
 ```text
 $empirica design and verify the retry policy
@@ -67,10 +69,9 @@ directly as a repo/user skill there if needed, and use native simple mode only.
 
 ## Install for Pi
 
-Install the repository as one Pi package. This enables Methodologist and installs
-Empirica's current diagnostic adapter. The exact `pi@0.84.1` Empirica profile is
-not yet capable of author actions or a bound audit lifecycle, so it refuses to
-start an unusable convergence run:
+Install the repository as one Pi package. It bundles the pinned
+`pi-subagents@0.50.0` extension and the Empirica auditor role required by the exact
+`pi@0.84.1+pi-subagents@0.50.0` profile:
 
 ```sh
 pi install git:github.com/obzenner/siffran
@@ -81,12 +82,17 @@ Restart Pi after installation, or run `/reload` in an existing session. Availabl
 ```text
 /think <intent>                 # structured Methodologist workflow
 /think --simple <intent>        # original single-prompt Methodologist mode
-/empirica <goal>                # report the current typed Pi capability gap
-empirica_status                 # tool: inspect a restored run's ID and status
+/empirica <goal>                # start a durable Empirica v2 workflow
+empirica_observe                 # tool: route, graph, research, spike, freeze
+empirica_read                    # tool: complete RunView, argument, contract
+report_convergence               # tool: guarded terminal decision
 ```
 
-`empirica_status` and `report_convergence` remain available for diagnosing an
-existing restored handle. Neither provides the missing author or audit path.
+The Pi adapter binds `empirica.empirica-auditor` as a foreground child, correlates
+its `tool_result`, and admits the verdict through non-model-callable private ingress.
+The pinned native surface exposes requested model configuration but no independently
+observed resolved child model, so identity remains unverified and convergence blocks.
+Pi also has no native completion veto; call `report_convergence` before any status claim.
 
 To update later:
 
@@ -100,13 +106,17 @@ For local development, install the checkout instead:
 pi install "$(pwd)"
 ```
 
+The three exact Empirica host drivers are implemented at `foreground_only`, but their registry
+`promotion_status` remains `pending_live`. They are not release-supported until
+`make empirica-host-live-check` has retained exact installed-host receipts for all three.
+
 ## Plugins
 
 <!-- BEGIN GENERATED: plugins (managed by the checkup skill — do not edit by hand) -->
 | Plugin | Version | Description |
 |--------|---------|-------------|
 | `methodologist` | 0.8.1 | Methodology router — picks and executes formal CS/math reasoning methodologies with tracked phases and structured output. |
-| `empirica` | 2.0.0 | Host-neutral empirical-convergence workflow — routes uncertainty into a claim graph, requires cited research before deterministic spikes, derives claim state, and binds convergence to a current independent audit. Full execution is hook-enforced only on profiles with author-action and bound-audit capabilities; unsupported profiles fail explicitly before starting. |
+| `empirica` | 2.0.1 | Host-neutral empirical-convergence workflow — routes uncertainty into a claim graph, requires cited research before deterministic spikes, derives claim state, and binds convergence to a current independent audit. Full execution is hook-enforced only on profiles with author-action and bound-audit capabilities; unsupported profiles fail explicitly before starting. |
 <!-- END GENERATED: plugins -->
 
 ## Development

@@ -29,7 +29,12 @@
       "deadline": null,
       "native_id": null,
       "first_terminal_fingerprint": null,
-      "capability_ref": "cap-1"
+      "capability_ref": "cap-1",
+      "audit_operation_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "audit_argument": {
+        "argument_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "audit_role_profile": "empirica:empirica-auditor"
     }
   ],
   "committed_artifact_head_id": null

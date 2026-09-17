@@ -32,7 +32,12 @@
       "deadline": 1700000000.0,
       "native_id": "native-auditor-1",
       "first_terminal_fingerprint": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
-      "capability_ref": "cap-auditor"
+      "capability_ref": "cap-auditor",
+      "audit_operation_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "audit_argument": {
+        "argument_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "audit_role_profile": "empirica:empirica-auditor"
     },
     {
       "child_id": "child-rejected",
@@ -43,7 +48,10 @@
       "deadline": null,
       "native_id": null,
       "first_terminal_fingerprint": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
-      "capability_ref": "cap-spike"
+      "capability_ref": "cap-spike",
+      "audit_operation_id": null,
+      "audit_argument": null,
+      "audit_role_profile": null
     }
   ],
   "committed_artifact_head_id": null

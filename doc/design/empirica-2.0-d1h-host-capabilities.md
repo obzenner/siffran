@@ -48,9 +48,8 @@ an audit or evidence obligation. It must not claim automatic independent audit s
 | Host/profile | Tier | Advertised automatic audit | Privacy statement | Required implementation evidence |
 |---|---|---|---|---|
 | Claude Code 2.1.270 | `foreground_only`; candidate `full_async` | Yes in foreground; async only after promotion | Dossier can be inserted into the admitted Agent input; the child's final answer is host-visible to the parent/author, so output privacy is **not** guaranteed | Exact admitted Agent invocation → native `agent_id` live correlation is required before promotion; serialization, type, timing, transcript path, or launch order are not proof |
-| Pi 0.84.1 + pi-subagents 0.50.0 | candidate `full_async`, promoted only by runtime capability/live proof | Yes after promotion; otherwise explicit foreground fallback | Same-process RPC can supply the task; completion/result may be projected to the parent, so output privacy is **not** guaranteed | RPC ping/capability, session ownership, persisted ID/artifact root, async-started/complete, replay/reload, and first-terminal live proof |
-| Pi 0.84.1 native without the conformance-listed pi-subagents profile | `foreground_only` | Yes, foreground only | Tool result is parent-visible; output privacy is **not** guaranteed | Forced foreground tool-call/result conformance and explicit async rejection |
-| Codex CLI 0.146.0 | `observational` | No | No documented private child-input mutation or trusted child-output callback | Typed capability residual; no audit approval from observed spawn request; parent Stop remains enforceable |
+| Pi 0.84.1 + pi-subagents 0.50.0 | `foreground_only`, pending live | No convergent audit: resolved child model is not natively observed | The bound tool result is parent-visible, so output privacy is **not** guaranteed | Canonical packaged agent → `toolCallId` correlation, synchronous redaction, private verdict ingress, explicit async rejection, and honest `independence_unverified` |
+| Codex CLI 0.146.0 | `foreground_only`, pending live | No convergent audit: managed process resolved model is not natively observed | Final output is observed by the adapter process; output privacy is **not** guaranteed | Public MCP trace plus bounded managed process, exact final-output parsing, private ingress, Stop re-evaluation, and honest `independence_unverified` |
 
 Only an exact conformance-listed profile receives its declared tier. An unlisted version is
 `observational`—or unavailable when even observation is unproven—until deterministic fixtures and
@@ -73,21 +72,21 @@ PreToolUse, SubagentStart, SubagentStop, PostToolUseFailure, SessionStart, and S
 
 Empirica foreground binding contract:
 
-1. PreToolUse reserves one child operation, enforces budget, stores the native `tool_use_id` and
-   private completion capability in the trusted adapter/application record, and inserts only the
-   dossier/instructions—not the capability—into that admitted Agent invocation.
-2. The foreground PostToolUse result is correlated by the same native `tool_use_id` and records
-   exactly one completion; invalid/missing audit output leaves audit unreadable.
-3. PostToolUseFailure before observed start marks `launch_rejected` and refunds once; failure after
-   start remains spent.
-4. SubagentStart/Stop native IDs are retained as diagnostic observations but MUST NOT bind a
-   reservation or receive a dossier unless an exact admitted-launch correlation is proven.
-5. A SubagentStart lacking that exact correlation is unrelated/ambiguous. Serialization, matching
-   agent type, timing, transcript path, and order are not sufficient.
-6. A future candidate full-async promotion requires a live falsifier covering same-type resume and
-   unrelated-launch races. Only after that proof may concurrent pending children complete out of
-   order by native ID.
-7. Application deadlines produce `timed_out`; later output is append-only diagnostic evidence and
+1. PreToolUse verifies the exact plugin-scoped auditor, forbids model overrides, reserves exactly
+   one audit operation, and replaces the complete child prompt with the immutable dossier/rubric.
+2. A second outstanding reserved audit is refused; there is never an order-based choice among
+   multiple reservations.
+3. SubagentStart is the first native-start observation. Its exact `agent_id` drives
+   `reserved -> launching -> pending`; the adapter retains that native ID privately.
+4. SubagentStop must carry the same exact `agent_id`. Private correlation resolves that ID to one
+   pending child before identity or verdict admission; purpose, timing, and list order are ignored.
+5. Parent and child model identities are read from their host transcripts at terminal observation,
+   not from requested model aliases. Missing concrete identity remains `unverified`.
+6. PostToolUseFailure while the operation is still reserved records `launch_rejected` and refunds
+   once; malformed terminal output records `failed` after observed start.
+7. A future candidate full-async promotion requires a separate live falsifier for concurrent
+   same-type starts, resume, cancellation, and out-of-order terminal delivery.
+8. Application deadlines produce `timed_out`; later output is append-only diagnostic evidence and
    cannot reopen or converge a terminal child or run.
 
 ## 4. Pi binding protocols
@@ -108,39 +107,34 @@ Documented public integration:
 Sources: installed `/Users/dmitry.lambrianov/.pi/agent/npm/node_modules/pi-subagents` 0.50.0,
 `docs/extension-api.md`, `docs/observability.md`, `docs/tool-reference.md`, and exported APIs.
 
-Empirica binding contract:
+Empirica's promoted foreground binding uses the structured model tool rather than claiming the
+separate async RPC lifecycle:
 
-1. Adapter verifies runtime RPC ping/capabilities and reserves one Empirica child operation, then
-   invokes RPC `spawn` with a correlation token held by the trusted adapter, not model context.
-2. RPC async/run ID becomes `host_child_id`; async-start binds it only after session ownership and
-   artifact root are validated.
-3. Same-process completion accelerates delivery; persisted validated status/replay is authoritative
-   after reload and drives one idempotent terminal event.
-4. On Pi reload, adapter reconciles every pending operation from Empirica state against the exact
-   session-owned pi-subagents status/replay. Missing provider, substituted artifact root/run, or
-   unprovable state fails closed as `orphaned`.
-5. Stop/timeout controls are translated to the host, but Empirica first-terminal admission remains
-   authoritative. Until the required live proof passes, the profile is not advertised full-async.
-
-### Native Pi fallback
-
-The adapter mutates the subagent tool to foreground execution only after explicit foreground
-selection. `toolCallId` binds start/result. A tool error becomes `failed` or `launch_rejected`
-depending on whether execution started. Background requests return `host.async_unsupported`.
+1. `tool_call` reserves one canonical audit child and forces `async=false`.
+2. The adapter binds the native `toolCallId`, injects the current dossier, and records
+   `launching -> pending` through private ingress.
+3. `tool_result` retrieves the exact correlated foreground output and redacts the fenced verdict
+   synchronously before its first await.
+4. The adapter privately records configured/observed attribution and admits the candidate verdict;
+   first-terminal and replay rules remain application-owned.
+5. Reload restores the opaque run and any persisted correlation entry; async requests remain
+   `host.async_unsupported` until the candidate probe is promoted.
 
 ## 5. Codex behavior
 
-Pinned Codex 0.146.0 establishes a PreToolUse request and parent Stop gate but no supported
-`updatedInput`, child completion/final-output callback, or transcript reference.
+Pinned Codex 0.146.0 provides public MCP tools, durable hook identity, and a parent Stop gate,
+but no native `updatedInput`, child final-output callback, or child transcript reference.
+The trusted Stop adapter therefore owns a bounded foreground `codex exec` process:
 
-Therefore:
+1. evaluate the located run and proceed only when audit is the current obligation;
+2. reserve one foreground child and obtain the current `GetArgument` dossier;
+3. record launching/pending and author/auditor attribution privately;
+4. invoke `codex exec --ephemeral --sandbox read-only` with an adapter-pinned model and dossier;
+5. parse exactly one final fenced verdict, admit it through private ingress, and re-evaluate;
+6. permit Stop only for guarded `Allow(converged=true)`.
 
-- a spawn request may be budgeted/recorded, but it is not a trusted started/completed audit child;
-- automatic audit remains unavailable;
-- attempted automatic audit returns `host.audit_output_unobservable` with recovery guidance;
-- no nonce/ticket/dossier is exposed to the author to simulate the missing trusted path;
-- graph, deterministic evidence, residual reporting, and parent Stop enforcement remain supported;
-- a run that otherwise owes audit stops honestly with residual rather than reporting convergence.
+The MCP tools remain public-only and cannot express trusted ingress. Process failure, malformed
+output, same/unverified attribution, or unavailable evaluation blocks Stop.
 
 Sources: `plugins/empirica/adapters/codex/README.md` and pinned official Codex 0.146.0 hook sources
 listed there.
@@ -196,13 +190,13 @@ pending child was fabricated:
 - terminal late completion cannot produce convergence;
 - unsupported async or output observation returns the exact capability reason;
 - Claude foreground and candidate exact-correlation race behavior;
-- Pi+pi-subagents candidate promotion, session/artifact substitution, and replay behavior;
-- Pi native foreground behavior;
-- Codex observational behavior;
-- advertised tier equals the exact runtime-detected conformance profile.
+- Pi+pi-subagents foreground tool-call/result binding and candidate async promotion behavior;
+- Codex managed foreground auditor and Stop re-evaluation behavior;
+- advertised tier equals the exact conformance-listed profile.
 
-Live probes are mandatory for Claude full async, Pi+pi-subagents full async, Pi native foreground, and
-Codex observational behavior before release.
+Live probes are mandatory for Claude foreground, Pi+pi-subagents foreground, and Codex managed
+foreground behavior before release. Candidate full-async promotion requires its separate named
+probe and does not block foreground support.
 
 ## 8. Stop conditions
 

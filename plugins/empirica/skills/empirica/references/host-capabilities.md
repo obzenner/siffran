@@ -1,63 +1,60 @@
 # Host capability preflight
 
-Read this file at activation. Capability claims come from the exact registered
-profile and live adapter surface, not from generic host documentation.
+Read this file after route acknowledgement. Capability claims come from the exact registered
+profile and live adapter surface, not generic host documentation.
 
-## Required execution surface
+## Required surface
 
-A host can run Empirica to convergence only when it can expose the complete
-public run view, submit public author actions, obtain the audit argument, bind and
-observe an independent child, admit its verdict privately, and request a guarded
-terminal decision. Missing capabilities remain typed and visible.
+A complete host reads the public RunView, submits public author actions, obtains the audit
+argument, binds and observes an independent auditor, admits its output privately, and requests a
+guarded terminal decision. Trusted evidence, attribution, child events, and verdicts are never
+model-callable.
 
 ## Claude Code `claude-code@2.1.270`
 
-Claude Code supplies the lifecycle hooks used by the current full author path:
-activation, route/dispatch/spawn interception, convergence gating, restoration,
-and auditor completion capture. Use only the builders and hook paths shipped by
-the adapter. Do not submit trusted payloads directly.
+Required surfaces:
 
-The profile remains `foreground_only`; asynchronous execution must not be claimed
-or silently downgraded. The host observes audit delivery, but model independence
-is reported rather than guaranteed.
+- active and trusted Empirica activation/route/spawn/Stop hooks;
+- MCP tools `empirica_observe`, `empirica_read`, and `report_convergence`;
+- canonical `empirica:empirica-auditor` foreground child.
 
-## Pi `pi@0.84.1`
+The host mutates the auditor prompt with the typed dossier and observes the final output through
+its native subagent completion hook. The profile is `foreground_only`; async is unsupported.
 
-The shipping v2 adapter exposes:
+## Pi `pi@0.84.1+pi-subagents@0.50.0`
 
-- `/empirica <goal>` to report the typed capability gap and refuse before
-  `StartRun`, creating no run;
-- `empirica_status` to resolve and render only run ID and status;
-- `report_convergence` as a fail-closed guarded operation;
-- opaque handle restoration across session compaction.
+Required surfaces:
 
-It does **not** expose `ObserveAction`, `GetRun`, `GetArgument`, author knowledge,
-or a bound audit lifecycle. Executable subagent launches are denied while a run
-handle is active. Pi has no completion-veto lifecycle, so a turn can finish
-without calling `report_convergence`.
+- `/empirica` has injected an opaque run handle;
+- `empirica_observe`, `empirica_read`, and `report_convergence` are registered;
+- `pi-subagents@0.50.0` provides the structured `subagent` tool and its `tool_result` event;
+- the packaged `empirica.empirica-auditor` role is executable.
 
-Therefore this profile cannot execute the convergence workflow. If activation has
-already created an active handle, explain that it cannot be progressed and do not
-invent a graph, evidence record, or auditor result. The tool returning only
-`status=active` is not a resume contract.
-
-The candidate profile `pi@0.84.1+pi-subagents@0.50.0` must not be promoted until
-its named live probe demonstrates private lifecycle observation and the registry
-is updated.
+The adapter forces the canonical auditor to foreground execution, correlates by `toolCallId`,
+redacts the verdict before its first await, and uses adapter-private ingress. The pinned native
+surface exposes the requested child model but not an independently observed resolved model, so
+auditor identity remains unverified and true convergence blocks. Pi has no native completion veto;
+call `report_convergence` before any status claim. Bare `pi@0.84.1` without the subagent surface is
+unsupported.
 
 ## Codex CLI `codex-cli@0.146.0`
 
-The current profile is observational. Activation can reach the strict bridge
-shell, but route, investigation, author observations, child admission, audit, and
-convergence completion are unavailable without a resolved lifecycle. Hosted
-WebSearch ordering is not observed by `PreToolUse`.
+Required surfaces:
 
-Treat a Codex invocation as unsupported for full convergence. Do not imply that
-hook registration alone provides the missing lifecycle.
+- explicit activation injected an opaque handle;
+- MCP tools `empirica_observe`, `empirica_read`, and `report_convergence` are present;
+- the Empirica Stop hook is enabled and trusted;
+- `codex exec` and the configured auditor model are available.
+
+Codex 0.146.0 cannot observe an arbitrary native child's final output. Its adapter therefore
+owns a bounded foreground `codex exec` auditor at Stop, records lifecycle, privately admits the
+exact final verdict, and re-evaluates before completion. The process argv is configuration, not an
+observed resolved model, so auditor identity remains unverified and convergence blocks. Do not
+spawn an ordinary auditor child. Async remains unsupported.
+
+Hosted WebSearch may be invisible to `PreToolUse`; that sensor gap never proves research ordering.
 
 ## Capability failure output
-
-Use this shape:
 
 ```text
 Empirica cannot execute on <exact host profile>.

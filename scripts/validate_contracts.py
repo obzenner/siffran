@@ -48,8 +48,8 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:49bdf99832e3862a74060e3be8e45ea10b88f5029a0658fde9032a35a1b42b65"
-REVIEWED_HOST_PROFILES_DIGEST = "sha256:370e998ca50a33d3dc35c4fe0a6fe5a4e44304f92a4fb3ae83d9c6653029803f"
+REVIEWED_REGISTRY_DIGEST = "sha256:b70c27616f18a1cf5f8c6404066dcefc0a65a5a3f8d9849bbc1b1fbcf38aa1f6"
+REVIEWED_HOST_PROFILES_DIGEST = "sha256:1f0161ddb828d946b6821f92087d8aae53f0bdceb4a312ee15a954e2c534fed1"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
 REGISTRY_VERSION = "2.0.0"
@@ -155,7 +155,7 @@ def check_identity(contract: dict, errors: list[str], where: str) -> None:
             errors.append(f"{where}: {key} is required")
     actions = contract.get("actions", {})
     if isinstance(actions, dict):
-        for sub in ("author", "trusted"):
+        for sub in ("author", "host", "trusted"):
             if sub not in actions:
                 errors.append(f"{where}: actions.{sub} is required")
 
@@ -1336,7 +1336,9 @@ def _minimal_valid_state() -> dict:
 def _valid_child_for_state(state: str, d64: str, reg_terminal: set) -> dict:
     """Build one valid child record for the given canonical child state."""
     base = {"child_id": f"c-{state}", "purpose": "audit", "state": state,
-            "deadline": None, "capability_ref": "cap-1"}
+            "deadline": None, "capability_ref": "cap-1",
+            "audit_operation_id": d64, "audit_argument": {"argument_digest": d64},
+            "audit_role_profile": "empirica:empirica-auditor"}
     if state == "reserved":
         base.update(spent=False, refunded=False, native_id=None,
                      first_terminal_fingerprint=None)
@@ -1785,8 +1787,9 @@ def check_schema_mirror(request_schema: dict, response_schema: dict, contract: d
     """
     actions = contract.get("actions", {})
     reg_author = set(actions.get("author", []))
+    reg_host = set(actions.get("host", []))
     reg_trusted = set(actions.get("trusted", []))
-    reg_kinds = reg_author | reg_trusted
+    reg_kinds = reg_author | reg_host | reg_trusted
     schema_kinds = _extract_action_kinds(request_schema)
     if schema_kinds != reg_kinds:
         errors.append(f"{where}: request action kinds {sorted(schema_kinds)} != registry {sorted(reg_kinds)}")
@@ -2132,7 +2135,7 @@ def main() -> int:
         "getcontract-index", "getcontract-section", "getcontract-full",
         # D2E added presentation_selector GetContract section fixture.
         "getcontract-presentation-selector",
-        "block-host-async-unsupported", "block-host-audit-output-unobservable",
+        "block-host-async-unsupported",
         "observe-child-event-redacted",
         # D2A §7 added fixtures.
         "getargument-active", "getargument-audited", "restore-active",
@@ -2289,6 +2292,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     bad_extra["profiles"].append({
         "host_id": "x", "profile_id": "x@1.0", "version": "1.0", "current_tier": "foreground_only",
         "required_fixture_ids": [], "required_live_probe_ids": ["p"],
+        "promotion_status": "pending_live",
         "input_private": "unverified", "output_private": False, "unsupported_reason_ids": [],
         "sources": ["s"]})
     expect(lambda e: check_host_profiles(bad_extra, registry, required_fixtures, e, "neg"),

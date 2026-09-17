@@ -94,7 +94,7 @@ test(
 test(
   "live bridge: the exact profile is set in the transport env (no default)",
   () => {
-    assert.equal(HOST_PROFILE_ID, "pi@0.84.1");
+    assert.equal(HOST_PROFILE_ID, "pi@0.84.1+pi-subagents@0.50.0");
   },
 );
 

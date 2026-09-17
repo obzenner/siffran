@@ -186,7 +186,7 @@ class D7TransactionTests(unittest.TestCase):
     def test_cas_retry_reuses_content_addresses_without_duplicates(self):
         runs, artifacts_repo, workspace = Runs(), Artifacts(), Workspace()
         coordinator = Coordinator(workspace, Harness(), runs, artifacts_repo,
-                                  "pi@0.84.1", {})
+                                  "pi@0.84.1+pi-subagents@0.50.0", {})
         start = coordinator.handle({"type": "StartRun", "selector": {"project": "p", "session": "s"},
                                     "goal": "g"}, "start")
         run_id = start["result"]["run"]["id"]
@@ -205,7 +205,7 @@ class D7TransactionTests(unittest.TestCase):
 
     def test_repeated_domain_artifacts_are_idempotent_not_corrupting(self):
         runs, artifacts_repo, workspace = Runs(), Artifacts(), Workspace()
-        coordinator = Coordinator(workspace, Harness(), runs, artifacts_repo, "pi@0.84.1", {})
+        coordinator = Coordinator(workspace, Harness(), runs, artifacts_repo, "pi@0.84.1+pi-subagents@0.50.0", {})
         started = coordinator.handle({"type": "StartRun", "selector": {"project": "p", "session": "s"},
                                       "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
@@ -225,7 +225,7 @@ class D7TransactionTests(unittest.TestCase):
 
     def test_deduplicated_noop_retries_if_revision_changed(self):
         runs, artifacts_repo = Runs(), Artifacts()
-        coordinator = Coordinator(Workspace(), Harness(), runs, artifacts_repo, "pi@0.84.1", {})
+        coordinator = Coordinator(Workspace(), Harness(), runs, artifacts_repo, "pi@0.84.1+pi-subagents@0.50.0", {})
         started = coordinator.handle({"type": "StartRun", "selector": {"project": "p", "session": "s"},
                                       "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
@@ -242,7 +242,7 @@ class D7TransactionTests(unittest.TestCase):
 
     def test_identical_derivation_does_not_double_consume_pass(self):
         runs, artifacts_repo, workspace = Runs(), Artifacts(), Workspace()
-        coordinator = Coordinator(workspace, Harness(), runs, artifacts_repo, "pi@0.84.1", {})
+        coordinator = Coordinator(workspace, Harness(), runs, artifacts_repo, "pi@0.84.1+pi-subagents@0.50.0", {})
         started = coordinator.handle({"type": "StartRun", "selector": {"project": "p", "session": "s"},
                                       "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
@@ -261,7 +261,7 @@ class D7TransactionTests(unittest.TestCase):
 
     def test_corrupt_repository_read_blocks_get_but_resolve_is_inert(self):
         runs, artifacts_repo = Runs(), Artifacts()
-        coordinator = Coordinator(Workspace(), Harness(), runs, artifacts_repo, "pi@0.84.1", {})
+        coordinator = Coordinator(Workspace(), Harness(), runs, artifacts_repo, "pi@0.84.1+pi-subagents@0.50.0", {})
         key = RunKey(storage_id("p"), storage_id("s"), 1)
         runs.data[key] = Corrupt("bad bytes")
         get_response = coordinator.handle({"type": "GetRun", "run_id": encode_handle(key)}, "get")
@@ -273,7 +273,7 @@ class D7TransactionTests(unittest.TestCase):
 
     def test_read_revision_change_retries_before_projection(self):
         runs, artifacts_repo, workspace = Runs(), Artifacts(), Workspace()
-        coordinator = Coordinator(workspace, Harness(), runs, artifacts_repo, "pi@0.84.1", {})
+        coordinator = Coordinator(workspace, Harness(), runs, artifacts_repo, "pi@0.84.1+pi-subagents@0.50.0", {})
         started = coordinator.handle({"type": "StartRun", "selector": {"project": "p", "session": "s"},
                                       "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
@@ -285,7 +285,7 @@ class D7TransactionTests(unittest.TestCase):
 
     def test_post_plan_capture_tracks_disjoint_graph_heads(self):
         runs, artifacts_repo, workspace, harness = Runs(), Artifacts(), Workspace(), Harness()
-        coordinator = Coordinator(workspace, harness, runs, artifacts_repo, "pi@0.84.1", {})
+        coordinator = Coordinator(workspace, harness, runs, artifacts_repo, "pi@0.84.1+pi-subagents@0.50.0", {})
         started = coordinator.handle({"type": "StartRun", "selector": {"project": "p", "session": "s"},
                                       "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
@@ -325,7 +325,7 @@ class D7TransactionTests(unittest.TestCase):
             with self.subTest(replacement=replacement):
                 runs, artifacts_repo = Runs(), Artifacts()
                 coordinator = Coordinator(Workspace(), Harness(), runs, artifacts_repo,
-                                          "pi@0.84.1", {})
+                                          "pi@0.84.1+pi-subagents@0.50.0", {})
                 coordinator.handle({"type": "StartRun", "selector": {"project": "p", "session": "s"},
                                     "goal": "g"}, "start")
                 key = next(iter(runs.data))
@@ -346,7 +346,7 @@ class D7TransactionTests(unittest.TestCase):
             with self.subTest(malformed=malformed):
                 runs, artifacts_repo = Runs(), Artifacts()
                 coordinator = Coordinator(Workspace(), Harness(), runs, artifacts_repo,
-                                          "pi@0.84.1", {})
+                                          "pi@0.84.1+pi-subagents@0.50.0", {})
                 started = coordinator.handle({"type": "StartRun",
                                               "selector": {"project": "p", "session": "s"},
                                               "goal": "g"}, "start")
@@ -367,7 +367,7 @@ class D7TransactionTests(unittest.TestCase):
 
     def test_spike_result_conflict_retries_without_rerun_or_post_commit_observation(self):
         runs, artifacts_repo, workspace, harness = Runs(), Artifacts(), Workspace(), Harness()
-        coordinator = Coordinator(workspace, harness, runs, artifacts_repo, "pi@0.84.1", {})
+        coordinator = Coordinator(workspace, harness, runs, artifacts_repo, "pi@0.84.1+pi-subagents@0.50.0", {})
         started = coordinator.handle({"type": "StartRun", "selector": {"project": "p", "session": "s"},
                                       "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
@@ -400,7 +400,7 @@ class D7TransactionTests(unittest.TestCase):
         snapshot = EvaluationSnapshot(
             state=state, history=(), graph=None, run_id="er2:test:test",
             contract_id="empirica/public", contract_version="2.0.0",
-            contract_digest="sha256:" + "0" * 64, profile_id="pi@0.84.1",
+            contract_digest="sha256:" + "0" * 64, profile_id="pi@0.84.1+pi-subagents@0.50.0",
             host_tier="foreground_only", command={"type": "GetRun"})
         left, right = project_runview(snapshot), project_runview(snapshot)
         self.assertEqual(left, right)

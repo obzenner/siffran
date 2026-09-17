@@ -85,6 +85,40 @@ export function resolveRunRequest(
   };
 }
 
+export function observeActionRequest(
+  runId: string,
+  action: { kind: string; [key: string]: unknown },
+  requestId: string,
+): Request {
+  return {
+    protocol: PROTOCOL,
+    request_id: requestId,
+    command: { type: "ObserveAction", run_id: runId, action },
+  };
+}
+
+export function getRunRequest(runId: string, requestId: string): Request {
+  return { protocol: PROTOCOL, request_id: requestId,
+           command: { type: "GetRun", run_id: runId } };
+}
+
+export function getArgumentRequest(runId: string, requestId: string): Request {
+  return { protocol: PROTOCOL, request_id: requestId,
+           command: { type: "GetArgument", run_id: runId } };
+}
+
+export function getContractRequest(
+  target: "index" | "section" | "full",
+  requestId: string,
+  sectionId?: string,
+): Request {
+  const command: Extract<Request["command"], { type: "GetContract" }> = {
+    type: "GetContract", target,
+  };
+  if (sectionId !== undefined) command.section_id = sectionId;
+  return { protocol: PROTOCOL, request_id: requestId, command };
+}
+
 export function evaluateRunRequest(
   runId: string,
   intent: EvaluateIntent,
@@ -214,14 +248,10 @@ export function statusNotice(result: Result): Notice {
   }
 }
 
-// --- subagent local fail-closed (D6-C C3, D8-owned) --------------------------
+// --- native subagent launch classification ----------------------------------
 //
-// The foreground-only `pi@0.84.1` profile does not support child admission (D8):
-// there is no subagent extension and no async child protocol. When a real
-// Empirica run handle exists, an executable subagent tool launch is denied
-// locally — no dispatch, no child protocol/state. Read-only management calls
-// (list/status) and no-handle launches are inert. The denial is owned by D8
-// (child admission), not by the adapter's convergence gate.
+// Only structured executions enter the bound-auditor adapter path. Management
+// calls and malformed multi-key requests are inert.
 
 /** The Pi subagent tool name. */
 export const SUBAGENT_TOOL = "subagent";
@@ -242,13 +272,4 @@ export function isExecutableSubagentLaunch(
   const inp = input ?? {};
   const present = LAUNCH_KEYS.filter((k) => k in inp && inp[k] != null);
   return present.length === 1;
-}
-
-/** The D8-owned local denial reason for an executable subagent launch while a
- * real Empirica run is active on the foreground-only pi@0.84.1 profile. */
-export function subagentUnsupportedReason(): string {
-  return (
-    "empirica: executable subagent launch unsupported — " +
-    "child admission (D8) unavailable for host profile pi@0.84.1 (foreground_only)"
-  );
 }

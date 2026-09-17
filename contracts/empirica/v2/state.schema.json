@@ -155,7 +155,10 @@
         "deadline",
         "native_id",
         "first_terminal_fingerprint",
-        "capability_ref"
+        "capability_ref",
+        "audit_operation_id",
+        "audit_argument",
+        "audit_role_profile"
       ],
       "properties": {
         "child_id": {
@@ -207,6 +210,19 @@
         },
         "capability_ref": {
           "type": "string",
+          "minLength": 1
+        },
+        "audit_operation_id": {
+          "oneOf": [
+            {"$ref": "#/$defs/digest256"},
+            {"type": "null"}
+          ]
+        },
+        "audit_argument": {
+          "type": ["object", "null"]
+        },
+        "audit_role_profile": {
+          "type": ["string", "null"],
           "minLength": 1
         }
       },

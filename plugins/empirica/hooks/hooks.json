@@ -56,6 +56,21 @@
         ]
       }
     ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/agent_failure.py"
+            ],
+            "timeout": 30
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
@@ -79,6 +94,21 @@
             "command": "python3",
             "args": [
               "${CLAUDE_PLUGIN_ROOT}/hooks/state_restore.py"
+            ],
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "^empirica:empirica-auditor$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/subagent_start.py"
             ],
             "timeout": 30
           }

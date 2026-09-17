@@ -4,8 +4,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .evaluation import (EvaluationSnapshot, active_evidence, claim_digest, claim_state, digest,
-                         stale_artifact_ids)
+from .evaluation import (EvaluationSnapshot, active_evidence, audit_attributions, claim_digest,
+                         claim_state, digest, identity_pair, stale_artifact_ids)
 
 
 def _copy(value: Any) -> Any:
@@ -122,21 +122,20 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
 
 def _audit(snapshot: EvaluationSnapshot) -> dict[str, Any]:
     audits = [a for a in snapshot.history if a.get("kind") == "audit_verdict"]
-    attributions = [a for a in snapshot.history if a.get("kind") == "attribution"]
     audit_children = [c for c in snapshot.state.children if c["purpose"] == "audit"]
     state = ("passed" if audits and audits[-1]["verdict"] == "pass" else
              "failed" if audits else
              "pending" if any(c["state"] in {"reserved", "launching", "pending"}
                               for c in audit_children) else "required")
-    auditor = next((a for a in reversed(attributions) if a["subject_kind"] == "auditor"), None)
-    covered = next((a for a in reversed(attributions) if a["subject_kind"] == "covered_actor"), None)
-    if not auditor or not covered or auditor.get("provider_id") is None or covered.get("provider_id") is None:
+    verdict = audits[-1] if audits else {}
+    auditor, covered = audit_attributions(snapshot, verdict)
+    auditor_pair, covered_pair = identity_pair(auditor), identity_pair(covered)
+    if auditor_pair is None or covered_pair is None:
         independence = "unverified"
-    elif (auditor["provider_id"], auditor["model_id"]) == (covered["provider_id"], covered["model_id"]):
+    elif auditor_pair == covered_pair:
         independence = "same_model"
     else:
         independence = "decorrelated"
-    verdict = audits[-1] if audits else {}
     return {"state": state, "independence": independence,
             "reviewed_argument_digest": verdict.get("argument_digest"),
             "reviewed_goal_digest": verdict.get("goal_digest"),

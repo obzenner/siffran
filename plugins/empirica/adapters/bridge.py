@@ -89,6 +89,22 @@ def build_service(profile_id: str):
     )
 
 
+def trusted_audit_plan(profile_id: str, run_id: str, child_id: str) -> dict | None:
+    """Load the immutable operation committed with one audit reservation."""
+    return build_service(profile_id).trusted_audit_plan(run_id=run_id, child_id=child_id)
+
+
+def trusted_resolve_child(profile_id: str, run_id: str, native_id: str) -> str | None:
+    """Resolve an exact native audit execution without exposing correlation publicly."""
+    return build_service(profile_id).trusted_resolve_child(
+        run_id=run_id, native_id=native_id, purpose="audit")
+
+
+def trusted_evidence_leaf(profile_id: str, run_id: str, payload: dict) -> dict:
+    """Host-observed deterministic evidence ingress; never exposed by public dispatch."""
+    return build_service(profile_id).trusted_evidence_leaf(run_id=run_id, payload=payload)
+
+
 def trusted_child_event(profile_id: str, run_id: str, child_id: str, event: dict) -> dict:
     """Host-adapter-only lifecycle ingress; never exposed by the public wire dispatcher."""
     return build_service(profile_id).trusted_child_event(

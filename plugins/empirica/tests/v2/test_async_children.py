@@ -9,7 +9,7 @@ before/after child states and side-effect counts (D4 spec §8A). All child-state
 the real private composition ingress (``drv.trusted_child_event``); author-forgery negatives use
 public dispatch.
 """
-from __future__ import annotations
+from concurrent.futures import ThreadPoolExecutor
 
 import unittest
 
@@ -46,11 +46,10 @@ class AsyncChildrenTests(ConformanceCase):
         # Assert after state: launching
         after = self.snapshot_run_state(drv, run_id)
         self.assert_child_summary(after["run"], child_id, state="launching")
-        # a NON-canonical transition (launching -> orphaned is not a registry edge) must be
-        # rejected through trusted ingress; exact child/operational snapshot unchanged.
+        # launching -> timed_out is not a registry edge (crash recovery uses orphaned).
         snap_pre = self.snapshot_run_state(drv, run_id)
         resp_bad = drv.trusted_child_event(run_id, child_id,
-                                             build_child_event_payload("orphaned", native_id="n1"))
+                                             build_child_event_payload("timed_out", native_id="n1"))
         self.assert_valid_response(resp_bad)
         self.assertIn(resp_bad["result"]["type"], ("Fault", "Block"),
                       "a non-canonical child transition must fail closed")
@@ -68,6 +67,42 @@ class AsyncChildrenTests(ConformanceCase):
                                                  result_digest="sha256:" + "a" * 64))
         self.assert_valid_response(resp_done)
         self.assert_child_summary(resp_done["result"]["run"], child_id, state="completed")
+
+    def test_concurrent_audit_reservation_commits_exactly_one_operation(self):
+        drv = self.bind_driver(
+            "D11", "concurrent-audit-reserve",
+            "The coordinator CAS enforces one active audit operation under interleaving")
+        run_id = self.start_run(drv, goal=self.GOAL)
+        self.require_graph_admitted(drv, run_id)
+        self.dispatch(drv, observe_action(
+            run_id=run_id,
+            action={"kind": "configure_run", "budgets": {"max_spawns": 2}}))
+        request = observe_action(run_id=run_id, action=action_child_reserve(
+            purpose="audit", role_profile=self.DEFAULT_PROFILE, execution="foreground"))
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            responses = list(pool.map(lambda _index: self.dispatch(drv, request), range(2)))
+        self.assertEqual(sorted(row["result"]["type"] for row in responses), ["Allow", "Block"])
+        final = self.dispatch(drv, get_run(run_id=run_id))["result"]["run"]
+        active = [child for child in final["children"]
+                  if child["purpose"] == "audit"
+                  and child["state"] in {"reserved", "launching", "pending"}]
+        self.assertEqual(len(active), 1)
+
+    def test_interrupted_preterminal_reservations_can_be_orphaned(self):
+        for source in ("reserved", "launching"):
+            with self.subTest(source=source):
+                drv = self.bind_driver(
+                    "D11", f"orphan-{source}",
+                    "Host recovery closes interrupted foreground reservations")
+                run_id = self.start_run(drv, goal=self.GOAL)
+                child_id = self.require_admitted_child(drv, run_id)
+                if source == "launching":
+                    self.require_child_state(drv, run_id, child_id, "launching")
+                response = drv.trusted_child_event(
+                    run_id, child_id,
+                    build_child_event_payload("orphaned", native_id=f"recovery-{source}"))
+                self.assert_child_summary(response["result"]["run"], child_id, state="orphaned")
+                self.assertEqual(response["result"]["type"], "Block")
 
     # 23 — Admission binds one run-scoped child ID and, where supported, exactly one native ID
     def test_admission_binds_one_child_id(self):

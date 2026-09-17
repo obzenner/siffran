@@ -15,13 +15,14 @@ No run file, Git ref, or host runtime directory is read directly.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import sys
 from collections.abc import Mapping
 
 from adapters import bridge as application_bridge
-from .audit import child_prompt, verdict_from_final_output
+from adapters.audit import child_prompt, verdict_from_final_output
+from adapters.audit_protocol import (AuditLaunchPlan, AuditProtocol, AuditProtocolError,
+                                     IdentityObservation)
 from .completion import dispatch_stop, stop_result
 from .dispatch import bash_command, dispatched_harness
 from .restore import dispatch_restore, restore_context
@@ -93,29 +94,26 @@ def _agent_identity(tool_input: Mapping[str, object]) -> tuple[str | None, str |
 
 
 def run_start_main() -> int:
-    """UserPromptExpansion: best-effort activation, always silent and fail open."""
+    """UserPromptExpansion: activate and inject the opaque handle/public tool contract."""
     payload = _payload()
     try:
-        dispatch_start_run(payload)
+        response = dispatch_start_run(payload)
+        result = response.get("result", {}) if isinstance(response, dict) else {}
+        run = result.get("run", {}) if isinstance(result, Mapping) else {}
+        handle = run.get("id") if isinstance(run, Mapping) else None
+        if isinstance(handle, str) and handle:
+            context = (
+                f"Empirica v2 is active. Opaque run handle: {handle}. "
+                "Use empirica_observe for public author actions, empirica_read for the "
+                "current RunView/argument/contract, and report_convergence only after "
+                "the bound audit is current. Never submit trusted ingress."
+            )
+            json.dump({"hookSpecificOutput": {"hookEventName": "UserPromptExpansion",
+                                              "additionalContext": context}}, sys.stdout)
+            sys.stdout.write("\n")
     except Exception:  # noqa: BLE001 - this event must never wedge prompt expansion
         pass
     return 0
-
-
-def _event(state: str, native_id: str, result_digest: str | None = None) -> dict:
-    raw = {"state": state, "native_id": native_id, "result_digest": result_digest}
-    fingerprint = "sha256:" + hashlib.sha256(
-        json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    return {**raw, "fingerprint": fingerprint}
-
-
-def _argument(handle: str) -> dict | None:
-    response = application_bridge.handle({"protocol": "empirica/v2",
-        "request_id": "claude-audit-argument",
-        "command": {"type": "GetArgument", "run_id": handle}}, CLAUDE_PROFILE_ID)
-    result = response.get("result", {})
-    value = result.get("argument") if result.get("type") == "Allow" else None
-    return value if isinstance(value, dict) else None
 
 
 def spawn_main() -> int:
@@ -136,57 +134,36 @@ def spawn_main() -> int:
     purpose, role_profile = _agent_identity(tool_input)
     if not purpose or not role_profile:
         return _deny("empirica spawn denied: missing real purpose or role profile")
-    is_auditor = "empirica-auditor" in role_profile.lower()
+    is_auditor = role_profile == "empirica:empirica-auditor"
     reservation_purpose = "audit" if is_auditor else purpose
     handle, _ = _resolve(payload)
     if handle is None:
-        return 0  # no active run → no cap to enforce (D8 owns the spawn cap)
+        return 0  # no active run → no cap to enforce
     try:
-        response = dispatch_child_reserve(
-            payload, handle, purpose=reservation_purpose, role_profile=role_profile, execution="foreground",
-            correlation_id="claude-child-reserve",
-        )
-        decision = spawn_decision(response)
-        if decision.exit_code:
-            return _deny(decision.reason or "empirica spawn denied",
-                         response.get("result") if isinstance(response, Mapping) else None)
-        if is_auditor:
-            result = response.get("result", {})
-            run = result.get("run", {}) if isinstance(result, Mapping) else {}
-            children = run.get("children", []) if isinstance(run, Mapping) else []
-            child = next((c for c in reversed(children)
-                          if c.get("purpose") == reservation_purpose and c.get("state") == "reserved"), None)
-            argument = _argument(handle)
-            if not isinstance(child, Mapping) or argument is None:
-                return _deny("empirica auditor admission unavailable")
-            child_id = child["child_id"]
-            native_id = str(payload.get("tool_use_id") or child_id)
-            application_bridge.trusted_child_event(
-                CLAUDE_PROFILE_ID, handle, child_id, _event("launching", native_id))
-            application_bridge.trusted_child_event(
-                CLAUDE_PROFILE_ID, handle, child_id, _event("pending", native_id))
-            evidence_ids = [a["artifact_id"] for a in argument.get("artifacts", [])
-                            if a.get("kind") in {"research", "spike"}]
-            model = payload.get("model") if isinstance(payload.get("model"), str) else None
-            application_bridge.trusted_attribution(CLAUDE_PROFILE_ID, handle, {
-                "subject_kind": "covered_actor", "subject_id": "claude-author",
-                "child_id": None, "provider_id": "anthropic" if model else None,
-                "model_id": model, "observed_by": "host",
-                "covered_artifact_ids": evidence_ids})
-            auditor_model = (tool_input.get("model")
-                             if isinstance(tool_input.get("model"), str)
-                             else "claude-opus-4-8")
-            application_bridge.trusted_attribution(CLAUDE_PROFILE_ID, handle, {
-                "subject_kind": "auditor", "subject_id": "claude-auditor",
-                "child_id": child_id, "provider_id": "anthropic",
-                "model_id": auditor_model, "observed_by": "configuration",
-                "covered_artifact_ids": []})
-            updated = dict(tool_input)
-            updated["prompt"] = ((str(updated.get("prompt")) + "\n\n")
-                                 if updated.get("prompt") else "") + child_prompt(argument)
-            json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse",
-                                              "updatedInput": updated}}, sys.stdout)
-            sys.stdout.write("\n")
+        if not is_auditor:
+            response = dispatch_child_reserve(
+                payload, handle, purpose=reservation_purpose, role_profile=role_profile,
+                execution="foreground", correlation_id="claude-child-reserve")
+            decision = spawn_decision(response)
+            return (_deny(decision.reason or "empirica spawn denied",
+                          response.get("result") if isinstance(response, Mapping) else None)
+                    if decision.exit_code else 0)
+        if "model" in tool_input:
+            return _deny("empirica auditor launch forbids model overrides")
+        plan = AuditProtocol(CLAUDE_PROFILE_ID).prepare(
+            handle, role_profile="empirica:empirica-auditor")
+        updated = {
+            "subagent_type": "empirica:empirica-auditor",
+            "description": "Bound Empirica audit",
+            "prompt": child_prompt(plan.argument),
+            "run_in_background": False,
+            "max_turns": 8,
+        }
+        json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                          "updatedInput": updated}}, sys.stdout)
+        sys.stdout.write("\n")
+    except AuditProtocolError as exc:
+        return _deny(f"empirica spawn denied: {exc}")
     except Exception:  # noqa: BLE001 - active-run launch failures deny below
         return _deny("empirica spawn denied: adapter failure")
     return 0
@@ -249,6 +226,8 @@ def restore_main() -> int:
     try:
         handle, _ = _resolve(payload)
         if handle is not None:
+            AuditProtocol(CLAUDE_PROFILE_ID).reconcile_orphans(
+                handle, native_prefix="claude-session-restore")
             context = restore_context(dispatch_restore(payload, handle))
             if context:
                 print(context)
@@ -257,47 +236,144 @@ def restore_main() -> int:
     return 0
 
 
-def _transcript_final(path: object) -> str | None:
+def _transcript_observation(path: object) -> tuple[str | None, str | None]:
+    """Return the last concrete assistant model and textual final message."""
     if not isinstance(path, str) or not path:
-        return None
-    final = None
+        return None, None
+    model = final = None
     try:
         with open(path, encoding="utf-8") as stream:
             for line in stream:
                 row = json.loads(line)
                 message = row.get("message", {}) if isinstance(row, dict) else {}
-                if message.get("role") == "assistant":
-                    content = message.get("content")
-                    if isinstance(content, str):
-                        final = content
+                if message.get("role") != "assistant":
+                    continue
+                candidate = message.get("model")
+                if isinstance(candidate, str) and candidate:
+                    model = candidate
+                content = message.get("content")
+                if isinstance(content, str):
+                    final = content
+                elif isinstance(content, list):
+                    text = [item.get("text") for item in content
+                            if isinstance(item, Mapping) and item.get("type") == "text"
+                            and isinstance(item.get("text"), str)]
+                    if text:
+                        final = "\n".join(text)
     except (OSError, ValueError, TypeError):
+        return model, final
+    return model, final
+
+
+def _durable_plan(handle: str, child_id: str) -> AuditLaunchPlan | None:
+    operation = application_bridge.trusted_audit_plan(CLAUDE_PROFILE_ID, handle, child_id)
+    if not isinstance(operation, Mapping):
         return None
-    return final
+    role = operation.get("role_profile")
+    operation_id = operation.get("operation_id")
+    argument = operation.get("argument")
+    if (role != "empirica:empirica-auditor" or not isinstance(operation_id, str)
+            or not operation_id.startswith("sha256:") or len(operation_id) != 71
+            or not isinstance(argument, dict)):
+        return None
+    return AuditLaunchPlan(
+        CLAUDE_PROFILE_ID, handle, child_id, role, argument, operation_id)
 
 
-def subagent_stop_main() -> int:
-    """SubagentStop records a foreground auditor verdict through private application ingress."""
+def _reserved_plan(handle: str, result: Mapping[str, object]) -> AuditLaunchPlan | None:
+    run = result.get("run", {})
+    children = run.get("children", []) if isinstance(run, Mapping) else []
+    reserved = [child for child in children if isinstance(child, Mapping)
+                and child.get("purpose") == "audit" and child.get("state") == "reserved"]
+    if len(reserved) != 1:
+        return None
+    child_id = reserved[0].get("child_id")
+    if not isinstance(child_id, str):
+        return None
+    return _durable_plan(handle, child_id)
+
+
+def agent_failure_main() -> int:
+    """PostToolUseFailure reconciles an admitted auditor that never reached SubagentStart."""
     payload = _payload()
     try:
-        if "empirica-auditor" not in str(payload.get("agent_type", "")).lower():
+        tool_input = payload.get("tool_input")
+        if not isinstance(tool_input, Mapping):
+            return 0
+        _, role = _agent_identity(tool_input)
+        if role != "empirica:empirica-auditor":
             return 0
         handle, result = _resolve(payload)
         if handle is None or not isinstance(result, Mapping):
             return 0
+        plan = _reserved_plan(handle, result)
+        if plan is not None:
+            AuditProtocol(CLAUDE_PROFILE_ID).reject(plan)
+    except Exception:
+        return 0
+    return 0
+
+
+def subagent_start_main() -> int:
+    """SubagentStart binds the exact native agent id to one reserved audit operation."""
+    payload = _payload()
+    try:
+        if payload.get("agent_type") != "empirica:empirica-auditor":
+            return 0
+        native_id = payload.get("agent_id")
+        handle, result = _resolve(payload)
+        if handle is None or not isinstance(result, Mapping) or not isinstance(native_id, str):
+            return 0
+        plan = _reserved_plan(handle, result)
+        if plan is None:
+            return 0
+        AuditProtocol(CLAUDE_PROFILE_ID).observe_started(plan, native_id)
+    except Exception:  # observational hook; Stop still fails closed on an open audit
+        return 0
+    return 0
+
+
+def subagent_stop_main() -> int:
+    """SubagentStop admits only the verdict from its exact bound native execution."""
+    payload = _payload()
+    try:
+        if payload.get("agent_type") != "empirica:empirica-auditor":
+            return 0
+        native_id = payload.get("agent_id")
+        handle, result = _resolve(payload)
+        if handle is None or not isinstance(result, Mapping) or not isinstance(native_id, str):
+            return 0
         run = result.get("run", {})
         children = run.get("children", []) if isinstance(run, Mapping) else []
-        child = next((c for c in reversed(children)
-                      if c.get("purpose") == "audit" and c.get("state") == "pending"), None)
-        output = payload.get("last_assistant_message") or _transcript_final(
-            payload.get("agent_transcript_path") or payload.get("transcript_path"))
-        verdict = verdict_from_final_output(output)
-        if not isinstance(child, Mapping) or verdict is None:
-            print("empirica: auditor returned no valid verdict; audit remains open.", file=sys.stderr)
+        child_id = application_bridge.trusted_resolve_child(
+            CLAUDE_PROFILE_ID, handle, native_id)
+        child = next((item for item in children if isinstance(item, Mapping)
+                      and item.get("child_id") == child_id and item.get("purpose") == "audit"
+                      and item.get("state") == "pending"), None)
+        plan = _durable_plan(handle, str(child_id)) if child_id else None
+        if child is None or plan is None:
             return 0
-        response = application_bridge.trusted_audit_verdict(
-            CLAUDE_PROFILE_ID, handle, child["child_id"], verdict)
-        if response.get("result", {}).get("type") not in {"Allow", "Inert"}:
-            print("empirica: auditor verdict rejected; audit remains open.", file=sys.stderr)
+        child_path = payload.get("agent_transcript_path")
+        auditor_model, transcript_final = _transcript_observation(child_path)
+        author_model, _ = _transcript_observation(payload.get("transcript_path"))
+        output = payload.get("last_assistant_message") or transcript_final
+        verdict = verdict_from_final_output(output)
+        protocol = AuditProtocol(CLAUDE_PROFILE_ID)
+        if verdict is None:
+            protocol.observe_failure(plan, native_id, "failed")
+            print("empirica: auditor returned no valid verdict; audit failed.", file=sys.stderr)
+            return 0
+        protocol.observe_identities(
+            plan, native_id,
+            author=IdentityObservation(
+                "anthropic" if author_model else None, author_model, "host",
+                "claude-parent-transcript"),
+            auditor=IdentityObservation(
+                "anthropic" if auditor_model else None, auditor_model, "host",
+                "claude-child-transcript"),
+        )
+        if not protocol.observe_verdict(plan, native_id, verdict):
+            print("empirica: auditor verdict rejected; audit failed.", file=sys.stderr)
     except Exception:  # noqa: BLE001 - SubagentStop is observational to the host
         return 0
     return 0

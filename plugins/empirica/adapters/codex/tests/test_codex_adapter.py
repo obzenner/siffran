@@ -22,7 +22,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[3]
 if str(PLUGIN_ROOT) not in sys.path:
@@ -129,6 +130,37 @@ class ExactV2ProfileTests(unittest.TestCase):
 
     def test_profile_id_is_the_exact_codex_registry_profile(self) -> None:
         self.assertEqual(CODEX_PROFILE_ID, "codex-cli@0.146.0")
+
+    def test_stop_hook_deadline_exceeds_managed_audit_deadline(self) -> None:
+        from adapters.codex.audit import MANAGED_AUDIT_TIMEOUT_SECONDS
+        hooks = json.loads((PLUGIN_ROOT / "hooks" / "codex.json").read_text(encoding="utf-8"))
+        stop = hooks["hooks"]["Stop"][0]["hooks"][0]
+        self.assertGreater(stop["timeout"], MANAGED_AUDIT_TIMEOUT_SECONDS)
+
+    def test_managed_runner_without_start_ack_rejects_reservation(self) -> None:
+        from adapters.codex.audit import execute_audit
+        protocol = MagicMock()
+        protocol.prepare.return_value = SimpleNamespace(argument={}, child_id="ch-1")
+        with patch("adapters.codex.audit.AuditProtocol", return_value=protocol):
+            self.assertFalse(execute_audit(
+                {}, "run", runner=lambda _p, _m, _c, _started: (0, "no start")))
+        protocol.reject.assert_called_once()
+        protocol.observe_started.assert_not_called()
+
+    def test_managed_timeout_after_native_start_closes_timed_out(self) -> None:
+        from adapters.codex.audit import execute_audit
+        protocol = MagicMock()
+        protocol.prepare.return_value = SimpleNamespace(argument={}, child_id="ch-1")
+
+        def timeout(_prompt, _model, _cwd, started):
+            started("native-1")
+            return None, ""
+
+        with patch("adapters.codex.audit.AuditProtocol", return_value=protocol):
+            self.assertFalse(execute_audit({}, "run", runner=timeout))
+        protocol.observe_started.assert_called_once()
+        protocol.observe_failure.assert_called_once_with(
+            protocol.prepare.return_value, "native-1", "timed_out")
 
     def test_transport_dispatches_via_bridge_handle_with_profile_and_no_cwd(self) -> None:
         captured: dict = {}

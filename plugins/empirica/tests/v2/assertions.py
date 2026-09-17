@@ -1108,12 +1108,15 @@ class ConformanceCase(unittest.TestCase):
         argument = self.dispatch(drv, get_argument(run_id=run_id))
         if argument["result"]["type"] != "Allow":
             self.require_graph_admitted(drv, run_id)
+            argument = self.dispatch(drv, get_argument(run_id=run_id))
+        before = {child["child_id"] for child in argument["result"].get("run", {}).get("children", [])}
         resp = self.dispatch(drv, observe_action(run_id=run_id, action=action_child_reserve(
             purpose="audit", role_profile=self.DEFAULT_PROFILE, execution=execution)))
         run = resp["result"].get("run", {})
-        kids = run.get("children", [])
+        kids = [child for child in run.get("children", []) if child.get("child_id") not in before]
         if len(kids) != 1:
-            raise HarnessDefect(f"child reserve must admit exactly one child (prerequisite); got {len(kids)}")
+            raise HarnessDefect(
+                f"child reserve must admit exactly one new child (prerequisite); got {len(kids)}")
         c = kids[0]
         if c.get("state") not in CHILD_STATES:
             raise HarnessDefect(f"admitted child must carry a canonical state (prerequisite); got {c.get('state')!r}")
@@ -1232,7 +1235,7 @@ class ConformanceCase(unittest.TestCase):
         return child_id
 
     def require_trusted_audit_attribution(self, drv, run_id: str, child_id: str,
-                                          c0_artifact_id: str, *,
+                                          c0_artifact_id: str | list[str], *,
                                           variant: str) -> None:
         """Submit trusted covered-actor and auditor attribution through private ingress
         (D4-S3a-R).
@@ -1242,6 +1245,7 @@ class ConformanceCase(unittest.TestCase):
         uses equal normalized provider/model pairs; decorrelated uses distinct pairs;
         unverified makes one pair null. Every trusted response is validated/asserted.
         Raises HarnessDefect if any response is not valid."""
+        covered_observer = auditor_observer = "host"
         if variant == "same_model":
             covered_provider, covered_model = "p1", "m1"
             auditor_provider, auditor_model = "p1", "m1"
@@ -1251,20 +1255,29 @@ class ConformanceCase(unittest.TestCase):
         elif variant == "unverified":
             covered_provider, covered_model = "p1", "m1"
             auditor_provider, auditor_model = None, None
+        elif variant == "alias":
+            covered_provider, covered_model = "p1", "m1"
+            auditor_provider, auditor_model = "p2", "opus"
+        elif variant == "configuration":
+            covered_provider, covered_model = "p1", "m1"
+            auditor_provider, auditor_model = "p2", "m2"
+            auditor_observer = "configuration"
         else:
             raise HarnessDefect(f"unknown attribution variant {variant!r}")
         # Covered-actor attribution: bound to exact active approved C0 artifact IDs.
+        covered_ids = ([c0_artifact_id] if isinstance(c0_artifact_id, str)
+                       else list(c0_artifact_id))
         covered_payload = build_attribution_payload(
             subject_kind="covered_actor", subject_id="covered-actor-1",
             child_id=None, provider_id=covered_provider, model_id=covered_model,
-            observed_by="host", covered_artifact_ids=[c0_artifact_id])
+            observed_by=covered_observer, covered_artifact_ids=covered_ids)
         resp_covered = drv.trusted_attribution(run_id, covered_payload)
         self.assert_valid_response(resp_covered)
         # Auditor attribution: bound to pending SUT-admitted audit child.
         auditor_payload = build_attribution_payload(
             subject_kind="auditor", subject_id="auditor-1",
             child_id=child_id, provider_id=auditor_provider, model_id=auditor_model,
-            observed_by="host", covered_artifact_ids=[])
+            observed_by=auditor_observer, covered_artifact_ids=[])
         resp_auditor = drv.trusted_attribution(run_id, auditor_payload)
         self.assert_valid_response(resp_auditor)
 

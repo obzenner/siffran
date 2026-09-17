@@ -11,8 +11,9 @@
   "actions": {
     "author": [
       "graph", "research", "spike_request", "configure_run",
-      "route", "investigate", "dispatch", "freeze", "child_reserve"
+      "route", "investigate", "dispatch", "freeze"
     ],
+    "host": ["child_reserve"],
     "trusted": ["evidence_leaf", "attribution", "child_event", "audit_verdict"]
   },
   "child_lifecycle": {
@@ -24,9 +25,11 @@
     "transitions": [
       {"from": "reserved", "to": "launching"},
       {"from": "reserved", "to": "launch_rejected"},
+      {"from": "reserved", "to": "orphaned"},
       {"from": "launching", "to": "pending"},
       {"from": "launching", "to": "launch_rejected"},
       {"from": "launching", "to": "failed"},
+      {"from": "launching", "to": "orphaned"},
       {"from": "pending", "to": "completed"},
       {"from": "pending", "to": "failed"},
       {"from": "pending", "to": "cancelled"},

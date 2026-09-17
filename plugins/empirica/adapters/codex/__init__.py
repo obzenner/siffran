@@ -1,13 +1,8 @@
-"""Codex CLI 0.146.0 adapter for the shared ``empirica/v2`` bridge (D6-C C2b).
+"""Codex CLI 0.146.0 driver and request translators for ``empirica/v2``.
 
-These modules translate Codex-shaped lifecycle payloads into exact v2 requests without
-registering hooks.  The adapter retains only the ``StartRun`` builder (activation) and the
-``ResolveRun`` builder; the four hook entrypoints ``ResolveRun`` through the strict bridge shell
-and return inert when unresolved (D6 no-location run port).  Removed operations
-(``void_spawn``/``audit_ticket``/``consume`` ticket/``phase``) and author-submitted trusted
-actions (``evidence_leaf``/``attribution``/``child_event``/``audit_verdict``) have no public
-builder here: the adapter fails closed locally rather than fabricating capability.  The thin
-hooks under ``hooks/`` remain the active implementation.
+Native hooks activate the shared public bridge and bounded managed audit process. Trusted ingress
+has no public builder. Because this exact Codex profile cannot observe the process's resolved model,
+its auditor identity remains unverified and convergence fails closed.
 """
 
 from .correlation import PROTOCOL, CorrelationError, correlate, request_id

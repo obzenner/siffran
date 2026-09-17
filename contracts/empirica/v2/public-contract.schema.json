@@ -23,9 +23,10 @@
     "actions": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["author", "trusted"],
+      "required": ["author", "host", "trusted"],
       "properties": {
         "author": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "host": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
         "trusted": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true}
       }
     },

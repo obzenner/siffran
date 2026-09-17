@@ -9,7 +9,7 @@ preflight confirms a bound audit lifecycle.
 - Every in-scope gating claim is approved from real evidence.
 - Every experiment claim has a current passing spike.
 - Freeze scope, if any, is already committed.
-- The host can obtain `GetArgument`, reserve an audit child, observe its lifecycle,
+- The host can obtain `GetArgument`, bind one audit execution, observe its lifecycle,
   and admit its output through private ingress.
 
 If the final condition is false, audit and true convergence are unsupported.
@@ -19,10 +19,13 @@ Ordinary conversation with another model is not a substitute.
 
 1. Request the current typed audit argument. It binds the goal, graph shape,
    evidence, frozen/deferred scope, and reviewed claims by digest.
-2. Reserve exactly one child with purpose `audit`, the canonical plugin-scoped
-   auditor role, and the execution mode supported by the exact host profile.
-3. Let the host inject the dossier. Do not expose or manufacture private
-   correlation material.
+2. On Claude or Pi, invoke exactly one canonical plugin-scoped auditor in foreground mode.
+   Do not submit `child_reserve`: concrete reservation is a host protocol operation and is
+   intentionally absent from `empirica_observe`. On Codex, finish the evidence-complete turn
+   so the trusted Stop hook can reserve and run its managed foreground auditor; do not spawn
+   an ordinary child.
+3. Let the host inject the dossier and bind native execution. Do not expose or
+   manufacture private correlation material.
 4. The auditor independently retrieves every citation, checks spike provenance,
    searches for missing material claims, evaluates freeze honesty, and returns a
    structured pass/fail verdict.

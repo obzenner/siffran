@@ -46,6 +46,28 @@ export interface ResolveRunCommand {
 
 export type EvaluateIntent = "continue" | "report_convergence" | "stop";
 
+export interface ObserveActionCommand {
+  type: "ObserveAction";
+  run_id: string;
+  action: { kind: string; [key: string]: unknown };
+}
+
+export interface GetRunCommand {
+  type: "GetRun";
+  run_id: string;
+}
+
+export interface GetArgumentCommand {
+  type: "GetArgument";
+  run_id: string;
+}
+
+export interface GetContractCommand {
+  type: "GetContract";
+  target: "index" | "section" | "full";
+  section_id?: string;
+}
+
 export interface EvaluateRunCommand {
   type: "EvaluateRun";
   run_id: string;
@@ -61,6 +83,10 @@ export interface RestoreRunCommand {
 export type Command =
   | StartRunCommand
   | ResolveRunCommand
+  | ObserveActionCommand
+  | GetRunCommand
+  | GetArgumentCommand
+  | GetContractCommand
   | EvaluateRunCommand
   | RestoreRunCommand;
 

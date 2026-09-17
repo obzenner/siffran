@@ -26,14 +26,16 @@ Then identify the exact active host surface from the tools and lifecycle already
 present in context. **Do not read any file, including a skill reference, before
 route acknowledgement.** Use this inline bootstrap matrix:
 
-- **Claude Code:** continue only when the Empirica hook lifecycle is active and
-  trusted; the route adapter is the first operation.
-- **Pi `pi@0.84.1`:** unsupported for convergence; status/report tools are
-  diagnostic only and `/empirica` must refuse before creating a run.
-- **Codex CLI `codex-cli@0.146.0`:** observational and unsupported for full
-  convergence.
-- **Unknown surface:** stop as unsupported rather than borrowing another host's
-  capabilities.
+- **Claude Code `claude-code@2.1.270`:** continue when the Empirica hooks and
+  public MCP tools are active and trusted; record route first.
+- **Pi `pi@0.84.1+pi-subagents@0.50.0`:** continue when `/empirica` injected an
+  opaque handle and `empirica_observe`, `empirica_read`, `report_convergence`,
+  and the structured `subagent` tool are present.
+- **Codex CLI `codex-cli@0.146.0`:** continue when activation injected the opaque
+  handle, the public MCP tools are present, and the Stop hook is trusted; Stop
+  owns the managed foreground audit.
+- **Unknown or partial surface:** stop as unsupported rather than borrowing
+  another profile's capabilities.
 
 A runnable convergence workflow requires all of these capabilities:
 
@@ -48,11 +50,9 @@ If any capability is absent, stop before investigation and report the exact
 unsupported capability. Do not imitate the missing operation in prose or write
 runtime artifacts by hand.
 
-**Current Pi boundary:** Pi cannot execute the convergence workflow. Its v2
-adapter exposes only status and guarded convergence reporting; it has no author
-action or audit lifecycle. `empirica_status` returns only run ID and status. An
-active Pi handle with no graph cannot be progressed by the skill. Report this as
-unsupported; do not claim that the run can converge.
+The base Pi surface without `pi-subagents`, a Codex session with untrusted hooks,
+or any host missing one of the three public tools is unsupported. Report the exact
+missing capability; do not imitate it in prose or write runtime artifacts by hand.
 
 The user invocation is `$ARGUMENTS`. Leading `--` values are mode flags, not part
 of the goal. The host adapter owns parsing. Surface unknown flags and read the
@@ -135,13 +135,14 @@ language. When budgets, a stall, or scope closure matter, read
 When every in-scope gating claim is approved, read
 [references/audit.md](references/audit.md).
 
-The author never grades its own convergence. On a capable host:
-
-1. request the current typed audit argument;
-2. reserve one child with purpose `audit` and the canonical auditor role;
-3. let the host bind the dossier to that child and observe its lifecycle;
-4. let the host—not the author—admit the returned verdict and attribution;
-5. reread the run because any graph or evidence change invalidates stale coverage.
+The author never grades its own convergence. On Claude, invoke the exact
+`empirica:empirica-auditor`; on Pi, invoke the exact packaged
+`empirica.empirica-auditor`. The host protocol—not `empirica_observe`—owns concrete
+reservation, dossier replacement, correlation, identity observation, and terminal admission.
+On Codex, do not launch an ordinary child: finish the turn only when all non-audit
+obligations are closed so the trusted Stop hook can run its bounded managed auditor.
+In every case the host—not the author—binds the dossier, observes the final output,
+and admits the candidate verdict.
 
 Audit may block but cannot manufacture deterministic machine evidence. Model
 independence is reported as observed, same-model, or unverified; never guaranteed
@@ -153,7 +154,9 @@ convergence is unsupported. Do not substitute an ordinary model response.
 ## 6. Request the terminal decision
 
 Call the host's guarded convergence operation exactly once after the graph,
-evidence, scope, and audit are current.
+evidence, and scope are current. On Claude and Pi this is `report_convergence`
+after the bound audit. On Codex the trusted Stop hook performs the bound managed
+audit when due and then requests the guarded decision before permitting completion.
 
 - Only a schema-guarded `Allow` permits reporting the result.
 - `Allow(converged=true)` permits a convergence claim.

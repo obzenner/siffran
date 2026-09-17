@@ -1,72 +1,47 @@
 # Empirica Pi adapter (v2)
 
-This is the **v2-only** Pi adapter. It is a *translator* over the `empirica/v2`
-contract: it maps Pi's native events into requests and maps the guarded typed
-decision back onto Pi's enforcement/UI. It holds no convergence rules — those
-live in the host-neutral core, reached through the injected `dispatch` seam.
+This is the v2-only Pi translation shell. It exposes the same public author/read/report
+surface as the Claude and Codex adapters and owns no convergence policy.
 
-## Current surface (honest unsupported preflight)
+## Exact profile
 
-| Pi surface | v2 request | Notes |
+The implemented profile is `pi@0.84.1+pi-subagents@0.50.0`, tier `foreground_only`, with
+`promotion_status=pending_live`. `pi-subagents` must provide its structured `subagent` tool.
+Asynchronous audit execution is not supported and is never silently downgraded.
+
+## Surface
+
+| Pi surface | v2 operation | Behaviour |
 |---|---|---|
-| `resources_discover` | — | Contributes the shared Empirica skill directory. |
-| `/empirica <goal>` | — | Rejects before `StartRun`: this exact profile cannot submit author actions or complete a bound audit. No unusable active run is created. |
-| `empirica_status` tool | `RestoreRun` when a handle was restored; otherwise `ResolveRun` | Reports the run id and status only — no goal/modes/contract rendering. The opaque handle wins across extension reloads. |
-| `report_convergence` tool | `EvaluateRun(report_convergence)` | Hard gate: the tool is blocked unless the core returns a **guarded Allow**. |
-| `tool_call` interception | `EvaluateRun(report_convergence)` | The hard gate (registered tool execute and `tool_call`). Also denies executable `subagent` launches locally. |
-| `session_before_compact` | `RestoreRun` | Only if a real handle exists. |
+| `/empirica <goal>` | `StartRun` | Starts a durable run, persists the opaque handle, and injects public-tool guidance. |
+| `empirica_observe` | `ObserveAction` | Accepts only canonical public author kinds. Trusted kinds are rejected locally and by schema. |
+| `empirica_read` | `GetRun`, `GetArgument`, `GetContract`, `RestoreRun` | Returns the complete typed result; resolves a session handle when needed. |
+| `report_convergence` | `EvaluateRun(report_convergence)` | Fails closed unless the guarded response is `Allow`. |
+| `tool_call(subagent)` | `child_reserve` + private lifecycle | Binds the canonical auditor, forces foreground execution, injects the dossier, and records launching/pending facts. |
+| `tool_result(subagent)` | private `audit_verdict` | Correlates by `toolCallId`, redacts before the first await, and admits only one exact fenced verdict. |
+| compaction | `RestoreRun` | Carries the opaque handle and restores the selected run. |
 
-## report_convergence hard gate (nonnull handle)
+The packaged auditor defaults to `claude-opus-4-8`. Deployments may pin a concrete
+configured model with `EMPIRICA_PI_AUDITOR_MODEL`; the adapter resolves that launch contract and
+rejects shadowed agent definitions and author-supplied overrides. Pi 0.84.1/pi-subagents 0.50.0
+does not expose an independently observed resolved child-model identity: `details.results[].model`
+is the requested launch configuration. The adapter therefore records the auditor identity as
+unverified and convergence blocks rather than promoting configuration to identity.
 
-With a **nonnull run handle**, the gate permits **only** a guarded `Allow`:
+The adapter-private Python subprocess exposes no Pi tool. It is the imperative ingress shell for
+host-observed attribution, child events, and audit verdicts. Public tools cannot express these
+payloads.
 
-| Result | Gate |
-|---|---|
-| `Allow` (converged true *or* false) | **permit** |
-| `Block` | **deny** |
-| `Inert` (run gone, handle exists) | **deny** |
-| `Fault` (open *or* closed) | **deny** |
-| transport error | **deny** (fail closed) |
+## Hard gate
 
-`Allow` with `converged=false` is a valid, guarded **permit** — it is a
-machine-approved non-convergence report, not a denial.
+With a non-null run handle, `report_convergence` permits only a centrally guarded `Allow`.
+`Block`, `Inert`, every `Fault`, malformed responses, and transport failures deny. The central
+guard enforces `converged=true` iff `run.status=converged`.
 
-### Allow cross invariant (central guard)
+Pi has no native completion veto; the model must call `report_convergence` before making a
+convergence claim. A turn can otherwise finish without a terminal decision.
 
-The central inbound runtime guard (`guard.ts`) enforces: `converged` is `true`
-**iff** `run.status` is `converged`; `converged` is `false` only for
-`active` / `stopped_residual` / `stopped_frozen` / `stopped_budget`. A
-mismatched `Allow` (e.g. `converged=true` with `status=active`) is rejected by
-the guard so the hard gate fails closed.
+## Validation
 
-## Subagent local fail-closed (D8-owned)
-
-The conservative `pi@0.84.1` profile is **foreground-only** — no subagent
-extension, no child-admission (D8) capability, no async child protocol. When a
-**real Empirica run handle exists**, an executable `subagent` tool launch
-(exactly one of `agent`, `workflowScript`, or `resume`) is **denied locally** as
-unsupported — no dispatch, no child protocol/state. The denial is D8-owned.
-
-Read-only management calls (`subagent { action: "list" }`, `subagent { action:
-"status" }`) and malformed multi-key launches are **inert** (no denial, no
-dispatch). A launch with **no handle** is also inert (nothing to deny against).
-
-## Host profile
-
-The exact conservative profile is `pi@0.84.1` (foreground-only). There is no
-capability detection and no default — the bridge requires this exact profile and
-fails closed if it is absent. Because the profile cannot execute the mandatory
-author and audit paths, `/empirica` refuses before creating a run. Existing
-handles can still be inspected and fail-closed convergence decisions remain
-available for recovery/diagnosis.
-
-## Gaps (D6 boundary, not implemented by this adapter)
-
-- **D7** owns v2 identity/location and reconnects the hardened repository.
-- **D8** owns child admission (subagent launches); this adapter only denies
-  locally.
-- **D11** owns full generated parity (the mechanical + jsonschema subset checks
-  here are the adapter's contribution).
-- No audit/ticket/nonce/spawn pipeline, no nudge, no knowledge tool, no v1
-  obligations contract. State lives only behind the transport; the only
-per-session state is the active run's opaque handle, held in memory.
+Run `make check-pi` for deterministic adapter coverage. Profile promotion additionally requires
+`make empirica-host-live-check` with a retained installed-Pi receipt.

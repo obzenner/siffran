@@ -18,7 +18,6 @@ import {
   statusNotice,
   startRunNotice,
   isExecutableSubagentLaunch,
-  subagentUnsupportedReason,
   SUBAGENT_TOOL,
   REPORT_CONVERGENCE_INTENT,
   REPORT_CONVERGENCE_TOOL,
@@ -162,10 +161,3 @@ for (const c of SUBAGENT_CASES) {
     assert.equal(isExecutableSubagentLaunch(c.toolName, c.input), c.expected);
   });
 }
-
-test("subagentUnsupportedReason is D8-owned and names the profile", () => {
-  const reason = subagentUnsupportedReason();
-  assert.match(reason, /D8/);
-  assert.match(reason, /pi@0.84.1/);
-  assert.match(reason, /foreground_only/);
-});

@@ -16,6 +16,8 @@ ENTRYPOINTS = {
     "dispatch_gate.py": "dispatch_main",
     "convergence_gate.py": "completion_main",
     "state_restore.py": "restore_main",
+    "agent_failure.py": "agent_failure_main",
+    "subagent_start.py": "subagent_start_main",
     "subagent_stop.py": "subagent_stop_main",
 }
 FORBIDDEN = re.compile(r"(?:^|[/'\"`])\.(?:claude|pi)(?:/|[\"'`])")
@@ -77,7 +79,8 @@ def main() -> int:
 
     hooks = json.loads((HOOKS / "hooks.json").read_text(encoding="utf-8"))
     # Validate the invariant (only registered thin entrypoints), rather than freezing hook config.
-    if set(hooks["hooks"]) != {"UserPromptExpansion", "PreToolUse", "Stop", "SubagentStop", "SessionStart"}:
+    if set(hooks["hooks"]) != {"UserPromptExpansion", "PreToolUse", "PostToolUseFailure",
+                                  "Stop", "SubagentStart", "SubagentStop", "SessionStart"}:
         fail("hooks.json lifecycle events changed")
     for groups in hooks["hooks"].values():
         for group in groups:
@@ -102,10 +105,14 @@ def main() -> int:
     for term in STALE_SKILL_TERMS:
         if term in skill_text:
             fail(f"SKILL.md retains stale runtime term: {term}")
-    if "Pi cannot execute the convergence workflow" not in skill_text:
-        fail("SKILL.md does not disclose the current Pi capability boundary")
+    for required in (
+        "claude-code@2.1.270", "pi@0.84.1+pi-subagents@0.50.0",
+        "codex-cli@0.146.0", "empirica_observe", "empirica_read", "report_convergence",
+    ):
+        if required not in skill_text:
+            fail(f"SKILL.md omits complete host/tool disclosure: {required}")
 
-    for path in [SKILL, *sorted((ROOT / "agents").glob("*.md"))]:
+    for path in [SKILL, *sorted((ROOT / "agents").glob("**/*.md"))]:
         text = path.read_text(encoding="utf-8")
         if "~/.empirica-plugin" not in text or "refs/empirica" not in text:
             fail(f"instruction omits authoritative storage locations: {path}")

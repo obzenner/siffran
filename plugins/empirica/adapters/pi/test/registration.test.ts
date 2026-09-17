@@ -39,19 +39,20 @@ test("does NOT register removed commands", () => {
   assert.equal(pi.commands.get("report-convergence"), undefined);
 });
 
-test("registers only the tool_call gate (no tool_result, no agent_settled)", () => {
+test("registers tool_call and tool_result for gating and bound audit", () => {
   const pi = register();
   assert.equal(typeof pi.handlers.get("tool_call"), "function");
-  assert.equal(pi.handlers.get("tool_result"), undefined);
+  assert.equal(typeof pi.handlers.get("tool_result"), "function");
   assert.equal(pi.handlers.get("agent_settled"), undefined);
 });
 
-test("registers exactly two tools: report_convergence and empirica_status", () => {
+test("registers the shared public driving tools", () => {
   const pi = register();
-  assert.deepEqual([...pi.tools.keys()].sort(), ["empirica_status", "report_convergence"]);
+  assert.deepEqual([...pi.tools.keys()].sort(),
+    ["empirica_observe", "empirica_read", "report_convergence"]);
 });
 
-test("does NOT register empirica_knowledge tool", () => {
+test("does NOT register legacy empirica_knowledge tool", () => {
   const pi = register();
   assert.equal(pi.tools.get("empirica_knowledge"), undefined);
 });
