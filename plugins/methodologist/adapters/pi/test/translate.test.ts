@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { PROTOCOL, type Response } from "../src/contract.ts";
 import {
   applyResult,
+  listMethodologiesRequest,
   parseThinkInvocation,
   selectMethodologyRequest,
 } from "../src/translate.ts";
@@ -34,7 +35,7 @@ function deps(ui: FakeUi) {
 
 // --- invocation -> request ---------------------------------------------------
 
-test("bare /think asks the core to select (no requested methodology)", () => {
+test("bare /think parses as a catalog request with no selected methodology", () => {
   const parsed = parseThinkInvocation("", ["invariant-analysis"]);
   assert.equal(parsed.requestedMethodology, null);
   assert.ok(parsed.intent.length > 0, "intent must be non-empty (schema minLength 1)");
@@ -52,6 +53,14 @@ test("any non-empty /think argument is an explicit name for core validation", ()
   assert.equal(parsed.intent, "why does the cache miss");
 });
 
+test("listMethodologiesRequest builds the catalog request", () => {
+  assert.deepEqual(listMethodologiesRequest("catalog-1"), {
+    protocol: PROTOCOL,
+    request_id: "catalog-1",
+    command: { type: "ListMethodologies" },
+  });
+});
+
 test("selectMethodologyRequest matches the shared contract fixture", () => {
   const fixture = JSON.parse(readFileSync(FIXTURE, "utf-8"));
   const request = selectMethodologyRequest(
@@ -66,6 +75,19 @@ test("selectMethodologyRequest matches the shared contract fixture", () => {
 });
 
 // --- result -> Pi ------------------------------------------------------------
+
+test("MethodologyCatalog returns the ordered names without rendering policy", async () => {
+  const ui = new FakeUi();
+  const outcome = await applyResult({
+    type: "MethodologyCatalog",
+    methodologies: [
+      { name: "a", lineage: "l", use_when: "when a", prevents: "failure a" },
+      { name: "b", lineage: "l", use_when: "when b", prevents: "failure b" },
+    ],
+  }, deps(ui));
+  assert.deepEqual(outcome, { kind: "catalog", methodologies: ["a", "b"] });
+  assert.equal(ui.notifications.length, 0);
+});
 
 test("MethodologySelected announces the choice and renders no persistent phase widget", async () => {
   const ui = new FakeUi();
@@ -141,22 +163,75 @@ test("HumanPort.ask reports the Pi capability gap rather than faking input", asy
 
 // --- end-to-end through the command handler ---------------------------------
 
-test("bare /think delegates semantic selection to the model through shared resources", async () => {
+test("bare /think shows the complete catalog, waits for the human, then starts the choice", async () => {
+  const requests: string[] = [];
   const pi = new FakePi();
   createMethodologistExtension({
-    dispatch: () => {
-      throw new Error("bare selection must not dispatch before the model chooses");
+    dispatch: (request): Response => {
+      requests.push(request.command.type);
+      if (request.command.type === "ListMethodologies") {
+        return {
+          protocol: PROTOCOL,
+          request_id: request.request_id,
+          result: {
+            type: "MethodologyCatalog",
+            methodologies: [
+              { name: "formal-reasoning", lineage: "logic", use_when: "rules", prevents: "exceptions" },
+              { name: "decomposition", lineage: "Parnas", use_when: "large structure", prevents: "tangles" },
+            ],
+          },
+        };
+      }
+      if (request.command.type !== "SelectMethodology") throw new Error("unexpected command");
+      return {
+        protocol: PROTOCOL,
+        request_id: request.request_id,
+        result: {
+          type: "MethodologySelected",
+          methodology: request.command.requested_methodology!,
+          reason: request.command.intent,
+          phases: Array.from({ length: 6 }, (_, index) => ({ number: index + 1, title: `Phase ${index + 1}` })),
+        },
+      };
     },
   })(pi);
-  const ui = new FakeUi();
+  const ui = new FakeUi(["decomposition — Use when: large structure — Prevents: tangles"]);
 
   await pi.commands.get("think")!.handler("", { ui });
 
+  assert.deepEqual(requests, ["ListMethodologies", "SelectMethodology"]);
+  assert.equal(ui.selects.length, 1);
+  assert.deepEqual(ui.selects[0].options, [
+    "formal-reasoning — Use when: rules — Prevents: exceptions",
+    "decomposition — Use when: large structure — Prevents: tangles",
+  ]);
   assert.equal(pi.sentUserMessages.length, 1);
-  assert.match(pi.sentUserMessages[0], /SKILL\.md/);
-  assert.match(pi.sentUserMessages[0], /registry\.json/);
-  assert.match(pi.sentUserMessages[0], /semantically compare/);
-  assert.match(pi.sentUserMessages[0], /methodologist_select/);
+  assert.match(pi.sentUserMessages[0], /user-selected Methodologist methodology: decomposition/);
+  assert.match(pi.sentUserMessages[0], /methodologies\/decomposition\.md/);
+  assert.match(pi.sentUserMessages[0], /Do not invoke \/think/);
+});
+
+test("bare /think cancellation starts nothing and reports the dismissal", async () => {
+  const pi = new FakePi();
+  createMethodologistExtension({
+    dispatch: (request): Response => ({
+      protocol: PROTOCOL,
+      request_id: request.request_id,
+      result: {
+        type: "MethodologyCatalog",
+        methodologies: [
+          { name: "formal-reasoning", lineage: "logic", use_when: "rules", prevents: "exceptions" },
+        ],
+      },
+    }),
+  })(pi);
+  const ui = new FakeUi([undefined]);
+
+  await pi.commands.get("think")!.handler("", { ui });
+
+  assert.equal(pi.sentUserMessages.length, 0);
+  assert.equal(ui.notifications.at(-1)?.level, "error");
+  assert.match(ui.notifications.at(-1)?.message ?? "", /dismissed/i);
 });
 
 test("/think --simple sends one direct shared-skill prompt and bypasses runtime state", async () => {
@@ -237,14 +312,16 @@ test("normal named /think remains bridge-backed", async () => {
   await pi.commands.get("think")!.handler("formal-reasoning", { ui });
 
   assert.equal(dispatches, 1);
-  assert.equal(pi.sentUserMessages.length, 0);
+  assert.equal(pi.sentUserMessages.length, 1);
+  assert.match(pi.sentUserMessages[0], /formal-reasoning/);
+  assert.match(pi.sentUserMessages[0], /Validated phase plan/);
   assert.ok(
     ui.widgets.every((w) => w.content === undefined),
     "named /think renders no persistent phase widget",
   );
 });
 
-test("model selection tool: ambiguity -> human choice -> named bridge", async () => {
+test("selection tool validates a methodology already chosen by the user", async () => {
   const requests: string[] = [];
   const dispatch = (request: {
     request_id: string;
@@ -266,29 +343,20 @@ test("model selection tool: ambiguity -> human choice -> named bridge", async ()
     };
   };
 
-  const ui = new FakeUi(["first-principles — axioms"]);
+  const ui = new FakeUi();
   const pi = new FakePi();
   createMethodologistExtension({ dispatch: dispatch as never })(pi);
   const tool = pi.tools.get("methodologist_select")!;
   const result = await tool.execute(
     "call-1",
-    {
-      candidates: [
-        { name: "invariant-analysis", rationale: "property" },
-        { name: "first-principles", rationale: "axioms" },
-      ],
-    },
+    { methodology: "decomposition", reason: "Selected by the user." },
     undefined,
     undefined,
     { ui },
   );
 
-  assert.deepEqual(requests, ["first-principles"]);
-  assert.match(result.content[0].text, /Using \*\*first-principles\*\*/);
-  assert.ok(
-    ui.widgets.every((w) => w.content === undefined),
-    "selection renders no persistent phase widget",
-  );
+  assert.deepEqual(requests, ["decomposition"]);
+  assert.match(result.content[0].text, /Using \*\*decomposition\*\*/);
 });
 
 test("/think handler: a thrown dispatch is reported, not swallowed", async () => {

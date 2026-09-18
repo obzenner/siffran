@@ -46,7 +46,7 @@ def _tool_definition() -> dict[str, object]:
         "name": TOOL_NAME,
         "title": "Validate Methodologist selection",
         "description": (
-            "Validate a methodology name selected semantically from the installed "
+            "Validate a methodology already chosen from the complete installed "
             "Methodologist registry and return its canonical six-phase plan. Use only "
             "for explicitly requested structured bridge mode; native skill execution "
             "does not need this tool."
@@ -57,25 +57,8 @@ def _tool_definition() -> dict[str, object]:
             "properties": {
                 "methodology": {"type": "string", "minLength": 1},
                 "reason": {"type": "string", "minLength": 1},
-                "candidates": {
-                    "type": "array",
-                    "minItems": 2,
-                    "maxItems": 2,
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "required": ["name", "rationale"],
-                        "properties": {
-                            "name": {"type": "string", "minLength": 1},
-                            "rationale": {"type": "string", "minLength": 1},
-                        },
-                    },
-                },
             },
-            "oneOf": [
-                {"required": ["methodology", "reason"]},
-                {"required": ["candidates"]},
-            ],
+            "required": ["methodology", "reason"],
         },
         "annotations": {
             "readOnlyHint": True,
@@ -142,51 +125,11 @@ def _tool_result(arguments: object) -> dict[str, object]:
             "isError": False,
         }
 
-    candidates = arguments.get("candidates")
-    if isinstance(candidates, list) and len(candidates) == 2:
-        canonical: list[dict[str, str]] = []
-        for index, candidate in enumerate(candidates):
-            if not isinstance(candidate, dict):
-                break
-            name = candidate.get("name")
-            rationale = candidate.get("rationale")
-            if not isinstance(name, str) or not name.strip() or not isinstance(rationale, str) or not rationale.strip():
-                break
-            response = _selection(name.strip(), rationale.strip(), f"codex-mcp-candidate-{index + 1}")
-            result = response["result"]
-            if result.get("type") != "MethodologySelected":
-                break
-            canonical.append(
-                {"name": str(result["methodology"]), "rationale": rationale.strip()}
-            )
-        if len(canonical) == 2:
-            result = {
-                "type": "HumanDecisionRequired",
-                "candidates": canonical,
-                "question": "Which methodology addresses the primary uncertainty?",
-            }
-            choices = "\n".join(
-                f"- {item['name']}: {item['rationale']}" for item in canonical
-            )
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": (
-                            f"Ask the user to choose before continuing:\n{choices}\n"
-                            "Then call this tool again with the chosen methodology and reason."
-                        ),
-                    }
-                ],
-                "structuredContent": result,
-                "isError": False,
-            }
-
     return {
         "content": [
             {
                 "type": "text",
-                "text": "Provide methodology + reason, or exactly two valid candidates.",
+                "text": "Provide the methodology chosen by the user and a reason.",
             }
         ],
         "isError": True,

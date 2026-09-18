@@ -13,6 +13,14 @@
         {
           "type": "object",
           "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": {"const": "ListMethodologies"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
           "required": ["type", "intent"],
           "properties": {
             "type": {"const": "SelectMethodology"},

@@ -24,6 +24,7 @@ SKILL_DIR = PLUGIN_DIR / "skills" / "think"
 METHODOLOGIES_DIR = SKILL_DIR / "methodologies"
 STANCE_FILE = SKILL_DIR / "references" / "evidence-over-recall.md"
 
+from application import MethodologistService  # noqa: E402
 from core import (  # noqa: E402
     EXPECTED_PHASE_COUNT,
     Candidate,
@@ -322,6 +323,36 @@ class TestStanceValidation(unittest.TestCase):
         self.assertTrue(validate_stance("nothing here"))
 
 
+class TestApplicationCatalog(unittest.TestCase):
+    def setUp(self):
+        self.service = MethodologistService(SKILL_DIR)
+
+    def test_lists_complete_registry_in_order(self):
+        response = self.service.handle({
+            "protocol": "methodologist/v1",
+            "request_id": "catalog",
+            "command": {"type": "ListMethodologies"},
+        })
+        result = response["result"]
+        self.assertEqual(result["type"], "MethodologyCatalog")
+        registry = parse_registry(json.loads((SKILL_DIR / "registry.json").read_text()))
+        self.assertEqual(
+            [entry["name"] for entry in result["methodologies"]],
+            [entry.name for entry in registry.entries],
+        )
+        self.assertTrue(all(entry["use_when"] and entry["prevents"]
+                            for entry in result["methodologies"]))
+
+    def test_catalog_contains_evidence_preserving_refinement(self):
+        result = self.service.handle({
+            "protocol": "methodologist/v1",
+            "request_id": "catalog-epr",
+            "command": {"type": "ListMethodologies"},
+        })["result"]
+        names = [entry["name"] for entry in result["methodologies"]]
+        self.assertIn("evidence-preserving-refinement", names)
+
+
 # --- integration: the real shipped files --------------------------------------
 
 
@@ -341,6 +372,13 @@ class TestRealFiles(unittest.TestCase):
                     m.phase_count, EXPECTED_PHASE_COUNT, f"{m.name} phase count"
                 )
                 self.assertEqual(validate_methodology_structure(m), [])
+
+    def test_explicit_bare_invocation_requires_complete_catalog_and_human_choice(self):
+        skill = (SKILL_DIR / "SKILL.md").read_text()
+        self.assertIn("Explicit invocation without a name: catalog first", skill)
+        self.assertIn("Present every registry entry, in registry order", skill)
+        self.assertIn("Which methodology should I run?", skill)
+        self.assertIn("Do not recommend", skill)
 
     def test_real_stance_reference_declares_the_stance(self):
         self.assertTrue(STANCE_FILE.exists(), STANCE_FILE)

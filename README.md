@@ -115,7 +115,7 @@ The three exact Empirica host drivers are implemented at `foreground_only`, but 
 <!-- BEGIN GENERATED: plugins (managed by the checkup skill — do not edit by hand) -->
 | Plugin | Version | Description |
 |--------|---------|-------------|
-| `methodologist` | 0.8.1 | Methodology router — picks and executes formal CS/math reasoning methodologies with tracked phases and structured output. |
+| `methodologist` | 0.9.0 | Formal reasoning catalog — lets users choose and execute evidence-backed CS/math methodologies with traced phases and structured output. |
 | `empirica` | 2.0.1 | Host-neutral empirical-convergence workflow — routes uncertainty into a claim graph, requires cited research before deterministic spikes, derives claim state, and binds convergence to a current independent audit. Full execution is hook-enforced only on profiles with author-action and bound-audit capabilities; unsupported profiles fail explicitly before starting. |
 <!-- END GENERATED: plugins -->
 

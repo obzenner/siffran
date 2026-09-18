@@ -5,10 +5,10 @@ The service owns protocol dispatch and resource validation while the existing
 parsing, six-phase validation, and ordered reasoning-run construction. Hosts
 supply only a resource directory; no host state or repository state is written.
 
-Semantic auto-selection deliberately does not live here. A bare host command
-must ask its model to apply the shared skill and registry, then submit the
-selected *name* through this same service. That keeps selection semantic rather
-than turning the bridge into a keyword router.
+Semantic selection deliberately does not live here. The service exposes the
+complete ordered catalog for human choice and validates a subsequently selected
+name. This keeps selection explicit and prevents the bridge from becoming a
+keyword router.
 """
 from __future__ import annotations
 
@@ -49,9 +49,11 @@ class MethodologistService:
         request_id = "unknown"
         try:
             request_id, command = self._parse_envelope(request)
-            if command["type"] != "SelectMethodology":
-                return _fault(request_id, "invalid_request")
-            return self._select(request_id, command)
+            if command["type"] == "ListMethodologies":
+                return self._list(request_id)
+            if command["type"] == "SelectMethodology":
+                return self._select(request_id, command)
+            return _fault(request_id, "invalid_request")
         except InvalidRequest:
             return _fault(request_id, "invalid_request")
         except (OSError, ValueError, json.JSONDecodeError):
@@ -71,6 +73,29 @@ class MethodologistService:
             raise InvalidRequest("command must have a type")
         return request_id, command
 
+    def _registry(self):
+        registry_data = json.loads((self._skill_dir / "registry.json").read_text())
+        registry = parse_registry(registry_data)
+        methodologies_dir = self._skill_dir / registry.schema.files_dir
+        file_stems = {path.stem for path in methodologies_dir.glob("*.md")}
+        if validate_registry_against_files(registry, file_stems):
+            raise InvalidRequest("registry and methodology files are inconsistent")
+        return registry, methodologies_dir
+
+    def _list(self, request_id: str) -> dict:
+        registry, _ = self._registry()
+        entries = []
+        for entry in registry.entries:
+            fields = {key: entry.get(key) for key in ("lineage", "use_when", "prevents")}
+            if any(not isinstance(value, str) or not value.strip() for value in fields.values()):
+                raise InvalidRequest("catalog entry is incomplete")
+            entries.append({"name": entry.name, **fields})
+        return {
+            "protocol": PROTOCOL,
+            "request_id": request_id,
+            "result": {"type": "MethodologyCatalog", "methodologies": entries},
+        }
+
     def _select(self, request_id: str, command: dict) -> dict:
         intent = command.get("intent")
         requested = command.get("requested_methodology")
@@ -80,12 +105,7 @@ class MethodologistService:
         if not isinstance(requested, str) or not requested.strip():
             raise InvalidRequest("a named methodology is required")
 
-        registry_data = json.loads((self._skill_dir / "registry.json").read_text())
-        registry = parse_registry(registry_data)
-        methodologies_dir = self._skill_dir / registry.schema.files_dir
-        file_stems = {path.stem for path in methodologies_dir.glob("*.md")}
-        if validate_registry_against_files(registry, file_stems):
-            raise InvalidRequest("registry and methodology files are inconsistent")
+        registry, methodologies_dir = self._registry()
 
         canonical = next(
             (name for name in registry.names if name.casefold() == requested.casefold()),

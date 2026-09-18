@@ -8,6 +8,10 @@
 
 export const PROTOCOL = "methodologist/v1";
 
+export interface ListMethodologiesCommand {
+  type: "ListMethodologies";
+}
+
 export interface SelectMethodologyCommand {
   type: "SelectMethodology";
   intent: string;
@@ -30,6 +34,7 @@ export interface ProduceArtifactCommand {
 }
 
 export type Command =
+  | ListMethodologiesCommand
   | SelectMethodologyCommand
   | CompletePhaseCommand
   | ProduceArtifactCommand;
@@ -48,6 +53,18 @@ export interface PhaseSpec {
   title?: string;
   number?: number;
   [key: string]: unknown;
+}
+
+export interface MethodologyCatalogEntry {
+  name: string;
+  lineage: string;
+  use_when: string;
+  prevents: string;
+}
+
+export interface MethodologyCatalog {
+  type: "MethodologyCatalog";
+  methodologies: MethodologyCatalogEntry[];
 }
 
 export interface MethodologySelected {
@@ -85,6 +102,7 @@ export interface Fault {
 }
 
 export type Result =
+  | MethodologyCatalog
   | MethodologySelected
   | HumanDecisionRequired
   | PhaseAdvanced
