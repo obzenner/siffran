@@ -1,7 +1,7 @@
-import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import * as path from "node:path";
 
+import { runJsonProcess } from "./process-transport.ts";
 import { HOST_PROFILE_ID } from "./stdio-transport.ts";
 
 export interface AuditPlanData {
@@ -29,27 +29,17 @@ export type PrivateIngress = (request: PrivateIngressRequest) => Promise<Record<
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const PRIVATE_BRIDGE_SCRIPT = path.resolve(HERE, "..", "private_bridge.py");
 
-export function createPrivateIngress(): PrivateIngress {
-  return (request) => new Promise<Record<string, unknown>>((resolve, reject) => {
-    const child = spawn(process.env.EMPIRICA_PYTHON ?? "python3", [PRIVATE_BRIDGE_SCRIPT], {
+export function createPrivateIngress(
+  timeoutMs = 30_000, script = PRIVATE_BRIDGE_SCRIPT,
+): PrivateIngress {
+  return async (request) => {
+    const raw = await runJsonProcess({
+      command: process.env.EMPIRICA_PYTHON ?? "python3",
+      args: [script],
       env: { ...process.env, EMPIRICA_HOST_PROFILE_ID: HOST_PROFILE_ID },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => (stdout += chunk));
-    child.stderr.on("data", (chunk: string) => (stderr += chunk));
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code !== 0) {
-        reject(new Error(stderr.trim() || `private bridge exited ${code}`));
-        return;
-      }
-      try { resolve(JSON.parse(stdout) as Record<string, unknown>); }
-      catch (error) { reject(error); }
-    });
-    child.stdin.end(JSON.stringify(request));
-  });
+      timeoutMs,
+      label: "private bridge",
+    }, JSON.stringify(request));
+    return JSON.parse(raw) as Record<string, unknown>;
+  };
 }

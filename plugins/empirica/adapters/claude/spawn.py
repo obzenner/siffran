@@ -11,7 +11,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from .correlation import PROTOCOL, request_id as new_request_id
-from .fail_direction import FailureDirection, blocks_on_failure
+from .fail_direction import FailureDirection
 from .route import observed_at
 from .selector import context_from_payload
 from .transport import BridgeTransport, Transport
@@ -96,12 +96,15 @@ def spawn_decision(response: object) -> SpawnDecision:
     if not isinstance(response, dict) or not isinstance(response.get("result"), dict):
         return SpawnDecision(2, "spawn denied: malformed reservation response")
     result = response["result"]
-    if result.get("type") == "Block":
+    kind = result.get("type")
+    if kind == "Block":
         reason = result.get("reason")
         return SpawnDecision(2, reason if isinstance(reason, str) else "spawn denied")
-    if result.get("type") == "Fault" and blocks_on_failure(
-        response, fallback=FailureDirection.OPEN,
-    ):
+    if kind == "Fault":
+        if result.get("fail_direction") == FailureDirection.OPEN.value:
+            return SpawnDecision(0)
         message = result.get("message")
         return SpawnDecision(2, message if isinstance(message, str) else "spawn gate failed closed")
-    return SpawnDecision(0)
+    if kind == "Allow":
+        return SpawnDecision(0)
+    return SpawnDecision(2, "spawn denied: reservation was not admitted")

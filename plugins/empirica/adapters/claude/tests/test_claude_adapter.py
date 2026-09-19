@@ -354,6 +354,10 @@ class ResponseMappingTests(unittest.TestCase):
             {"result": {"type": "Allow", "run": {"status": "converged"}}}).exit_code, 0)
         self.assertEqual(spawn_decision(
             {"result": {"type": "Fault", "fail_direction": "open"}}).exit_code, 0)
+        self.assertEqual(spawn_decision(
+            {"result": {"type": "Inert", "reason": "no_run"}}).exit_code, 2)
+        self.assertEqual(spawn_decision(
+            {"result": {"type": "Surprise"}}).exit_code, 2)
         # malformed/non-object/mismatched deny the native launch
         self.assertEqual(spawn_decision({"not": "a response"}).exit_code, 2)
         self.assertEqual(spawn_decision({"result": "not-a-dict"}).exit_code, 2)
@@ -506,6 +510,12 @@ class SpawnLifecycleTests(unittest.TestCase):
     def test_spawn_denies_on_adapter_exception_with_active_run(self) -> None:
         from adapters.claude.lifecycle import spawn_main
         with self._bridge_with_handle(raises=True), patch("sys.stdin", new=self._stdin()):
+            self.assertEqual(spawn_main(), 2)
+
+    def test_spawn_denies_when_run_disappears_during_reservation(self) -> None:
+        from adapters.claude.lifecycle import spawn_main
+        inert = {"type": "Inert", "reason": "no_run"}
+        with self._bridge_with_handle(inert), patch("sys.stdin", new=self._stdin()):
             self.assertEqual(spawn_main(), 2)
 
     def test_spawn_denies_on_closed_fault_with_active_run(self) -> None:

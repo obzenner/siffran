@@ -14,12 +14,12 @@
 // EMPIRICA_HOST_PROFILE_ID environment variable. There is no default: the
 // bridge requires an explicit profile and fails closed if it is absent.
 
-import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import * as path from "node:path";
 
 import type { Dispatch, Request, Response } from "./contract.ts";
 import { assertResponse, GuardError } from "./guard.ts";
+import { runJsonProcess } from "./process-transport.ts";
 
 /** Exact Pi + pi-subagents profile required for complete foreground audit binding. */
 export const HOST_PROFILE_ID = "pi@0.84.1+pi-subagents@0.50.0";
@@ -81,79 +81,19 @@ function guardResponse(raw: string, expectedRequestId: string): Response {
  * before it is returned, so the caller never sees an unvalidated envelope.
  */
 export function createStdioBridgeDispatch(config: StdioBridgeConfig): Dispatch {
-  return (request: Request): Promise<Response> =>
-    new Promise<Response>((resolve, reject) => {
-      const env: NodeJS.ProcessEnv = {
+  return async (request: Request): Promise<Response> => {
+    const raw = await runJsonProcess({
+      command: config.command,
+      args: config.args,
+      cwd: config.cwd,
+      env: {
         ...(config.env ?? process.env),
-        // The exact host profile is supplied to the bridge; no default.
         EMPIRICA_HOST_PROFILE_ID: HOST_PROFILE_ID,
-      };
-
-      const child = spawn(config.command, [...(config.args ?? [])], {
-        cwd: config.cwd,
-        env,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-
-      let stdout = "";
-      let stderr = "";
-      let settled = false;
-      const finish = (fn: () => void) => {
-        if (settled) return;
-        settled = true;
-        if (timer !== null) clearTimeout(timer);
-        fn();
-      };
-
-      const timer =
-        config.timeoutMs && config.timeoutMs > 0
-          ? setTimeout(() => {
-              child.kill("SIGKILL");
-              finish(() =>
-                reject(
-                  new GuardError(
-                    `empirica bridge timed out after ${config.timeoutMs}ms`,
-                  ),
-                ),
-              );
-            }, config.timeoutMs)
-          : null;
-
-      child.stdout.setEncoding("utf-8");
-      child.stderr.setEncoding("utf-8");
-      child.stdout.on("data", (chunk: string) => (stdout += chunk));
-      child.stderr.on("data", (chunk: string) => (stderr += chunk));
-
-      child.on("error", (error: Error) =>
-        finish(() =>
-          reject(
-            new GuardError(`empirica bridge failed to start: ${error.message}`),
-          ),
-        ),
-      );
-
-      child.on("close", (code: number | null) =>
-        finish(() => {
-          if (code !== 0) {
-            const detail = stderr.trim();
-            reject(
-              new GuardError(
-                `empirica bridge exited with code ${code}${detail ? `: ${detail}` : ""}`,
-              ),
-            );
-            return;
-          }
-          try {
-            resolve(guardResponse(stdout, request.request_id));
-          } catch (error) {
-            reject(error instanceof Error ? error : new GuardError(String(error)));
-          }
-        }),
-      );
-
-      child.stdin.on("error", () => {
-        /* a bridge that exits before reading stdin surfaces via 'close'/'error' */
-      });
-      child.stdin.end(JSON.stringify(request));
-    });
+      },
+      timeoutMs: config.timeoutMs && config.timeoutMs > 0 ? config.timeoutMs : 30_000,
+      label: "empirica bridge",
+      error: (message) => new GuardError(message),
+    }, JSON.stringify(request));
+    return guardResponse(raw, request.request_id);
+  };
 }

@@ -30,6 +30,18 @@ class ProductionExecutionAdapterTests(unittest.TestCase):
             self.assertEqual(result.exit_code, 0)
             self.assertEqual(result.snapshot_digest, snapshot.snapshot_digest)
 
+    def test_workspace_preserves_requested_path_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "a").write_text("a", encoding="utf-8")
+            (root / "b").write_text("b", encoding="utf-8")
+            capture = FilesystemWorkspace(root).observe(("b", "a"))
+            self.assertEqual(
+                [row.observation.path for row in capture.files], ["b", "a"])
+            snapshot = build_execution_snapshot(("b", "a"), FilesystemWorkspace(root))
+            self.assertEqual(
+                [row.path for row in snapshot.file_bindings], ["b", "a"])
+
     def test_workspace_rejects_symlink_escape_as_non_regular(self):
         with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as outside:
             root = Path(directory)

@@ -19,7 +19,7 @@ class FilesystemWorkspace:
 
     def observe(self, paths: tuple[str, ...]) -> WorkspaceCapture:
         files = []
-        for relative in sorted(set(paths)):
+        for relative in paths:
             validate_relative_posix_path(relative)
             target = self.root.joinpath(*relative.split("/"))
             try:
