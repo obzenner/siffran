@@ -22,7 +22,8 @@ Asynchronous audit execution is not supported and is never silently downgraded.
 | `tool_result(subagent)` | private `audit_identity` + `audit_verdict` | Correlates by `toolCallId`, redacts before the first await, binds the verdict to the final native assistant record in the host-generated child session, and admits only one exact fenced verdict. |
 | compaction | `RestoreRun` | Carries the opaque handle and restores the selected run. |
 
-The packaged auditor defaults to `claude-opus-4-8`. Deployments may pin a concrete
+The packaged auditor pins `amazon-bedrock-eu/eu.anthropic.claude-opus-4-8`, the exact
+provider-qualified Pi registry identity used by the promoted profile. Deployments may pin a concrete
 configured model with `EMPIRICA_PI_AUDITOR_MODEL`; the adapter resolves that launch contract and
 rejects shadowed agent definitions and author-supplied overrides. The adapter never trusts
 `details.results[].model`, which is requested launch configuration. Instead it reads the exact
