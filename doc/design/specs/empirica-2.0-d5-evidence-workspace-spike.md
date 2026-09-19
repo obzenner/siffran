@@ -137,9 +137,20 @@ code, and `gate == gate_from_exit_code(exit_code)`. Empty observation snapshot u
 basis ID. Malformed port values remain representable only at `CapturedFile`/`WorkspaceCapture`, where
 the shell rejects them fail-closed.
 
-The harness receives no Workspace and no ambient live-workspace/cwd authority. It executes only
-against a materialized read-only view made from captured bytes. Real adapter implementations must
-sandbox/materialize that view or fail unavailable; they never fall back to the live workspace.
+The harness receives no Workspace and never uses the live workspace as its execution cwd or input
+view. It executes against materialized captured bytes whose initial modes are read-only, applies an
+inherited per-file write limit (including stdout/stderr), hashes the bounded stdout/stderr bytes,
+and terminates the spawned process group at completion or timeout. The production filesystem
+adapter opens workspace components descriptor-relatively with no-follow semantics and verifies the
+same descriptor before and after reading.
+
+This is an **evidence-integrity and resource boundary**, not an operating-system security sandbox.
+The command retains the invoking agent's filesystem, environment, credential, and network authority;
+a same-authority process can deliberately chmod materialized files or access absolute host paths.
+Empirica never claims containment against such a command. Host sandboxing and credentials remain
+outside the protocol threat model as stated by ADR-0042; CI remains the shipping trust boundary. A
+same-authority command may also create a new session to escape process-group cleanup, so cleanup is
+a cooperative resource bound rather than containment against a hostile command.
 
 HarnessResult echoes the exact supplied snapshot digest. It carries no gate/approval/claim/artifact
 facts. Harness is a trusted deterministic boundary; application rejects snapshot-digest mismatch.
