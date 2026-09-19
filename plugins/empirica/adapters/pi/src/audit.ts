@@ -48,7 +48,7 @@ function redact(value: unknown): unknown {
 
 /** Redact synchronously before the caller performs any await. */
 export function redactVerdict(event: ToolResultEvent): void {
-  event.content = redact(event.content);
+  event.content = [{ type: "text", text: "[empirica-verdict recorded by host]" }];
   event.details = redact(event.details);
   event.error = redact(event.error);
 }

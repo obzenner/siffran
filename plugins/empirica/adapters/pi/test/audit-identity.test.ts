@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { resultText } from "../src/audit.ts";
+import { redactVerdict, resultText } from "../src/audit.ts";
 import {
   identityFromSessionJsonl,
   sessionFileFromDetails,
@@ -21,6 +21,19 @@ function assistant(
 ): string {
   return line({ type: "message", message: { role: "assistant", content, provider, model } });
 }
+
+test("replaces JSON-escaped workflow rendering before returning it to the author", () => {
+  const event = {
+    toolCallId: "audit",
+    content: [{ type: "text", text: JSON.stringify({ output: BLOCK, finalOutput: BLOCK }) }],
+    details: { results: [{ finalOutput: BLOCK }] },
+  };
+  redactVerdict(event);
+  assert.deepEqual(event.content, [
+    { type: "text", text: "[empirica-verdict recorded by host]" },
+  ]);
+  assert.doesNotMatch(JSON.stringify(event.details), /```empirica-verdict/);
+});
 
 test("selects the exact child finalOutput instead of duplicated workflow rendering", () => {
   assert.equal(resultText({
