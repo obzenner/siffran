@@ -601,7 +601,7 @@ class Coordinator:
                    "auditor" if kind == "GetArgument" else
                    "terminal" if snapshot.state.status != "active" else "on_demand")
         terminal = snapshot.state.status if snapshot.state.status != "active" else None
-        return select_sections(context, list(reasons or ()), terminal)
+        return select_sections(_proto._PUBLIC_CONTRACT, context, list(reasons or ()), terminal)
 
     def _allow(self, request_id: str, snapshot: EvaluationSnapshot, argument: bool = False):
         self.last_snapshot = snapshot
@@ -625,9 +625,9 @@ class Coordinator:
                              parameters: dict[str, Any] | None = None, affected: str | None = None):
         self.last_snapshot = snapshot
         reason = self._reason(code, parameters, affected)
-        run = project_runview(snapshot, select_sections("block", [code],
-                                                        snapshot.state.status
-                                                        if snapshot.state.status != "active" else None))
+        run = project_runview(snapshot, select_sections(
+            _proto._PUBLIC_CONTRACT, "block", [code],
+            snapshot.state.status if snapshot.state.status != "active" else None))
         return {"protocol": _proto._PROTOCOL, "request_id": request_id,
                 "result": {"type": "Block", "run": run, "reasons": [reason]}}
 

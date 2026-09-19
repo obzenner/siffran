@@ -51,8 +51,9 @@ def bind_selector(operation_context: str, reason_codes: list[str],
             f"{_D9_SELECTOR_MODULE!r} has no {_D9_SELECTOR_FACTORY!r} factory; the D9 selector "
             "seam is not yet implemented."
         )
-    return select(operation_context=operation_context, reason_codes=list(reason_codes),
-                  terminal_status=terminal_status)
+    registry = importlib.import_module("application.protocol")._PUBLIC_CONTRACT
+    return select(registry=registry, operation_context=operation_context,
+                  reason_codes=list(reason_codes), terminal_status=terminal_status)
 
 
 def compose_application(workspace, harness, runs, artifacts, host,

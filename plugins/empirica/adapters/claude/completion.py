@@ -94,13 +94,11 @@ def stop_result(response: object) -> StopResult:
     if kind == "Allow":
         return StopResult(0, stdout=_json_line(result))
     if kind == "Block":
-        reason = result.get("reason")
-        text = reason if isinstance(reason, str) and reason else "empirica run is not complete"
-        contract = result.get("run", {}).get("contract") if isinstance(result.get("run"), dict) else None
-        if isinstance(contract, dict) and isinstance(contract.get("contract_id"), str):
-            from vendor.obligations import render_text
-            text += "\n" + render_text(contract)
-        return StopResult(2, stderr=text + "\n")
+        reasons = result.get("reasons")
+        messages = [row.get("message") or row.get("code") for row in reasons
+                    if isinstance(row, dict)] if isinstance(reasons, list) else []
+        text = "\n".join(value for value in messages if isinstance(value, str) and value)
+        return StopResult(2, stderr=(text or "empirica run is not complete") + "\n")
     if kind == "Fault":
         message = result.get("message")
         text = message if isinstance(message, str) and message else "empirica completion gate fault"

@@ -26,6 +26,7 @@ EMPIRICA_ACTIVATION_TESTS := $(PLUGINS_DIR)/empirica/adapters/claude/tests/test_
 EMPIRICA_FRESHNESS_TESTS := $(PLUGINS_DIR)/empirica/tests/test_freshness.py
 EMPIRICA_OBSERVATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_observation.py
 EMPIRICA_EXECUTION_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/tests/test_execution_adapter.py
+EMPIRICA_PROTOCOL_ISOLATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_protocol_isolation.py
 EMPIRICA_D6_STRICT_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d6_strict_v2.py
 EMPIRICA_D7_LOCATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_location.py
 EMPIRICA_D7_TRANSACTION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_transactions.py
@@ -92,6 +93,7 @@ check-core: ## Host-neutral core: obligations lib, Empirica core/application/sta
 	@$(PYTHON) $(EMPIRICA_FRESHNESS_TESTS)
 	@$(PYTHON) $(EMPIRICA_OBSERVATION_TESTS)
 	@$(PYTHON) $(EMPIRICA_EXECUTION_ADAPTER_TESTS)
+	@$(PYTHON) $(EMPIRICA_PROTOCOL_ISOLATION_TESTS)
 	@$(PYTHON) $(EMPIRICA_D6_STRICT_TESTS)
 	@$(PYTHON) $(EMPIRICA_D7_LOCATION_TESTS)
 	@$(PYTHON) $(EMPIRICA_D7_TRANSACTION_TESTS)

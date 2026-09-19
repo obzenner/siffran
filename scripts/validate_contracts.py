@@ -2050,12 +2050,14 @@ def main() -> int:
             from core.context_selector import select_sections
             selector = registry["presentation_selector"]
             for context, expected in selector["context_sections"].items():
-                if select_sections(context, [], None) != expected:
+                if select_sections(registry, context, [], None) != expected:
                     errors.append(f"context-selector: context {context!r} drift")
             for code, reason in registry["reasons"].items():
-                if select_sections("block", [code], None) != list(dict.fromkeys(reason["sections"])):
+                expected = list(dict.fromkeys(
+                    [*selector["context_sections"]["block"], *reason["sections"]]))
+                if select_sections(registry, "block", [code], None) != expected:
                     errors.append(f"context-selector: reason {code!r} drift")
-            if select_sections("block", ["unknown.reason"], None) != selector["unknown_reason_sections"]:
+            if select_sections(registry, "block", ["unknown.reason"], None) != selector["unknown_reason_sections"]:
                 errors.append("context-selector: unknown-reason fallback drift")
         except (ImportError, KeyError, TypeError) as exc:
             errors.append(f"context-selector: unavailable: {exc}")

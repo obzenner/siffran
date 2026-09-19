@@ -14,6 +14,7 @@ capability admission (handled by the service, not here).
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -72,7 +73,7 @@ def contract_result(target: str, section_id: str | None = None) -> dict | None:
             "id": _PUBLIC_CONTRACT["id"], "version": _PUBLIC_CONTRACT["version"],
             "sections": [{"id": key, "title": row["title"]}
                          for key, row in _PUBLIC_CONTRACT["sections"].items()],
-            "reasons": [{"code": key, "sections": row["sections"]}
+            "reasons": [{"code": key, "sections": list(row["sections"])}
                         for key, row in _PUBLIC_CONTRACT["reasons"].items()],
             "next_actions": [{"id": key, "description": row["description"]}
                              for key, row in _PUBLIC_CONTRACT["next_actions"].items()]}}
@@ -82,9 +83,9 @@ def contract_result(target: str, section_id: str | None = None) -> dict | None:
             return None
         return {"target": target, "digest": _DIGEST, "section_id": section_id,
                 "section": {"id": section_id, "title": row["title"],
-                            "summary": row["summary"], "clauses": row["clauses"]}}
+                            "summary": row["summary"], "clauses": copy.deepcopy(row["clauses"])}}
     if target == "full":
-        return {"target": target, "digest": _DIGEST, "full": _PUBLIC_CONTRACT}
+        return {"target": target, "digest": _DIGEST, "full": copy.deepcopy(_PUBLIC_CONTRACT)}
     return None
 
 

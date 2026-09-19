@@ -45,6 +45,7 @@ from adapters.claude.fail_direction import (  # noqa: E402
     failure_direction,
 )
 from adapters.claude.invocation import parse_invocation  # noqa: E402
+from adapters.claude.restore import restore_context  # noqa: E402
 from adapters.claude.selector import SelectorError  # noqa: E402
 from adapters.claude.spawn import spawn_decision  # noqa: E402
 from adapters.claude.transport import BridgeTransport  # noqa: E402
@@ -332,10 +333,12 @@ class ResponseMappingTests(unittest.TestCase):
                                         "run": {"id": "r", "status": "converged"}}})
         self.assertEqual(allow.exit_code, 0)
         self.assertEqual(json.loads(allow.stdout)["type"], "Allow")
-        block = stop_result({"result": {"type": "Block", "reason": "not converged",
-                                        "run": {"id": "r", "status": "active"}}})
+        block = stop_result({"result": {"type": "Block", "reasons": [
+            {"code": "graph.missing", "message": "not converged"},
+            {"code": "route.required", "message": "route first"},
+        ]}})
         self.assertEqual((block.exit_code, block.stdout), (2, ""))
-        self.assertIn("not converged", block.stderr)
+        self.assertEqual(block.stderr, "not converged\nroute first\n")
         closed = stop_result({"result": {"type": "Fault", "code": "unsupported",
                                          "fail_direction": "closed", "message": "no eval"}})
         self.assertEqual((closed.exit_code, closed.stdout), (2, ""))
@@ -343,6 +346,17 @@ class ResponseMappingTests(unittest.TestCase):
                                              "fail_direction": "open", "message": "bridge"}})
         self.assertEqual((open_fault.exit_code, open_fault.stderr), (0, "bridge\n"))
         self.assertEqual(stop_result({"not": "a response"}).exit_code, 2)
+
+    def test_restore_context_renders_bounded_v2_runview(self) -> None:
+        fixture = json.loads((PLUGIN_ROOT.parent.parent / "contracts" / "empirica" / "v2" /
+                              "fixtures" / "restore-active.json").read_text(encoding="utf-8"))
+        context = restore_context(fixture["expected"])
+        self.assertIn("BEGIN UNTRUSTED EMPIRICA RUN DATA", context)
+        body = context.split("-----\n", 1)[1].split("\n----- END", 1)[0]
+        self.assertEqual(json.loads(body), {"run": fixture["expected"]["result"]["run"]})
+        terminal = json.loads(json.dumps(fixture["expected"]))
+        terminal["result"]["run"]["status"] = "converged"
+        self.assertEqual(restore_context(terminal), "")
 
     def test_spawn_decision_block_closed_fault_and_malformed(self) -> None:
         self.assertEqual(spawn_decision(
