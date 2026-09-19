@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Require real installed-host Empirica receipts before release promotion."""
+"""Require real installed-host Empirica receipts for the supported release set."""
 from __future__ import annotations
 
 import hashlib
@@ -11,7 +11,6 @@ from pathlib import Path
 EXPECTED = {
     "claude": ("claude-code@2.1.270", "2.1.270"),
     "pi": ("pi@0.84.1+pi-subagents@0.50.0", "0.84.1"),
-    "codex": ("codex-cli@0.146.0", "0.146.0"),
 }
 
 

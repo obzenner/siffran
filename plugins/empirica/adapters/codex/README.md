@@ -5,19 +5,22 @@ translates native hooks, exposes the canonical public MCP tools, and owns one bo
 auditor. Claim, evidence, budget, audit-coverage, and convergence rules remain in the
 host-neutral core.
 
-## Exact profile
+## Work-in-progress status
 
-The profile is `codex-cli@0.146.0`, tier `foreground_only`. Codex native hooks cannot mutate a
-spawned child request or observe arbitrary child output. Rather than pretending otherwise, the
-Stop adapter launches a host-owned foreground `codex exec` subprocess, observes its exact final
-message, and privately admits the candidate verdict. Async execution remains unsupported.
-The profile remains `pending_live` until its installed-host receipt passes the release gate.
+**Empirica convergence is not supported on Codex CLI 0.146.0.** The packaged adapter exists for
+conformance development and fail-closed experimentation only. Its exact profile is
+`observational` with `promotion_status=wip_unsupported`; `foreground_only` is a candidate tier,
+not an advertised capability.
 
-The auditor model defaults to `gpt-5.1-codex-mini` and can be pinned with
-`EMPIRICA_CODEX_AUDITOR_MODEL`. Codex 0.146.0 exposes the requested process argv but no
-independently observed resolved-model identity, so the auditor identity remains `unverified` and
-convergence blocks. The exact profile cannot be promoted until a native resolved-model observation
-is available and bound to the managed process.
+Codex native hooks cannot mutate a spawned child request or independently observe the resolved
+model behind a managed `codex exec` process. The adapter can observe one correlated final message,
+but configured argv is not identity evidence. Auditor independence therefore remains `unverified`
+and convergence blocks. Async execution is also unsupported. Codex is excluded from the supported
+installed-host release receipt set until a native resolved-model observation can be bound to the
+managed process and the candidate foreground probe passes.
+
+For adapter development, the managed auditor defaults to `gpt-5.1-codex-mini` and may be pinned
+with `EMPIRICA_CODEX_AUDITOR_MODEL`; that configuration never counts as observed identity.
 
 ## Surface
 

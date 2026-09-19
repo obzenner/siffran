@@ -246,7 +246,7 @@ empirica-architecture-check: ## validate Empirica 2.0 target ownership, dependen
 # Deterministic adapter conformance. These tests do not launch installed native hosts.
 .PHONY: empirica-host-adapter-check
 empirica-host-adapter-check: ## validate public tools and three host adapter translations
-	@printf '$(BOLD)==> empirica three-host adapter conformance$(RESET)\n'
+	@printf '$(BOLD)==> empirica host-adapter conformance$(RESET)\n'
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_PUBLIC_TOOLS_TESTS)
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_CLAUDE_ADAPTER_CONFORMANCE_TESTS)
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_CODEX_ADAPTER_CONFORMANCE_TESTS)

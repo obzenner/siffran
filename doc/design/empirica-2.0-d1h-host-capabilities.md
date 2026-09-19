@@ -47,9 +47,9 @@ an audit or evidence obligation. It must not claim automatic independent audit s
 
 | Host/profile | Tier | Advertised automatic audit | Privacy statement | Required implementation evidence |
 |---|---|---|---|---|
-| Claude Code 2.1.270 | `foreground_only`; candidate `full_async` | Yes in foreground; async only after promotion | Dossier can be inserted into the admitted Agent input; the child's final answer is host-visible to the parent/author, so output privacy is **not** guaranteed | Exact admitted Agent invocation → native `agent_id` live correlation is required before promotion; serialization, type, timing, transcript path, or launch order are not proof |
-| Pi 0.84.1 + pi-subagents 0.50.0 | `foreground_only`, pending live | Yes when the exact host-generated child session binds a concrete native assistant identity to the admitted verdict | The bound tool result is parent-visible, so output privacy is **not** guaranteed | Canonical packaged agent → `toolCallId` correlation, synchronous redaction, bounded session receipt, verdict-bound native identity, private ingress, and explicit async rejection |
-| Codex CLI 0.146.0 | `foreground_only`, pending live | No convergent audit: managed process resolved model is not natively observed | Final output is observed by the adapter process; output privacy is **not** guaranteed | Public MCP trace plus bounded managed process, exact final-output parsing, private ingress, Stop re-evaluation, and honest `independence_unverified` |
+| Claude Code 2.1.270 | `foreground_only`, promoted; candidate `full_async` | Yes in foreground; async only after separate promotion | Dossier can be inserted into the admitted Agent input; the child's final answer is host-visible to the parent/author, so output privacy is **not** guaranteed | Credentialed installed foreground trace binds the exact admitted Agent invocation to native `agent_id`; candidate async still requires its separate correlation probe |
+| Pi 0.84.1 + pi-subagents 0.50.0 | `foreground_only`, promoted | Yes when the exact host-generated child session binds a concrete native assistant identity to the admitted verdict | The bound tool result is parent-visible, so output privacy is **not** guaranteed | Credentialed installed foreground trace: canonical packaged agent → `toolCallId` correlation, synchronous closed redaction, bounded session receipt, verdict-bound native identity, private ingress, and guarded `Allow(converged=true)`; async remains unsupported |
+| Codex CLI 0.146.0 | `observational`, `wip_unsupported`; candidate `foreground_only` | No supported convergent audit: managed-process resolved model is not natively observed | Final output is observed by the adapter process; output privacy is **not** guaranteed | WIP public MCP and bounded-process conformance only; exact final-output parsing and Stop re-evaluation honestly end in `audit.independence_unverified` until native identity and the candidate probe exist |
 
 Only an exact conformance-listed profile receives its declared tier. An unlisted version is
 `observational`—or unavailable when even observation is unproven—until deterministic fixtures and
@@ -197,9 +197,10 @@ pending child was fabricated:
 - Codex managed foreground auditor and Stop re-evaluation behavior;
 - advertised tier equals the exact conformance-listed profile.
 
-Live probes are mandatory for Claude foreground, Pi+pi-subagents foreground, and Codex managed
-foreground behavior before release. Candidate full-async promotion requires its separate named
-probe and does not block foreground support.
+Live probes are mandatory for the supported Claude and Pi foreground profiles before release.
+Candidate full-async promotion requires its separate named probe and does not block foreground
+support. Codex is WIP and excluded from the supported release set; its managed-foreground probe is
+a candidate-promotion prerequisite rather than a release receipt.
 
 ## 8. Stop conditions
 

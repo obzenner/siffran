@@ -1,21 +1,20 @@
-# Empirica 2.0 D11 — three-host driver conformance and live promotion
+# Empirica 2.0 D11 — host-driver conformance and supported live promotion
 
-Status: implementation in progress; profile promotion blocked on installed-host receipts
+Status: Claude and Pi foreground profiles promoted; Codex adapter WIP and unsupported
 
 ## Decision
 
-Empirica 2.0 supports Claude Code, Pi, and Codex only when each exact advertised
-profile can complete the same positive lifecycle through surfaces available to a
-real model:
+Empirica 2.1 supports the exact promoted Claude Code and Pi foreground profiles when each can
+complete the same positive lifecycle through surfaces available to a real model:
 
 ```text
 StartRun → route → graph → research → deterministic spike → current RunView
 → bound independent audit → private verdict ingress → Allow(converged=true)
 ```
 
-A typed unsupported result is a safe intermediate state, not release support.
-Direct application dispatch and private conformance seams do not establish host
-support.
+A typed unsupported result is a safe intermediate state, not release support. Codex remains a
+conformance-tested WIP adapter at the `observational` tier and is not part of the supported release
+set. Direct application dispatch and private conformance seams do not establish host support.
 
 ## Invariants
 
@@ -72,25 +71,25 @@ evidence remains unverified.
 
 ### Codex
 
-The shared MCP server supplies public tools. Because Codex 0.146.0 cannot inject a
-native child prompt or observe child final output, the trusted Stop adapter owns a
-bounded `codex exec` auditor subprocess. It obtains the dossier, reserves the child,
-observes the process and concrete model configuration, parses one closed verdict,
-and invokes private ingress. The MCP tools remain public-only. The command/model
-configuration is fixed by the host adapter, never by tool input. Missing or
-same-model attribution blocks honestly.
+The shared MCP server supplies public tools for WIP conformance. Because Codex 0.146.0 cannot
+independently observe the resolved model behind a managed `codex exec` subprocess, command/model
+configuration remains insufficient identity evidence. The bounded adapter may parse a correlated
+final verdict and invoke private ingress, but attribution remains unverified and convergence blocks.
+The profile is `observational` and `wip_unsupported`; `foreground_only` is only a future candidate.
 
 ## Red-first acceptance
 
 `make empirica-host-adapter-check` is the deterministic red-first layer. It must initially fail
 because the public server and host drivers are absent, but it never claims to launch an installed
-host. `make empirica-host-live-check` is the separate promotion gate: it requires retained receipts
-from credentialed, installed Claude, Pi, and Codex processes. `make release-check` requires both.
+host. `make empirica-host-live-check` is the separate supported-release gate: it requires retained
+receipts from credentialed, installed Claude and Pi processes. Codex is deliberately excluded while
+its profile is `wip_unsupported`. `make release-check` requires deterministic conformance plus the
+supported-host receipts.
 
 The deterministic adapter traces become green when each adapter translates its available native
-facts correctly. Claude and Pi can reach injected `Allow(converged=true)`; Codex 0.146.0 must end
-in `audit.independence_unverified` because its managed process does not expose an observed resolved
-model. Promotion still waits for the live gate and cannot override that typed limitation.
+facts correctly. Claude and Pi reach `Allow(converged=true)` and their exact foreground profiles are
+promoted by retained credentialed installed-host traces. Codex 0.146.0 must end in
+`audit.independence_unverified`; this is correct fail-closed WIP behavior, not supported convergence.
 
 The acceptance matrix is layered rather than duplicated in every positive trace:
 

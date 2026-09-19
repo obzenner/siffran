@@ -27,7 +27,7 @@
           "candidate_probe_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
           "required_fixture_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
           "required_live_probe_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
-          "promotion_status": {"enum": ["pending_live", "promoted"]},
+          "promotion_status": {"enum": ["pending_live", "promoted", "wip_unsupported"]},
           "input_private": {"oneOf": [{"type": "boolean"}, {"const": "unverified"}]},
           "output_private": {"oneOf": [{"type": "boolean"}, {"const": "unverified"}]},
           "unsupported_reason_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
@@ -35,7 +35,20 @@
         },
         "dependentRequired": {
           "candidate_tier": ["candidate_probe_ids"]
-        }
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"promotion_status": {"const": "wip_unsupported"}}},
+            "then": {
+              "required": ["candidate_tier", "candidate_probe_ids"],
+              "properties": {"current_tier": {"const": "observational"}}
+            }
+          },
+          {
+            "if": {"properties": {"promotion_status": {"const": "promoted"}}},
+            "then": {"properties": {"current_tier": {"enum": ["full_async", "foreground_only"]}}}
+          }
+        ]
       }
     }
   }

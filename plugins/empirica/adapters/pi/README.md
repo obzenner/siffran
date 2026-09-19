@@ -5,8 +5,9 @@ surface as the Claude and Codex adapters and owns no convergence policy.
 
 ## Exact profile
 
-The implemented profile is `pi@0.84.1+pi-subagents@0.50.0`, tier `foreground_only`, with
-`promotion_status=pending_live`. `pi-subagents` must provide its structured `subagent` tool.
+The exact profile is `pi@0.84.1+pi-subagents@0.50.0`, tier `foreground_only`, with
+`promotion_status=promoted` after a credentialed installed-host foreground trace reached guarded
+`Allow(converged=true)`. `pi-subagents` must provide its structured `subagent` tool.
 Asynchronous audit execution is not supported and is never silently downgraded.
 
 ## Surface

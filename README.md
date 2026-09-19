@@ -49,13 +49,12 @@ installing, review
 small MCP adapter. The Methodologist package contains no hooks. Codex's normal
 sandbox and MCP approval policy still apply.
 
-Empirica's command hooks require a separate trust step. Open `/hooks`, review the
-installed definitions, and trust them before use. The exact Codex 0.146.0 profile
-exposes the canonical public MCP tools and a fail-closed Stop gate. Because native
-hooks cannot observe arbitrary child output, the adapter owns a bounded foreground
-`codex exec` auditor and privately admits only its correlated final verdict. Codex
-cannot independently observe the resolved auditor model, so identity remains
-unverified and convergence blocks rather than trusting configured argv:
+**Empirica on Codex is work in progress and is not supported for convergence.** The exact
+Codex 0.146.0 adapter exposes the canonical public MCP tools and a fail-closed Stop gate for
+adapter development, but Codex cannot independently observe the resolved auditor model. Its
+profile is therefore `observational` with `promotion_status: wip_unsupported`; convergence blocks
+with `audit.independence_unverified` rather than trusting configured argv. Do not rely on the
+experimental Codex package for an Empirica convergence claim:
 
 ```text
 $empirica design and verify the retry policy
@@ -107,9 +106,10 @@ For local development, install the checkout instead:
 pi install "$(pwd)"
 ```
 
-The three exact Empirica host drivers are implemented at `foreground_only`, but their registry
-`promotion_status` remains `pending_live`. They are not release-supported until
-`make empirica-host-live-check` has retained exact installed-host receipts for all three.
+The exact Claude Code and Pi foreground profiles are promoted from credentialed installed-host
+traces. Codex is explicitly `wip_unsupported` and is not part of the supported release set.
+`make empirica-host-live-check` requires exact receipts for Claude and Pi only; Pi and Claude async
+promotion remains separate and unsupported.
 
 ## Plugins
 
