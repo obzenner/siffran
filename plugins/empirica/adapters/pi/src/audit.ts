@@ -38,7 +38,9 @@ export function verdictFromText(text: string): Record<string, unknown> | null {
 function redact(value: unknown): unknown {
   if (typeof value === "string")
     return value.replace(/```empirica-verdict\s*\n[\s\S]*?\n```/g,
-      "[empirica-verdict recorded by host]");
+      "[empirica-verdict recorded by host]")
+      .replace(/```empirica-verdict\\n[\s\S]*?\\n```/g,
+        "[empirica-verdict recorded by host]");
   if (Array.isArray(value)) return value.map(redact);
   if (value && typeof value === "object")
     return Object.fromEntries(Object.entries(value as Record<string, unknown>)

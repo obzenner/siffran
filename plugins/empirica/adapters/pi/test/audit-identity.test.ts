@@ -26,7 +26,10 @@ test("replaces JSON-escaped workflow rendering before returning it to the author
   const event = {
     toolCallId: "audit",
     content: [{ type: "text", text: JSON.stringify({ output: BLOCK, finalOutput: BLOCK }) }],
-    details: { results: [{ finalOutput: BLOCK }] },
+    details: {
+      results: [{ finalOutput: BLOCK }],
+      mission: { summary: JSON.stringify({ output: BLOCK, finalOutput: BLOCK }) },
+    },
   };
   redactVerdict(event);
   assert.deepEqual(event.content, [
