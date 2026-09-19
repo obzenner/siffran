@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import { verdictFromText } from "./audit.ts";
 
 export interface ObservedChildIdentity {
+  [key: string]: unknown;
   provider_id: string;
   model_id: string;
   observed_by: "host";

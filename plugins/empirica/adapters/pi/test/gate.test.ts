@@ -9,7 +9,9 @@ import assert from "node:assert/strict";
 import { PROTOCOL, type Request, type Response, type Result } from "../src/contract.ts";
 import { REPORT_CONVERGENCE_TOOL, SUBAGENT_TOOL } from "../src/translate.ts";
 import { createEmpiricaExtension, DEFAULT_SKILLS_DIR } from "../src/index.ts";
-import { resolve } from "node:path";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { FakePi, FakeUi, fakeCtx } from "./fakes.ts";
 import type { ToolCallEvent, ToolResultEvent } from "../src/pi-types.ts";
 import type { PrivateIngressRequest } from "../src/private-transport.ts";
@@ -266,10 +268,20 @@ test("tool_result redacts before privately admitting the correlated verdict", as
       input: { agent: "empirica.empirica-auditor", task: "audit" } },
     fakeCtx(),
   );
+  const nativeSession = join(mkdtempSync(join(tmpdir(), "empirica-pi-audit-")), "session.jsonl");
+  writeFileSync(nativeSession, JSON.stringify({
+    type: "message",
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: "```empirica-verdict\n{\"verdict\":\"pass\"}\n```" }],
+      provider: "amazon-bedrock-us",
+      model: "us.anthropic.claude-opus-4-8",
+    },
+  }) + "\n");
   const event = {
     toolCallId: "tc-result", toolName: SUBAGENT_TOOL,
     content: [{ type: "text", text: "```empirica-verdict\n{\"verdict\":\"pass\"}\n```" }],
-    details: { results: [{ model: "bedrock/auditor-model",
+    details: { results: [{ model: "configured/wrong-model", sessionFile: nativeSession,
       output: "```empirica-verdict\n{\"verdict\":\"pass\"}\n```" }] },
   };
   const handler = w.pi.handlers.get("tool_result") as
@@ -281,8 +293,9 @@ test("tool_result redacts before privately admitting the correlated verdict", as
   assert.match(JSON.stringify(replacement.content), /recorded by host/);
   assert.equal(w.privateRequests.at(-1)?.operation, "audit_verdict");
   const identity = w.privateRequests.find((request) => request.operation === "audit_identity");
-  assert.equal(identity?.auditor?.provider_id, null);
-  assert.equal(identity?.auditor?.model_id, null);
+  assert.equal(identity?.auditor?.provider_id, "amazon-bedrock-us");
+  assert.equal(identity?.auditor?.model_id, "us.anthropic.claude-opus-4-8");
+  assert.equal(identity?.auditor?.source, "pi-child-session");
   assert.equal(w.pi.entries.at(-1)?.customType, "empirica.audit.done");
 });
 

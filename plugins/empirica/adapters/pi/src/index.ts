@@ -18,7 +18,7 @@
 
 import { fileURLToPath } from "node:url";
 import * as path from "node:path";
-import { readFileSync } from "node:fs";
+import { lstatSync, readFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 
 import type { Dispatch, Request, Response, RunSelector } from "./contract.ts";
@@ -34,6 +34,9 @@ import { createPrivateIngress, type AuditPlanData, type PrivateIngress } from ".
 import {
   lifecycleEvent, redactVerdict, resultDigest, resultText as auditResultText, verdictFromText,
 } from "./audit.ts";
+import {
+  identityFromSessionJsonl, sessionFileFromDetails,
+} from "./audit-identity.ts";
 import { createStdioBridgeDispatch, defaultBridgeConfig } from "./stdio-transport.ts";
 import {
   REPORT_CONVERGENCE_INTENT,
@@ -52,6 +55,18 @@ import {
   startRunNotice,
   type StartRunOptions,
 } from "./translate.ts";
+
+const MAX_AUDIT_SESSION_BYTES = 16 * 1024 * 1024;
+function readAuditSession(file: string): string | null {
+  try {
+    const before = lstatSync(file);
+    if (!before.isFile() || before.size > MAX_AUDIT_SESSION_BYTES) return null;
+    const bytes = readFileSync(file);
+    const after = lstatSync(file);
+    return before.dev === after.dev && before.ino === after.ino && before.size === after.size
+      && bytes.length === before.size ? bytes.toString("utf8") : null;
+  } catch { return null; }
+}
 
 // plugins/empirica/adapters/pi/src/index.ts -> plugins/empirica/skills
 export const DEFAULT_SKILLS_DIR = path.resolve(
@@ -419,6 +434,11 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       }
       const text = auditResultText(event);
       redactVerdict(event);
+      const verdict = verdictFromText(text);
+      const sessionFile = sessionFileFromDetails(event.details);
+      const session = verdict && sessionFile ? readAuditSession(sessionFile) : null;
+      const identity = verdict && session
+        ? identityFromSessionJsonl(session, verdict) : null;
       audits.delete(event.toolCallId);
       let reconciled = false;
       try {
@@ -436,12 +456,11 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           operation: "audit_identity", run_id: correlation.runHandle,
           native_id: correlation.nativeId, plan: correlation.plan,
           author: correlation.author,
-          auditor: {
+          auditor: identity ?? {
             provider_id: null, model_id: null,
-            observed_by: "host", source: "pi-subagents-resolved-model-unobservable",
+            observed_by: "host", source: "pi-child-session-unverified",
           },
         });
-        const verdict = verdictFromText(text);
         if (!verdict) {
           await trusted({ operation: "audit_failure", run_id: correlation.runHandle,
             native_id: correlation.nativeId, plan: correlation.plan, state: "failed" });
