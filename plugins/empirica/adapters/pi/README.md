@@ -18,15 +18,17 @@ Asynchronous audit execution is not supported and is never silently downgraded.
 | `empirica_read` | `GetRun`, `GetArgument`, `GetContract`, `RestoreRun` | Returns the complete typed result; resolves a session handle when needed. |
 | `report_convergence` | `EvaluateRun(report_convergence)` | Fails closed unless the guarded response is `Allow`. |
 | `tool_call(subagent)` | `child_reserve` + private lifecycle | Binds the canonical auditor, forces foreground execution, injects the dossier, and records launching/pending facts. |
-| `tool_result(subagent)` | private `audit_verdict` | Correlates by `toolCallId`, redacts before the first await, and admits only one exact fenced verdict. |
+| `tool_result(subagent)` | private `audit_identity` + `audit_verdict` | Correlates by `toolCallId`, redacts before the first await, binds the verdict to the final native assistant record in the host-generated child session, and admits only one exact fenced verdict. |
 | compaction | `RestoreRun` | Carries the opaque handle and restores the selected run. |
 
 The packaged auditor defaults to `claude-opus-4-8`. Deployments may pin a concrete
 configured model with `EMPIRICA_PI_AUDITOR_MODEL`; the adapter resolves that launch contract and
-rejects shadowed agent definitions and author-supplied overrides. Pi 0.84.1/pi-subagents 0.50.0
-does not expose an independently observed resolved child-model identity: `details.results[].model`
-is the requested launch configuration. The adapter therefore records the auditor identity as
-unverified and convergence blocks rather than promoting configuration to identity.
+rejects shadowed agent definitions and author-supplied overrides. The adapter never trusts
+`details.results[].model`, which is requested launch configuration. Instead it reads the exact
+result row's host-generated `sessionFile` and accepts identity only when the final native assistant
+record carries concrete provider/model fields and its sole verdict equals the admitted tool-result
+verdict. Missing, malformed, oversized, changed, or ambiguous sessions remain unverified and block
+convergence.
 
 The adapter-private Python subprocess exposes no Pi tool. It is the imperative ingress shell for
 host-observed attribution, child events, and audit verdicts. Public tools cannot express these

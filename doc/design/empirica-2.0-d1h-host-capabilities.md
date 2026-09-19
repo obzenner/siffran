@@ -48,7 +48,7 @@ an audit or evidence obligation. It must not claim automatic independent audit s
 | Host/profile | Tier | Advertised automatic audit | Privacy statement | Required implementation evidence |
 |---|---|---|---|---|
 | Claude Code 2.1.270 | `foreground_only`; candidate `full_async` | Yes in foreground; async only after promotion | Dossier can be inserted into the admitted Agent input; the child's final answer is host-visible to the parent/author, so output privacy is **not** guaranteed | Exact admitted Agent invocation → native `agent_id` live correlation is required before promotion; serialization, type, timing, transcript path, or launch order are not proof |
-| Pi 0.84.1 + pi-subagents 0.50.0 | `foreground_only`, pending live | No convergent audit: resolved child model is not natively observed | The bound tool result is parent-visible, so output privacy is **not** guaranteed | Canonical packaged agent → `toolCallId` correlation, synchronous redaction, private verdict ingress, explicit async rejection, and honest `independence_unverified` |
+| Pi 0.84.1 + pi-subagents 0.50.0 | `foreground_only`, pending live | Yes when the exact host-generated child session binds a concrete native assistant identity to the admitted verdict | The bound tool result is parent-visible, so output privacy is **not** guaranteed | Canonical packaged agent → `toolCallId` correlation, synchronous redaction, bounded session receipt, verdict-bound native identity, private ingress, and explicit async rejection |
 | Codex CLI 0.146.0 | `foreground_only`, pending live | No convergent audit: managed process resolved model is not natively observed | Final output is observed by the adapter process; output privacy is **not** guaranteed | Public MCP trace plus bounded managed process, exact final-output parsing, private ingress, Stop re-evaluation, and honest `independence_unverified` |
 
 Only an exact conformance-listed profile receives its declared tier. An unlisted version is
@@ -115,9 +115,12 @@ separate async RPC lifecycle:
    `launching -> pending` through private ingress.
 3. `tool_result` retrieves the exact correlated foreground output and redacts the fenced verdict
    synchronously before its first await.
-4. The adapter privately records configured/observed attribution and admits the candidate verdict;
-   first-terminal and replay rules remain application-owned.
-5. Reload restores the opaque run and any persisted correlation entry; async requests remain
+4. The adapter ignores configured result-model metadata. It reads the exact result row's bounded,
+   host-generated `sessionFile` and accepts provider/model identity only from the final native
+   assistant record when its sole verdict equals the admitted tool-result verdict.
+5. The adapter privately records that observation and admits the candidate verdict; missing,
+   changed, malformed, or ambiguous session evidence remains `independence_unverified`.
+6. Reload restores the opaque run and any persisted correlation entry; async requests remain
    `host.async_unsupported` until the candidate probe is promoted.
 
 ## 5. Codex behavior

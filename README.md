@@ -89,10 +89,11 @@ report_convergence               # tool: guarded terminal decision
 ```
 
 The Pi adapter binds `empirica.empirica-auditor` as a foreground child, correlates
-its `tool_result`, and admits the verdict through non-model-callable private ingress.
-The pinned native surface exposes requested model configuration but no independently
-observed resolved child model, so identity remains unverified and convergence blocks.
-Pi also has no native completion veto; call `report_convergence` before any status claim.
+its `tool_result`, and admits trusted facts through non-model-callable private ingress.
+It ignores requested result-model metadata and binds identity to the final native assistant
+record in the exact host-generated child session when that record produced the admitted verdict.
+Missing or ambiguous session evidence blocks. Pi also has no native completion veto; call
+`report_convergence` before any status claim.
 
 To update later:
 
@@ -116,7 +117,7 @@ The three exact Empirica host drivers are implemented at `foreground_only`, but 
 | Plugin | Version | Description |
 |--------|---------|-------------|
 | `methodologist` | 0.9.0 | Formal reasoning catalog — lets users choose and execute evidence-backed CS/math methodologies with traced phases and structured output. |
-| `empirica` | 2.0.1 | Host-neutral empirical-convergence workflow — routes uncertainty into a claim graph, requires cited research before deterministic spikes, derives claim state, and binds convergence to a current independent audit. Full execution is hook-enforced only on profiles with author-action and bound-audit capabilities; unsupported profiles fail explicitly before starting. |
+| `empirica` | 2.1.0 | Host-neutral empirical-convergence workflow — routes uncertainty into a claim graph, requires cited research before deterministic spikes, derives claim state, and binds convergence to a current independent audit. Full execution is hook-enforced only on profiles with author-action and bound-audit capabilities; unsupported profiles fail explicitly before starting. |
 <!-- END GENERATED: plugins -->
 
 ## Development

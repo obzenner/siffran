@@ -65,7 +65,10 @@ and read operations. Activation injects the opaque handle into model context.
 The extension supplies the public tools and uses the installed, exact
 pi-subagents profile. `tool_call` reserves/binds the canonical auditor and injects
 the dossier; `tool_result` observes and redacts the candidate result before any
-await, then calls a private bridge ingress. Durable correlation survives reload.
+await, reads the exact result row's bounded host-generated child session, binds the
+final native assistant provider/model to the matching verdict, then calls private
+bridge ingress. Durable correlation survives reload; missing or ambiguous session
+evidence remains unverified.
 
 ### Codex
 

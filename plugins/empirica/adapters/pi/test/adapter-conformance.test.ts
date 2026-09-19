@@ -86,20 +86,34 @@ test("Pi public tools and injected foreground observations satisfy adapter confo
         .map((claim) => ({ claim_id: claim.claim_id, evidence_digest: claim.evidence_digest })),
       scope_review: "pass",
     };
+    const nativeSession = join(root, "audit-session.jsonl");
+    writeFileSync(nativeSession, JSON.stringify({
+      type: "message",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "```empirica-verdict\n" +
+          JSON.stringify(verdict) + "\n```" }],
+        provider: "bedrock",
+        model: "native-auditor-model",
+      },
+    }) + "\n");
     const event: ToolResultEvent = {
       toolCallId: "pi-audit-1", toolName: "subagent",
       content: "```empirica-verdict\n" + JSON.stringify(verdict) + "\n```",
-      details: { results: [{ model: "bedrock/auditor-model" }] },
+      details: { results: [{
+        model: "bedrock/configured-auditor-model", sessionFile: nativeSession,
+      }] },
     };
     const toolResult = pi.handlers.get("tool_result") as
       (event: ToolResultEvent, context: typeof ctx) => Promise<unknown>;
     await toolResult(event, ctx);
     assert.doesNotMatch(String(event.content), /```empirica-verdict/);
 
-    await assert.rejects(
-      () => execute("report_convergence", {}),
-      /concrete author and auditor model identities were not both host-observed|independence/i,
-    );
+    const final = await execute("report_convergence", {});
+    const result = final.details as { type: string; converged: boolean; run: { status: string } };
+    assert.equal(result.type, "Allow");
+    assert.equal(result.converged, true);
+    assert.equal(result.run.status, "converged");
   } finally {
     process.chdir(previous.cwd);
     if (previous.home === undefined) delete process.env.EMPIRICA_HOME;

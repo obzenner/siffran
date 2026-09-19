@@ -299,6 +299,36 @@ test("tool_result redacts before privately admitting the correlated verdict", as
   assert.equal(w.pi.entries.at(-1)?.customType, "empirica.audit.done");
 });
 
+test("missing native session keeps auditor identity unverified", async () => {
+  const child = { child_id: "ch-unverified", purpose: "audit", state: "reserved" };
+  const w = wire((req) => {
+    if (req.command.type === "ObserveAction")
+      return envelope({ type: "Allow", converged: false,
+        run: { ...run(), children: [child] } as never });
+    if (req.command.type === "GetArgument")
+      return envelope({ type: "Allow", converged: false, run: run(),
+        argument: { argument_digest: `sha256:${"a".repeat(64)}`, claims: [] } } as never);
+    return envelope({ type: "Allow", converged: false, run: run() });
+  });
+  await startRun(w);
+  await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "tc-unverified",
+    input: { agent: "empirica.empirica-auditor", task: "audit" } }, fakeCtx());
+  const event: ToolResultEvent = {
+    toolCallId: "tc-unverified",
+    content: "```empirica-verdict\n{\"verdict\":\"pass\"}\n```",
+    details: { results: [{
+      model: "bedrock/configured-model", sessionFile: "/missing/child-session.jsonl",
+    }] },
+  };
+  await (w.pi.handlers.get("tool_result") as
+    (event: ToolResultEvent, ctx: ReturnType<typeof fakeCtx>) => Promise<unknown>)(
+      event, fakeCtx());
+  const identity = w.privateRequests.find((request) => request.operation === "audit_identity");
+  assert.equal(identity?.auditor?.provider_id, null);
+  assert.equal(identity?.auditor?.model_id, null);
+  assert.equal(identity?.auditor?.source, "pi-child-session-unverified");
+});
+
 test("session restore orphans unresolved audits and tombstones completed correlations", async () => {
   const plan = { child_id: "ch-1", role_profile: "empirica.empirica-auditor",
     operation_id: `sha256:${"b".repeat(64)}`,

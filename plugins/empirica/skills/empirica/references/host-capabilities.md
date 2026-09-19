@@ -31,9 +31,10 @@ Required surfaces:
 - the packaged `empirica.empirica-auditor` role is executable.
 
 The adapter forces the canonical auditor to foreground execution, correlates by `toolCallId`,
-redacts the verdict before its first await, and uses adapter-private ingress. The pinned native
-surface exposes the requested child model but not an independently observed resolved model, so
-auditor identity remains unverified and true convergence blocks. Pi has no native completion veto;
+redacts the verdict before its first await, and uses adapter-private ingress. It ignores the
+configured result model and binds identity to the final native assistant record in the exact
+host-generated child session only when that record's verdict equals the admitted result. Missing
+or ambiguous session evidence remains unverified and blocks. Pi has no native completion veto;
 call `report_convergence` before any status claim. Bare `pi@0.84.1` without the subagent surface is
 unsupported.
 
