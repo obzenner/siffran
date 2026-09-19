@@ -99,9 +99,12 @@ test("Pi public tools and injected foreground observations satisfy adapter confo
     }) + "\n");
     const event: ToolResultEvent = {
       toolCallId: "pi-audit-1", toolName: "subagent",
-      content: "```empirica-verdict\n" + JSON.stringify(verdict) + "\n```",
+      content: ["output", "finalOutput"].map(() => ({
+        type: "text", text: "```empirica-verdict\n" + JSON.stringify(verdict) + "\n```",
+      })),
       details: { results: [{
         model: "bedrock/configured-auditor-model", sessionFile: nativeSession,
+        finalOutput: "```empirica-verdict\n" + JSON.stringify(verdict) + "\n```",
       }] },
     };
     const toolResult = pi.handlers.get("tool_result") as

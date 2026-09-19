@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { resultText } from "../src/audit.ts";
 import {
   identityFromSessionJsonl,
   sessionFileFromDetails,
@@ -20,6 +21,25 @@ function assistant(
 ): string {
   return line({ type: "message", message: { role: "assistant", content, provider, model } });
 }
+
+test("selects the exact child finalOutput instead of duplicated workflow rendering", () => {
+  assert.equal(resultText({
+    toolCallId: "audit",
+    content: [{ type: "text", text: `${BLOCK}\n${BLOCK}` }],
+    details: { results: [{ finalOutput: BLOCK }] },
+  }), BLOCK);
+});
+
+test("rejects ambiguous or malformed structured child result rows", () => {
+  assert.equal(resultText({
+    toolCallId: "audit", content: BLOCK,
+    details: { results: [{ finalOutput: BLOCK }, { finalOutput: BLOCK }] },
+  }), "");
+  assert.equal(resultText({
+    toolCallId: "audit", content: BLOCK,
+    details: { results: [{ output: BLOCK }] },
+  }), "");
+});
 
 test("extracts only a one-child host session path and ignores configured model metadata", () => {
   assert.equal(sessionFileFromDetails({ results: [{

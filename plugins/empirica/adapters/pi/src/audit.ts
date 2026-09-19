@@ -5,7 +5,17 @@ import type { ToolResultEvent } from "./pi-types.ts";
 const BLOCK = /```empirica-verdict\s*\n([\s\S]*?)\n```/g;
 
 export function resultText(event: ToolResultEvent): string {
-  const value = event.content ?? event.details ?? event.error ?? "";
+  let value = event.content ?? event.details ?? event.error ?? "";
+  if (event.details && typeof event.details === "object" && !Array.isArray(event.details)
+      && "results" in event.details) {
+    const results = (event.details as { results?: unknown }).results;
+    if (!Array.isArray(results) || results.length !== 1) return "";
+    const row = results[0];
+    if (!row || typeof row !== "object" || Array.isArray(row)) return "";
+    const finalOutput = (row as { finalOutput?: unknown }).finalOutput;
+    if (typeof finalOutput !== "string" || !finalOutput) return "";
+    value = finalOutput;
+  }
   if (typeof value === "string") return value;
   if (Array.isArray(value)) return value.map((item) => {
     if (item && typeof item === "object" && "text" in item)

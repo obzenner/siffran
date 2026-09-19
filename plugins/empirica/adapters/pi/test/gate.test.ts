@@ -280,9 +280,12 @@ test("tool_result redacts before privately admitting the correlated verdict", as
   }) + "\n");
   const event = {
     toolCallId: "tc-result", toolName: SUBAGENT_TOOL,
-    content: [{ type: "text", text: "```empirica-verdict\n{\"verdict\":\"pass\"}\n```" }],
+    content: ["output", "finalOutput"].map(() => ({
+      type: "text", text: "```empirica-verdict\n{\"verdict\":\"pass\"}\n```",
+    })),
     details: { results: [{ model: "configured/wrong-model", sessionFile: nativeSession,
-      output: "```empirica-verdict\n{\"verdict\":\"pass\"}\n```" }] },
+      output: "```empirica-verdict\n{\"verdict\":\"pass\"}\n```",
+      finalOutput: "```empirica-verdict\n{\"verdict\":\"pass\"}\n```" }] },
   };
   const handler = w.pi.handlers.get("tool_result") as
     (event: ToolResultEvent, ctx: ReturnType<typeof fakeCtx>) => Promise<unknown>;
@@ -318,6 +321,7 @@ test("missing native session keeps auditor identity unverified", async () => {
     content: "```empirica-verdict\n{\"verdict\":\"pass\"}\n```",
     details: { results: [{
       model: "bedrock/configured-model", sessionFile: "/missing/child-session.jsonl",
+      finalOutput: "```empirica-verdict\n{\"verdict\":\"pass\"}\n```",
     }] },
   };
   await (w.pi.handlers.get("tool_result") as
