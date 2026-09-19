@@ -4,7 +4,7 @@ Status: Claude and Pi foreground profiles promoted; Codex adapter WIP and unsupp
 
 ## Decision
 
-Empirica 2.1 supports the exact promoted Claude Code and Pi foreground profiles when each can
+Empirica 2.0 supports the exact promoted Claude Code and Pi foreground profiles when each can
 complete the same positive lifecycle through surfaces available to a real model:
 
 ```text
@@ -77,19 +77,20 @@ configuration remains insufficient identity evidence. The bounded adapter may pa
 final verdict and invoke private ingress, but attribution remains unverified and convergence blocks.
 The profile is `observational` and `wip_unsupported`; `foreground_only` is only a future candidate.
 
-## Red-first acceptance
+## Layered acceptance
 
-`make empirica-host-adapter-check` is the deterministic red-first layer. It must initially fail
-because the public server and host drivers are absent, but it never claims to launch an installed
-host. `make empirica-host-live-check` is the separate supported-release gate: it requires retained
-receipts from credentialed, installed Claude and Pi processes. Codex is deliberately excluded while
-its profile is `wip_unsupported`. `make release-check` requires deterministic conformance plus the
-supported-host receipts.
+`make empirica-host-adapter-check` is the deterministic layer. It was introduced red-first while
+the public server and host drivers were absent; it now stays green without claiming to launch an
+installed host. `make empirica-host-live-check` is the separate supported-release gate: a trusted
+release operator captures retained, candidate-bound Claude and Pi parent/child JSONL, durable state,
+and native version output. The verifier checks those structures and their internal correlation; it
+does not provide signatures or proof against operator fabrication. Codex is deliberately excluded
+while its profile is `wip_unsupported`.
 
-The deterministic adapter traces become green when each adapter translates its available native
-facts correctly. Claude and Pi reach `Allow(converged=true)` and their exact foreground profiles are
-promoted by retained credentialed installed-host traces. Codex 0.146.0 must end in
-`audit.independence_unverified`; this is correct fail-closed WIP behavior, not supported convergence.
+Claude and Pi reached `Allow(converged=true)` in installed foreground probes and their exact
+profiles were promoted. Release certification still requires fresh receipts from the exact final
+candidate. Codex 0.146.0 must end in `audit.independence_unverified`; this is correct fail-closed WIP
+behavior, not supported convergence.
 
 The acceptance matrix is layered rather than duplicated in every positive trace:
 

@@ -369,6 +369,12 @@ bump: ## Bump a plugin version: make bump PLUGIN=empirica PART=minor
 		printf 'plugins: $(PLUGIN_NAMES)\n' >&2; exit 2; fi
 	@$(PYTHON) $(SCRIPTS)/bump_version.py "$(PLUGIN)" "$(or $(PART),patch)"
 
+.PHONY: version-set
+version-set: ## Set an unreleased plugin version exactly: make version-set PLUGIN=empirica VERSION=2.0.0
+	@if [ -z "$(PLUGIN)" ] || [ -z "$(VERSION)" ]; then \
+		printf 'usage: make version-set PLUGIN=<name> VERSION=MAJOR.MINOR.PATCH\n' >&2; exit 2; fi
+	@$(PYTHON) $(SCRIPTS)/bump_version.py "$(PLUGIN)" "=$(VERSION)"
+
 .PHONY: docs
 docs: ## Explain how to regenerate the generated plugin tables
 	@printf '$(BOLD)==> generated docs$(RESET)\n'

@@ -106,8 +106,9 @@ For local development, install the checkout instead:
 pi install "$(pwd)"
 ```
 
-The exact Claude Code and Pi foreground profiles are promoted from credentialed installed-host
-traces. Codex is explicitly `wip_unsupported` and is not part of the supported release set.
+The exact Claude Code and Pi foreground profiles were promoted from installed-host observations;
+release certification additionally requires fresh operator-attested, candidate-bound structural
+receipts. Codex is explicitly `wip_unsupported` and is not part of the supported release set.
 `make empirica-host-live-check` requires exact receipts for Claude and Pi only; Pi and Claude async
 promotion remains separate and unsupported.
 
@@ -117,7 +118,7 @@ promotion remains separate and unsupported.
 | Plugin | Version | Description |
 |--------|---------|-------------|
 | `methodologist` | 0.9.0 | Formal reasoning catalog — lets users choose and execute evidence-backed CS/math methodologies with traced phases and structured output. |
-| `empirica` | 2.1.0 | Host-neutral empirical-convergence workflow — routes uncertainty into a claim graph, requires cited research before deterministic spikes, derives claim state, and binds convergence to a current independent audit. Full execution is hook-enforced only on profiles with author-action and bound-audit capabilities; unsupported profiles fail explicitly before starting. |
+| `empirica` | 2.0.0 | Host-neutral empirical-convergence workflow — routes uncertainty into a claim graph, requires cited research before deterministic spikes, derives claim state, and binds convergence to a current independent audit. Full execution is hook-enforced only on profiles with author-action and bound-audit capabilities; unsupported profiles fail explicitly before starting. |
 <!-- END GENERATED: plugins -->
 
 ## Development

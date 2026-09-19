@@ -1,13 +1,9 @@
-"""D6-A red strict tests for the future ``application.protocol``/``application.run_state``/v2 seam.
+"""D6 strict-v2 regression tests for the ``application.protocol``/``application.run_state`` seam.
 
-These tests are RED-first: they collect and execute fully, but every case fails because the
-production modules (``plugins/empirica/application/protocol.py``,
-``plugins/empirica/application/run_state.py``, ``plugins/empirica/application/v2.py``) are absent on
-the pre-D6-B tree. Each case imports those modules through a single seam helper and names the owner
-+ expected behavior in its failure message, so the suite reports each absent behavior by name
-rather than aborting on a global import error.
+These cases were introduced red-first on the pre-D6-B tree. They now execute against the shipped
+strict-v2 modules and preserve the original failure-specific assertions as regressions.
 
-Coverage (D6 spec section 10, required red tests):
+Coverage (D6 spec section 10):
 
 * raw request variants: null/empty/v1/future/partial protocol, None/{}/non-object, unknown/extra
   top-level/command/action fields;

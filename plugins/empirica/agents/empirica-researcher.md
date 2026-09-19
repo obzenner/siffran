@@ -39,8 +39,11 @@ open; a summary of docs you did not read; another model's assertion.
 
 The caller supplies the claim through the Empirica adapter/API. Never read or edit runtime state
 under `.claude/` or `.pi/`, and never edit `~/.empirica-plugin/` or `refs/empirica/*` directly.
-Return the structured record below to the caller; the host records the trusted evidence as a
-host-observed action — the author never submits the trusted ingress directly.
+Return the structured handoff below to the caller. For `supports` or `refutes`, the caller submits
+the canonical public `empirica_observe` research action: map `kind` to `source_kind`, `source` to
+`payload.source_ref`, and the citation/reasoning to `payload.observation`. The author never invokes
+trusted ingress. If the result is `inconclusive`, submit nothing and leave the claim open. See
+`skills/empirica/references/evidence.md` for the authoritative action shape.
 
 ## Output
 

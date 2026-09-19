@@ -18,9 +18,9 @@ dispatch and treats an unknown command or decision as `unsupported`, never as su
   (`contracts/empirica/v2/public-contract.json`), plus exact host profiles
   (`contracts/empirica/v2/host-profiles.json`) and request/response schemas. The
   `GetArgument` response projects the one canonical typed `artifacts` union
-  (research | `spike_request` | spike) as the public bounded provenance view. v2 is inert
-  structured data, not an interpreted policy engine; D2 creates the contract only and
-  does not change runtime dispatch or remove v1. v2 fixtures live under
+  (research | `spike_request` | spike) as the public bounded provenance view. v2 is the sole
+  Empirica runtime protocol: its registry is inert structured data consumed by the core and
+  adapters, with no v1 dispatch, migration, or fallback. v2 fixtures live under
   `contracts/empirica/v2/fixtures/`.
 - `methodologist/v1` — methodology selection and phase progression.
 - `obligations/v1` — immutable `require`/`forbid` obligations, exact witnesses, trusted observations, derived deterministic verdicts, and canonical agent-facing views. Witness refs follow `^[a-z][a-z0-9_-]*(/[A-Za-z0-9._:@-]+)+$`; the verifier's caller decides observation trust. Revisions are append-only, explicitly name their predecessor, and retain removed obligations as attributed retirement records. `contract.schema.json`, `observation.schema.json`, and `verdict.schema.json` define the wire values; the contract schema also exports `$defs/view` for host protocols.
