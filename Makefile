@@ -27,6 +27,7 @@ EMPIRICA_FRESHNESS_TESTS := $(PLUGINS_DIR)/empirica/tests/test_freshness.py
 EMPIRICA_OBSERVATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_observation.py
 EMPIRICA_EXECUTION_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/tests/test_execution_adapter.py
 EMPIRICA_PROTOCOL_ISOLATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_protocol_isolation.py
+EMPIRICA_LIVE_RECEIPT_TESTS := $(SCRIPTS)/tests/test_empirica_live_receipts.py
 EMPIRICA_D6_STRICT_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d6_strict_v2.py
 EMPIRICA_D7_LOCATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_location.py
 EMPIRICA_D7_TRANSACTION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_transactions.py
@@ -84,7 +85,7 @@ check-ci: check-static check-core check-claude check-codex ## Every suite except
 	@if [ "$(PI_CHECKS)" = "1" ]; then $(MAKE) check-pi; else printf '$(DIM)Pi suite skipped in CI (PI_CHECKS=1 to include)$(RESET)\n'; fi
 	@printf '\n$(BOLD)CI checks passed.$(RESET)\n'
 
-check-static: lint validate docs-check adr-check contract-check obligations-check vendor-check activation-check ## Lint, manifests, generated docs, ADR health, API/obligation contracts, vendor copy, activation isolation
+check-static: lint validate docs-check adr-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check ## Lint, manifests, generated docs, ADR health, API/obligation contracts, vendor copy, activation isolation
 	@printf '$(BOLD)==> static suite ok$(RESET)\n'
 
 check-core: ## Host-neutral core: obligations lib, Empirica core/application/state/git store, Methodologist core
@@ -255,6 +256,17 @@ empirica-host-adapter-check: ## validate public tools and three host adapter tra
 	@node --experimental-strip-types --test $(EMPIRICA_PI_ADAPTER_CONFORMANCE_TESTS)
 	@cd $(PLUGINS_DIR)/empirica/tests/v2 && PYTHONPATH=../.. $(PYTHON) -m unittest -v \
 		test_public_host_path.PublicHostPathTests
+
+.PHONY: empirica-host-receipt-unit-check
+empirica-host-receipt-unit-check: ## test structural installed-host receipt verification
+	@printf '$(BOLD)==> empirica receipt verifier$(RESET)\n'
+	@$(PYTHON) $(EMPIRICA_LIVE_RECEIPT_TESTS)
+
+.PHONY: empirica-host-receipt
+empirica-host-receipt: ## capture one operator-attested receipt: HOST=... TRANSCRIPT=... STATE=... CHILD_SESSION=... VERSION_OUTPUT=... COMMAND=... OUTPUT=...
+	@if [ -z "$(HOST)" ] || [ -z "$(TRANSCRIPT)" ] || [ -z "$(STATE)" ] || [ -z "$(CHILD_SESSION)" ] || [ -z "$(VERSION_OUTPUT)" ] || [ -z "$(COMMAND)" ] || [ -z "$(OUTPUT)" ]; then \
+		printf 'usage: make empirica-host-receipt HOST=claude|pi TRANSCRIPT=... STATE=... CHILD_SESSION=... VERSION_OUTPUT=... COMMAND=... OUTPUT=...\n' >&2; exit 2; fi
+	@$(PYTHON) $(SCRIPTS)/capture_empirica_live_receipt.py "$(HOST)" --transcript "$(TRANSCRIPT)" --state "$(STATE)" --child-session "$(CHILD_SESSION)" --version-output "$(VERSION_OUTPUT)" --command "$(COMMAND)" --output "$(OUTPUT)" --operator-attested
 
 .PHONY: empirica-host-live-check
 empirica-host-live-check: ## require retained installed-host Allow(converged=true) receipts
