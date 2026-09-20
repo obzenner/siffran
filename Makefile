@@ -85,7 +85,7 @@ check-ci: check-static check-core check-claude check-codex ## Every suite except
 	@if [ "$(PI_CHECKS)" = "1" ]; then $(MAKE) check-pi; else printf '$(DIM)Pi suite skipped in CI (PI_CHECKS=1 to include)$(RESET)\n'; fi
 	@printf '\n$(BOLD)CI checks passed.$(RESET)\n'
 
-check-static: lint validate docs-check adr-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check ## Lint, manifests, generated docs, ADR health, API/obligation contracts, vendor copy, activation isolation
+check-static: lint validate docs-check adr-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check ## Lint, manifests, generated docs, ADR health, API/obligation contracts, vendor copies, activation isolation
 	@printf '$(BOLD)==> static suite ok$(RESET)\n'
 
 check-core: ## Host-neutral core: obligations lib, Empirica core/application/state/git store, Methodologist core
@@ -179,9 +179,10 @@ obligations-check: ## Validate obligation schemas and substrate-neutral fixtures
 	@$(PYTHON) $(SCRIPTS)/validate_obligations.py
 
 .PHONY: vendor-check
-vendor-check: ## Verify Empirica's obligation package is byte-identical to the generic source
-	@printf '$(BOLD)==> obligation vendor$(RESET)\n'
+vendor-check: ## Verify Empirica's obligation and runtime-contract vendor copies
+	@printf '$(BOLD)==> Empirica vendor copies$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/check_vendor.py
+	@$(PYTHON) $(SCRIPTS)/check_contract_vendor.py
 
 .PHONY: activation-check
 activation-check: ## Verify Empirica runtime isolation and thin Claude hook activation
@@ -400,6 +401,10 @@ release-check: check empirica-architecture-check empirica-host-live-check ## Pre
 	@printf '  3. open or update the PR\n'
 
 ## --- Maintain
+
+.PHONY: vendor-contracts
+vendor-contracts: ## Regenerate Empirica's shipped runtime contracts from the repository SSOT
+	@$(PYTHON) $(SCRIPTS)/sync_contract_vendor.py
 
 .PHONY: pi-lock
 pi-lock: ## Refresh the root Pi package lockfile after dependency changes

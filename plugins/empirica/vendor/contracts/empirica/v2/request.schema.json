@@ -1,0 +1,1190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://siffran.dev/contracts/empirica/v2/request.schema.json",
+  "title": "Empirica v2 request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "request_id",
+    "command"
+  ],
+  "properties": {
+    "protocol": {
+      "const": "empirica/v2"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "command": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/startRun"
+        },
+        {
+          "$ref": "#/$defs/resolveRun"
+        },
+        {
+          "$ref": "#/$defs/observeAction"
+        },
+        {
+          "$ref": "#/$defs/evaluateRun"
+        },
+        {
+          "$ref": "#/$defs/getRun"
+        },
+        {
+          "$ref": "#/$defs/getArgument"
+        },
+        {
+          "$ref": "#/$defs/getContract"
+        },
+        {
+          "$ref": "#/$defs/restoreRun"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "runSelector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "project",
+        "session"
+      ],
+      "properties": {
+        "project": {
+          "type": "string",
+          "minLength": 1
+        },
+        "session": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_passes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_spawns": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "modes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "multi_provider": {
+          "type": "boolean"
+        },
+        "cli_exec": {
+          "type": "boolean"
+        }
+      }
+    },
+    "trustedEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capability_ref",
+        "boundary"
+      ],
+      "description": "Trusted-boundary capability reference. capability_ref is an opaque host/application-held reference, never a secret; committed examples redact it.",
+      "properties": {
+        "capability_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "boundary": {
+          "enum": [
+            "host",
+            "application"
+          ]
+        }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "description": "Extensible deep graph/evidence/actor domain data; only this object may carry D6-validated payload. The control object itself is closed."
+    },
+    "digest256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "nullableDigest256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "relativePosixPath": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Strict normalized repo-relative POSIX path shared with the response schema; rejects leading slash, drive/colon prefix, backslash/UNC, empty/repeated separator, and dot/dotdot segments.",
+      "pattern": "^(?!(?:\\.(?:/|$)))(?!(?:\\.\\.(?:/|$)))(?!.*/\\.(?:/|$))(?!.*/\\.\\.(?:/|$))[^\\\\/:]+(?:/[^\\\\/:]+)*$"
+    },
+    "fileBindingRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "description": "Closed file result binding for a trusted evidence_leaf; path is a strict normalized repo-relative POSIX path and sha256 is a digest256.",
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/relativePosixPath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest256"
+        }
+      }
+    },
+    "reviewedClaimItemRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim_id",
+        "evidence_digest"
+      ],
+      "description": "Closed reviewed-claim item for a trusted audit_verdict payload.",
+      "properties": {
+        "claim_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence_digest": {
+          "$ref": "#/$defs/digest256"
+        }
+      }
+    },
+    "childEventPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "native_id",
+        "fingerprint",
+        "result_digest"
+      ],
+      "description": "Closed trusted child_event payload. state is a canonical child state excluding reserved; native_id, fingerprint, and result_digest follow exact branch/null relations. No nested event alias.",
+      "properties": {
+        "state": {
+          "enum": [
+            "launching",
+            "pending",
+            "completed",
+            "launch_rejected",
+            "failed",
+            "cancelled",
+            "timed_out",
+            "orphaned"
+          ]
+        },
+        "native_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/digest256"
+        },
+        "result_digest": {
+          "$ref": "#/$defs/nullableDigest256"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "launching",
+                  "pending",
+                  "completed",
+                  "failed",
+                  "cancelled",
+                  "timed_out",
+                  "orphaned"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "native_id": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "native_id"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "launch_rejected"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "native_id": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "native_id"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "completed"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "result_digest": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              }
+            },
+            "required": [
+              "result_digest"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "launching",
+                  "pending",
+                  "launch_rejected",
+                  "failed",
+                  "cancelled",
+                  "timed_out",
+                  "orphaned"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "result_digest": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "result_digest"
+            ]
+          }
+        }
+      ]
+    },
+    "attributionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subject_kind",
+        "subject_id",
+        "child_id",
+        "provider_id",
+        "model_id",
+        "observed_by",
+        "covered_artifact_ids"
+      ],
+      "description": "Closed trusted attribution payload carrying normalized identity facts only; never independence, decorrelated, tier, or verdict. provider/model are both non-null or both null.",
+      "properties": {
+        "subject_kind": {
+          "enum": [
+            "covered_actor",
+            "auditor"
+          ]
+        },
+        "subject_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "child_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "provider_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "model_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "observed_by": {
+          "enum": [
+            "host",
+            "configuration"
+          ]
+        },
+        "covered_artifact_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/digest256"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "subject_kind": {
+                "const": "auditor"
+              }
+            },
+            "required": [
+              "subject_kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "child_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "covered_artifact_ids": {
+                "maxItems": 0
+              }
+            },
+            "required": [
+              "child_id",
+              "covered_artifact_ids"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "subject_kind": {
+                "const": "covered_actor"
+              }
+            },
+            "required": [
+              "subject_kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "child_id": {
+                "type": "null"
+              },
+              "covered_artifact_ids": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "child_id",
+              "covered_artifact_ids"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider_id": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "provider_id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "model_id": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "model_id"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "provider_id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "model_id": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "model_id"
+            ]
+          }
+        }
+      ]
+    },
+    "auditVerdictPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verdict",
+        "findings",
+        "argument_digest",
+        "goal_digest",
+        "frozen_scope_digest",
+        "deferred_scope_digest",
+        "reviewed_claims",
+        "scope_review"
+      ],
+      "description": "Closed trusted audit_verdict payload. frozen_scope_digest null requires scope_review null; non-null requires pass|fail. No independence/attribution/model/provider field.",
+      "properties": {
+        "verdict": {
+          "enum": [
+            "pass",
+            "fail"
+          ]
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "argument_digest": {
+          "$ref": "#/$defs/digest256"
+        },
+        "goal_digest": {
+          "$ref": "#/$defs/digest256"
+        },
+        "frozen_scope_digest": {
+          "$ref": "#/$defs/nullableDigest256"
+        },
+        "deferred_scope_digest": {
+          "$ref": "#/$defs/digest256"
+        },
+        "reviewed_claims": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/reviewedClaimItemRequest"
+          }
+        },
+        "scope_review": {
+          "enum": [
+            "pass",
+            "fail",
+            null
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "frozen_scope_digest": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "frozen_scope_digest"
+            ]
+          },
+          "then": {
+            "properties": {
+              "scope_review": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "scope_review"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "frozen_scope_digest": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "frozen_scope_digest"
+            ]
+          },
+          "then": {
+            "properties": {
+              "scope_review": {
+                "enum": [
+                  "pass",
+                  "fail"
+                ]
+              }
+            },
+            "required": [
+              "scope_review"
+            ]
+          }
+        }
+      ]
+    },
+    "evidenceLeafPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "harness_request_id",
+        "command_digest",
+        "prerequisite_research_ids",
+        "file_bindings",
+        "exit_code",
+        "result_digest"
+      ],
+      "description": "Closed trusted evidence_leaf payload for a deterministic harness spike result. Gate is derived from exit_code and not supplied; claim/command identity comes from the sealed request and is not caller repeated.",
+      "properties": {
+        "harness_request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command_digest": {
+          "$ref": "#/$defs/digest256"
+        },
+        "prerequisite_research_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/digest256"
+          }
+        },
+        "file_bindings": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "Closed file result bindings for a trusted evidence_leaf. uniqueItems rejects identical {path,sha256} objects; procedural validation additionally rejects duplicate normalized path even when hashes differ.",
+          "items": {
+            "$ref": "#/$defs/fileBindingRequest"
+          }
+        },
+        "exit_code": {
+          "type": "integer"
+        },
+        "result_digest": {
+          "$ref": "#/$defs/digest256"
+        }
+      }
+    },
+    "actionGraph": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "graph"
+        },
+        "payload": {
+          "$ref": "#/$defs/payload"
+        }
+      }
+    },
+    "actionResearch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "claim_id",
+        "source_kind",
+        "result"
+      ],
+      "properties": {
+        "kind": {
+          "const": "research"
+        },
+        "claim_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_kind": {
+          "enum": [
+            "docs",
+            "code",
+            "runtime",
+            "web"
+          ]
+        },
+        "result": {
+          "enum": [
+            "supports",
+            "refutes"
+          ]
+        },
+        "payload": {
+          "$ref": "#/$defs/payload"
+        }
+      }
+    },
+    "actionSpikeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "claim_id",
+        "command",
+        "dependent_files"
+      ],
+      "properties": {
+        "kind": {
+          "const": "spike_request"
+        },
+        "claim_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dependent_files": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^/].*$"
+          }
+        }
+      }
+    },
+    "actionConfigureRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "budgets"
+          ]
+        },
+        {
+          "required": [
+            "modes"
+          ]
+        }
+      ],
+      "properties": {
+        "kind": {
+          "const": "configure_run"
+        },
+        "budgets": {
+          "$ref": "#/$defs/budgets"
+        },
+        "modes": {
+          "$ref": "#/$defs/modes"
+        }
+      }
+    },
+    "actionRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "reason"
+      ],
+      "properties": {
+        "kind": {
+          "const": "route"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "actionInvestigate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "investigate"
+        }
+      }
+    },
+    "actionFreeze": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "freeze"
+        }
+      }
+    },
+    "actionDispatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "target"
+      ],
+      "properties": {
+        "kind": {
+          "const": "dispatch"
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "claim_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "actionChildReserve": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "purpose",
+        "role_profile",
+        "execution"
+      ],
+      "properties": {
+        "kind": {
+          "const": "child_reserve"
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role_profile": {
+          "type": "string",
+          "minLength": 1
+        },
+        "execution": {
+          "enum": [
+            "foreground",
+            "async"
+          ]
+        },
+        "deadline": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "actionEvidenceLeaf": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "trusted",
+        "payload"
+      ],
+      "properties": {
+        "kind": {
+          "const": "evidence_leaf"
+        },
+        "trusted": {
+          "$ref": "#/$defs/trustedEnvelope"
+        },
+        "payload": {
+          "$ref": "#/$defs/evidenceLeafPayload"
+        }
+      }
+    },
+    "actionAttribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "trusted",
+        "payload"
+      ],
+      "properties": {
+        "kind": {
+          "const": "attribution"
+        },
+        "trusted": {
+          "$ref": "#/$defs/trustedEnvelope"
+        },
+        "payload": {
+          "$ref": "#/$defs/attributionPayload"
+        }
+      }
+    },
+    "actionChildEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "trusted",
+        "child_id",
+        "payload"
+      ],
+      "properties": {
+        "kind": {
+          "const": "child_event"
+        },
+        "trusted": {
+          "$ref": "#/$defs/trustedEnvelope"
+        },
+        "child_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "payload": {
+          "$ref": "#/$defs/childEventPayload"
+        }
+      }
+    },
+    "actionAuditVerdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "trusted",
+        "child_id",
+        "payload"
+      ],
+      "properties": {
+        "kind": {
+          "const": "audit_verdict"
+        },
+        "trusted": {
+          "$ref": "#/$defs/trustedEnvelope"
+        },
+        "child_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "payload": {
+          "$ref": "#/$defs/auditVerdictPayload"
+        }
+      }
+    },
+    "action": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/actionGraph"
+        },
+        {
+          "$ref": "#/$defs/actionResearch"
+        },
+        {
+          "$ref": "#/$defs/actionSpikeRequest"
+        },
+        {
+          "$ref": "#/$defs/actionConfigureRun"
+        },
+        {
+          "$ref": "#/$defs/actionRoute"
+        },
+        {
+          "$ref": "#/$defs/actionInvestigate"
+        },
+        {
+          "$ref": "#/$defs/actionFreeze"
+        },
+        {
+          "$ref": "#/$defs/actionDispatch"
+        },
+        {
+          "$ref": "#/$defs/actionChildReserve"
+        },
+        {
+          "$ref": "#/$defs/actionEvidenceLeaf"
+        },
+        {
+          "$ref": "#/$defs/actionAttribution"
+        },
+        {
+          "$ref": "#/$defs/actionChildEvent"
+        },
+        {
+          "$ref": "#/$defs/actionAuditVerdict"
+        }
+      ]
+    },
+    "startRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "selector",
+        "goal"
+      ],
+      "properties": {
+        "type": {
+          "const": "StartRun"
+        },
+        "selector": {
+          "$ref": "#/$defs/runSelector"
+        },
+        "goal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "budgets": {
+          "$ref": "#/$defs/budgets"
+        },
+        "modes": {
+          "$ref": "#/$defs/modes"
+        }
+      }
+    },
+    "resolveRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "selector"
+      ],
+      "properties": {
+        "type": {
+          "const": "ResolveRun"
+        },
+        "selector": {
+          "$ref": "#/$defs/runSelector"
+        }
+      }
+    },
+    "observeAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "run_id",
+        "action"
+      ],
+      "properties": {
+        "type": {
+          "const": "ObserveAction"
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "action": {
+          "$ref": "#/$defs/action"
+        },
+        "observed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "evaluateRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "run_id",
+        "intent"
+      ],
+      "properties": {
+        "type": {
+          "const": "EvaluateRun"
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "intent": {
+          "enum": [
+            "continue",
+            "report_convergence",
+            "stop"
+          ]
+        },
+        "observed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "getRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "run_id"
+      ],
+      "properties": {
+        "type": {
+          "const": "GetRun"
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "getArgument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "run_id"
+      ],
+      "properties": {
+        "type": {
+          "const": "GetArgument"
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "getContract": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/getContractIndex"
+        },
+        {
+          "$ref": "#/$defs/getContractSection"
+        },
+        {
+          "$ref": "#/$defs/getContractFull"
+        }
+      ]
+    },
+    "restoreRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "run_id"
+      ],
+      "properties": {
+        "type": {
+          "const": "RestoreRun"
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "getContractIndex": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "target"
+      ],
+      "properties": {
+        "type": {
+          "const": "GetContract"
+        },
+        "target": {
+          "const": "index"
+        }
+      }
+    },
+    "getContractSection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "target",
+        "section_id"
+      ],
+      "properties": {
+        "type": {
+          "const": "GetContract"
+        },
+        "target": {
+          "const": "section"
+        },
+        "section_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "getContractFull": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "target"
+      ],
+      "properties": {
+        "type": {
+          "const": "GetContract"
+        },
+        "target": {
+          "const": "full"
+        }
+      }
+    }
+  }
+}

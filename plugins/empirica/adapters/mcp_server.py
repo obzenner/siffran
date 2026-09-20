@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared Claude/Codex MCP transport for Empirica's public v2 tools."""
+"""Claude/Codex MCP 2025-11-25 stdio transport for Empirica's public tools."""
 from __future__ import annotations
 
 import json
@@ -13,7 +13,7 @@ if str(_PLUGIN_ROOT) not in sys.path:
 
 from adapters.public_tools import PublicTools  # noqa: E402
 
-DEFAULT_PROTOCOL_VERSION = "2025-11-25"
+PROTOCOL_VERSION = "2025-11-25"
 
 
 def profile_from_environment(environ: dict[str, str] | None = None) -> str:
@@ -55,9 +55,10 @@ def handle_message(message: object, tools: PublicTools) -> dict[str, object] | N
         return None
     if method == "initialize":
         params = message.get("params")
-        requested = params.get("protocolVersion") if isinstance(params, dict) else None
+        if not isinstance(params, dict) or not isinstance(params.get("protocolVersion"), str):
+            return _error(request_id, -32602, "Invalid initialization")
         return {"jsonrpc": "2.0", "id": request_id, "result": {
-            "protocolVersion": requested if isinstance(requested, str) else DEFAULT_PROTOCOL_VERSION,
+            "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {"tools": {"listChanged": False}},
             "serverInfo": {"name": "empirica", "version": _version()},
         }}

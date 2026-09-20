@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://siffran.dev/contracts/empirica/v2/public-contract.schema.json",
+  "title": "Empirica v2 public contract registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id", "version", "protocol", "commands", "decisions", "statuses",
+    "actions", "child_lifecycle", "host_tiers",
+    "claim_states", "claim_kinds", "audit_states", "independence_states", "freshness_states",
+    "artifact_kinds", "artifact_outcomes", "spike_gates",
+    "attribution_subject_kinds", "attribution_observers", "audit_verdicts", "scope_reviews",
+    "mode_fields", "operation_contexts", "untrusted_delimiters", "presentation_selector",
+    "next_actions", "reasons", "sections"
+  ],
+  "properties": {
+    "id": {"const": "empirica/public"},
+    "version": {"const": "2.0.0"},
+    "protocol": {"const": "empirica/v2"},
+    "commands": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "decisions": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "statuses": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "actions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["author", "host", "trusted"],
+      "properties": {
+        "author": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "host": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "trusted": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true}
+      }
+    },
+    "child_lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["states", "terminal_states", "transitions"],
+      "properties": {
+        "states": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "terminal_states": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "transitions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["from", "to"],
+            "properties": {"from": {"type": "string", "minLength": 1}, "to": {"type": "string", "minLength": 1}}
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "host_tiers": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "claim_states": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "claim_kinds": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "minItems": 1},
+    "audit_states": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "independence_states": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "freshness_states": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "artifact_kinds": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "minItems": 1},
+    "artifact_outcomes": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "minItems": 1},
+    "spike_gates": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "minItems": 1},
+    "attribution_subject_kinds": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "minItems": 1},
+    "attribution_observers": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "minItems": 1},
+    "audit_verdicts": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "minItems": 1},
+    "scope_reviews": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "minItems": 1},
+    "mode_fields": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "operation_contexts": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "untrusted_delimiters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["open", "close"],
+      "properties": {
+        "open": {"type": "string", "minLength": 1},
+        "close": {"type": "string", "minLength": 1}
+      }
+    },
+    "presentation_selector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["context_sections", "terminal_sections", "unknown_reason_sections"],
+      "description": "Canonical ordered presentation selector registry (D1 §12). The JSON registry is the executable SSOT; exact operation-context key parity and section resolution are enforced procedurally (no Python selector mapping).",
+      "properties": {
+        "context_sections": {
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[a-z][a-z0-9_.-]*$": {
+              "type": "array",
+              "items": {"type": "string", "minLength": 1},
+              "uniqueItems": true
+            }
+          }
+        },
+        "terminal_sections": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "unknown_reason_sections": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true,
+          "minItems": 1
+        }
+      }
+    },
+    "next_actions": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-z][a-z0-9_.-]*$": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["description", "params"],
+          "properties": {
+            "description": {"type": "string", "minLength": 1},
+            "params": {"type": "object"}
+          }
+        }
+      }
+    },
+    "reasons": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-z][a-z0-9_.-]*$": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["params", "next_actions", "sections", "message"],
+          "properties": {
+            "params": {"type": "object"},
+            "next_actions": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+            "sections": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+            "message": {"type": "string"}
+          }
+        }
+      }
+    },
+    "sections": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-z][a-z0-9_/.-]*$": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["title", "summary", "clauses"],
+          "properties": {
+            "title": {"type": "string", "minLength": 1},
+            "summary": {"type": "string"},
+            "clauses": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "text"],
+                "properties": {"id": {"type": "string", "minLength": 1}, "text": {"type": "string", "minLength": 1}}
+              },
+              "uniqueItems": true
+            }
+          }
+        }
+      }
+    }
+  }
+}

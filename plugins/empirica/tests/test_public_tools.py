@@ -2,7 +2,12 @@
 """Red-first contract for the shared model-callable Empirica v2 public tools."""
 from __future__ import annotations
 
+import json
+import os
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -118,6 +123,30 @@ class PublicToolContractTests(unittest.TestCase):
 
 
 class McpTransportTests(unittest.TestCase):
+    @staticmethod
+    def _tools():
+        from adapters.public_tools import PublicTools
+
+        return PublicTools(
+            "claude-code@2.1.270",
+            dispatch=lambda request, _profile: {
+                "protocol": "empirica/v2",
+                "request_id": request["request_id"],
+                "result": {"type": "Inert", "reason": "no_run"},
+            },
+        )
+
+    @staticmethod
+    def _initialize(version: str = "2025-11-25"):
+        return {
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {
+                "protocolVersion": version,
+                "capabilities": {},
+                "clientInfo": {"name": "test-client", "version": "1"},
+            },
+        }
+
     def test_profile_is_bound_by_host_environment(self):
         from adapters.mcp_server import profile_from_environment
 
@@ -132,25 +161,53 @@ class McpTransportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             profile_from_environment({})
 
+    def test_initialize_uses_the_latest_revision_supported_by_claude_code(self):
+        from adapters.mcp_server import handle_message
+
+        exact = handle_message(self._initialize(), self._tools())["result"]
+        self.assertEqual(exact["protocolVersion"], "2025-11-25")
+        self.assertEqual(exact["capabilities"], {"tools": {"listChanged": False}})
+
+        fallback = handle_message(self._initialize("1900-01-01"), self._tools())["result"]
+        self.assertEqual(fallback["protocolVersion"], "2025-11-25")
+
+        invalid = handle_message(
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            self._tools(),
+        )
+        self.assertEqual(invalid["error"]["code"], -32602)
+
     def test_mcp_lists_the_same_three_public_tools(self):
         from adapters.mcp_server import handle_message
-        from adapters.public_tools import PublicTools
 
-        tools = PublicTools(
-            "claude-code@2.1.270",
-            dispatch=lambda request, _profile: {
-                "protocol": "empirica/v2",
-                "request_id": request["request_id"],
-                "result": {"type": "Inert", "reason": "no_run"},
-            },
-        )
         response = handle_message(
-            {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, tools
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+            self._tools(),
         )
         self.assertEqual(
             [item["name"] for item in response["result"]["tools"]],
             ["empirica_read", "empirica_observe", "report_convergence"],
         )
+
+    def test_plugin_copy_starts_without_repository_root_contracts(self):
+        with tempfile.TemporaryDirectory() as temp:
+            isolated = Path(temp) / "empirica"
+            shutil.copytree(PLUGIN, isolated)
+            requests = [
+                self._initialize(),
+                {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+            ]
+            env = {**os.environ, "CLAUDE_PLUGIN_ROOT": str(isolated)}
+            env.pop("PYTHONPATH", None)
+            result = subprocess.run(
+                [sys.executable, str(isolated / "adapters/mcp_server.py")],
+                input="".join(json.dumps(row) + "\n" for row in requests),
+                text=True, capture_output=True, cwd=temp, env=env, check=True,
+            )
+        responses = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual(responses[0]["result"]["protocolVersion"], "2025-11-25")
+        self.assertEqual(len(responses[1]["result"]["tools"]), 3)
 
 
 if __name__ == "__main__":
