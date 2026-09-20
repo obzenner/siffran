@@ -1,16 +1,6 @@
-"""Strict v2 request protocol seam (D6 spec §6).
+"""Strict v2 protocol over the plugin-vendored canonical contracts.
 
-Sole internal loader/root discovery: loads the PublicContract, request/response/state schemas, and
-host profiles once from the repo and computes the canonical PublicContract SHA256 over strict
-canonical JSON; exposes the private constants sibling modules consume.
-``dispatch_request(raw, handler)`` is the service's only public-request gateway: it validates the
-raw value against the closed request schema, calls ``handler`` exactly once with the valid
-discriminated envelope, validates the handler response against the response schema, requires the
-response request_id to equal the request request_id, and applies the response fallback. Invalid
-wire returns exact Fault ``invalid_request``/closed with a safe request-id fallback. A malformed,
-exceptional, or request-id-mismatched handler response becomes an exact schema-valid
-``unavailable``/closed Fault without recursive validation loops. Trusted payload shape never grants
-capability admission (handled by the service, not here).
+``make vendor-check`` keeps the shipped copy byte-identical to the repository SSOT.
 """
 from __future__ import annotations
 
@@ -22,15 +12,9 @@ from pathlib import Path
 import jsonschema
 from referencing import Registry, Resource
 
-# Sole internal loader: PublicContract, request/response/state schemas, host profiles (SSOT).
-# Canonical PublicContract SHA256 over strict canonical JSON.
+# Sole internal loader and canonical PublicContract digest.
 
-_ROOT = Path(__file__).resolve()
-for _ in range(8):
-    if (_ROOT / "contracts" / "empirica" / "v2" / "public-contract.json").exists():
-        break
-    _ROOT = _ROOT.parent
-_V2 = _ROOT / "contracts" / "empirica" / "v2"
+_V2 = Path(__file__).resolve().parents[1] / "vendor/contracts/empirica/v2"
 
 _PUBLIC_CONTRACT = json.loads((_V2 / "public-contract.json").read_text(encoding="utf-8"))
 _REQUEST_SCHEMA = json.loads((_V2 / "request.schema.json").read_text(encoding="utf-8"))

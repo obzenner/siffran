@@ -1,9 +1,6 @@
-"""Shared model-callable projection of Empirica's public v2 driving surface.
+"""Model-callable projection of Empirica's public v2 surface.
 
-This adapter contains no convergence policy. It mechanically projects author action
-schemas from the canonical PublicContract/request schema, wraps tool arguments in a
-correlated v2 envelope, and delegates to the one public bridge dispatcher. Trusted
-ingress functions are deliberately neither imported nor registered.
+Schemas are derived from the canonical contracts; trusted ingress is never registered.
 """
 from __future__ import annotations
 
@@ -25,7 +22,8 @@ REPORT_TOOL = "report_convergence"
 _TOOL_ORDER = (READ_TOOL, OBSERVE_TOOL, REPORT_TOOL)
 _AUTHOR_KINDS = frozenset(_protocol._PUBLIC_CONTRACT["actions"]["author"])
 _PROFILES = frozenset(_protocol._PROFILES)
-_PUBLIC_TOOL_ARTIFACT = Path(__file__).resolve().parents[3] / "contracts" / "empirica" / "v2" / "public-tools.json"
+_PUBLIC_TOOL_ARTIFACT = (Path(__file__).resolve().parents[1]
+                         / "vendor/contracts/empirica/v2/public-tools.json")
 
 Dispatch = Callable[[dict, str], dict]
 
