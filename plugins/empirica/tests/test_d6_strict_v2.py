@@ -12,12 +12,12 @@ Coverage (D6 spec section 10):
 * response self-validation fallback is forced through ``dispatch_request(raw, handler)`` with an
   injected malformed handler, counted exactly one call, and is exact v2 ``unavailable``/closed,
   schema-valid, correlated, and nonrecursive;
-* identity classification: old/unsupported vs current-corrupt; valid roundtrip via
-  ``classify_and_decode`` → ``classification.kind`` and ``classification.state.encode()``;
+* persisted-state classification: exact valid current v2 or one corrupt category; valid roundtrip
+  via ``classify_and_decode`` and ``encode_state``;
 * strict state roundtrip (no defaults) using the committed valid-active fixture;
 * invalid child/counters/stamps/duplicates/NaN/Inf deadlines;
-* old/current-corrupt GetRun/RestoreRun/EvaluateRun through the composed service and a recording
-  repository, exact canonical failure-safe Blocks, injected canaries absent, zero writes;
+* rejected persisted-state GetRun/RestoreRun/EvaluateRun through the composed service and a
+  recording repository: exact canonical corrupt Blocks, fixed safe fields, canaries absent, zero writes;
 * valid-current StartRun/GetRun/RestoreRun exact unsupported/closed;
 * compact exactly ``{"status":"unsupported"}``, operational_state exactly ``{}``, reload distinct
   with equivalent behavior over the same recording ports.
@@ -55,10 +55,9 @@ _HOST_PROFILES = json.loads((_V2 / "host-profiles.json").read_text(encoding="utf
 _VALID_ACTIVE_STATE = json.loads(
     (_V2 / "state-fixtures" / "valid-active.json").read_text(encoding="utf-8"))
 
-# Load the committed block-old-version fixture expected as the SSOT for the old-version
-# failure-safe Block (no hardcoded contract digest or full Block in test code).
-_BLOCK_OLD_VERSION_FIXTURE = json.loads(
-    (_V2 / "fixtures" / "block-old-version.json").read_text(encoding="utf-8"))
+# Canonical failure-safe projection for every rejected persisted aggregate.
+_BLOCK_CORRUPT_FIXTURE = json.loads(
+    (_V2 / "fixtures" / "block-corrupt-state.json").read_text(encoding="utf-8"))
 
 _PROTOCOL = _PUBLIC_CONTRACT["protocol"]
 _COMMANDS = list(_PUBLIC_CONTRACT["commands"])
@@ -189,51 +188,14 @@ class RecordingRunRepository:
         return rev
 
 
-def _expected_old_version_block(run_id: str, goal: str, request_id: str = "r") -> dict:
-    """Build the exact expected failure-safe Block for an old-version run, based on the
-    accepted block-old-version fixture SSOT (deep-copied and parameterized only by
-    request_id, run.id, and allowed goal).
-
-    The fixture carries the canonical contract identity/digest, host profile, sections,
-    obligations, residuals, freshness, children, and reason with exact actions/sections/message.
-    No code/actions/message are copied — they come from the fixture."""
+def _expected_corrupt_block(run_id: str, goal: str = "Unsupported run state.",
+                            request_id: str = "r") -> dict:
+    """Build the exact canonical Block for any rejected persisted aggregate."""
     import copy
-    block = copy.deepcopy(_BLOCK_OLD_VERSION_FIXTURE["expected"])
+    block = copy.deepcopy(_BLOCK_CORRUPT_FIXTURE["expected"])
     block["request_id"] = request_id
     block["result"]["run"]["id"] = run_id
     block["result"]["run"]["goal"] = goal
-    return block
-
-
-def _expected_corrupt_block(run_id: str, goal: str, request_id: str = "r") -> dict:
-    """Build the exact expected failure-safe Block for a corrupt run, based on the
-    block-old-version fixture SSOT deep-copy with the corrupt reason substituted from the
-    canonical PublicContract registry.
-
-    The corrupt reason (code/parameters/next_actions/sections/message) is derived by
-    deep-copying ``_PUBLIC_CONTRACT['reasons']['run.corrupt']`` — no copied code/actions/
-    message in test code."""
-    import copy
-    block = copy.deepcopy(_BLOCK_OLD_VERSION_FIXTURE["expected"])
-    block["request_id"] = request_id
-    block["result"]["run"]["id"] = run_id
-    block["result"]["run"]["goal"] = goal
-    # Derive the corrupt reason by deep-copying the canonical registry reason and
-    # substituting it; no copied code/actions/message in test code. The registry
-    # ``params`` is a JSON Schema, not an instance: validate {} against it and set
-    # ``parameters`` to that validated instance ({}) so the response carries a valid
-    # instance, not the schema object.
-    corrupt_reason_spec = copy.deepcopy(_PUBLIC_CONTRACT["reasons"]["run.corrupt"])
-    params_instance: dict = {}
-    jsonschema.validate(instance=params_instance,
-                        schema=corrupt_reason_spec.get("params", {}))
-    block["result"]["reasons"][0] = {
-        "code": "run.corrupt",
-        "parameters": params_instance,
-        "next_actions": copy.deepcopy(corrupt_reason_spec.get("next_actions", [])),
-        "sections": copy.deepcopy(corrupt_reason_spec.get("sections", [])),
-        "message": copy.deepcopy(corrupt_reason_spec.get("message", "")),
-    }
     return block
 
 
@@ -253,13 +215,31 @@ class D6ProtocolPrevalidation(unittest.TestCase):
                 jsonschema.validate(instance=env, schema=_REQUEST_SCHEMA)
 
     def test_all_author_action_samples_validate_request_schema(self):
-        """Every author action sample validates against request.schema.json."""
+        """Every author action sample validates; research provenance is mandatory."""
         for action_kind in _AUTHOR_ACTIONS:
             with self.subTest(action=action_kind):
                 action = _build_action_sample(action_kind)
                 env = _valid_request({"type": "ObserveAction", "run_id": "r1",
                                        "action": action})
                 jsonschema.validate(instance=env, schema=_REQUEST_SCHEMA)
+        complete = _build_action_sample("research")
+        for label, payload in (
+            ("missing_payload", None),
+            ("missing_source_ref", {"citation": "Observed line."}),
+            ("missing_citation", {"source_ref": "src/example.py:1"}),
+            ("empty_source_ref", {"source_ref": "", "citation": "Observed line."}),
+            ("empty_citation", {"source_ref": "src/example.py:1", "citation": ""}),
+        ):
+            with self.subTest(research=label):
+                action = dict(complete)
+                if payload is None:
+                    action.pop("payload")
+                else:
+                    action["payload"] = payload
+                env = _valid_request({"type": "ObserveAction", "run_id": "r1",
+                                       "action": action})
+                with self.assertRaises(jsonschema.ValidationError):
+                    jsonschema.validate(instance=env, schema=_REQUEST_SCHEMA)
 
     def test_trusted_fixture_requests_validate_request_schema(self):
         """The four accepted observe-fixture requests (trusted actions) validate against
@@ -283,13 +263,9 @@ class D6ProtocolPrevalidation(unittest.TestCase):
         self.assertEqual(_VALID_ACTIVE_STATE["status"], "active")
         self.assertTrue(_VALID_ACTIVE_STATE["children"])
 
-    def test_expected_old_and_corrupt_blocks_validate_response_schema(self):
-        """Both representative expected old-version and corrupt Blocks validate against the
-        v2 response schema (production-independent prevalidation). The corrupt reason
-        parameters must be a valid instance ({}), not the params schema object."""
-        old_block = _expected_old_version_block("r-old", "A legacy goal.")
-        jsonschema.validate(instance=old_block, schema=_RESPONSE_SCHEMA)
-        corrupt_block = _expected_corrupt_block("r-corrupt", "Unsupported run state.")
+    def test_expected_corrupt_block_validates_response_schema(self):
+        """The canonical rejected-state Block validates independently of production."""
+        corrupt_block = _expected_corrupt_block("r-corrupt")
         jsonschema.validate(instance=corrupt_block, schema=_RESPONSE_SCHEMA)
         # Verify corrupt parameters is an instance, not a schema object.
         corrupt_reason = corrupt_block["result"]["reasons"][0]
@@ -323,7 +299,9 @@ def _build_action_sample(kind: str) -> dict:
     if kind == "graph":
         return {"kind": "graph"}
     if kind == "research":
-        return {"kind": "research", "claim_id": "C0", "source_kind": "code", "result": "supports"}
+        return {"kind": "research", "claim_id": "C0", "source_kind": "code",
+                "result": "supports", "payload": {
+                    "source_ref": "src/example.py:1", "citation": "Observed line."}}
     if kind == "spike_request":
         return {"kind": "spike_request", "claim_id": "C0", "command": "pytest",
                 "dependent_files": ["f.py"]}
@@ -540,15 +518,14 @@ class D6StrictRunStateTests(unittest.TestCase):
     """D6-A red strict tests for ``application.run_state`` (future module).
 
     The frozen codec seam is ``classify_and_decode(raw)`` returning a typed immutable
-    classification with ``kind`` (``old_unsupported|current_corrupt|valid``) and, only when
-    valid, an immutable ``state`` whose ``encode()`` reproduces the exact closed document
-    without defaults.
+    classification with ``kind`` (``current_corrupt|valid``) and, only when valid, an immutable
+    ``state`` whose ``encode()`` reproduces the exact closed document without defaults.
     """
 
     GOAL = "Prove strict v2 state identity classification and codec."
 
-    def test_identity_classification_old_unsupported(self):
-        """missing/null/empty/v1/future/unknown protocol → old/unsupported."""
+    def test_every_noncurrent_identity_is_corrupt(self):
+        """Missing/null/empty/v1/future/unknown persisted identity is corrupt, never compatible."""
         mod = _import_run_state()
         for raw in (
             {"status": "active"},
@@ -560,8 +537,8 @@ class D6StrictRunStateTests(unittest.TestCase):
         ):
             with self.subTest(raw=raw):
                 classification = mod.classify_and_decode(raw)
-                self.assertEqual(classification.kind, "old_unsupported",
-                                 f"raw {raw!r} must classify old_unsupported")
+                self.assertEqual(classification.kind, "current_corrupt",
+                                 f"raw {raw!r} must classify current_corrupt")
 
     def test_identity_classification_current_corrupt_wrong_schema(self):
         """exact protocol==empirica/v2 + missing/wrong state_schema → current-corrupt."""
@@ -681,7 +658,7 @@ class D6StrictRunStateTests(unittest.TestCase):
         old = {"protocol": "empirica/v1", "status": "active", "goal": "legacy"}
         snapshot = json.loads(json.dumps(old))
         mod.classify_and_decode(old)
-        self.assertEqual(old, snapshot, "classify_and_decode must not mutate old state")
+        self.assertEqual(old, snapshot, "classify_and_decode must not mutate rejected state")
 
 
 class D6MinimalServiceTests(unittest.TestCase):
@@ -736,11 +713,10 @@ class D6MinimalServiceTests(unittest.TestCase):
         self.assertEqual(result["code"], "unsupported")
         self.assertEqual(result["fail_direction"], "closed")
 
-    # ---- old/corrupt state failure-safe projection through service dispatch ----
+    # ---- rejected persisted state failure-safe projection through service dispatch ----
 
-    def test_old_state_get_run_failure_safe_block(self):
-        """Old-state GetRun through the composed service returns exact failure-safe
-        run.old_version Block; injected canaries absent; zero writes."""
+    def test_noncurrent_state_get_run_is_corrupt(self):
+        """Noncurrent GetRun returns run.corrupt with fixed safe fields, no canary, zero writes."""
         runs = RecordingRunRepository()
         canary = "CANARY_OLD_GET_001"
         old_state = {"protocol": "empirica/v1", "status": "converged", "goal": "A legacy goal.",
@@ -750,19 +726,18 @@ class D6MinimalServiceTests(unittest.TestCase):
         resp = service.dispatch(_valid_request({"type": "GetRun", "run_id": "r-old"},
                                                 request_id="r"))
         jsonschema.validate(instance=resp, schema=_RESPONSE_SCHEMA)
-        expected = _expected_old_version_block("r-old", "A legacy goal.")
+        expected = _expected_corrupt_block("r-old", "Unsupported run state.")
         self.assertEqual(resp, expected,
-                         "old-state GetRun must return the exact canonical failure-safe Block")
+                         "noncurrent GetRun must return the exact canonical corrupt Block")
         # canary must be absent from the response
         self.assertNotIn(canary, json.dumps(resp),
                          "injected canary must not appear in the failure-safe projection")
         # zero writes
-        self.assertEqual(runs.create_calls, 0, "old-state read must perform zero creates")
-        self.assertEqual(runs.cas_calls, 0, "old-state read must perform zero CAS writes")
+        self.assertEqual(runs.create_calls, 0, "rejected-state read must perform zero creates")
+        self.assertEqual(runs.cas_calls, 0, "rejected-state read must perform zero CAS writes")
 
-    def test_old_state_restore_run_failure_safe_block(self):
-        """Old-state RestoreRun through the composed service returns exact failure-safe
-        run.old_version Block; canaries absent; zero writes."""
+    def test_noncurrent_state_restore_run_is_corrupt(self):
+        """Noncurrent RestoreRun returns run.corrupt with no semantic reuse or writes."""
         runs = RecordingRunRepository()
         canary = "CANARY_OLD_RESTORE_002"
         old_state = {"protocol": "empirica/v1", "status": "converged", "goal": "A legacy goal.",
@@ -772,15 +747,14 @@ class D6MinimalServiceTests(unittest.TestCase):
         resp = service.dispatch(_valid_request({"type": "RestoreRun", "run_id": "r-old"},
                                                 request_id="r"))
         jsonschema.validate(instance=resp, schema=_RESPONSE_SCHEMA)
-        expected = _expected_old_version_block("r-old", "A legacy goal.")
+        expected = _expected_corrupt_block("r-old", "Unsupported run state.")
         self.assertEqual(resp, expected)
         self.assertNotIn(canary, json.dumps(resp))
         self.assertEqual(runs.create_calls, 0)
         self.assertEqual(runs.cas_calls, 0)
 
-    def test_old_state_evaluate_run_failure_safe_block(self):
-        """Old-state EvaluateRun through the composed service returns exact failure-safe
-        run.old_version Block; canaries absent; zero writes."""
+    def test_noncurrent_state_evaluate_run_is_corrupt(self):
+        """Noncurrent EvaluateRun returns run.corrupt with no semantic reuse or writes."""
         runs = RecordingRunRepository()
         canary = "CANARY_OLD_EVAL_003"
         old_state = {"protocol": "empirica/v1", "status": "active", "goal": "Legacy.",
@@ -791,7 +765,7 @@ class D6MinimalServiceTests(unittest.TestCase):
             {"type": "EvaluateRun", "run_id": "r-old", "intent": "report_convergence"},
             request_id="r"))
         jsonschema.validate(instance=resp, schema=_RESPONSE_SCHEMA)
-        expected = _expected_old_version_block("r-old", "Legacy.")
+        expected = _expected_corrupt_block("r-old", "Unsupported run state.")
         self.assertEqual(resp, expected)
         self.assertNotIn(canary, json.dumps(resp))
         self.assertEqual(runs.create_calls, 0)
@@ -846,7 +820,7 @@ class D6MinimalServiceTests(unittest.TestCase):
         jsonschema.validate(instance=resp, schema=_RESPONSE_SCHEMA)
         # goal is already a string ("ok"); fixed safe text applies only when goal is
         # missing or non-string, so the expected goal is the raw goal itself.
-        expected = _expected_corrupt_block("r-corrupt", "ok")
+        expected = _expected_corrupt_block("r-corrupt")
         self.assertEqual(resp, expected)
         self.assertNotIn(canary, json.dumps(resp))
         self.assertEqual(runs.create_calls, 0)
@@ -876,7 +850,7 @@ class D6MinimalServiceTests(unittest.TestCase):
         reloaded = service.reload()
         self.assertIsNot(reloaded, service, "reload must return a DISTINCT shell")
         # equivalent behavior: the reloaded shell over the same recording ports produces the
-        # same old-version Block for the same old-state run
+        # same corrupt-state Block for the same rejected persisted run
         resp1 = service.dispatch(_valid_request({"type": "GetRun", "run_id": "r-old"},
                                                  request_id="r"))
         resp2 = reloaded.dispatch(_valid_request({"type": "GetRun", "run_id": "r-old"},

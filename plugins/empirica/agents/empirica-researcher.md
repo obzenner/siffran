@@ -41,7 +41,8 @@ The caller supplies the claim through the Empirica adapter/API. Never read or ed
 under `.claude/` or `.pi/`, and never edit `~/.empirica-plugin/` or `refs/empirica/*` directly.
 Return the structured handoff below to the caller. For `supports` or `refutes`, the caller submits
 the canonical public `empirica_observe` research action: map `kind` to `source_kind`, `source` to
-`payload.source_ref`, and the citation/reasoning to `payload.observation`. The author never invokes
+`payload.source_ref`, and the exact quoted citation to `payload.citation`. Keep reasoning in the
+handoff for the caller/auditor; do not substitute reasoning for a citation. The author never invokes
 trusted ingress. If the result is `inconclusive`, submit nothing and leave the claim open. See
 `skills/empirica/references/evidence.md` for the authoritative action shape.
 

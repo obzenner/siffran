@@ -168,6 +168,25 @@ class BudgetFreezeTerminalTests(ConformanceCase):
         self.assertFalse(c1_after[0].get("gating", True),
                          "C1 must be deferred (not gating) after a second freeze")
 
+    def test_frozen_claim_deletion_fails_closed(self):
+        drv = self.bind_driver(
+            "D7", "case-18",
+            "Freeze C0 and C1, then reject a replacement graph that silently deletes C1; the "
+            "committed graph remains selected while graph additions remain covered separately")
+        run_id = self.start_run(drv, goal=self.GOAL)
+        frozen_graph = self.require_graph_admitted(
+            drv, run_id, canonical_graph(n_claims=2, kind="ordinary"))
+        frozen_ids = [c["id"] for c in frozen_graph["claims"]]
+        self.require_frozen_scope(drv, run_id)
+        response = self.dispatch(drv, observe_action(
+            run_id=run_id, action=action_graph(
+                payload=canonical_graph(n_claims=1, kind="ordinary"))))
+        self.assert_block_reason(response, "graph.invalid")
+        argument = self.assert_argument_view(
+            self.dispatch(drv, get_argument(run_id=run_id))["result"])
+        self.assertEqual([c["claim_id"] for c in argument["claims"]], frozen_ids,
+                         "rejected deletion must leave the committed graph selected")
+
     # 19 — Committed frozen scope remains the only gating/audited scope; later claims deferred
     def test_committed_frozen_scope_only_gating_scope(self):
         drv = self.bind_driver(

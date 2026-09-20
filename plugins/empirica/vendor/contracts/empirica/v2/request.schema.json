@@ -116,6 +116,27 @@
       "type": "object",
       "description": "Extensible deep graph/evidence/actor domain data; only this object may carry D6-validated payload. The control object itself is closed."
     },
+    "researchPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_ref",
+        "citation"
+      ],
+      "properties": {
+        "source_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "citation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observed_content_digest": {
+          "$ref": "#/$defs/digest256"
+        }
+      }
+    },
     "digest256": {
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$"
@@ -646,7 +667,8 @@
         "kind",
         "claim_id",
         "source_kind",
-        "result"
+        "result",
+        "payload"
       ],
       "properties": {
         "kind": {
@@ -671,7 +693,7 @@
           ]
         },
         "payload": {
-          "$ref": "#/$defs/payload"
+          "$ref": "#/$defs/researchPayload"
         }
       }
     },

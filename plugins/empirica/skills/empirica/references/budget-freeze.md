@@ -36,6 +36,8 @@ Freeze is an explicit scope commitment, not convergence.
 
 - The first accepted freeze wins.
 - It commits the currently gating claim IDs.
+- Every later graph must retain every committed ID; omission fails closed as
+  `graph.invalid` and leaves the selected graph unchanged.
 - Claims added later are deferred rather than silently included.
 - Every committed claim still needs its evidence and passing audit.
 - Deferred claims remain visible in the terminal handoff.

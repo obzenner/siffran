@@ -2,7 +2,7 @@
 
 **Status:** Parent-frozen implementation specification; normative machine files are created in D2.
 
-**Protocol:** `empirica/v2` only. A v1/old-state run is never migrated or adjudicated.
+**Protocol:** `empirica/v2` only. Every other wire identity is invalid and every other persisted identity is corrupt.
 
 **Companion:** `empirica-2.0-d1h-host-capabilities.md`.
 
@@ -144,7 +144,7 @@ but never changes status or produces a later convergence result.
 Author-accessible:
 
 ```text
-graph             canonical current argument graph
+graph             canonical current root-connected claim-dependency DAG
 research          one externally observed citation bound to a claim
 spike_request     request trusted deterministic harness execution against active research and declared dependent files
 configure_run     budget/mode changes while active
@@ -154,6 +154,11 @@ dispatch          actor/claim assignment witness
 freeze            first-write-wins committed claim scope
 child_reserve     request a host child for a declared purpose
 ```
+
+The v2 graph admits only unique, acyclic `SupportedBy` edges directed from a claim to its supporting
+claim. Endpoints must be known and distinct, and every claim must be reachable from the declared
+root. Invalid candidates produce `graph.invalid` before persistence; an invalid persisted selected
+graph makes the aggregate `run.corrupt`.
 
 Trusted adapter/application only:
 
@@ -267,8 +272,10 @@ Requirements:
   prerequisite and is fresh;
 - refutation: active refuting research or active failing deterministic spike;
 - `needs-decision`: cannot be agent-approved; becomes human residual;
-- simultaneous active support and refutation fails closed as an evidence conflict; it does not select
-  the truthy result. The author must resolve/supersede the conflicting record or stop with residual.
+- simultaneous active supporting and refuting research fails closed as an evidence conflict; it does
+  not select either research result. An active failing deterministic spike is the machine falsifier
+  and refutes the claim even though supporting research was a prerequisite to run it. The author
+  must resolve/supersede conflicting research or stop with residual.
 
 ## 6. Workspace observation and re-gate
 
@@ -402,7 +409,7 @@ writing another label.
 
 - root refuted: stopped residual, never converged;
 - unresolved human/data hold: stopped residual;
-- committed frozen scope discharged with later claims: stopped frozen, non-converged;
+- committed frozen scope discharged with later claims: stopped frozen, non-converged; every later graph retains all committed claim IDs or fails closed without replacing the selected graph;
 - budget exhausted: stopped budget, non-converged;
 - all committed claims approved/fresh and independent audit current/passing: converged.
 
@@ -434,7 +441,6 @@ the host but must preserve IDs and parameters.
 | Code | Default next action(s) | Contract section |
 |---|---|---|
 | `run.no_active` | `run.start_fresh` | `run/lifecycle` |
-| `run.old_version` | `run.start_fresh` | `run/lifecycle` |
 | `run.terminal` | `run.inspect` | `terminal` |
 | `run.corrupt` | `run.start_fresh` | `run/lifecycle` |
 | `graph.missing` | `run.inspect` | `claims/graph` |
@@ -542,22 +548,12 @@ Private capabilities are always redacted.
 Every Block is diagnosable from `reason.code`, parameters, affected obligation/witness, current
 observation, and next actions without parsing prose.
 
-## 14. Strict refusal of old state
+## 14. Strict rejection of every noncurrent persisted aggregate
 
-Before semantic decoding, raw persisted state must contain exact protocol identifier `empirica/v2`
-and a supported exact state schema version. Missing, null, unknown, future, v1, or structurally
-incompatible identity is old/unsupported state; no field defaults, migration, artifact selection,
-evidence evaluation, or terminal inference may run. Corrupt v2 identity/encoding returns
-`run.corrupt`; recognized non-v2 returns `run.old_version`.
-
-For old/unsupported state:
-
-- do not decode it as v2;
-- do not import/migrate it;
-- preserve/display only independently safe selector/goal text where available;
-- return `run.old_version` and `run.start_fresh`;
-- never report old convergence or evidence as current;
-- provide no compatibility writer or migration target.
+Before semantic decoding, persisted state must contain the exact `empirica/v2` protocol and current
+state-schema identity, satisfy the closed schema and procedural invariants, and reference a
+consistent history. Every other aggregate returns `run.corrupt` and `run.start_fresh`, contributes
+no public fields, and receives no defaults, migration, inference, adjudication, or repair.
 
 ## 15. D2/D4 acceptance fixtures
 
@@ -583,8 +579,9 @@ D2 creates schema/registry fixtures; D4 makes them behaviorally executable. Requ
 - freshness TOCTOU retries/reobserves or fails closed;
 - route ordering, freeze first-write-wins, terminal honesty, corrupt graph/state;
 - deterministic progressive selection, unknown fallback, and context upper bounds;
-- old v1, versionless, null, future/unknown, partially matching, truncated, and falsely-converged state
-  refusal with fresh-run guidance and no legacy artifact adjudication;
+- noncurrent, versionless, null, future/unknown, partially matching, truncated, and
+  falsely-converged persisted state all return the same safe `run.corrupt` projection with no field
+  reuse or artifact adjudication;
 - private capability absent from every public fixture/view.
 
 ## 16. Explicit non-goals

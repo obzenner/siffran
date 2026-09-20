@@ -130,28 +130,15 @@ audit ticket/nonce, composite verdict, `is_legacy`, migration marker, or host pr
 
 ## 5. Identity classification before decode
 
-`classify_and_decode(raw)` performs only identity classification before schema validation:
+`classify_and_decode(raw)` accepts only an object with exact `empirica/v2` and current state-schema
+identity that passes the closed schema and procedural invariants. Every other value is one
+`current_corrupt` classification; only `valid` carries an immutable state whose `encode()`
+reproduces the exact document. Classification never selects artifacts, defaults fields, migrates,
+infers terminality, evaluates evidence, or reuses rejected fields.
 
-1. non-object or exact `protocol==empirica/v2` plus missing/wrong `state_schema` → current-corrupt;
-2. object with missing/null/empty/v1/future/unknown protocol → old/unsupported;
-3. exact protocol and exact state schema → validate full schema + procedural invariants;
-4. valid → immutable RunState; invalid → current-corrupt.
-
-It never selects artifacts, defaults fields, migrates, infers terminality, or evaluates evidence.
-The frozen codec seam returns a typed immutable classification with `kind`
-(`old_unsupported|current_corrupt|valid`) and, only when valid, an immutable state whose `encode()`
-reproduces the exact closed document without defaults. No separate public encode/decode helpers are
-required. Old state exposes only independently safe goal text when it is already a string; all other
-semantics are ignored.
-
-Restore maps old/unsupported to sole `run.old_version` Block and current-corrupt to sole `run.corrupt`
-Block, both with canonical registry reason/actions/sections and one narrowly named failure-safe
-RunView. That view is mechanically based on the accepted old-version fixture: requested run ID,
-raw goal only when already a string (otherwise exact fixed text `Unsupported run state.`), fixed
-`status=active`, both modes
-false, canonical contract identity/digest and exact fixture sections `run/lifecycle`,`protocol`, empty
-obligations/residuals/freshness/children, and composed host profile facts. It never copies raw status,
-mode, child, counter, pointer, terminal, or evidence values. No old state is rewritten.
+Every rejected aggregate maps to sole `run.corrupt` with the fixed safe goal
+`Unsupported run state.`, canonical contract/profile facts, and empty projected operational facts.
+No rejected state is rewritten or repaired.
 
 ## 6. Strict request protocol
 

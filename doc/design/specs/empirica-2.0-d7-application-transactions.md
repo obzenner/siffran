@@ -35,7 +35,7 @@ This spec applies functional decomposition (Dijkstra/Parnas/Simon), abstraction 
 | "CAS updates bump the generation to avoid conflicts" | **CAS updates the same generation.** Only a terminal/corrupt selector starts the next generation; a live run never changes generation mid-flight. |
 | "D7 will make D4 cases 1–44 green" | **D7 owns cases 2–5, 16, 18–20 only.** Case 17 and whole case 21 are D8; case 1 and 36–44 are D9; 6–15 are D5 owner. |
 | "Inert carries run.no_active/run.terminal with a RunView" | **Inert carries only schema enum `no_run`/`unsupported_host_event` and no RunView.** `run.no_active`/`run.terminal` are Block reason codes. |
-| "Missing graph → graph.missing, malformed → graph.invalid" | **Both missing and malformed selected graph → `graph.invalid` Block.** |
+| "Missing graph → graph.missing, malformed → graph.invalid" | **No selected graph when required yields `graph.invalid`; a persisted selected-graph pointer whose artifact is missing, malformed, or structurally invalid makes the aggregate `run.corrupt`.** |
 | "Terminal runs report a `failed` status" | **No `failed` status.** Terminal statuses: `converged`, `stopped_residual`, `stopped_frozen`, `stopped_budget`. |
 | "Storage IDs use `sha256:<64hex>`" | **Storage IDs use `s256-<64hex>`.** |
 | "compose takes an allocator parameter" | **compose keeps its current signature; the located facade wraps the allocator internally.** |
@@ -64,7 +64,12 @@ This is the sole committed-history visibility pointer: the content digest of the
 
 ### 5.3 Graph failure
 
-`graph.invalid` applies **only** to `EvaluateRun`, `GetArgument`, and graph-dependent `ObserveAction` (actions that require a selected graph to decide). When the manifest chain is valid but `selected_graph_artifact_id` is null, unreachable from the committed head, missing, or malformed, the command fails closed `graph.invalid`. A fresh `StartRun`, `ResolveRun`, or `GetRun` may `Allow` a complete `RunView` with a **null graph pointer** and **no `ArgumentView`** — these commands do not require a selected graph and never produce `graph.invalid`.
+`graph.invalid` applies to a missing required graph or an invalid candidate graph. A candidate is
+validated before artifact creation and cannot replace the selected graph when invalid. Once state
+contains `selected_graph_artifact_id`, that exact artifact must be reachable, decodable, and a valid
+strict dependency DAG; otherwise the persisted aggregate is `run.corrupt`. A fresh `StartRun`,
+`ResolveRun`, or `GetRun` may `Allow` a complete `RunView` with a null graph pointer and no
+`ArgumentView` because no selected graph is yet claimed.
 
 ## 6. OperationalState value type
 
@@ -103,7 +108,7 @@ Manifest ID is its content digest. The coordinator constructs the manifest; the 
 
 ### 7.2 Committed-history traversal
 
-Starting from `committed_artifact_head_id` in the state, traverse the manifest chain (via `parent` links) over the physical artifact set. This defines the committed ordered history and the D2C artifact sequence. Active heads derive only from this reachable history. Unreachable orphans (appended but not linked) are ignored. Missing, malformed, cyclic, duplicate-ref, wrong-kind, or wrong-head manifests, or a latest `next_state_digest` mismatch, are **snapshot/history corruption**: they produce a `run.corrupt` Block (not a `run_state` codec `current_corrupt` classification). The `run_state` codec only validates the head field grammar (null or well-formed `digest256`); manifest chain integrity is checked during traversal, not during codec classification. When the manifest chain is valid but the selected graph artifact is null, unreachable from the committed head, missing, or malformed, the failure is `graph.invalid` (§5.3), not `run.corrupt` — a valid manifest chain with a bad graph is a graph problem, not history corruption.
+Starting from `committed_artifact_head_id` in the state, traverse the manifest chain (via `parent` links) over the physical artifact set. This defines the committed ordered history and the D2C artifact sequence. Active heads derive only from this reachable history. Unreachable orphans (appended but not linked) are ignored. Missing, malformed, cyclic, duplicate-ref, wrong-kind, or wrong-head manifests, a missing/malformed/structurally invalid selected graph artifact, or a latest `next_state_digest` mismatch are **snapshot/history corruption**: they produce a fixed-safe `run.corrupt` Block. A null selected pointer remains valid operational state until a command requires a graph.
 
 ### 7.3 Transaction state machine
 
@@ -238,11 +243,11 @@ Never use `Inert` with `run.no_active` or `run.terminal` — those are Block rea
 | GetArgument on terminal run | `Allow` current `RunView` **and** `ArgumentView` assembled from exact fresh D5 `ObservationSnapshot` for all active spikes, projecting current freshness/derived claim/audit/obligation facts; `converged` iff `status == "converged"`; no state transition, CAS, or status change; `converged` boolean remains historical from immutable status |
 | EvaluateRun `report_convergence` / `stop` on terminal run | `Allow` current `RunView` assembled from exact fresh D5 `ObservationSnapshot` for all active spikes, projecting current freshness/derived claim/audit/obligation facts; `converged` iff `status == "converged"`; no state transition, CAS, or status change; `converged` boolean remains historical from immutable status |
 
-A terminal `GetArgument` returns both the current `RunView` and the current `ArgumentView` (active evidence derived from committed history). If the manifest chain is malformed/missing/cyclic/duplicate/wrong-kind or the latest `next_state_digest` mismatches (§7.2), the response is `Block` `run.corrupt` — a corrupt committed history cannot yield a truthful `ArgumentView`. If the manifest chain is valid but the selected graph is null/missing/unreachable/malformed (§5.3), the response is `Block` `graph.invalid` instead of `Allow` — a valid history with a bad graph cannot yield a truthful `ArgumentView`.
+A terminal `GetArgument` returns both the current `RunView` and the current `ArgumentView` only when committed history and the selected graph are valid. Any malformed/missing reachable history, state-witness mismatch, or missing/malformed/structurally invalid selected graph artifact produces fixed-safe `run.corrupt`; a corrupt aggregate cannot yield a truthful projection.
 
 ### 10.3 Block
 
-Block is used for active-run failures requiring Block + RunView (e.g., `run.corrupt`, `run.old_version`, `graph.invalid`, `route.required`, `budget.exhausted`). Block `run.terminal` is used only if a canonical operation explicitly requires Block + RunView. No new schema, reason code, or response field.
+Block is used for active-run failures requiring Block + RunView (e.g., `run.corrupt`, `graph.invalid`, `route.required`, `budget.exhausted`). Block `run.terminal` is used only if a canonical operation explicitly requires Block + RunView. No new schema, reason code, or response field.
 
 ### 10.4 Active-evidence derivation (D2C)
 
@@ -292,7 +297,7 @@ Dependency direction (D3 enforced): `core/*` is pure (imports only `core` siblin
 | 2 | Route must precede investigate; investigate-first Blocks `route.required` | D7 green |
 | 3 | Valid route then investigation proceeds (Allow + witness) | D7 green |
 | 4 | Claim state derived; only committed support scope gates | D7 green |
-| 5 | Missing/malformed selected graph fails closed `graph.invalid` | D7 green |
+| 5 | Missing required graph or invalid candidate fails `graph.invalid`; corrupt persisted selected graph fails `run.corrupt` | D7 green |
 | 16 | Derivation and spawn limits enforce structured budget Blocks | D7 green |
 | 18 | Freeze first-write-wins under repeated/conflicting requests | D7 green |
 | 19 | Committed frozen scope remains sole gating/audited scope; later claims deferred | D7 green |
@@ -335,7 +340,7 @@ Per-slice runtime is measured, not suggested. Each slice reports physical LOC de
 - **Overlap one lexical call:** overlapping active spike paths observed in one deduplicated batch.
 - **Full recompute:** any state-bearing read/commit recomputes active evidence from complete committed history.
 - **Idempotent append:** retry re-appends same content → no duplicate.
-- **Corrupt/absent fail closed:** corrupt manifest chain → `run.corrupt` Block; absent selector → `Inert` `no_run`; null/missing/unreachable/malformed graph with valid manifest chain → `graph.invalid` Block.
+- **Corrupt/absent fail closed:** corrupt manifest chain or selected persisted graph → `run.corrupt` Block; absent selector → `Inert` `no_run`; null graph pointer is valid until an operation requires a graph.
 - **Manifest traversal:** cyclic/missing/duplicate/wrong-kind manifest → `run.corrupt` Block; orphan ignored; selected graph reachable.
 - **Spike two-commit:** request committed before harness; execute once; result committed; conflict retries result commit without rerun; crash-safe orphan.
 - **Terminal response exact:** GetRun/GetArgument/RestoreRun/Evaluate(stop/report_convergence) on terminal → Allow (converged iff status converged); Evaluate(continue)/ObserveAction/ingress on terminal → Inert `no_run`.
@@ -346,7 +351,7 @@ Per-slice runtime is measured, not suggested. Each slice reports physical LOC de
 - **Concurrent/stale-writer retry:** two writers race CAS; loser retries fresh snapshot; final revision coherent.
 - **Idempotency:** retried mutating commit → same state; no duplicate artifacts; no double pass.
 - **Append-then-pointer ordering:** orphan append unselected; successful commit has consistent pointers.
-- **Fail-closed reads:** read against corrupt/missing/cyclic/duplicate/wrong-kind manifest chain or `next_state_digest` mismatch fails closed `run.corrupt`; read against null/missing/unreachable/malformed graph with valid manifest chain fails closed `graph.invalid`; capture/`ObservationUnavailable` fails closed `Fault` `unavailable`/`closed` immediately with no retry; never approves.
+- **Fail-closed reads:** read against corrupt/missing/cyclic/duplicate/wrong-kind committed history, a state-witness mismatch, or a missing/malformed/structurally invalid persisted selected graph fails fixed-safe `run.corrupt`; capture/`ObservationUnavailable` fails closed `Fault` `unavailable`/`closed` immediately with no retry; never approves.
 
 ## 17. Runtime budget
 

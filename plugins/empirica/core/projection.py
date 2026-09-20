@@ -4,8 +4,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .evaluation import (EvaluationSnapshot, active_evidence, audit_attributions, claim_digest,
-                         claim_state, digest, identity_pair, stale_artifact_ids)
+from .evaluation import (EvaluationSnapshot, active_evidence, audit_attributions, claim_conflicted,
+                         claim_digest, claim_state, digest, identity_pair, stale_artifact_ids)
 
 
 def _copy(value: Any) -> Any:
@@ -81,11 +81,14 @@ def _residuals(snapshot: EvaluationSnapshot) -> list[dict[str, Any]]:
     if status == "stopped_frozen":
         return []
     if status == "stopped_residual" and snapshot.graph:
+        conflicted = any(claim_conflicted(snapshot, c) for c in snapshot.graph["claims"])
         discarded = any(claim_state(snapshot, c) == "discarded" for c in snapshot.graph["claims"])
-        code = "claim.refuted" if discarded else "claim.research_missing"
+        code = "claim.refuted" if discarded else ("evidence.conflict" if conflicted
+                                                   else "claim.research_missing")
         metadata = ({"next_actions": ["run.inspect"], "sections": ["claims/refutation"]}
-                    if discarded else
-                    {"next_actions": ["research.record"], "sections": ["evidence/research"]})
+                    if discarded else ({"next_actions": ["run.inspect", "residual.accept"],
+                    "sections": ["claims/refutation"]} if conflicted else
+                    {"next_actions": ["research.record"], "sections": ["evidence/research"]}))
         return [{"code": code, "parameters": {}, **metadata}]
     return []
 
@@ -173,7 +176,10 @@ def project_argument(snapshot: EvaluationSnapshot) -> dict[str, Any]:
                   "kind": kind, "statement_digest": art["statement_digest"]}
         if kind == "research":
             common.update(active=art["artifact_id"] in active_ids, outcome=art["outcome"],
-                          source_kind=art["source_kind"], source_ref=art["source_ref"])
+                          source_kind=art["source_kind"], source_ref=art["source_ref"],
+                          citation=art["citation"])
+            if "observed_content_digest" in art:
+                common["observed_content_digest"] = art["observed_content_digest"]
         elif kind == "spike_request":
             common.update(harness_request_id=art["harness_request_id"], command=art["command"],
                           command_digest=art["command_digest"], dependent_files=art["dependent_files"],

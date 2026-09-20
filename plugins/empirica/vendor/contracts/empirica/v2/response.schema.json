@@ -227,21 +227,6 @@
           ],
           "properties": {
             "code": {
-              "const": "run.old_version"
-            },
-            "parameters": {
-              "$ref": "#/$defs/emptyParams"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "code",
-            "parameters"
-          ],
-          "properties": {
-            "code": {
               "const": "run.terminal"
             },
             "parameters": {
@@ -1578,8 +1563,7 @@
         },
         "type": {
           "enum": [
-            "SupportedBy",
-            "InContextOf"
+            "SupportedBy"
           ]
         }
       }
@@ -1611,7 +1595,8 @@
         "active",
         "outcome",
         "source_kind",
-        "source_ref"
+        "source_ref",
+        "citation"
       ],
       "description": "Fold-1 research citation; no spike fields.",
       "properties": {
@@ -1655,6 +1640,13 @@
         "source_ref": {
           "type": "string",
           "minLength": 1
+        },
+        "citation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observed_content_digest": {
+          "$ref": "#/$defs/digest256"
         }
       }
     },

@@ -13,13 +13,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from application import protocol  # noqa: E402
-from application.snapshot import (HistoryCorrupt, make_artifact, state_digest,  # noqa: E402
-                                  traverse_history)
+from application.snapshot import (HistoryCorrupt, graph_from_history, make_artifact,  # noqa: E402
+                                  state_digest, traverse_history)
 from application.ports import CapturedFile, HarnessResult, WorkspaceCapture  # noqa: E402
-from application.run_state import decode_state  # noqa: E402
+from application.run_state import decode_state, encode_state  # noqa: E402
 from application.location import encode_handle, storage_id  # noqa: E402
 from application.transaction import Coordinator  # noqa: E402
-from core.evaluation import EvaluationSnapshot, artifact  # noqa: E402
+from core.evaluation import (EvaluationSnapshot, artifact, audit_binding, audit_passes,  # noqa: E402
+                             evaluate_snapshot)
 from core.freshness import FileObservation, ObservationState, canonical_digest  # noqa: E402
 from core.projection import project_runview  # noqa: E402
 from core.records import (ABSENT, Artifact, Conflict, Corrupt, Present, Revision,  # noqa: E402
@@ -215,7 +216,9 @@ class D7TransactionTests(unittest.TestCase):
                          "action": {"kind": "graph", "payload": graph}}
         research_command = {"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "research", "claim_id": "C0",
-                                       "source_kind": "code", "result": "supports"}}
+                                       "source_kind": "code", "result": "supports", "payload": {
+                                           "source_ref": "test_d7_transactions.py",
+                                           "citation": "Repeated artifact fixture."}}}
         for command in (graph_command, graph_command, research_command, research_command):
             self.assertEqual(coordinator.handle(command, "repeat")["result"]["type"], "Allow")
         key = next(iter(runs.data))
@@ -252,14 +255,16 @@ class D7TransactionTests(unittest.TestCase):
                             "action": {"kind": "graph", "payload": graph}}, "g")
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "research", "claim_id": "C0",
-                                       "source_kind": "code", "result": "supports"}}, "r")
+                                       "source_kind": "code", "result": "supports", "payload": {
+                                           "source_ref": "test_d7_transactions.py",
+                                           "citation": "Derivation fixture."}}}, "r")
         command = {"type": "EvaluateRun", "run_id": run_id, "intent": "report_convergence"}
         coordinator.handle(command, "e1")
         coordinator.handle(command, "e2")
         key = next(iter(runs.data))
         self.assertEqual(runs.data[key].value["budgets"]["passes_used"], 1)
 
-    def test_corrupt_repository_read_blocks_get_but_resolve_is_inert(self):
+    def test_corrupt_repository_read_blocks_get_and_resolve(self):
         runs, artifacts_repo = Runs(), Artifacts()
         coordinator = Coordinator(Workspace(), Harness(), runs, artifacts_repo, "pi@0.84.1+pi-subagents@0.50.0", {})
         key = RunKey(storage_id("p"), storage_id("s"), 1)
@@ -269,7 +274,43 @@ class D7TransactionTests(unittest.TestCase):
         self.assertEqual(get_response["result"]["reasons"][0]["code"], "run.corrupt")
         resolve = coordinator.handle({"type": "ResolveRun",
                                       "selector": {"project": "p", "session": "s"}}, "resolve")
-        self.assertEqual(resolve["result"], {"type": "Inert", "reason": "no_run"})
+        self.assertEqual(resolve["result"]["type"], "Block")
+        self.assertEqual(resolve["result"]["reasons"][0]["code"], "run.corrupt")
+
+    def test_inconsistent_frozen_history_uses_fixed_safe_corrupt_projection(self):
+        runs, artifacts_repo = Runs(), Artifacts()
+        coordinator = Coordinator(Workspace(), Harness(), runs, artifacts_repo,
+                                  "pi@0.84.1+pi-subagents@0.50.0", {})
+        started = coordinator.handle({"type": "StartRun", "selector": {"project": "p", "session": "s"},
+                                      "goal": "CANARY_REJECTED_GOAL"}, "start")
+        run_id = started["result"]["run"]["id"]
+        graph = {"root": "C0", "claims": [{"id": "C0", "text": "t", "gating": True,
+                                               "kind": "ordinary"}], "edges": []}
+        coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                            "action": {"kind": "graph", "payload": graph}}, "graph")
+        coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                            "action": {"kind": "freeze"}}, "freeze")
+        key = next(iter(runs.data))
+        state = decode_state(runs.data[key].value)
+        bad_graph = {"root": "R", "claims": [{"id": "R", "text": "replacement",
+                                                  "gating": True, "kind": "ordinary"}], "edges": []}
+        graph_artifact = make_artifact({"kind": "graph", "graph": bad_graph})
+        artifacts_repo.append(key, graph_artifact)
+        next_state = replace(state, selected_graph_artifact_id=graph_artifact.artifact_id)
+        manifest = make_artifact({"kind": "transaction_manifest", "version": 1,
+            "parent": state.committed_artifact_head_id, "artifact_ids": [graph_artifact.artifact_id],
+            "observation_basis_id": "test", "observation_digest": "sha256:" + "0" * 64,
+            "next_state_digest": state_digest(next_state)})
+        artifacts_repo.append(key, manifest)
+        committed = replace(next_state, committed_artifact_head_id=manifest.artifact_id)
+        runs.data[key] = Present(encode_state(committed), Revision("inconsistent"))
+        writes_before = runs.cas_calls
+        response = coordinator.handle({"type": "GetRun", "run_id": run_id}, "get")
+        self.assertEqual(response["result"]["type"], "Block")
+        self.assertEqual(response["result"]["reasons"][0]["code"], "run.corrupt")
+        self.assertEqual(response["result"]["run"]["goal"], "Unsupported run state.")
+        self.assertNotIn("CANARY_REJECTED_GOAL", json.dumps(response))
+        self.assertEqual(runs.cas_calls, writes_before)
 
     def test_read_revision_change_retries_before_projection(self):
         runs, artifacts_repo, workspace = Runs(), Artifacts(), Workspace()
@@ -282,6 +323,32 @@ class D7TransactionTests(unittest.TestCase):
         response = coordinator.handle({"type": "GetRun", "run_id": run_id}, "read")
         self.assertEqual(response["result"]["type"], "Allow")
         self.assertGreaterEqual(runs.read_calls - baseline, 4)
+
+    def test_invalid_dependency_candidate_has_zero_writes(self):
+        def claim(cid):
+            return {"id": cid, "text": cid, "gating": True, "kind": "ordinary"}
+        invalid = (
+            {"root": "C0", "claims": [claim("C0")],
+             "edges": [{"from": "C0", "to": "C0", "type": "SupportedBy"}]},
+            {"root": "C0", "claims": [claim("C0"), claim("C1")], "edges": []},
+            {"root": "C0", "claims": [claim("C0"), claim("C1")],
+             "edges": [{"from": "C0", "to": "C1", "type": "SupportedBy"},
+                       {"from": "C0", "to": "C1", "type": "SupportedBy"}]},
+        )
+        for candidate in invalid:
+            with self.subTest(candidate=candidate):
+                runs, artifacts_repo = Runs(), Artifacts()
+                coordinator = Coordinator(Workspace(), Harness(), runs, artifacts_repo,
+                                          "pi@0.84.1+pi-subagents@0.50.0", {})
+                started = coordinator.handle({"type": "StartRun",
+                    "selector": {"project": "p", "session": "s"}, "goal": "g"}, "start")
+                key = next(iter(runs.data))
+                writes = (runs.cas_calls, len(artifacts_repo.values[key]))
+                response = coordinator.handle({"type": "ObserveAction",
+                    "run_id": started["result"]["run"]["id"],
+                    "action": {"kind": "graph", "payload": candidate}}, "graph")
+                self.assertEqual(response["result"]["reasons"][0]["code"], "graph.invalid")
+                self.assertEqual((runs.cas_calls, len(artifacts_repo.values[key])), writes)
 
     def test_post_plan_capture_tracks_disjoint_graph_heads(self):
         runs, artifacts_repo, workspace, harness = Runs(), Artifacts(), Workspace(), Harness()
@@ -298,7 +365,9 @@ class D7TransactionTests(unittest.TestCase):
         for claim, path in (("C0", "src/0.py"), ("C1", "src/1.py")):
             coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                                 "action": {"kind": "research", "claim_id": claim,
-                                           "source_kind": "code", "result": "supports"}}, "r")
+                                           "source_kind": "code", "result": "supports", "payload": {
+                                               "source_ref": "test_d7_transactions.py",
+                                               "citation": "Post-plan capture fixture."}}}, "r")
             workspace.write(path, claim.encode())
             response = coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                                            "action": {"kind": "spike_request", "claim_id": claim,
@@ -320,7 +389,7 @@ class D7TransactionTests(unittest.TestCase):
         self.assertEqual(len(workspace.calls) - before, 1,
                          "state-only commit must reuse the evaluated observation")
 
-    def test_resolve_retry_reapplies_terminal_and_corrupt_semantics(self):
+    def test_resolve_retry_rejects_mutated_terminal_and_corrupt_state(self):
         for replacement in ("terminal", "corrupt"):
             with self.subTest(replacement=replacement):
                 runs, artifacts_repo = Runs(), Artifacts()
@@ -339,17 +408,42 @@ class D7TransactionTests(unittest.TestCase):
                 runs.replace_on_read[baseline + 2] = value
                 response = coordinator.handle({"type": "ResolveRun",
                                                "selector": {"project": "p", "session": "s"}}, "r")
-                self.assertEqual(response["result"], {"type": "Inert", "reason": "no_run"})
+                self.assertEqual(response["result"]["type"], "Block")
+                self.assertEqual(response["result"]["reasons"][0]["code"], "run.corrupt")
 
-    def test_selected_graph_missing_or_malformed_is_graph_invalid(self):
-        for malformed in (False, True):
-            with self.subTest(malformed=malformed):
+    def test_resolve_valid_terminal_is_inert_but_corrupt_terminal_blocks(self):
+        runs, artifacts_repo = Runs(), Artifacts()
+        coordinator = Coordinator(Workspace(), Harness(), runs, artifacts_repo,
+                                  "pi@0.84.1+pi-subagents@0.50.0", {})
+        started = coordinator.handle({"type": "StartRun", "selector": {"project": "p", "session": "s"},
+                                      "goal": "CANARY_TERMINAL_GOAL"}, "start")
+        run_id = started["result"]["run"]["id"]
+        graph = {"root": "C0", "claims": [{"id": "C0", "text": "t", "gating": True,
+                                               "kind": "ordinary"}], "edges": []}
+        coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                            "action": {"kind": "graph", "payload": graph}}, "graph")
+        coordinator.handle({"type": "EvaluateRun", "run_id": run_id, "intent": "stop"}, "stop")
+        resolve = {"type": "ResolveRun", "selector": {"project": "p", "session": "s"}}
+        self.assertEqual(coordinator.handle(resolve, "valid")["result"],
+                         {"type": "Inert", "reason": "no_run"})
+        key = next(iter(runs.data))
+        head = runs.data[key].value["committed_artifact_head_id"]
+        artifacts_repo.values[key].pop(head)
+        response = coordinator.handle(resolve, "corrupt")
+        self.assertEqual(response["result"]["type"], "Block")
+        self.assertEqual(response["result"]["reasons"][0]["code"], "run.corrupt")
+        self.assertEqual(response["result"]["run"]["goal"], "Unsupported run state.")
+        self.assertNotIn("CANARY_TERMINAL_GOAL", json.dumps(response))
+
+    def test_selected_graph_missing_malformed_or_structurally_invalid_is_run_corrupt(self):
+        for corruption in ("missing", "malformed", "structural"):
+            with self.subTest(corruption=corruption):
                 runs, artifacts_repo = Runs(), Artifacts()
                 coordinator = Coordinator(Workspace(), Harness(), runs, artifacts_repo,
                                           "pi@0.84.1+pi-subagents@0.50.0", {})
                 started = coordinator.handle({"type": "StartRun",
                                               "selector": {"project": "p", "session": "s"},
-                                              "goal": "g"}, "start")
+                                              "goal": "CANARY_SELECTED_GRAPH_GOAL"}, "start")
                 run_id = started["result"]["run"]["id"]
                 graph = {"root": "C0", "claims": [{"id": "C0", "text": "t",
                           "gating": True, "kind": "ordinary"}], "edges": []}
@@ -357,13 +451,70 @@ class D7TransactionTests(unittest.TestCase):
                                     "action": {"kind": "graph", "payload": graph}}, "g")
                 key = next(iter(runs.data))
                 graph_id = runs.data[key].value["selected_graph_artifact_id"]
-                if malformed:
+                if corruption == "malformed":
                     artifacts_repo.values[key][graph_id] = Artifact(graph_id, "not-json")
-                else:
+                elif corruption == "missing":
                     artifacts_repo.values[key].pop(graph_id)
+                else:
+                    state = decode_state(runs.data[key].value)
+                    invalid = make_artifact({"kind": "graph", "graph": {
+                        "root": "C0", "claims": graph["claims"],
+                        "edges": [{"from": "C0", "to": "C0", "type": "SupportedBy"}]}})
+                    artifacts_repo.append(key, invalid)
+                    next_state = replace(state, selected_graph_artifact_id=invalid.artifact_id)
+                    manifest = make_artifact({"kind": "transaction_manifest", "version": 1,
+                        "parent": state.committed_artifact_head_id,
+                        "artifact_ids": [invalid.artifact_id],
+                        "observation_basis_id": "test",
+                        "observation_digest": "sha256:" + "0" * 64,
+                        "next_state_digest": state_digest(next_state)})
+                    artifacts_repo.append(key, manifest)
+                    committed = replace(next_state, committed_artifact_head_id=manifest.artifact_id)
+                    runs.data[key] = Present(encode_state(committed), Revision("structural"))
+                writes_before = runs.cas_calls
+                artifact_count = len(artifacts_repo.values[key])
                 response = coordinator.handle({"type": "GetArgument", "run_id": run_id}, "arg")
                 self.assertEqual(response["result"]["type"], "Block")
-                self.assertEqual(response["result"]["reasons"][0]["code"], "graph.invalid")
+                self.assertEqual(response["result"]["reasons"][0]["code"], "run.corrupt")
+                self.assertEqual(response["result"]["run"]["goal"], "Unsupported run state.")
+                self.assertNotIn("CANARY_SELECTED_GRAPH_GOAL", json.dumps(response))
+                self.assertEqual(runs.cas_calls, writes_before)
+                self.assertEqual(len(artifacts_repo.values[key]), artifact_count)
+
+    def test_trusted_ingress_maps_corrupt_aggregate_to_fixed_safe_block(self):
+        operations = (
+            ("trusted_attribution", ({},)),
+            ("trusted_audit_verdict", ("child", {})),
+            ("trusted_child_event", ("child", {})),
+        )
+        for operation, args in operations:
+            for corruption in ("store", "selected-graph"):
+                with self.subTest(operation=operation, corruption=corruption):
+                    runs, artifacts_repo = Runs(), Artifacts()
+                    coordinator = Coordinator(Workspace(), Harness(), runs, artifacts_repo,
+                                              "pi@0.84.1+pi-subagents@0.50.0", {})
+                    started = coordinator.handle({"type": "StartRun",
+                        "selector": {"project": "p", "session": "s"},
+                        "goal": "CANARY_TRUSTED_GOAL"}, "start")
+                    run_id = started["result"]["run"]["id"]
+                    graph = {"root": "C0", "claims": [{"id": "C0", "text": "t",
+                        "gating": True, "kind": "ordinary"}], "edges": []}
+                    coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                                        "action": {"kind": "graph", "payload": graph}}, "graph")
+                    key = next(iter(runs.data))
+                    if corruption == "store":
+                        runs.data[key] = Corrupt("bad bytes")
+                    else:
+                        graph_id = runs.data[key].value["selected_graph_artifact_id"]
+                        artifacts_repo.values[key].pop(graph_id)
+                    writes = (runs.cas_calls, len(artifacts_repo.values[key]))
+                    response = getattr(coordinator, operation)(run_id, *args, request_id="trusted")
+                    self.assertEqual(response["result"]["type"], "Block")
+                    self.assertEqual(response["result"]["reasons"][0]["code"], "run.corrupt")
+                    self.assertEqual(response["result"]["run"]["goal"],
+                                     "Unsupported run state.")
+                    self.assertNotIn("CANARY_TRUSTED_GOAL", json.dumps(response))
+                    self.assertEqual((runs.cas_calls, len(artifacts_repo.values[key])), writes)
 
     def test_spike_result_conflict_retries_without_rerun_or_post_commit_observation(self):
         runs, artifacts_repo, workspace, harness = Runs(), Artifacts(), Workspace(), Harness()
@@ -377,7 +528,9 @@ class D7TransactionTests(unittest.TestCase):
                             "action": {"kind": "graph", "payload": graph}}, "g")
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "research", "claim_id": "C0",
-                                       "source_kind": "code", "result": "supports"}}, "r")
+                                       "source_kind": "code", "result": "supports", "payload": {
+                                           "source_ref": "test_d7_transactions.py",
+                                           "citation": "Retry fixture."}}}, "r")
         workspace.write("src/x.py", b"x")
         # Request commit is the next CAS; inject the conflict on the following result commit.
         runs.conflict_on.add(runs.cas_calls + 2)
@@ -394,6 +547,31 @@ class D7TransactionTests(unittest.TestCase):
         history = traverse_history(decode_state(runs.data[key].value),
                                    artifacts_repo.values[key].values())
         self.assertEqual(sum(a["kind"] == "spike" for a in history), 1)
+
+    def test_inconsistent_persisted_frozen_scope_is_corrupt_not_repairable(self):
+        state = replace(initial(), selected_graph_artifact_id="sha256:" + "1" * 64,
+                        frozen_claim_ids=("C0",))
+        graph = {"root": "R", "claims": [{"id": "R", "text": "root", "kind": "ordinary",
+                                             "gating": True}], "edges": []}
+        common = {"state": state, "history": (), "graph": graph, "run_id": "er2:test:test"}
+        report_snapshot = EvaluationSnapshot(
+            **common, command={"type": "EvaluateRun", "intent": "report_convergence"})
+        report = evaluate_snapshot(
+            report_snapshot, {"type": "EvaluateRun", "intent": "report_convergence"})
+        self.assertEqual((report.result_type, report.reason_code), ("Block", "graph.invalid"))
+        argument = evaluate_snapshot(EvaluationSnapshot(
+            **common, command={"type": "GetArgument"}), {"type": "GetArgument"})
+        self.assertEqual((argument.result_type, argument.reason_code), ("Block", "graph.invalid"))
+        self.assertEqual(audit_binding(report_snapshot), {})
+        self.assertFalse(audit_passes(report_snapshot, {"verdict": "pass"}))
+        stop = evaluate_snapshot(EvaluationSnapshot(
+            **common, command={"type": "EvaluateRun", "intent": "stop"}),
+            {"type": "EvaluateRun", "intent": "stop"})
+        self.assertEqual((stop.result_type, stop.reason_code), ("Block", "graph.invalid"))
+        persisted = ({"artifact_id": state.selected_graph_artifact_id, "kind": "graph",
+                      "graph": graph},)
+        with self.assertRaises(HistoryCorrupt):
+            graph_from_history(state, persisted, required=False)
 
     def test_projection_is_deterministic_and_has_no_committed_head(self):
         state = initial()

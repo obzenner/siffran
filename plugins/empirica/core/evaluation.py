@@ -92,12 +92,42 @@ def valid_graph(value: Any) -> bool:
         ids.append(claim["id"])
     if len(ids) != len(set(ids)) or value["root"] not in ids or not isinstance(value["edges"], (list, tuple)):
         return False
+    children: dict[str, list[str]] = {claim_id: [] for claim_id in ids}
+    seen_edges: set[tuple[str, str]] = set()
+    indegree = {claim_id: 0 for claim_id in ids}
     for edge in value["edges"]:
         if (not isinstance(edge, Mapping) or set(edge) != {"from", "to", "type"}
-                or edge["from"] not in ids or edge["to"] not in ids
-                or edge["type"] not in {"SupportedBy", "InContextOf"}):
+                or edge["from"] not in children or edge["to"] not in children
+                or edge["type"] != "SupportedBy" or edge["from"] == edge["to"]):
             return False
-    return True
+        pair = (edge["from"], edge["to"])
+        if pair in seen_edges:
+            return False
+        seen_edges.add(pair)
+        children[pair[0]].append(pair[1])
+        indegree[pair[1]] += 1
+    queue = [claim_id for claim_id in ids if indegree[claim_id] == 0]
+    visited = 0
+    while queue:
+        current = queue.pop()
+        visited += 1
+        for child in children[current]:
+            indegree[child] -= 1
+            if indegree[child] == 0:
+                queue.append(child)
+    if visited != len(ids):
+        return False
+    reachable, stack = set(), [value["root"]]
+    while stack:
+        current = stack.pop()
+        if current not in reachable:
+            reachable.add(current)
+            stack.extend(children[current])
+    return len(reachable) == len(ids)
+
+
+def frozen_scope_missing(state: OperationalState, graph: Mapping[str, Any] | None) -> bool:
+    return state.frozen_claim_ids is not None and (graph is None or not set(state.frozen_claim_ids).issubset(c["id"] for c in graph["claims"]))
 
 
 def claim_digest(claim: dict[str, Any]) -> str:
@@ -106,8 +136,7 @@ def claim_digest(claim: dict[str, Any]) -> str:
 
 def active_evidence(snapshot: EvaluationSnapshot, claim: dict[str, Any]) -> list[dict[str, Any]]:
     cd = claim_digest(claim)
-    evidence = [a for a in snapshot.history if a.get("kind") in {"research", "spike"}
-                and a.get("claim_id") == claim["id"] and a.get("claim_digest") == cd]
+    evidence = [a for a in snapshot.history if a.get("kind") in {"research", "spike"} and a.get("claim_id") == claim["id"] and a.get("claim_digest") == cd]
     spikes = [a for a in evidence if a["kind"] == "spike"]
     active_spike = spikes[-1:] if spikes else []
     return [a for a in evidence if a["kind"] == "research"] + active_spike
@@ -122,16 +151,18 @@ def active_spike_heads(snapshot: EvaluationSnapshot) -> tuple[ActiveSpikeHead, .
         if spikes:
             item = spikes[-1]
             bindings = tuple(FileBinding(b["path"], b["sha256"]) for b in item["file_bindings"])
-            heads.append(ActiveSpikeHead(item["artifact_id"], claim["id"],
-                                         item["harness_request_id"], bindings))
+            heads.append(ActiveSpikeHead(item["artifact_id"], claim["id"], item["harness_request_id"], bindings))
     return tuple(heads)
 
 
 def stale_artifact_ids(snapshot: EvaluationSnapshot) -> set[str]:
     if not snapshot.observations:
         return set()
-    return {head.artifact_id for head in evaluate_freshness(
-        active_spike_heads(snapshot), snapshot.observations).stale_heads}
+    return {head.artifact_id for head in evaluate_freshness(active_spike_heads(snapshot), snapshot.observations).stale_heads}
+
+
+def claim_conflicted(snapshot: EvaluationSnapshot, claim: dict[str, Any]) -> bool:
+    return {a["outcome"] for a in active_evidence(snapshot, claim) if a["kind"] == "research"} >= {"supporting", "refuting"}
 
 
 def claim_state(snapshot: EvaluationSnapshot, claim: dict[str, Any]) -> str:
@@ -140,42 +171,35 @@ def claim_state(snapshot: EvaluationSnapshot, claim: dict[str, Any]) -> str:
     supporting = any(a["outcome"] == "supporting" for a in research)
     refuting = any(a["outcome"] == "refuting" for a in research)
     spikes = [a for a in evidence if a["kind"] == "spike"]
-    spike_ok = bool(spikes and spikes[-1]["outcome"] == "pass"
-                    and spikes[-1]["artifact_id"] not in stale_artifact_ids(snapshot))
-    approved = supporting and (claim["kind"] == "ordinary" or
-                               (claim["kind"] == "needs-experiment" and spike_ok))
+    spike_failed = bool(spikes and spikes[-1]["outcome"] == "fail")
+    spike_ok = bool(spikes and spikes[-1]["outcome"] == "pass" and spikes[-1]["artifact_id"] not in stale_artifact_ids(snapshot))
+    if supporting and refuting and not spike_failed:
+        return "open"
+    approved = supporting and not spike_failed and (claim["kind"] == "ordinary" or (claim["kind"] == "needs-experiment" and spike_ok))
     node = {"type": "claim", "text": claim["text"], "kind": claim["kind"],
             "confidence": 1.0 if approved else 0.0,
             "blocked": "needs-decision" if claim["kind"] == "needs-decision" else None,
             "evidence": [a["artifact_id"] for a in evidence],
-            "refuted_by": "research" if refuting else None}
+            "refuted_by": "spike" if spike_failed else ("research" if refuting else None)}
     graph = {"root": claim["id"], "nodes": {claim["id"]: node}, "edges": []}
-    return claim_rules.state_of(
-        graph, claim["id"], 1.0,
-        lambda _claim_id, purpose: refuting if purpose == "refute" else approved,
-    )
+    return claim_rules.state_of(graph, claim["id"], 1.0, lambda _claim_id, purpose: (refuting or spike_failed) if purpose == "refute" else approved)
 
 
-def _decision(snapshot: EvaluationSnapshot, state: OperationalState, result: str = "Allow",
-              artifacts: tuple[dict[str, Any], ...] = (), reason: str | None = None,
-              parameters: dict[str, Any] | None = None, affected: str | None = None) -> Decision:
-    return Decision(result, StateIntent(state, artifacts), reason,
-                    tuple((parameters or {}).items()), affected)
+def _decision(snapshot: EvaluationSnapshot, state: OperationalState, result: str = "Allow", artifacts: tuple[dict[str, Any], ...] = (), reason: str | None = None, parameters: dict[str, Any] | None = None, affected: str | None = None) -> Decision:
+    return Decision(result, StateIntent(state, artifacts), reason, tuple((parameters or {}).items()), affected)
 
 
 def plan_spike_request(snapshot: EvaluationSnapshot, action: Mapping[str, Any]) -> Decision:
     """Purely admit and seal a spike request against current graph/research."""
     state = snapshot.state
-    if snapshot.graph is None:
+    if snapshot.graph is None or frozen_scope_missing(state, snapshot.graph):
         return _decision(snapshot, state, "Block", reason="graph.invalid")
     claim = next((c for c in snapshot.graph["claims"] if c["id"] == action["claim_id"]), None)
     if claim is None:
         return _decision(snapshot, state, "Block", reason="graph.invalid")
-    research = [a for a in active_evidence(snapshot, claim)
-                if a["kind"] == "research" and a["outcome"] == "supporting"]
+    research = [a for a in active_evidence(snapshot, claim) if a["kind"] == "research" and a["outcome"] == "supporting"]
     if not research:
-        return _decision(snapshot, state, "Block", reason="claim.spike_prerequisite_missing",
-                         affected="claim:" + claim["id"])
+        return _decision(snapshot, state, "Block", reason="claim.spike_prerequisite_missing", affected="claim:" + claim["id"])
     sealed = artifact("spike_request", {
         "claim_id": claim["id"], "claim_digest": claim_digest(claim),
         "statement_digest": digest(action), "harness_request_id": digest(action),
@@ -186,19 +210,15 @@ def plan_spike_request(snapshot: EvaluationSnapshot, action: Mapping[str, Any]) 
     return _decision(snapshot, state, artifacts=(sealed,))
 
 
-def plan_spike_result(snapshot: EvaluationSnapshot, request_body: Mapping[str, Any],
-                      facts: Any) -> Decision:
+def plan_spike_result(snapshot: EvaluationSnapshot, request_body: Mapping[str, Any], facts: Any) -> Decision:
     """Purely admit immutable harness facts and plan one spike result artifact."""
     state = snapshot.state
-    if snapshot.graph is None:
+    if snapshot.graph is None or frozen_scope_missing(state, snapshot.graph):
         return _decision(snapshot, state, "Block", reason="graph.invalid")
-    claim = next((c for c in snapshot.graph["claims"]
-                  if c["id"] == request_body["claim_id"]), None)
+    claim = next((c for c in snapshot.graph["claims"] if c["id"] == request_body["claim_id"]), None)
     if claim is None or claim_digest(claim) != request_body["claim_digest"]:
         return _decision(snapshot, state, "Block", reason="graph.invalid")
-    prior = [a for a in snapshot.history if a.get("kind") == "spike"
-             and a.get("claim_id") == claim["id"]
-             and a.get("claim_digest") == request_body["claim_digest"]]
+    prior = [a for a in snapshot.history if a.get("kind") == "spike" and a.get("claim_id") == claim["id"] and a.get("claim_digest") == request_body["claim_digest"]]
     result = artifact("spike", {
         "claim_id": claim["id"], "claim_digest": request_body["claim_digest"],
         "statement_digest": facts.result_digest,
@@ -215,15 +235,10 @@ def plan_spike_result(snapshot: EvaluationSnapshot, request_body: Mapping[str, A
 
 def covered_artifact_ids(snapshot: EvaluationSnapshot) -> list[str]:
     """Return the exact active evidence set whose producer identity an audit covers."""
-    if snapshot.graph is None:
+    if snapshot.graph is None or frozen_scope_missing(snapshot.state, snapshot.graph):
         return []
-    gating = (set(snapshot.state.frozen_claim_ids)
-              if snapshot.state.frozen_claim_ids is not None else
-              {claim["id"] for claim in snapshot.graph["claims"] if claim["gating"]})
-    return [artifact["artifact_id"]
-            for claim in snapshot.graph["claims"]
-            if claim["id"] in gating and claim_state(snapshot, claim) == "approved"
-            for artifact in active_evidence(snapshot, claim)]
+    gating = (set(snapshot.state.frozen_claim_ids) if snapshot.state.frozen_claim_ids is not None else {claim["id"] for claim in snapshot.graph["claims"] if claim["gating"]})
+    return [artifact["artifact_id"] for claim in snapshot.graph["claims"] if claim["id"] in gating and claim_state(snapshot, claim) == "approved" for artifact in active_evidence(snapshot, claim)]
 
 
 def valid_attribution(snapshot: EvaluationSnapshot, payload: Mapping[str, Any]) -> bool:
@@ -278,7 +293,7 @@ def audit_attributions(
 
 def audit_binding(snapshot: EvaluationSnapshot) -> dict[str, Any]:
     """Derive the exact audit dossier binding from the current immutable snapshot."""
-    if snapshot.graph is None:
+    if snapshot.graph is None or frozen_scope_missing(snapshot.state, snapshot.graph):
         return {}
     all_ids = [c["id"] for c in snapshot.graph["claims"]]
     gating = (list(snapshot.state.frozen_claim_ids)
@@ -304,13 +319,15 @@ def audit_binding(snapshot: EvaluationSnapshot) -> dict[str, Any]:
 
 def audit_passes(snapshot: EvaluationSnapshot, verdict: Mapping[str, Any]) -> bool:
     expected = audit_binding(snapshot)
-    return (verdict.get("verdict") == "pass" and
+    return (bool(expected) and verdict.get("verdict") == "pass" and
             all(_plain(verdict.get(key)) == value for key, value in expected.items()))
 
 
 def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> Decision:
     """Apply one validated command without performing I/O."""
     state, kind = snapshot.state, command["type"]
+    if frozen_scope_missing(state, snapshot.graph):
+        return _decision(snapshot, state, "Block", reason="graph.invalid")
     if state.status != "active":
         if kind in {"GetRun", "GetArgument", "RestoreRun"} or (
                 kind == "EvaluateRun" and command["intent"] in {"stop", "report_convergence"}):
@@ -344,7 +361,7 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                                                 investigation_stamp=state.stamp_seq + 1))
         if akind == "graph":
             graph = action.get("payload")
-            if not valid_graph(graph):
+            if not valid_graph(graph) or frozen_scope_missing(state, graph):
                 return _decision(snapshot, state, "Block", reason="graph.invalid")
             art = artifact("graph", {"graph": graph})
             return _decision(snapshot, replace(state, selected_graph_artifact_id=art["artifact_id"]),
@@ -356,12 +373,15 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             claim = claims.get(action["claim_id"])
             if claim is None:
                 return _decision(snapshot, state, "Block", reason="graph.invalid")
+            payload = action["payload"]
             art = artifact("research", {
                 "claim_id": claim["id"], "claim_digest": claim_digest(claim),
-                "statement_digest": digest(action.get("payload", {})),
+                "statement_digest": digest(payload),
                 "outcome": "supporting" if action["result"] == "supports" else "refuting",
-                "source_kind": action["source_kind"],
-                "source_ref": str(action.get("payload", {}).get("source_ref", action["source_kind"])),
+                "source_kind": action["source_kind"], "source_ref": payload["source_ref"],
+                "citation": payload["citation"],
+                **({"observed_content_digest": payload["observed_content_digest"]} if
+                   "observed_content_digest" in payload else {}),
             })
             return _decision(snapshot, state, artifacts=(art,))
         if akind == "freeze":
@@ -434,6 +454,8 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             spikes = [a for a in evidence if a["kind"] == "spike"]
             if cs == "discarded":
                 reason, parameters = "claim.refuted", {}
+            elif claim_conflicted(snapshot, c):
+                reason, parameters = "evidence.conflict", {}
             elif any(a["outcome"] == "supporting" for a in research) and c["kind"] == "needs-experiment":
                 stale = stale_artifact_ids(snapshot)
                 if spikes and spikes[-1]["artifact_id"] in stale:

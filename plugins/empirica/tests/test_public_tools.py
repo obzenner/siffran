@@ -85,6 +85,25 @@ class PublicToolContractTests(unittest.TestCase):
             self.assertTrue(result["isError"], action["kind"])
         self.assertEqual(self.requests, [])
 
+    def test_research_requires_locator_and_citation_before_dispatch(self):
+        tools = self._tools()
+        base = {"kind": "research", "claim_id": "G0", "source_kind": "code",
+                "result": "supports"}
+        for payload in (None, {"source_ref": "src/a.py"}, {"citation": "Observed line."}):
+            action = dict(base)
+            if payload is not None:
+                action["payload"] = payload
+            result = tools.call("empirica_observe", {"run_id": "r", "action": action})
+            self.assertTrue(result["isError"], payload)
+        self.assertEqual(self.requests, [])
+
+        payload = {"source_ref": "src/a.py:1", "citation": "Observed line.",
+                   "observed_content_digest": "sha256:" + "a" * 64}
+        result = tools.call("empirica_observe", {
+            "run_id": "r", "action": {**base, "payload": payload}})
+        self.assertFalse(result["isError"])
+        self.assertEqual(self.requests[-1][0]["command"]["action"]["payload"], payload)
+
     def test_dispatch_failure_is_a_tool_error_not_an_exception(self):
         from adapters.public_tools import PublicTools
 

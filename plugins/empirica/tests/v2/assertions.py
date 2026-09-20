@@ -307,11 +307,11 @@ def action_graph(payload: dict | None = None) -> dict:
 
 def action_research(*, claim_id: str, source_kind: str, result: str,
                     payload: dict | None = None) -> dict:
-    a = {"kind": "research", "claim_id": claim_id,
-         "source_kind": source_kind, "result": result}
-    if payload is not None:
-        a["payload"] = payload
-    return a
+    details = {"source_ref": "plugins/empirica/tests/v2/assertions.py",
+               "citation": "The test observed this source directly."}
+    details.update(payload or {})
+    return {"kind": "research", "claim_id": claim_id,
+            "source_kind": source_kind, "result": result, "payload": details}
 
 
 def action_spike_request(*, claim_id: str, command: str, dependent_files: list[str]) -> dict:
@@ -916,6 +916,12 @@ class ConformanceCase(unittest.TestCase):
                         "research artifact must carry a statement_digest")
         self.assertTrue(art.get("source_ref"),
                         "research artifact must carry a source_ref")
+        self.assertTrue(art.get("citation"),
+                        "research artifact must carry a verbatim citation")
+        observed = art.get("observed_content_digest")
+        if observed is not None:
+            self.assertRegex(observed, _DIGEST_RE,
+                             "research observed_content_digest must be sha256:<hex>")
         if claim_id is not None:
             self.assertEqual(art.get("claim_id"), claim_id,
                              "research artifact claim_id must match")

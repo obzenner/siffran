@@ -45,7 +45,7 @@ def _load_suite() -> unittest.TestSuite:
 # every method to call dispatch directly.
 _STRICT_RAW_METHODS: set[tuple[str, str]] = {
     ("test_protocol_host.py", "test_v2_identity_checked_before_decoding"),
-    ("test_protocol_host.py", "test_v1_and_old_state_rejected_with_fresh_run_recovery"),
+    ("test_protocol_host.py", "test_noncurrent_wire_and_persisted_state_are_rejected"),
     ("test_protocol_host.py", "test_unknown_fields_actions_fail_closed"),
     ("test_projection_context.py", "test_unknown_references_fail_closed"),
 }

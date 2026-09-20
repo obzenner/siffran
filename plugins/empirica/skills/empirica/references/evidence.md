@@ -18,10 +18,14 @@ Public author action:
   "result": "supports",
   "payload": {
     "source_ref": "plugins/example/core.py:40-63",
-    "observation": "The boundary derives the value rather than accepting it."
+    "citation": "The boundary derives the value rather than accepting it."
   }
 }
 ```
+
+`payload.source_ref` and a non-empty verbatim `payload.citation` are mandatory.
+`payload.observed_content_digest` may additionally bind the bytes that were observed when the host
+can compute a SHA-256 digest.
 
 Use `result: "refutes"` when the source contradicts the claim. A URL, path, or
 quote is not automatically true; the independent auditor later checks relevance

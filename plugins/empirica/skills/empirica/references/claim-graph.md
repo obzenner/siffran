@@ -36,9 +36,10 @@ Each claim has exactly:
 - `gating`: whether it blocks the active scope;
 - `kind`: `ordinary`, `needs-experiment`, or `needs-decision`.
 
-Each edge has exactly `from`, `to`, and `type`. The supported types are
-`SupportedBy` and `InContextOf`; both endpoints must exist. The root must name an
-existing claim.
+Each edge has exactly `from`, `to`, and `type`. The only supported type is
+`SupportedBy`, directed from a claim to a claim that supports it. Both endpoints
+must exist and differ. Edges must be unique and acyclic, and every claim must be
+reachable from the declared root by following `SupportedBy` edges.
 
 Do not send the legacy `nodes`/confidence representation as the v2 graph.
 Confidence and terminal state are derived projections, never graph input.
@@ -47,7 +48,7 @@ Confidence and terminal state are derived projections, never graph input.
 
 1. Make the root the goal-level assurance claim.
 2. Add one gating claim for each material unknown or invariant.
-3. Attach every claim to the root; detached claims are not coverage.
+3. Attach every claim to the root through `SupportedBy`; detached claims are invalid.
 4. Use `needs-experiment` only when a deterministic command can falsify the claim.
 5. Use `needs-decision` only for an irreducible human choice.
 6. Keep claims stable enough for evidence binding. Rewording intentionally makes

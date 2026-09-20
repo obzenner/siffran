@@ -58,7 +58,8 @@ class CodexAdapterConformanceTests(unittest.TestCase):
                     "edges": [],
                 }})
                 observe({"kind": "research", "claim_id": "G0", "source_kind": "code",
-                         "result": "supports", "payload": {"source_ref": "probe.py"}})
+                         "result": "supports", "payload": {"source_ref": "probe.py",
+                                                               "citation": "The probe executes successfully."}})
                 observe({"kind": "spike_request", "claim_id": "G0",
                          "command": "python3 probe.py", "dependent_files": ["probe.py"]})
                 observe({"kind": "freeze"})

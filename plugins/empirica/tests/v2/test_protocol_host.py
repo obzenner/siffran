@@ -30,27 +30,24 @@ class ProtocolHostTests(ConformanceCase):
         drv = self.bind_driver(
             "D6", "case-45",
             "Exact empirica/v2 state/protocol identity is checked before semantic decoding")
-        # Persisted v1 identity with hostile/partial semantic fields → exact sole run.old_version
-        # Block with canonical actions/sections before semantic decode (raw-state test input).
+        # Persisted non-v2 identity with hostile fields → sole run.corrupt before decoding.
         drv.inject_run_state("r-legacy", {"protocol": "empirica/v1", "status": "active",
                                            "hostile": "payload", "partial": {"x": 1}})
         restored = self.raw_dispatch(drv, {"protocol": protocol(), "request_id": "r",
                                             "command": {"type": "RestoreRun", "run_id": "r-legacy"}})
-        self.assert_block_sole_reason(restored, "run.old_version")
+        self.assert_block_sole_reason(restored, "run.corrupt")
         # a v1 protocol wire envelope → exact Fault/closed (raw wire, not Block)
         v1 = {"protocol": "empirica/v1", "request_id": "v1-probe",
               "command": {"type": "GetRun", "run_id": "r"}}
         resp = self.raw_dispatch(drv, v1)
         self.assert_fault(resp, fail_direction="closed")
 
-    # 46 — Wire variants Fault/closed; persisted identities sole run.old_version; v2+corrupt sole run.corrupt
-    def test_v1_and_old_state_rejected_with_fresh_run_recovery(self):
+    # 46 — Non-v2 wire faults closed; every rejected persisted identity is solely run.corrupt
+    def test_noncurrent_wire_and_persisted_state_are_rejected(self):
         drv = self.bind_driver(
             "D6", "case-46",
-            "Wire protocol variants null/empty/v1/future/partial are exact Fault/closed; "
-            "persisted identities null/missing/v1/future are exact sole run.old_version Blocks "
-            "with start-fresh recovery; exact v2 identity with malformed/partial encoding is "
-            "sole run.corrupt Block")
+            "Non-v2 wire identities are exact Fault/closed; every noncurrent or malformed "
+            "persisted identity is sole run.corrupt with start-fresh recovery")
         # Wire protocol variants null/empty/v1/future/partial → exact Fault/closed
         for proto in (None, "", "empirica/v1", "empirica/v3", "empirica/v2-rc"):
             with self.subTest(protocol=proto):
@@ -58,7 +55,7 @@ class ProtocolHostTests(ConformanceCase):
                        "command": {"type": "GetContract", "target": "index"}}
                 r = self.raw_dispatch(drv, env)
                 self.assert_fault(r, fail_direction="closed")
-        # Persisted identities null/missing/v1/future → exact sole run.old_version Block w/ start-fresh
+        # Persisted null/missing/v1/future identities → sole run.corrupt with start-fresh.
         for state in ({"protocol": None, "status": "active"},
                       {"status": "active"},                       # missing protocol
                       {"protocol": "empirica/v1", "status": "active"},
@@ -67,9 +64,9 @@ class ProtocolHostTests(ConformanceCase):
                 drv.inject_run_state("r-old", state)
                 r = self.raw_dispatch(drv, {"protocol": protocol(), "request_id": "r",
                                              "command": {"type": "RestoreRun", "run_id": "r-old"}})
-                self.assert_block_sole_reason(r, "run.old_version")
+                self.assert_block_sole_reason(r, "run.corrupt")
                 self.assertIn("run.start_fresh", r["result"]["reasons"][0]["next_actions"],
-                              "run.old_version must offer run.start_fresh recovery")
+                              "run.corrupt must offer run.start_fresh recovery")
         # Exact v2 identity with malformed/partial encoding → sole run.corrupt Block
         drv.inject_run_state("r-corrupt", {"protocol": protocol(), "status": "active",
                                             "obligations": "not-an-object"})

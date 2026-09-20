@@ -231,6 +231,68 @@ class ActivationRouteGraphTests(ConformanceCase):
                 self.assert_block_only(resp, ["graph.missing" if label == "missing"
                                                else "graph.invalid"])
 
+    def test_structurally_invalid_dependency_graphs_are_rejected_without_replacement(self):
+        """Seam 4A: the selected argument is one strict root-connected dependency DAG."""
+        def claim(cid):
+            return {"id": cid, "text": f"Claim {cid}", "gating": True,
+                    "kind": "ordinary"}
+        variants = {
+            "unknown-endpoint": {"root": "C0", "claims": [claim("C0")],
+                                 "edges": [{"from": "C0", "to": "C1",
+                                            "type": "SupportedBy"}]},
+            "self-loop": {"root": "C0", "claims": [claim("C0")],
+                          "edges": [{"from": "C0", "to": "C0",
+                                     "type": "SupportedBy"}]},
+            "duplicate-edge": {"root": "C0", "claims": [claim("C0"), claim("C1")],
+                               "edges": [{"from": "C0", "to": "C1",
+                                          "type": "SupportedBy"},
+                                         {"from": "C0", "to": "C1",
+                                          "type": "SupportedBy"}]},
+            "cycle": {"root": "C0", "claims": [claim("C0"), claim("C1")],
+                      "edges": [{"from": "C0", "to": "C1", "type": "SupportedBy"},
+                                {"from": "C1", "to": "C0", "type": "SupportedBy"}]},
+            "detached": {"root": "C0", "claims": [claim("C0"), claim("C1")],
+                         "edges": []},
+            "in-context-edge": {"root": "C0", "claims": [claim("C0"), claim("C1")],
+                                "edges": [{"from": "C0", "to": "C1",
+                                           "type": "InContextOf"}]},
+        }
+        for label, candidate in variants.items():
+            with self.subTest(variant=label):
+                drv = self.bind_driver(
+                    "D7", "seam-4a",
+                    "Invalid dependency shape Blocks as graph.invalid and cannot replace the "
+                    "previous selected graph")
+                run_id = self.start_run(drv)
+                self.require_graph_admitted(drv, run_id, canonical_graph(n_claims=1))
+                before = self.dispatch(drv, get_argument(run_id=run_id))["result"]["argument"]
+                response = self.dispatch(drv, observe_action(
+                    run_id=run_id, action=action_graph(payload=candidate)))
+                self.assert_block_only(response, ["graph.invalid"])
+                after = self.dispatch(drv, get_argument(run_id=run_id))["result"]["argument"]
+                self.assertEqual(after, before,
+                                 "an invalid candidate must not replace the selected graph")
+
+    def test_branching_and_shared_dependency_dag_is_admitted(self):
+        def claim(cid):
+            return {"id": cid, "text": f"Claim {cid}", "gating": True,
+                    "kind": "ordinary"}
+        graph = {"root": "C0", "claims": [claim(cid) for cid in ("C0", "C1", "C2", "C3")],
+                 "edges": [
+                     {"from": "C0", "to": "C1", "type": "SupportedBy"},
+                     {"from": "C0", "to": "C2", "type": "SupportedBy"},
+                     {"from": "C1", "to": "C3", "type": "SupportedBy"},
+                     {"from": "C2", "to": "C3", "type": "SupportedBy"},
+                 ]}
+        drv = self.bind_driver("D7", "seam-4a",
+                               "A rooted branching DAG with a shared dependency is valid")
+        run_id = self.start_run(drv)
+        response = self.dispatch(drv, observe_action(run_id=run_id,
+                                                     action=action_graph(payload=graph)))
+        self.assert_allow(response, converged=False)
+        argument = self.dispatch(drv, get_argument(run_id=run_id))["result"]["argument"]
+        self.assertEqual(argument["edges"], graph["edges"])
+
     # 6 — Refuted/discarded claim remains append-only history and needs real refuting evidence
     def test_refuted_claim_append_only_needs_real_evidence(self):
         drv = self.bind_driver(
@@ -274,6 +336,32 @@ class ActivationRouteGraphTests(ConformanceCase):
         residual_codes = {r["code"] for r in stop_result["run"].get("residuals", [])}
         self.assertIn("claim.refuted", residual_codes,
                       "terminal evaluation must report claim.refuted residual")
+
+        # Simultaneous supporting and refuting research is not resolved by choosing refutation.
+        conflict_drv = self.bind_driver(
+            "D5", "case-6",
+            "Complete active supporting and refuting research remains unresolved as the exact "
+            "evidence.conflict reason; it must not project approved or discarded")
+        conflict_run = self.start_run(conflict_drv)
+        conflict_graph = self.require_graph_admitted(
+            conflict_drv, conflict_run, canonical_graph(n_claims=1, kind="ordinary"))
+        conflict_root = conflict_graph["root"]
+        self.dispatch(conflict_drv, observe_action(
+            run_id=conflict_run, action=action_research(
+                claim_id=conflict_root, source_kind="code", result="supports")))
+        self.dispatch(conflict_drv, observe_action(
+            run_id=conflict_run, action=action_research(
+                claim_id=conflict_root, source_kind="docs", result="refutes")))
+        conflict_claim = self.get_argument_claim(conflict_drv, conflict_run, conflict_root)
+        self.assertEqual(conflict_claim["state"], "open",
+                         "conflicting research must not select approval or refutation")
+        conflict_response = self.dispatch(
+            conflict_drv, evaluate(run_id=conflict_run, intent="report_convergence"))
+        self.assert_block_reason(conflict_response, "evidence.conflict")
+        self.dispatch(conflict_drv, evaluate(run_id=conflict_run, intent="stop"))
+        stopped = self.dispatch(conflict_drv, get_run(run_id=conflict_run))["result"]["run"]
+        self.assertIn("evidence.conflict", {r["code"] for r in stopped["residuals"]},
+                      "honest stop must preserve the conflict residual")
 
 
 if __name__ == "__main__":

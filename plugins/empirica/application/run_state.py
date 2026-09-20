@@ -1,12 +1,7 @@
 """Strict v2 persisted-state classification and codec (D6 spec §4–5).
 
-Consumes the internal state schema and protocol identity loaded once by ``application.protocol``
-(no duplicate root/json/PublicContract loads). ``classify_and_decode(raw)`` performs only identity
-classification before semantic decoding, returning a typed frozen ``Classification`` with ``kind``
-(``old_unsupported`` | ``current_corrupt`` | ``valid``) and, only when valid, a recursively
-immutable ``RunState`` whose ``encode()`` reproduces the exact closed document without defaults.
-Procedural invariants (unique child IDs, counter bounds, stamp bounds, finite deadlines) are owned
-by the codec, not the JSON schema. No defaults, migration, or mutation.
+Only the exact current protocol/schema identity is decoded. Every other value is corrupt; there is
+no old-state category, field default, migration, or mutation.
 """
 from __future__ import annotations
 
@@ -101,25 +96,14 @@ def _procedural_ok(doc: dict) -> bool:
 
 
 def classify_and_decode(raw: Any) -> Classification:
-    """Classify identity before decode (D6 spec §5).
-
-    1. non-object or exact protocol==empirica/v2 + missing/wrong state_schema → current_corrupt;
-    2. object with missing/null/empty/v1/future/unknown protocol → old_unsupported;
-    3. exact protocol and exact state_schema → validate full schema + procedural invariants;
-    4. valid → immutable RunState; invalid → current_corrupt.
-
-    Never selects artifacts, defaults fields, migrates, infers terminality, or mutates input.
-    """
-    if not isinstance(raw, dict):
+    """Decode only an exact valid v2 document; classify every other value as corrupt."""
+    if (not isinstance(raw, dict) or raw.get("protocol") != _PROTOCOL
+            or raw.get("state_schema") != _STATE_SCHEMA_ID):
         return Classification("current_corrupt")
-    if raw.get("protocol") == _PROTOCOL:
-        if raw.get("state_schema") != _STATE_SCHEMA_ID:
-            return Classification("current_corrupt")
-        try:
-            jsonschema.validate(instance=raw, schema=_STATE_SCHEMA)
-        except jsonschema.ValidationError:
-            return Classification("current_corrupt")
-        if not _procedural_ok(raw):
-            return Classification("current_corrupt")
-        return Classification("valid", decode_state(raw))
-    return Classification("old_unsupported")
+    try:
+        jsonschema.validate(instance=raw, schema=_STATE_SCHEMA)
+    except jsonschema.ValidationError:
+        return Classification("current_corrupt")
+    if not _procedural_ok(raw):
+        return Classification("current_corrupt")
+    return Classification("valid", decode_state(raw))

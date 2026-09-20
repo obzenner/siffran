@@ -90,12 +90,13 @@
     "research.record": {
       "description": "Record one externally observed Fold-1 research citation bound to a claim.",
       "params": {
-        "type": "object", "additionalProperties": false, "required": ["claim_id", "source_kind", "result"],
+        "type": "object", "additionalProperties": false, "required": ["claim_id", "source_kind", "source_ref", "citation", "result"],
         "properties": {
           "claim_id": {"type": "string", "minLength": 1},
           "source_kind": {"enum": ["docs", "code", "runtime", "web"]},
-          "locator": {"type": "string"},
-          "citation": {"type": "string"},
+          "source_ref": {"type": "string", "minLength": 1},
+          "citation": {"type": "string", "minLength": 1},
+          "observed_content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
           "result": {"enum": ["supports", "refutes"]}
         }
       }
@@ -147,7 +148,6 @@
   },
   "reasons": {
     "run.no_active": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["run.start_fresh"], "sections": ["run/lifecycle"], "message": "No active run for this selector; start a fresh run."},
-    "run.old_version": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["run.start_fresh"], "sections": ["run/lifecycle"], "message": "Run state is not empirica/v2; start a fresh run."},
     "run.terminal": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["run.inspect"], "sections": ["terminal"], "message": "Run is terminal; inspect residuals."},
     "run.corrupt": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["run.start_fresh"], "sections": ["run/lifecycle"], "message": "Run state is corrupt; start a fresh run."},
     "graph.missing": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["run.inspect"], "sections": ["claims/graph"], "message": "No selected argument graph."},
@@ -161,7 +161,7 @@
     "claim.spike_stale": {"params": {"type": "object", "additionalProperties": false, "required": ["changes"], "properties": {"changes": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "object", "additionalProperties": false, "required": ["path", "state"], "properties": {"path": {"type": "string", "minLength": 1, "pattern": "^(?!(?:\\.(?:/|$)))(?!(?:\\.\\.(?:/|$)))(?!.*/\\.(?:/|$))(?!.*/\\.\\.(?:/|$))[^\\\\/:]+(?:/[^\\\\/:]+)*$"}, "state": {"enum": ["present", "missing", "unreadable", "non_regular", "outside_workspace"]}}}}}}, "next_actions": ["spike.regate"], "sections": ["evidence/freshness"], "message": "Spike prerequisites changed; re-gate."},
     "claim.human_decision": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["human.request_decision"], "sections": ["claims/residuals"], "message": "Claim requires a human decision."},
     "claim.refuted": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["run.inspect"], "sections": ["claims/refutation"], "message": "Active evidence refutes this claim."},
-    "evidence.conflict": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["run.inspect", "residual.accept"], "sections": ["claims/refutation"], "message": "Simultaneous support and refutation fails closed; resolve or stop with residual."},
+    "evidence.conflict": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["run.inspect", "residual.accept"], "sections": ["claims/refutation"], "message": "Simultaneous supporting and refuting research fails closed; resolve or stop with residual."},
     "budget.exhausted": {"params": {"type": "object", "additionalProperties": false, "required": ["resource"], "properties": {"resource": {"enum": ["spawn", "pass"]}}}, "next_actions": ["budget.raise", "residual.accept"], "sections": ["budget"], "message": "{resource} budget exhausted."},
     "audit.required": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["child.spawn_auditor"], "sections": ["audit"], "message": "Audit is owed; spawn an independent auditor."},
     "audit.pending": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["child.wait"], "sections": ["audit"], "message": "Audit child is pending; wait."},
@@ -197,21 +197,21 @@
     },
     "run/lifecycle": {
       "title": "Run lifecycle",
-      "summary": "Run statuses, terminality, and old or corrupt state refusal.",
+      "summary": "Run statuses, terminality, and corrupt state refusal.",
       "clauses": [
         {"id": "run/lifecycle/statuses", "text": "A run is active, converged, stopped_residual, stopped_frozen, or stopped_budget; every status except active is terminal."},
         {"id": "run/lifecycle/terminal_immutable", "text": "A terminal run never changes status and never produces a later convergence result, though append-only diagnostic facts may be admitted where explicitly allowed."},
-        {"id": "run/lifecycle/old_version", "text": "Persisted state that is not exactly empirica/v2 is old or unsupported; it is never decoded, migrated, or adjudicated, and returns run.old_version with run.start_fresh."},
-        {"id": "run/lifecycle/corrupt", "text": "Corrupt v2 identity or encoding returns run.corrupt with run.start_fresh; no field defaults or terminal inference run on bad state."}
+        {"id": "run/lifecycle/corrupt", "text": "Any persisted aggregate that is not exactly valid empirica/v2 state and history returns run.corrupt with run.start_fresh; rejected data contributes no fields, defaults, terminal inference, migration, or repair."}
       ]
     },
     "claims/graph": {
       "title": "Argument graph",
       "summary": "Graph shape and missing or invalid graph handling.",
       "clauses": [
-        {"id": "claims/graph/shape", "text": "The argument graph contains claim identity, text, confidence, kind and tags, and root and support edges; it does not contain trusted claim state."},
-        {"id": "claims/graph/missing", "text": "A missing selected graph yields graph.missing with run.inspect."},
-        {"id": "claims/graph/invalid", "text": "A malformed graph, unsupported edge or type, or corrupt active artifact yields graph.invalid and fails closed."}
+        {"id": "claims/graph/shape", "text": "The argument is a strict root-connected claim-dependency DAG containing exact claim identity, text, gating, and kind fields; it never contains trusted claim state."},
+        {"id": "claims/graph/dependencies", "text": "SupportedBy is the only edge type and is directed from a claim to its supporting claim; endpoints are known and distinct, edges are unique, the relation is acyclic, and every claim is reachable from the declared root."},
+        {"id": "claims/graph/missing", "text": "A current run with no selected graph yields graph.missing with run.inspect when a graph is required."},
+        {"id": "claims/graph/invalid", "text": "An invalid candidate graph yields graph.invalid before artifact creation or selected-state replacement; a selected persisted graph artifact that is missing, malformed, or structurally invalid makes the aggregate run.corrupt."}
       ]
     },
     "claims/residuals": {
@@ -227,7 +227,7 @@
       "summary": "Active refutation and simultaneous support/refutation.",
       "clauses": [
         {"id": "claims/refutation/refuted", "text": "Active refuting research or an active failing spike discards the claim with claim.refuted."},
-        {"id": "claims/refutation/conflict", "text": "Simultaneous active support and refutation fails closed as evidence.conflict; it does not select the truthy result, and the author must resolve or stop with residual."}
+        {"id": "claims/refutation/conflict", "text": "Simultaneous active supporting and refuting research fails closed as evidence.conflict; it does not select either research result, and the author must resolve or stop with residual."}
       ]
     },
     "evidence/research": {
@@ -316,7 +316,7 @@
       "title": "Freeze",
       "summary": "First-write-wins committed scope and deferred residuals.",
       "clauses": [
-        {"id": "freeze/first_write_wins", "text": "Freeze is first-write-wins and commits the current gating claim IDs; those claims still require fresh evidence and audit."},
+        {"id": "freeze/first_write_wins", "text": "Freeze is first-write-wins and commits the current gating claim IDs; every later selected graph must retain every committed ID or fail closed as graph.invalid without replacing the selected graph, and those claims still require fresh evidence and audit."},
         {"id": "freeze/deferred", "text": "Later derived claims are visible as deferred residuals with freeze.deferred and residual.accept and cannot silently enter the committed scope."}
       ]
     },
@@ -362,10 +362,10 @@
     },
     "protocol": {
       "title": "Protocol identity",
-      "summary": "Exact v2 identity and the refusal of old state and internal fields.",
+      "summary": "Exact v2 identity and rejection of every other wire or persisted identity.",
       "clauses": [
-        {"id": "protocol/identity", "text": "The protocol identifier is exactly empirica/v2; missing, null, unknown, future, or v1 identity is old or unsupported state."},
-        {"id": "protocol/no_migration", "text": "There is no compatibility writer, migration target, or v1 adjudication; old state returns run.old_version and run.start_fresh."},
+        {"id": "protocol/identity", "text": "The only accepted wire and persisted-state protocol identifier is exactly empirica/v2; every other wire identity is invalid_request and every other persisted identity is run.corrupt."},
+        {"id": "protocol/no_migration", "text": "Rejected persisted data is never decoded, migrated, adjudicated, or repaired and contributes no public fields."},
         {"id": "protocol/no_internal_fields", "text": "There is no public nonce, reservation entity, ticket, phase enum, CAS revision arithmetic, or artifact path in the public contract."}
       ]
     },

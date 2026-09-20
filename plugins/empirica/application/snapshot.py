@@ -5,7 +5,8 @@ import json
 import re
 from typing import Any
 
-from core.evaluation import EvaluationSnapshot, claim_digest, digest, valid_graph
+from core.evaluation import (EvaluationSnapshot, claim_digest, digest, frozen_scope_missing,
+                             valid_graph)
 from core.freshness import ActiveSpikeHead, FileBinding
 from core.records import Artifact
 from core.run import OperationalState
@@ -113,19 +114,8 @@ def traverse_history(state: OperationalState, stored: Any) -> tuple[dict[str, An
                 raise HistoryCorrupt("duplicate committed artifact reference")
             value = by_id.get(aid)
             if value is None:
-                if aid == state.selected_graph_artifact_id:
-                    referenced.add(aid)
-                    ordered.append({"artifact_id": aid, "kind": "invalid_graph"})
-                    continue
                 raise HistoryCorrupt("missing committed domain artifact")
-            try:
-                domain = _decode(value)
-            except HistoryCorrupt:
-                if aid == state.selected_graph_artifact_id:
-                    referenced.add(aid)
-                    ordered.append({"artifact_id": aid, "kind": "invalid_graph"})
-                    continue
-                raise
+            domain = _decode(value)
             if domain.get("kind") == "transaction_manifest":
                 raise HistoryCorrupt("manifest referenced as domain artifact")
             referenced.add(aid)
@@ -146,9 +136,9 @@ def graph_from_history(state: OperationalState, history: tuple[dict[str, Any], .
     item = next((a for a in history if a["artifact_id"] == selected), None)
     graph = item.get("graph") if item and item.get("kind") == "graph" else None
     if not valid_graph(graph):
-        if required:
-            raise GraphInvalid("selected graph invalid or unreachable")
-        return None
+        raise HistoryCorrupt("selected graph is missing, malformed, or structurally invalid")
+    if frozen_scope_missing(state, graph):
+        raise HistoryCorrupt("selected graph omits frozen claim")
     return graph
 
 

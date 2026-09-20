@@ -1,24 +1,14 @@
 """Implementation-agnostic persistence ports for empirica (ADR-31).
 
-Two repositories with deliberately different concurrency models, plus one explicit migration port:
-
-* :class:`RunRepository` — a run's *operational state* (lifecycle status, counters, the mutable
-  bookkeeping a run updates as it progresses). Single logical document per key, guarded by
-  optimistic concurrency (compare-and-set on an opaque :class:`~empirica.core.records.Revision`).
-* :class:`ArtifactRepository` — a run's *claims and evidence*: an append-only set of immutable
-  artifacts. No revisions and no overwrite; appends form a commutative, idempotent union, which is
-  what lets concurrent writers add evidence without coordinating.
-* :class:`MigrationPort` — the *only* sanctioned way data crosses a generation boundary.
-
-These are ``typing.Protocol`` interfaces: an adapter (filesystem, database, object store) satisfies
-a port by shape, without importing it. Nothing here references a concrete store, a path, a Git
-command, or a Claude/Pi concept — that separation is the whole point of the port (ADR-31).
+Operational state uses compare-and-set; immutable claim/evidence artifacts use append-only union.
+Adapters satisfy these ``typing.Protocol`` interfaces without depending on concrete storage or host
+concepts.
 """
 from __future__ import annotations
 
 from typing import Protocol, TypeVar
 
-from .records import Artifact, MigrationReport, Read, Revision, RunKey
+from .records import Artifact, Read, Revision, RunKey
 
 T = TypeVar("T")
 
@@ -75,21 +65,4 @@ class ArtifactRepository(Protocol):
         if nothing was ever appended (or it belongs to another generation), or ``Corrupt(reason)``
         if the stored set cannot be decoded. The ``revision`` is advisory (an opaque digest of the
         set) — ``append`` is unconditional and does not consume it."""
-        ...
-
-
-class MigrationPort(Protocol):
-    """The single explicit path for moving a run's storage across a generation boundary.
-
-    Reads never migrate implicitly (generation isolation, see
-    :class:`~empirica.core.records.RunKey`); a schema/layout change is enacted by invoking this
-    port, which copies ``source``'s operational state and artifacts into ``target`` — a different
-    generation of the same run — and reports what moved. Leaving ``source`` intact makes the
-    migration reversible: rollback is just pointing back at the older generation.
-    """
-
-    def migrate(self, source: RunKey, target: RunKey) -> MigrationReport:
-        """Copy state and artifacts from ``source`` to ``target`` and return a
-        :class:`~empirica.core.records.MigrationReport`. ``target`` must be absent beforehand
-        (first-writer-wins still holds); ``source`` is not modified."""
         ...

@@ -48,7 +48,7 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:b70c27616f18a1cf5f8c6404066dcefc0a65a5a3f8d9849bbc1b1fbcf38aa1f6"
+REVIEWED_REGISTRY_DIGEST = "sha256:cc25cee80a10845fb62bb698c8c3cc56520b986de81783dda7c77c0453b47d4f"
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:aad8b0b5cad21532a426a564d911c89ee64e4e94a750a1341b6adbbd5a22bebb"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
@@ -58,7 +58,7 @@ PROTOCOL = "empirica/v2"
 # types and research source kinds. Artifact kind/outcome/spike-gate vocabularies ARE
 # canonical-JSON (artifact_kinds/artifact_outcomes/spike_gates in the registry) and are
 # derived from the loaded registry, never duplicated here as EXPECTED_* tables.
-EDGE_TYPES = {"SupportedBy", "InContextOf"}
+EDGE_TYPES = {"SupportedBy"}
 EVIDENCE_SOURCE_KINDS = {"docs", "code", "runtime", "web"}
 # Strict normalized repo-relative POSIX path (shared schema/check). Rejects leading
 # slash, drive/colon, backslash/UNC, empty/repeated separators, dot/dotdot segments.
@@ -760,13 +760,19 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
                 errors.append(f"{p}: research source_kind {sk!r} not canonical")
             if not isinstance(art.get("source_ref"), str) or not art.get("source_ref"):
                 errors.append(f"{p}: research source_ref must be a nonempty string")
+            if not isinstance(art.get("citation"), str) or not art.get("citation"):
+                errors.append(f"{p}: research citation must be a nonempty string")
+            if ("observed_content_digest" in art
+                    and not _is_digest(art.get("observed_content_digest"))):
+                errors.append(f"{p}: research observed_content_digest must be sha256:<64hex>")
             if aid is not None and art.get("outcome") == "supporting" and cdigest is not None:
                 supporting_research_by_digest.setdefault(cdigest, set()).add(aid)
                 if art.get("active") is True and isinstance(cid, str):
                     active_supporting_by_cd.setdefault((cid, cdigest), set()).add(aid)
         elif kind == "spike_request":
             for fb in ("active", "outcome", "file_bindings", "exit_code", "spike_gate",
-                      "supersedes", "source_kind", "source_ref"):
+                      "supersedes", "source_kind", "source_ref", "citation",
+                      "observed_content_digest"):
                 if fb in art:
                     errors.append(f"{p}: spike_request artifact must not carry field {fb!r}")
             if not isinstance(art.get("harness_request_id"), str) or not art.get("harness_request_id"):
@@ -796,7 +802,8 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
                 else:
                     requests_by_key[key] = art
         elif kind == "spike":
-            for fb in ("source_kind", "source_ref", "dependent_files"):
+            for fb in ("source_kind", "source_ref", "citation", "observed_content_digest",
+                       "dependent_files"):
                 if fb in art:
                     errors.append(f"{p}: spike result artifact must not carry field {fb!r}")
             if not isinstance(art.get("active"), bool):
@@ -2133,7 +2140,7 @@ def main() -> int:
     REQUIRED_V2_FIXTURES = {
         "start-bootstrap-allow", "block-open-claim", "block-stale-spike",
         "block-pending-audit", "block-child-terminal", "allow-stopped-frozen",
-        "allow-stopped-budget", "allow-converged", "block-old-version",
+        "allow-stopped-budget", "allow-converged", "block-corrupt-state",
         "getcontract-index", "getcontract-section", "getcontract-full",
         # D2E added presentation_selector GetContract section fixture.
         "getcontract-presentation-selector",
@@ -2646,7 +2653,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_bad_kind["argument"]["artifacts"] = [{"sequence": 0,
         "artifact_id": "sha256:" + "1" * 64, "claim_id": "G0", "claim_digest": d64,
         "kind": "research", "statement_digest": d64, "active": True, "outcome": "pass",
-        "source_kind": "web", "source_ref": "https://example.test/s"}]
+        "source_kind": "web", "source_ref": "https://example.test/s",
+        "citation": "Observed test source."}]
     expect(lambda e: check_argument_view(arg_bad_kind, registry, e, "neg"),
            "research outcome", "research artifact spike outcome")
 
@@ -2707,10 +2715,12 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_dup_art["argument"]["artifacts"] = [
         {"sequence": 0, "artifact_id": "sha256:" + "1" * 64, "claim_id": "G0", "claim_digest": d64,
          "kind": "research", "statement_digest": d64, "active": True, "outcome": "supporting",
-         "source_kind": "web", "source_ref": "https://example.test/s"},
+         "source_kind": "web", "source_ref": "https://example.test/s",
+         "citation": "Observed test source."},
         {"sequence": 1, "artifact_id": "sha256:" + "1" * 64, "claim_id": "G0", "claim_digest": d64,
          "kind": "research", "statement_digest": d64, "active": True, "outcome": "supporting",
-         "source_kind": "web", "source_ref": "https://example.test/s"}]
+         "source_kind": "web", "source_ref": "https://example.test/s",
+         "citation": "Observed test source."}]
     expect(lambda e: check_argument_view(arg_dup_art, registry, e, "neg"),
            "not unique", "duplicate artifact_id")
 
@@ -2739,11 +2749,11 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                 {"sequence": 0, "artifact_id": R1, "claim_id": "G0", "claim_digest": d64,
                  "kind": "research", "statement_digest": d64, "active": True,
                  "outcome": "supporting", "source_kind": "web",
-                 "source_ref": "https://example.test/s"},
+                 "source_ref": "https://example.test/s", "citation": "Observed test source."},
                 {"sequence": 1, "artifact_id": R2, "claim_id": "G0", "claim_digest": d64,
                  "kind": "research", "statement_digest": d64, "active": True,
                  "outcome": "supporting", "source_kind": "code",
-                 "source_ref": "src/a.py"},
+                 "source_ref": "src/a.py", "citation": "Observed test source."},
                 {"sequence": 2, "artifact_id": Q1, "claim_id": "G0", "claim_digest": d64,
                  "kind": "spike_request", "statement_digest": d64,
                  "harness_request_id": "h1", "command": "make test", "command_digest": d64,
@@ -2936,7 +2946,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                 {"sequence": 0, "artifact_id": R1, "claim_id": "G0", "claim_digest": d64,
                  "kind": "research", "statement_digest": d64, "active": True,
                  "outcome": "supporting", "source_kind": "web",
-                 "source_ref": "https://example.test/s"},
+                 "source_ref": "https://example.test/s", "citation": "Observed test source."},
                 {"sequence": 1, "artifact_id": Q1, "claim_id": "G0", "claim_digest": d64,
                  "kind": "spike_request", "statement_digest": d64,
                  "harness_request_id": "h1", "command": "make test", "command_digest": d64,
@@ -3019,7 +3029,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg["artifacts"].append({"sequence": 4, "artifact_id": "sha256:" + "9" * 64,
         "claim_id": "G0", "claim_digest": d64, "kind": "research", "statement_digest": d64,
         "active": True, "outcome": "refuting", "source_kind": "web",
-        "source_ref": "https://example.test/refutes"})
+        "source_ref": "https://example.test/refutes", "citation": "Observed refutation."})
     arg["claims"][0]["active_evidence_ids"] = [R1, R2, "sha256:" + "9" * 64, P1]
     arg["claims"][0]["evidence_digest"] = registry_digest(arg["claims"][0]["active_evidence_ids"])
     arg["audit"]["reviewed_claims"][0]["evidence_digest"] = arg["claims"][0]["evidence_digest"]
@@ -3071,7 +3081,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
             {"sequence": 0, "artifact_id": R1, "claim_id": "G0", "claim_digest": d64,
              "kind": "research", "statement_digest": d64, "active": True,
              "outcome": "supporting", "source_kind": "web",
-             "source_ref": "https://example.test/s"}],
+             "source_ref": "https://example.test/s", "citation": "Observed test source."}],
         "audit": {"state": "not_required", "independence": "unverified",
             "reviewed_argument_digest": None, "reviewed_goal_digest": None,
             "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": None,
@@ -3122,7 +3132,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
             {"sequence": 0, "artifact_id": R1, "claim_id": "G0", "claim_digest": d64,
              "kind": "research", "statement_digest": d64, "active": True,
              "outcome": "supporting", "source_kind": "web",
-             "source_ref": "https://example.test/s"},
+             "source_ref": "https://example.test/s", "citation": "Observed test source."},
             {"sequence": 1, "artifact_id": Q1, "claim_id": "G0", "claim_digest": d64,
              "kind": "spike_request", "statement_digest": d64,
              "harness_request_id": "h1", "command": "make test", "command_digest": d64,
@@ -3137,7 +3147,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
             {"sequence": 3, "artifact_id": R_X, "claim_id": "G1", "claim_digest": d64,
              "kind": "research", "statement_digest": d64, "active": True,
              "outcome": "supporting", "source_kind": "code",
-             "source_ref": "src/b.py"}],
+             "source_ref": "src/b.py", "citation": "Observed test source."}],
         "audit": {"state": "not_required", "independence": "unverified",
             "reviewed_argument_digest": None, "reviewed_goal_digest": None,
             "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": None,
@@ -3428,7 +3438,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         return [
             {"sequence": 0, "artifact_id": R1, "claim_id": "G0", "claim_digest": WORD,
              "kind": "research", "statement_digest": STMT, "active": True,
-             "outcome": "supporting", "source_kind": "web", "source_ref": "src/a.py"},
+             "outcome": "supporting", "source_kind": "web", "source_ref": "src/a.py",
+             "citation": "Observed test source."},
             {"sequence": 1, "artifact_id": Q1, "claim_id": "G0", "claim_digest": WORD,
              "kind": "spike_request", "statement_digest": STMT,
              "harness_request_id": "h1", "command": "make test", "command_digest": CMD,
