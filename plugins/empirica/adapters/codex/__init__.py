@@ -1,27 +1,30 @@
-"""Codex CLI adapter for the shared ``empirica/v1`` application service."""
+"""Codex CLI 0.146.0 driver and request translators for ``empirica/v2``.
 
+Native hooks activate the shared public bridge and bounded managed audit process. Trusted ingress
+has no public builder. Because this exact Codex profile cannot observe the process's resolved model,
+its auditor identity remains unverified and convergence fails closed.
+"""
+
+from .correlation import PROTOCOL, CorrelationError, correlate, request_id
 from .lifecycle import (
-    build_investigation_request,
-    build_reserve_spawn_request,
-    build_restore_request,
-    build_route_request,
+    SelectorError,
+    build_resolve_request,
     build_start_run_request,
-    build_stop_request,
     explicit_activation,
-    event_stamp,
 )
-from .transport import BridgeTransport, Transport, dispatch
+from .transport import CODEX_PROFILE_ID, BridgeTransport, Transport, dispatch
 
 __all__ = [
     "BridgeTransport",
+    "CODEX_PROFILE_ID",
+    "CorrelationError",
+    "PROTOCOL",
+    "SelectorError",
     "Transport",
-    "build_investigation_request",
-    "build_reserve_spawn_request",
-    "build_restore_request",
-    "build_route_request",
+    "build_resolve_request",
     "build_start_run_request",
-    "build_stop_request",
+    "correlate",
     "dispatch",
-    "event_stamp",
     "explicit_activation",
+    "request_id",
 ]

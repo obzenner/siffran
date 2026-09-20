@@ -1,0 +1,70 @@
+{
+  "request": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-old-version",
+    "command": {
+      "type": "EvaluateRun",
+      "run_id": "run-fx",
+      "intent": "report_convergence"
+    }
+  },
+  "expected": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-old-version",
+    "result": {
+      "type": "Block",
+      "run": {
+        "id": "run-legacy",
+        "goal": "A legacy goal.",
+        "status": "active",
+        "modes": {
+          "multi_provider": false,
+          "cli_exec": false
+        },
+        "contract": {
+          "id": "empirica/public",
+          "version": "2.0.0",
+          "relevant_sections": [
+            "run/lifecycle",
+            "protocol"
+          ],
+          "digest": "sha256:b70c27616f18a1cf5f8c6404066dcefc0a65a5a3f8d9849bbc1b1fbcf38aa1f6"
+        },
+        "obligations": {
+          "active": [],
+          "deferred": []
+        },
+        "residuals": [],
+        "freshness": {
+          "changes": []
+        },
+        "children": [],
+        "host": {
+          "profile_id": "claude-code@2.1.270",
+          "tier": "foreground_only",
+          "missing_capabilities": [
+            "host.async_unsupported"
+          ]
+        },
+        "next_actions": [],
+        "untrusted_delimiters": {
+          "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+          "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+        }
+      },
+      "reasons": [
+        {
+          "code": "run.old_version",
+          "parameters": {},
+          "next_actions": [
+            "run.start_fresh"
+          ],
+          "sections": [
+            "run/lifecycle"
+          ],
+          "message": "Run state is not empirica/v2; start a fresh run."
+        }
+      ]
+    }
+  }
+}

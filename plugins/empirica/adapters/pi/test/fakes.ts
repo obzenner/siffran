@@ -1,16 +1,14 @@
 // Test doubles that mock the Pi ExtensionAPI / ctx surface just enough to prove
-// registration, translation, gating, and follow-up behaviour, with no Pi runtime
+// registration, translation, gating, and guard behaviour, with no Pi runtime
 // and no network.
 
 import type {
-  AgentSettledHandler,
   CommandDefinition,
   ExtensionAPI,
   ExtensionContext,
-  MessageDelivery,
-  NotifyType,
   ResourcesDiscoverHandler,
   ToolCallHandler,
+  ToolDefinition,
   UiContext,
 } from "../src/pi-types.ts";
 
@@ -19,10 +17,7 @@ export interface NotifyCall {
   type?: NotifyType;
 }
 
-export interface SentMessage {
-  text: string;
-  deliverAs?: MessageDelivery;
-}
+type NotifyType = "info" | "warning" | "error";
 
 /** Records ctx.ui interactions the empirica adapter makes (notify only). */
 export class FakeUi implements UiContext {
@@ -38,21 +33,32 @@ export class FakeUi implements UiContext {
   }
 }
 
-export function fakeCtx(cwd = "/work/repo", entries: Array<{ type?: string; customType?: string; data?: unknown }> = []): ExtensionContext {
-  return { ui: new FakeUi(), cwd, sessionManager: { getEntries: () => entries } };
+export function fakeCtx(
+  cwd = "/work/repo",
+  entries: Array<{ type?: string; customType?: string; data?: unknown }> = [],
+): ExtensionContext {
+  return { ui: new FakeUi(), cwd,
+    model: { provider: "bedrock", id: "author-model" },
+    sessionManager: { getEntries: () => entries } };
 }
 
 /** Captures everything an extension registers against the ExtensionAPI. */
 export class FakePi implements ExtensionAPI {
   readonly commands = new Map<string, CommandDefinition>();
   readonly handlers = new Map<string, unknown>();
-  readonly tools = new Map<string, import("../src/pi-types.ts").ToolDefinition>();
-  readonly sentMessages: SentMessage[] = [];
+  readonly tools = new Map<string, ToolDefinition>();
   readonly modelMessages: Array<{ customType: string; content: string }> = [];
   readonly entries: Array<{ customType: string; data?: unknown }> = [];
-  registerTool(def: import("../src/pi-types.ts").ToolDefinition): void { this.tools.set(def.name, def); }
-  appendEntry(customType: string, data?: unknown): void { this.entries.push({ customType, data }); }
-  sendMessage(message: { customType: string; content: string; display?: boolean }): void { this.modelMessages.push(message); }
+
+  registerTool(def: ToolDefinition): void {
+    this.tools.set(def.name, def);
+  }
+  appendEntry(customType: string, data?: unknown): void {
+    this.entries.push({ customType, data });
+  }
+  sendMessage(message: { customType: string; content: string; display?: boolean }): void {
+    this.modelMessages.push(message);
+  }
 
   registerCommand(name: string, def: CommandDefinition): void {
     this.commands.set(name, def);
@@ -60,13 +66,6 @@ export class FakePi implements ExtensionAPI {
 
   on(event: string, handler: unknown): void {
     this.handlers.set(event, handler);
-  }
-
-  sendUserMessage(
-    text: string,
-    options?: { deliverAs?: MessageDelivery },
-  ): void {
-    this.sentMessages.push({ text, ...options });
   }
 
   command(name: string): CommandDefinition {
@@ -81,10 +80,6 @@ export class FakePi implements ExtensionAPI {
 
   toolCall(): ToolCallHandler {
     return this.require("tool_call") as ToolCallHandler;
-  }
-
-  agentSettled(): AgentSettledHandler {
-    return this.require("agent_settled") as AgentSettledHandler;
   }
 
   private require(event: string): unknown {

@@ -49,9 +49,12 @@ installing, review
 small MCP adapter. The Methodologist package contains no hooks. Codex's normal
 sandbox and MCP approval policy still apply.
 
-Empirica's command hooks require a separate trust step. Open `/hooks`, review the
-installed definitions, and trust them before use; untrusted or modified hooks do
-not enforce the workflow. Activate a run explicitly:
+**Empirica on Codex is work in progress and is not supported for convergence.** The exact
+Codex 0.146.0 adapter exposes the canonical public MCP tools and a fail-closed Stop gate for
+adapter development, but Codex cannot independently observe the resolved auditor model. Its
+profile is therefore `observational` with `promotion_status: wip_unsupported`; convergence blocks
+with `audit.independence_unverified` rather than trusting configured argv. Do not rely on the
+experimental Codex package for an Empirica convergence claim:
 
 ```text
 $empirica design and verify the retry policy
@@ -65,7 +68,9 @@ directly as a repo/user skill there if needed, and use native simple mode only.
 
 ## Install for Pi
 
-Install the repository as one Pi package. This enables both Methodologist and Empirica:
+Install the repository as one Pi package. It bundles the pinned
+`pi-subagents@0.50.0` extension and the Empirica auditor role required by the exact
+`pi@0.84.1+pi-subagents@0.50.0` profile:
 
 ```sh
 pi install git:github.com/obzenner/siffran
@@ -76,9 +81,18 @@ Restart Pi after installation, or run `/reload` in an existing session. Availabl
 ```text
 /think <intent>                 # structured Methodologist workflow
 /think --simple <intent>        # original single-prompt Methodologist mode
-/empirica <goal>                # start an evidence-convergence run
-/empirica-status                # inspect the current run
+/empirica <goal>                # start a durable Empirica v2 workflow
+empirica_observe                 # tool: route, graph, research, spike, freeze
+empirica_read                    # tool: complete RunView, argument, contract
+report_convergence               # tool: guarded terminal decision
 ```
+
+The Pi adapter binds `empirica.empirica-auditor` as a foreground child, correlates
+its `tool_result`, and admits trusted facts through non-model-callable private ingress.
+It ignores requested result-model metadata and binds identity to the final native assistant
+record in the exact host-generated child session when that record produced the admitted verdict.
+Missing or ambiguous session evidence blocks. Pi also has no native completion veto; call
+`report_convergence` before any status claim.
 
 To update later:
 
@@ -92,13 +106,19 @@ For local development, install the checkout instead:
 pi install "$(pwd)"
 ```
 
+The exact Claude Code and Pi foreground profiles were promoted from installed-host observations;
+release certification additionally requires fresh operator-attested, candidate-bound structural
+receipts. Codex is explicitly `wip_unsupported` and is not part of the supported release set.
+`make empirica-host-live-check` requires exact receipts for Claude and Pi only; Pi and Claude async
+promotion remains separate and unsupported.
+
 ## Plugins
 
 <!-- BEGIN GENERATED: plugins (managed by the checkup skill — do not edit by hand) -->
 | Plugin | Version | Description |
 |--------|---------|-------------|
 | `methodologist` | 0.9.0 | Formal reasoning catalog — lets users choose and execute evidence-backed CS/math methodologies with traced phases and structured output. |
-| `empirica` | 1.3.0 | Empirical-convergence workflow — adjudicates a claim graph (GSN argument with in-toto evidence) where every claim's confidence must be earned by real external evidence: research citations first, deterministic spike verdicts for machine-checkable claims, then an independent auditor on a different model before a run may report convergence. Records which model actually answered each claim, and reports when audit independence was not obtained. Hook-enforced. |
+| `empirica` | 2.0.0 | Host-neutral empirical-convergence workflow — routes uncertainty into a claim graph, requires cited research before deterministic spikes, derives claim state, and binds convergence to a current independent audit. Full execution is hook-enforced only on profiles with author-action and bound-audit capabilities; unsupported profiles fail explicitly before starting. |
 <!-- END GENERATED: plugins -->
 
 ## Development

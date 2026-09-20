@@ -23,12 +23,24 @@ PLUGINS_DIR := plugins
 SCRIPTS := scripts
 ADR_DIR := doc/adr
 EMPIRICA_ACTIVATION_TESTS := $(PLUGINS_DIR)/empirica/adapters/claude/tests/test_activation_lifecycle.py
-EMPIRICA_CORE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_core.py
-EMPIRICA_APP_TESTS := $(PLUGINS_DIR)/empirica/tests/test_application.py
+EMPIRICA_FRESHNESS_TESTS := $(PLUGINS_DIR)/empirica/tests/test_freshness.py
+EMPIRICA_OBSERVATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_observation.py
+EMPIRICA_EXECUTION_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/tests/test_execution_adapter.py
+EMPIRICA_PROTOCOL_ISOLATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_protocol_isolation.py
+EMPIRICA_LIVE_RECEIPT_TESTS := $(SCRIPTS)/tests/test_empirica_live_receipts.py
+EMPIRICA_D6_STRICT_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d6_strict_v2.py
+EMPIRICA_D7_LOCATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_location.py
+EMPIRICA_D7_TRANSACTION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_transactions.py
+EMPIRICA_BRIDGE_V2_TESTS := $(PLUGINS_DIR)/empirica/tests/test_bridge_v2.py
+EMPIRICA_PUBLIC_TOOLS_TESTS := $(PLUGINS_DIR)/empirica/tests/test_public_tools.py
+EMPIRICA_AUDIT_PROTOCOL_TESTS := $(PLUGINS_DIR)/empirica/tests/test_audit_protocol.py
 EMPIRICA_STATE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_state_adapter.py
 EMPIRICA_GIT_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/git/tests/test_git_artifact_repo.py
 EMPIRICA_CLAUDE_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/claude/tests/test_claude_adapter.py
+EMPIRICA_CLAUDE_ADAPTER_CONFORMANCE_TESTS := $(PLUGINS_DIR)/empirica/adapters/claude/tests/test_claude_adapter_conformance.py
 EMPIRICA_CODEX_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/codex/tests/test_codex_adapter.py
+EMPIRICA_CODEX_ADAPTER_CONFORMANCE_TESTS := $(PLUGINS_DIR)/empirica/adapters/codex/tests/test_codex_adapter_conformance.py
+EMPIRICA_PI_ADAPTER_CONFORMANCE_TESTS := $(PLUGINS_DIR)/empirica/adapters/pi/test/adapter-conformance.test.ts
 METHODOLOGIST_CORE_TESTS := $(PLUGINS_DIR)/methodologist/tests/test_core.py
 METHODOLOGIST_CODEX_TESTS := $(PLUGINS_DIR)/methodologist/adapters/codex/tests/test_mcp_server.py
 MARKETPLACE := .claude-plugin/marketplace.json
@@ -73,14 +85,23 @@ check-ci: check-static check-core check-claude check-codex ## Every suite except
 	@if [ "$(PI_CHECKS)" = "1" ]; then $(MAKE) check-pi; else printf '$(DIM)Pi suite skipped in CI (PI_CHECKS=1 to include)$(RESET)\n'; fi
 	@printf '\n$(BOLD)CI checks passed.$(RESET)\n'
 
-check-static: lint validate docs-check adr-check contract-check obligations-check vendor-check activation-check ## Lint, manifests, generated docs, ADR health, API/obligation contracts, vendor copy, activation isolation
+check-static: lint validate docs-check adr-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check ## Lint, manifests, generated docs, ADR health, API/obligation contracts, vendor copy, activation isolation
 	@printf '$(BOLD)==> static suite ok$(RESET)\n'
 
 check-core: ## Host-neutral core: obligations lib, Empirica core/application/state/git store, Methodologist core
 	@printf '$(BOLD)==> core suite$(RESET)\n'
 	@$(PYTHON) lib/obligations/tests/test_obligations.py
-	@$(PYTHON) $(EMPIRICA_CORE_TESTS)
-	@$(PYTHON) $(EMPIRICA_APP_TESTS)
+	@$(PYTHON) $(EMPIRICA_FRESHNESS_TESTS)
+	@$(PYTHON) $(EMPIRICA_OBSERVATION_TESTS)
+	@$(PYTHON) $(EMPIRICA_EXECUTION_ADAPTER_TESTS)
+	@$(PYTHON) $(EMPIRICA_PROTOCOL_ISOLATION_TESTS)
+	@$(PYTHON) $(EMPIRICA_D6_STRICT_TESTS)
+	@$(PYTHON) $(EMPIRICA_D7_LOCATION_TESTS)
+	@$(PYTHON) $(EMPIRICA_D7_TRANSACTION_TESTS)
+	@$(PYTHON) $(EMPIRICA_BRIDGE_V2_TESTS)
+	@$(PYTHON) $(EMPIRICA_PUBLIC_TOOLS_TESTS)
+	@$(PYTHON) $(EMPIRICA_AUDIT_PROTOCOL_TESTS)
+	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/v2/__main__.py
 	@$(PYTHON) $(EMPIRICA_STATE_TESTS)
 	@$(PYTHON) $(EMPIRICA_GIT_ADAPTER_TESTS)
 	@$(PYTHON) $(METHODOLOGIST_CORE_TESTS)
@@ -89,10 +110,12 @@ check-claude: ## Claude Code host: activation lifecycle + Claude adapter tests
 	@printf '$(BOLD)==> claude suite$(RESET)\n'
 	@$(PYTHON) $(EMPIRICA_ACTIVATION_TESTS)
 	@$(PYTHON) $(EMPIRICA_CLAUDE_ADAPTER_TESTS)
+	@$(PYTHON) $(EMPIRICA_CLAUDE_ADAPTER_CONFORMANCE_TESTS)
 
 check-codex: methodologist-codex-check empirica-codex-check ## Codex host: adapter tests + package/hook validation for both plugins
 	@printf '$(BOLD)==> codex suite$(RESET)\n'
 	@$(PYTHON) $(EMPIRICA_CODEX_ADAPTER_TESTS)
+	@$(PYTHON) $(EMPIRICA_CODEX_ADAPTER_CONFORMANCE_TESTS)
 	@$(PYTHON) $(METHODOLOGIST_CODEX_TESTS)
 
 check-pi: pi-bundle-check methodologist-pi-check empirica-pi-check ## Pi host: bundle + both adapters (static, typecheck, tests, live bridge) — needs Node
@@ -141,6 +164,7 @@ adr-check: ## Check ADR link health and numbering (adrs doctor)
 contract-check: ## Validate host-neutral API schemas and conformance fixtures
 	@printf '$(BOLD)==> contracts$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_contracts.py
+	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) -c 'import adapters.public_tools'
 
 # Design spike from the first Pi dogfood run (doc/design/bridge-transport-retry-policy.md). It is a
 # design model, not a product check, so it is NOT part of `make check`.
@@ -211,6 +235,78 @@ codex-live-check: ## Smoke Codex 0.146.0 marketplace/plugin loading (set CODEX=.
 	@printf '$(BOLD)==> Codex 0.146.0 live plugin smoke$(RESET)\n'
 	@CODEX="$${CODEX:-codex}" $(PYTHON) $(SCRIPTS)/validate_codex_adapter.py --live
 
+# Empirica 2.0 target-state architecture validator (D3). Structural-only: ownership/dependency
+# direction, subtraction (forbidden files/symbols/fields/actions/protocols), effective runtime budget,
+# thin hooks, public-contract/profile alignment, and Make lifecycle. Intentionally NOT composed into
+# check-static/check/check-ci in D3 — the current pre-D6/D7 tree is expected to be RED; the reported
+# violations are the red acceptance list for D6/D7. D3-M composes the target once the state is green.
+# Pass ARGS=--self-test to run the committed synthetic suite (GREEN) instead of validating the repo.
+.PHONY: empirica-architecture-check
+empirica-architecture-check: ## validate Empirica 2.0 target ownership, dependencies, subtraction, and code budget
+	@printf '$(BOLD)==> empirica architecture$(RESET)\n'
+	@$(PYTHON) $(SCRIPTS)/validate_empirica_architecture.py $(ARGS)
+
+# Deterministic adapter conformance. These tests do not launch installed native hosts.
+.PHONY: empirica-host-adapter-check
+empirica-host-adapter-check: ## validate public tools and three host adapter translations
+	@printf '$(BOLD)==> empirica host-adapter conformance$(RESET)\n'
+	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_PUBLIC_TOOLS_TESTS)
+	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_CLAUDE_ADAPTER_CONFORMANCE_TESTS)
+	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_CODEX_ADAPTER_CONFORMANCE_TESTS)
+	@node --experimental-strip-types --test $(EMPIRICA_PI_ADAPTER_CONFORMANCE_TESTS)
+	@cd $(PLUGINS_DIR)/empirica/tests/v2 && PYTHONPATH=../.. $(PYTHON) -m unittest -v \
+		test_public_host_path.PublicHostPathTests
+
+.PHONY: empirica-host-receipt-unit-check
+empirica-host-receipt-unit-check: ## test structural installed-host receipt verification
+	@printf '$(BOLD)==> empirica receipt verifier$(RESET)\n'
+	@$(PYTHON) $(EMPIRICA_LIVE_RECEIPT_TESTS)
+
+.PHONY: empirica-host-receipt
+empirica-host-receipt: ## capture one operator-attested receipt: HOST=... TRANSCRIPT=... STATE=... CHILD_SESSION=... VERSION_OUTPUT=... COMMAND=... OUTPUT=...
+	@if [ -z "$(HOST)" ] || [ -z "$(TRANSCRIPT)" ] || [ -z "$(STATE)" ] || [ -z "$(CHILD_SESSION)" ] || [ -z "$(VERSION_OUTPUT)" ] || [ -z "$(COMMAND)" ] || [ -z "$(OUTPUT)" ]; then \
+		printf 'usage: make empirica-host-receipt HOST=claude|pi TRANSCRIPT=... STATE=... CHILD_SESSION=... VERSION_OUTPUT=... COMMAND=... OUTPUT=...\n' >&2; exit 2; fi
+	@$(PYTHON) $(SCRIPTS)/capture_empirica_live_receipt.py "$(HOST)" --transcript "$(TRANSCRIPT)" --state "$(STATE)" --child-session "$(CHILD_SESSION)" --version-output "$(VERSION_OUTPUT)" --command "$(COMMAND)" --output "$(OUTPUT)" --operator-attested
+
+.PHONY: empirica-host-live-check
+empirica-host-live-check: ## require retained installed-host Allow(converged=true) receipts
+	@printf '$(BOLD)==> empirica installed-host receipts$(RESET)\n'
+	@$(PYTHON) $(SCRIPTS)/verify_empirica_live_receipts.py
+
+# Empirica 2.0 host-neutral behavioral conformance suite.
+.PHONY: empirica-v2-conformance
+empirica-v2-conformance: ## run Empirica 2.0 host-neutral behavioral conformance
+	@printf '$(BOLD)==> empirica v2 conformance$(RESET)\n'
+	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/v2/__main__.py $(ARGS)
+
+# Empirica 2.0 D7-B location codec tests. storage_id / encode_handle / decode_handle contract
+# against the production application/location module. Composed into check-core (green target).
+.PHONY: empirica-d7-conformance
+empirica-d7-conformance: ## run D7-owned D4 cases plus strict D6 state cases
+	@printf '$(BOLD)==> empirica d7 conformance$(RESET)\n'
+	@cd $(PLUGINS_DIR)/empirica/tests/v2 && PYTHONPATH=../.. $(PYTHON) -m unittest -v \
+		test_activation_route_graph.ActivationRouteGraphTests.test_investigate_before_route_blocks_with_routing_reason \
+		test_activation_route_graph.ActivationRouteGraphTests.test_route_then_investigate_proceeds_late_route_blocks \
+		test_activation_route_graph.ActivationRouteGraphTests.test_claim_state_derived_committed_scope_gates \
+		test_activation_route_graph.ActivationRouteGraphTests.test_malformed_missing_selected_graph_fails_closed \
+		test_budget_freeze_terminal.BudgetFreezeTerminalTests.test_derivation_and_spawn_limits_block \
+		test_budget_freeze_terminal.BudgetFreezeTerminalTests.test_freeze_first_write_wins \
+		test_budget_freeze_terminal.BudgetFreezeTerminalTests.test_committed_frozen_scope_only_gating_scope \
+		test_budget_freeze_terminal.BudgetFreezeTerminalTests.test_terminal_nonconverged_runs_honest \
+		test_protocol_host.ProtocolHostTests.test_v2_identity_checked_before_decoding \
+		test_protocol_host.ProtocolHostTests.test_v1_and_old_state_rejected_with_fresh_run_recovery \
+		test_protocol_host.ProtocolHostTests.test_unknown_fields_actions_fail_closed
+
+.PHONY: empirica-d7-transactions
+empirica-d7-transactions: ## run Empirica 2.0 D7-W transaction and history tests
+	@printf '$(BOLD)==> empirica d7 transactions$(RESET)\n'
+	@$(PYTHON) $(EMPIRICA_D7_TRANSACTION_TESTS)
+
+.PHONY: empirica-d7-location
+empirica-d7-location: ## run Empirica 2.0 D7-B location codec tests
+	@printf '$(BOLD)==> empirica d7 location (D7-B)$(RESET)\n'
+	@$(PYTHON) $(EMPIRICA_D7_LOCATION_TESTS)
+
 ## --- Inspect
 
 .PHONY: status
@@ -237,15 +333,6 @@ adr-list: ## List all ADRs with their status
 .PHONY: doctor
 doctor: ## empirica preflight: actors reachable; pass ARGS="--multi-provider" to probe (no inference)
 	@PYTHONPATH=plugins/empirica $(PYTHON) -c 'from adapters.claude.preflight import main; raise SystemExit(main())' $(ARGS)
-
-.PHONY: migrate-legacy
-migrate-legacy: ## Explicitly import a legacy run: make migrate-legacy RUN_DIR=... REPO=...
-	@if [ -z "$(RUN_DIR)" ] || [ -z "$(REPO)" ]; then \
-		printf 'usage: make migrate-legacy RUN_DIR=<legacy-run-dir> REPO=<git-repo> [SESSION_ID=<id>]\n' >&2; \
-		exit 2; \
-	fi
-	@$(PYTHON) plugins/empirica/adapters/claude/migrate_legacy.py \
-		--run-dir "$(RUN_DIR)" --repo "$(REPO)" $(if $(SESSION_ID),--session-id "$(SESSION_ID)",)
 
 # Dogfooding (see docs/packages.md "Scope and Deduplication" in pi): the committed .pi/settings.json
 # adds this checkout as a project-local package and applies an autoload:false DELTA over the globally
@@ -282,6 +369,12 @@ bump: ## Bump a plugin version: make bump PLUGIN=empirica PART=minor
 		printf 'plugins: $(PLUGIN_NAMES)\n' >&2; exit 2; fi
 	@$(PYTHON) $(SCRIPTS)/bump_version.py "$(PLUGIN)" "$(or $(PART),patch)"
 
+.PHONY: version-set
+version-set: ## Set an unreleased plugin version exactly: make version-set PLUGIN=empirica VERSION=2.0.0
+	@if [ -z "$(PLUGIN)" ] || [ -z "$(VERSION)" ]; then \
+		printf 'usage: make version-set PLUGIN=<name> VERSION=MAJOR.MINOR.PATCH\n' >&2; exit 2; fi
+	@$(PYTHON) $(SCRIPTS)/bump_version.py "$(PLUGIN)" "=$(VERSION)"
+
 .PHONY: docs
 docs: ## Explain how to regenerate the generated plugin tables
 	@printf '$(BOLD)==> generated docs$(RESET)\n'
@@ -300,13 +393,17 @@ docs-check: ## Verify the generated plugin tables match the manifests
 	@$(PYTHON) $(SCRIPTS)/check_generated_docs.py
 
 .PHONY: release-check
-release-check: check ## Pre-release gate: every suite (docs-check is part of check-static)
+release-check: check empirica-architecture-check empirica-host-live-check ## Pre-release gate: deterministic checks plus installed-host receipts
 	@printf '\n$(BOLD)Ready to release.$(RESET) Remaining steps are yours:\n'
 	@printf '  1. confirm the version bump is in plugin.json (make status)\n'
 	@printf '  2. commit and push\n'
 	@printf '  3. open or update the PR\n'
 
 ## --- Maintain
+
+.PHONY: pi-lock
+pi-lock: ## Refresh the root Pi package lockfile after dependency changes
+	@npm install --package-lock-only --ignore-scripts
 
 .PHONY: clean
 clean: ## Remove Python caches and stray build artifacts

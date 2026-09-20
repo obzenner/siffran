@@ -1,0 +1,24 @@
+{
+  "protocol": "empirica/v2",
+  "state_schema": "empirica.run/2",
+  "goal": "Prove stamp overflow is rejected procedurally.",
+  "status": "active",
+  "modes": {
+    "multi_provider": false,
+    "cli_exec": false
+  },
+  "budgets": {
+    "max_passes": 1,
+    "passes_used": 0,
+    "max_spawns": 0,
+    "spawns_used": 0
+  },
+  "selected_graph_artifact_id": null,
+  "frozen_claim_ids": null,
+  "route_stamp": 10,
+  "investigation_stamp": null,
+  "stamp_seq": 3,
+  "last_derivation_digest": null,
+  "children": [],
+  "committed_artifact_head_id": null
+}

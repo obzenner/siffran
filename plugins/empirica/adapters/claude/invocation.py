@@ -1,8 +1,14 @@
-"""Pure Claude invocation-mode translation (ADR-28), with no mode side files."""
+"""Pure Claude invocation-mode translation (ADR-28), with no mode side files.
+
+Resolved modes become an exact v2 ``configure_run`` author action; the old ``mode``/``phase``
+action is removed (D6-C).  No timestamp or ordering decision is made here.
+"""
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+
+from .correlation import PROTOCOL, request_id as new_request_id
 
 MODES = ("multi_provider", "cli_exec")
 FLAGS = {"--multi-provider": "multi_provider", "--cli-exec": "cli_exec"}
@@ -84,20 +90,29 @@ def parse_invocation(
     return Invocation(goal, modes, sources, tuple(unknown))
 
 
-def build_mode_request(run_id: str, modes: Mapping[str, bool], *, request_id: str) -> dict:
-    """Build the typed operational mode update used when configuring an existing run."""
+def build_configure_run_request(
+    run_id: str, modes: Mapping[str, bool], *, correlation_id: str | None = None,
+) -> dict:
+    """Build the exact v2 ``configure_run`` author action used to set run modes.
+
+    Only the closed mode vocabulary is admitted; unknown or non-boolean modes fail closed locally
+    rather than entering the request.  ``configure_run`` requires at least a ``modes`` (or
+    ``budgets``) object; this builder carries ``modes`` only.
+    """
     if not isinstance(run_id, str) or not run_id:
         raise ValueError("run_id must be a non-empty application run handle")
     selected = {key: value for key, value in modes.items() if key in MODES}
     unknown = sorted(set(modes) - set(MODES))
     if unknown or any(not isinstance(value, bool) for value in selected.values()):
         raise ValueError(f"invalid mode configuration: unknown={unknown!r}")
+    if not selected:
+        raise ValueError("configure_run requires at least one known mode")
     return {
-        "protocol": "empirica/v1",
-        "request_id": request_id,
+        "protocol": PROTOCOL,
+        "request_id": correlation_id or new_request_id({}, "configure-run"),
         "command": {
             "type": "ObserveAction",
             "run_id": run_id,
-            "action": {"kind": "mode", "modes": selected},
+            "action": {"kind": "configure_run", "modes": selected},
         },
     }

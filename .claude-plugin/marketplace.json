@@ -15,7 +15,7 @@
     {
       "name": "empirica",
       "source": "./plugins/empirica",
-      "description": "Empirical-convergence workflow — tracks unknowns with confidence scores in a living spec, spikes them against real deterministic checks, and drives them to a fixed point before handing off to implementation. Hook-enforced convergence.",
+      "description": "Host-neutral empirical-convergence workflow — routes uncertainty into a claim graph, requires cited research before deterministic spikes, derives claim state, and binds convergence to a current independent audit. Full execution is hook-enforced only on profiles with author-action and bound-audit capabilities; unsupported profiles fail explicitly before starting.",
       "category": "development"
     }
   ]

@@ -1,11 +1,51 @@
-# Empirica Pi adapter
+# Empirica Pi adapter (v2)
 
-This extension translates Pi lifecycle events into the `empirica/v1` bridge. `/empirica` parses ADR-28 leading mode flags, persists and re-injects the opaque run handle, and always sends the resolved goal, modes, unknown flags, and Step 1 instruction to the model (verified in the live Pi dogfood run, `doc/design/reports/dogfood-pi.md`, P-1). The deterministic obligation contract is exposed to the model. The `report_convergence` custom tool is enforced at `tool_call`; denials include reason, contract text, and handle. `empirica_status` reports goal/modes when supplied by the core.
+This is the v2-only Pi translation shell. It exposes the same public author/read/report
+surface as the Claude and Codex adapters and owns no convergence policy.
 
-Only executable `subagent` calls (those carrying exactly one of `agent`, `workflowScript`, or `resume`) reserve spawn budget. Management calls such as `list` and `status`, and malformed multi-key launches, are ignored. An auditor call (`empirica-auditor`) reserves a spawn and obtains a declared actor audit ticket; the adapter then calls `GetArgument`, injects the rubric, nonce, and dossier into the child task, and forces `async: false`. The nonce is never sent in a model message. On `tool_result`, an error voids the reservation; a valid fenced `empirica-verdict` is parsed and submitted as `audit_verdict`, then the verdict block is redacted before the result is shown to the author. Missing or mismatched verdicts leave the audit obligation open. Budget Blocks include the rendered contract. Bridge transport failures fail closed, while adapter-generated invalid requests surface as bugs. These interception rules and actor payloads were verified by the live dogfood sequence (P-4).
+## Exact profile
 
-### Auditor flow and nudge limit
+The exact profile is `pi@0.84.1+pi-subagents@0.50.0`, tier `foreground_only`, with
+`promotion_status=promoted` after an installed-host foreground trace reached guarded
+`Allow(converged=true)`. `pi-subagents` must provide its structured `subagent` tool.
+Asynchronous audit execution is not supported and is never silently downgraded.
 
-The host, rather than the author, owns the audit round-trip: `reserve_spawn` → `audit_ticket` → `GetArgument` → foreground auditor → `audit_verdict`. The child must build its verdict from the supplied `GetArgument` digests. The adapter appends the core's rendered contract (or a rejection reason) to the tool result while keeping the nonce out of author-visible content. Set `EMPIRICA_PI_MAX_NUDGES` to cap observational follow-up reminders after `agent_settled` (default: `3`); exceeding the cap emits one pause notice and never gates completion.
+## Surface
 
-Compaction uses `session_before_compact` custom summaries and retains contract JSON in extension session entries. `agent_settled` nudges at most once per reason/revision/verdict, skips empty or aborted turns, and pauses after `EMPIRICA_PI_MAX_NUDGES` (default 3), with one resume instruction. Pi cannot veto completion: enforcement exists only when the report tool is invoked. A spawn outside Pi's event stream is necessarily un-gated.
+| Pi surface | v2 operation | Behaviour |
+|---|---|---|
+| `/empirica <goal>` | `StartRun` | Starts a durable run, persists the opaque handle, and injects public-tool guidance. |
+| `empirica_observe` | `ObserveAction` | Accepts only canonical public author kinds. Trusted kinds are rejected locally and by schema. |
+| `empirica_read` | `GetRun`, `GetArgument`, `GetContract`, `RestoreRun` | Returns the complete typed result; resolves a session handle when needed. |
+| `report_convergence` | `EvaluateRun(report_convergence | stop)` | Fails closed unless the guarded response is `Allow`; `intent: stop` records an honest non-converged terminal. |
+| `tool_call(subagent)` | `child_reserve` + private lifecycle | Binds the canonical auditor, forces foreground execution, injects the dossier, and records launching/pending facts. |
+| `tool_result(subagent)` | private `audit_identity` + `audit_verdict` | Correlates by `toolCallId`, redacts before the first await, binds the verdict to the final native assistant record in the host-generated child session, and admits only one exact fenced verdict. |
+| compaction | `RestoreRun` | Carries the opaque handle and restores the selected run. |
+
+The packaged auditor pins `amazon-bedrock/eu.anthropic.claude-opus-4-8`, a stock Pi 0.84.1
+provider-qualified registry identity. Deployments may override it with
+`EMPIRICA_PI_AUDITOR_MODEL` when their registry uses a concrete private provider alias; the adapter
+resolves that launch contract and rejects shadowed agent definitions and author-supplied overrides.
+The adapter never trusts `details.results[].model`, which is requested launch configuration.
+Instead it reads the exact result row's host-generated `sessionFile` and accepts identity only when
+the final native assistant record carries concrete provider/model fields and its sole verdict equals
+the admitted tool-result verdict. Missing, malformed, oversized, changed, or ambiguous sessions
+remain unverified and block convergence.
+
+The adapter-private Python subprocess exposes no Pi tool. It is the imperative ingress shell for
+host-observed attribution, child events, and audit verdicts. Public tools cannot express these
+payloads.
+
+## Hard gate
+
+With a non-null run handle, `report_convergence` permits only a centrally guarded `Allow`.
+`Block`, `Inert`, every `Fault`, malformed responses, and transport failures deny. The central
+guard enforces `converged=true` iff `run.status=converged`.
+
+Pi has no native completion veto; the model must call `report_convergence` before making a
+convergence claim. A turn can otherwise finish without a terminal decision.
+
+## Validation
+
+Run `make check-pi` for deterministic adapter coverage. Profile promotion additionally requires
+`make empirica-host-live-check` with a retained installed-Pi receipt.

@@ -1,0 +1,413 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://siffran.dev/contracts/empirica/v2/state.schema.json",
+  "title": "Empirica v2 internal persisted run state",
+  "description": "Internal host-neutral persisted-state schema (D6 strict-v2-subtraction section 4). Not PublicContract behavior. Closed required fields with no decoder defaults; status and child-state vocabularies are mechanically mirrored from the canonical PublicContract registry. Procedural invariants (counter bounds, stamp bounds, child_id uniqueness) are owned by the codec and the contract validator, not by this schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "state_schema",
+    "goal",
+    "status",
+    "modes",
+    "budgets",
+    "selected_graph_artifact_id",
+    "frozen_claim_ids",
+    "route_stamp",
+    "investigation_stamp",
+    "stamp_seq",
+    "last_derivation_digest",
+    "children",
+    "committed_artifact_head_id"
+  ],
+  "properties": {
+    "protocol": {
+      "const": "empirica/v2"
+    },
+    "state_schema": {
+      "const": "empirica.run/2"
+    },
+    "goal": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "active",
+        "converged",
+        "stopped_residual",
+        "stopped_frozen",
+        "stopped_budget"
+      ]
+    },
+    "modes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "multi_provider",
+        "cli_exec"
+      ],
+      "properties": {
+        "multi_provider": {
+          "type": "boolean"
+        },
+        "cli_exec": {
+          "type": "boolean"
+        }
+      }
+    },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_passes",
+        "passes_used",
+        "max_spawns",
+        "spawns_used"
+      ],
+      "properties": {
+        "max_passes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "passes_used": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_spawns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "spawns_used": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "selected_graph_artifact_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "frozen_claim_ids": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "route_stamp": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "investigation_stamp": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "stamp_seq": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "last_derivation_digest": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "children": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/childRecord"
+      }
+    },
+    "committed_artifact_head_id": {
+      "$ref": "#/$defs/nullableDigest256"
+    }
+  },
+  "$defs": {
+    "digest256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "childRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "child_id",
+        "purpose",
+        "state",
+        "spent",
+        "refunded",
+        "deadline",
+        "native_id",
+        "first_terminal_fingerprint",
+        "capability_ref",
+        "audit_operation_id",
+        "audit_argument",
+        "audit_role_profile"
+      ],
+      "properties": {
+        "child_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state": {
+          "enum": [
+            "reserved",
+            "launching",
+            "pending",
+            "completed",
+            "launch_rejected",
+            "failed",
+            "cancelled",
+            "timed_out",
+            "orphaned"
+          ]
+        },
+        "spent": {
+          "type": "boolean"
+        },
+        "refunded": {
+          "type": "boolean"
+        },
+        "deadline": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "native_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "first_terminal_fingerprint": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "capability_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "audit_operation_id": {
+          "oneOf": [
+            {"$ref": "#/$defs/digest256"},
+            {"type": "null"}
+          ]
+        },
+        "audit_argument": {
+          "type": ["object", "null"]
+        },
+        "audit_role_profile": {
+          "type": ["string", "null"],
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "reserved"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "spent": {
+                "const": false
+              },
+              "refunded": {
+                "const": false
+              },
+              "native_id": {
+                "type": "null"
+              },
+              "first_terminal_fingerprint": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "spent",
+              "refunded",
+              "native_id",
+              "first_terminal_fingerprint"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "launch_rejected"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "spent": {
+                "const": false
+              },
+              "refunded": {
+                "const": true
+              },
+              "native_id": {
+                "type": "null"
+              },
+              "first_terminal_fingerprint": {
+                "$ref": "#/$defs/digest256"
+              }
+            },
+            "required": [
+              "spent",
+              "refunded",
+              "native_id",
+              "first_terminal_fingerprint"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "launching",
+                  "pending"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "spent": {
+                "const": true
+              },
+              "refunded": {
+                "const": false
+              },
+              "native_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "first_terminal_fingerprint": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "spent",
+              "refunded",
+              "native_id",
+              "first_terminal_fingerprint"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "completed",
+                  "failed",
+                  "cancelled",
+                  "timed_out",
+                  "orphaned"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "spent": {
+                "const": true
+              },
+              "refunded": {
+                "const": false
+              },
+              "native_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "first_terminal_fingerprint": {
+                "$ref": "#/$defs/digest256"
+              }
+            },
+            "required": [
+              "spent",
+              "refunded",
+              "native_id",
+              "first_terminal_fingerprint"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "refunded": {
+                "const": true
+              }
+            },
+            "required": [
+              "refunded"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "launch_rejected"
+              },
+              "spent": {
+                "const": false
+              }
+            },
+            "required": [
+              "state",
+              "spent"
+            ]
+          }
+        }
+      ]
+    },
+    "nullableDigest256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}

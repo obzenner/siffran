@@ -1,0 +1,84 @@
+{
+  "request": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-stale-spike",
+    "command": {
+      "type": "EvaluateRun",
+      "run_id": "run-fx",
+      "intent": "report_convergence"
+    }
+  },
+  "expected": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-stale-spike",
+    "result": {
+      "type": "Block",
+      "run": {
+        "id": "run-fx",
+        "goal": "Prove the public contract is internally consistent.",
+        "status": "active",
+        "modes": {
+          "multi_provider": false,
+          "cli_exec": false
+        },
+        "contract": {
+          "id": "empirica/public",
+          "version": "2.0.0",
+          "relevant_sections": [
+            "evidence/freshness"
+          ],
+          "digest": "sha256:b70c27616f18a1cf5f8c6404066dcefc0a65a5a3f8d9849bbc1b1fbcf38aa1f6"
+        },
+        "obligations": {
+          "active": [],
+          "deferred": []
+        },
+        "residuals": [],
+        "freshness": {
+          "changes": [
+            {
+              "path": "src/lib.py",
+              "state": "present"
+            }
+          ]
+        },
+        "children": [],
+        "host": {
+          "profile_id": "claude-code@2.1.270",
+          "tier": "foreground_only",
+          "missing_capabilities": [
+            "host.async_unsupported"
+          ]
+        },
+        "next_actions": [],
+        "untrusted_delimiters": {
+          "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+          "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+        }
+      },
+      "reasons": [
+        {
+          "code": "claim.spike_stale",
+          "parameters": {
+            "changes": [
+              {
+                "path": "src/lib.py",
+                "state": "present"
+              }
+            ]
+          },
+          "affected": {
+            "witness_ref": "spike/G0"
+          },
+          "next_actions": [
+            "spike.regate"
+          ],
+          "sections": [
+            "evidence/freshness"
+          ],
+          "message": "Spike prerequisites changed; re-gate."
+        }
+      ]
+    }
+  }
+}

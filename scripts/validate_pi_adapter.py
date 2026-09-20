@@ -84,6 +84,25 @@ def check_manifest(adapter: Path, errors: list[str]) -> dict:
         target = (adapter / entry).resolve()
         if not target.is_file():
             errors.append(f"{rel(manifest_path)}: pi.extensions entry {entry!r} does not exist")
+
+    if adapter == ROOT:
+        if manifest.get("dependencies", {}).get("pi-subagents") != "0.50.0":
+            errors.append(f"{rel(manifest_path)}: complete Pi profile must pin pi-subagents 0.50.0")
+        if "pi-subagents" not in manifest.get("bundledDependencies", []):
+            errors.append(f"{rel(manifest_path)}: pi-subagents must be bundled for npm installs")
+        if "./node_modules/pi-subagents/index.ts" not in extensions:
+            errors.append(f"{rel(manifest_path)}: bundled pi-subagents extension is not loaded")
+        agent_roots = manifest.get("pi", {}).get("subagents", {}).get("agents", [])
+        agent_path = adapter / agent_roots[0] / "empirica-auditor.md" if agent_roots else None
+        if agent_roots != ["./plugins/empirica/agents/pi"]:
+            errors.append(f"{rel(manifest_path)}: packaged Empirica auditor agent is not declared")
+        elif agent_path is None or not agent_path.is_file():
+            errors.append(f"{rel(manifest_path)}: packaged Empirica auditor agent is missing")
+        elif not re.search(
+                r"^model: amazon-bedrock/eu\.anthropic\.claude-opus-4-8$",
+                agent_path.read_text(encoding="utf-8"), re.MULTILINE):
+            errors.append(
+                f"{rel(agent_path)}: auditor model must be the promoted provider-qualified identity")
     return manifest
 
 

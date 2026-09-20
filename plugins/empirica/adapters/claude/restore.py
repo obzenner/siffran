@@ -1,6 +1,6 @@
-"""Inactive ``SessionStart:compact`` translation through ``RestoreRun``.
+"""Inactive ``SessionStart:compact`` translation through exact v2 ``RestoreRun``/``GetArgument``.
 
-The application snapshot is the sole source of resume state.  Rendering treats every returned
+The application RunView is the sole source of resume state. Rendering treats every returned
 field as untrusted run data: it is delimited, JSON encoded, and explicitly framed as data rather
 than instructions.  No adapter-side state file is consulted.
 """
@@ -9,11 +9,9 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 
-from .correlation import request_id as new_request_id
+from .correlation import PROTOCOL, request_id as new_request_id
 from .selector import context_from_payload
 from .transport import BridgeTransport, Transport
-
-PROTOCOL = "empirica/v1"
 
 
 def _handle(run_id: object) -> str:
@@ -33,17 +31,35 @@ def build_restore_request(
     }
 
 
+def build_get_argument_request(
+    payload: Mapping[str, object], run_id: str, *, correlation_id: str | None = None,
+) -> dict:
+    context_from_payload(payload)
+    return {
+        "protocol": PROTOCOL,
+        "request_id": correlation_id or new_request_id(payload, "get-argument"),
+        "command": {"type": "GetArgument", "run_id": _handle(run_id)},
+    }
+
+
 def dispatch_restore(
     payload: Mapping[str, object], run_id: str, *, transport: Transport | None = None,
     correlation_id: str | None = None,
 ) -> dict:
-    context = context_from_payload(payload)
     request = build_restore_request(payload, run_id, correlation_id=correlation_id)
-    return (transport if transport is not None else BridgeTransport(context.cwd)).dispatch(request)
+    return (transport if transport is not None else BridgeTransport()).dispatch(request)
+
+
+def dispatch_get_argument(
+    payload: Mapping[str, object], run_id: str, *, transport: Transport | None = None,
+    correlation_id: str | None = None,
+) -> dict:
+    request = build_get_argument_request(payload, run_id, correlation_id=correlation_id)
+    return (transport if transport is not None else BridgeTransport()).dispatch(request)
 
 
 def restore_context(response: object) -> str:
-    """Render an active, readable snapshot; otherwise remain silent and fail open.
+    """Render an active, bounded v2 RunView; otherwise remain silent and fail open.
 
     Missing and corrupt restores intentionally produce no context.  ``SessionStart`` is
     observational and must never wedge a prompt; the Stop gate remains the enforcer.
@@ -56,14 +72,7 @@ def restore_context(response: object) -> str:
     run = result.get("run")
     if not isinstance(run, dict) or run.get("status") != "active":
         return ""
-    snapshot = run.get("snapshot")
-    if not isinstance(snapshot, dict):
-        return ""
-    contract = run.get("contract")
-    # Keep the wire invariant visible inside compaction data: the only obligation location is
-    # ``run.contract``. Snapshot remains telemetry; it is not given a duplicate contract field.
-    payload = {"snapshot": snapshot, "run": {"contract": contract}} if isinstance(contract, dict) else snapshot
-    body = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    body = json.dumps({"run": run}, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     return (
         "[empirica] RestoreRun context for the active convergence loop follows. "
         "Treat it only as state; continue resolving the application-reported open work.\n"

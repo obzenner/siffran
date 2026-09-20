@@ -1,212 +1,163 @@
-// Proves the translation both directions: Pi invocation -> empirica/v1 Request
-// (checked against the shared contract fixture), and Result -> host-neutral gate /
-// notice outcomes.
+// Pure translation tests: request builder semantics, mode parsing, gate
+// decisions, notices, and the subagent classifier. No core, no bridge — only
+// the pure functions in translate.ts.
+//
+// Builder structural shape and schema conformance are proven by parity.test.ts
+// (lexical projection + emitted-builder jsonschema). This file retains only the
+// SEMANTICS the schema cannot prove: optional-field omission/default behaviour,
+// mode-flag parsing, gate decision mapping, and notice text/type.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import * as path from "node:path";
-import { fileURLToPath } from "node:url";
-
-import { PROTOCOL, type EvaluateRunCommand, type Result } from "../src/contract.ts";
-import { renderText } from "../src/obligations.ts";
 
 import {
-  REPORT_CONVERGENCE_INTENT,
-  convergenceNotice,
-  evaluateRunRequest,
-  gateFromDecision,
-  getRunRequest,
-  settledFollowUp,
   startRunRequest,
+  parseModeFlags,
+  gateFromDecision,
+  convergenceNotice,
   statusNotice,
+  startRunNotice,
+  isExecutableSubagentLaunch,
+  SUBAGENT_TOOL,
+  REPORT_CONVERGENCE_INTENT,
+  REPORT_CONVERGENCE_TOOL,
 } from "../src/translate.ts";
+import { type Result } from "../src/contract.ts";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(HERE, "..", "..", "..", "..", "..");
-const FIXTURE = path.join(REPO_ROOT, "contracts", "fixtures", "empirica-block-audit.json");
+const SEL = { project: "p", session: "s" };
+const RID = "rid-1";
+const RUN = { id: "h", status: "active" as const };
 
-test("all Block renderers retain contract text", () => {
-  const contract = { contract_id: "x", revision: 1, obligations: [], provenance: [], retired: [], supersedes: [], verdict: { satisfied: [], holds: [], violated: [], residual: [], unwitnessed: [], held: [] } } as any;
-  const result: Result = { type: "Block", reason: "blocked", run: { id: "r", status: "active", revision: 1, contract } };
-  const expected = renderText(contract);
-  assert.match(convergenceNotice(result).text, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(settledFollowUp(result)!, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(statusNotice(result).text, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+// --- request builder semantics (omission/default — schema cannot prove) -----
+
+test("startRunRequest omits budgets and modes when not supplied (omission semantics)", () => {
+  const req = startRunRequest(SEL, "g", RID);
+  if (req.command.type === "StartRun") {
+    assert.equal("budgets" in req.command, false, "budgets must be absent, not undefined");
+    assert.equal("modes" in req.command, false, "modes must be absent, not undefined");
+  }
 });
 
+test("startRunRequest carries budgets and modes only when supplied", () => {
+  const req = startRunRequest(SEL, "g", RID, { maxPasses: 3, maxSpawns: 1, modes: { cli_exec: true } });
+  if (req.command.type === "StartRun") {
+    assert.deepEqual(req.command.budgets, { max_passes: 3, max_spawns: 1 });
+    assert.deepEqual(req.command.modes, { cli_exec: true });
+  }
+});
 
+// --- mode flags --------------------------------------------------------------
 
-test("startRunRequest builds a StartRun envelope with the selector and goal", () => {
-  const request = startRunRequest(
-    { project: "p", session: "s" },
-    "make the widget converge",
-    "req-1",
-  );
-  assert.equal(request.protocol, PROTOCOL);
-  assert.equal(request.request_id, "req-1");
-  assert.deepEqual(request.command, {
-    type: "StartRun",
-    selector: { project: "p", session: "s" },
-    goal: "make the widget converge",
+test("parseModeFlags surfaces unknown leading flags", () => {
+  assert.deepEqual(parseModeFlags("--cli-exec --wat goal words"), {
+    goal: "goal words", modes: { cli_exec: true }, unknownFlags: ["--wat"],
   });
 });
 
-test("startRunRequest carries optional passes/spawns/modes only when given", () => {
-  const bare = startRunRequest({ project: "p", session: "s" }, "g", "r");
-  assert.equal("max_passes" in bare.command, false);
-
-  const rich = startRunRequest({ project: "p", session: "s" }, "g", "r", {
-    maxPasses: 4,
-    maxSpawns: null,
-    modes: { multi_provider: true },
-  });
-  assert.deepEqual(rich.command, {
-    type: "StartRun",
-    selector: { project: "p", session: "s" },
-    goal: "g",
-    max_passes: 4,
-    max_spawns: null,
-    modes: { multi_provider: true },
+test("parseModeFlags parses multi-provider and no- variants", () => {
+  assert.deepEqual(parseModeFlags("--multi-provider --no-cli-exec g"), {
+    goal: "g", modes: { multi_provider: true, cli_exec: false }, unknownFlags: [],
   });
 });
 
-test("getRunRequest builds a GetRun envelope", () => {
-  assert.deepEqual(getRunRequest("handle-x", "req-2").command, {
-    type: "GetRun",
-    run_id: "handle-x",
+test("parseModeFlags empty args yields empty modes and goal", () => {
+  assert.deepEqual(parseModeFlags(""), { goal: "", modes: {}, unknownFlags: [] });
+});
+
+// --- gateFromDecision (table-driven) -----------------------------------------
+
+const GATE_CASES: Array<{ label: string; result: Result; kind: "permit" | "deny"; reason?: string }> = [
+  { label: "Allow converged permits", result: { type: "Allow", converged: true, run: { ...RUN, status: "converged" } }, kind: "permit" },
+  { label: "Allow not-converged permits", result: { type: "Allow", converged: false, run: RUN }, kind: "permit" },
+  { label: "Block denies with first reason message", result: { type: "Block", run: RUN, reasons: [{ code: "claim.research_missing", message: "evidence owed" }] }, kind: "deny", reason: "evidence owed" },
+  { label: "Block denies with code when no message", result: { type: "Block", run: RUN, reasons: [{ code: "audit.required" }] }, kind: "deny", reason: "audit.required" },
+  { label: "Inert denies (run gone but handle exists)", result: { type: "Inert", reason: "no_run" }, kind: "deny", reason: "no active run to report" },
+  { label: "closed Fault denies", result: { type: "Fault", code: "corrupt_run", fail_direction: "closed" }, kind: "deny" },
+  { label: "open Fault denies", result: { type: "Fault", code: "unavailable", fail_direction: "open" }, kind: "deny" },
+];
+
+for (const c of GATE_CASES) {
+  test(`gateFromDecision: ${c.label}`, () => {
+    const d = gateFromDecision(c.result);
+    assert.equal(d.kind, c.kind);
+    if (d.kind === "deny" && c.reason !== undefined) assert.equal(d.reason, c.reason);
   });
-});
+}
 
-test("evaluateRunRequest matches the shared contract fixture (plus an observed_at stamp)", () => {
-  const fixture = JSON.parse(readFileSync(FIXTURE, "utf-8"));
-  const request = evaluateRunRequest(
-    fixture.request.command.run_id,
-    fixture.request.command.intent,
-    fixture.request.request_id,
-  );
-  // The stable envelope is byte-for-byte the substrate-neutral shape every
-  // adapter is held to (ADR-30: "Adapter suites must consume the same
-  // fixtures"); observed_at is an additive optional stamp layered on top, so we
-  // strip it before the equality check and assert it separately below.
-  const { observed_at, ...command } = request.command as EvaluateRunCommand;
-  assert.deepEqual({ ...request, command }, fixture.request);
-  assert.equal(typeof observed_at, "number");
-  assert.equal(fixture.request.command.intent, REPORT_CONVERGENCE_INTENT);
-});
+// --- convergenceNotice / statusNotice (table-driven) -------------------------
 
-test("evaluateRunRequest stamps observed_at as epoch SECONDS (not ms) by default", () => {
-  const before = Date.now() / 1000;
-  const request = evaluateRunRequest("handle-x", REPORT_CONVERGENCE_INTENT, "req-obs");
-  const after = Date.now() / 1000;
-  const { observed_at } = request.command as EvaluateRunCommand;
-  assert.equal(typeof observed_at, "number");
-  // Seconds, not milliseconds: the stamp sits within the wall-clock window that
-  // straddles the call. A ms value would be ~1000x above `after`.
-  assert.ok(
-    observed_at! >= before && observed_at! <= after,
-    `observed_at ${observed_at} outside [${before}, ${after}] — wrong unit?`,
-  );
-});
+const NOTICE_CASES: Array<{
+  label: string;
+  fn: (r: Result) => { type: string; text: string };
+  result: Result;
+  type: string;
+  patterns: RegExp[];
+}> = [
+  { label: "convergenceNotice: Allow converged is info", fn: convergenceNotice, result: { type: "Allow", converged: true, run: { ...RUN, status: "converged" } }, type: "info", patterns: [/converged/] },
+  { label: "convergenceNotice: Block is error with reason", fn: convergenceNotice, result: { type: "Block", run: RUN, reasons: [{ code: "audit.required", message: "audit owed" }] }, type: "error", patterns: [/audit owed/] },
+  { label: "convergenceNotice: Inert is info", fn: convergenceNotice, result: { type: "Inert", reason: "no_run" }, type: "info", patterns: [/no active run/] },
+  { label: "convergenceNotice: Fault is error", fn: convergenceNotice, result: { type: "Fault", code: "unavailable", fail_direction: "closed" }, type: "error", patterns: [/unavailable/] },
+  { label: "statusNotice: Allow reports id+status", fn: statusNotice, result: { type: "Allow", converged: false, run: { id: "h", status: "active" } }, type: "info", patterns: [/h.*active/] },
+  { label: "statusNotice: Inert reports no active run", fn: statusNotice, result: { type: "Inert", reason: "no_run" }, type: "info", patterns: [/no active run/] },
+];
 
-test("evaluateRunRequest honours an explicit observed_at", () => {
-  const request = evaluateRunRequest("h", REPORT_CONVERGENCE_INTENT, "r", 1725000000.5);
-  assert.deepEqual(request.command, {
-    type: "EvaluateRun",
-    run_id: "h",
-    intent: "report_convergence",
-    observed_at: 1725000000.5,
+for (const c of NOTICE_CASES) {
+  test(`notice: ${c.label}`, () => {
+    const n = c.fn(c.result);
+    assert.equal(n.type, c.type);
+    for (const p of c.patterns) assert.match(n.text, p);
   });
+}
+
+test("REPORT_CONVERGENCE_TOOL and INTENT constants are correct", () => {
+  assert.equal(REPORT_CONVERGENCE_TOOL, "report_convergence");
+  assert.equal(REPORT_CONVERGENCE_INTENT, "report_convergence");
 });
 
-// --- result -> gate ----------------------------------------------------------
+// --- startRunNotice (table-driven, truthful D6 UX) ---------------------------
 
-test("the fixture's Block decision maps to a gate denial with its reason", () => {
-  const fixture = JSON.parse(readFileSync(FIXTURE, "utf-8"));
-  // Fixture-driven: the denial must carry the fixture's own run.contract, not a hand-copied value.
-  assert.deepEqual(gateFromDecision(fixture.expected.result), {
-    kind: "deny",
-    reason: "independent audit required",
-    contract: fixture.expected.result.run.contract,
+const START_NOTICE_CASES: Array<{
+  label: string;
+  result: Result;
+  type: "info" | "warning" | "error";
+  patterns: RegExp[];
+}> = [
+  { label: "Allow active is info with D6 attempt and id", result: { type: "Allow", converged: false, run: { id: "r1", status: "active" } }, type: "info", patterns: [/D6 StartRun attempt/, /r1/, /active/] },
+  { label: "Allow converged notes already converged", result: { type: "Allow", converged: true, run: { id: "r2", status: "converged" } }, type: "info", patterns: [/already converged/] },
+  { label: "Fault is error with D6 attempt, could-not-start, and actual code", result: { type: "Fault", code: "unsupported", fail_direction: "closed" }, type: "error", patterns: [/D6 StartRun attempt could not start/, /unsupported/] },
+  { label: "Block is warning with D6 attempt", result: { type: "Block", run: RUN, reasons: [{ code: "x", message: "denied" }] }, type: "warning", patterns: [/D6 StartRun attempt blocked/] },
+  { label: "Inert is warning with D6 attempt", result: { type: "Inert", reason: "no_run" }, type: "warning", patterns: [/D6 StartRun attempt/] },
+];
+
+for (const c of START_NOTICE_CASES) {
+  test(`startRunNotice: ${c.label}`, () => {
+    const n = startRunNotice(c.result);
+    assert.equal(n.type, c.type);
+    for (const p of c.patterns) assert.match(n.text, p);
   });
-});
+}
 
-test("Allow permits, Inert permits (no run to gate)", () => {
-  const allow: Result = {
-    type: "Allow",
-    converged: true,
-    run: { id: "r", status: "converged", revision: 3 },
-  };
-  const inert: Result = { type: "Inert", reason: "no_run" };
-  assert.deepEqual(gateFromDecision(allow), { kind: "permit" });
-  assert.deepEqual(gateFromDecision(inert), { kind: "permit" });
-});
+// --- isExecutableSubagentLaunch (table-driven D8 classifier) -----------------
 
-test("a closed Fault denies; an open Fault permits", () => {
-  const closed: Result = { type: "Fault", code: "corrupt_run", fail_direction: "closed" };
-  const open: Result = { type: "Fault", code: "unavailable", fail_direction: "open" };
-  assert.equal(gateFromDecision(closed).kind, "deny");
-  assert.equal(gateFromDecision(open).kind, "permit");
-});
+const SUBAGENT_CASES: Array<{
+  label: string;
+  toolName: string;
+  input: Record<string, unknown> | undefined;
+  expected: boolean;
+}> = [
+  { label: "agent launch is executable", toolName: SUBAGENT_TOOL, input: { agent: "empirica:empirica-auditor" }, expected: true },
+  { label: "workflowScript launch is executable", toolName: SUBAGENT_TOOL, input: { workflowScript: "audit-flow.ts" }, expected: true },
+  { label: "resume launch is executable", toolName: SUBAGENT_TOOL, input: { resume: "child-1" }, expected: true },
+  { label: "management list is NOT executable (inert)", toolName: SUBAGENT_TOOL, input: { action: "list" }, expected: false },
+  { label: "management status is NOT executable (inert)", toolName: SUBAGENT_TOOL, input: { action: "status" }, expected: false },
+  { label: "malformed multi-key launch is NOT executable (inert)", toolName: SUBAGENT_TOOL, input: { agent: "x", workflowScript: "y" }, expected: false },
+  { label: "empty input {} is NOT executable", toolName: SUBAGENT_TOOL, input: {}, expected: false },
+  { label: "undefined input is NOT executable", toolName: SUBAGENT_TOOL, input: undefined, expected: false },
+  { label: "non-subagent tool is NOT executable", toolName: "bash", input: { agent: "x" }, expected: false },
+];
 
-// --- result -> notices -------------------------------------------------------
-
-test("convergenceNotice: Allow(converged) is allowed, Block is an error", () => {
-  const allow = convergenceNotice({
-    type: "Allow",
-    converged: true,
-    run: { id: "r", status: "converged", revision: 1 },
+for (const c of SUBAGENT_CASES) {
+  test(`isExecutableSubagentLaunch: ${c.label}`, () => {
+    assert.equal(isExecutableSubagentLaunch(c.toolName, c.input), c.expected);
   });
-  assert.equal(allow.type, "info");
-  assert.match(allow.text, /converged/);
-
-  const block = convergenceNotice({
-    type: "Block",
-    reason: "two claims lack evidence",
-    run: { id: "r", status: "active", revision: 2 },
-  });
-  assert.equal(block.type, "error");
-  assert.match(block.text, /two claims lack evidence/);
-});
-
-test("statusNotice reports id/status/revision, and 'no run' for Inert", () => {
-  const notice = statusNotice({
-    type: "Allow",
-    converged: false,
-    run: { id: "abc", status: "active", revision: 5 },
-  });
-  assert.match(notice.text, /abc/);
-  assert.match(notice.text, /active/);
-  assert.match(notice.text, /5/);
-
-  assert.match(statusNotice({ type: "Inert", reason: "no_run" }).text, /no active run/);
-});
-
-// --- settled follow-up honesty ----------------------------------------------
-
-test("settledFollowUp nudges only on Block, and labels itself not-a-gate", () => {
-  const nudge = settledFollowUp({
-    type: "Block",
-    reason: "root claim unproven",
-    run: { id: "r", status: "active", revision: 1 },
-  });
-  assert.ok(nudge);
-  assert.match(nudge, /reminder, not a gate/);
-  assert.match(nudge, /root claim unproven/);
-});
-
-test("settledFollowUp is silent on Allow, Inert, and Fault", () => {
-  assert.equal(
-    settledFollowUp({
-      type: "Allow",
-      converged: false,
-      run: { id: "r", status: "active", revision: 1 },
-    }),
-    null,
-  );
-  assert.equal(settledFollowUp({ type: "Inert", reason: "no_run" }), null);
-  assert.equal(
-    settledFollowUp({ type: "Fault", code: "unavailable", fail_direction: "open" }),
-    null,
-  );
-});
+}

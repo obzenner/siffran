@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "empirica": {
+      "type": "stdio",
+      "command": "python3",
+      "args": [
+        "-c",
+        "import os,runpy;runpy.run_path(os.path.join(os.environ.get('CLAUDE_PLUGIN_ROOT') or os.environ.get('PLUGIN_ROOT') or '.','adapters/mcp_server.py'),run_name='__main__')"
+      ],
+      "startup_timeout_sec": 10,
+      "tool_timeout_sec": 360
+    }
+  }
+}

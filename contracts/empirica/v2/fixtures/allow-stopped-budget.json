@@ -1,0 +1,73 @@
+{
+  "request": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-stopped-budget",
+    "command": {
+      "type": "EvaluateRun",
+      "run_id": "run-fx",
+      "intent": "stop"
+    }
+  },
+  "expected": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-stopped-budget",
+    "result": {
+      "type": "Allow",
+      "converged": false,
+      "run": {
+        "id": "run-fx",
+        "goal": "Prove the public contract is internally consistent.",
+        "status": "stopped_budget",
+        "modes": {
+          "multi_provider": false,
+          "cli_exec": false
+        },
+        "contract": {
+          "id": "empirica/public",
+          "version": "2.0.0",
+          "relevant_sections": [
+            "budget",
+            "terminal"
+          ],
+          "digest": "sha256:b70c27616f18a1cf5f8c6404066dcefc0a65a5a3f8d9849bbc1b1fbcf38aa1f6"
+        },
+        "obligations": {
+          "active": [],
+          "deferred": []
+        },
+        "residuals": [
+          {
+            "code": "budget.exhausted",
+            "parameters": {
+              "resource": "pass"
+            },
+            "next_actions": [
+              "budget.raise",
+              "residual.accept"
+            ],
+            "sections": [
+              "budget"
+            ]
+          }
+        ],
+        "freshness": {
+          "changes": []
+        },
+        "children": [],
+        "host": {
+          "profile_id": "claude-code@2.1.270",
+          "tier": "foreground_only",
+          "missing_capabilities": [
+            "host.async_unsupported"
+          ]
+        },
+        "terminal_note": "Derivation budget exhausted.",
+        "next_actions": [],
+        "untrusted_delimiters": {
+          "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+          "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+        }
+      }
+    }
+  }
+}

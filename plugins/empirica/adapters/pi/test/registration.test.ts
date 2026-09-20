@@ -1,6 +1,7 @@
-// Proves the adapter registers with Pi: the commands, the tool_call and
-// agent_settled handlers, and the resources_discover handler that contributes the
-// real Empirica skill directory.
+// Proves the adapter registers with Pi: the /empirica command, the tool_call
+// gate handler, and the resources_discover handler that contributes the real
+// Empirica skill directory. No removed surfaces (agent_settled, tool_result,
+// /empirica-status, /report-convergence commands, empirica_knowledge tool).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -24,20 +25,36 @@ function register(): FakePi {
   return pi;
 }
 
-test("registers the empirica commands with descriptions", () => {
+test("registers the /empirica command with a description", () => {
   const pi = register();
-  for (const name of ["empirica", "empirica-status", "report-convergence"]) {
-    const command = pi.commands.get(name);
-    assert.ok(command, `expected a '${name}' command to be registered`);
-    assert.ok((command.description ?? "").length > 0);
-    assert.equal(typeof command.handler, "function");
-  }
+  const command = pi.commands.get("empirica");
+  assert.ok(command, "expected an 'empirica' command to be registered");
+  assert.ok((command.description ?? "").length > 0);
+  assert.equal(typeof command.handler, "function");
 });
 
-test("registers the tool_call gate and the agent_settled observer", () => {
+test("does NOT register removed commands", () => {
+  const pi = register();
+  assert.equal(pi.commands.get("empirica-status"), undefined);
+  assert.equal(pi.commands.get("report-convergence"), undefined);
+});
+
+test("registers tool_call and tool_result for gating and bound audit", () => {
   const pi = register();
   assert.equal(typeof pi.handlers.get("tool_call"), "function");
-  assert.equal(typeof pi.handlers.get("agent_settled"), "function");
+  assert.equal(typeof pi.handlers.get("tool_result"), "function");
+  assert.equal(pi.handlers.get("agent_settled"), undefined);
+});
+
+test("registers the shared public driving tools", () => {
+  const pi = register();
+  assert.deepEqual([...pi.tools.keys()].sort(),
+    ["empirica_observe", "empirica_read", "report_convergence"]);
+});
+
+test("does NOT register legacy empirica_knowledge tool", () => {
+  const pi = register();
+  assert.equal(pi.tools.get("empirica_knowledge"), undefined);
 });
 
 test("resources_discover contributes the empirica skills directory", async () => {
@@ -50,7 +67,6 @@ test("resources_discover contributes the empirica skills directory", async () =>
 });
 
 test("the contributed skills directory actually holds the empirica skill", () => {
-  // The path must resolve to real resources, not just be well-formed.
   assert.ok(existsSync(DEFAULT_SKILLS_DIR), `${DEFAULT_SKILLS_DIR} must exist`);
   assert.ok(
     existsSync(path.join(DEFAULT_SKILLS_DIR, "empirica", "SKILL.md")),
@@ -66,4 +82,14 @@ test("a custom skillsDir overrides the default", async () => {
     { ui: undefined as never },
   );
   assert.deepEqual(result.skillPaths, ["/tmp/x"]);
+});
+
+test("every registered tool declares a JSON-Schema object parameters block", () => {
+  const host = new FakePi();
+  createEmpiricaExtension({ dispatch: noopDispatch })(host);
+  for (const def of host.tools.values()) {
+    const schema = def.parameters as { type?: unknown; properties?: unknown };
+    assert.equal(schema.type, "object", `${def.name}: parameters.type must be "object"`);
+    assert.equal(typeof schema.properties, "object", `${def.name}: parameters.properties missing`);
+  }
 });

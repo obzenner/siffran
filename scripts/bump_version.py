@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Bump a plugin's semver version in its plugin.json.
 
-Invoked by `make bump PLUGIN=<name> PART=major|minor|patch`.
+Invoked by `make bump PLUGIN=<name> PART=major|minor|patch` or the explicit
+`make version-set PLUGIN=<name> VERSION=X.Y.Z` release-normalization target.
 
 plugin.json is the ONLY place a version lives (CLAUDE.md's and README.md's tables are generated
 from it, and marketplace.json deliberately carries no version). Claude Code uses this field to
 detect updates, so changing plugin code without bumping it means users never receive the change.
 
-Usage: bump_version.py <plugin> [major|minor|patch]   (default: patch)
+Usage: bump_version.py <plugin> [major|minor|patch|=MAJOR.MINOR.PATCH]   (default: patch)
 """
 import json
 import sys
@@ -34,14 +35,25 @@ def main(argv: list[str]) -> int:
               file=sys.stderr)
         return 1
 
-    if part == "major":
+    if part.startswith("="):
+        exact = part[1:]
+        try:
+            values = tuple(int(x) for x in exact.split("."))
+        except ValueError:
+            values = ()
+        if len(values) != 3 or exact != ".".join(str(x) for x in values):
+            print(f"  FAIL VERSION must be MAJOR.MINOR.PATCH, got {exact!r}", file=sys.stderr)
+            return 2
+        major, minor, patch = values
+    elif part == "major":
         major, minor, patch = major + 1, 0, 0
     elif part == "minor":
         minor, patch = minor + 1, 0
     elif part == "patch":
         patch += 1
     else:
-        print(f"  FAIL PART must be major|minor|patch, got {part!r}", file=sys.stderr)
+        print(f"  FAIL target must be major|minor|patch|=MAJOR.MINOR.PATCH, got {part!r}",
+              file=sys.stderr)
         return 2
 
     previous = data["version"]

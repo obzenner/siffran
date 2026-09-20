@@ -1,0 +1,69 @@
+{
+  "request": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-host-async",
+    "command": {
+      "type": "EvaluateRun",
+      "run_id": "run-fx",
+      "intent": "continue"
+    }
+  },
+  "expected": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-host-async",
+    "result": {
+      "type": "Block",
+      "run": {
+        "id": "run-fx",
+        "goal": "Prove the public contract is internally consistent.",
+        "status": "active",
+        "modes": {
+          "multi_provider": false,
+          "cli_exec": false
+        },
+        "contract": {
+          "id": "empirica/public",
+          "version": "2.0.0",
+          "relevant_sections": [
+            "hosts/capabilities"
+          ],
+          "digest": "sha256:b70c27616f18a1cf5f8c6404066dcefc0a65a5a3f8d9849bbc1b1fbcf38aa1f6"
+        },
+        "obligations": {
+          "active": [],
+          "deferred": []
+        },
+        "residuals": [],
+        "freshness": {
+          "changes": []
+        },
+        "children": [],
+        "host": {
+          "profile_id": "pi@0.84.1+pi-subagents@0.50.0",
+          "tier": "foreground_only",
+          "missing_capabilities": [
+            "host.async_unsupported"
+          ]
+        },
+        "next_actions": [],
+        "untrusted_delimiters": {
+          "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+          "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+        }
+      },
+      "reasons": [
+        {
+          "code": "host.async_unsupported",
+          "parameters": {},
+          "next_actions": [
+            "residual.accept"
+          ],
+          "sections": [
+            "hosts/capabilities"
+          ],
+          "message": "Host does not support async children; accept residual or run foreground."
+        }
+      ]
+    }
+  }
+}

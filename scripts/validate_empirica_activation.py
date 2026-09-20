@@ -16,9 +16,21 @@ ENTRYPOINTS = {
     "dispatch_gate.py": "dispatch_main",
     "convergence_gate.py": "completion_main",
     "state_restore.py": "restore_main",
+    "agent_failure.py": "agent_failure_main",
+    "subagent_start.py": "subagent_start_main",
     "subagent_stop.py": "subagent_stop_main",
 }
 FORBIDDEN = re.compile(r"(?:^|[/'\"`])\.(?:claude|pi)(?:/|[\"'`])")
+SKILL = ROOT / "skills/empirica/SKILL.md"
+REQUIRED_SKILL_REFERENCES = {
+    "host-capabilities.md",
+    "claim-graph.md",
+    "evidence.md",
+    "budget-freeze.md",
+    "audit.md",
+    "handoff.md",
+}
+STALE_SKILL_TERMS = {"spike_harness.py", "EMPIRICA_STALL_DEADLINE_SEC"}
 
 
 def fail(message: str) -> None:
@@ -31,8 +43,6 @@ def normal_runtime_files() -> list[Path]:
     for base in (ROOT / "core", ROOT / "application", ROOT / "adapters"):
         for path in base.rglob("*.py"):
             if "tests" in path.parts or "quarantine" in path.parts:
-                continue
-            if path.name == "migrate_legacy.py":
                 continue
             files.append(path)
     files.extend(HOOKS / name for name in ENTRYPOINTS)
@@ -69,7 +79,8 @@ def main() -> int:
 
     hooks = json.loads((HOOKS / "hooks.json").read_text(encoding="utf-8"))
     # Validate the invariant (only registered thin entrypoints), rather than freezing hook config.
-    if set(hooks["hooks"]) != {"UserPromptExpansion", "PreToolUse", "Stop", "SubagentStop", "SessionStart"}:
+    if set(hooks["hooks"]) != {"UserPromptExpansion", "PreToolUse", "PostToolUseFailure",
+                                  "Stop", "SubagentStart", "SubagentStop", "SessionStart"}:
         fail("hooks.json lifecycle events changed")
     for groups in hooks["hooks"].values():
         for group in groups:
@@ -80,7 +91,28 @@ def main() -> int:
                 if len(names) != 1 or names[0] not in ENTRYPOINTS:
                     fail(f"hooks.json bypasses a registered thin entrypoint: {hook}")
 
-    for path in [ROOT / "skills/empirica/SKILL.md", *sorted((ROOT / "agents").glob("*.md"))]:
+    skill_text = SKILL.read_text(encoding="utf-8")
+    if len(skill_text.splitlines()) > 300:
+        fail("SKILL.md exceeds the 300-line progressive-disclosure budget")
+    if len(skill_text.split()) > 3500:
+        fail("SKILL.md exceeds the conservative 3,500-word context budget")
+    references = SKILL.parent / "references"
+    for name in REQUIRED_SKILL_REFERENCES:
+        if not (references / name).is_file():
+            fail(f"required progressive-disclosure reference is missing: {name}")
+        if f"references/{name}" not in skill_text:
+            fail(f"SKILL.md does not route to reference: {name}")
+    for term in STALE_SKILL_TERMS:
+        if term in skill_text:
+            fail(f"SKILL.md retains stale runtime term: {term}")
+    for required in (
+        "claude-code@2.1.270", "pi@0.84.1+pi-subagents@0.50.0",
+        "codex-cli@0.146.0", "empirica_observe", "empirica_read", "report_convergence",
+    ):
+        if required not in skill_text:
+            fail(f"SKILL.md omits complete host/tool disclosure: {required}")
+
+    for path in [SKILL, *sorted((ROOT / "agents").glob("**/*.md"))]:
         text = path.read_text(encoding="utf-8")
         if "~/.empirica-plugin" not in text or "refs/empirica" not in text:
             fail(f"instruction omits authoritative storage locations: {path}")

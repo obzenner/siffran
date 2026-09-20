@@ -12,6 +12,10 @@ links:
 
 # Pi adapter parity and named gaps
 
+> **Amended by ADR-0042:** The ticket/nonce and `empirica_status`/`empirica_knowledge`
+> surfaces below describe the retired v1 adapter. Strict v2 instead exposes
+> `empirica_read`/`empirica_observe` and uses a host-owned durable audit operation.
+
 ## Context and Problem Statement
 
 Before this change, `plugins/empirica/adapters/pi/src/index.ts:101-220` parsed `/empirica` arguments as an undifferentiated goal, held the run handle only in extension memory, gated a tool name that it did not register, and had no knowledge tools, spawn interception, session reconstruction, or compaction restore. The workflow requires preservation of the handle and missing work across boundaries (`plugins/empirica/skills/empirica/SKILL.md:363-366`), while Pi exposes lifecycle and tool APIs documented in the extension host. The adapter must implement those capabilities without pretending Pi has a completion veto.

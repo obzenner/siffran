@@ -1,0 +1,163 @@
+{
+  "version": "1.0.0",
+  "description": "Empirica 2.0 target-state architecture policy. Inert internal config consumed by scripts/validate_empirica_architecture.py. Not a public contract; not composed into check-static until D3-M (after D6/D7 make the target state green).",
+  "runtime_roots": {
+    "package_root": "plugins/empirica",
+    "python_extension": ".py",
+    "typescript_extension": ".ts",
+    "typescript_host_adapter": "adapters/pi"
+  },
+  "import_package_prefixes": ["empirica", "plugins.empirica"],
+  "excluded_test_patterns": [
+    "__pycache__",
+    "tests",
+    "test",
+    "test_*",
+    "*.test.ts"
+  ],
+  "layers": {
+    "core": {
+      "roots": ["core"],
+      "forbidden_imports": ["application", "adapters", "hooks"]
+    },
+    "application": {
+      "roots": ["application"],
+      "forbidden_imports": ["adapters", "hooks"]
+    },
+    "adapters.claude": {
+      "roots": ["adapters/claude"],
+      "forbidden_imports": ["adapters.codex", "adapters.pi"]
+    },
+    "adapters.codex": {
+      "roots": ["adapters/codex"],
+      "forbidden_imports": ["adapters.claude", "adapters.pi"]
+    },
+    "adapters.pi": {
+      "roots": ["adapters/pi"],
+      "forbidden_imports": ["adapters.claude", "adapters.codex"]
+    },
+    "adapters.git": {
+      "roots": ["adapters/git"],
+      "forbidden_imports": ["adapters.claude", "adapters.codex", "adapters.pi", "hooks"]
+    },
+    "adapters.state": {
+      "roots": ["adapters/state"],
+      "forbidden_imports": ["adapters.claude", "adapters.codex", "adapters.pi", "hooks"]
+    },
+    "adapters.bridge": {
+      "roots": ["adapters/bridge.py", "adapters/__init__.py"],
+      "forbidden_imports": ["hooks"]
+    },
+    "hooks": {
+      "roots": ["hooks"],
+      "forbidden_imports": []
+    },
+    "vendor": {
+      "roots": ["vendor"],
+      "forbidden_imports": ["application", "adapters", "hooks", "core"]
+    }
+  },
+  "forbidden_cross_host_dependencies": {
+    "host_adapters": ["adapters.claude", "adapters.codex", "adapters.pi"],
+    "rule": "a host adapter must not import another host adapter"
+  },
+  "forbidden_paths": [
+    "adapters/claude/migrate_legacy.py"
+  ],
+  "forbidden_runtime_protocols": [
+    "empirica/v1"
+  ],
+  "forbidden_symbols": {
+    "domain_adjudicators": [
+      "two_fold_verdict",
+      "state_of",
+      "adjudicate",
+      "coverage_check",
+      "contract_for_graph"
+    ],
+    "adjudicator_scope": "adapters",
+    "evidence_approval_literal": "evidence"
+  },
+  "forbidden_fields": {
+    "function_names": [
+      "transition_phase",
+      "_transition_phase",
+      "can_advance_to",
+      "_issue_audit_ticket",
+      "_consume_audit_ticket",
+      "_reject_ticket_use",
+      "_decode_tickets",
+      "_decode_reservations"
+    ],
+    "phase": {
+      "names": ["PHASES", "KIND_PHASE", "DEFAULT_PHASE"],
+      "attributes": ["phase"],
+      "string_constants": ["phase"]
+    },
+    "obligation_contract_persistence": {
+      "names": ["contract_artifact_id", "contract_revision"],
+      "attributes": ["contract_artifact_id", "contract_revision"],
+      "string_constants": ["contract_artifact_id", "contract_revision"]
+    },
+    "separate_entities": {
+      "names": ["reservations", "reservation_seq", "audit_tickets", "reservation_id"],
+      "attributes": ["reservations", "reservation_seq", "audit_tickets", "reservation_id"],
+      "string_constants": ["reservations", "reservation_seq", "audit_tickets", "reservation_id"]
+    },
+    "audit_nonce": {
+      "attributes": ["nonce"],
+      "string_constants": ["nonce"]
+    },
+    "composite_verdicts": {
+      "names": ["verdicts"],
+      "attributes": ["verdicts"],
+      "string_constants": ["verdicts"]
+    }
+  },
+  "forbidden_actions": {
+    "constants": [
+      "KIND_RESERVE_SPAWN",
+      "KIND_VOID_SPAWN",
+      "KIND_CONSUME_AUDIT_TICKET",
+      "KIND_AUDIT_TICKET",
+      "KIND_EVIDENCE"
+    ],
+    "literal_values": [
+      "reserve_spawn",
+      "void_spawn",
+      "consume_audit_ticket",
+      "audit_ticket"
+    ]
+  },
+  "effective_runtime": {
+    "baseline": 9458,
+    "baseline_ref": "4257c8d",
+    "maximum": 9457,
+    "extensions": [".py", ".ts"]
+  },
+  "thin_hooks": {
+    "root": "hooks",
+    "max_statements": 12,
+    "max_functions": 1,
+    "forbidden_domain_imports": ["core", "application"]
+  },
+  "required_contract_references": {
+    "public_contract": "contracts/empirica/v2/public-contract.json",
+    "id": "empirica/public",
+    "version": "2.0.0",
+    "protocol": "empirica/v2"
+  },
+  "required_profile_references": {
+    "host_profiles": "contracts/empirica/v2/host-profiles.json",
+    "protocol": "empirica/v2",
+    "required_profile_ids": [
+      "claude-code@2.1.270",
+      "pi@0.84.1+pi-subagents@0.50.0",
+      "codex-cli@0.146.0"
+    ]
+  },
+  "make_target": "empirica-architecture-check",
+  "make_validator_script": "scripts/validate_empirica_architecture.py",
+  "forbidden_make_text": ["migrate-legacy"],
+  "make_history_rewrite_terms": ["git commit", "git push", "git rebase", "git reset"]
+}

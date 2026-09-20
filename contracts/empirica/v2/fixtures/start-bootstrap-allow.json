@@ -1,0 +1,75 @@
+{
+  "request": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-start-bootstrap",
+    "command": {
+      "type": "StartRun",
+      "selector": {
+        "project": "demo",
+        "session": "s1"
+      },
+      "goal": "Prove the public contract is internally consistent.",
+      "budgets": {
+        "max_passes": 3,
+        "max_spawns": 2
+      },
+      "modes": {
+        "multi_provider": false
+      }
+    }
+  },
+  "expected": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-start-bootstrap",
+    "result": {
+      "type": "Allow",
+      "converged": false,
+      "run": {
+        "id": "run-fx",
+        "goal": "Prove the public contract is internally consistent.",
+        "status": "active",
+        "modes": {
+          "multi_provider": false,
+          "cli_exec": false
+        },
+        "contract": {
+          "id": "empirica/public",
+          "version": "2.0.0",
+          "relevant_sections": [
+            "core",
+            "roles",
+            "hosts/capabilities"
+          ],
+          "digest": "sha256:b70c27616f18a1cf5f8c6404066dcefc0a65a5a3f8d9849bbc1b1fbcf38aa1f6"
+        },
+        "obligations": {
+          "active": [
+            {
+              "id": "empirica/G0",
+              "must": "record research",
+              "status": "residual"
+            }
+          ],
+          "deferred": []
+        },
+        "residuals": [],
+        "freshness": {
+          "changes": []
+        },
+        "children": [],
+        "host": {
+          "profile_id": "claude-code@2.1.270",
+          "tier": "foreground_only",
+          "missing_capabilities": [
+            "host.async_unsupported"
+          ]
+        },
+        "next_actions": [],
+        "untrusted_delimiters": {
+          "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+          "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+        }
+      }
+    }
+  }
+}

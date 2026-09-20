@@ -43,8 +43,8 @@
           {
             "type": "command",
             "command": "python3 \"${PLUGIN_ROOT}/hooks/codex_hook.py\" stop",
-            "timeout": 30,
-            "statusMessage": "Evaluating Empirica convergence"
+            "timeout": 960,
+            "statusMessage": "Running the bound Empirica audit and convergence gate"
           }
         ]
       }

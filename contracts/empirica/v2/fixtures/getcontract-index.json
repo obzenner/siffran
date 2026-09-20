@@ -1,0 +1,13 @@
+{
+  "request": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-getcontract-index",
+    "command": {
+      "type": "GetContract",
+      "target": "index"
+    }
+  },
+  "expected_from_registry": {
+    "target": "index"
+  }
+}

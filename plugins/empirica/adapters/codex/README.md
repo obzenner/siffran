@@ -1,91 +1,64 @@
 # Empirica adapter for Codex CLI
 
-This is a thin Codex-native adapter over the existing `empirica/v1` application service. It
-translates Codex hook payloads and decisions; it does not reimplement claim, evidence, budget,
-audit, or convergence rules. The shared bridge still wires the same operational repository under
-`$EMPIRICA_HOME` (default `~/.empirica-plugin`) and the same Git artifact repository under
-`refs/empirica/*`. No normal adapter operation writes `.codex` or any other runtime state into the
-repository.
+This is the exact `codex-cli@0.146.0` adapter over the shared `empirica/v2` service. It
+translates native hooks, exposes the canonical public MCP tools, and owns one bounded managed
+auditor. Claim, evidence, budget, audit-coverage, and convergence rules remain in the
+host-neutral core.
 
-## Pinned host contract
+## Work-in-progress status
 
-The adapter and conformance fixtures target **Codex CLI 0.146.0**. The primary sources are the
-tagged Codex implementation and its generated schemas:
+**Empirica convergence is not supported on Codex CLI 0.146.0.** The packaged adapter exists for
+conformance development and fail-closed experimentation only. Its exact profile is
+`observational` with `promotion_status=wip_unsupported`; `foreground_only` is a candidate tier,
+not an advertised capability.
 
-- [generated command-hook schemas](https://github.com/openai/codex/tree/rust-v0.146.0/codex-rs/hooks/schema/generated)
-- [`PreToolUse` input and decision handling](https://github.com/openai/codex/blob/rust-v0.146.0/codex-rs/hooks/src/events/pre_tool_use.rs)
-- [`Stop` blocking and continuation handling](https://github.com/openai/codex/blob/rust-v0.146.0/codex-rs/hooks/src/events/stop.rs)
-- [`SessionStart` sources and context injection](https://github.com/openai/codex/blob/rust-v0.146.0/codex-rs/hooks/src/events/session_start.rs)
-- [bundled-plugin hook discovery and trust](https://github.com/openai/codex/blob/rust-v0.146.0/codex-rs/hooks/src/engine/discovery.rs)
-- [canonical tool names and the `Agent` compatibility alias](https://github.com/openai/codex/blob/rust-v0.146.0/codex-rs/core/src/tools/hook_names.rs)
+Codex native hooks cannot mutate a spawned child request or independently observe the resolved
+model behind a managed `codex exec` process. The adapter can observe one correlated final message,
+but configured argv is not identity evidence. Auditor independence therefore remains `unverified`
+and convergence blocks. Async execution is also unsupported. Codex is excluded from the supported
+installed-host release receipt set until a native resolved-model observation can be bound to the
+managed process and the candidate foreground probe passes.
 
-Codex hook config uses a shell `command` string. The plugin manifest therefore points to
-`hooks/codex.json`, rather than reusing Claude's `hooks/hooks.json`, whose `command` plus `args`
-shape is not the Codex 0.146.0 bundled-hook contract.
+For adapter development, the managed auditor defaults to `gpt-5.1-codex-mini` and may be pinned
+with `EMPIRICA_CODEX_AUDITOR_MODEL`; that configuration never counts as observed identity.
 
-| Codex surface | Adapter mapping | Enforcement |
+## Surface
+
+| Codex surface | Mapping | Behaviour |
 |---|---|---|
-| explicit `$empirica ...` at prompt start | `StartRun` | activation is best-effort and otherwise inert |
-| `PreToolUse`, matcher `Agent` | `ObserveAction(reserve_spawn)`; auditor marker also issues a ticket | cap denial and closed corrupt-state faults deny the spawn |
-| `PreToolUse`, matcher `Bash` | first-write route/investigation stamps; recognized CLI actors reserve and record dispatch | route is witnessed; CLI spawn cap is enforced when `cli_exec` is enabled |
-| `Stop` | `EvaluateRun(report_convergence)` | `Block` and closed faults return native `decision: block` |
-| `SessionStart:compact` | `RestoreRun` | observational, bounded context, never a completion gate |
-| `adapters.codex.knowledge` | graph, research, deterministic spike/re-gate, audit ticket/verdict, attribution | shared validation and application service |
+| explicit `$empirica ...` | `StartRun` | Best-effort activation; injects the opaque handle and public-tool instructions. |
+| MCP `empirica_observe` | `ObserveAction` | Public route, graph, research, spike request, freeze, and configuration only; concrete reservation is host-owned. |
+| MCP `empirica_read` | `GetRun`, `GetArgument`, `GetContract`, `RestoreRun` | Complete typed public read surface. |
+| MCP `report_convergence` | `EvaluateRun` | Public guarded decision; never trusted ingress. |
+| `Stop` | resolve → evaluate → managed audit when due → re-evaluate | Blocks on any unavailable or non-converged result; permits only `Allow(converged=true)`. |
+| `SessionStart:compact` | `ResolveRun` | Reconnects the durable selected run. |
 
-After choosing known/unknown, record the route before any investigative Bash command with a
-portable no-op. The `PreToolUse:Bash` hook recognizes this marker and submits the route first:
+The deterministic spike harness remains the sole machine approver. Audit can block but cannot
+manufacture evidence. `evidence_leaf`, attribution, child events, and audit verdicts have no MCP
+schema and are admitted only by adapter-private calls after host observation.
 
-```sh
-python3 -c 'pass' -- --empirica-route 'runtime behavior is unknown'
-```
+## Hook trust
 
-Codex 0.146.0 does not put a timestamp in hook stdin. `turn_id` and `tool_use_id` are copied as
-review metadata, while the existing service's CAS-assigned monotone sequence is the authoritative
-route/action ordering witness.
+Installing a Codex plugin does not automatically trust changed command hooks. Review and trust
+the normalized commands in Codex `/hooks`; modified commands require renewed trust. An
+untrusted or disabled Stop hook is visible but is not an enforcement boundary.
 
-## Trust boundary and visibility limits
+## Pinned sources
 
-Installing the plugin does **not** trust its command hooks. Unmanaged hooks are enabled but do not
-execute until the user reviews and trusts each normalized command hash in Codex's `/hooks` UI;
-changing the handler makes it `modified` and requires another review. The automation-only
-`--dangerously-bypass-hook-trust` flag is suitable only for an isolated smoke test that has already
-vetted the source. Therefore Empirica enforcement is conditional on the relevant hooks being
-trusted and enabled. A disabled, untrusted, or modified hook is visible in Codex but is not an
-enforcement boundary.
+The adapter targets the tagged 0.146.0 generated hook schemas and implementation:
 
-Hosted Responses API WebSearch is not dispatched through Codex's ordinary tool registry in
-0.146.0, so `PreToolUse` cannot observe, stamp, or deny it. Standalone/extension search may be
-hook-visible when it is a registered tool, but this adapter makes no blanket claim. A research
-citation can still be recorded after hosted search, and the independent auditor can re-read it,
-but P1 route ordering for that hosted action is **unverified** unless an earlier hook-visible
-action already established the investigation stamp. This is a host sensor gap, not evidence of
-ordering and not a reason to report convergence.
+- <https://github.com/openai/codex/tree/rust-v0.146.0/codex-rs/hooks/schema/generated>
+- <https://github.com/openai/codex/blob/rust-v0.146.0/codex-rs/hooks/src/events/stop.rs>
+- <https://github.com/openai/codex/blob/rust-v0.146.0/codex-rs/hooks/src/engine/discovery.rs>
 
-The audit ticket proves only that a trusted `PreToolUse:Agent` hook witnessed a requested spawn.
-
-### Auditor round-trip limitation (Codex 0.146.0)
-
-Codex's documented `PreToolUse` hook output has no `updatedInput` field, and its `Stop` payload
-contains only the parent `last_assistant_message`, not a spawned child's final output or a child
-transcript reference. Therefore this adapter can reserve and ticket an auditor spawn, but cannot
-inject the GetArgument dossier/nonce into that child or host-record its fenced verdict. The closest
-available `Stop` hook evaluates the run only; it must leave the audit obligation open. A future
-Codex payload carrying a mutable child input plus child final output (or a documented child
-transcript path) can use `adapters.claude.audit.child_prompt` and `verdict_from_final_output`
-without changing the application contract.
-It does not authenticate the spawned actor or the unsigned verdict; those remain within Empirica's
-documented file-level trust model. Codex plugin bundles also do not load Claude's `agents/`
-definitions, so a Codex auditor spawn must include the literal `empirica-auditor` marker in its
-dispatcher-visible `agent_type`, `name`, `task_name`, or `message` for the ticket to be issued.
+Hosted Responses API WebSearch is not necessarily routed through ordinary `PreToolUse`; no
+ordering claim is inferred from that sensor gap.
 
 ## Validation
 
 ```sh
-make empirica-codex-check
+make check-codex
+make empirica-host-adapter-check   # deterministic adapter conformance only
+make empirica-host-live-check      # retained installed-host promotion receipts
 make codex-live-check CODEX='npx -y @openai/codex@0.146.0'
 ```
-
-The first target validates manifests, hook shapes, official payload fixtures, and a complete
-isolated bridge lifecycle without inference. The second asks the pinned executable to add this
-local marketplace, install Empirica into a temporary `CODEX_HOME`, and list the installed bundle;
-it exercises the real plugin loader without using credentials or calling a model.

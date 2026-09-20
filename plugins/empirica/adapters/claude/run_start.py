@@ -1,8 +1,8 @@
-"""Pure Claude run-start translation plus an injectable bridge dispatch.
+"""Pure Claude run-start/resume translation plus an injectable bridge dispatch.
 
-This module is deliberately inactive: no existing hook imports it and no ``hooks.json`` entry names
-it.  It preserves the payload variants accepted by the current run-start hook while translating the
-operation into the host-neutral ``empirica/v1`` ``StartRun`` command.
+``StartRun`` removes the actor wire field, nests explicit max values under ``budgets`` and omits
+absent values; ``ResolveRun`` resolves a run from its selector.  Both produce exact v2 envelopes
+(D6-C spec §3/C2).  This module is deliberately inactive: no hook imports it directly.
 """
 from __future__ import annotations
 
@@ -10,12 +10,11 @@ import os
 from collections.abc import Mapping
 from typing import Any
 
-from .correlation import request_id as new_request_id
+from .correlation import PROTOCOL, request_id as new_request_id
 from .invocation import Invocation, parse_invocation
 from .selector import context_from_payload, selector_from_payload
 from .transport import BridgeTransport, Transport
 
-PROTOCOL = "empirica/v1"
 FALLBACK_GOAL = "empirica run (goal unspecified)"
 
 
@@ -28,14 +27,6 @@ def invocation_details(
         environ=os.environ if environ is None else environ,
         fallback_goal=FALLBACK_GOAL,
     )
-
-
-def goal_and_modes(
-    payload: Mapping[str, object], *, environ: Mapping[str, str] | None = None,
-) -> tuple[str, dict[str, bool]]:
-    """Compatibility projection of :func:`invocation_details`."""
-    invocation = invocation_details(payload, environ=environ)
-    return invocation.goal, invocation.modes
 
 
 def _max_passes(environ: Mapping[str, str]) -> int | None:
@@ -66,33 +57,45 @@ def build_start_run_request(
     correlation_id: str | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Translate one validated Claude payload into an ``empirica/v1`` StartRun envelope."""
-    # Validate cwd/session together before deriving either selector component.
-    context_from_payload(payload)
-    goal, modes = goal_and_modes(payload, environ=environ)
+    """Translate one validated Claude payload into an exact v2 ``StartRun`` envelope.
+
+    No ``actor`` field is emitted.  Explicit max values are nested under ``budgets`` and omitted
+    when absent; resolved modes are emitted only when non-empty.
+    """
+    context_from_payload(payload)  # validate cwd/session together before deriving the selector
+    invocation = invocation_details(payload, environ=environ)
     command: dict[str, Any] = {
         "type": "StartRun",
         "selector": selector_from_payload(payload),
-        "goal": goal,
+        "goal": invocation.goal,
     }
-    model = payload.get("model")
-    # Claude hook payloads document the active model as top-level `model` when the event supplies
-    # it.  Older events omit it; absence remains unverified rather than inventing an identity.
-    if isinstance(model, str) and model.strip():
-        command["actor"] = {"model": model.strip(), "harness": "claude-code",
-                            "provider": "anthropic", "source_type": "LLM_JUDGE"}
-    if modes:
-        command["modes"] = modes
-    max_passes = _max_passes(os.environ if environ is None else environ)
+    if invocation.modes:
+        command["modes"] = invocation.modes
+    env = os.environ if environ is None else environ
+    budgets: dict[str, int] = {}
+    max_passes = _max_passes(env)
     if max_passes is not None:
-        command["max_passes"] = max_passes
-    max_spawns = _max_spawns(os.environ if environ is None else environ)
+        budgets["max_passes"] = max_passes
+    max_spawns = _max_spawns(env)
     if max_spawns is not None:
-        command["max_spawns"] = max_spawns
+        budgets["max_spawns"] = max_spawns
+    if budgets:
+        command["budgets"] = budgets
     return {
         "protocol": PROTOCOL,
         "request_id": correlation_id or new_request_id(payload, "run-start"),
         "command": command,
+    }
+
+
+def build_resolve_request(
+    payload: Mapping[str, object], *, correlation_id: str | None = None,
+) -> dict:
+    """Translate one validated Claude payload into an exact v2 ``ResolveRun`` envelope."""
+    return {
+        "protocol": PROTOCOL,
+        "request_id": correlation_id or new_request_id(payload, "resolve"),
+        "command": {"type": "ResolveRun", "selector": selector_from_payload(payload)},
     }
 
 
@@ -104,9 +107,15 @@ def dispatch_start_run(
     environ: Mapping[str, str] | None = None,
 ) -> dict:
     """Translate and dispatch through the shared bridge (or an injected parity-test transport)."""
-    context = context_from_payload(payload)
     request = build_start_run_request(
         payload, correlation_id=correlation_id, environ=environ,
     )
-    target = transport if transport is not None else BridgeTransport(context.cwd)
-    return target.dispatch(request)
+    return (transport if transport is not None else BridgeTransport()).dispatch(request)
+
+
+def dispatch_resolve(
+    payload: Mapping[str, object], *, transport: Transport | None = None,
+    correlation_id: str | None = None,
+) -> dict:
+    request = build_resolve_request(payload, correlation_id=correlation_id)
+    return (transport if transport is not None else BridgeTransport()).dispatch(request)
