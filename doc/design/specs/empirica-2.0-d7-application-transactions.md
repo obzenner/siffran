@@ -58,7 +58,7 @@ This is the sole committed-history visibility pointer: the content digest of the
 
 - The graph and active evidence are authoritative argument content (append-only artifacts).
 - Operational state holds only the closed D6 fields plus `committed_artifact_head_id`; no persisted claim state, obligation contract, composite verdict, projected snapshot, phase, reservation, audit ticket, or host profile.
-- `claims.state_of` remains the only claim-state derivation; claim states are derived on read, never persisted.
+- `evaluation.derive_claims` is the only claim-state derivation: it combines local evidence with scoped conjunctive dependencies on read; claim states are never persisted.
 - Active/deferred obligations are ephemeral projections, never persisted.
 - No new persisted representation without authority declaration and projection invariant test.
 

@@ -13,8 +13,8 @@ import unittest
 
 from assertions import (  # noqa: E402
     ConformanceCase, UNTRUSTED_CLOSE, UNTRUSTED_OPEN,
-    action_attribution, action_audit_verdict, action_configure_run, action_research,
-    build_attribution_payload,
+    action_attribution, action_audit_verdict, action_configure_run, action_graph, action_research,
+    build_attribution_payload, canonical_graph,
     evaluate, get_argument, get_run, observe_action,
 )
 
@@ -258,6 +258,34 @@ class AuditTests(ConformanceCase):
             claim_id=scope2["root_id"], source_kind="web", result="supports",
             payload={"source_ref": "https://example.test/new-support"})))
         stale = self.dispatch(drv2, evaluate(run_id=run2, intent="report_convergence"))
+        self.assert_block_only(stale, ["audit.failed"])
+
+    def test_deferred_support_change_preserves_scope_and_stales_old_audit(self):
+        drv = self.bind_driver("D7", "seam-4b",
+                               "Deferred dependency changes argument currency, not commitment")
+        run_id = self.start_run(drv, goal=self.GOAL)
+        scope = self.require_audit_scope(drv, run_id)
+        child_id = self.require_pending_audit_child(drv, run_id)
+        self.require_trusted_audit_attribution(
+            drv, run_id, child_id, scope["c0_artifact_id"], variant="decorrelated")
+        verdict = self.build_audit_verdict_payload(
+            drv, run_id, verdict="pass", scope_review="pass")
+        self.assertEqual(drv.trusted_audit_verdict(
+            run_id, child_id, verdict)["result"]["type"], "Allow")
+        before = self.assert_argument_view(
+            self.dispatch(drv, get_argument(run_id=run_id))["result"])
+        expanded = canonical_graph(n_claims=2, kind="ordinary")
+        self.assert_allow(self.dispatch(drv, observe_action(
+            run_id=run_id, action=action_graph(payload=expanded))), converged=False)
+        after = self.assert_argument_view(
+            self.dispatch(drv, get_argument(run_id=run_id))["result"])
+        self.assertEqual(after["frozen_scope_digest"], before["frozen_scope_digest"])
+        self.assertNotEqual(after["argument_digest"], before["argument_digest"])
+        self.assertNotEqual(after["deferred_scope_digest"], before["deferred_scope_digest"])
+        rows = {claim["claim_id"]: claim for claim in after["claims"]}
+        self.assertEqual(rows[expanded["root"]]["state"], "approved")
+        self.assertFalse(rows["C1"]["gating"])
+        stale = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
         self.assert_block_only(stale, ["audit.failed"])
 
     # 33 — Independence derived from trusted observed attribution only; reported honestly

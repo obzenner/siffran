@@ -136,6 +136,9 @@ class BudgetFreezeTerminalTests(ConformanceCase):
         # Research-only freeze (no spike): claim kind is ordinary.
         graph = self.require_graph_admitted(drv, run_id, canonical_graph(n_claims=1, kind="ordinary"))
         root_id = graph["root"]
+        self.dispatch(drv, observe_action(run_id=run_id, action=action_research(
+            claim_id=root_id, source_kind="code", result="supports")))
+        self.assertEqual(self.get_argument_claim(drv, run_id, root_id)["state"], "approved")
         self.require_frozen_scope(drv, run_id)
         # Capture the typed first frozen-scope digest before graph expansion (D4-S2 correction).
         arg_before = self.assert_argument_view(
@@ -167,6 +170,63 @@ class BudgetFreezeTerminalTests(ConformanceCase):
         self.assertTrue(c1_after, "C1 must be in the argument after expansion")
         self.assertFalse(c1_after[0].get("gating", True),
                          "C1 must be deferred (not gating) after a second freeze")
+        self.assertEqual(c0_after[0]["state"], "approved",
+                         "a newly deferred support must not expand frozen adjudication")
+
+    def test_deferred_intermediary_cannot_shrink_frozen_commitment(self):
+        drv = self.bind_driver("D7", "seam-4b",
+                               "Frozen IDs remain committed through a deferred intermediary")
+        run_id = self.start_run(drv, goal=self.GOAL)
+        original = canonical_graph(n_claims=2, kind="ordinary")
+        self.require_graph_admitted(drv, run_id, original)
+        for cid in (original["root"], "C1"):
+            self.dispatch(drv, observe_action(run_id=run_id, action=action_research(
+                claim_id=cid, source_kind="code", result="supports")))
+        self.require_frozen_scope(drv, run_id)
+        before = self.assert_argument_view(
+            self.dispatch(drv, get_argument(run_id=run_id))["result"])
+        deferred = {"id": "D", "text": "Deferred intermediary", "gating": True,
+                    "kind": "ordinary"}
+        replacement = {"root": original["root"],
+                       "claims": [original["claims"][0], original["claims"][1], deferred],
+                       "edges": [
+                           {"from": original["root"], "to": "D", "type": "SupportedBy"},
+                           {"from": "D", "to": "C1", "type": "SupportedBy"},
+                       ]}
+        self.assert_allow(self.dispatch(drv, observe_action(
+            run_id=run_id, action=action_graph(payload=replacement))), converged=False)
+        after = self.assert_argument_view(
+            self.dispatch(drv, get_argument(run_id=run_id))["result"])
+        self.assertEqual(after["frozen_scope_digest"], before["frozen_scope_digest"])
+        rows = {claim["claim_id"]: claim for claim in after["claims"]}
+        self.assertTrue(rows[original["root"]]["gating"])
+        self.assertTrue(rows["C1"]["gating"],
+                        "frozen C1 remains committed despite a deferred path")
+        self.assertFalse(rows["D"]["gating"])
+        self.assertEqual(rows[original["root"]]["state"], "approved")
+        self.assertEqual(rows["C1"]["state"], "approved")
+
+        pruned_drv = self.bind_driver("D7", "seam-4b",
+                                      "Discarded ancestor cannot shrink frozen IDs")
+        pruned_run = self.start_run(pruned_drv, goal=self.GOAL)
+        claims = [{"id": cid, "text": cid, "gating": True, "kind": "ordinary"}
+                  for cid in ("P", "A", "F")]
+        chain = {"root": "P", "claims": claims,
+                 "edges": [{"from": "P", "to": "A", "type": "SupportedBy"},
+                           {"from": "A", "to": "F", "type": "SupportedBy"}]}
+        self.require_graph_admitted(pruned_drv, pruned_run, chain)
+        self.require_frozen_scope(pruned_drv, pruned_run)
+        frozen_before = self.assert_argument_view(
+            self.dispatch(pruned_drv, get_argument(run_id=pruned_run))["result"])
+        self.dispatch(pruned_drv, observe_action(run_id=pruned_run, action=action_research(
+            claim_id="A", source_kind="code", result="refutes")))
+        frozen_after = self.assert_argument_view(
+            self.dispatch(pruned_drv, get_argument(run_id=pruned_run))["result"])
+        self.assertEqual(frozen_after["frozen_scope_digest"],
+                         frozen_before["frozen_scope_digest"])
+        frozen_rows = {claim["claim_id"]: claim for claim in frozen_after["claims"]}
+        self.assertTrue(frozen_rows["F"]["gating"],
+                        "path pruning cannot remove frozen descendant F from commitment")
 
     def test_frozen_claim_deletion_fails_closed(self):
         drv = self.bind_driver(

@@ -53,9 +53,8 @@ selects a graph artifact, that artifact is part of the persisted aggregate: abse
 content, or structural invalidity returns fixed-safe `run.corrupt` under the strict-state contract.
 No legacy graph is decoded or migrated.
 
-This decision establishes structural integrity only. A follow-on decision and seam will make
-`SupportedBy` traversal determine parent/dependency adjudication and consolidate stranded graph
-walkers. Until then existing claim `gating` behavior remains unchanged.
+ADR 46 makes `SupportedBy` traversal adjudicative through one scoped conjunctive v2 derivation and
+removes the stranded legacy graph walkers without reviving their incompatible claim model.
 
 ## Consequences
 

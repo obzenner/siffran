@@ -399,10 +399,11 @@ class EvidenceFreshnessTests(ConformanceCase):
         root_id = graph["root"]
         c1_id = graph["claims"][1]["id"]
         # Two approved gating claims/spikes over separate files, proved via require_approved_spike.
-        self.require_research_recorded(drv, run_id, root_id)
-        self.require_approved_spike(drv, run_id, root_id, [_BOUND_C0], content=b"v1", exit_code=0)
+        # Approve the supporting child before asserting dependency-derived approval of its parent.
         self.require_research_recorded(drv, run_id, c1_id)
         self.require_approved_spike(drv, run_id, c1_id, [_BOUND_C1], content=b"v1", exit_code=0)
+        self.require_research_recorded(drv, run_id, root_id)
+        self.require_approved_spike(drv, run_id, root_id, [_BOUND_C0], content=b"v1", exit_code=0)
         # Prove both baseline claims are approved/fresh before mutation.
         c0_before = self.get_argument_claim(drv, run_id, root_id)
         c1_before = self.get_argument_claim(drv, run_id, c1_id)

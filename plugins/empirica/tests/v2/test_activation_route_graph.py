@@ -293,6 +293,109 @@ class ActivationRouteGraphTests(ConformanceCase):
         argument = self.dispatch(drv, get_argument(run_id=run_id))["result"]["argument"]
         self.assertEqual(argument["edges"], graph["edges"])
 
+    def test_scoped_support_dependencies_are_conjunctive_and_leaf_explained(self):
+        def claim(cid, kind="ordinary"):
+            return {"id": cid, "text": f"Claim {cid}", "gating": True, "kind": kind}
+
+        def research(drv, run_id, cid, result="supports"):
+            return self.dispatch(drv, observe_action(
+                run_id=run_id, action=action_research(
+                    claim_id=cid, source_kind="code", result=result)))
+
+        # Own evidence plus only one of two required supports is insufficient.
+        drv = self.bind_driver("D7", "seam-4b", "Scoped supports are conjunctive")
+        run_id = self.start_run(drv)
+        graph = {"root": "C0", "claims": [claim("C0"), claim("C1"), claim("C2")],
+                 "edges": [{"from": "C0", "to": "C1", "type": "SupportedBy"},
+                           {"from": "C0", "to": "C2", "type": "SupportedBy"}]}
+        self.require_graph_admitted(drv, run_id, graph)
+        research(drv, run_id, "C0")
+        research(drv, run_id, "C1")
+        self.assertEqual(self.get_argument_claim(drv, run_id, "C0")["state"], "open")
+        result = self.assert_block_reason(
+            self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence")),
+            "claim.research_missing")
+        self.assertEqual(result["reasons"][0]["affected"], {"obligation_id": "claim:C2"})
+        research(drv, run_id, "C2")
+        self.assertEqual(self.get_argument_claim(drv, run_id, "C0")["state"], "approved")
+
+        # Approved children cannot substitute for the parent's own evidence.
+        own_drv = self.bind_driver("D7", "seam-4b", "Parent keeps its own evidence requirement")
+        own_run = self.start_run(own_drv)
+        self.require_graph_admitted(own_drv, own_run, graph)
+        research(own_drv, own_run, "C1")
+        research(own_drv, own_run, "C2")
+        self.assertEqual(self.get_argument_claim(own_drv, own_run, "C0")["state"], "open")
+        own_result = self.assert_block_reason(
+            self.dispatch(own_drv, evaluate(run_id=own_run, intent="report_convergence")),
+            "claim.research_missing")
+        self.assertEqual(own_result["reasons"][0]["affected"], {"obligation_id": "claim:C0"})
+
+        # A refuted child blocks support but does not refute its parent.
+        refute_drv = self.bind_driver("D7", "seam-4b", "Refutation never propagates upward")
+        refute_run = self.start_run(refute_drv)
+        refute_graph = {"root": "P", "claims": [claim("P"), claim("R")],
+                        "edges": [{"from": "P", "to": "R", "type": "SupportedBy"}]}
+        self.require_graph_admitted(refute_drv, refute_run, refute_graph)
+        research(refute_drv, refute_run, "P")
+        research(refute_drv, refute_run, "R", "refutes")
+        self.assertEqual(self.get_argument_claim(refute_drv, refute_run, "P")["state"], "open")
+        self.assertEqual(self.get_argument_claim(refute_drv, refute_run, "R")["state"], "discarded")
+
+        # Dependency-only human hold names the supporting claim, not missing parent evidence.
+        hold_drv = self.bind_driver("D7", "seam-4b", "Dependency residual names its leaf")
+        hold_run = self.start_run(hold_drv)
+        hold_graph = {"root": "P", "claims": [claim("P"), claim("H", "needs-decision")],
+                      "edges": [{"from": "P", "to": "H", "type": "SupportedBy"}]}
+        self.require_graph_admitted(hold_drv, hold_run, hold_graph)
+        research(hold_drv, hold_run, "P")
+        self.assertEqual(self.get_argument_claim(hold_drv, hold_run, "P")["state"], "open")
+        hold_result = self.assert_block_reason(
+            self.dispatch(hold_drv, evaluate(run_id=hold_run, intent="report_convergence")),
+            "claim.human_decision")
+        self.assertEqual(hold_result["reasons"][0]["affected"], {"obligation_id": "claim:H"})
+
+        own_hold_drv = self.bind_driver("D7", "seam-4b",
+                                        "Dependency evaluation preserves parent human hold")
+        own_hold_run = self.start_run(own_hold_drv)
+        own_hold_graph = {"root": "H", "claims": [claim("H", "needs-decision"), claim("O")],
+                          "edges": [{"from": "H", "to": "O", "type": "SupportedBy"}]}
+        self.require_graph_admitted(own_hold_drv, own_hold_run, own_hold_graph)
+        self.assertEqual(self.get_argument_claim(
+            own_hold_drv, own_hold_run, "H")["state"], "blocked")
+
+    def test_discard_pruning_is_path_sensitive_and_never_vacuously_converges(self):
+        def claim(cid):
+            return {"id": cid, "text": f"Claim {cid}", "gating": True, "kind": "ordinary"}
+
+        drv = self.bind_driver("D7", "seam-4b", "Shared live paths survive branch discard")
+        run_id = self.start_run(drv)
+        graph = {"root": "P", "claims": [claim(cid) for cid in ("P", "A", "B", "S")],
+                 "edges": [{"from": "P", "to": "A", "type": "SupportedBy"},
+                           {"from": "P", "to": "B", "type": "SupportedBy"},
+                           {"from": "A", "to": "S", "type": "SupportedBy"},
+                           {"from": "B", "to": "S", "type": "SupportedBy"}]}
+        self.require_graph_admitted(drv, run_id, graph)
+        for cid, result in (("P", "supports"), ("A", "refutes"), ("B", "supports")):
+            self.dispatch(drv, observe_action(run_id=run_id, action=action_research(
+                claim_id=cid, source_kind="code", result=result)))
+        self.assertEqual(self.get_argument_claim(drv, run_id, "A")["state"], "discarded")
+        self.assertEqual(self.get_argument_claim(drv, run_id, "B")["state"], "open",
+                         "shared S remains required through live branch B")
+
+        root_drv = self.bind_driver("D7", "seam-4b", "Discarded root cannot vacuously converge")
+        root_run = self.start_run(root_drv)
+        root_graph = {"root": "R", "claims": [claim("R"), claim("S")],
+                      "edges": [{"from": "R", "to": "S", "type": "SupportedBy"}]}
+        self.require_graph_admitted(root_drv, root_run, root_graph)
+        self.dispatch(root_drv, observe_action(run_id=root_run, action=action_research(
+            claim_id="R", source_kind="code", result="refutes")))
+        response = self.dispatch(root_drv, evaluate(
+            run_id=root_run, intent="report_convergence"))
+        result = self.assert_block_reason(response, "claim.refuted")
+        self.assertFalse(result.get("converged", False))
+        self.assertEqual(result["reasons"][0]["affected"], {"obligation_id": "claim:R"})
+
     # 6 — Refuted/discarded claim remains append-only history and needs real refuting evidence
     def test_refuted_claim_append_only_needs_real_evidence(self):
         drv = self.bind_driver(

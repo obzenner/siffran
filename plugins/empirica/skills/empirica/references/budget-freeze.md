@@ -5,10 +5,10 @@ bounded scope.
 
 ## Budget
 
-Empirica is bounded by pass and spawn ceilings. The service derives the working
-pass allowance from current open scope but clamps it to the configured ceiling.
-Do not invent a fixed formula in the skill and do not lower a ceiling below
-already consumed work.
+Empirica is bounded by configured pass and spawn ceilings. Passes are charged only
+when the current derivation changes; repeated identical evaluation does not spend
+another pass. Do not invent a scope-derived formula in the skill and do not lower
+a ceiling below already consumed work.
 
 A pass is charged only according to the service's observed progress rules. Spawn
 budget is reserved through the service before child execution. Denied or
@@ -38,7 +38,11 @@ Freeze is an explicit scope commitment, not convergence.
 - It commits the currently gating claim IDs.
 - Every later graph must retain every committed ID; omission fails closed as
   `graph.invalid` and leaves the selected graph unchanged.
-- Claims added later are deferred rather than silently included.
+- Claims added later are deferred rather than silently included; an edge from a
+  frozen parent does not activate a deferred child.
+- The committed IDs are never recomputed from filtered or pruned graph paths.
+- Node or edge changes still alter the argument binding and make prior audit
+  coverage stale even when frozen IDs do not change.
 - Every committed claim still needs its evidence and passing audit.
 - Deferred claims remain visible in the terminal handoff.
 - A frozen result is never relabeled `converged:true`.

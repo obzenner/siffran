@@ -37,9 +37,23 @@ Each claim has exactly:
 - `kind`: `ordinary`, `needs-experiment`, or `needs-decision`.
 
 Each edge has exactly `from`, `to`, and `type`. The only supported type is
-`SupportedBy`, directed from a claim to a claim that supports it. Both endpoints
+`SupportedBy`, directed from a claim to a required supporting claim. Both endpoints
 must exist and differ. Edges must be unique and acyclic, and every claim must be
 reachable from the declared root by following `SupportedBy` edges.
+
+Within the effective scope, support is conjunctive: a claim can be approved only
+when its own evidence requirements and every direct in-scope supporting child are
+approved. Before freeze, effective scope is the claims marked `gating`; after
+freeze, it is the immutable frozen claim IDs. A deferred child does not silently
+expand a frozen commitment, but adding its node or edge still changes the argument
+and makes prior audit coverage stale.
+
+A failed support prevents parent approval but does not refute the parent. The
+parent remains open unless its own evidence makes it blocked or discarded. A
+discarded branch stops dependency evaluation only on that path; shared descendants
+remain active through other live paths. Blocking output identifies the unresolved
+supporting claim rather than claiming that an already evidenced parent lacks local
+evidence.
 
 Do not send the legacy `nodes`/confidence representation as the v2 graph.
 Confidence and terminal state are derived projections, never graph input.

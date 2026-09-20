@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any
 
-from . import claims as claim_rules
 from .freshness import ActiveSpikeHead, FileBinding, evaluate_freshness
 from .run import OperationalState
 
@@ -65,6 +65,13 @@ class EvaluationSnapshot:
 class StateIntent:
     state: OperationalState
     artifacts: tuple[dict[str, Any], ...] = ()
+
+
+@dataclass(frozen=True)
+class ClaimDerivation:
+    states: Mapping[str, str]
+    blockers: Mapping[str, str]
+    scope: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -165,24 +172,77 @@ def claim_conflicted(snapshot: EvaluationSnapshot, claim: dict[str, Any]) -> boo
     return {a["outcome"] for a in active_evidence(snapshot, claim) if a["kind"] == "research"} >= {"supporting", "refuting"}
 
 
-def claim_state(snapshot: EvaluationSnapshot, claim: dict[str, Any]) -> str:
+def effective_scope_ids(snapshot: EvaluationSnapshot) -> tuple[str, ...]:
+    if snapshot.graph is None:
+        return ()
+    return (tuple(snapshot.state.frozen_claim_ids)
+            if snapshot.state.frozen_claim_ids is not None else
+            tuple(c["id"] for c in snapshot.graph["claims"] if c["gating"]))
+
+
+def local_claim_state(snapshot: EvaluationSnapshot, claim: dict[str, Any],
+                      stale: set[str] | None = None) -> str:
     evidence = active_evidence(snapshot, claim)
     research = [a for a in evidence if a["kind"] == "research"]
     supporting = any(a["outcome"] == "supporting" for a in research)
     refuting = any(a["outcome"] == "refuting" for a in research)
     spikes = [a for a in evidence if a["kind"] == "spike"]
     spike_failed = bool(spikes and spikes[-1]["outcome"] == "fail")
-    spike_ok = bool(spikes and spikes[-1]["outcome"] == "pass" and spikes[-1]["artifact_id"] not in stale_artifact_ids(snapshot))
+    spike_ok = bool(spikes and spikes[-1]["outcome"] == "pass"
+                    and spikes[-1]["artifact_id"] not in (
+                        stale_artifact_ids(snapshot) if stale is None else stale))
     if supporting and refuting and not spike_failed:
         return "open"
-    approved = supporting and not spike_failed and (claim["kind"] == "ordinary" or (claim["kind"] == "needs-experiment" and spike_ok))
-    node = {"type": "claim", "text": claim["text"], "kind": claim["kind"],
-            "confidence": 1.0 if approved else 0.0,
-            "blocked": "needs-decision" if claim["kind"] == "needs-decision" else None,
-            "evidence": [a["artifact_id"] for a in evidence],
-            "refuted_by": "spike" if spike_failed else ("research" if refuting else None)}
-    graph = {"root": claim["id"], "nodes": {claim["id"]: node}, "edges": []}
-    return claim_rules.state_of(graph, claim["id"], 1.0, lambda _claim_id, purpose: (refuting or spike_failed) if purpose == "refute" else approved)
+    if spike_failed or refuting:
+        return "discarded"
+    if claim["kind"] == "needs-decision":
+        return "blocked"
+    approved = supporting and (claim["kind"] == "ordinary" or
+                               (claim["kind"] == "needs-experiment" and spike_ok))
+    return "approved" if approved else "open"
+
+
+def derive_claims(snapshot: EvaluationSnapshot) -> ClaimDerivation:
+    if snapshot.graph is None:
+        return ClaimDerivation(MappingProxyType({}), MappingProxyType({}), ())
+    claims = snapshot.graph["claims"]
+    ids = [claim["id"] for claim in claims]
+    index = {claim_id: position for position, claim_id in enumerate(ids)}
+    children: dict[str, list[str]] = {claim_id: [] for claim_id in ids}
+    indegree = {claim_id: 0 for claim_id in ids}
+    for edge in snapshot.graph["edges"]:
+        children[edge["from"]].append(edge["to"])
+        indegree[edge["to"]] += 1
+    ready = deque(claim_id for claim_id in ids if indegree[claim_id] == 0)
+    order: list[str] = []
+    while ready:
+        current = ready.popleft()
+        order.append(current)
+        for child in sorted(children[current], key=index.__getitem__):
+            indegree[child] -= 1
+            if indegree[child] == 0:
+                ready.append(child)
+    stale = stale_artifact_ids(snapshot)
+    local = {claim["id"]: local_claim_state(snapshot, claim, stale) for claim in claims}
+    scoped = effective_scope_ids(snapshot)
+    scope = set(scoped)
+    states: dict[str, str] = {}
+    blockers: dict[str, str] = {}
+    for claim_id in reversed(order):
+        own = local[claim_id]
+        if claim_id not in scope or own != "approved":
+            states[claim_id] = own
+            if own != "approved":
+                blockers[claim_id] = claim_id
+            continue
+        failed = next((child for child in sorted(children[claim_id], key=index.__getitem__)
+                       if child in scope and states[child] != "approved"), None)
+        if failed is None:
+            states[claim_id] = "approved"
+        else:
+            states[claim_id] = "open"
+            blockers[claim_id] = blockers.get(failed, failed)
+    return ClaimDerivation(MappingProxyType(states), MappingProxyType(blockers), scoped)
 
 
 def _decision(snapshot: EvaluationSnapshot, state: OperationalState, result: str = "Allow", artifacts: tuple[dict[str, Any], ...] = (), reason: str | None = None, parameters: dict[str, Any] | None = None, affected: str | None = None) -> Decision:
@@ -237,8 +297,11 @@ def covered_artifact_ids(snapshot: EvaluationSnapshot) -> list[str]:
     """Return the exact active evidence set whose producer identity an audit covers."""
     if snapshot.graph is None or frozen_scope_missing(snapshot.state, snapshot.graph):
         return []
-    gating = (set(snapshot.state.frozen_claim_ids) if snapshot.state.frozen_claim_ids is not None else {claim["id"] for claim in snapshot.graph["claims"] if claim["gating"]})
-    return [artifact["artifact_id"] for claim in snapshot.graph["claims"] if claim["id"] in gating and claim_state(snapshot, claim) == "approved" for artifact in active_evidence(snapshot, claim)]
+    derivation = derive_claims(snapshot)
+    gating = set(derivation.scope)
+    return [artifact["artifact_id"] for claim in snapshot.graph["claims"]
+            if claim["id"] in gating and derivation.states[claim["id"]] == "approved"
+            for artifact in active_evidence(snapshot, claim)]
 
 
 def valid_attribution(snapshot: EvaluationSnapshot, payload: Mapping[str, Any]) -> bool:
@@ -296,15 +359,14 @@ def audit_binding(snapshot: EvaluationSnapshot) -> dict[str, Any]:
     if snapshot.graph is None or frozen_scope_missing(snapshot.state, snapshot.graph):
         return {}
     all_ids = [c["id"] for c in snapshot.graph["claims"]]
-    gating = (list(snapshot.state.frozen_claim_ids)
-              if snapshot.state.frozen_claim_ids is not None
-              else [c["id"] for c in snapshot.graph["claims"] if c["gating"]])
+    derivation = derive_claims(snapshot)
+    gating = list(derivation.scope)
     deferred = [cid for cid in all_ids if cid not in set(gating)]
     visible = [a["artifact_id"] for a in snapshot.history
                if a.get("kind") in {"research", "spike_request", "spike"}]
     reviewed = []
     for claim in snapshot.graph["claims"]:
-        if claim["id"] in gating and claim_state(snapshot, claim) == "approved":
+        if claim["id"] in gating and derivation.states[claim["id"]] == "approved":
             reviewed.append({"claim_id": claim["id"],
                              "evidence_digest": digest(
                                  [a["artifact_id"] for a in active_evidence(snapshot, claim)])})
@@ -436,9 +498,9 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
         intent = command["intent"]
         if intent == "continue":
             return _decision(snapshot, state)
-        states = [(c, claim_state(snapshot, c)) for c in snapshot.graph["claims"]]
-        gating = set(state.frozen_claim_ids) if state.frozen_claim_ids is not None else {
-            c["id"] for c in snapshot.graph["claims"] if c["gating"]}
+        derivation = derive_claims(snapshot)
+        states = [(c, derivation.states[c["id"]]) for c in snapshot.graph["claims"]]
+        gating = set(derivation.scope)
         scoped = [(c, cs) for c, cs in states if c["id"] in gating]
         if intent == "stop":
             if state.budgets["passes_used"] >= state.budgets["max_passes"]:
@@ -448,12 +510,17 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             return _decision(snapshot, replace(state, status=status))
         missing = next(((c, cs) for c, cs in scoped if cs != "approved"), None)
         if missing:
-            c, cs = missing
+            c, _ = missing
+            target_id = derivation.blockers.get(c["id"], c["id"])
+            c = next(claim for claim in snapshot.graph["claims"] if claim["id"] == target_id)
+            cs = derivation.states[target_id]
             evidence = active_evidence(snapshot, c)
             research = [a for a in evidence if a["kind"] == "research"]
             spikes = [a for a in evidence if a["kind"] == "spike"]
             if cs == "discarded":
                 reason, parameters = "claim.refuted", {}
+            elif cs == "blocked":
+                reason, parameters = "claim.human_decision", {}
             elif claim_conflicted(snapshot, c):
                 reason, parameters = "evidence.conflict", {}
             elif any(a["outcome"] == "supporting" for a in research) and c["kind"] == "needs-experiment":
@@ -474,18 +541,18 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                 parameters = {}
             return _decision(snapshot, state, "Block", reason=reason, parameters=parameters,
                              affected="claim:" + c["id"])
-        derivation = digest({"graph": snapshot.graph,
-                             "claims": [(c["id"], claim_state(snapshot, c),
-                                         [a["artifact_id"] for a in active_evidence(snapshot, c)])
-                                        for c in snapshot.graph["claims"]],
-                             "frozen": state.frozen_claim_ids})
-        if derivation != state.last_derivation_digest:
+        derivation_digest = digest({"graph": snapshot.graph,
+                                    "claims": [(c["id"], derivation.states[c["id"]],
+                                                [a["artifact_id"] for a in active_evidence(snapshot, c)])
+                                               for c in snapshot.graph["claims"]],
+                                    "frozen": state.frozen_claim_ids})
+        if derivation_digest != state.last_derivation_digest:
             if state.budgets["passes_used"] >= state.budgets["max_passes"]:
                 return _decision(snapshot, state, "Block", reason="budget.exhausted",
                                  parameters={"resource": "pass"})
             budgets = dict(state.budgets)
             budgets["passes_used"] += 1
-            state = replace(state, budgets=budgets, last_derivation_digest=derivation)
+            state = replace(state, budgets=budgets, last_derivation_digest=derivation_digest)
         audits = [a for a in snapshot.history if a.get("kind") == "audit_verdict"]
         if not audits:
             return _decision(snapshot, state, "Block", reason="audit.required")

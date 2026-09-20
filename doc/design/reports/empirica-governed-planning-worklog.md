@@ -735,5 +735,68 @@ Independent non-Anthropic review:
 
 Seam 4A deliberately does not make dependency state adjudicative. That is Seam 4B: one live
 root traversal must determine parent/dependency outcomes and stranded graph walkers must be
-consolidated or removed. No files are staged or committed. Human accepted Seam 4A and authorized
-committing the accepted seams before proceeding.
+consolidated or removed. Human accepted Seam 4A and authorized committing the accepted seams.
+Seams 1–4A were committed as `bd1c896` before Seam 4B began.
+
+### Seam 4B — Scoped conjunctive dependency adjudication — LANDED, HITL accepted
+
+ADR 46 records the human-confirmed semantics. For effective scope `S` (ordered `gating: true` IDs
+before freeze; exact immutable frozen IDs afterward), a claim is approved only when its own local
+requirements and every direct `SupportedBy` child in `S` are approved. Dependencies are required
+conjuncts by explicit Empirica policy, not by inference from the lack of an alternatives field.
+
+State and explanation rules:
+
+- local blocked/discarded state wins and is never overwritten by dependency evaluation;
+- a non-approved child makes an otherwise locally approved parent open;
+- child refutation never propagates upward;
+- the blocking response follows dependency blockers to the actual unresolved support and uses that
+  claim's existing research/spike/decision/conflict/refutation reason;
+- traversal stops below a discarded node only for that path, so a shared descendant remains live
+  through another parent;
+- approved-only convergence remains, preventing vacuous success after pruning.
+
+Freeze and audit rules:
+
+- effective scope is stored IDs, never recomputed from reachability or pruning;
+- a frozen parent's new deferred child does not expand commitment;
+- a deferred intermediary or discarded ancestor cannot remove a frozen descendant;
+- every admitted node/edge change still changes argument/deferred digests and stales old audit
+  coverage.
+
+Red evidence:
+
+- an evidenced parent with one approved and one open required child projected approved;
+- an evidenced branch sharing an open descendant with a discarded branch projected approved;
+- focused conformance failed those two dependency-state assertions while audit/freeze clarification
+  regressions were already green.
+
+Green implementation:
+
+- `evaluation.derive_claims` is the sole v2 local-plus-dependency state derivation and supplies
+  state, effective scope, and actionable blocker IDs to evaluation, projection, and audit coverage;
+- existing freshness, evidence conflict, failed-spike precedence, human holds, audit identity,
+  terminal, and configured pass/spawn guards remain in place;
+- legacy normalized-graph `core/claims.py`, its stale fixture, and genuinely unused
+  scope-budget `core/budget.py` plus isolated tests were removed; live v2 budget guards remain;
+- conformance covers all eight human-required cases, including scoped AND, own evidence, no upward
+  refutation, shared DAG paths, frozen/deferred audit currency, immutable commitment, non-vacuous
+  convergence, and dependency-leaf explanation;
+- canonical contract digest is
+  `sha256:283abc83c3d8e19947cc53a5c95b75085d85cb4ddce3c4e0b71e85a05354a801`;
+- Empirica plugin version remains 3.0.0: versions are bound to production merge, and Seams 1–4B
+  together are one major increment from the last released 2.0.1 rather than separate unpublished
+  major releases;
+- `make contract-check`, vendor/docs checks, conformance (63/63), D7 transactions (19/19), lint,
+  architecture, core, and final `make check` pass; Pi remains 150/150;
+- effective runtime is 9,263 lines, 194 below the unchanged 9,457 ceiling.
+
+Independent non-Anthropic review:
+
+- GPT-5.6 Terra verified scoped bottom-up AND derivation, deterministic leaf explanations,
+  path-sensitive shared-DAG behavior, exact frozen-ID scope, audit invalidation, projection/audit
+  consistency, retained live budget guards, legacy subtraction, contract/vendor parity, and tests;
+- final verdict: **ACCEPT**.
+
+Nothing is staged or committed for Seam 4B; human accepted the seam and explicitly authorized
+fixing the unreleased version to one major increment and committing it.

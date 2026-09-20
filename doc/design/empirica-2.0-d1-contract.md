@@ -155,10 +155,15 @@ freeze            first-write-wins committed claim scope
 child_reserve     request a host child for a declared purpose
 ```
 
-The v2 graph admits only unique, acyclic `SupportedBy` edges directed from a claim to its supporting
-claim. Endpoints must be known and distinct, and every claim must be reachable from the declared
-root. Invalid candidates produce `graph.invalid` before persistence; an invalid persisted selected
-graph makes the aggregate `run.corrupt`.
+The v2 graph admits only unique, acyclic `SupportedBy` edges directed from a claim to its required
+supporting claim. Endpoints must be known and distinct, and every claim must be reachable from the
+declared root. Within the effective gating/frozen scope, support is conjunctive: approval requires
+the claim's own approval requirements and every direct in-scope child approved. Dependency failure
+leaves an otherwise approvable parent open, never propagates refutation upward, and reports the
+actual unresolved support. Pruning is path-sensitive in the DAG, while committed IDs are never
+recomputed from reachability. Deferred dependencies do not expand frozen scope, but every graph
+change invalidates prior argument-bound audit coverage. Invalid candidates produce `graph.invalid`
+before persistence; an invalid persisted selected graph makes the aggregate `run.corrupt`.
 
 Trusted adapter/application only:
 

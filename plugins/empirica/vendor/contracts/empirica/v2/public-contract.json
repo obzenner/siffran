@@ -209,7 +209,10 @@
       "summary": "Graph shape and missing or invalid graph handling.",
       "clauses": [
         {"id": "claims/graph/shape", "text": "The argument is a strict root-connected claim-dependency DAG containing exact claim identity, text, gating, and kind fields; it never contains trusted claim state."},
-        {"id": "claims/graph/dependencies", "text": "SupportedBy is the only edge type and is directed from a claim to its supporting claim; endpoints are known and distinct, edges are unique, the relation is acyclic, and every claim is reachable from the declared root."},
+        {"id": "claims/graph/dependencies", "text": "SupportedBy is the only edge type and is directed from a claim to its required supporting claim; endpoints are known and distinct, edges are unique, the relation is acyclic, and every claim is reachable from the declared root."},
+        {"id": "claims/graph/scoped_and", "text": "A scoped claim is approved only when its own approval requirements and every direct supporting child in the effective scope are approved; effective scope is the current gating IDs before freeze and the immutable frozen IDs after freeze."},
+        {"id": "claims/graph/dependency_state", "text": "An open, blocked, or discarded scoped support prevents an otherwise approvable parent from approval but never overwrites the parent's own blocked or discarded state and never propagates refutation upward; the public blocking reason identifies the unresolved supporting claim."},
+        {"id": "claims/graph/path_sensitive", "text": "Dependency traversal stops below a discarded claim for that path only; a shared descendant remains adjudicative through every other live path, and committed IDs are never recomputed from filtered or pruned reachability."},
         {"id": "claims/graph/missing", "text": "A current run with no selected graph yields graph.missing with run.inspect when a graph is required."},
         {"id": "claims/graph/invalid", "text": "An invalid candidate graph yields graph.invalid before artifact creation or selected-state replacement; a selected persisted graph artifact that is missing, malformed, or structurally invalid makes the aggregate run.corrupt."}
       ]
@@ -317,7 +320,8 @@
       "summary": "First-write-wins committed scope and deferred residuals.",
       "clauses": [
         {"id": "freeze/first_write_wins", "text": "Freeze is first-write-wins and commits the current gating claim IDs; every later selected graph must retain every committed ID or fail closed as graph.invalid without replacing the selected graph, and those claims still require fresh evidence and audit."},
-        {"id": "freeze/deferred", "text": "Later derived claims are visible as deferred residuals with freeze.deferred and residual.accept and cannot silently enter the committed scope."}
+        {"id": "freeze/deferred", "text": "Later derived claims are visible as deferred residuals with freeze.deferred and residual.accept and cannot silently enter or remove IDs from the committed scope; an edge from a frozen parent to a deferred child does not activate that child."},
+        {"id": "freeze/audit_currency", "text": "Any admitted graph node or edge change changes the argument binding and invalidates prior audit coverage even when immutable frozen IDs and dependency adjudication are unchanged."}
       ]
     },
     "terminal": {

@@ -198,7 +198,7 @@ Edge item, closed:
 {"from": "G0", "to": "S1", "type": "SupportedBy"}
 ```
 
-Type is exactly `SupportedBy`, directed from claim to supporting claim. Endpoints must resolve and differ, edges are duplicate-free, the relation is acyclic, every claim is root-reachable, and deterministic ordering is validated.
+Type is exactly `SupportedBy`, directed from claim to required supporting claim. Endpoints must resolve and differ, edges are duplicate-free, the relation is acyclic, every claim is root-reachable, and deterministic ordering is validated. Within the effective gating/frozen scope, every direct child is a conjunctive approval prerequisite; dependency failure preserves the parent's own local blocked/discarded state and otherwise leaves it open while identifying the unresolved child.
 
 Evidence item, closed:
 
