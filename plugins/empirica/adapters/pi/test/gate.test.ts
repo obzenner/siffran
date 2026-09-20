@@ -557,6 +557,16 @@ test("direct tool: report_convergence execute rejects on open Fault with active 
   await assert.rejects(() => execTool(w, "report_convergence"), /unavailable/);
 });
 
+test("direct tool: report_convergence forwards an honest stop intent", async () => {
+  const w = wire((req) => req.command.type === "StartRun"
+    ? envelope({ type: "Allow", converged: false, run: run() })
+    : envelope({ type: "Allow", converged: false, run: run("stopped_residual") }));
+  await startRun(w);
+  await execTool(w, "report_convergence", { intent: "stop" });
+  const request = w.requests.at(-1)!;
+  assert.equal(request.command.type === "EvaluateRun" ? request.command.intent : null, "stop");
+});
+
 test("empirica_read uses the restored opaque handle", async () => {
   const w = wire((req) => {
     assert.equal(req.command.type, "GetRun");

@@ -89,10 +89,9 @@ def _project_schemas() -> dict[str, dict]:
         "properties": {"run_id": run_id, "action": _author_action_schema()},
     }
     report = {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["run_id"],
-        "properties": {"run_id": run_id},
+        "type": "object", "additionalProperties": False, "required": ["run_id"],
+        "properties": {"run_id": run_id,
+                       "intent": {"enum": ["report_convergence", "stop"]}},
     }
     return {READ_TOOL: read, OBSERVE_TOOL: observe, REPORT_TOOL: report}
 
@@ -138,7 +137,7 @@ class PublicTools:
         descriptions = {
             READ_TOOL: "Read the current Empirica run, audit argument, or public contract.",
             OBSERVE_TOOL: "Submit one public Empirica author action for the active run.",
-            REPORT_TOOL: "Ask Empirica for the guarded terminal convergence decision.",
+            REPORT_TOOL: "Ask Empirica for a guarded convergence or honest-stop decision.",
         }
         definitions = []
         for name in _TOOL_ORDER:
@@ -193,7 +192,7 @@ class PublicTools:
                     "action": copy.deepcopy(arguments["action"])}
         if name == REPORT_TOOL:
             return {"type": "EvaluateRun", "run_id": arguments["run_id"],
-                    "intent": "report_convergence"}
+                    "intent": arguments.get("intent", "report_convergence")}
         operation = arguments["operation"]
         if operation == "GetContract":
             command = {"type": "GetContract", "target": arguments["target"]}

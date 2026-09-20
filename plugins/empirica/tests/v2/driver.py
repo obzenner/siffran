@@ -352,6 +352,3 @@ def new_driver(profile_id: str, *, limits: dict | None = None,
     return sut_adapter.bind_live(
         workspace, harness, runs, artifacts, host, profile_id, lim, clk,
     )
-
-
-

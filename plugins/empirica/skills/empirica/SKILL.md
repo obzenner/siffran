@@ -165,6 +165,10 @@ audit when due and then requests the guarded decision before permitting completi
   failure never permits convergence.
 - A terminal run is reported, never re-judged or reopened.
 
+Use the default `report_convergence` intent only for convergence. When explicitly accepting current
+residual/deferred scope or an exhausted pass budget, call it once with `intent: "stop"`; only the
+resulting `Allow(converged=false)` authorizes an honest stopped report.
+
 Do not repeatedly call the gate hoping for a different answer. Follow the typed
 residual obligation or next action returned by the service.
 

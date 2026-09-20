@@ -285,13 +285,14 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       pi.registerTool({
         name: REPORT_CONVERGENCE_TOOL,
         label: "Report convergence",
-        description: "Ask Empirica to verify convergence.",
+        description: "Ask Empirica for guarded convergence or an honest residual stop.",
         parameters: EMPTY_PARAMS,
-        async execute() {
+        async execute(_id, raw) {
           if (!runHandle)
             return { content: [{ type: "text", text: "No active Empirica run." }] };
           const response = await dispatch(
-            evaluateRunRequest(runHandle, REPORT_CONVERGENCE_INTENT, randomUUID()),
+            evaluateRunRequest(runHandle, (raw as { intent?: unknown }).intent === "stop"
+              ? "stop" : REPORT_CONVERGENCE_INTENT, randomUUID()),
           );
           const decision = gateFromDecision(response.result);
           if (decision.kind === "deny")

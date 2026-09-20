@@ -3,7 +3,7 @@ name: empirica-auditor
 package: empirica
 description: Independent read-only Empirica auditor for one host-injected dossier.
 tools: read, grep, find, ls
-model: amazon-bedrock-eu/eu.anthropic.claude-opus-4-8
+model: amazon-bedrock/eu.anthropic.claude-opus-4-8
 thinking: high
 defaultContext: fresh
 inheritProjectContext: true

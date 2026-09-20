@@ -100,6 +100,11 @@ class PublicToolContractTests(unittest.TestCase):
             self.requests[-1][0]["command"],
             {"type": "EvaluateRun", "run_id": "r", "intent": "report_convergence"},
         )
+        tools.call("report_convergence", {"run_id": "r", "intent": "stop"})
+        self.assertEqual(
+            self.requests[-1][0]["command"],
+            {"type": "EvaluateRun", "run_id": "r", "intent": "stop"},
+        )
 
     def test_caller_cannot_supply_protocol_profile_or_request_id(self):
         tools = self._tools()

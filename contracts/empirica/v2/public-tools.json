@@ -283,7 +283,14 @@
       },
       "report_convergence": {
         "additionalProperties": false,
-        "properties": {},
+        "properties": {
+          "intent": {
+            "enum": [
+              "report_convergence",
+              "stop"
+            ]
+          }
+        },
         "required": [],
         "type": "object"
       }
@@ -585,6 +592,12 @@
       "report_convergence": {
         "additionalProperties": false,
         "properties": {
+          "intent": {
+            "enum": [
+              "report_convergence",
+              "stop"
+            ]
+          },
           "run_id": {
             "minLength": 1,
             "type": "string"
