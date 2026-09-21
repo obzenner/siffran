@@ -14,6 +14,7 @@
   },
   "selected_graph_artifact_id": null,
   "frozen_claim_ids": null,
+  "frozen_semantic_digest": null,
   "route_stamp": null,
   "investigation_stamp": null,
   "stamp_seq": 0,

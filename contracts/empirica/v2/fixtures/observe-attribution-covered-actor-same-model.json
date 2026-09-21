@@ -48,7 +48,7 @@
             "evidence/spike",
             "audit"
           ],
-          "digest": "sha256:283abc83c3d8e19947cc53a5c95b75085d85cb4ddce3c4e0b71e85a05354a801"
+          "digest": "sha256:98e7ce690a91b67ebde9c655697295586869f5290c3b84fec519d953704d688a"
         },
         "obligations": {
           "active": [],

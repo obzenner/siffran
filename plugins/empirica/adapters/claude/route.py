@@ -14,6 +14,7 @@ from .transport import BridgeTransport, Transport
 
 INVESTIGATIVE_TOOLS = frozenset({
     "Read", "Glob", "Grep", "Bash", "WebFetch", "WebSearch", "NotebookRead", "LSP",
+    "Agent",
 })
 
 
@@ -52,21 +53,12 @@ def _request(
     }
 
 
-def is_route_command(payload: Mapping[str, object]) -> bool:
-    """Whether Bash carries the adapter's explicit route announcement rather than investigation."""
-    if payload.get("tool_name") != "Bash":
-        return False
-    tool_input = payload.get("tool_input")
-    command = tool_input.get("command") if isinstance(tool_input, Mapping) else None
-    return isinstance(command, str) and "--announce-route" in command
-
-
 def build_investigation_request(
     payload: Mapping[str, object], run_id: str, *, correlation_id: str | None = None,
 ) -> dict | None:
-    """Build the first-investigation operation, excluding non-investigative and route calls."""
+    """Build the first-investigation operation for every investigative native tool."""
     context_from_payload(payload)
-    if payload.get("tool_name") not in INVESTIGATIVE_TOOLS or is_route_command(payload):
+    if payload.get("tool_name") not in INVESTIGATIVE_TOOLS:
         return None
     return _request(
         payload, run_id, {"kind": "investigate"}, "investigate", correlation_id,

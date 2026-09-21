@@ -34,8 +34,13 @@ Do not claim a wall-clock stall deadline unless the active contract exposes one.
 
 Freeze is an explicit scope commitment, not convergence.
 
-- The first accepted freeze wins.
-- It commits the currently gating claim IDs.
+- The first accepted freeze wins and atomically commits both IDs and semantic
+  identity.
+- Semantic identity binds each committed claim's exact `id`, `text`, `kind`, and
+  input `gating`, plus the sorted `SupportedBy` edges whose endpoints are both
+  committed.
+- Reordering equivalent records/edges is allowed; changing a committed record or
+  committed-to-committed edge is `graph.invalid` with no write.
 - Every later graph must retain every committed ID; omission fails closed as
   `graph.invalid` and leaves the selected graph unchanged.
 - Claims added later are deferred rather than silently included; an edge from a
@@ -49,4 +54,6 @@ Freeze is an explicit scope commitment, not convergence.
 
 Before submitting `ObserveAction(kind="freeze")`, show the user the committed and
 expected deferred scope. After acceptance, do not mutate the commitment by
-rewriting prose or resubmitting freeze.
+rewriting prose or resubmitting freeze. There is no author-controlled scope
+revision: changing committed meaning requires a fresh run until a trusted
+human-origin revision protocol is supported.

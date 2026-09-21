@@ -68,12 +68,14 @@ Do this before reading files, searching, browsing, or running commands.
    - **unknown** — requires observation, experiment, or human judgment.
 3. Announce the route and record `ObserveAction(kind="route")` through the active
    author-action surface.
-4. Only after route acknowledgement, read
-   [references/host-capabilities.md](references/host-capabilities.md) for the
-   exact host contract, then begin investigation.
+4. Record `ObserveAction(kind="investigate")` after route acknowledgement and
+   before any native read, search, command, evidence submission, or child launch.
+5. Then read [references/host-capabilities.md](references/host-capabilities.md)
+   for the exact host contract and begin investigation.
 
-If the host cannot record the route, the workflow is unsupported. Do not continue
-with an unrecorded substitute.
+If either witness cannot be recorded, the workflow is unsupported. The core and
+supported host adapters fail closed before investigative tools, evidence, child
+budget, or harness execution; do not continue with an unrecorded substitute.
 
 ## 2. Seed the claim graph
 

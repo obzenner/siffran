@@ -407,6 +407,8 @@ class AsyncChildrenTests(ConformanceCase):
                     "reasons rather than silent fallback; current tiers match D1-H/D2 profiles",
                     profile_id=pid)
                 run_id = self.start_run(drv, goal=self.GOAL)
+                self.require_route_admitted(drv, run_id)
+                self.require_investigate_admitted(drv, run_id)
                 resp = self.dispatch(drv, observe_action(run_id=run_id, action=action_child_reserve(
                     purpose="audit", role_profile=pid, execution="async")))
                 tier = profile_tier(pid)

@@ -87,6 +87,10 @@
       "description": "Record a routing commitment before investigation.",
       "params": {"type": "object", "additionalProperties": false, "required": ["label"], "properties": {"label": {"type": "string", "minLength": 1}}}
     },
+    "investigation.record": {
+      "description": "Record the first investigation witness after routing.",
+      "params": {"type": "object", "additionalProperties": false, "properties": {}}
+    },
     "research.record": {
       "description": "Record one externally observed Fold-1 research citation bound to a claim.",
       "params": {
@@ -153,6 +157,7 @@
     "graph.missing": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["run.inspect"], "sections": ["claims/graph"], "message": "No selected argument graph."},
     "graph.invalid": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["run.inspect"], "sections": ["claims/graph"], "message": "Argument graph is malformed or unsupported."},
     "route.required": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["route.record"], "sections": ["route"], "message": "Record a route before investigation."},
+    "investigation.required": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["investigation.record"], "sections": ["route"], "message": "Record the first investigation witness before evidence or child execution."},
     "route.late": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["run.inspect"], "sections": ["route"], "message": "Route observed after investigation is a permanent violation."},
     "claim.research_missing": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["research.record"], "sections": ["evidence/research"], "message": "Record Fold-1 research for this claim."},
     "claim.research_unbound": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["research.record"], "sections": ["evidence/research"], "message": "Research is not bound to the current claim digest."},
@@ -214,7 +219,7 @@
         {"id": "claims/graph/dependency_state", "text": "An open, blocked, or discarded scoped support prevents an otherwise approvable parent from approval but never overwrites the parent's own blocked or discarded state and never propagates refutation upward; the public blocking reason identifies the unresolved supporting claim."},
         {"id": "claims/graph/path_sensitive", "text": "Dependency traversal stops below a discarded claim for that path only; a shared descendant remains adjudicative through every other live path, and committed IDs are never recomputed from filtered or pruned reachability."},
         {"id": "claims/graph/missing", "text": "A current run with no selected graph yields graph.missing with run.inspect when a graph is required."},
-        {"id": "claims/graph/invalid", "text": "An invalid candidate graph yields graph.invalid before artifact creation or selected-state replacement; a selected persisted graph artifact that is missing, malformed, or structurally invalid makes the aggregate run.corrupt."}
+        {"id": "claims/graph/invalid", "text": "An invalid candidate graph, including a graph that conflicts with frozen semantic identity, yields graph.invalid before artifact creation or selected-state replacement; a selected persisted graph artifact that is missing, malformed, structurally invalid, or inconsistent with frozen semantic identity makes the aggregate run.corrupt."}
       ]
     },
     "claims/residuals": {
@@ -312,6 +317,7 @@
       "summary": "Route-before-investigation and the late-route violation.",
       "clauses": [
         {"id": "route/before_investigation", "text": "A route must be observed before investigation; first route and first investigation are first-write-wins witnesses."},
+        {"id": "route/admission_gate", "text": "Research, spike execution, child execution, and convergence require both witnesses; missing route yields route.required, missing investigation yields investigation.required, and rejection occurs before evidence, budget, child, harness, manifest, or state writes."},
         {"id": "route/late", "text": "A late route is a permanent reported violation with route.late and run.inspect; it is not retroactively repaired by writing another label."}
       ]
     },
@@ -319,7 +325,9 @@
       "title": "Freeze",
       "summary": "First-write-wins committed scope and deferred residuals.",
       "clauses": [
-        {"id": "freeze/first_write_wins", "text": "Freeze is first-write-wins and commits the current gating claim IDs; every later selected graph must retain every committed ID or fail closed as graph.invalid without replacing the selected graph, and those claims still require fresh evidence and audit."},
+        {"id": "freeze/first_write_wins", "text": "Freeze atomically commits the ordered gating claim IDs and a canonical semantic digest over each committed claim's exact id, text, kind, and input gating plus the sorted SupportedBy edge set whose endpoints are both committed; every later graph must preserve that identity or fail graph.invalid without writes or selection replacement."},
+        {"id": "freeze/persisted_consistency", "text": "A persisted frozen ID/digest pair must be present together and match the selected graph; missing, malformed, or inconsistent state/history is run.corrupt and cannot be repaired."},
+        {"id": "freeze/revision_authority", "text": "No author action may revise frozen semantic identity; changing committed meaning requires a fresh run until a trusted human-origin scope-revision protocol is explicitly supported."},
         {"id": "freeze/deferred", "text": "Later derived claims are visible as deferred residuals with freeze.deferred and residual.accept and cannot silently enter or remove IDs from the committed scope; an edge from a frozen parent to a deferred child does not activate that child."},
         {"id": "freeze/audit_currency", "text": "Any admitted graph node or edge change changes the argument binding and invalidates prior audit coverage even when immutable frozen IDs and dependency adjudication are unchanged."}
       ]

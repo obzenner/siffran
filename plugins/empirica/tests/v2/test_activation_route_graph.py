@@ -16,8 +16,9 @@ from __future__ import annotations
 import unittest
 
 from assertions import (  # noqa: E402
-    ConformanceCase, action_graph, action_investigate, action_research, action_route,
-    canonical_graph, evaluate, get_argument, get_run, observe_action, start_run, REASONS,
+    ConformanceCase, action_child_reserve, action_graph, action_investigate, action_research,
+    action_route, canonical_graph, evaluate, get_argument, get_run, observe_action, start_run,
+    REASONS,
 )
 
 
@@ -171,6 +172,48 @@ class ActivationRouteGraphTests(ConformanceCase):
         self.assertEqual(late2_result["run"].get("obligations", {}),
                          late_run.get("obligations", {}),
                          "a repeated late route must not change the derived obligation snapshot")
+
+    def test_evidence_and_child_execution_require_route_then_investigation(self):
+        """Route and investigation witnesses gate every evidence/execution admission."""
+        graph = canonical_graph(n_claims=1)
+        claim_id = graph["root"]
+
+        for label, action in (
+            ("research", action_research(claim_id=claim_id, source_kind="code",
+                                         result="supports")),
+            ("child", action_child_reserve(purpose="arbitrary work", role_profile="worker",
+                                           execution="foreground")),
+        ):
+            with self.subTest(action=label, stage="unrouted"):
+                drv = self.bind_driver("D6", "route-admission",
+                                       "Unrouted investigation admission is zero-progress blocked")
+                run_id = self.start_run(drv)
+                self.assert_allow(self.dispatch(drv, observe_action(
+                    run_id=run_id, action=action_graph(payload=graph))), converged=False)
+                blocked = self.dispatch(drv, observe_action(run_id=run_id, action=action))
+                self.assert_block_only(blocked, ["route.required"])
+
+            with self.subTest(action=label, stage="route-only"):
+                drv = self.bind_driver("D6", "investigation-admission",
+                                       "Route alone cannot admit investigation evidence or execution")
+                run_id = self.start_run(drv)
+                self.assert_allow(self.dispatch(drv, observe_action(
+                    run_id=run_id, action=action_graph(payload=graph))), converged=False)
+                self.require_route_admitted(drv, run_id)
+                blocked = self.dispatch(drv, observe_action(run_id=run_id, action=action))
+                self.assert_block_only(blocked, ["investigation.required"])
+
+            with self.subTest(action=label, stage="investigating"):
+                drv = self.bind_driver("D6", "investigation-admission",
+                                       "Route then investigation admits evidence or execution")
+                run_id = self.start_run(drv)
+                self.assert_allow(self.dispatch(drv, observe_action(
+                    run_id=run_id, action=action_graph(payload=graph))), converged=False)
+                self.require_route_admitted(drv, run_id)
+                self.assert_allow(self.dispatch(drv, observe_action(
+                    run_id=run_id, action=action_investigate())), converged=False)
+                self.assert_allow(self.dispatch(drv, observe_action(
+                    run_id=run_id, action=action)), converged=False)
 
     # 4 — Claim state is derived; without committed approved scope convergence is refused
     def test_claim_state_derived_committed_scope_gates(self):

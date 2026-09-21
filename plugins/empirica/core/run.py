@@ -24,6 +24,7 @@ class OperationalState:
     budgets: Mapping[str, int]
     selected_graph_artifact_id: str | None
     frozen_claim_ids: tuple[str, ...] | None
+    frozen_semantic_digest: str | None
     route_stamp: int | None
     investigation_stamp: int | None
     stamp_seq: int

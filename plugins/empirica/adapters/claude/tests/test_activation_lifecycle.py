@@ -2,11 +2,10 @@
 """Bounded exact-v2 activation lifecycle tests for the Claude hooks (D6-C C2a).
 
 The seven thin hooks remain importable and return honest native unsupported/fail-closed behavior
-through the strict v2 shell.  At D6 the no-location run port reports every opaque ID unresolved, so
-``ResolveRun`` returns unsupported/closed and no run handle is resolved: state-bearing gates have
-no active run to enforce and are inert, while a real launch missing real inputs fails closed
-locally.  Removed/trusted actions are never dispatched.  Compatibility/migration assertions are
-intentionally absent.
+through the strict v2 shell. At D6 the no-location run port returns unsupported/closed. Executable
+Agent and investigative-tool admission must distinguish exact ``Inert/no_run`` from that
+unavailability and therefore deny; observational hooks remain non-wedging. Removed/trusted actions
+are never dispatched. Compatibility/migration assertions are intentionally absent.
 """
 from __future__ import annotations
 
@@ -117,14 +116,15 @@ class HookNativeBehaviorTests(unittest.TestCase):
                               self.cwd)
         self.assertEqual((code, out, err), (0, "", ""))
 
-    def test_spawn_real_launch_with_real_inputs_is_inert_when_no_run(self) -> None:
-        # D6 resolves no run handle, so the cap is not enforced; the launch is allowed.
+    def test_spawn_real_launch_fails_closed_when_resolution_is_unavailable(self) -> None:
         code, out, err = _run(
             "spawn_gate.py",
             _payload(tool_name="Agent", tool_input={"subagent_type": "worker", "prompt": "do work"}),
             self.cwd,
         )
-        self.assertEqual((code, out, err), (0, "", ""))
+        self.assertEqual(code, 2)
+        self.assertEqual(out, "")
+        self.assertIn("run resolution unavailable", err)
 
     def test_spawn_real_launch_missing_purpose_fails_closed_locally(self) -> None:
         # A real launch shape with no prompt (no real purpose) fails closed locally and never
@@ -137,11 +137,13 @@ class HookNativeBehaviorTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("spawn denied", err)
 
-    def test_route_observation_is_inert(self) -> None:
+    def test_route_investigation_fails_closed_when_resolution_is_unavailable(self) -> None:
         code, out, err = _run("route_stamp.py",
                               _payload(tool_name="Grep", tool_input={"pattern": "x"}),
                               self.cwd)
-        self.assertEqual((code, out, err), (0, "", ""))
+        self.assertEqual(code, 2)
+        self.assertEqual(out, "")
+        self.assertIn("investigation denied", err)
 
     def test_dispatch_non_actor_bash_is_inert(self) -> None:
         code, out, err = _run("dispatch_gate.py",

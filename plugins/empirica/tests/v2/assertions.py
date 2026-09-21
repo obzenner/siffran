@@ -1088,6 +1088,12 @@ class ConformanceCase(unittest.TestCase):
                 break
         if expected_kind is not None:
             self.assert_claim_kind(claim[0], expected_kind)
+        obligations = self._obligation_index(resp["result"]["run"])
+        if obligations.get("obligation.route", {}).get("status") != "satisfied":
+            route_resp = self.require_route_admitted(drv, run_id)
+            obligations = self._obligation_index(route_resp["result"]["run"])
+        if obligations.get("obligation.investigation", {}).get("status") != "satisfied":
+            self.require_investigate_admitted(drv, run_id)
         return payload
 
     def start_run(self, drv, *, goal: str | None = None, **kw) -> str:

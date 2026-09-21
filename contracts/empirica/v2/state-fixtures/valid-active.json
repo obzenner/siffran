@@ -15,6 +15,7 @@
   },
   "selected_graph_artifact_id": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
   "frozen_claim_ids": null,
+  "frozen_semantic_digest": null,
   "route_stamp": 2,
   "investigation_stamp": 3,
   "stamp_seq": 5,

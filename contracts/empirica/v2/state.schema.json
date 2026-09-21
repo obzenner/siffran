@@ -14,6 +14,7 @@
     "budgets",
     "selected_graph_artifact_id",
     "frozen_claim_ids",
+    "frozen_semantic_digest",
     "route_stamp",
     "investigation_stamp",
     "stamp_seq",
@@ -103,19 +104,22 @@
       },
       "uniqueItems": true
     },
+    "frozen_semantic_digest": {
+      "$ref": "#/$defs/nullableDigest256"
+    },
     "route_stamp": {
       "type": [
         "integer",
         "null"
       ],
-      "minimum": 0
+      "minimum": 1
     },
     "investigation_stamp": {
       "type": [
         "integer",
         "null"
       ],
-      "minimum": 0
+      "minimum": 1
     },
     "stamp_seq": {
       "type": "integer",

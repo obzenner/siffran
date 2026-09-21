@@ -40,21 +40,30 @@ def _payload() -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def _resolve(payload: Mapping[str, object]) -> tuple[str | None, dict | None]:
+def _resolve(
+    payload: Mapping[str, object], *, strict: bool = False,
+) -> tuple[str | None, dict | None]:
     """Return ``(handle, result)`` using only ``ResolveRun`` through the shared bridge.
 
-    At D6 the no-location run port reports unresolved, so no handle is returned.  Any transport
-    failure is treated as no resolvable run rather than wedging the host event.
+    Observational hooks preserve non-wedging behavior. Admission hooks pass ``strict``: only exact
+    ``Inert/no_run`` proves that no cap exists; transport failure, faults, and malformed no-handle
+    responses are unavailable and must fail closed.
     """
     try:
         response = dispatch_resolve(payload, correlation_id="claude-resolve")
-    except Exception:  # noqa: BLE001 - never wedge a host event on transport failure
+    except Exception:  # noqa: BLE001 - admission callers distinguish unavailable from no-run
+        if strict:
+            raise
         return None, None
     result = response.get("result") if isinstance(response, dict) else None
     run = result.get("run") if isinstance(result, dict) else None
     handle = run.get("id") if isinstance(run, dict) else None
-    return (handle if isinstance(handle, str) and handle else None,
-            result if isinstance(result, dict) else None)
+    if isinstance(handle, str) and handle:
+        return handle, result if isinstance(result, dict) else None
+    if strict and not (isinstance(result, dict) and result.get("type") == "Inert"
+                       and result.get("reason") == "no_run"):
+        raise RuntimeError("run resolution unavailable")
+    return None, result if isinstance(result, dict) else None
 
 
 def _deny(reason: str, result: Mapping[str, object] | None = None) -> int:
@@ -62,7 +71,7 @@ def _deny(reason: str, result: Mapping[str, object] | None = None) -> int:
     if result is not None:
         run = result.get("run") if isinstance(result, Mapping) else None
         contract = run.get("contract") if isinstance(run, Mapping) else None
-        if isinstance(contract, Mapping):
+        if isinstance(contract, Mapping) and isinstance(contract.get("sections"), Mapping):
             from vendor.obligations import render_text
             print(render_text(contract), file=sys.stderr)
     return 2
@@ -136,10 +145,20 @@ def spawn_main() -> int:
         return _deny("empirica spawn denied: missing real purpose or role profile")
     is_auditor = role_profile == "empirica:empirica-auditor"
     reservation_purpose = "audit" if is_auditor else purpose
-    handle, _ = _resolve(payload)
-    if handle is None:
-        return 0  # no active run → no cap to enforce
     try:
+        handle, _ = _resolve(payload, strict=True)
+    except Exception:  # noqa: BLE001 - executable launch resolution must fail closed
+        return _deny("empirica spawn denied: run resolution unavailable")
+    if handle is None:
+        return 0  # exact no-active-run response → no cap to enforce
+    try:
+        investigation = dispatch_investigation(payload, handle)
+        if investigation is not None:
+            decision = spawn_decision(investigation)
+            if decision.exit_code:
+                result = investigation.get("result") if isinstance(investigation, Mapping) else None
+                return _deny(decision.reason or "empirica investigation denied",
+                             result if isinstance(result, Mapping) else None)
         if not is_auditor:
             response = dispatch_child_reserve(
                 payload, handle, purpose=reservation_purpose, role_profile=role_profile,
@@ -170,14 +189,22 @@ def spawn_main() -> int:
 
 
 def route_main() -> int:
-    """PreToolUse: investigative observation; best effort and non-blocking."""
+    """PreToolUse: deny active-run investigation until the core admits its witness."""
     payload = _payload()
     try:
-        handle, _ = _resolve(payload)
-        if handle is not None:
-            dispatch_investigation(payload, handle)
-    except Exception:  # noqa: BLE001 - observational event never blocks tools
-        pass
+        handle, _ = _resolve(payload, strict=True)
+        if handle is None:
+            return 0
+        response = dispatch_investigation(payload, handle)
+        if response is None:
+            return 0
+        decision = spawn_decision(response)
+        if decision.exit_code:
+            result = response.get("result") if isinstance(response, Mapping) else None
+            return _deny(decision.reason or "empirica investigation denied",
+                         result if isinstance(result, Mapping) else None)
+    except Exception:  # noqa: BLE001 - active-run investigation must fail closed
+        return _deny("empirica investigation denied: adapter failure")
     return 0
 
 

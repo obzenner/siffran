@@ -42,6 +42,8 @@ class BudgetFreezeTerminalTests(ConformanceCase):
                 "on spawn Block")
             run_id = self.start_run(drv, goal=self.GOAL,
                                     budgets={"max_spawns": 0, "max_passes": 5})
+            self.require_route_admitted(drv, run_id)
+            self.require_investigate_admitted(drv, run_id)
             resp = self.dispatch(drv, observe_action(run_id=run_id, action=action_child_reserve(
                 purpose="audit", role_profile=self.DEFAULT_PROFILE, execution="foreground")))
             result = self.assert_block_reason(resp, "budget.exhausted",
@@ -190,6 +192,7 @@ class BudgetFreezeTerminalTests(ConformanceCase):
         replacement = {"root": original["root"],
                        "claims": [original["claims"][0], original["claims"][1], deferred],
                        "edges": [
+                           {"from": original["root"], "to": "C1", "type": "SupportedBy"},
                            {"from": original["root"], "to": "D", "type": "SupportedBy"},
                            {"from": "D", "to": "C1", "type": "SupportedBy"},
                        ]}
@@ -227,6 +230,57 @@ class BudgetFreezeTerminalTests(ConformanceCase):
         frozen_rows = {claim["claim_id"]: claim for claim in frozen_after["claims"]}
         self.assertTrue(frozen_rows["F"]["gating"],
                         "path pruning cannot remove frozen descendant F from commitment")
+
+    def test_frozen_semantic_identity_rejects_claim_and_induced_edge_changes(self):
+        def claim(cid, *, text=None, gating=True, kind="ordinary"):
+            return {"id": cid, "text": text or cid, "gating": gating, "kind": kind}
+
+        claims = [claim("C0"), claim("C1"), claim("C2")]
+        root_edges = [{"from": "C0", "to": "C1", "type": "SupportedBy"},
+                      {"from": "C0", "to": "C2", "type": "SupportedBy"}]
+        base = {"root": "C0", "claims": claims, "edges": root_edges}
+        with_extra = {"root": "C0", "claims": claims, "edges": root_edges + [
+            {"from": "C1", "to": "C2", "type": "SupportedBy"}]}
+        variants = {
+            "text": (base, {"root": "C0",
+                            "claims": [claim("C0"), claim("C1", text="changed"), claim("C2")],
+                            "edges": root_edges}),
+            "kind": (base, {"root": "C0",
+                            "claims": [claim("C0"), claim("C1", kind="needs-experiment"),
+                                       claim("C2")], "edges": root_edges}),
+            "gating": (base, {"root": "C0",
+                              "claims": [claim("C0"), claim("C1", gating=False), claim("C2")],
+                              "edges": root_edges}),
+            "edge-add": (base, with_extra),
+            "edge-remove": (with_extra, base),
+            "edge-reparent": (base, {"root": "C0", "claims": claims, "edges": [
+                {"from": "C0", "to": "C1", "type": "SupportedBy"},
+                {"from": "C1", "to": "C2", "type": "SupportedBy"}]}),
+        }
+        for label, (frozen_graph, candidate) in variants.items():
+            with self.subTest(variant=label):
+                drv = self.bind_driver("D7", "frozen-semantic-identity",
+                                       "Frozen claim records and induced edges are immutable")
+                run_id = self.start_run(drv, goal=self.GOAL)
+                self.require_graph_admitted(drv, run_id, frozen_graph)
+                self.require_frozen_scope(drv, run_id)
+                before = self.dispatch(drv, get_argument(run_id=run_id))["result"]["argument"]
+                response = self.dispatch(drv, observe_action(
+                    run_id=run_id, action=action_graph(payload=candidate)))
+                self.assert_block_only(response, ["graph.invalid"])
+                after = self.dispatch(drv, get_argument(run_id=run_id))["result"]["argument"]
+                self.assertEqual(after, before,
+                                 "rejected semantic mutation must preserve selected graph")
+
+        reorder_drv = self.bind_driver("D7", "frozen-semantic-identity",
+                                       "Equivalent claim and edge order remains admissible")
+        reorder_run = self.start_run(reorder_drv, goal=self.GOAL)
+        self.require_graph_admitted(reorder_drv, reorder_run, base)
+        self.require_frozen_scope(reorder_drv, reorder_run)
+        reordered = {"root": "C0", "claims": [claims[2], claims[0], claims[1]],
+                     "edges": list(reversed(root_edges))}
+        self.assert_allow(self.dispatch(reorder_drv, observe_action(
+            run_id=reorder_run, action=action_graph(payload=reordered))), converged=False)
 
     def test_frozen_claim_deletion_fails_closed(self):
         drv = self.bind_driver(

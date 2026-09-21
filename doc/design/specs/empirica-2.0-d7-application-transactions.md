@@ -78,7 +78,7 @@ One immutable operational value type lives in `core/run.py`:
 ```text
 OperationalState (frozen dataclass):
   protocol, state_schema, goal, status, modes, budgets,
-  selected_graph_artifact_id, frozen_claim_ids,
+  selected_graph_artifact_id, frozen_claim_ids, frozen_semantic_digest,
   route_stamp, investigation_stamp, stamp_seq,
   last_derivation_digest, children,
   committed_artifact_head_id
@@ -270,7 +270,13 @@ project_argument(snapshot: EvaluationSnapshot) -> ArgumentView
 - Defaults: both modes `false`; `max_passes=8`, `max_spawns=1` unless request supplies explicit budgets. Request budget overrides injected `limits`; injected limits override defaults when request omits.
 - A derivation pass is consumed only when the semantic derivation digest changes and the commit succeeds. `GetRun`, `GetArgument`, and identical `EvaluateRun` consume no pass.
 - Exhausted `child_reserve` (`max_spawns` exceeded) → `Block` `budget.exhausted` (`resource: spawn`), appends **no child record**. Non-exhausted child request → `unsupported`/closed until D8.
-- Freeze first-write-wins: `frozen_claim_ids` set only if null; repeated/conflicting freeze is `Inert` unchanged. Committed scope still gates/audits; later claims deferred.
+- Route before investigation: route and investigation are positive, strictly ordered first-write
+  witnesses. Research, spikes, executable children, trusted audit facts, and convergence require
+  both. Candidate rejection precedes domain artifacts, budget/child mutation, harness execution,
+  manifests, and CAS. Reachable investigative artifacts persist the exact witness pair; mismatch is
+  `run.corrupt`. Native Claude/Pi pre-tool gates deny investigation before execution. Honest stop and
+  preparation-only graph/configuration/freeze remain available.
+- Freeze first-write-wins: ordered `frozen_claim_ids` and canonical `frozen_semantic_digest` are set atomically only when both are null; repeated freeze is `Inert` unchanged. The digest binds exact committed claim records and sorted edges with frozen endpoints. Candidate mismatch is zero-write `graph.invalid`; persisted mismatch is `run.corrupt`. Later claims and cross-scope edges remain deferred and audit-invalidating.
 - Terminal status first wins: once non-`active`, no later event changes status or produces convergence.
 
 ## 13. Ownership and modules table

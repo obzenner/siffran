@@ -7,7 +7,7 @@ from typing import Any
 
 from core.context_selector import select_sections
 from core.evaluation import (Decision, EvaluationSnapshot, audit_binding, digest, evaluate_snapshot,
-                             frozen_scope_missing, plan_spike_request, plan_spike_result, valid_attribution)
+                             frozen_scope_invalid, plan_spike_request, plan_spike_result, valid_attribution)
 from core.freshness import canonical_digest
 from core.projection import project_argument, project_runview
 from core.records import Conflict, Corrupt, RunKey
@@ -18,7 +18,8 @@ from .location import decode_handle, encode_handle, storage_id
 from .observation import (HarnessContractError, HarnessUnavailable, ObservationUnavailable,
                           build_observation_snapshot, execute_spike_bound)
 from .snapshot import (GraphInvalid, HistoryCorrupt, active_spike_heads as captured_heads,
-                       assemble, graph_from_history, make_artifact, state_digest, traverse_history)
+                       assemble, graph_from_history, make_artifact, state_digest, traverse_history,
+                       validate_investigation_history)
 
 
 def _plain(value: Any) -> Any:
@@ -74,7 +75,8 @@ class Coordinator:
         return OperationalState(
             protocol=_proto._PROTOCOL, state_schema=_proto._STATE_SCHEMA_ID,
             goal=command["goal"], status="active", modes=modes, budgets=budgets,
-            selected_graph_artifact_id=None, frozen_claim_ids=None, route_stamp=None,
+            selected_graph_artifact_id=None, frozen_claim_ids=None, frozen_semantic_digest=None,
+            route_stamp=None,
             investigation_stamp=None, stamp_seq=0, last_derivation_digest=None,
             children=(), committed_artifact_head_id=None,
         )
@@ -257,10 +259,11 @@ class Coordinator:
             return None
         try:
             history = traverse_history(classified.state, self._read_artifacts(key))
+            validate_investigation_history(classified.state, history)
             graph = graph_from_history(classified.state, history, required=True)
         except (GraphInvalid, HistoryCorrupt):
             return None
-        if frozen_scope_missing(classified.state, graph):
+        if frozen_scope_invalid(classified.state, graph):
             return None
         child = next((row for row in classified.state.children
                       if row["child_id"] == child_id and row["purpose"] == "audit"), None)
@@ -282,8 +285,6 @@ class Coordinator:
         key = decode_handle(run_id)
         if key is None:
             return self._inert(request_id)
-        planned_artifact = {"artifact_id": digest({"kind": kind, **payload}),
-                            "body": {"kind": kind, **payload}}
         for _ in range(8):
             read = self.runs.read(key)
             if isinstance(read, Corrupt):
@@ -296,6 +297,9 @@ class Coordinator:
             if classified.state.status != "active":
                 return self._inert(request_id)
             state = classified.state
+            planned_body = {"kind": kind, **payload, "route_stamp": state.route_stamp,
+                            "investigation_stamp": state.investigation_stamp}
+            planned_artifact = {"artifact_id": digest(planned_body), "body": planned_body}
             try:
                 snapshot = self._assemble(key, state, {"type": "GetRun", "run_id": run_id},
                                           require_graph=False)
@@ -303,8 +307,12 @@ class Coordinator:
                 if not self._revision_unchanged(key, read.revision):
                     continue
                 return self._safe_block(key, request_id, "run.corrupt")
-            if frozen_scope_missing(snapshot.state, snapshot.graph):
+            if frozen_scope_invalid(snapshot.state, snapshot.graph):
                 return self._fault_with_run(request_id, snapshot)
+            if state.route_stamp is None:
+                return self._block_from_snapshot(snapshot, request_id, "route.required")
+            if state.investigation_stamp is None:
+                return self._block_from_snapshot(snapshot, request_id, "investigation.required")
             same_key = [a for a in snapshot.history if a.get("kind") == kind and (
                 (kind == "audit_verdict" and a.get("child_id") == child_id) or
                 (kind == "attribution" and (

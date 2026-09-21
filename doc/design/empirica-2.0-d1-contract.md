@@ -393,9 +393,13 @@ Rules:
 
 ### Freeze
 
-Freeze is first-write-wins. It commits the current gating claim IDs. Those claims still require fresh
-evidence and audit. Later derived claims are visible as deferred residuals and cannot silently enter
-the committed scope.
+Freeze is first-write-wins. It atomically commits the ordered gating claim IDs and a canonical
+digest over each committed claim's exact `id`, `text`, `kind`, and input `gating` plus sorted
+`SupportedBy` edges whose endpoints are committed. Equivalent ordering is allowed; changing a
+committed record or internal edge is `graph.invalid` before writes. Persisted mismatch is
+`run.corrupt`. Later claims and cross-scope edges remain deferred and audit-invalidating but cannot
+change commitment. No author action revises frozen semantics; use a fresh run until trusted human
+revision ingress exists. Committed claims still require fresh evidence and audit.
 
 ### Budget
 
@@ -407,8 +411,12 @@ started work remains spent.
 ### Route
 
 Route must be observed before investigation. First route and first investigation are first-write-wins
-witnesses. A late route is a permanent reported violation; it is not retroactively repaired by
-writing another label.
+positive witnesses with `route_stamp < investigation_stamp <= stamp_seq`. Research, spikes,
+executable children, trusted audit facts, and convergence require both witnesses; missing route is
+`route.required`, and route-only state is `investigation.required`. Supported host adapters deny
+native investigative tools before execution when the witness cannot be admitted. Rejections occur
+before evidence, budget, child, harness, manifest, or CAS writes. A late route remains a permanent
+reported violation and cannot retroactively repair evidence. Honest explicit stop remains available.
 
 ### Terminal
 

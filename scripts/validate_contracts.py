@@ -48,7 +48,7 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:283abc83c3d8e19947cc53a5c95b75085d85cb4ddce3c4e0b71e85a05354a801"
+REVIEWED_REGISTRY_DIGEST = "sha256:98e7ce690a91b67ebde9c655697295586869f5290c3b84fec519d953704d688a"
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:aad8b0b5cad21532a426a564d911c89ee64e4e94a750a1341b6adbbd5a22bebb"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
@@ -1332,6 +1332,7 @@ def _minimal_valid_state() -> dict:
         "selected_graph_artifact_id": None,
         "committed_artifact_head_id": None,
         "frozen_claim_ids": None,
+        "frozen_semantic_digest": None,
         "route_stamp": None,
         "investigation_stamp": None,
         "stamp_seq": 0,

@@ -99,6 +99,11 @@ def spawn_decision(response: object) -> SpawnDecision:
     kind = result.get("type")
     if kind == "Block":
         reason = result.get("reason")
+        if not isinstance(reason, str):
+            reasons = result.get("reasons")
+            first = reasons[0] if isinstance(reasons, list) and reasons else None
+            if isinstance(first, dict):
+                reason = first.get("message") or first.get("code")
         return SpawnDecision(2, reason if isinstance(reason, str) else "spawn denied")
     if kind == "Fault":
         if result.get("fail_direction") == FailureDirection.OPEN.value:

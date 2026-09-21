@@ -44,9 +44,11 @@ reachable from the declared root by following `SupportedBy` edges.
 Within the effective scope, support is conjunctive: a claim can be approved only
 when its own evidence requirements and every direct in-scope supporting child are
 approved. Before freeze, effective scope is the claims marked `gating`; after
-freeze, it is the immutable frozen claim IDs. A deferred child does not silently
-expand a frozen commitment, but adding its node or edge still changes the argument
-and makes prior audit coverage stale.
+freeze, it is the immutable frozen claim IDs. Freeze also binds each committed
+claim's exact record and the edge set whose endpoints are both frozen, so changing
+committed wording, kind, gating, or internal dependency requires a fresh run.
+A deferred child does not silently expand a frozen commitment, but adding its node
+or cross-scope edge still changes the argument and makes prior audit coverage stale.
 
 A failed support prevents parent approval but does not refute the parent. The
 parent remains open unless its own evidence makes it blocked or discarded. A

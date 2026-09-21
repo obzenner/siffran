@@ -799,4 +799,132 @@ Independent non-Anthropic review:
 - final verdict: **ACCEPT**.
 
 Nothing is staged or committed for Seam 4B; human accepted the seam and explicitly authorized
-fixing the unreleased version to one major increment and committing it.
+fixing the unreleased version to one major increment and committing it. Seam 4B was committed as
+`4418e89`; Empirica remains unreleased at 3.0.0.
+
+### Seam 5 — Frozen semantic identity — LANDED, awaiting HITL acceptance
+
+Freeze now atomically stores ordered `frozen_claim_ids` and `frozen_semantic_digest`. The canonical
+witness contains exact `{id,text,kind,gating}` records in frozen-ID order and the lexically sorted
+`SupportedBy` edge set whose endpoints are frozen. Equivalent list ordering is not semantic drift.
+
+Boundary behavior:
+
+- post-freeze candidate changes to a frozen record or frozen-to-frozen edge return `graph.invalid`
+  before graph artifact, manifest, or CAS writes and preserve the selected graph;
+- deferred records and cross-scope edges remain allowed, do not activate deferred scope, and still
+  stale old audit coverage through the full argument digest;
+- persisted state must contain frozen IDs and semantic digest together, and the digest must match
+  the selected graph; mismatch is fixed-safe `run.corrupt`, never repair;
+- author-controlled revision is unsupported; changing committed meaning requires a fresh run until
+  trusted human-origin revision ingress exists.
+
+Red evidence:
+
+- text, kind, input-gating, frozen-edge addition, frozen-edge removal, and frozen-edge reparenting
+  were all admitted after freeze (six failing conformance variants).
+
+Green evidence:
+
+- all six mutations now block with the prior argument unchanged, while equivalent claim/edge reorder
+  and deferred cross-scope topology remain admitted;
+- D7 proves first-freeze ID+digest atomicity, repeated-freeze idempotence, candidate zero writes, and
+  fixed-safe persisted same-ID semantic mismatch;
+- strict codec tests reject a missing field, malformed digest, or unpaired ID/digest state and
+  round-trip a valid pair without defaults;
+- state schema/11 fixtures, canonical/vendor contracts, D1/D6/D7 specs, skill references, and ADR 47
+  are synchronized;
+- canonical contract digest is
+  `sha256:7b88d67791a3f13e9022788a6bd28f0e90cf9266f19fcf4eec26e2d764bc7aed`;
+- focused conformance passes 64/64, D7 passes 21/21, strict codec pairing passes, and final
+  `make check` passes all static/core/Claude/Codex/Pi suites with Pi 150/150;
+- effective runtime is 9,296 lines, 161 below the unchanged 9,457 ceiling.
+
+Independent non-Anthropic review:
+
+- GPT-5.6 Terra verified canonicalization, atomic capture, strict pairing, candidate zero-write
+  rejection, persisted mismatch classification, deferred audit currency, contracts, fixtures, and
+  unchanged unreleased 3.0.0 version, but found paired frozen state with no selected graph could
+  bypass history corruption on non-graph-required reads/trusted ingress;
+- parent reproduced the gap red-first (`graph.invalid` instead of `run.corrupt`), moved the guard
+  into `graph_from_history`, and covered GetRun, ResolveRun, attribution, verdict, and child-event
+  ingress with zero-write/no-leak assertions;
+- final re-review: **ACCEPT**.
+
+Nothing is staged or committed; human HITL accepted Seam 5. It remains uncommitted pending the next
+approved integration boundary.
+
+### Seam 6 — Hard-gated route before investigation — LANDED, awaiting review/HITL
+
+Route order is now enforced at the core, persisted-history, transaction, Claude, and Pi boundaries:
+
+- route and investigation stamps are positive and strictly ordered; investigation implies route,
+  and children/converged state require investigation;
+- research, spike request/result, every executable child, trusted attribution/verdict, and
+  convergence require both witnesses;
+- missing route is `route.required`; route-only state is `investigation.required`;
+- candidate denial occurs before evidence, budget/child mutation, harness execution, manifests, and
+  CAS; explicit honest stop and preparation-only graph/configuration/freeze remain available;
+- persisted investigative artifacts carry the exact route/investigation pair; absent or conflicting
+  witnesses make reachable history fixed-safe `run.corrupt` across public and trusted ingress;
+- Claude denies investigative PreToolUse and Agent execution when admission fails, and no Bash marker
+  text can exempt investigation;
+- Pi records investigation before native tools, evidence-producing public tools, and executable
+  subagents while leaving management/read/report surfaces non-investigative;
+- `.pi/settings.json` suppresses the separate global pi-subagents extension so `make pi-dev` loads
+  the checkout-bundled exact 0.50.0 profile once; the root Pi validator binds this development delta.
+
+Red evidence:
+
+- unrouted and route-only research/child actions were admitted;
+- zero/equal/reversed/missing-route stamps, children without investigation, and converged-without-
+  investigation state decoded as valid;
+- Claude's active-run investigation hook returned success on core Block/unavailability;
+- Pi native read/bash tools executed without an investigation dispatch;
+- persisted evidence could exist without route-order witnesses.
+
+Green evidence so far:
+
+- host-neutral conformance passes 65/65 and D7 transaction coverage passes 25/25;
+- strict codec route-order coverage passes 17/17;
+- Claude suite passes 48 adapter tests plus hook/reachability checks; Pi suite passes 154/154;
+- contract/vendor/lint/core checks pass; architecture is 9,431/9,457;
+- canonical contract digest is
+  `sha256:98e7ce690a91b67ebde9c655697295586869f5290c3b84fec519d953704d688a`;
+- Orca-driven interactive Claude Code 2.1.278 and Pi 0.84.1 + pi-subagents 0.50.0 sessions both
+  denied a native `package.json` read before route with `Record a route before investigation.`, then
+  admitted the same read after public route and investigate actions, projecting both obligations as
+  satisfied;
+- live probing found and fixed a Claude presentation bug where `_deny` tried to render a projected
+  contract identity as a full contract and flattened the real route denial to `adapter failure`;
+- a final Orca-driven Pi session submitted a preparation-only graph, called
+  `report_convergence({intent: "stop"})`, received `stopped_residual`, persisted
+  `empirica.run.done`, and then executed one native `package.json` read without an investigation
+  denial, proving terminal handle retirement on the real host path.
+
+Independent Astra review initially returned **NOT ACCEPT** with five reproduced defects. The parent
+fixed each red-first:
+
+- Claude resolution unavailability was indistinguishable from exact no-run and could admit native
+  investigation/Agent execution; strict admission resolution now permits only exact `Inert/no_run`
+  without a handle and denies transport, Fault, or malformed responses;
+- Pi's pre-tool report gate ignored `intent: stop` and evaluated again during tool execution; it now
+  preserves the exact intent and passes one guarded response to the matching tool call;
+- Pi retained verified terminal handles and blocked later native tools; converged/stopped responses
+  now append a terminal marker, retire the in-memory handle, and remain inactive after restore;
+- Python boolean witness values compared equal to integer stamps; all five investigative artifact
+  kinds now require exact integer types before pair equality;
+- trusted audit-plan reads skipped investigation-history validation; dossier lookup now applies the
+  same validator as public and trusted mutation paths.
+
+The Pi development delta also excludes a global siffran bundle's nested
+`node_modules/pi-subagents/index.ts`, closing the duplicate-extension case for both old and current
+global packages. Focused core, Claude, Pi, contract, vendor, and architecture checks are green.
+The full `make check` is green; `git diff --check` is clean. A stale renamed unittest selector in the
+review-only `make empirica-d7-conformance` target was corrected and that 11-test target is green.
+Effective runtime is 9,431/9,457.
+
+Independent Astra fallback re-review: **ACCEPT**. The reviewer verified all five repairs, Pi package
+deduplication, exact 3.0.0 versioning, contract/vendor/docs parity, and the architecture ceiling.
+This is development acceptance, not an installed-host release receipt. Nothing is staged or
+committed; human HITL acceptance is pending.

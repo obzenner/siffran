@@ -86,8 +86,9 @@ budgets                      {max_passes:int>=1, passes_used:int>=0,
                               max_spawns:int>=0, spawns_used:int>=0}
 selected_graph_artifact_id   digest256 | null
 frozen_claim_ids             null | unique ordered nonempty-string array
-route_stamp                  int>=0 | null
-investigation_stamp          int>=0 | null
+frozen_semantic_digest       digest256 | null (null exactly with frozen_claim_ids)
+route_stamp                  int>=1 | null
+investigation_stamp          int>=1 | null
 stamp_seq                    int>=0
 last_derivation_digest       digest256 | null
 children                     ordered array of strict child records
@@ -120,7 +121,9 @@ Branch shape rules:
 - every terminal state requires terminal fingerprint; completed/adverse post-start require native ID;
 - child IDs unique procedurally; counters obey `passes_used<=max_passes` and
   `spawns_used<=max_spawns` procedurally;
-- route/investigation stamps, when non-null, are `<=stamp_seq`;
+- route/investigation stamps, when non-null, are positive and `<=stamp_seq`;
+- investigation implies route and `route_stamp < investigation_stamp`; children and converged state
+  require investigation;
 - terminal status is just a stored fact; no old evidence/convergence inference occurs in D6.
 
 Repository CAS revision remains repository metadata and is not duplicated in the document. Graph,

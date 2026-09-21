@@ -133,8 +133,30 @@ def valid_graph(value: Any) -> bool:
     return len(reachable) == len(ids)
 
 
-def frozen_scope_missing(state: OperationalState, graph: Mapping[str, Any] | None) -> bool:
-    return state.frozen_claim_ids is not None and (graph is None or not set(state.frozen_claim_ids).issubset(c["id"] for c in graph["claims"]))
+def frozen_semantic_digest(graph: Mapping[str, Any] | None,
+                           frozen_ids: tuple[str, ...] | None) -> str | None:
+    if graph is None or frozen_ids is None:
+        return None
+    claims = {claim["id"]: claim for claim in graph["claims"]}
+    if any(claim_id not in claims for claim_id in frozen_ids):
+        return None
+    frozen = set(frozen_ids)
+    payload = {
+        "claims": [{key: claims[claim_id][key] for key in ("id", "text", "kind", "gating")}
+                   for claim_id in frozen_ids],
+        "edges": [{"from": source, "to": target, "type": edge_type}
+                  for source, target, edge_type in sorted(
+                      (edge["from"], edge["to"], edge["type"]) for edge in graph["edges"]
+                      if edge["from"] in frozen and edge["to"] in frozen)],
+    }
+    return digest(payload)
+
+
+def frozen_scope_invalid(state: OperationalState, graph: Mapping[str, Any] | None) -> bool:
+    if state.frozen_claim_ids is None:
+        return state.frozen_semantic_digest is not None
+    observed = frozen_semantic_digest(graph, state.frozen_claim_ids)
+    return observed is None or observed != state.frozen_semantic_digest
 
 
 def claim_digest(claim: dict[str, Any]) -> str:
@@ -249,10 +271,24 @@ def _decision(snapshot: EvaluationSnapshot, state: OperationalState, result: str
     return Decision(result, StateIntent(state, artifacts), reason, tuple((parameters or {}).items()), affected)
 
 
+def _investigation_block(snapshot: EvaluationSnapshot) -> Decision | None:
+    state = snapshot.state
+    if state.route_stamp is None:
+        return _decision(snapshot, state, "Block", reason="route.required",
+                         affected="obligation.route")
+    if state.investigation_stamp is None:
+        return _decision(snapshot, state, "Block", reason="investigation.required",
+                         affected="obligation.investigation")
+    return None
+
+
 def plan_spike_request(snapshot: EvaluationSnapshot, action: Mapping[str, Any]) -> Decision:
     """Purely admit and seal a spike request against current graph/research."""
     state = snapshot.state
-    if snapshot.graph is None or frozen_scope_missing(state, snapshot.graph):
+    blocked = _investigation_block(snapshot)
+    if blocked is not None:
+        return blocked
+    if snapshot.graph is None or frozen_scope_invalid(state, snapshot.graph):
         return _decision(snapshot, state, "Block", reason="graph.invalid")
     claim = next((c for c in snapshot.graph["claims"] if c["id"] == action["claim_id"]), None)
     if claim is None:
@@ -266,6 +302,7 @@ def plan_spike_request(snapshot: EvaluationSnapshot, action: Mapping[str, Any]) 
         "command": action["command"], "command_digest": digest(action["command"]),
         "dependent_files": sorted(action["dependent_files"]),
         "prerequisite_research_ids": [a["artifact_id"] for a in research],
+        "route_stamp": state.route_stamp, "investigation_stamp": state.investigation_stamp,
     })
     return _decision(snapshot, state, artifacts=(sealed,))
 
@@ -273,7 +310,10 @@ def plan_spike_request(snapshot: EvaluationSnapshot, action: Mapping[str, Any]) 
 def plan_spike_result(snapshot: EvaluationSnapshot, request_body: Mapping[str, Any], facts: Any) -> Decision:
     """Purely admit immutable harness facts and plan one spike result artifact."""
     state = snapshot.state
-    if snapshot.graph is None or frozen_scope_missing(state, snapshot.graph):
+    blocked = _investigation_block(snapshot)
+    if blocked is not None:
+        return blocked
+    if snapshot.graph is None or frozen_scope_invalid(state, snapshot.graph):
         return _decision(snapshot, state, "Block", reason="graph.invalid")
     claim = next((c for c in snapshot.graph["claims"] if c["id"] == request_body["claim_id"]), None)
     if claim is None or claim_digest(claim) != request_body["claim_digest"]:
@@ -289,13 +329,14 @@ def plan_spike_result(snapshot: EvaluationSnapshot, request_body: Mapping[str, A
         "exit_code": facts.exit_code, "spike_gate": facts.gate.value,
         "outcome": "pass" if facts.exit_code == 0 else "fail",
         "supersedes": prior[-1]["artifact_id"] if prior else None,
+        "route_stamp": state.route_stamp, "investigation_stamp": state.investigation_stamp,
     })
     return _decision(snapshot, state, artifacts=(result,))
 
 
 def covered_artifact_ids(snapshot: EvaluationSnapshot) -> list[str]:
     """Return the exact active evidence set whose producer identity an audit covers."""
-    if snapshot.graph is None or frozen_scope_missing(snapshot.state, snapshot.graph):
+    if snapshot.graph is None or frozen_scope_invalid(snapshot.state, snapshot.graph):
         return []
     derivation = derive_claims(snapshot)
     gating = set(derivation.scope)
@@ -356,7 +397,7 @@ def audit_attributions(
 
 def audit_binding(snapshot: EvaluationSnapshot) -> dict[str, Any]:
     """Derive the exact audit dossier binding from the current immutable snapshot."""
-    if snapshot.graph is None or frozen_scope_missing(snapshot.state, snapshot.graph):
+    if snapshot.graph is None or frozen_scope_invalid(snapshot.state, snapshot.graph):
         return {}
     all_ids = [c["id"] for c in snapshot.graph["claims"]]
     derivation = derive_claims(snapshot)
@@ -388,7 +429,7 @@ def audit_passes(snapshot: EvaluationSnapshot, verdict: Mapping[str, Any]) -> bo
 def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> Decision:
     """Apply one validated command without performing I/O."""
     state, kind = snapshot.state, command["type"]
-    if frozen_scope_missing(state, snapshot.graph):
+    if frozen_scope_invalid(state, snapshot.graph):
         return _decision(snapshot, state, "Block", reason="graph.invalid")
     if state.status != "active":
         if kind in {"GetRun", "GetArgument", "RestoreRun"} or (
@@ -423,7 +464,7 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                                                 investigation_stamp=state.stamp_seq + 1))
         if akind == "graph":
             graph = action.get("payload")
-            if not valid_graph(graph) or frozen_scope_missing(state, graph):
+            if not valid_graph(graph) or frozen_scope_invalid(state, graph):
                 return _decision(snapshot, state, "Block", reason="graph.invalid")
             art = artifact("graph", {"graph": graph})
             return _decision(snapshot, replace(state, selected_graph_artifact_id=art["artifact_id"]),
@@ -431,6 +472,9 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
         if akind in {"research", "freeze"} and snapshot.graph is None:
             return _decision(snapshot, state, "Block", reason="graph.invalid")
         if akind == "research":
+            blocked = _investigation_block(snapshot)
+            if blocked is not None:
+                return blocked
             claims = {c["id"]: c for c in snapshot.graph["claims"]}
             claim = claims.get(action["claim_id"])
             if claim is None:
@@ -442,6 +486,8 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                 "outcome": "supporting" if action["result"] == "supports" else "refuting",
                 "source_kind": action["source_kind"], "source_ref": payload["source_ref"],
                 "citation": payload["citation"],
+                "route_stamp": state.route_stamp,
+                "investigation_stamp": state.investigation_stamp,
                 **({"observed_content_digest": payload["observed_content_digest"]} if
                    "observed_content_digest" in payload else {}),
             })
@@ -450,7 +496,9 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             if state.frozen_claim_ids is not None:
                 return _decision(snapshot, state, "Inert")
             ids = tuple(c["id"] for c in snapshot.graph["claims"] if c["gating"])
-            return _decision(snapshot, replace(state, frozen_claim_ids=ids))
+            semantic_digest = frozen_semantic_digest(snapshot.graph, ids)
+            return _decision(snapshot, replace(state, frozen_claim_ids=ids,
+                                                frozen_semantic_digest=semantic_digest))
         if akind == "configure_run":
             modes, budgets = dict(state.modes), dict(state.budgets)
             modes.update(action.get("modes", {}))
@@ -462,6 +510,9 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                 budgets[key] = value
             return _decision(snapshot, replace(state, modes=modes, budgets=budgets))
         if akind == "child_reserve":
+            blocked = _investigation_block(snapshot)
+            if blocked is not None:
+                return blocked
             execution = action["execution"]
             if action["purpose"] == "audit" and any(
                 child["purpose"] == "audit"
@@ -508,6 +559,9 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             deferred = [c for c, _ in states if c["id"] not in gating]
             status = "stopped_frozen" if deferred else "stopped_residual"
             return _decision(snapshot, replace(state, status=status))
+        blocked = _investigation_block(snapshot)
+        if blocked is not None:
+            return blocked
         missing = next(((c, cs) for c, cs in scoped if cs != "approved"), None)
         if missing:
             c, _ = missing

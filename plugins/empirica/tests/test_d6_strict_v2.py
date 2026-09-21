@@ -591,6 +591,33 @@ class D6StrictRunStateTests(unittest.TestCase):
         self.assertEqual(mod.encode_state(classification.state), _VALID_ACTIVE_STATE,
                          "roundtrip must not add/remove/default any field")
 
+    def test_frozen_semantic_digest_pair_is_strict(self):
+        mod = _import_run_state()
+        variants = []
+        missing = json.loads(json.dumps(_VALID_ACTIVE_STATE))
+        missing.pop("frozen_semantic_digest")
+        variants.append(missing)
+        digest_without_ids = json.loads(json.dumps(_VALID_ACTIVE_STATE))
+        digest_without_ids["frozen_semantic_digest"] = "sha256:" + "1" * 64
+        variants.append(digest_without_ids)
+        ids_without_digest = json.loads(json.dumps(_VALID_ACTIVE_STATE))
+        ids_without_digest["frozen_claim_ids"] = ["C0"]
+        variants.append(ids_without_digest)
+        malformed = json.loads(json.dumps(_VALID_ACTIVE_STATE))
+        malformed["frozen_claim_ids"] = ["C0"]
+        malformed["frozen_semantic_digest"] = "not-a-digest"
+        variants.append(malformed)
+        for raw in variants:
+            with self.subTest(raw=raw):
+                self.assertEqual(mod.classify_and_decode(raw).kind, "current_corrupt")
+
+        frozen = json.loads(json.dumps(_VALID_ACTIVE_STATE))
+        frozen["frozen_claim_ids"] = ["C0"]
+        frozen["frozen_semantic_digest"] = "sha256:" + "2" * 64
+        classified = mod.classify_and_decode(frozen)
+        self.assertEqual(classified.kind, "valid")
+        self.assertEqual(mod.encode_state(classified.state), frozen)
+
     def test_invalid_child_duplicate_id_rejected(self):
         mod = _import_run_state()
         bad = json.loads(json.dumps(_VALID_ACTIVE_STATE))
@@ -604,6 +631,41 @@ class D6StrictRunStateTests(unittest.TestCase):
         bad["budgets"]["passes_used"] = bad["budgets"]["max_passes"] + 5
         classification = mod.classify_and_decode(bad)
         self.assertEqual(classification.kind, "current_corrupt")
+
+    def test_children_and_convergence_require_investigation_witnesses(self):
+        mod = _import_run_state()
+        child_without_route = json.loads(json.dumps(_VALID_ACTIVE_STATE))
+        child_without_route["route_stamp"] = None
+        child_without_route["investigation_stamp"] = None
+        child_without_route["stamp_seq"] = 0
+        converged_without_route = json.loads(json.dumps(_VALID_ACTIVE_STATE))
+        converged_without_route["children"] = []
+        converged_without_route["status"] = "converged"
+        converged_without_route["route_stamp"] = None
+        converged_without_route["investigation_stamp"] = None
+        converged_without_route["stamp_seq"] = 0
+        for raw in (child_without_route, converged_without_route):
+            with self.subTest(status=raw["status"], children=len(raw["children"])):
+                self.assertEqual(mod.classify_and_decode(raw).kind, "current_corrupt")
+
+    def test_invalid_route_investigation_order_rejected(self):
+        mod = _import_run_state()
+        variants = []
+        for route, investigation, seq in (
+            (0, None, 0),
+            (None, 1, 1),
+            (1, 1, 1),
+            (2, 1, 2),
+        ):
+            bad = json.loads(json.dumps(_VALID_ACTIVE_STATE))
+            bad["route_stamp"] = route
+            bad["investigation_stamp"] = investigation
+            bad["stamp_seq"] = seq
+            variants.append(bad)
+        for raw in variants:
+            with self.subTest(route=raw["route_stamp"],
+                              investigation=raw["investigation_stamp"]):
+                self.assertEqual(mod.classify_and_decode(raw).kind, "current_corrupt")
 
     def test_invalid_stamp_overflow_rejected(self):
         mod = _import_run_state()

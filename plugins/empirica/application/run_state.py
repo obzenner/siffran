@@ -34,6 +34,7 @@ def decode_state(doc: dict[str, Any]) -> OperationalState:
         status=doc["status"], modes=doc["modes"], budgets=doc["budgets"],
         selected_graph_artifact_id=doc["selected_graph_artifact_id"],
         frozen_claim_ids=None if doc["frozen_claim_ids"] is None else tuple(doc["frozen_claim_ids"]),
+        frozen_semantic_digest=doc["frozen_semantic_digest"],
         route_stamp=doc["route_stamp"], investigation_stamp=doc["investigation_stamp"],
         stamp_seq=doc["stamp_seq"], last_derivation_digest=doc["last_derivation_digest"],
         children=tuple(doc["children"]), committed_artifact_head_id=doc["committed_artifact_head_id"],
@@ -46,6 +47,7 @@ def encode_state(state: OperationalState) -> dict[str, Any]:
         "status": state.status, "modes": _thaw(state.modes), "budgets": _thaw(state.budgets),
         "selected_graph_artifact_id": state.selected_graph_artifact_id,
         "frozen_claim_ids": None if state.frozen_claim_ids is None else list(state.frozen_claim_ids),
+        "frozen_semantic_digest": state.frozen_semantic_digest,
         "route_stamp": state.route_stamp, "investigation_stamp": state.investigation_stamp,
         "stamp_seq": state.stamp_seq, "last_derivation_digest": state.last_derivation_digest,
         "children": _thaw(state.children),
@@ -88,6 +90,17 @@ def _procedural_ok(doc: dict) -> bool:
     if b.get("spawns_used", 0) > b.get("max_spawns", 0):
         return False
     seq = doc.get("stamp_seq", 0)
+    route = doc.get("route_stamp")
+    investigation = doc.get("investigation_stamp")
+    if route is not None and route < 1:
+        return False
+    if investigation is not None and (route is None or investigation < 1 or route >= investigation):
+        return False
+    if (doc.get("children") or doc.get("status") == "converged") and investigation is None:
+        return False
+    frozen = doc.get("frozen_claim_ids")
+    if (frozen is None) != (doc.get("frozen_semantic_digest") is None):
+        return False
     for key in ("route_stamp", "investigation_stamp"):
         s = doc.get(key)
         if s is not None and s > seq:

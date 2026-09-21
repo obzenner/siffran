@@ -37,6 +37,7 @@ from adapters.claude import (  # noqa: E402
     build_start_run_request,
     build_stop_request,
 )
+from adapters.claude import lifecycle  # noqa: E402
 from adapters.claude.completion import stop_result  # noqa: E402
 from adapters.claude.correlation import CorrelationError, correlate, request_id  # noqa: E402
 from adapters.claude.fail_direction import (  # noqa: E402
@@ -224,7 +225,68 @@ class RestoreAndGetArgumentTests(unittest.TestCase):
 
 
 class RouteAndInvestigateTests(unittest.TestCase):
-    def test_investigation_is_exact_v2_and_excludes_route_calls(self) -> None:
+    def test_investigation_hook_fails_closed_for_active_run(self) -> None:
+        payload = _payload(tool_name="Read", tool_input={"file_path": "package.json"})
+        block = {"protocol": PROTOCOL, "request_id": "r", "result": {
+            "type": "Block", "run": {"id": "run", "status": "active"},
+            "reasons": [{"code": "route.required", "parameters": {},
+                         "next_actions": ["route.record"], "sections": ["route"]}]}}
+        allow = {"protocol": PROTOCOL, "request_id": "r", "result": {
+            "type": "Allow", "converged": False,
+            "run": {"id": "run", "status": "active"}}}
+        with patch.object(lifecycle, "_payload", return_value=payload), \
+             patch.object(lifecycle, "_resolve", return_value=("run", {})), \
+             patch.object(lifecycle, "dispatch_investigation", return_value=block):
+            self.assertEqual(lifecycle.route_main(), 2)
+        with patch.object(lifecycle, "_payload", return_value=payload), \
+             patch.object(lifecycle, "_resolve", return_value=("run", {})), \
+             patch.object(lifecycle, "dispatch_investigation", return_value=allow):
+            self.assertEqual(lifecycle.route_main(), 0)
+        with patch.object(lifecycle, "_payload", return_value=payload), \
+             patch.object(lifecycle, "_resolve", return_value=("run", {})), \
+             patch.object(lifecycle, "dispatch_investigation", side_effect=RuntimeError("down")):
+            self.assertEqual(lifecycle.route_main(), 2)
+
+    def test_investigation_hook_without_active_run_is_inert(self) -> None:
+        with patch.object(lifecycle, "_payload", return_value=_payload(tool_name="Read")), \
+             patch.object(lifecycle, "_resolve", return_value=(None, None)), \
+             patch.object(lifecycle, "dispatch_investigation") as dispatch:
+            self.assertEqual(lifecycle.route_main(), 0)
+            dispatch.assert_not_called()
+
+    def test_investigation_and_spawn_fail_closed_when_resolution_is_unavailable(self) -> None:
+        read = _payload(tool_name="Read", tool_input={"file_path": "package.json"})
+        agent = _payload(tool_name="Agent", tool_input={
+            "subagent_type": "worker", "prompt": "investigate"})
+        for failure in (
+            RuntimeError("transport down"),
+            {"protocol": PROTOCOL, "request_id": "claude-resolve", "result": {
+                "type": "Fault", "code": "internal", "message": "unavailable",
+                "fail_direction": "closed"}},
+            {"protocol": PROTOCOL, "request_id": "claude-resolve", "result": {
+                "type": "Allow", "converged": False}},
+        ):
+            effect = failure if isinstance(failure, Exception) else None
+            value = None if effect is not None else failure
+            with self.subTest(failure=failure), \
+                 patch.object(lifecycle, "_payload", return_value=read), \
+                 patch.object(lifecycle, "dispatch_resolve",
+                              side_effect=effect, return_value=value):
+                self.assertEqual(lifecycle.route_main(), 2)
+            with self.subTest(failure=failure, hook="spawn"), \
+                 patch.object(lifecycle, "_payload", return_value=agent), \
+                 patch.object(lifecycle, "dispatch_resolve",
+                              side_effect=effect, return_value=value):
+                self.assertEqual(lifecycle.spawn_main(), 2)
+
+    def test_strict_resolution_distinguishes_exact_no_run_from_unavailability(self) -> None:
+        response = {"protocol": PROTOCOL, "request_id": "claude-resolve",
+                    "result": {"type": "Inert", "reason": "no_run"}}
+        with patch.object(lifecycle, "dispatch_resolve", return_value=response):
+            self.assertEqual(lifecycle._resolve(_payload(), strict=True),
+                             (None, response["result"]))
+
+    def test_investigation_is_exact_v2_and_marker_text_cannot_bypass_it(self) -> None:
         request = build_investigation_request(
             _payload(tool_name="Grep", tool_input={"pattern": "x"}, event_ts=37),
             "run", correlation_id="investigate-1",
@@ -232,10 +294,11 @@ class RouteAndInvestigateTests(unittest.TestCase):
         _assert_valid(request)
         self.assertEqual(request["command"]["action"], {"kind": "investigate"})
         self.assertNotIn("observed_at", request["command"])  # numeric omitted, never seq:
-        # the adapter's own route announcement is not an investigation
+        # Bash marker text is untrusted and cannot exempt native investigation.
         own = _payload(tool_name="Bash",
                        tool_input={"command": "route_stamp.py --announce-route --session s"})
-        self.assertIsNone(build_investigation_request(own, "run"))
+        self.assertEqual(build_investigation_request(own, "run")["command"]["action"],
+                         {"kind": "investigate"})
 
     def test_route_announcement_is_exact_v2(self) -> None:
         request = build_route_announcement_request(
@@ -472,7 +535,12 @@ class SpawnLifecycleTests(unittest.TestCase):
         payload = self._stdin({"subagent_type": "empirica:empirica-auditor",
                                "prompt": "author-controlled prompt"})
         out = StringIO()
+        investigation = {"protocol": PROTOCOL, "request_id": "investigate", "result": {
+            "type": "Allow", "converged": False,
+            "run": {"id": "active-run", "status": "active"}}}
         with patch("adapters.claude.lifecycle._resolve", return_value=("active-run", {})), \
+             patch("adapters.claude.lifecycle.dispatch_investigation",
+                   return_value=investigation), \
              patch("adapters.claude.lifecycle.AuditProtocol.prepare", return_value=plan), \
              patch("sys.stdin", new=payload), patch("sys.stdout", new=out):
             self.assertEqual(spawn_main(), 0)
