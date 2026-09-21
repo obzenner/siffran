@@ -317,7 +317,8 @@ def _build_action_sample(kind: str) -> dict:
         return {"kind": "dispatch", "target": "claim"}
     if kind == "child_reserve":
         return {"kind": "child_reserve", "purpose": "audit",
-                "role_profile": _DEFAULT_PROFILE, "execution": "foreground"}
+                "role_profile": _DEFAULT_PROFILE, "execution": "foreground",
+                "resource_class": "audit"}
     raise ValueError(f"no sample for {kind!r}")
 
 
@@ -375,6 +376,18 @@ class D6StrictProtocolTests(unittest.TestCase):
                               "action": {"kind": "graph", "unknown_action_field": True}})
         resp = mod.dispatch_request(env, lambda envelope: {"bad": "handler"})
         self.assert_fault_closed(resp, "invalid_request")
+
+    def test_child_resource_class_is_required_and_audit_class_is_host_canonical(self):
+        mod = _import_protocol()
+        base = {"kind": "child_reserve", "purpose": "work", "role_profile": "worker",
+                "execution": "foreground"}
+        for action in (base, {**base, "resource_class": "audit"}):
+            with self.subTest(action=action):
+                env = _valid_request({"type": "ObserveAction", "run_id": "r1",
+                                      "action": action})
+                self.assert_fault_closed(
+                    mod.dispatch_request(env, lambda envelope: {"bad": "handler"}),
+                    "invalid_request")
 
     def test_every_command_discriminator_passes_validation(self):
         """Every valid command discriminator sample must pass validation and reach the
@@ -617,6 +630,46 @@ class D6StrictRunStateTests(unittest.TestCase):
         classified = mod.classify_and_decode(frozen)
         self.assertEqual(classified.kind, "valid")
         self.assertEqual(mod.encode_state(classified.state), frozen)
+
+    def test_split_spawn_accounts_and_child_class_reconcile_exactly(self):
+        mod = _import_run_state()
+        split = json.loads(json.dumps(_VALID_ACTIVE_STATE))
+        split["budgets"].update({"spawns_used": 0, "max_audit_spawns": 1,
+                                  "audit_spawns_used": 1})
+        split["children"][0]["resource_class"] = "audit"
+        self.assertEqual(mod.classify_and_decode(split).kind, "valid")
+        self.assertEqual(mod.encode_state(mod.classify_and_decode(split).state), split)
+        investigation = json.loads(json.dumps(split))
+        investigation["budgets"].update(spawns_used=1, audit_spawns_used=0)
+        investigation["children"][0].update(resource_class="investigation",
+            audit_operation_id=None, audit_argument=None, audit_role_profile=None)
+        self.assertEqual(mod.classify_and_decode(investigation).kind, "valid")
+        uncharged = json.loads(json.dumps(investigation))
+        uncharged["budgets"]["spawns_used"] = 0
+        self.assertEqual(mod.classify_and_decode(uncharged).kind, "current_corrupt")
+        duplicate_audit = json.loads(json.dumps(split))
+        second = dict(duplicate_audit["children"][0])
+        second.update(child_id="audit-2", capability_ref="cap-2",
+                      audit_operation_id="sha256:" + "c" * 64)
+        duplicate_audit["children"].append(second)
+        duplicate_audit["budgets"].update(max_audit_spawns=2, audit_spawns_used=2)
+        self.assertEqual(mod.classify_and_decode(duplicate_audit).kind, "current_corrupt")
+
+        variants = []
+        for mutate in (
+            lambda raw: raw["budgets"].pop("max_audit_spawns"),
+            lambda raw: raw["children"][0].pop("resource_class"),
+            lambda raw: raw["children"][0].update(resource_class="unknown"),
+            lambda raw: raw["budgets"].update(audit_spawns_used=0),
+            lambda raw: raw["budgets"].update(spawns_used=1),
+            lambda raw: raw["children"][0].update(resource_class="investigation"),
+        ):
+            bad = json.loads(json.dumps(split))
+            mutate(bad)
+            variants.append(bad)
+        for raw in variants:
+            with self.subTest(raw=raw):
+                self.assertEqual(mod.classify_and_decode(raw).kind, "current_corrupt")
 
     def test_invalid_child_duplicate_id_rejected(self):
         mod = _import_run_state()

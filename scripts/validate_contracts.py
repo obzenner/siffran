@@ -48,7 +48,7 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:98e7ce690a91b67ebde9c655697295586869f5290c3b84fec519d953704d688a"
+REVIEWED_REGISTRY_DIGEST = "sha256:bcee507e2daefd5b94cf955ccf3e2a21a9870403f737455f59086f9ee8ca37a9"
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:aad8b0b5cad21532a426a564d911c89ee64e4e94a750a1341b6adbbd5a22bebb"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
@@ -1328,7 +1328,8 @@ def _minimal_valid_state() -> dict:
         "status": "active",
         "modes": {"multi_provider": False, "cli_exec": False},
         "budgets": {"max_passes": 1, "passes_used": 0,
-                    "max_spawns": 1, "spawns_used": 0},
+                    "max_spawns": 1, "spawns_used": 0,
+                    "max_audit_spawns": 1, "audit_spawns_used": 0},
         "selected_graph_artifact_id": None,
         "committed_artifact_head_id": None,
         "frozen_claim_ids": None,
@@ -1343,8 +1344,8 @@ def _minimal_valid_state() -> dict:
 
 def _valid_child_for_state(state: str, d64: str, reg_terminal: set) -> dict:
     """Build one valid child record for the given canonical child state."""
-    base = {"child_id": f"c-{state}", "purpose": "audit", "state": state,
-            "deadline": None, "capability_ref": "cap-1",
+    base = {"child_id": f"c-{state}", "purpose": "audit", "resource_class": "audit",
+            "state": state, "deadline": None, "capability_ref": "cap-1",
             "audit_operation_id": d64, "audit_argument": {"argument_digest": d64},
             "audit_role_profile": "empirica:empirica-auditor"}
     if state == "reserved":
@@ -1389,7 +1390,7 @@ def _child_relation_mutations(state: str, d64: str, reg_terminal: set):
 def check_state_invariants(state: dict, errors: list[str], where: str) -> None:
     """Procedural invariants not expressible in JSON Schema (D6 section 4).
 
-    - counters: passes_used <= max_passes, spawns_used <= max_spawns;
+    - counters: each used counter is bounded and equals non-refunded children of its class;
     - stamps: route_stamp <= stamp_seq and investigation_stamp <= stamp_seq when non-null;
     - child_id uniqueness across the ordered children array;
     - child deadline: finite number or null (reject NaN/+Inf/-Inf).
@@ -1403,12 +1404,24 @@ def check_state_invariants(state: dict, errors: list[str], where: str) -> None:
         passes_used = budgets.get("passes_used", 0)
         max_spawns = budgets.get("max_spawns", 0)
         spawns_used = budgets.get("spawns_used", 0)
+        max_audit_spawns = budgets.get("max_audit_spawns", 0)
+        audit_spawns_used = budgets.get("audit_spawns_used", 0)
         if isinstance(passes_used, int) and isinstance(max_passes, int) \
                 and passes_used > max_passes:
             errors.append(f"{where}: passes_used {passes_used} > max_passes {max_passes}")
         if isinstance(spawns_used, int) and isinstance(max_spawns, int) \
                 and spawns_used > max_spawns:
             errors.append(f"{where}: spawns_used {spawns_used} > max_spawns {max_spawns}")
+        if isinstance(audit_spawns_used, int) and isinstance(max_audit_spawns, int) \
+                and audit_spawns_used > max_audit_spawns:
+            errors.append(f"{where}: audit_spawns_used {audit_spawns_used} > "
+                          f"max_audit_spawns {max_audit_spawns}")
+        charged = {"investigation": 0, "audit": 0}
+        for child in state.get("children", []) or []:
+            if isinstance(child, dict) and child.get("refunded") is False:
+                charged[child.get("resource_class")] = charged.get(child.get("resource_class"), 0) + 1
+        if spawns_used != charged["investigation"] or audit_spawns_used != charged["audit"]:
+            errors.append(f"{where}: spawn counters do not reconcile with non-refunded children")
     stamp_seq = state.get("stamp_seq", 0)
     if isinstance(stamp_seq, int):
         route_stamp = state.get("route_stamp")
@@ -2099,6 +2112,7 @@ def main() -> int:
         "invalid-missing-goal", "invalid-extra-field", "invalid-status",
         "invalid-child-duplicate-id", "invalid-counter", "invalid-stamp",
         "invalid-child-branch", "invalid-deadline-nan", "invalid-refund-mismatch",
+        "invalid-budget-reconciliation",
     }
     state_names = {p.name.removesuffix(".json") for p in state_fixture_paths}
     for name in sorted(REQUIRED_STATE_FIXTURES - state_names):
@@ -2116,6 +2130,7 @@ def main() -> int:
         "invalid-child-branch": (False, "False was expected"),
         "invalid-deadline-nan": (False, "finite number"),
         "invalid-refund-mismatch": (False, "launch_rejected"),
+        "invalid-budget-reconciliation": (False, "reconcile"),
     }
     for path in state_fixture_paths:
         name = path.name.removesuffix(".json")

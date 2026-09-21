@@ -181,7 +181,7 @@ class ActivationRouteGraphTests(ConformanceCase):
         for label, action in (
             ("research", action_research(claim_id=claim_id, source_kind="code",
                                          result="supports")),
-            ("child", action_child_reserve(purpose="arbitrary work", role_profile="worker",
+            ("child", action_child_reserve(purpose="arbitrary work", resource_class="investigation", role_profile="worker",
                                            execution="foreground")),
         ):
             with self.subTest(action=label, stage="unrouted"):

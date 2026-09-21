@@ -253,7 +253,7 @@ test("gate: a well-formed Inert is denied (run gone but handle exists)", async (
 // --- bound foreground auditor lifecycle -------------------------------------
 
 test("subagent: canonical auditor is reserved, bound, attributed, and prompt-injected", async () => {
-  const child = { child_id: "ch-1", purpose: "audit", state: "reserved" };
+  const child = { child_id: "ch-1", purpose: "audit", resource_class: "audit", state: "reserved" };
   const w = wire((req) => {
     if (req.command.type === "ObserveAction")
       return envelope({ type: "Allow", converged: false,
@@ -282,7 +282,7 @@ test("subagent: canonical auditor is reserved, bound, attributed, and prompt-inj
 });
 
 test("tool_result redacts before privately admitting the correlated verdict", async () => {
-  const child = { child_id: "ch-1", purpose: "audit", state: "reserved" };
+  const child = { child_id: "ch-1", purpose: "audit", resource_class: "audit", state: "reserved" };
   const w = wire((req) => {
     if (req.command.type === "ObserveAction")
       return envelope({ type: "Allow", converged: false,
@@ -335,7 +335,7 @@ test("tool_result redacts before privately admitting the correlated verdict", as
 });
 
 test("missing native session keeps auditor identity unverified", async () => {
-  const child = { child_id: "ch-unverified", purpose: "audit", state: "reserved" };
+  const child = { child_id: "ch-unverified", purpose: "audit", resource_class: "audit", state: "reserved" };
   const w = wire((req) => {
     if (req.command.type === "ObserveAction")
       return envelope({ type: "Allow", converged: false,
@@ -406,7 +406,7 @@ test("session restore orphans unresolved audits and tombstones completed correla
 });
 
 test("session shutdown orphans a newly admitted unresolved audit", async () => {
-  const child = { child_id: "ch-orphan", purpose: "audit", state: "reserved" };
+  const child = { child_id: "ch-orphan", purpose: "audit", resource_class: "audit", state: "reserved" };
   const w = wire((req) => {
     if (req.command.type === "ObserveAction")
       return envelope({ type: "Allow", converged: false,
@@ -426,7 +426,7 @@ test("session shutdown orphans a newly admitted unresolved audit", async () => {
 });
 
 test("malformed auditor result returns a propagated redacted replacement", async () => {
-  const child = { child_id: "ch-malformed", purpose: "audit", state: "reserved" };
+  const child = { child_id: "ch-malformed", purpose: "audit", resource_class: "audit", state: "reserved" };
   const w = wire((req) => {
     if (req.command.type === "ObserveAction")
       return envelope({ type: "Allow", converged: false,
@@ -453,7 +453,7 @@ test("malformed auditor result returns a propagated redacted replacement", async
 });
 
 test("errored auditor output is redacted and cannot admit a fenced verdict", async () => {
-  const child = { child_id: "ch-error", purpose: "audit", state: "reserved" };
+  const child = { child_id: "ch-error", purpose: "audit", resource_class: "audit", state: "reserved" };
   const w = wire((req) => {
     if (req.command.type === "ObserveAction")
       return envelope({ type: "Allow", converged: false,
@@ -485,6 +485,10 @@ test("non-canonical auditors stay ordinary budgeted children; model overrides ge
   const evil = await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "evil",
     input: { agent: "evil-empirica-auditor", task: "audit" } }, fakeCtx());
   assert.equal(evil?.block, true);
+  const ordinaryReserve = w.requests.find((request) => request.command.type === "ObserveAction"
+    && request.command.action.kind === "child_reserve");
+  assert.equal(ordinaryReserve?.command.type === "ObserveAction"
+    ? ordinaryReserve.command.action.resource_class : null, "investigation");
   const overridden = await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "override",
     input: { agent: "empirica.empirica-auditor", task: "audit", model: "author-model" } }, fakeCtx());
   assert.equal(overridden?.block, true);

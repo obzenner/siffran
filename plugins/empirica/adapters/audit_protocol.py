@@ -94,7 +94,7 @@ class AuditProtocol:
         current_run = current_result.get("run", {}) if isinstance(current_result, Mapping) else {}
         current_children = (current_run.get("children", [])
                             if isinstance(current_run, Mapping) else [])
-        if any(isinstance(child, Mapping) and child.get("purpose") == "audit"
+        if any(isinstance(child, Mapping) and child.get("resource_class") == "audit"
                and child.get("state") in {"reserved", "launching", "pending"}
                for child in current_children):
             raise AuditProtocolError("an audit operation is already active")
@@ -102,7 +102,7 @@ class AuditProtocol:
                   if isinstance(child, Mapping)}
         reserved = self._request({"type": "ObserveAction", "run_id": run_id, "action": {
             "kind": "child_reserve", "purpose": "audit", "role_profile": role_profile,
-            "execution": "foreground",
+            "execution": "foreground", "resource_class": "audit",
         }})
         result = reserved.get("result", {})
         if not isinstance(result, Mapping) or result.get("type") != "Allow":
@@ -111,7 +111,7 @@ class AuditProtocol:
         children = run.get("children", []) if isinstance(run, Mapping) else []
         candidates = [child for child in children if isinstance(child, Mapping)
                       and child.get("child_id") not in before
-                      and child.get("purpose") == "audit" and child.get("state") == "reserved"]
+                      and child.get("resource_class") == "audit" and child.get("state") == "reserved"]
         if len(candidates) != 1 or not isinstance(candidates[0].get("child_id"), str):
             for candidate in candidates:
                 candidate_id = candidate.get("child_id")
@@ -145,7 +145,7 @@ class AuditProtocol:
         run = result.get("run", {}) if isinstance(result, Mapping) else {}
         children = run.get("children", []) if isinstance(run, Mapping) else []
         active = [child for child in children if isinstance(child, Mapping)
-                  and child.get("purpose") == "audit"
+                  and child.get("resource_class") == "audit"
                   and child.get("state") in {"reserved", "launching", "pending"}
                   and isinstance(child.get("child_id"), str)]
         for child in active:

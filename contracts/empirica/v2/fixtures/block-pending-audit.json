@@ -28,7 +28,7 @@
             "audit",
             "children"
           ],
-          "digest": "sha256:98e7ce690a91b67ebde9c655697295586869f5290c3b84fec519d953704d688a"
+          "digest": "sha256:bcee507e2daefd5b94cf955ccf3e2a21a9870403f737455f59086f9ee8ca37a9"
         },
         "obligations": {
           "active": [],
@@ -42,6 +42,7 @@
           {
             "child_id": "ch-audit-1",
             "purpose": "audit",
+            "resource_class": "audit",
             "state": "pending",
             "deadline": "2026-09-14T00:00:00Z"
           }

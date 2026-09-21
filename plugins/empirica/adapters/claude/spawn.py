@@ -58,6 +58,7 @@ def build_child_reserve_request(
         "purpose": purpose,
         "role_profile": role_profile,
         "execution": execution,
+        "resource_class": "investigation",
     }
     if deadline is not None:
         action["deadline"] = deadline

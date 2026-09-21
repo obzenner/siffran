@@ -83,7 +83,8 @@ goal                         nonempty string
 status                       active | converged | stopped_residual | stopped_frozen | stopped_budget
 modes                        {multi_provider:boolean, cli_exec:boolean}
 budgets                      {max_passes:int>=1, passes_used:int>=0,
-                              max_spawns:int>=0, spawns_used:int>=0}
+                              max_spawns:int>=0, spawns_used:int>=0,
+                              max_audit_spawns:int>=0, audit_spawns_used:int>=0}
 selected_graph_artifact_id   digest256 | null
 frozen_claim_ids             null | unique ordered nonempty-string array
 frozen_semantic_digest       digest256 | null (null exactly with frozen_claim_ids)
@@ -99,6 +100,7 @@ Strict child record:
 ```text
 child_id                     nonempty unique opaque ID
 purpose                      nonempty opaque string
+resource_class               investigation | audit (host-owned, immutable)
 state                        canonical PublicContract child state
 spent                        boolean
 refunded                     boolean
@@ -119,8 +121,10 @@ Branch shape rules:
 - reserved requires `spent=false`, native/fingerprint null;
 - launching/pending require non-null native ID, null terminal fingerprint;
 - every terminal state requires terminal fingerprint; completed/adverse post-start require native ID;
-- child IDs unique procedurally; counters obey `passes_used<=max_passes` and
-  `spawns_used<=max_spawns` procedurally;
+- child IDs are unique; each used counter equals the non-refunded durable children in its exact
+  resource class and is bounded by that class's maximum;
+- audit-class children require canonical purpose and complete audit bindings; investigation-class
+  children forbid audit bindings; at most one audit child may be active;
 - route/investigation stamps, when non-null, are positive and `<=stamp_seq`;
 - investigation implies route and `route_stamp < investigation_stamp`; children and converged state
   require investigation;

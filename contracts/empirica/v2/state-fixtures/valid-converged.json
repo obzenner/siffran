@@ -11,7 +11,9 @@
     "max_passes": 20,
     "passes_used": 8,
     "max_spawns": 3,
-    "spawns_used": 2
+    "spawns_used": 0,
+    "max_audit_spawns": 1,
+    "audit_spawns_used": 1
   },
   "selected_graph_artifact_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
   "frozen_claim_ids": [
@@ -38,7 +40,8 @@
       "audit_argument": {
         "argument_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
       },
-      "audit_role_profile": "empirica:empirica-auditor"
+      "audit_role_profile": "empirica:empirica-auditor",
+      "resource_class": "audit"
     },
     {
       "child_id": "child-rejected",
@@ -52,7 +55,8 @@
       "capability_ref": "cap-spike",
       "audit_operation_id": null,
       "audit_argument": null,
-      "audit_role_profile": null
+      "audit_role_profile": null,
+      "resource_class": "investigation"
     }
   ],
   "committed_artifact_head_id": null

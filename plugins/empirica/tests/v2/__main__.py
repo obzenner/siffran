@@ -170,8 +170,8 @@ def _run_preflight() -> int:
         _obs(action_configure_run(modes={"multi_provider": True})),
         _obs(action_route(reason="primary-claim")), _obs(action_investigate()), _obs(action_freeze()),
         _obs(action_dispatch(target="claim")), _obs(action_dispatch(target="claim", claim_id="c0")),
-        _obs(action_child_reserve(purpose="audit", role_profile="claude-code@2.1.270", execution="async")),
-        _obs(action_child_reserve(purpose="audit", role_profile="claude-code@2.1.270", execution="foreground", deadline="2026-01-01T00:00:00Z")),
+        _obs(action_child_reserve(purpose="audit", resource_class="audit", role_profile="claude-code@2.1.270", execution="async")),
+        _obs(action_child_reserve(purpose="audit", resource_class="audit", role_profile="claude-code@2.1.270", execution="foreground", deadline="2026-01-01T00:00:00Z")),
         _obs(action_evidence_leaf(payload=build_evidence_leaf_payload(
             harness_request_id="hreq-pf", command_digest="sha256:" + "0" * 64,
             prerequisite_research_ids=["sha256:" + "1" * 64],

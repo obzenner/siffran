@@ -355,9 +355,18 @@ reported separately and is not promised by any currently supported host profile.
 ## 8. Child lifecycle
 
 A child is one operational record keyed by server-generated `child_id`. The record contains purpose,
-state, spent/refunded fact, deadline, optional bound native ID, first-terminal fingerprint, and private
-completion capability. V2 has no separate reservation entity, audit-ticket entity, reservation
-sequence, nonce, or ticket-consumption state.
+host-owned immutable resource class (`investigation | audit`), state, spent/refunded fact, deadline,
+optional bound native ID, first-terminal fingerprint, and private completion capability. V2 has no
+separate reservation entity, audit-ticket entity, reservation sequence, nonce, or ticket-consumption
+state.
+
+Investigation children use `max_spawns` / `spawns_used`; mandatory audit children use independent
+`max_audit_spawns` / `audit_spawns_used`. Neither account borrows from the other. Purpose is only
+descriptive and cannot select privileged audit capacity: ordinary host launches are always
+`investigation`, and only the canonical trusted audit protocol assigns `audit`. Persisted used
+counters equal the non-refunded children of their exact class; any mismatch is `run.corrupt`.
+RunView child summaries expose this class for host lifecycle correlation; adapters must not recover
+class from purpose text.
 
 `contracts/empirica/v2/public-contract.json` is the sole transition-table owner. D1-H only maps native
 host evidence onto these events:

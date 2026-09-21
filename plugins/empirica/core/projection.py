@@ -102,7 +102,8 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
     states = derive_claims(snapshot).states
     children = []
     for child in snapshot.state.children:
-        row = {"child_id": child["child_id"], "purpose": child["purpose"], "state": child["state"]}
+        row = {"child_id": child["child_id"], "purpose": child["purpose"],
+               "resource_class": child["resource_class"], "state": child["state"]}
         if child.get("deadline") is not None:
             row["deadline"] = str(child["deadline"])
         if child["state"] in {"launch_rejected", "failed", "cancelled", "timed_out", "orphaned"}:
@@ -131,7 +132,7 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
 
 def _audit(snapshot: EvaluationSnapshot) -> dict[str, Any]:
     audits = [a for a in snapshot.history if a.get("kind") == "audit_verdict"]
-    audit_children = [c for c in snapshot.state.children if c["purpose"] == "audit"]
+    audit_children = [c for c in snapshot.state.children if c["resource_class"] == "audit"]
     state = ("passed" if audits and audits[-1]["verdict"] == "pass" else
              "failed" if audits else
              "pending" if any(c["state"] in {"reserved", "launching", "pending"}

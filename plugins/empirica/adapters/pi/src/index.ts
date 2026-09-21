@@ -546,7 +546,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             ? event.input.agent : "pi-subagent";
           const reserved = await dispatch(observeActionRequest(runHandle, {
             kind: "child_reserve", purpose, role_profile: roleProfile,
-            execution: "foreground",
+            execution: "foreground", resource_class: "investigation",
           }, randomUUID()));
           if (reserved.result.type !== "Allow")
             return { block: true, reason: "empirica child reservation denied" };

@@ -45,7 +45,8 @@ class BudgetFreezeTerminalTests(ConformanceCase):
             self.require_route_admitted(drv, run_id)
             self.require_investigate_admitted(drv, run_id)
             resp = self.dispatch(drv, observe_action(run_id=run_id, action=action_child_reserve(
-                purpose="audit", role_profile=self.DEFAULT_PROFILE, execution="foreground")))
+                purpose="investigation", resource_class="investigation",
+                role_profile=self.DEFAULT_PROFILE, execution="foreground")))
             result = self.assert_block_reason(resp, "budget.exhausted",
                                                parameters={"resource": "spawn"})
             spec = REASONS["budget.exhausted"]
@@ -56,6 +57,38 @@ class BudgetFreezeTerminalTests(ConformanceCase):
             # No reservation on spawn Block — no child admitted.
             self.assertEqual(result["run"].get("children", []),
                              [], "a spawn Block must not admit a child")
+
+        with self.subTest(variant="protected_audit_spawn"):
+            drv = self.bind_driver("D7", "case-16-protected-audit",
+                "Exhausted investigation capacity cannot consume protected audit capacity")
+            run_id = self.start_run(drv, goal=self.GOAL,
+                                    budgets={"max_spawns": 0, "max_audit_spawns": 1})
+            self.require_graph_admitted(drv, run_id)
+            resp = self.dispatch(drv, observe_action(run_id=run_id, action=action_child_reserve(
+                purpose="audit", resource_class="audit",
+                role_profile=self.DEFAULT_PROFILE, execution="foreground")))
+            self.assertEqual(resp["result"]["type"], "Allow")
+            self.assertEqual(self.require_operational_int(drv, "spawns_used"), 0)
+            self.assertEqual(self.require_operational_int(drv, "audit_spawns_used"), 1)
+
+        with self.subTest(variant="audit_exhaustion_does_not_borrow"):
+            drv = self.bind_driver("D7", "case-16-audit-zero",
+                "Audit exhaustion is distinct and cannot consume investigation capacity")
+            run_id = self.start_run(drv, goal=self.GOAL,
+                                    budgets={"max_spawns": 1, "max_audit_spawns": 0})
+            self.require_route_admitted(drv, run_id)
+            self.require_investigate_admitted(drv, run_id)
+            denied = self.dispatch(drv, observe_action(run_id=run_id,
+                action=action_child_reserve(purpose="audit", resource_class="audit",
+                    role_profile=self.DEFAULT_PROFILE, execution="foreground")))
+            self.assert_block_reason(denied, "budget.exhausted",
+                                     parameters={"resource": "audit_spawn"})
+            admitted = self.dispatch(drv, observe_action(run_id=run_id,
+                action=action_child_reserve(purpose="work", resource_class="investigation",
+                    role_profile="worker", execution="foreground")))
+            self.assertEqual(admitted["result"]["type"], "Allow")
+            self.assertEqual(self.require_operational_int(drv, "audit_spawns_used"), 0)
+            self.assertEqual(self.require_operational_int(drv, "spawns_used"), 1)
 
         with self.subTest(variant="pass_exhausted"):
             drv = self.bind_driver(
@@ -470,7 +503,7 @@ class BudgetFreezeTerminalTests(ConformanceCase):
                               "an author-forged trusted action must not reopen a terminal run")
                 # A new child reservation is not a substitute for a late result.
                 reservation = self.dispatch(drv, observe_action(run_id=run_id,
-                    action=action_child_reserve(purpose="audit",
+                    action=action_child_reserve(purpose="audit", resource_class="audit",
                                                 role_profile=self.DEFAULT_PROFILE,
                                                 execution="foreground")))
                 self.assertIn(reservation["result"]["type"], ("Block", "Fault", "Inert"),

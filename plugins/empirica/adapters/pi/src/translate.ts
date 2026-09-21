@@ -50,6 +50,7 @@ export function parseModeFlags(args: string): ParsedModeFlags {
 export interface StartRunOptions {
   maxPasses?: number;
   maxSpawns?: number;
+  maxAuditSpawns?: number;
   modes?: Modes;
 }
 
@@ -64,10 +65,13 @@ export function startRunRequest(
     selector,
     goal,
   };
-  if (options.maxPasses !== undefined || options.maxSpawns !== undefined) {
+  if (options.maxPasses !== undefined || options.maxSpawns !== undefined
+      || options.maxAuditSpawns !== undefined) {
     const budgets: Budgets = {};
     if (options.maxPasses !== undefined) budgets.max_passes = options.maxPasses;
     if (options.maxSpawns !== undefined) budgets.max_spawns = options.maxSpawns;
+    if (options.maxAuditSpawns !== undefined)
+      budgets.max_audit_spawns = options.maxAuditSpawns;
     command.budgets = budgets;
   }
   if (options.modes !== undefined) command.modes = options.modes;

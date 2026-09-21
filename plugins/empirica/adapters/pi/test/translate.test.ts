@@ -39,9 +39,12 @@ test("startRunRequest omits budgets and modes when not supplied (omission semant
 });
 
 test("startRunRequest carries budgets and modes only when supplied", () => {
-  const req = startRunRequest(SEL, "g", RID, { maxPasses: 3, maxSpawns: 1, modes: { cli_exec: true } });
+  const req = startRunRequest(SEL, "g", RID, {
+    maxPasses: 3, maxSpawns: 1, maxAuditSpawns: 2, modes: { cli_exec: true },
+  });
   if (req.command.type === "StartRun") {
-    assert.deepEqual(req.command.budgets, { max_passes: 3, max_spawns: 1 });
+    assert.deepEqual(req.command.budgets,
+      { max_passes: 3, max_spawns: 1, max_audit_spawns: 2 });
     assert.deepEqual(req.command.modes, { cli_exec: true });
   }
 });

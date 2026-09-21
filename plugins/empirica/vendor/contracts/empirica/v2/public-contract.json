@@ -122,8 +122,8 @@
       "params": {"type": "object", "additionalProperties": false, "required": ["claim_id"], "properties": {"claim_id": {"type": "string", "minLength": 1}, "question": {"type": "string"}}}
     },
     "budget.raise": {
-      "description": "Raise a spawn or pass budget.",
-      "params": {"type": "object", "additionalProperties": false, "required": ["resource"], "properties": {"resource": {"enum": ["spawn", "pass"]}, "amount": {"type": "integer", "minimum": 1}}}
+      "description": "Raise an investigation-spawn, audit-spawn, or pass budget.",
+      "params": {"type": "object", "additionalProperties": false, "required": ["resource"], "properties": {"resource": {"enum": ["spawn", "audit_spawn", "pass"]}, "amount": {"type": "integer", "minimum": 1}}}
     },
     "child.spawn_auditor": {
       "description": "Spawn an independent auditor child.",
@@ -167,7 +167,7 @@
     "claim.human_decision": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["human.request_decision"], "sections": ["claims/residuals"], "message": "Claim requires a human decision."},
     "claim.refuted": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["run.inspect"], "sections": ["claims/refutation"], "message": "Active evidence refutes this claim."},
     "evidence.conflict": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["run.inspect", "residual.accept"], "sections": ["claims/refutation"], "message": "Simultaneous supporting and refuting research fails closed; resolve or stop with residual."},
-    "budget.exhausted": {"params": {"type": "object", "additionalProperties": false, "required": ["resource"], "properties": {"resource": {"enum": ["spawn", "pass"]}}}, "next_actions": ["budget.raise", "residual.accept"], "sections": ["budget"], "message": "{resource} budget exhausted."},
+    "budget.exhausted": {"params": {"type": "object", "additionalProperties": false, "required": ["resource"], "properties": {"resource": {"enum": ["spawn", "audit_spawn", "pass"]}}}, "next_actions": ["budget.raise", "residual.accept"], "sections": ["budget"], "message": "{resource} budget exhausted."},
     "audit.required": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["child.spawn_auditor"], "sections": ["audit"], "message": "Audit is owed; spawn an independent auditor."},
     "audit.pending": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["child.wait"], "sections": ["audit"], "message": "Audit child is pending; wait."},
     "audit.unreadable": {"params": {"type": "object", "additionalProperties": false, "properties": {}}, "next_actions": ["child.retry"], "sections": ["audit"], "message": "Audit output is unreadable; retry."},
@@ -297,7 +297,7 @@
       "title": "Child lifecycle",
       "summary": "The single child record, transitions, and terminal handling.",
       "clauses": [
-        {"id": "children/record", "text": "A child is one operational record keyed by a server-generated child_id containing purpose, state, spent and refunded fact, deadline, optional native id, first-terminal fingerprint, and private completion capability."},
+        {"id": "children/record", "text": "A child is one operational record keyed by a server-generated child_id containing immutable investigation-or-audit resource class, purpose, state, spent and refunded fact, deadline, optional native id, first-terminal fingerprint, and private completion capability. RunView child summaries expose the immutable resource class so host lifecycle code never infers authority from purpose text."},
         {"id": "children/transitions", "text": "Child states and allowed transitions are owned solely by the public contract; a host maps native evidence onto them and does not redefine a profile-specific state machine."},
         {"id": "children/idempotent", "text": "child_event owns the terminal fingerprint; an identical replay of it returns the exact Inert unchanged, and a conflicting terminal replay returns the exact Fault unchanged; D4 proves this behavior."},
         {"id": "children/refund", "text": "Launch rejection refunds once; any observed start permanently spends the spawn, and a terminal child yields child.terminal with child.retry and residual.accept."}
@@ -305,11 +305,11 @@
     },
     "budget": {
       "title": "Budget",
-      "summary": "Spawn and derivation budgets and exhaustion.",
+      "summary": "Independent investigation-spawn, audit-spawn, and derivation-pass budgets.",
       "clauses": [
-        {"id": "budget/operational", "text": "Spawn and derivation budgets are operational state; a derivation pass is consumed only when argument, evidence, or obligation state makes semantic progress."},
+        {"id": "budget/operational", "text": "Investigation-child and mandatory-audit reservations use disjoint bounded accounts; neither may borrow from or refund the other. Each used counter equals the non-refunded children of its immutable resource class. Derivation passes are separate operational state and are consumed only when argument, evidence, or obligation state makes semantic progress."},
         {"id": "budget/no_idle_spend", "text": "Idle checks, pending-child waits, repeated equivalent Stop, and host status polling consume no pass."},
-        {"id": "budget/exhausted", "text": "An exhausted spawn or pass budget yields budget.exhausted with budget.raise and residual.accept."}
+        {"id": "budget/exhausted", "text": "An exhausted investigation-spawn, audit-spawn, or pass budget yields budget.exhausted with budget.raise and residual.accept; exhaustion never borrows from another account."}
       ]
     },
     "route": {

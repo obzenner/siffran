@@ -311,7 +311,7 @@ def _reserved_plan(handle: str, result: Mapping[str, object]) -> AuditLaunchPlan
     run = result.get("run", {})
     children = run.get("children", []) if isinstance(run, Mapping) else []
     reserved = [child for child in children if isinstance(child, Mapping)
-                and child.get("purpose") == "audit" and child.get("state") == "reserved"]
+                and child.get("resource_class") == "audit" and child.get("state") == "reserved"]
     if len(reserved) != 1:
         return None
     child_id = reserved[0].get("child_id")
@@ -375,7 +375,8 @@ def subagent_stop_main() -> int:
         child_id = application_bridge.trusted_resolve_child(
             CLAUDE_PROFILE_ID, handle, native_id)
         child = next((item for item in children if isinstance(item, Mapping)
-                      and item.get("child_id") == child_id and item.get("purpose") == "audit"
+                      and item.get("child_id") == child_id
+                      and item.get("resource_class") == "audit"
                       and item.get("state") == "pending"), None)
         plan = _durable_plan(handle, str(child_id)) if child_id else None
         if child is None or plan is None:

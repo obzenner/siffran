@@ -51,8 +51,8 @@ class PublicHostPathTests(ConformanceCase):
 
         # Concrete child reservation is a host protocol operation, never a model tool action.
         reserve = self.dispatch(drv, observe_action(run_id=run_id, action=action_child_reserve(
-            purpose="audit", role_profile="empirica:empirica-auditor",
-            execution="foreground")))
+            purpose="audit", resource_class="audit",
+            role_profile="empirica:empirica-auditor", execution="foreground")))
         child = next(c for c in reserve["result"]["run"]["children"] if c["purpose"] == "audit")
         child_id = child["child_id"]
         native_id = "host-auditor-1"

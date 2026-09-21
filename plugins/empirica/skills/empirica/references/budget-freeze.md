@@ -5,14 +5,17 @@ bounded scope.
 
 ## Budget
 
-Empirica is bounded by configured pass and spawn ceilings. Passes are charged only
-when the current derivation changes; repeated identical evaluation does not spend
-another pass. Do not invent a scope-derived formula in the skill and do not lower
-a ceiling below already consumed work.
+Empirica is bounded by configured pass, investigation-spawn, and mandatory-audit-spawn
+ceilings. Passes are charged only when the current derivation changes; repeated identical
+evaluation does not spend another pass. Do not invent a scope-derived formula in the skill
+and do not lower a ceiling below already consumed work.
 
-A pass is charged only according to the service's observed progress rules. Spawn
-budget is reserved through the service before child execution. Denied or
-unsupported launches must not happen outside that reservation.
+A pass is charged only according to the service's observed progress rules. Investigation
+children use `max_spawns`; the canonical host-owned auditor uses the independent
+`max_audit_spawns` account. Neither account borrows from the other, and purpose text never
+selects audit capacity. Each spawn is reserved through the service before child execution.
+Only a launch rejected before observed start refunds the child's recorded account; denied or
+unsupported launches must not happen outside a reservation.
 
 When a budget is exhausted, accept the typed non-converged terminal result. Never
 remove a claim, forge evidence, or bypass audit to fit the budget.

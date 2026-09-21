@@ -136,6 +136,7 @@
         "resource": {
           "enum": [
             "spawn",
+            "audit_spawn",
             "pass"
           ]
         }
@@ -753,6 +754,7 @@
       "required": [
         "child_id",
         "purpose",
+        "resource_class",
         "state"
       ],
       "properties": {
@@ -763,6 +765,12 @@
         "purpose": {
           "type": "string",
           "minLength": 1
+        },
+        "resource_class": {
+          "enum": [
+            "investigation",
+            "audit"
+          ]
         },
         "state": {
           "enum": [

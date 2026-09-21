@@ -46,7 +46,9 @@ class _Service:
         if state is None:
             return {}
         return {"status": state.status, "passes_used": state.budgets["passes_used"],
-                "spawns_used": state.budgets["spawns_used"], "stamp_seq": state.stamp_seq,
+                "spawns_used": state.budgets["spawns_used"],
+                "audit_spawns_used": state.budgets["audit_spawns_used"],
+                "stamp_seq": state.stamp_seq,
                 "frozen_scope": list(state.frozen_claim_ids or ()),
                 "committed_artifact_head_id": state.committed_artifact_head_id}
 
@@ -72,7 +74,7 @@ class _Service:
     def _valid_trusted(name: str, payload: object) -> bool:
         return _proto.validate_trusted_payload(name, payload)
 
-    def trusted_resolve_child(self, *, run_id, native_id, purpose="audit") -> str | None:
+    def trusted_resolve_child(self, *, run_id, native_id) -> str | None:
         """Resolve one native execution through private host correlation only."""
         key = decode_handle(run_id)
         if key is None or not isinstance(native_id, str) or not native_id:
@@ -84,7 +86,7 @@ class _Service:
         if classification.kind != "valid":
             return None
         matches = [child["child_id"] for child in classification.state.children
-                   if child["purpose"] == purpose and child.get("native_id") == native_id]
+                   if child["resource_class"] == "audit" and child.get("native_id") == native_id]
         return matches[0] if len(matches) == 1 else None
 
     def trusted_audit_plan(self, *, run_id, child_id) -> dict | None:

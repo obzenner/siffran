@@ -12,6 +12,7 @@ from typing import Any
 
 import jsonschema
 
+from core.evaluation import SPAWN_BUDGET
 from core.run import OperationalState
 from . import protocol as _proto
 
@@ -66,29 +67,37 @@ class Classification:
 def _procedural_ok(doc: dict) -> bool:
     """Check unique child IDs, counter bounds, stamp bounds, and finite deadlines."""
     seen: set[str] = set()
+    charged = {"investigation": 0, "audit": 0}
     for ch in doc.get("children", []):
         cid = ch.get("child_id")
         if cid in seen:
             return False
         seen.add(cid)
-        if ch.get("purpose") == "audit":
-            if (not isinstance(ch.get("audit_operation_id"), str)
+        resource_class = ch.get("resource_class")
+        if resource_class == "audit":
+            if (ch.get("purpose") != "audit" or not isinstance(ch.get("audit_operation_id"), str)
                     or not isinstance(ch.get("audit_argument"), dict)
                     or not isinstance(ch.get("audit_role_profile"), str)):
                 return False
         elif (ch.get("audit_operation_id") is not None or ch.get("audit_argument") is not None
               or ch.get("audit_role_profile") is not None):
             return False
+        if not ch.get("refunded"):
+            charged[resource_class] += 1
         dl = ch.get("deadline")
         if dl is not None and (
             isinstance(dl, bool) or not isinstance(dl, (int, float)) or not math.isfinite(dl)
         ):
             return False
+    if sum(ch["resource_class"] == "audit" and ch["state"] in {"reserved", "launching", "pending"}
+           for ch in doc.get("children", [])) > 1:
+        return False
     b = doc.get("budgets", {})
     if b.get("passes_used", 0) > b.get("max_passes", 0):
         return False
-    if b.get("spawns_used", 0) > b.get("max_spawns", 0):
-        return False
+    for resource_class, (limit, used, _) in SPAWN_BUDGET.items():
+        if b.get(used, 0) > b.get(limit, 0) or b.get(used) != charged[resource_class]:
+            return False
     seq = doc.get("stamp_seq", 0)
     route = doc.get("route_stamp")
     investigation = doc.get("investigation_stamp")

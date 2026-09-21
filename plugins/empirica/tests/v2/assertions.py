@@ -352,9 +352,10 @@ def action_dispatch(*, target: str, claim_id: str | None = None) -> dict:
 
 
 def action_child_reserve(*, purpose: str, role_profile: str, execution: str,
-                        deadline: str | None = None) -> dict:
+                        resource_class: str, deadline: str | None = None) -> dict:
     a: dict = {"kind": "child_reserve", "purpose": purpose,
-               "role_profile": role_profile, "execution": execution}
+               "role_profile": role_profile, "execution": execution,
+               "resource_class": resource_class}
     if deadline is not None:
         a["deadline"] = deadline
     return a
@@ -1123,7 +1124,8 @@ class ConformanceCase(unittest.TestCase):
             argument = self.dispatch(drv, get_argument(run_id=run_id))
         before = {child["child_id"] for child in argument["result"].get("run", {}).get("children", [])}
         resp = self.dispatch(drv, observe_action(run_id=run_id, action=action_child_reserve(
-            purpose="audit", role_profile=self.DEFAULT_PROFILE, execution=execution)))
+            purpose="audit", resource_class="audit",
+            role_profile=self.DEFAULT_PROFILE, execution=execution)))
         run = resp["result"].get("run", {})
         kids = [child for child in run.get("children", []) if child.get("child_id") not in before]
         if len(kids) != 1:
@@ -1157,8 +1159,8 @@ class ConformanceCase(unittest.TestCase):
 
     # ---- D4-S3a child-summary and operational-snapshot helpers --------------------
     # Flatten/index child summaries for exact lookup; require exact operational integer fields
-    # (spawns_used, passes_used) without fallback defaults; snapshot complete public RunView
-    # plus operational side-effect facts for before/after equality. The single child
+    # (spawns_used, audit_spawns_used, passes_used) without fallback defaults; snapshot complete
+    # public RunView plus operational side-effect facts for before/after equality. The single child
     # index/assertion path is ``index_children`` + ``assert_child_summary`` (D4-S3a-R: removed
     # unused duplicate ``require_child_summary``).
 
@@ -1169,8 +1171,8 @@ class ConformanceCase(unittest.TestCase):
 
     @staticmethod
     def require_operational_int(drv, field: str) -> int:
-        """Require an exact operational integer field (``spawns_used``/``passes_used``) without
-        a fallback default (D4-S3a). Raises HarnessDefect if the field is absent or not an int."""
+        """Require an exact operational integer counter without a fallback default (D4-S3a).
+        Raises HarnessDefect if the field is absent or not an int."""
         st = drv.operational_state()
         val = st.get(field)
         if not isinstance(val, int):

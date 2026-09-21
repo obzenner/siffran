@@ -389,7 +389,7 @@ class AuditTests(ConformanceCase):
         run_id = self.start_run(drv, goal=self.GOAL)
         scope = self.require_audit_scope(drv, run_id)
         self.dispatch(drv, observe_action(
-            run_id=run_id, action=action_configure_run(budgets={"max_spawns": 2})))
+            run_id=run_id, action=action_configure_run(budgets={"max_audit_spawns": 2})))
 
         child_a = self.require_pending_audit_child(drv, run_id)
         self.require_trusted_audit_attribution(

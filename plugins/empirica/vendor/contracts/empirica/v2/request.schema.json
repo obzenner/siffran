@@ -76,6 +76,10 @@
         "max_spawns": {
           "type": "integer",
           "minimum": 0
+        },
+        "max_audit_spawns": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     },
@@ -825,11 +829,26 @@
     "actionChildReserve": {
       "type": "object",
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "resource_class": {"const": "audit"}
+            }
+          },
+          "then": {
+            "properties": {
+              "purpose": {"const": "audit"}
+            }
+          }
+        }
+      ],
       "required": [
         "kind",
         "purpose",
         "role_profile",
-        "execution"
+        "execution",
+        "resource_class"
       ],
       "properties": {
         "kind": {
@@ -847,6 +866,12 @@
           "enum": [
             "foreground",
             "async"
+          ]
+        },
+        "resource_class": {
+          "enum": [
+            "investigation",
+            "audit"
           ]
         },
         "deadline": {

@@ -164,6 +164,8 @@ def build_start_run_request(
         budgets["max_passes"] = passes
     if (spawns := _positive_env(env, "EMPIRICA_MAX_SPAWNS", zero=True)) is not None:
         budgets["max_spawns"] = spawns
+    if (audits := _positive_env(env, "EMPIRICA_MAX_AUDIT_SPAWNS", zero=True)) is not None:
+        budgets["max_audit_spawns"] = audits
     if budgets:
         command["budgets"] = budgets
     return {

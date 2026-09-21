@@ -159,11 +159,12 @@ class StartRunTests(unittest.TestCase):
 
         request_both = build_start_run_request(
             _payload(command_args="prove X"), correlation_id="start-4",
-            environ={"EMPIRICA_MAX_PASSES": "5", "EMPIRICA_MAX_SPAWNS": "3"},
+            environ={"EMPIRICA_MAX_PASSES": "5", "EMPIRICA_MAX_SPAWNS": "3",
+                     "EMPIRICA_MAX_AUDIT_SPAWNS": "2"},
         )
         _assert_valid(request_both)
         self.assertEqual(request_both["command"]["budgets"],
-                         {"max_passes": 5, "max_spawns": 3})
+                         {"max_passes": 5, "max_spawns": 3, "max_audit_spawns": 2})
 
     def test_modes_emitted_only_when_resolved(self) -> None:
         request = build_start_run_request(
@@ -365,6 +366,7 @@ class ChildReserveTests(unittest.TestCase):
         self.assertEqual(request["command"]["action"], {
             "kind": "child_reserve", "purpose": "audit G0",
             "role_profile": "empirica:empirica-auditor", "execution": "foreground",
+            "resource_class": "investigation",
         })
 
     def test_child_reserve_accepts_optional_string_deadline(self) -> None:
@@ -573,7 +575,10 @@ class SpawnLifecycleTests(unittest.TestCase):
                                       "agent_id": "native-1",
                                       "last_assistant_message": text}))
         resolved = ("active-run", {"run": {"children": [
-            {"child_id": "ch-audit", "purpose": "audit", "state": "pending"}]}})
+            {"child_id": "ordinary", "purpose": "audit",
+             "resource_class": "investigation", "state": "pending"},
+            {"child_id": "ch-audit", "purpose": "audit",
+             "resource_class": "audit", "state": "pending"}]}})
         argument = {"argument_digest": "sha256:" + "1" * 64, "claims": []}
         with patch("adapters.claude.lifecycle._resolve", return_value=resolved), \
              patch("adapters.claude.lifecycle.application_bridge.trusted_audit_plan",

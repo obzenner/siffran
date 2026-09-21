@@ -267,9 +267,15 @@ project_argument(snapshot: EvaluationSnapshot) -> ArgumentView
 
 ## 12. Budgets
 
-- Defaults: both modes `false`; `max_passes=8`, `max_spawns=1` unless request supplies explicit budgets. Request budget overrides injected `limits`; injected limits override defaults when request omits.
+- Defaults: both modes `false`; `max_passes=8`, `max_spawns=1`, and
+  `max_audit_spawns=1` unless request supplies explicit budgets. Request budget overrides injected
+  `limits`; injected limits override defaults when request omits.
 - A derivation pass is consumed only when the semantic derivation digest changes and the commit succeeds. `GetRun`, `GetArgument`, and identical `EvaluateRun` consume no pass.
-- Exhausted `child_reserve` (`max_spawns` exceeded) → `Block` `budget.exhausted` (`resource: spawn`), appends **no child record**. Non-exhausted child request → `unsupported`/closed until D8.
+- Child capacity is split by an immutable host-owned class: investigation uses
+  `max_spawns/spawns_used`; mandatory audit uses `max_audit_spawns/audit_spawns_used`. Neither borrows.
+  Exhaustion returns `budget.exhausted` with `resource: spawn|audit_spawn` and appends no child.
+  Launch rejection refunds exactly once to the recorded class; every used counter must reconcile to
+  non-refunded durable children. Purpose text has no authority to select audit capacity.
 - Route before investigation: route and investigation are positive, strictly ordered first-write
   witnesses. Research, spikes, executable children, trusted audit facts, and convergence require
   both. Candidate rejection precedes domain artifacts, budget/child mutation, harness execution,

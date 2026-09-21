@@ -266,11 +266,12 @@ class StartRunTests(unittest.TestCase):
 
         request_both = build_start_run_request(
             _payload(prompt="$empirica prove X"), correlation_id="start-4",
-            environ={"EMPIRICA_MAX_PASSES": "5", "EMPIRICA_MAX_SPAWNS": "3"},
+            environ={"EMPIRICA_MAX_PASSES": "5", "EMPIRICA_MAX_SPAWNS": "3",
+                     "EMPIRICA_MAX_AUDIT_SPAWNS": "2"},
         )
         _assert_valid(request_both)
         self.assertEqual(request_both["command"]["budgets"],
-                         {"max_passes": 5, "max_spawns": 3})
+                         {"max_passes": 5, "max_spawns": 3, "max_audit_spawns": 2})
 
     def test_modes_emitted_only_when_resolved(self) -> None:
         request = build_start_run_request(

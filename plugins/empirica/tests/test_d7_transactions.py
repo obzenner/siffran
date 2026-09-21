@@ -142,7 +142,8 @@ def initial() -> OperationalState:
     return OperationalState(
         protocol="empirica/v2", state_schema="empirica.run/2", goal="g", status="active",
         modes={"multi_provider": False, "cli_exec": False},
-        budgets={"max_passes": 8, "passes_used": 0, "max_spawns": 1, "spawns_used": 0},
+        budgets={"max_passes": 8, "passes_used": 0, "max_spawns": 1, "spawns_used": 0,
+                 "max_audit_spawns": 1, "audit_spawns_used": 0},
         selected_graph_artifact_id=None, frozen_claim_ids=None, frozen_semantic_digest=None,
         route_stamp=None,
         investigation_stamp=None, stamp_seq=0, last_derivation_digest=None, children=(),
@@ -394,7 +395,7 @@ class D7TransactionTests(unittest.TestCase):
               "source_kind": "code", "payload": {"source_ref": "package.json",
                   "citation": "pin"}}, "route.required"),
             ({"kind": "child_reserve", "purpose": "work", "role_profile": "worker",
-              "execution": "foreground"}, "route.required"),
+              "execution": "foreground", "resource_class": "investigation"}, "route.required"),
             ({"kind": "spike_request", "claim_id": "C0", "command": "test",
               "dependent_files": []}, "route.required"),
         )
@@ -418,6 +419,68 @@ class D7TransactionTests(unittest.TestCase):
                              "investigation.required")
             self.assertEqual((runs.data[key], runs.cas_calls, artifacts_repo.append_calls,
                               len(artifacts_repo.values[key]), harness.calls), before)
+
+    def test_split_child_budgets_are_isolated_and_purpose_cannot_select_audit(self):
+        def setup(session, audit_limit):
+            runs, artifacts_repo = Runs(), Artifacts()
+            coordinator = Coordinator(Workspace(), Harness(), runs, artifacts_repo,
+                                      "pi@0.84.1+pi-subagents@0.50.0", {})
+            started = coordinator.handle({"type": "StartRun",
+                "selector": {"project": "p", "session": session}, "goal": "split",
+                "budgets": {"max_spawns": 1, "max_audit_spawns": audit_limit}}, "start")
+            self.assertEqual(started["result"]["type"], "Allow")
+            run_id = started["result"]["run"]["id"]
+            activate_investigation(coordinator, run_id)
+            graph = {"root": "C0", "claims": [{"id": "C0", "text": "t",
+                "gating": True, "kind": "ordinary"}], "edges": []}
+            coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                                "action": {"kind": "graph", "payload": graph}}, "graph")
+            return coordinator, runs, run_id
+
+        coordinator, runs, run_id = setup("both", 1)
+        ordinary = {"kind": "child_reserve", "purpose": "audit", "role_profile": "worker",
+                    "execution": "foreground", "resource_class": "investigation"}
+        audit = {"kind": "child_reserve", "purpose": "audit",
+                 "role_profile": "empirica:empirica-auditor", "execution": "foreground",
+                 "resource_class": "audit"}
+        runs.conflicts = 1
+        self.assertEqual(coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                                            "action": ordinary}, "ordinary")["result"]["type"],
+                         "Allow")
+        runs.conflicts = 1
+        self.assertEqual(coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                                            "action": audit}, "audit")["result"]["type"],
+                         "Allow")
+        key = next(iter(runs.data))
+        state = runs.data[key].value
+        self.assertEqual((state["budgets"]["spawns_used"],
+                          state["budgets"]["audit_spawns_used"]), (1, 1))
+        self.assertEqual([child["resource_class"] for child in state["children"]],
+                         ["investigation", "audit"])
+        self.assertIsNone(state["children"][0]["audit_argument"])
+        self.assertIsNotNone(state["children"][1]["audit_argument"])
+        before = (runs.data[key], runs.cas_calls)
+        lower = coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+            "action": {"kind": "configure_run",
+                       "budgets": {"max_audit_spawns": 0}}}, "lower-audit")
+        self.assertEqual(lower["result"]["reasons"][0]["parameters"]["resource"],
+                         "audit_spawn")
+        self.assertEqual((runs.data[key], runs.cas_calls), before)
+        exhausted = coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                                        "action": {**ordinary, "purpose": "more"}}, "full")
+        self.assertEqual(exhausted["result"]["reasons"][0]["parameters"]["resource"], "spawn")
+
+        coordinator, runs, run_id = setup("audit-zero", 0)
+        denied = coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                                     "action": audit}, "audit-full")
+        self.assertEqual(denied["result"]["reasons"][0]["parameters"]["resource"],
+                         "audit_spawn")
+        admitted = coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                                       "action": {**ordinary, "purpose": "work"}}, "ordinary")
+        self.assertEqual(admitted["result"]["type"], "Allow")
+        state = runs.data[next(iter(runs.data))].value
+        self.assertEqual((state["budgets"]["spawns_used"],
+                          state["budgets"]["audit_spawns_used"]), (1, 0))
 
     def test_invalid_dependency_candidate_has_zero_writes(self):
         def claim(cid):
@@ -767,7 +830,8 @@ class D7TransactionTests(unittest.TestCase):
             {"id": "C0", "text": "audit history", "gating": True,
              "kind": "ordinary"}], "edges": []}})
         research = artifact("research", {"route_stamp": 99, "investigation_stamp": 100})
-        child = {"child_id": "audit-1", "purpose": "audit", "state": "reserved",
+        child = {"child_id": "audit-1", "purpose": "audit", "resource_class": "audit",
+                 "state": "reserved",
                  "spent": False, "refunded": False, "deadline": None, "native_id": None,
                  "first_terminal_fingerprint": None, "capability_ref": "cap-1",
                  "audit_operation_id": "sha256:" + "a" * 64,
@@ -775,6 +839,7 @@ class D7TransactionTests(unittest.TestCase):
                  "audit_role_profile": "empirica:empirica-auditor"}
         base = replace(initial(), selected_graph_artifact_id=graph["artifact_id"],
                        route_stamp=1, investigation_stamp=2, stamp_seq=2,
+                       budgets={**initial().budgets, "audit_spawns_used": 1},
                        children=(child,))
         state, values = chain(base, (graph, research))
         key = RunKey(storage_id("p"), storage_id("audit-history"), 1)

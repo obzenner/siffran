@@ -6,8 +6,9 @@ from dataclasses import replace
 from typing import Any
 
 from core.context_selector import select_sections
-from core.evaluation import (Decision, EvaluationSnapshot, audit_binding, digest, evaluate_snapshot,
-                             frozen_scope_invalid, plan_spike_request, plan_spike_result, valid_attribution)
+from core.evaluation import (SPAWN_BUDGET, Decision, EvaluationSnapshot, audit_binding, digest,
+                             evaluate_snapshot, frozen_scope_invalid, plan_spike_request,
+                             plan_spike_result, valid_attribution)
 from core.freshness import canonical_digest
 from core.projection import project_argument, project_runview
 from core.records import Conflict, Corrupt, RunKey
@@ -68,9 +69,11 @@ class Coordinator:
         modes = {"multi_provider": False, "cli_exec": False}
         modes.update({k: v for k, v in self.limits.get("modes", {}).items() if k in modes})
         modes.update(command.get("modes", {}))
-        budgets = {"max_passes": 8, "passes_used": 0, "max_spawns": 1, "spawns_used": 0}
+        budgets = {"max_passes": 8, "passes_used": 0, "max_spawns": 1, "spawns_used": 0,
+                   "max_audit_spawns": 1, "audit_spawns_used": 0}
         supplied_limits = self.limits.get("budgets", self.limits)
-        budgets.update({k: v for k, v in supplied_limits.items() if k in {"max_passes", "max_spawns"}})
+        budgets.update({k: v for k, v in supplied_limits.items()
+                        if k in {"max_passes", "max_spawns", "max_audit_spawns"}})
         budgets.update(command.get("budgets", {}))
         return OperationalState(
             protocol=_proto._PROTOCOL, state_schema=_proto._STATE_SCHEMA_ID,
@@ -219,7 +222,7 @@ class Coordinator:
             next_state = decision.intent.state
             if (command["type"] == "ObserveAction"
                     and command["action"]["kind"] == "child_reserve"
-                    and command["action"].get("purpose") == "audit"
+                    and command["action"].get("resource_class") == "audit"
                     and next_state != state):
                 dossier = project_argument(snapshot)
                 children = list(next_state.children)
@@ -266,7 +269,7 @@ class Coordinator:
         if frozen_scope_invalid(classified.state, graph):
             return None
         child = next((row for row in classified.state.children
-                      if row["child_id"] == child_id and row["purpose"] == "audit"), None)
+                      if row["child_id"] == child_id and row["resource_class"] == "audit"), None)
         if child is None or not isinstance(child.get("audit_argument"), Mapping):
             return None
         return {
@@ -341,7 +344,7 @@ class Coordinator:
                     (payload.get("verdict") == "pass" and payload.get("scope_review") != expected_scope)):
                     return self._fault_with_run(request_id, snapshot)
                 index = next((i for i, c in enumerate(state.children)
-                              if c["child_id"] == child_id and c["purpose"] == "audit"), None)
+                              if c["child_id"] == child_id and c["resource_class"] == "audit"), None)
                 if index is None or state.children[index]["state"] != "pending":
                     return self._fault_with_run(request_id, snapshot)
                 children = list(state.children)
@@ -423,7 +426,8 @@ class Coordinator:
             budgets = dict(state.budgets)
             if target == "launch_rejected":
                 child.update(spent=False, refunded=True, native_id=None)
-                budgets["spawns_used"] -= 1
+                _, used_key, _ = SPAWN_BUDGET[child["resource_class"]]
+                budgets[used_key] -= 1
             children = list(state.children)
             children[index] = child
             next_state = replace(state, children=tuple(children), budgets=budgets)

@@ -65,7 +65,9 @@
         "max_passes",
         "passes_used",
         "max_spawns",
-        "spawns_used"
+        "spawns_used",
+        "max_audit_spawns",
+        "audit_spawns_used"
       ],
       "properties": {
         "max_passes": {
@@ -81,6 +83,14 @@
           "minimum": 0
         },
         "spawns_used": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_audit_spawns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "audit_spawns_used": {
           "type": "integer",
           "minimum": 0
         }
@@ -153,6 +163,7 @@
       "required": [
         "child_id",
         "purpose",
+        "resource_class",
         "state",
         "spent",
         "refunded",
@@ -172,6 +183,12 @@
         "purpose": {
           "type": "string",
           "minLength": 1
+        },
+        "resource_class": {
+          "enum": [
+            "investigation",
+            "audit"
+          ]
         },
         "state": {
           "enum": [

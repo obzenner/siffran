@@ -928,3 +928,46 @@ Independent Astra fallback re-review: **ACCEPT**. The reviewer verified all five
 deduplication, exact 3.0.0 versioning, contract/vendor/docs parity, and the architecture ceiling.
 This is development acceptance, not an installed-host release receipt. Nothing is staged or
 committed; human HITL acceptance is pending.
+
+### Seam 7 — Isolated investigation and mandatory-audit spawn budgets — IMPLEMENTED, awaiting review/HITL
+
+Child reservations now carry a host-owned immutable `resource_class`. Ordinary Claude, Codex, and
+Pi launches always use `investigation`; only the canonical trusted audit protocol emits `audit`.
+Free-text purpose remains descriptive, so an ordinary task named `audit` cannot consume protected
+audit capacity.
+
+Operational state has independent `max_spawns/spawns_used` and
+`max_audit_spawns/audit_spawns_used` accounts, each defaulting to one and permitting explicit zero.
+Neither borrows. Reservation and one-time launch-rejection refund mutate only the child's recorded
+account. Used counters exactly reconcile to non-refunded durable children of their class; class/audit
+binding mismatch, counter mismatch, or multiple active audits is fixed-safe `run.corrupt`. Candidate
+exhaustion and attempts to lower a ceiling below use are typed zero-write `budget.exhausted` Blocks
+with `spawn` or `audit_spawn`.
+
+Red-first evidence reproduced shared-budget starvation, purpose-based privilege, missing persisted
+class, and unreconciled counters. Green evidence currently includes strict codec, D7 transaction,
+contract/vendor, host-neutral conformance, and Claude/Codex/Pi adapter suites. The canonical contract
+digest is `sha256:bcee507e2daefd5b94cf955ccf3e2a21a9870403f737455f59086f9ee8ca37a9`.
+ADR 49 records the decision. Initial independent Astra review returned **NOT ACCEPT** because the
+shared audit lifecycle and Claude correlation still inferred audit identity from purpose while
+RunView omitted resource class. The finding was reproduced and fixed by making `resource_class` a
+required child-summary field and selecting/prechecking/reconciling only that field. Collision tests
+now keep an investigation child named `audit` separate through audit prepare, cleanup, orphan
+reconciliation, Claude handback, class-specific refund, and mixed-class CAS retry. Focused Astra
+fallback re-review returned **ACCEPT** with no blockers. Final `make check` is green: strict D6
+49/49, D7 transactions 26/26, host-neutral conformance 65/65, Claude adapter 48/48, and Pi
+154/154; contract/vendor/static suites pass, `git diff --check` is clean, and architecture is
+9,451/9,457.
+
+Orca-driven interactive Claude Code 2.1.278 and Pi 0.84.1 + pi-subagents 0.50.0 diagnostics both
+started with `max_spawns=0` and `max_audit_spawns=1`, recorded route/investigate/preparation graph,
+and admitted exactly one canonical audit child with public `resource_class: audit` rather than
+returning investigation-budget exhaustion. Both then accepted an honest `stopped_residual` close.
+Claude completed a failing preparation-only verdict after launch. Pi's stock packaged provider ID
+was absent from this machine's region-aliased registry on the first attempt; the documented
+`EMPIRICA_PI_AUDITOR_MODEL=amazon-bedrock-eu/eu.anthropic.claude-opus-4-8` deployment override made
+the exact same diagnostic launch successfully, after which the incomplete dossier produced a
+non-converging failed audit child as expected. These are development traces, not release receipts.
+
+This is development acceptance, not an installed-host release receipt. Human HITL
+acceptance is pending.

@@ -29,26 +29,12 @@ def invocation_details(
     )
 
 
-def _max_passes(environ: Mapping[str, str]) -> int | None:
-    raw = environ.get("EMPIRICA_MAX_PASSES")
-    if raw is None:
-        return None
+def _budget(environ: Mapping[str, str], name: str, minimum: int) -> int | None:
     try:
-        value = int(raw)
-    except ValueError:
+        value = int(environ[name])
+    except (KeyError, ValueError):
         return None
-    return value if value >= 1 else None
-
-
-def _max_spawns(environ: Mapping[str, str]) -> int | None:
-    raw = environ.get("EMPIRICA_MAX_SPAWNS")
-    if raw is None:
-        return None
-    try:
-        value = int(raw)
-    except ValueError:
-        return None
-    return value if value >= 0 else None
+    return value if value >= minimum else None
 
 
 def build_start_run_request(
@@ -73,12 +59,13 @@ def build_start_run_request(
         command["modes"] = invocation.modes
     env = os.environ if environ is None else environ
     budgets: dict[str, int] = {}
-    max_passes = _max_passes(env)
-    if max_passes is not None:
-        budgets["max_passes"] = max_passes
-    max_spawns = _max_spawns(env)
-    if max_spawns is not None:
-        budgets["max_spawns"] = max_spawns
+    for field, env_name, minimum in (
+        ("max_passes", "EMPIRICA_MAX_PASSES", 1),
+        ("max_spawns", "EMPIRICA_MAX_SPAWNS", 0),
+        ("max_audit_spawns", "EMPIRICA_MAX_AUDIT_SPAWNS", 0),
+    ):
+        if (value := _budget(env, env_name, minimum)) is not None:
+            budgets[field] = value
     if budgets:
         command["budgets"] = budgets
     return {

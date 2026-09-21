@@ -12,6 +12,9 @@ from typing import Any
 from .freshness import ActiveSpikeHead, FileBinding, evaluate_freshness
 from .run import OperationalState
 
+SPAWN_BUDGET = {"investigation": ("max_spawns", "spawns_used", "spawn"),
+                "audit": ("max_audit_spawns", "audit_spawns_used", "audit_spawn")}
+
 
 def _plain(value: Any) -> Any:
     if isinstance(value, Mapping):
@@ -357,7 +360,7 @@ def valid_attribution(snapshot: EvaluationSnapshot, payload: Mapping[str, Any]) 
         child_id = payload.get("child_id")
         return (payload.get("covered_artifact_ids") == []
                 and isinstance(child_id, str)
-                and any(child["child_id"] == child_id and child["purpose"] == "audit"
+                and any(child["child_id"] == child_id and child["resource_class"] == "audit"
                         and child["state"] == "pending" for child in snapshot.state.children))
     return False
 
@@ -503,10 +506,12 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             modes, budgets = dict(state.modes), dict(state.budgets)
             modes.update(action.get("modes", {}))
             for key, value in action.get("budgets", {}).items():
-                used_key = "passes_used" if key == "max_passes" else "spawns_used"
+                used_key, resource = {"max_passes": ("passes_used", "pass"),
+                                      "max_spawns": ("spawns_used", "spawn"),
+                                      "max_audit_spawns": ("audit_spawns_used", "audit_spawn")}[key]
                 if value < budgets[used_key]:
                     return _decision(snapshot, state, "Block", reason="budget.exhausted",
-                                     parameters={"resource": "pass" if key == "max_passes" else "spawn"})
+                                     parameters={"resource": resource})
                 budgets[key] = value
             return _decision(snapshot, replace(state, modes=modes, budgets=budgets))
         if akind == "child_reserve":
@@ -514,8 +519,9 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             if blocked is not None:
                 return blocked
             execution = action["execution"]
-            if action["purpose"] == "audit" and any(
-                child["purpose"] == "audit"
+            resource_class = action["resource_class"]
+            if resource_class == "audit" and any(
+                child["resource_class"] == "audit"
                 and child["state"] in {"reserved", "launching", "pending"}
                 for child in state.children
             ):
@@ -524,21 +530,24 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                 reason = ("host.audit_output_unobservable" if snapshot.host_tier == "observational"
                           else "host.async_unsupported")
                 return _decision(snapshot, state, "Block", reason=reason)
-            if state.budgets["spawns_used"] >= state.budgets["max_spawns"]:
+            limit_key, used_key, resource = SPAWN_BUDGET[resource_class]
+            if state.budgets[used_key] >= state.budgets[limit_key]:
                 return _decision(snapshot, state, "Block", reason="budget.exhausted",
-                                 parameters={"resource": "spawn"})
+                                 parameters={"resource": resource})
             ordinal = len(state.children) + 1
             seed = {"run_id": snapshot.run_id, "ordinal": ordinal,
-                    "purpose": action["purpose"], "role_profile": action["role_profile"]}
+                    "purpose": action["purpose"], "role_profile": action["role_profile"],
+                    "resource_class": resource_class}
             child_id = "ch-" + digest(seed).removeprefix("sha256:")
-            child = {"child_id": child_id, "purpose": action["purpose"], "state": "reserved",
+            child = {"child_id": child_id, "purpose": action["purpose"],
+                     "resource_class": resource_class, "state": "reserved",
                      "spent": False, "refunded": False, "deadline": None, "native_id": None,
                      "first_terminal_fingerprint": None,
                      "capability_ref": digest({"capability": seed}),
                      "audit_operation_id": None, "audit_argument": None,
                      "audit_role_profile": None}
             budgets = dict(state.budgets)
-            budgets["spawns_used"] += 1
+            budgets[used_key] += 1
             return _decision(snapshot, replace(state, budgets=budgets,
                                                 children=state.children + (child,)))
         return _decision(snapshot, state, "Fault", reason="unsupported")
