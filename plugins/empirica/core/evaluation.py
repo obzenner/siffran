@@ -95,7 +95,7 @@ def valid_graph(value: Any) -> bool:
     ids: list[str] = []
     for claim in claims:
         if (not isinstance(claim, Mapping) or set(claim) != {"id", "text", "gating", "kind"}
-                or not isinstance(claim["id"], str) or not isinstance(claim["text"], str)
+                or not isinstance(claim["id"], str) or not claim["id"] or not isinstance(claim["text"], str)
                 or type(claim["gating"]) is not bool
                 or claim["kind"] not in {"ordinary", "needs-experiment", "needs-decision"}):
             return False

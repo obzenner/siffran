@@ -218,16 +218,15 @@ class AuditProtocol:
     def _terminal(self, child_id: str, run_id: str, state: str, native_id: str | None) -> None:
         response = self._child_event(
             self.profile_id, run_id, child_id, child_event(state, native_id))
-        if self._allow_or_inert(response):
-            return
         try:
             result = response["result"]
-            reconciled = (result.get("type") == "Block"
+            result_type = result.get("type")
+            reconciled = (result_type in {"Allow", "Inert"} or (result_type == "Block"
                 and len(result.get("reasons", [])) == 1
                 and result["reasons"][0].get("code") == "child.terminal"
-                and result["reasons"][0].get("parameters") == {"state": state}
-                and any(child.get("child_id") == child_id and child.get("state") == state
-                        for child in result.get("run", {}).get("children", [])))
+                and result["reasons"][0].get("parameters") == {"state": state})) and sum(
+                    (child.get("child_id"), child.get("state"), child.get("resource_class"))
+                    == (child_id, state, "audit") for child in result.get("run", {}).get("children", [])) == 1
         except (AttributeError, KeyError, TypeError):
             reconciled = False
         if not reconciled:

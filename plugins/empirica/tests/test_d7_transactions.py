@@ -486,6 +486,7 @@ class D7TransactionTests(unittest.TestCase):
         def claim(cid):
             return {"id": cid, "text": cid, "gating": True, "kind": "ordinary"}
         invalid = (
+            {"root": "", "claims": [claim("")], "edges": []},
             {"root": "C0", "claims": [claim("C0")],
              "edges": [{"from": "C0", "to": "C0", "type": "SupportedBy"}]},
             {"root": "C0", "claims": [claim("C0"), claim("C1")], "edges": []},

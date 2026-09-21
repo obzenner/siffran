@@ -45,7 +45,8 @@ class AuditProtocolTests(unittest.TestCase):
 
         def child(_profile: str, _run: str, child_id: str, event: dict) -> dict:
             self.events.append(("child", child_id, event["state"], event["native_id"]))
-            return response({"type": "Allow", "converged": False, "run": {}})
+            return response({"type": "Allow", "converged": False, "run": {"children": [{
+                "child_id": child_id, "state": event["state"], "resource_class": "audit"}]}})
 
         def attribution(_profile: str, _run: str, payload: dict) -> dict:
             self.events.append(("attribution", payload))
@@ -216,6 +217,21 @@ class AuditProtocolTests(unittest.TestCase):
                     self.protocol.observe_failure(plan, "native-1", "timed_out")
         self.protocol._child_event = lambda *_args: response(exact)
         self.protocol.observe_failure(plan, "native-1", "timed_out")
+
+    def test_terminal_allow_or_inert_requires_exact_child_state(self) -> None:
+        plan = AuditLaunchPlan("test-profile", "run", "ch-1", "canonical", self.argument)
+        exact_child = {"child_id": "ch-1", "state": "timed_out", "resource_class": "audit"}
+        for result_type in ("Allow", "Inert"):
+            exact = {"type": result_type, "run": {"children": [exact_child]}}
+            self.protocol._child_event = lambda *_args, exact=exact: response(exact)
+            self.protocol.observe_failure(plan, "native-1", "timed_out")
+            for children in ([], [{**exact_child, "child_id": "other"}],
+                             [{**exact_child, "state": "pending"}]):
+                with self.subTest(result_type=result_type, children=children):
+                    invalid = {"type": result_type, "run": {"children": children}}
+                    self.protocol._child_event = lambda *_args, invalid=invalid: response(invalid)
+                    with self.assertRaises(AuditProtocolError):
+                        self.protocol.observe_failure(plan, "native-1", "timed_out")
 
     def test_malformed_terminal_response_is_a_typed_reconciliation_error(self) -> None:
         plan = AuditLaunchPlan("test-profile", "run", "ch-1", "canonical", self.argument)

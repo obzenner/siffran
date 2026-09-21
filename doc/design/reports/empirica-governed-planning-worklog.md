@@ -1048,3 +1048,21 @@ The old audit remains charged and terminal; with the default one-attempt audit b
 an explicit allowance. Logical cancellation may leave native work running. Fresh-object tests are
 not installed-host restart/crash receipts. Human HITL accepted both this policy and the
 architecture-ceiling exception. No staging or commit was authorized or performed.
+
+### PR 29 review correction — exact terminal acknowledgement and non-empty claim IDs
+
+Copilot review found two valid boundary defects after the initial PR opened. First, the shared audit
+protocol returned early for every `Allow` or `Inert` terminal response without requiring the exact
+child and requested state, so a missing run could discard durable correlation without confirming the
+transition. Six red matrix cases reproduced missing child, wrong child, and wrong state for both
+result types. Terminal reconciliation now requires exactly one matching audit-class child for
+`Allow`, `Inert`, and the already-exact `child.terminal` Block path.
+
+Second, the deep graph validator accepted an empty root paired with an empty claim ID because it
+checked string type, uniqueness, membership, and connectivity but not the output schema's non-empty
+identifier boundary. A red D7 transaction case reproduced the downstream untyped failure. Empty
+claim IDs now return zero-write `graph.invalid`; root membership then rejects an empty root.
+
+Focused validation passes with audit protocol 11/11, stale recovery 15/15, and D7 transactions
+26/26. The correction stays within the approved architecture ceiling at 9,483/9,484 and does not
+change the public contract digest.
