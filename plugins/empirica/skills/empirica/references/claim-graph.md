@@ -36,9 +36,26 @@ Each claim has exactly:
 - `gating`: whether it blocks the active scope;
 - `kind`: `ordinary`, `needs-experiment`, or `needs-decision`.
 
-Each edge has exactly `from`, `to`, and `type`. The supported types are
-`SupportedBy` and `InContextOf`; both endpoints must exist. The root must name an
-existing claim.
+Each edge has exactly `from`, `to`, and `type`. The only supported type is
+`SupportedBy`, directed from a claim to a required supporting claim. Both endpoints
+must exist and differ. Edges must be unique and acyclic, and every claim must be
+reachable from the declared root by following `SupportedBy` edges.
+
+Within the effective scope, support is conjunctive: a claim can be approved only
+when its own evidence requirements and every direct in-scope supporting child are
+approved. Before freeze, effective scope is the claims marked `gating`; after
+freeze, it is the immutable frozen claim IDs. Freeze also binds each committed
+claim's exact record and the edge set whose endpoints are both frozen, so changing
+committed wording, kind, gating, or internal dependency requires a fresh run.
+A deferred child does not silently expand a frozen commitment, but adding its node
+or cross-scope edge still changes the argument and makes prior audit coverage stale.
+
+A failed support prevents parent approval but does not refute the parent. The
+parent remains open unless its own evidence makes it blocked or discarded. A
+discarded branch stops dependency evaluation only on that path; shared descendants
+remain active through other live paths. Blocking output identifies the unresolved
+supporting claim rather than claiming that an already evidenced parent lacks local
+evidence.
 
 Do not send the legacy `nodes`/confidence representation as the v2 graph.
 Confidence and terminal state are derived projections, never graph input.
@@ -47,7 +64,7 @@ Confidence and terminal state are derived projections, never graph input.
 
 1. Make the root the goal-level assurance claim.
 2. Add one gating claim for each material unknown or invariant.
-3. Attach every claim to the root; detached claims are not coverage.
+3. Attach every claim to the root through `SupportedBy`; detached claims are invalid.
 4. Use `needs-experiment` only when a deterministic command can falsify the claim.
 5. Use `needs-decision` only for an irreducible human choice.
 6. Keep claims stable enough for evidence binding. Rewording intentionally makes

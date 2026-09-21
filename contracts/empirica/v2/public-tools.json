@@ -34,7 +34,25 @@
                     "const": "research"
                   },
                   "payload": {
-                    "description": "Extensible deep graph/evidence/actor domain data; only this object may carry D6-validated payload. The control object itself is closed.",
+                    "additionalProperties": false,
+                    "properties": {
+                      "citation": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "observed_content_digest": {
+                        "pattern": "^sha256:[0-9a-f]{64}$",
+                        "type": "string"
+                      },
+                      "source_ref": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "source_ref",
+                      "citation"
+                    ],
                     "type": "object"
                   },
                   "result": {
@@ -56,7 +74,8 @@
                   "kind",
                   "claim_id",
                   "source_kind",
-                  "result"
+                  "result",
+                  "payload"
                 ],
                 "type": "object"
               },
@@ -116,6 +135,10 @@
                         "type": "integer"
                       },
                       "max_spawns": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "max_audit_spawns": {
                         "minimum": 0,
                         "type": "integer"
                       }
@@ -328,7 +351,25 @@
                     "const": "research"
                   },
                   "payload": {
-                    "description": "Extensible deep graph/evidence/actor domain data; only this object may carry D6-validated payload. The control object itself is closed.",
+                    "additionalProperties": false,
+                    "properties": {
+                      "citation": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "observed_content_digest": {
+                        "pattern": "^sha256:[0-9a-f]{64}$",
+                        "type": "string"
+                      },
+                      "source_ref": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "source_ref",
+                      "citation"
+                    ],
                     "type": "object"
                   },
                   "result": {
@@ -350,7 +391,8 @@
                   "kind",
                   "claim_id",
                   "source_kind",
-                  "result"
+                  "result",
+                  "payload"
                 ],
                 "type": "object"
               },
@@ -410,6 +452,10 @@
                         "type": "integer"
                       },
                       "max_spawns": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "max_audit_spawns": {
                         "minimum": 0,
                         "type": "integer"
                       }

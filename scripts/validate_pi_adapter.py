@@ -92,6 +92,34 @@ def check_manifest(adapter: Path, errors: list[str]) -> dict:
             errors.append(f"{rel(manifest_path)}: pi-subagents must be bundled for npm installs")
         if "./node_modules/pi-subagents/index.ts" not in extensions:
             errors.append(f"{rel(manifest_path)}: bundled pi-subagents extension is not loaded")
+        dev_settings_path = ROOT / ".pi/settings.json"
+        try:
+            dev_settings = json.loads(dev_settings_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            errors.append(f"{rel(dev_settings_path)}: {exc}")
+            dev_settings = {}
+        global_subagents_delta = next((entry for entry in dev_settings.get("packages", [])
+                                       if isinstance(entry, dict)
+                                       and entry.get("source") == "npm:pi-subagents@0.50.0"), None)
+        if global_subagents_delta != {"source": "npm:pi-subagents@0.50.0", "autoload": False,
+                                      "extensions": ["-index.ts"]}:
+            errors.append(f"{rel(dev_settings_path)}: must suppress the global pi-subagents "
+                          "extension while the checkout-bundled profile is active")
+        global_siffran_delta = next((entry for entry in dev_settings.get("packages", [])
+                                    if isinstance(entry, dict)
+                                    and entry.get("source") ==
+                                    "https://github.com/obzenner/siffran"), None)
+        expected_siffran_delta = {
+            "source": "https://github.com/obzenner/siffran", "autoload": False,
+            "extensions": ["-plugins/empirica/adapters/pi/src/index.ts",
+                           "-plugins/methodologist/adapters/pi/src/index.ts",
+                           "-node_modules/pi-subagents/index.ts"],
+            "skills": ["-plugins/empirica/skills/empirica",
+                       "-plugins/methodologist/skills/think"],
+        }
+        if global_siffran_delta != expected_siffran_delta:
+            errors.append(f"{rel(dev_settings_path)}: must suppress every global siffran "
+                          "extension/skill shadowed by the checkout package")
         agent_roots = manifest.get("pi", {}).get("subagents", {}).get("agents", [])
         agent_path = adapter / agent_roots[0] / "empirica-auditor.md" if agent_roots else None
         if agent_roots != ["./plugins/empirica/agents/pi"]:

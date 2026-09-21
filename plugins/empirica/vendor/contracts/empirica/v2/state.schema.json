@@ -14,6 +14,7 @@
     "budgets",
     "selected_graph_artifact_id",
     "frozen_claim_ids",
+    "frozen_semantic_digest",
     "route_stamp",
     "investigation_stamp",
     "stamp_seq",
@@ -64,7 +65,9 @@
         "max_passes",
         "passes_used",
         "max_spawns",
-        "spawns_used"
+        "spawns_used",
+        "max_audit_spawns",
+        "audit_spawns_used"
       ],
       "properties": {
         "max_passes": {
@@ -80,6 +83,14 @@
           "minimum": 0
         },
         "spawns_used": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_audit_spawns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "audit_spawns_used": {
           "type": "integer",
           "minimum": 0
         }
@@ -103,19 +114,22 @@
       },
       "uniqueItems": true
     },
+    "frozen_semantic_digest": {
+      "$ref": "#/$defs/nullableDigest256"
+    },
     "route_stamp": {
       "type": [
         "integer",
         "null"
       ],
-      "minimum": 0
+      "minimum": 1
     },
     "investigation_stamp": {
       "type": [
         "integer",
         "null"
       ],
-      "minimum": 0
+      "minimum": 1
     },
     "stamp_seq": {
       "type": "integer",
@@ -149,6 +163,7 @@
       "required": [
         "child_id",
         "purpose",
+        "resource_class",
         "state",
         "spent",
         "refunded",
@@ -168,6 +183,12 @@
         "purpose": {
           "type": "string",
           "minLength": 1
+        },
+        "resource_class": {
+          "enum": [
+            "investigation",
+            "audit"
+          ]
         },
         "state": {
           "enum": [

@@ -155,6 +155,20 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isInvestigationTool(toolName: string, input: Record<string, unknown>,
+                             gatedTools: Set<string>, subagentToolName: string): boolean {
+  if (gatedTools.has(toolName) || toolName === "empirica_read") return false;
+  if (toolName === subagentToolName)
+    return isExecutableSubagentLaunch(toolName, input);
+  if (toolName === "empirica_observe") {
+    const action = input.action;
+    if (!action || typeof action !== "object") return false;
+    return new Set(["research", "spike_request"]).has(
+      String((action as Record<string, unknown>).kind));
+  }
+  return true;
+}
+
 /**
  * Build the Pi extension function from its dependencies.
  *
@@ -184,6 +198,18 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     const completedAuditCalls = new Set<string>();
     type ChildCorrelation = { runHandle: string; childId: string; nativeId: string };
     const children = new Map<string, ChildCorrelation>();
+    const reportEvaluations = new Map<string, { intent: string; response: Response }>();
+    const terminalStatus = (response: Response): boolean => {
+      const result = response.result;
+      if (result.type !== "Allow") return false;
+      return new Set(["converged", "stopped_budget", "stopped_frozen", "stopped_residual"])
+        .has(String(result.run.status));
+    };
+    const retireTerminal = (response: Response): void => {
+      if (!runHandle || !terminalStatus(response)) return;
+      pi.appendEntry?.("empirica.run.done", { runHandle });
+      runHandle = null;
+    };
 
     // Guarded dispatch: every response passes through the central runtime guard
     // before ANY gate or render. A malformed/partial/unknown/mismatched response
@@ -203,6 +229,9 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     // (session_start) Restore the run handle from persisted entries.
     pi.on("session_start", async (_event, ctx) => {
       const entries = ctx.sessionManager?.getEntries() ?? [];
+      const terminalRuns = new Set(entries.filter((entry) => entry.customType === "empirica.run.done")
+        .map((entry) => (entry.data as { runHandle?: unknown } | undefined)?.runHandle)
+        .filter((value): value is string => typeof value === "string"));
       const completedAudits = new Set(entries.filter((entry) => entry.customType === "empirica.audit.done")
         .map((entry) => (entry.data as { toolCallId?: unknown } | undefined)?.toolCallId)
         .filter((value): value is string => typeof value === "string"));
@@ -213,7 +242,8 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           runHandle?: unknown; toolCallId?: unknown; nativeId?: unknown;
           plan?: unknown; author?: unknown; auditor?: unknown; childId?: unknown;
         } | undefined;
-        if (entry.customType === "empirica.run" && typeof data?.runHandle === "string")
+        if (entry.customType === "empirica.run" && typeof data?.runHandle === "string"
+            && !terminalRuns.has(data.runHandle))
           runHandle = data.runHandle;
         if (entry.customType === "empirica.audit" && !completedAudits.has(String(data?.toolCallId))
             && typeof data?.runHandle === "string"
@@ -287,16 +317,20 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         label: "Report convergence",
         description: "Ask Empirica for guarded convergence or an honest residual stop.",
         parameters: EMPTY_PARAMS,
-        async execute(_id, raw) {
-          if (!runHandle)
+        async execute(id, raw) {
+          if (!runHandle && !reportEvaluations.has(id))
             return { content: [{ type: "text", text: "No active Empirica run." }] };
-          const response = await dispatch(
-            evaluateRunRequest(runHandle, (raw as { intent?: unknown }).intent === "stop"
-              ? "stop" : REPORT_CONVERGENCE_INTENT, randomUUID()),
+          const intent = (raw as { intent?: unknown }).intent === "stop"
+            ? "stop" : REPORT_CONVERGENCE_INTENT;
+          const prepared = reportEvaluations.get(id);
+          reportEvaluations.delete(id);
+          const response = prepared?.intent === intent ? prepared.response : await dispatch(
+            evaluateRunRequest(runHandle!, intent, randomUUID()),
           );
           const decision = gateFromDecision(response.result);
           if (decision.kind === "deny")
-            throw new Error(`${decision.reason}\nhandle: ${runHandle}`);
+            throw new Error(`${decision.reason}\nhandle: ${runHandle ?? "terminal"}`);
+          retireTerminal(response);
           return { content: [{ type: "text", text: resultText(response) }], details: response.result };
         },
       });
@@ -487,6 +521,20 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
 
     // (tool_call) The hard convergence gate plus bound foreground auditor admission.
     pi.on("tool_call", async (event: ToolCallEvent, ctx: ExtensionContext): Promise<ToolCallResult | void> => {
+      if (runHandle !== null && isInvestigationTool(
+        event.toolName, event.input, gatedTools, subagentToolName)) {
+        try {
+          const response = await dispatch(observeActionRequest(runHandle, {
+            kind: "investigate",
+          }, randomUUID()));
+          const decision = gateFromDecision(response.result);
+          if (decision.kind === "deny")
+            return { block: true, reason: `empirica investigation denied: ${decision.reason}` };
+        } catch (error) {
+          return { block: true,
+            reason: `empirica investigation unavailable (failing closed): ${describe(error)}` };
+        }
+      }
       if (runHandle !== null && isExecutableSubagentLaunch(event.toolName, event.input)) {
         if (event.toolName !== subagentToolName)
           return { block: true, reason: "empirica: unrecognized child execution surface" };
@@ -498,7 +546,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             ? event.input.agent : "pi-subagent";
           const reserved = await dispatch(observeActionRequest(runHandle, {
             kind: "child_reserve", purpose, role_profile: roleProfile,
-            execution: "foreground",
+            execution: "foreground", resource_class: "investigation",
           }, randomUUID()));
           if (reserved.result.type !== "Allow")
             return { block: true, reason: "empirica child reservation denied" };
@@ -563,13 +611,15 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       if (!gatedTools.has(event.toolName)) return;
       if (runHandle === null) return; // no run to gate against
       try {
+        const intent = event.input.intent === "stop" ? "stop" : REPORT_CONVERGENCE_INTENT;
         const response = await dispatch(
-          evaluateRunRequest(runHandle, REPORT_CONVERGENCE_INTENT, randomUUID()),
+          evaluateRunRequest(runHandle, intent, randomUUID()),
         );
         const decision = gateFromDecision(response.result);
         if (decision.kind === "deny")
           return { block: true, reason: `${decision.reason}\nhandle: ${runHandle}` };
-        return; // permit
+        reportEvaluations.set(event.toolCallId, { intent, response });
+        return; // permit; execute consumes this exact guarded result
       } catch (error) {
         // The gate is the trust boundary: an unavailable core fails closed.
         return {

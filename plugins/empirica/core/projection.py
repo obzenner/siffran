@@ -4,8 +4,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .evaluation import (EvaluationSnapshot, active_evidence, audit_attributions, claim_digest,
-                         claim_state, digest, identity_pair, stale_artifact_ids)
+from .evaluation import (EvaluationSnapshot, active_evidence, audit_attributions, claim_conflicted,
+                         claim_digest, derive_claims, digest, identity_pair, stale_artifact_ids)
 
 
 def _copy(value: Any) -> Any:
@@ -44,7 +44,8 @@ def _freshness(snapshot: EvaluationSnapshot) -> tuple[list[dict[str, Any]], set[
     return changes, stale
 
 
-def _obligations(snapshot: EvaluationSnapshot) -> dict[str, list[dict[str, Any]]]:
+def _obligations(snapshot: EvaluationSnapshot,
+                 states: Mapping[str, str]) -> dict[str, list[dict[str, Any]]]:
     state = snapshot.state
     late = bool(snapshot.command and snapshot.command.get("type") == "ObserveAction"
                 and snapshot.command["action"].get("kind") == "route"
@@ -61,14 +62,14 @@ def _obligations(snapshot: EvaluationSnapshot) -> dict[str, list[dict[str, Any]]
     if snapshot.graph:
         for claim in snapshot.graph["claims"]:
             row = {"id": "claim:" + claim["id"], "must": "Discharge claim " + claim["id"] + ".",
-                   "status": "satisfied" if claim_state(snapshot, claim) == "approved" else "residual"}
+                   "status": "satisfied" if states[claim["id"]] == "approved" else "residual"}
             if claim["id"] in deferred:
                 row["hold"] = "deferred"
             active.append(row)
     return {"active": active, "deferred": []}
 
 
-def _residuals(snapshot: EvaluationSnapshot) -> list[dict[str, Any]]:
+def _residuals(snapshot: EvaluationSnapshot, states: Mapping[str, str]) -> list[dict[str, Any]]:
     status = snapshot.state.status
     _, deferred = _scope(snapshot)
     if snapshot.state.frozen_claim_ids is not None and deferred:
@@ -81,20 +82,28 @@ def _residuals(snapshot: EvaluationSnapshot) -> list[dict[str, Any]]:
     if status == "stopped_frozen":
         return []
     if status == "stopped_residual" and snapshot.graph:
-        discarded = any(claim_state(snapshot, c) == "discarded" for c in snapshot.graph["claims"])
-        code = "claim.refuted" if discarded else "claim.research_missing"
+        gating, _ = _scope(snapshot)
+        scoped_ids = set(gating)
+        scoped = [c for c in snapshot.graph["claims"] if c["id"] in scoped_ids]
+        conflicted = any(claim_conflicted(snapshot, c) for c in scoped)
+        discarded = any(states[c["id"]] == "discarded" for c in scoped)
+        code = "claim.refuted" if discarded else ("evidence.conflict" if conflicted
+                                                   else "claim.research_missing")
         metadata = ({"next_actions": ["run.inspect"], "sections": ["claims/refutation"]}
-                    if discarded else
-                    {"next_actions": ["research.record"], "sections": ["evidence/research"]})
+                    if discarded else ({"next_actions": ["run.inspect", "residual.accept"],
+                    "sections": ["claims/refutation"]} if conflicted else
+                    {"next_actions": ["research.record"], "sections": ["evidence/research"]}))
         return [{"code": code, "parameters": {}, **metadata}]
     return []
 
 
 def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] | None = None) -> dict[str, Any]:
     changes, _ = _freshness(snapshot)
+    states = derive_claims(snapshot).states
     children = []
     for child in snapshot.state.children:
-        row = {"child_id": child["child_id"], "purpose": child["purpose"], "state": child["state"]}
+        row = {"child_id": child["child_id"], "purpose": child["purpose"],
+               "resource_class": child["resource_class"], "state": child["state"]}
         if child.get("deadline") is not None:
             row["deadline"] = str(child["deadline"])
         if child["state"] in {"launch_rejected", "failed", "cancelled", "timed_out", "orphaned"}:
@@ -107,7 +116,8 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
                      "digest": snapshot.contract_digest,
                      "relevant_sections": list(["protocol"] if relevant_sections is None
                                                else relevant_sections)},
-        "obligations": _obligations(snapshot), "residuals": _residuals(snapshot),
+        "obligations": _obligations(snapshot, states),
+        "residuals": _residuals(snapshot, states),
         "freshness": {"changes": changes}, "children": children,
         "next_actions": [],
         "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
@@ -122,7 +132,7 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
 
 def _audit(snapshot: EvaluationSnapshot) -> dict[str, Any]:
     audits = [a for a in snapshot.history if a.get("kind") == "audit_verdict"]
-    audit_children = [c for c in snapshot.state.children if c["purpose"] == "audit"]
+    audit_children = [c for c in snapshot.state.children if c["resource_class"] == "audit"]
     state = ("passed" if audits and audits[-1]["verdict"] == "pass" else
              "failed" if audits else
              "pending" if any(c["state"] in {"reserved", "launching", "pending"}
@@ -152,11 +162,12 @@ def project_argument(snapshot: EvaluationSnapshot) -> dict[str, Any]:
     del changes
     claims: list[dict[str, Any]] = []
     active_ids: set[str] = set()
+    states = derive_claims(snapshot).states
     for claim in snapshot.graph["claims"]:
         evidence = active_evidence(snapshot, claim)
         ids = [a["artifact_id"] for a in evidence]
         active_ids.update(ids)
-        state = claim_state(snapshot, claim)
+        state = states[claim["id"]]
         claims.append({
             "claim_id": claim["id"], "text": claim["text"],
             "wording_digest": claim_digest(claim), "state": state, "kind": claim["kind"],
@@ -173,7 +184,10 @@ def project_argument(snapshot: EvaluationSnapshot) -> dict[str, Any]:
                   "kind": kind, "statement_digest": art["statement_digest"]}
         if kind == "research":
             common.update(active=art["artifact_id"] in active_ids, outcome=art["outcome"],
-                          source_kind=art["source_kind"], source_ref=art["source_ref"])
+                          source_kind=art["source_kind"], source_ref=art["source_ref"],
+                          citation=art["citation"])
+            if "observed_content_digest" in art:
+                common["observed_content_digest"] = art["observed_content_digest"]
         elif kind == "spike_request":
             common.update(harness_request_id=art["harness_request_id"], command=art["command"],
                           command_digest=art["command_digest"], dependent_files=art["dependent_files"],

@@ -101,6 +101,7 @@ check-core: ## Host-neutral core: obligations lib, Empirica core/application/sta
 	@$(PYTHON) $(EMPIRICA_BRIDGE_V2_TESTS)
 	@$(PYTHON) $(EMPIRICA_PUBLIC_TOOLS_TESTS)
 	@$(PYTHON) $(EMPIRICA_AUDIT_PROTOCOL_TESTS)
+	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/test_stale_audit_retry.py
 	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/v2/__main__.py
 	@$(PYTHON) $(EMPIRICA_STATE_TESTS)
 	@$(PYTHON) $(EMPIRICA_GIT_ADAPTER_TESTS)
@@ -295,13 +296,18 @@ empirica-d7-conformance: ## run D7-owned D4 cases plus strict D6 state cases
 		test_budget_freeze_terminal.BudgetFreezeTerminalTests.test_committed_frozen_scope_only_gating_scope \
 		test_budget_freeze_terminal.BudgetFreezeTerminalTests.test_terminal_nonconverged_runs_honest \
 		test_protocol_host.ProtocolHostTests.test_v2_identity_checked_before_decoding \
-		test_protocol_host.ProtocolHostTests.test_v1_and_old_state_rejected_with_fresh_run_recovery \
+		test_protocol_host.ProtocolHostTests.test_noncurrent_wire_and_persisted_state_are_rejected \
 		test_protocol_host.ProtocolHostTests.test_unknown_fields_actions_fail_closed
 
 .PHONY: empirica-d7-transactions
 empirica-d7-transactions: ## run Empirica 2.0 D7-W transaction and history tests
 	@printf '$(BOLD)==> empirica d7 transactions$(RESET)\n'
 	@$(PYTHON) $(EMPIRICA_D7_TRANSACTION_TESTS)
+
+.PHONY: empirica-stale-audit-check
+empirica-stale-audit-check: ## Test bounded stale pending-audit recovery and the shared host protocol
+	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/test_stale_audit_retry.py
+	@$(PYTHON) $(EMPIRICA_AUDIT_PROTOCOL_TESTS)
 
 .PHONY: empirica-d7-location
 empirica-d7-location: ## run Empirica 2.0 D7-B location codec tests
@@ -336,10 +342,10 @@ doctor: ## empirica preflight: actors reachable; pass ARGS="--multi-provider" to
 	@PYTHONPATH=plugins/empirica $(PYTHON) -c 'from adapters.claude.preflight import main; raise SystemExit(main())' $(ARGS)
 
 # Dogfooding (see docs/packages.md "Scope and Deduplication" in pi): the committed .pi/settings.json
-# adds this checkout as a project-local package and applies an autoload:false DELTA over the globally
-# installed siffran package that force-excludes its Pi extensions/skills. Everything else in the
-# user's Pi setup (pi-subagents, providers, other packages) loads unchanged; only siffran is
-# overridden by this tree. Local edits hot-reload with /reload. Pi asks to trust the folder once.
+# adds this checkout as a project-local package and applies autoload:false DELTAs that exclude the
+# globally installed siffran resources and the separately installed pi-subagents extension. The
+# checkout-bundled exact pi-subagents profile remains active; providers and unrelated packages are
+# unchanged. Local edits hot-reload with /reload. Pi asks to trust the folder once.
 PI ?= pi
 .PHONY: pi-dev
 pi-dev: ## Run Pi with siffran overridden by THIS checkout (dogfood; other packages unchanged): make pi-dev [ARGS="..."]

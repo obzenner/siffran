@@ -6,8 +6,10 @@ from dataclasses import replace
 from typing import Any
 
 from core.context_selector import select_sections
-from core.evaluation import (Decision, EvaluationSnapshot, audit_binding, digest, evaluate_snapshot,
-                             plan_spike_request, plan_spike_result, valid_attribution)
+from core.evaluation import (SPAWN_BUDGET, Decision, EvaluationSnapshot, audit_binding,
+                             audit_operation_current, digest,
+                             evaluate_snapshot, frozen_scope_invalid, plan_spike_request,
+                             plan_spike_result, valid_attribution)
 from core.freshness import canonical_digest
 from core.projection import project_argument, project_runview
 from core.records import Conflict, Corrupt, RunKey
@@ -18,7 +20,8 @@ from .location import decode_handle, encode_handle, storage_id
 from .observation import (HarnessContractError, HarnessUnavailable, ObservationUnavailable,
                           build_observation_snapshot, execute_spike_bound)
 from .snapshot import (GraphInvalid, HistoryCorrupt, active_spike_heads as captured_heads,
-                       assemble, graph_from_history, make_artifact, state_digest, traverse_history)
+                       assemble, graph_from_history, make_artifact, state_digest, traverse_history,
+                       validate_investigation_history)
 
 
 def _plain(value: Any) -> Any:
@@ -67,14 +70,17 @@ class Coordinator:
         modes = {"multi_provider": False, "cli_exec": False}
         modes.update({k: v for k, v in self.limits.get("modes", {}).items() if k in modes})
         modes.update(command.get("modes", {}))
-        budgets = {"max_passes": 8, "passes_used": 0, "max_spawns": 1, "spawns_used": 0}
+        budgets = {"max_passes": 8, "passes_used": 0, "max_spawns": 1, "spawns_used": 0,
+                   "max_audit_spawns": 1, "audit_spawns_used": 0}
         supplied_limits = self.limits.get("budgets", self.limits)
-        budgets.update({k: v for k, v in supplied_limits.items() if k in {"max_passes", "max_spawns"}})
+        budgets.update({k: v for k, v in supplied_limits.items()
+                        if k in {"max_passes", "max_spawns", "max_audit_spawns"}})
         budgets.update(command.get("budgets", {}))
         return OperationalState(
             protocol=_proto._PROTOCOL, state_schema=_proto._STATE_SCHEMA_ID,
             goal=command["goal"], status="active", modes=modes, budgets=budgets,
-            selected_graph_artifact_id=None, frozen_claim_ids=None, route_stamp=None,
+            selected_graph_artifact_id=None, frozen_claim_ids=None, frozen_semantic_digest=None,
+            route_stamp=None,
             investigation_stamp=None, stamp_seq=0, last_derivation_digest=None,
             children=(), committed_artifact_head_id=None,
         )
@@ -136,11 +142,13 @@ class Coordinator:
         if key is None:
             return self._inert(request_id)
         read = self.runs.read(key)
-        if isinstance(read, Corrupt) or not self._present(read):
+        if isinstance(read, Corrupt):
+            return self._safe_block(key, request_id, "run.corrupt")
+        if not self._present(read):
             return self._inert(request_id)
         classification = run_state.classify_and_decode(read.value)
-        if classification.kind != "valid" or classification.state.status != "active":
-            return self._inert(request_id)
+        if classification.kind != "valid":
+            return self._safe_block(key, request_id, "run.corrupt")
         return self._read_response(key, read, command, request_id)
 
     def handle(self, command: dict[str, Any], request_id: str) -> dict[str, Any]:
@@ -169,14 +177,12 @@ class Coordinator:
         for _ in range(8):
             read = self.runs.read(key)
             if isinstance(read, Corrupt):
-                return self._safe_block(key, {}, request_id, "run.corrupt")
+                return self._safe_block(key, request_id, "run.corrupt")
             if not self._present(read):
                 return self._inert(request_id)
             classification = run_state.classify_and_decode(read.value)
-            if classification.kind == "old_unsupported":
-                return self._safe_block(key, read.value, request_id, "run.old_version")
             if classification.kind != "valid":
-                return self._safe_block(key, read.value, request_id, "run.corrupt")
+                return self._safe_block(key, request_id, "run.corrupt")
             state = classification.state
             if self.artifacts is None:
                 return self._fault(request_id, "unsupported")
@@ -194,7 +200,7 @@ class Coordinator:
             except HistoryCorrupt:
                 if not self._revision_unchanged(key, read.revision):
                     continue
-                return self._block_from_state(key, state, command, request_id, "run.corrupt")
+                return self._safe_block(key, request_id, "run.corrupt")
             except GraphInvalid:
                 if not self._revision_unchanged(key, read.revision):
                     continue
@@ -217,8 +223,8 @@ class Coordinator:
             next_state = decision.intent.state
             if (command["type"] == "ObserveAction"
                     and command["action"]["kind"] == "child_reserve"
-                    and command["action"].get("purpose") == "audit"
-                    and next_state != state):
+                    and command["action"].get("resource_class") == "audit"
+                    and len(next_state.children) > len(state.children)):
                 dossier = project_argument(snapshot)
                 children = list(next_state.children)
                 child = dict(children[-1])
@@ -255,8 +261,16 @@ class Coordinator:
         classified = run_state.classify_and_decode(read.value)
         if classified.kind != "valid":
             return None
+        try:
+            history = traverse_history(classified.state, self._read_artifacts(key))
+            validate_investigation_history(classified.state, history)
+            graph = graph_from_history(classified.state, history, required=True)
+        except (GraphInvalid, HistoryCorrupt):
+            return None
+        if frozen_scope_invalid(classified.state, graph):
+            return None
         child = next((row for row in classified.state.children
-                      if row["child_id"] == child_id and row["purpose"] == "audit"), None)
+                      if row["child_id"] == child_id and row["resource_class"] == "audit"), None)
         if child is None or not isinstance(child.get("audit_argument"), Mapping):
             return None
         return {
@@ -275,18 +289,34 @@ class Coordinator:
         key = decode_handle(run_id)
         if key is None:
             return self._inert(request_id)
-        planned_artifact = {"artifact_id": digest({"kind": kind, **payload}),
-                            "body": {"kind": kind, **payload}}
         for _ in range(8):
             read = self.runs.read(key)
+            if isinstance(read, Corrupt):
+                return self._safe_block(key, request_id, "run.corrupt")
             if not self._present(read):
                 return self._inert(request_id)
             classified = run_state.classify_and_decode(read.value)
-            if classified.kind != "valid" or classified.state.status != "active":
+            if classified.kind != "valid":
+                return self._safe_block(key, request_id, "run.corrupt")
+            if classified.state.status != "active":
                 return self._inert(request_id)
             state = classified.state
-            snapshot = self._assemble(key, state, {"type": "GetRun", "run_id": run_id},
-                                      require_graph=False)
+            planned_body = {"kind": kind, **payload, "route_stamp": state.route_stamp,
+                            "investigation_stamp": state.investigation_stamp}
+            planned_artifact = {"artifact_id": digest(planned_body), "body": planned_body}
+            try:
+                snapshot = self._assemble(key, state, {"type": "GetRun", "run_id": run_id},
+                                          require_graph=False)
+            except HistoryCorrupt:
+                if not self._revision_unchanged(key, read.revision):
+                    continue
+                return self._safe_block(key, request_id, "run.corrupt")
+            if frozen_scope_invalid(snapshot.state, snapshot.graph):
+                return self._fault_with_run(request_id, snapshot)
+            if state.route_stamp is None:
+                return self._block_from_snapshot(snapshot, request_id, "route.required")
+            if state.investigation_stamp is None:
+                return self._block_from_snapshot(snapshot, request_id, "investigation.required")
             same_key = [a for a in snapshot.history if a.get("kind") == kind and (
                 (kind == "audit_verdict" and a.get("child_id") == child_id) or
                 (kind == "attribution" and (
@@ -315,8 +345,9 @@ class Coordinator:
                     (payload.get("verdict") == "pass" and payload.get("scope_review") != expected_scope)):
                     return self._fault_with_run(request_id, snapshot)
                 index = next((i for i, c in enumerate(state.children)
-                              if c["child_id"] == child_id and c["purpose"] == "audit"), None)
-                if index is None or state.children[index]["state"] != "pending":
+                              if c["child_id"] == child_id and c["resource_class"] == "audit"), None)
+                if (index is None or state.children[index]["state"] != "pending"
+                        or not audit_operation_current(snapshot, state.children[index])):
                     return self._fault_with_run(request_id, snapshot)
                 children = list(state.children)
                 child = dict(children[index])
@@ -355,14 +386,23 @@ class Coordinator:
                  ("pending", "timed_out"), ("pending", "orphaned")}
         for _ in range(8):
             read = self.runs.read(key)
+            if isinstance(read, Corrupt):
+                return self._safe_block(key, request_id, "run.corrupt")
             if not self._present(read):
                 return self._inert(request_id)
             classified = run_state.classify_and_decode(read.value)
-            if classified.kind != "valid" or classified.state.status != "active":
+            if classified.kind != "valid":
+                return self._safe_block(key, request_id, "run.corrupt")
+            if classified.state.status != "active":
                 return self._inert(request_id)
             state = classified.state
-            snapshot = self._assemble(key, state, {"type": "GetRun", "run_id": run_id},
-                                      require_graph=False)
+            try:
+                snapshot = self._assemble(key, state, {"type": "GetRun", "run_id": run_id},
+                                          require_graph=False)
+            except HistoryCorrupt:
+                if not self._revision_unchanged(key, read.revision):
+                    continue
+                return self._safe_block(key, request_id, "run.corrupt")
             index = next((i for i, row in enumerate(state.children)
                           if row["child_id"] == child_id), None)
             if index is None:
@@ -388,7 +428,8 @@ class Coordinator:
             budgets = dict(state.budgets)
             if target == "launch_rejected":
                 child.update(spent=False, refunded=True, native_id=None)
-                budgets["spawns_used"] -= 1
+                _, used_key, _ = SPAWN_BUDGET[child["resource_class"]]
+                budgets[used_key] -= 1
             children = list(state.children)
             children[index] = child
             next_state = replace(state, children=tuple(children), budgets=budgets)
@@ -421,21 +462,19 @@ class Coordinator:
         for _ in range(8):
             read = self.runs.read(key)
             if isinstance(read, Corrupt):
-                return self._safe_block(key, {}, request_id, "run.corrupt")
+                return self._safe_block(key, request_id, "run.corrupt")
             if not self._present(read):
                 return self._inert(request_id)
             classification = run_state.classify_and_decode(read.value)
-            if classification.kind == "old_unsupported":
-                return self._safe_block(key, read.value, request_id, "run.old_version")
             if classification.kind != "valid":
-                return self._safe_block(key, read.value, request_id, "run.corrupt")
+                return self._safe_block(key, request_id, "run.corrupt")
             if classification.state.status != "active":
                 return self._inert(request_id)
             state = classification.state
             try:
                 snapshot = self._assemble(key, state, command, require_graph=True)
             except HistoryCorrupt:
-                return self._block_from_state(key, state, command, request_id, "run.corrupt")
+                return self._safe_block(key, request_id, "run.corrupt")
             except GraphInvalid:
                 return self._block_from_state(key, state, command, request_id, "graph.invalid")
             decision = plan_spike_request(snapshot, action)
@@ -460,21 +499,19 @@ class Coordinator:
         for _ in range(8):
             read = self.runs.read(key)
             if isinstance(read, Corrupt):
-                return self._safe_block(key, {}, request_id, "run.corrupt")
+                return self._safe_block(key, request_id, "run.corrupt")
             classification = run_state.classify_and_decode(read.value) if self._present(read) else None
             if not classification:
                 return self._inert(request_id)
-            if classification.kind == "old_unsupported":
-                return self._safe_block(key, read.value, request_id, "run.old_version")
             if classification.kind != "valid":
-                return self._safe_block(key, read.value, request_id, "run.corrupt")
+                return self._safe_block(key, request_id, "run.corrupt")
             state = classification.state
             if state.status != "active":
                 return self._inert(request_id)
             try:
                 snapshot = self._assemble(key, state, command, require_graph=True)
             except HistoryCorrupt:
-                return self._block_from_state(key, state, command, request_id, "run.corrupt")
+                return self._safe_block(key, request_id, "run.corrupt")
             except GraphInvalid:
                 return self._block_from_state(key, state, command, request_id, "graph.invalid")
             except ObservationUnavailable:
@@ -553,20 +590,13 @@ class Coordinator:
     def _read_response(self, key: RunKey, read: Any, command: dict[str, Any], request_id: str,
                        retries: int = 8):
         classification = run_state.classify_and_decode(read.value)
-        if command["type"] == "ResolveRun" and (
-                classification.kind != "valid" or classification.state.status != "active"):
-            return self._inert(request_id)
-        if classification.kind == "old_unsupported":
-            return self._safe_block(key, read.value, request_id, "run.old_version")
         if classification.kind != "valid":
-            return self._safe_block(key, read.value, request_id, "run.corrupt")
+            return self._safe_block(key, request_id, "run.corrupt")
         state = classification.state
         try:
             snapshot = self._assemble(key, state, command, require_graph=False)
         except HistoryCorrupt:
-            if command["type"] == "ResolveRun":
-                return self._inert(request_id)
-            return self._block_from_state(key, state, command, request_id, "run.corrupt")
+            return self._safe_block(key, request_id, "run.corrupt")
         except ObservationUnavailable:
             return self._fault(request_id, "unavailable")
         if not self._revision_unchanged(key, read.revision):
@@ -574,11 +604,12 @@ class Coordinator:
                 return self._fault(request_id, "conflict")
             latest = self.runs.read(key)
             if isinstance(latest, Corrupt):
-                return (self._inert(request_id) if command["type"] == "ResolveRun"
-                        else self._safe_block(key, {}, request_id, "run.corrupt"))
+                return self._safe_block(key, request_id, "run.corrupt")
             if not self._present(latest):
                 return self._inert(request_id)
             return self._read_response(key, latest, command, request_id, retries - 1)
+        if command["type"] == "ResolveRun" and state.status != "active":
+            return self._inert(request_id)
         self.last_state = state
         return self._allow(request_id, snapshot)
 
@@ -641,8 +672,8 @@ class Coordinator:
             host_tier=profile["current_tier"], command=command)
         return self._block_from_snapshot(snapshot, request_id, code)
 
-    def _safe_block(self, key: RunKey, raw: Any, request_id: str, code: str):
-        goal = raw.get("goal") if isinstance(raw, dict) and isinstance(raw.get("goal"), str) else "Unsupported run state."
+    def _safe_block(self, key: RunKey, request_id: str, code: str):
+        goal = "Unsupported run state."
         spec = _proto._PUBLIC_CONTRACT["reasons"][code]
         sections = list(spec["sections"])
         if "protocol" not in sections:

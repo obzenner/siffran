@@ -45,7 +45,7 @@ def _load_suite() -> unittest.TestSuite:
 # every method to call dispatch directly.
 _STRICT_RAW_METHODS: set[tuple[str, str]] = {
     ("test_protocol_host.py", "test_v2_identity_checked_before_decoding"),
-    ("test_protocol_host.py", "test_v1_and_old_state_rejected_with_fresh_run_recovery"),
+    ("test_protocol_host.py", "test_noncurrent_wire_and_persisted_state_are_rejected"),
     ("test_protocol_host.py", "test_unknown_fields_actions_fail_closed"),
     ("test_projection_context.py", "test_unknown_references_fail_closed"),
 }
@@ -170,8 +170,8 @@ def _run_preflight() -> int:
         _obs(action_configure_run(modes={"multi_provider": True})),
         _obs(action_route(reason="primary-claim")), _obs(action_investigate()), _obs(action_freeze()),
         _obs(action_dispatch(target="claim")), _obs(action_dispatch(target="claim", claim_id="c0")),
-        _obs(action_child_reserve(purpose="audit", role_profile="claude-code@2.1.270", execution="async")),
-        _obs(action_child_reserve(purpose="audit", role_profile="claude-code@2.1.270", execution="foreground", deadline="2026-01-01T00:00:00Z")),
+        _obs(action_child_reserve(purpose="audit", resource_class="audit", role_profile="claude-code@2.1.270", execution="async")),
+        _obs(action_child_reserve(purpose="audit", resource_class="audit", role_profile="claude-code@2.1.270", execution="foreground", deadline="2026-01-01T00:00:00Z")),
         _obs(action_evidence_leaf(payload=build_evidence_leaf_payload(
             harness_request_id="hreq-pf", command_digest="sha256:" + "0" * 64,
             prerequisite_research_ids=["sha256:" + "1" * 64],

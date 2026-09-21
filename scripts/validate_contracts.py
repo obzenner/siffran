@@ -48,7 +48,7 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:b70c27616f18a1cf5f8c6404066dcefc0a65a5a3f8d9849bbc1b1fbcf38aa1f6"
+REVIEWED_REGISTRY_DIGEST = "sha256:164ad4fc626115f19cf9b13077cc353468b49beaf5ff094490c09185d7d4d87a"
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:aad8b0b5cad21532a426a564d911c89ee64e4e94a750a1341b6adbbd5a22bebb"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
@@ -58,7 +58,7 @@ PROTOCOL = "empirica/v2"
 # types and research source kinds. Artifact kind/outcome/spike-gate vocabularies ARE
 # canonical-JSON (artifact_kinds/artifact_outcomes/spike_gates in the registry) and are
 # derived from the loaded registry, never duplicated here as EXPECTED_* tables.
-EDGE_TYPES = {"SupportedBy", "InContextOf"}
+EDGE_TYPES = {"SupportedBy"}
 EVIDENCE_SOURCE_KINDS = {"docs", "code", "runtime", "web"}
 # Strict normalized repo-relative POSIX path (shared schema/check). Rejects leading
 # slash, drive/colon, backslash/UNC, empty/repeated separators, dot/dotdot segments.
@@ -760,13 +760,19 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
                 errors.append(f"{p}: research source_kind {sk!r} not canonical")
             if not isinstance(art.get("source_ref"), str) or not art.get("source_ref"):
                 errors.append(f"{p}: research source_ref must be a nonempty string")
+            if not isinstance(art.get("citation"), str) or not art.get("citation"):
+                errors.append(f"{p}: research citation must be a nonempty string")
+            if ("observed_content_digest" in art
+                    and not _is_digest(art.get("observed_content_digest"))):
+                errors.append(f"{p}: research observed_content_digest must be sha256:<64hex>")
             if aid is not None and art.get("outcome") == "supporting" and cdigest is not None:
                 supporting_research_by_digest.setdefault(cdigest, set()).add(aid)
                 if art.get("active") is True and isinstance(cid, str):
                     active_supporting_by_cd.setdefault((cid, cdigest), set()).add(aid)
         elif kind == "spike_request":
             for fb in ("active", "outcome", "file_bindings", "exit_code", "spike_gate",
-                      "supersedes", "source_kind", "source_ref"):
+                      "supersedes", "source_kind", "source_ref", "citation",
+                      "observed_content_digest"):
                 if fb in art:
                     errors.append(f"{p}: spike_request artifact must not carry field {fb!r}")
             if not isinstance(art.get("harness_request_id"), str) or not art.get("harness_request_id"):
@@ -796,7 +802,8 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
                 else:
                     requests_by_key[key] = art
         elif kind == "spike":
-            for fb in ("source_kind", "source_ref", "dependent_files"):
+            for fb in ("source_kind", "source_ref", "citation", "observed_content_digest",
+                       "dependent_files"):
                 if fb in art:
                     errors.append(f"{p}: spike result artifact must not carry field {fb!r}")
             if not isinstance(art.get("active"), bool):
@@ -1321,10 +1328,12 @@ def _minimal_valid_state() -> dict:
         "status": "active",
         "modes": {"multi_provider": False, "cli_exec": False},
         "budgets": {"max_passes": 1, "passes_used": 0,
-                    "max_spawns": 1, "spawns_used": 0},
+                    "max_spawns": 1, "spawns_used": 0,
+                    "max_audit_spawns": 1, "audit_spawns_used": 0},
         "selected_graph_artifact_id": None,
         "committed_artifact_head_id": None,
         "frozen_claim_ids": None,
+        "frozen_semantic_digest": None,
         "route_stamp": None,
         "investigation_stamp": None,
         "stamp_seq": 0,
@@ -1335,8 +1344,8 @@ def _minimal_valid_state() -> dict:
 
 def _valid_child_for_state(state: str, d64: str, reg_terminal: set) -> dict:
     """Build one valid child record for the given canonical child state."""
-    base = {"child_id": f"c-{state}", "purpose": "audit", "state": state,
-            "deadline": None, "capability_ref": "cap-1",
+    base = {"child_id": f"c-{state}", "purpose": "audit", "resource_class": "audit",
+            "state": state, "deadline": None, "capability_ref": "cap-1",
             "audit_operation_id": d64, "audit_argument": {"argument_digest": d64},
             "audit_role_profile": "empirica:empirica-auditor"}
     if state == "reserved":
@@ -1381,7 +1390,7 @@ def _child_relation_mutations(state: str, d64: str, reg_terminal: set):
 def check_state_invariants(state: dict, errors: list[str], where: str) -> None:
     """Procedural invariants not expressible in JSON Schema (D6 section 4).
 
-    - counters: passes_used <= max_passes, spawns_used <= max_spawns;
+    - counters: each used counter is bounded and equals non-refunded children of its class;
     - stamps: route_stamp <= stamp_seq and investigation_stamp <= stamp_seq when non-null;
     - child_id uniqueness across the ordered children array;
     - child deadline: finite number or null (reject NaN/+Inf/-Inf).
@@ -1395,12 +1404,24 @@ def check_state_invariants(state: dict, errors: list[str], where: str) -> None:
         passes_used = budgets.get("passes_used", 0)
         max_spawns = budgets.get("max_spawns", 0)
         spawns_used = budgets.get("spawns_used", 0)
+        max_audit_spawns = budgets.get("max_audit_spawns", 0)
+        audit_spawns_used = budgets.get("audit_spawns_used", 0)
         if isinstance(passes_used, int) and isinstance(max_passes, int) \
                 and passes_used > max_passes:
             errors.append(f"{where}: passes_used {passes_used} > max_passes {max_passes}")
         if isinstance(spawns_used, int) and isinstance(max_spawns, int) \
                 and spawns_used > max_spawns:
             errors.append(f"{where}: spawns_used {spawns_used} > max_spawns {max_spawns}")
+        if isinstance(audit_spawns_used, int) and isinstance(max_audit_spawns, int) \
+                and audit_spawns_used > max_audit_spawns:
+            errors.append(f"{where}: audit_spawns_used {audit_spawns_used} > "
+                          f"max_audit_spawns {max_audit_spawns}")
+        charged = {"investigation": 0, "audit": 0}
+        for child in state.get("children", []) or []:
+            if isinstance(child, dict) and child.get("refunded") is False:
+                charged[child.get("resource_class")] = charged.get(child.get("resource_class"), 0) + 1
+        if spawns_used != charged["investigation"] or audit_spawns_used != charged["audit"]:
+            errors.append(f"{where}: spawn counters do not reconcile with non-refunded children")
     stamp_seq = state.get("stamp_seq", 0)
     if isinstance(stamp_seq, int):
         route_stamp = state.get("route_stamp")
@@ -2091,6 +2112,7 @@ def main() -> int:
         "invalid-missing-goal", "invalid-extra-field", "invalid-status",
         "invalid-child-duplicate-id", "invalid-counter", "invalid-stamp",
         "invalid-child-branch", "invalid-deadline-nan", "invalid-refund-mismatch",
+        "invalid-budget-reconciliation",
     }
     state_names = {p.name.removesuffix(".json") for p in state_fixture_paths}
     for name in sorted(REQUIRED_STATE_FIXTURES - state_names):
@@ -2108,6 +2130,7 @@ def main() -> int:
         "invalid-child-branch": (False, "False was expected"),
         "invalid-deadline-nan": (False, "finite number"),
         "invalid-refund-mismatch": (False, "launch_rejected"),
+        "invalid-budget-reconciliation": (False, "reconcile"),
     }
     for path in state_fixture_paths:
         name = path.name.removesuffix(".json")
@@ -2133,7 +2156,7 @@ def main() -> int:
     REQUIRED_V2_FIXTURES = {
         "start-bootstrap-allow", "block-open-claim", "block-stale-spike",
         "block-pending-audit", "block-child-terminal", "allow-stopped-frozen",
-        "allow-stopped-budget", "allow-converged", "block-old-version",
+        "allow-stopped-budget", "allow-converged", "block-corrupt-state",
         "getcontract-index", "getcontract-section", "getcontract-full",
         # D2E added presentation_selector GetContract section fixture.
         "getcontract-presentation-selector",
@@ -2646,7 +2669,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_bad_kind["argument"]["artifacts"] = [{"sequence": 0,
         "artifact_id": "sha256:" + "1" * 64, "claim_id": "G0", "claim_digest": d64,
         "kind": "research", "statement_digest": d64, "active": True, "outcome": "pass",
-        "source_kind": "web", "source_ref": "https://example.test/s"}]
+        "source_kind": "web", "source_ref": "https://example.test/s",
+        "citation": "Observed test source."}]
     expect(lambda e: check_argument_view(arg_bad_kind, registry, e, "neg"),
            "research outcome", "research artifact spike outcome")
 
@@ -2707,10 +2731,12 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_dup_art["argument"]["artifacts"] = [
         {"sequence": 0, "artifact_id": "sha256:" + "1" * 64, "claim_id": "G0", "claim_digest": d64,
          "kind": "research", "statement_digest": d64, "active": True, "outcome": "supporting",
-         "source_kind": "web", "source_ref": "https://example.test/s"},
+         "source_kind": "web", "source_ref": "https://example.test/s",
+         "citation": "Observed test source."},
         {"sequence": 1, "artifact_id": "sha256:" + "1" * 64, "claim_id": "G0", "claim_digest": d64,
          "kind": "research", "statement_digest": d64, "active": True, "outcome": "supporting",
-         "source_kind": "web", "source_ref": "https://example.test/s"}]
+         "source_kind": "web", "source_ref": "https://example.test/s",
+         "citation": "Observed test source."}]
     expect(lambda e: check_argument_view(arg_dup_art, registry, e, "neg"),
            "not unique", "duplicate artifact_id")
 
@@ -2739,11 +2765,11 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                 {"sequence": 0, "artifact_id": R1, "claim_id": "G0", "claim_digest": d64,
                  "kind": "research", "statement_digest": d64, "active": True,
                  "outcome": "supporting", "source_kind": "web",
-                 "source_ref": "https://example.test/s"},
+                 "source_ref": "https://example.test/s", "citation": "Observed test source."},
                 {"sequence": 1, "artifact_id": R2, "claim_id": "G0", "claim_digest": d64,
                  "kind": "research", "statement_digest": d64, "active": True,
                  "outcome": "supporting", "source_kind": "code",
-                 "source_ref": "src/a.py"},
+                 "source_ref": "src/a.py", "citation": "Observed test source."},
                 {"sequence": 2, "artifact_id": Q1, "claim_id": "G0", "claim_digest": d64,
                  "kind": "spike_request", "statement_digest": d64,
                  "harness_request_id": "h1", "command": "make test", "command_digest": d64,
@@ -2936,7 +2962,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                 {"sequence": 0, "artifact_id": R1, "claim_id": "G0", "claim_digest": d64,
                  "kind": "research", "statement_digest": d64, "active": True,
                  "outcome": "supporting", "source_kind": "web",
-                 "source_ref": "https://example.test/s"},
+                 "source_ref": "https://example.test/s", "citation": "Observed test source."},
                 {"sequence": 1, "artifact_id": Q1, "claim_id": "G0", "claim_digest": d64,
                  "kind": "spike_request", "statement_digest": d64,
                  "harness_request_id": "h1", "command": "make test", "command_digest": d64,
@@ -3019,7 +3045,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg["artifacts"].append({"sequence": 4, "artifact_id": "sha256:" + "9" * 64,
         "claim_id": "G0", "claim_digest": d64, "kind": "research", "statement_digest": d64,
         "active": True, "outcome": "refuting", "source_kind": "web",
-        "source_ref": "https://example.test/refutes"})
+        "source_ref": "https://example.test/refutes", "citation": "Observed refutation."})
     arg["claims"][0]["active_evidence_ids"] = [R1, R2, "sha256:" + "9" * 64, P1]
     arg["claims"][0]["evidence_digest"] = registry_digest(arg["claims"][0]["active_evidence_ids"])
     arg["audit"]["reviewed_claims"][0]["evidence_digest"] = arg["claims"][0]["evidence_digest"]
@@ -3071,7 +3097,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
             {"sequence": 0, "artifact_id": R1, "claim_id": "G0", "claim_digest": d64,
              "kind": "research", "statement_digest": d64, "active": True,
              "outcome": "supporting", "source_kind": "web",
-             "source_ref": "https://example.test/s"}],
+             "source_ref": "https://example.test/s", "citation": "Observed test source."}],
         "audit": {"state": "not_required", "independence": "unverified",
             "reviewed_argument_digest": None, "reviewed_goal_digest": None,
             "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": None,
@@ -3122,7 +3148,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
             {"sequence": 0, "artifact_id": R1, "claim_id": "G0", "claim_digest": d64,
              "kind": "research", "statement_digest": d64, "active": True,
              "outcome": "supporting", "source_kind": "web",
-             "source_ref": "https://example.test/s"},
+             "source_ref": "https://example.test/s", "citation": "Observed test source."},
             {"sequence": 1, "artifact_id": Q1, "claim_id": "G0", "claim_digest": d64,
              "kind": "spike_request", "statement_digest": d64,
              "harness_request_id": "h1", "command": "make test", "command_digest": d64,
@@ -3137,7 +3163,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
             {"sequence": 3, "artifact_id": R_X, "claim_id": "G1", "claim_digest": d64,
              "kind": "research", "statement_digest": d64, "active": True,
              "outcome": "supporting", "source_kind": "code",
-             "source_ref": "src/b.py"}],
+             "source_ref": "src/b.py", "citation": "Observed test source."}],
         "audit": {"state": "not_required", "independence": "unverified",
             "reviewed_argument_digest": None, "reviewed_goal_digest": None,
             "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": None,
@@ -3428,7 +3454,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         return [
             {"sequence": 0, "artifact_id": R1, "claim_id": "G0", "claim_digest": WORD,
              "kind": "research", "statement_digest": STMT, "active": True,
-             "outcome": "supporting", "source_kind": "web", "source_ref": "src/a.py"},
+             "outcome": "supporting", "source_kind": "web", "source_ref": "src/a.py",
+             "citation": "Observed test source."},
             {"sequence": 1, "artifact_id": Q1, "claim_id": "G0", "claim_digest": WORD,
              "kind": "spike_request", "statement_digest": STMT,
              "harness_request_id": "h1", "command": "make test", "command_digest": CMD,

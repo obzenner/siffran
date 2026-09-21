@@ -58,12 +58,11 @@ pending. Capture complete GetRun.
 
 Raw malformed requests still pass response schema validation.
 
-45. Persisted v1 identity with hostile/partial semantic fields restores as exact sole
-    `run.old_version` Block with canonical actions/sections before semantic decode. A v1 wire envelope
-    is exact Fault/closed.
+45. Persisted non-v2 identity with hostile/partial semantic fields restores as sole `run.corrupt`
+    without reusing those fields. A non-v2 wire envelope is exact Fault/closed.
 46. Wire protocol variants null/empty/v1/future/partial are exact Fault/closed. Persisted identities
-    null/missing/v1/future are exact sole run.old_version Blocks with start-fresh recovery and no
-    migration/defaults. Exact v2 identity with malformed/partial encoding is sole `run.corrupt` Block.
+    null/missing/v1/future and malformed exact-v2 state all produce the same sole `run.corrupt`
+    Block with fixed safe fields, start-fresh recovery, and no migration/defaults.
 47. Unknown top-level request field, command field, action kind, and action field each exact
     Fault/closed. Exact-v2 persisted unknown status is sole `run.corrupt` Block with canonical
     start-fresh recovery. No Fault|Block unions.

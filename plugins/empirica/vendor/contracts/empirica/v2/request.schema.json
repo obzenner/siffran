@@ -76,6 +76,10 @@
         "max_spawns": {
           "type": "integer",
           "minimum": 0
+        },
+        "max_audit_spawns": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     },
@@ -115,6 +119,27 @@
     "payload": {
       "type": "object",
       "description": "Extensible deep graph/evidence/actor domain data; only this object may carry D6-validated payload. The control object itself is closed."
+    },
+    "researchPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_ref",
+        "citation"
+      ],
+      "properties": {
+        "source_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "citation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observed_content_digest": {
+          "$ref": "#/$defs/digest256"
+        }
+      }
     },
     "digest256": {
       "type": "string",
@@ -646,7 +671,8 @@
         "kind",
         "claim_id",
         "source_kind",
-        "result"
+        "result",
+        "payload"
       ],
       "properties": {
         "kind": {
@@ -671,7 +697,7 @@
           ]
         },
         "payload": {
-          "$ref": "#/$defs/payload"
+          "$ref": "#/$defs/researchPayload"
         }
       }
     },
@@ -803,11 +829,26 @@
     "actionChildReserve": {
       "type": "object",
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "resource_class": {"const": "audit"}
+            }
+          },
+          "then": {
+            "properties": {
+              "purpose": {"const": "audit"}
+            }
+          }
+        }
+      ],
       "required": [
         "kind",
         "purpose",
         "role_profile",
-        "execution"
+        "execution",
+        "resource_class"
       ],
       "properties": {
         "kind": {
@@ -825,6 +866,12 @@
           "enum": [
             "foreground",
             "async"
+          ]
+        },
+        "resource_class": {
+          "enum": [
+            "investigation",
+            "audit"
           ]
         },
         "deadline": {

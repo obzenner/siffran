@@ -11,10 +11,13 @@
     "max_passes": 1,
     "passes_used": 0,
     "max_spawns": 0,
-    "spawns_used": 0
+    "spawns_used": 0,
+    "max_audit_spawns": 1,
+    "audit_spawns_used": 0
   },
   "selected_graph_artifact_id": null,
   "frozen_claim_ids": null,
+  "frozen_semantic_digest": null,
   "route_stamp": 10,
   "investigation_stamp": null,
   "stamp_seq": 3,

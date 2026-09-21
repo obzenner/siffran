@@ -28,7 +28,7 @@
             "claims/graph",
             "evidence/research"
           ],
-          "digest": "sha256:b70c27616f18a1cf5f8c6404066dcefc0a65a5a3f8d9849bbc1b1fbcf38aa1f6"
+          "digest": "sha256:164ad4fc626115f19cf9b13077cc353468b49beaf5ff094490c09185d7d4d87a"
         },
         "obligations": {
           "active": [],
@@ -104,7 +104,9 @@
             "active": true,
             "outcome": "supporting",
             "source_kind": "web",
-            "source_ref": "https://example.test/source"
+            "source_ref": "https://example.test/source",
+            "citation": "The observed source supports G0.",
+            "observed_content_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999"
           }
         ],
         "audit": {

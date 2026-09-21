@@ -43,7 +43,7 @@
           "relevant_sections": [
             "audit"
           ],
-          "digest": "sha256:b70c27616f18a1cf5f8c6404066dcefc0a65a5a3f8d9849bbc1b1fbcf38aa1f6"
+          "digest": "sha256:164ad4fc626115f19cf9b13077cc353468b49beaf5ff094490c09185d7d4d87a"
         },
         "obligations": {
           "active": [],
@@ -57,6 +57,7 @@
           {
             "child_id": "ch-audit-1",
             "purpose": "audit",
+            "resource_class": "audit",
             "state": "pending"
           }
         ],
@@ -110,7 +111,8 @@
             "active": true,
             "outcome": "supporting",
             "source_kind": "web",
-            "source_ref": "https://example.test/s"
+            "source_ref": "https://example.test/s",
+            "citation": "The observed source supports G0."
           },
           {
             "sequence": 1,

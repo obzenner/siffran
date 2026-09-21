@@ -55,7 +55,8 @@ test("Pi public tools and injected foreground observations satisfy adapter confo
       edges: [],
     }});
     await observe({ kind: "research", claim_id: "G0", source_kind: "code",
-                    result: "supports", payload: { source_ref: "probe.py" } });
+                    result: "supports", payload: { source_ref: "probe.py",
+                      citation: "The probe executes successfully." } });
     await observe({ kind: "spike_request", claim_id: "G0",
                     command: "python3 probe.py", dependent_files: ["probe.py"] });
     await observe({ kind: "freeze" });

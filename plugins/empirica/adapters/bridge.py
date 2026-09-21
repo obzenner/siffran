@@ -96,8 +96,7 @@ def trusted_audit_plan(profile_id: str, run_id: str, child_id: str) -> dict | No
 
 def trusted_resolve_child(profile_id: str, run_id: str, native_id: str) -> str | None:
     """Resolve an exact native audit execution without exposing correlation publicly."""
-    return build_service(profile_id).trusted_resolve_child(
-        run_id=run_id, native_id=native_id, purpose="audit")
+    return build_service(profile_id).trusted_resolve_child(run_id=run_id, native_id=native_id)
 
 
 def trusted_evidence_leaf(profile_id: str, run_id: str, payload: dict) -> dict:

@@ -17,8 +17,7 @@ tests:
   guarded by an exclusive OS lock on a per-target ``.lock`` file, so two processes racing a CAS
   serialise rather than lose an update.
 
-This implementation is intentionally self-contained and never imports the older hook-local scratch
-IO retained for explicit migration tests.
+This implementation is intentionally self-contained and never consults another state store.
 """
 from __future__ import annotations
 

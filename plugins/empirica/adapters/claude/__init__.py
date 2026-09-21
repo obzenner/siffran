@@ -34,7 +34,6 @@ from .route import (
     build_route_announcement_request,
     dispatch_investigation,
     dispatch_route_announcement,
-    is_route_command,
     observed_at,
 )
 from .run_start import (
@@ -99,7 +98,6 @@ __all__ = [
     "dispatched_harness",
     "failure_direction",
     "invocation_details",
-    "is_route_command",
     "observed_at",
     "parse_invocation",
     "request_id",

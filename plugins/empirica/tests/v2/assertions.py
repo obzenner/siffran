@@ -307,11 +307,11 @@ def action_graph(payload: dict | None = None) -> dict:
 
 def action_research(*, claim_id: str, source_kind: str, result: str,
                     payload: dict | None = None) -> dict:
-    a = {"kind": "research", "claim_id": claim_id,
-         "source_kind": source_kind, "result": result}
-    if payload is not None:
-        a["payload"] = payload
-    return a
+    details = {"source_ref": "plugins/empirica/tests/v2/assertions.py",
+               "citation": "The test observed this source directly."}
+    details.update(payload or {})
+    return {"kind": "research", "claim_id": claim_id,
+            "source_kind": source_kind, "result": result, "payload": details}
 
 
 def action_spike_request(*, claim_id: str, command: str, dependent_files: list[str]) -> dict:
@@ -352,9 +352,10 @@ def action_dispatch(*, target: str, claim_id: str | None = None) -> dict:
 
 
 def action_child_reserve(*, purpose: str, role_profile: str, execution: str,
-                        deadline: str | None = None) -> dict:
+                        resource_class: str, deadline: str | None = None) -> dict:
     a: dict = {"kind": "child_reserve", "purpose": purpose,
-               "role_profile": role_profile, "execution": execution}
+               "role_profile": role_profile, "execution": execution,
+               "resource_class": resource_class}
     if deadline is not None:
         a["deadline"] = deadline
     return a
@@ -916,6 +917,12 @@ class ConformanceCase(unittest.TestCase):
                         "research artifact must carry a statement_digest")
         self.assertTrue(art.get("source_ref"),
                         "research artifact must carry a source_ref")
+        self.assertTrue(art.get("citation"),
+                        "research artifact must carry a verbatim citation")
+        observed = art.get("observed_content_digest")
+        if observed is not None:
+            self.assertRegex(observed, _DIGEST_RE,
+                             "research observed_content_digest must be sha256:<hex>")
         if claim_id is not None:
             self.assertEqual(art.get("claim_id"), claim_id,
                              "research artifact claim_id must match")
@@ -1082,6 +1089,12 @@ class ConformanceCase(unittest.TestCase):
                 break
         if expected_kind is not None:
             self.assert_claim_kind(claim[0], expected_kind)
+        obligations = self._obligation_index(resp["result"]["run"])
+        if obligations.get("obligation.route", {}).get("status") != "satisfied":
+            route_resp = self.require_route_admitted(drv, run_id)
+            obligations = self._obligation_index(route_resp["result"]["run"])
+        if obligations.get("obligation.investigation", {}).get("status") != "satisfied":
+            self.require_investigate_admitted(drv, run_id)
         return payload
 
     def start_run(self, drv, *, goal: str | None = None, **kw) -> str:
@@ -1111,7 +1124,8 @@ class ConformanceCase(unittest.TestCase):
             argument = self.dispatch(drv, get_argument(run_id=run_id))
         before = {child["child_id"] for child in argument["result"].get("run", {}).get("children", [])}
         resp = self.dispatch(drv, observe_action(run_id=run_id, action=action_child_reserve(
-            purpose="audit", role_profile=self.DEFAULT_PROFILE, execution=execution)))
+            purpose="audit", resource_class="audit",
+            role_profile=self.DEFAULT_PROFILE, execution=execution)))
         run = resp["result"].get("run", {})
         kids = [child for child in run.get("children", []) if child.get("child_id") not in before]
         if len(kids) != 1:
@@ -1145,8 +1159,8 @@ class ConformanceCase(unittest.TestCase):
 
     # ---- D4-S3a child-summary and operational-snapshot helpers --------------------
     # Flatten/index child summaries for exact lookup; require exact operational integer fields
-    # (spawns_used, passes_used) without fallback defaults; snapshot complete public RunView
-    # plus operational side-effect facts for before/after equality. The single child
+    # (spawns_used, audit_spawns_used, passes_used) without fallback defaults; snapshot complete
+    # public RunView plus operational side-effect facts for before/after equality. The single child
     # index/assertion path is ``index_children`` + ``assert_child_summary`` (D4-S3a-R: removed
     # unused duplicate ``require_child_summary``).
 
@@ -1157,8 +1171,8 @@ class ConformanceCase(unittest.TestCase):
 
     @staticmethod
     def require_operational_int(drv, field: str) -> int:
-        """Require an exact operational integer field (``spawns_used``/``passes_used``) without
-        a fallback default (D4-S3a). Raises HarnessDefect if the field is absent or not an int."""
+        """Require an exact operational integer counter without a fallback default (D4-S3a).
+        Raises HarnessDefect if the field is absent or not an int."""
         st = drv.operational_state()
         val = st.get(field)
         if not isinstance(val, int):

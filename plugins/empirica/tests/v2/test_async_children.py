@@ -76,9 +76,10 @@ class AsyncChildrenTests(ConformanceCase):
         self.require_graph_admitted(drv, run_id)
         self.dispatch(drv, observe_action(
             run_id=run_id,
-            action={"kind": "configure_run", "budgets": {"max_spawns": 2}}))
+            action={"kind": "configure_run", "budgets": {"max_audit_spawns": 2}}))
         request = observe_action(run_id=run_id, action=action_child_reserve(
-            purpose="audit", role_profile=self.DEFAULT_PROFILE, execution="foreground"))
+            purpose="audit", resource_class="audit",
+            role_profile=self.DEFAULT_PROFILE, execution="foreground"))
         with ThreadPoolExecutor(max_workers=2) as pool:
             responses = list(pool.map(lambda _index: self.dispatch(drv, request), range(2)))
         self.assertEqual(sorted(row["result"]["type"] for row in responses), ["Allow", "Block"])
@@ -113,7 +114,8 @@ class AsyncChildrenTests(ConformanceCase):
         run_id = self.start_run(drv, goal=self.GOAL)
         self.require_graph_admitted(drv, run_id)
         resp = self.dispatch(drv, observe_action(run_id=run_id, action=action_child_reserve(
-            purpose="audit", role_profile=self.DEFAULT_PROFILE, execution="foreground")))
+            purpose="audit", resource_class="audit",
+            role_profile=self.DEFAULT_PROFILE, execution="foreground")))
         children = resp["result"]["run"].get("children", [])
         self.assertEqual(len(children), 1, "one run-scoped child record per reserve")
         self.assert_no_private_capability(children[0])
@@ -271,8 +273,9 @@ class AsyncChildrenTests(ConformanceCase):
         # advance to pending via trusted ingress: reserved -> launching -> pending
         self.require_child_state(drv, run_id, child_id, "launching")
         self.require_child_state(drv, run_id, child_id, "pending")
-        # exact spawns_used/passes_used (no fallback defaults)
+        # exact split-spawn/pass counters (no fallback defaults)
         spawns_before = self.require_operational_int(drv, "spawns_used")
+        audits_before = self.require_operational_int(drv, "audit_spawns_used")
         passes_before = self.require_operational_int(drv, "passes_used")
         # Compact and assert public pending child preserved without private dump.
         compacted = drv.compact()
@@ -287,11 +290,14 @@ class AsyncChildrenTests(ConformanceCase):
         resp_get = self.dispatch(reloaded, get_run(run_id=run_id))
         self.assert_child_summary(resp_get["result"]["run"], child_id, state="pending")
         self.dispatch(reloaded, evaluate(run_id=run_id, intent="continue"))
-        # Assert pending child survives and both counters unchanged—no duplicate spawn/pass.
+        # Assert pending child survives and all counters are unchanged.
         spawns_after = self.require_operational_int(reloaded, "spawns_used")
+        audits_after = self.require_operational_int(reloaded, "audit_spawns_used")
         passes_after = self.require_operational_int(reloaded, "passes_used")
         self.assertEqual(spawns_after, spawns_before,
-                         "reload must not duplicate a spawn")
+                         "reload must not consume an investigation spawn")
+        self.assertEqual(audits_after, audits_before,
+                         "reload must not duplicate an audit spawn")
         self.assertEqual(passes_after, passes_before,
                          "reload must not duplicate a pass")
 
@@ -301,10 +307,10 @@ class AsyncChildrenTests(ConformanceCase):
             drv = self.bind_driver(
                 "D8", "case-27",
                 "Launch rejection refunds exactly once; replay does not refund twice")
-            run_id = self.start_run(drv, goal=self.GOAL, budgets={"max_spawns": 2})
-            spawns0 = self.require_operational_int(drv, "spawns_used")
+            run_id = self.start_run(drv, goal=self.GOAL, budgets={"max_audit_spawns": 2})
+            spawns0 = self.require_operational_int(drv, "audit_spawns_used")
             child_id = self.require_admitted_child(drv, run_id)
-            spawns_after_reserve = self.require_operational_int(drv, "spawns_used")
+            spawns_after_reserve = self.require_operational_int(drv, "audit_spawns_used")
             self.assertEqual(spawns_after_reserve, spawns0 + 1,
                              "reserve must spend exactly spawns0+1")
             # trusted reserved→launch_rejected: exact refund to baseline.
@@ -312,7 +318,7 @@ class AsyncChildrenTests(ConformanceCase):
                                             build_child_event_payload("launch_rejected"))
             self.assert_valid_response(resp)
             self.assert_child_summary(resp["result"]["run"], child_id, state="launch_rejected")
-            spawns_after_reject = self.require_operational_int(drv, "spawns_used")
+            spawns_after_reject = self.require_operational_int(drv, "audit_spawns_used")
             self.assertEqual(spawns_after_reject, spawns0,
                              "launch rejection must refund the spawn exactly once")
             # Replay identical rejection: exact Inert, no second refund/side effect.
@@ -334,10 +340,10 @@ class AsyncChildrenTests(ConformanceCase):
             drv = self.bind_driver(
                 "D8", "case-27",
                 "Post-start failure does not refund the spawn")
-            run_id = self.start_run(drv, goal=self.GOAL, budgets={"max_spawns": 2})
-            spawns0 = self.require_operational_int(drv, "spawns_used")
+            run_id = self.start_run(drv, goal=self.GOAL, budgets={"max_audit_spawns": 2})
+            spawns0 = self.require_operational_int(drv, "audit_spawns_used")
             child_id = self.require_admitted_child(drv, run_id)
-            spawns_after_reserve = self.require_operational_int(drv, "spawns_used")
+            spawns_after_reserve = self.require_operational_int(drv, "audit_spawns_used")
             self.assertEqual(spawns_after_reserve, spawns0 + 1,
                              "reserve must spend exactly spawns0+1")
             # reserve→launching→pending→failed; spawn remains spent exactly +1.
@@ -348,9 +354,37 @@ class AsyncChildrenTests(ConformanceCase):
                                                  build_child_event_payload("failed", native_id="n1"))
             self.assert_valid_response(resp_fail)
             self.assert_child_summary(resp_fail["result"]["run"], child_id, state="failed")
-            spawns_after_fail = self.require_operational_int(drv, "spawns_used")
+            spawns_after_fail = self.require_operational_int(drv, "audit_spawns_used")
             self.assertEqual(spawns_after_fail, spawns_after_reserve,
                              "post-start failure must not refund the spawn (exactly +1)")
+
+        for terminal in ("launch_rejected", "failed"):
+            with self.subTest(variant=f"investigation_{terminal}"):
+                drv = self.bind_driver("D8", "case-27-investigation",
+                    "Investigation refund and spend stay isolated from audit capacity")
+                run_id = self.start_run(drv, goal=self.GOAL,
+                                        budgets={"max_spawns": 2, "max_audit_spawns": 1})
+                self.require_route_admitted(drv, run_id)
+                self.require_investigate_admitted(drv, run_id)
+                reserved = self.dispatch(drv, observe_action(run_id=run_id,
+                    action=action_child_reserve(purpose="audit",
+                        resource_class="investigation", role_profile="worker",
+                        execution="foreground")))
+                child_id = reserved["result"]["run"]["children"][0]["child_id"]
+                self.assertEqual(self.require_operational_int(drv, "spawns_used"), 1)
+                self.assertEqual(self.require_operational_int(drv, "audit_spawns_used"), 0)
+                if terminal == "failed":
+                    self.require_child_state(drv, run_id, child_id, "launching")
+                    self.require_child_state(drv, run_id, child_id, "pending")
+                    native_id = "ordinary-native"
+                else:
+                    native_id = None
+                response = drv.trusted_child_event(
+                    run_id, child_id, build_child_event_payload(terminal, native_id=native_id))
+                self.assert_valid_response(response)
+                self.assertEqual(self.require_operational_int(drv, "spawns_used"),
+                                 0 if terminal == "launch_rejected" else 1)
+                self.assertEqual(self.require_operational_int(drv, "audit_spawns_used"), 0)
 
     # 28 — Cancellation, timeout, and orphan recovery produce their exact state/recovery action
     def test_cancel_timeout_orphan_exact_state_and_recovery(self):
@@ -407,8 +441,11 @@ class AsyncChildrenTests(ConformanceCase):
                     "reasons rather than silent fallback; current tiers match D1-H/D2 profiles",
                     profile_id=pid)
                 run_id = self.start_run(drv, goal=self.GOAL)
+                self.require_route_admitted(drv, run_id)
+                self.require_investigate_admitted(drv, run_id)
                 resp = self.dispatch(drv, observe_action(run_id=run_id, action=action_child_reserve(
-                    purpose="audit", role_profile=pid, execution="async")))
+                    purpose="audit", resource_class="audit", role_profile=pid,
+                    execution="async")))
                 tier = profile_tier(pid)
                 self.assertIn(tier, HOST_TIERS)
                 if tier == "foreground_only":

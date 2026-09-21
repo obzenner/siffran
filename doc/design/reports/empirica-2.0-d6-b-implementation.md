@@ -82,9 +82,9 @@ wc -l application/protocol.py application/run_state.py application/v2.py
 
 ### Digest correlation
 
-`protocol._DIGEST` equals the canonical `registry_digest` (`sha256:49bdf998...1b42b65`) computed by
-`scripts/validate_contracts.py` and matches the committed `block-old-version` fixture, so the
-failure-safe RunView contract identity correlates exactly with on-demand contract discovery.
+`protocol._DIGEST` equals the canonical `registry_digest` and matches the committed
+`block-corrupt-state` fixture, so the fixed-safe rejected-aggregate RunView correlates exactly with
+on-demand contract discovery.
 
 ### diff / index
 

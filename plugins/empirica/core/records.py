@@ -5,9 +5,7 @@ deliberately free of any storage mechanism: nothing here knows about a filesyste
 object, a database row, or a Claude/Pi run. An adapter translates between these records and a
 concrete store; the domain only ever holds these.
 
-Every record is a frozen dataclass or a singleton — persistence code passes state *by value* and
-may not mutate a record it was handed, which is what lets the same record be compared, cached, and
-migrated without a defensive copy.
+Every record is a frozen dataclass or singleton, so persistence passes state by value.
 """
 from __future__ import annotations
 
@@ -22,12 +20,8 @@ T = TypeVar("T")
 class RunKey:
     """The identity of one run's slice of storage.
 
-    ``generation`` is what makes migration explicit rather than implicit. Two keys that differ
-    only in ``generation`` name *different* storage slices: a write under generation 1 is invisible
-    to a read at generation 2 (generation isolation). Data crosses a generation boundary only when
-    a :class:`~empirica.core.ports.MigrationPort` copies it there on purpose — never as a silent
-    side effect of a read. Bumping the generation is therefore a safe way to start a run's storage
-    from a clean, empty slice while the previous generation stays intact for rollback.
+    ``generation`` isolates fresh run slices. Two keys that differ only in ``generation`` name
+    different storage; starting a new generation never reads or rewrites the previous slice.
     """
 
     project_id: str
@@ -107,20 +101,6 @@ class Artifact:
 
     artifact_id: str
     body: str
-
-
-@dataclass(frozen=True)
-class MigrationReport:
-    """The outcome of one explicit :class:`~empirica.core.ports.MigrationPort` run.
-
-    Returned so a migration is observable and auditable rather than a silent copy — the counts let
-    a caller assert that the expected volume of state actually crossed the generation boundary.
-    """
-
-    source: RunKey
-    target: RunKey
-    runs_migrated: int
-    artifacts_migrated: int
 
 
 class Conflict(Exception):

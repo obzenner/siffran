@@ -14,8 +14,8 @@ status inputs and compare real selector output to loaded D2E registry arrays via
 Cases 43–44 use a real public setup (C0 ordinary approved, freeze, C1 deferred, foreground audit
 child driven to pending) and assert compaction preserves the complete captured RunView exactly
 with a recursive banned-key check (no copied ``_BANNED_REVISION`` constant). Cases 45–47 assert
-exact sole ``run.old_version``/``run.corrupt`` Blocks and exact Fault/closed — no Fault|Block
-unions. Cases 48–50 assert exact registry profile/tier/missing-capability projection, all
+exact sole ``run.corrupt`` Blocks for every rejected persisted aggregate and exact Fault/closed —
+no Fault|Block unions. Cases 48–50 assert exact registry profile/tier/missing-capability projection, all
 profiles observed exactly once, and no private material in any public surface (no
 ``drv.artifacts()`` as public). The preflight validates the loaded presentation_selector is
 structurally integral. The normal suite is red only at the absent `empirica/v2` SUT seam;
@@ -368,8 +368,8 @@ Corrected cases (36–50):
 | 42 | test_projection_context | StartRun exact Allow + no dump; Evaluate empty run exact sole graph.missing Block + no dump (no conditional); compacted no full contract/private/persisted recursively via all three separated helpers (``assert_no_full_contract_dump``, ``assert_no_private_capability``, ``assert_no_persisted_operational_fields``); redundant top-level ``assertNotIn`` removed |
 | 43 | test_compaction | Real public setup (C0 ordinary approved, freeze, C1 deferred, foreground audit child → pending); capture GetRun; compaction preserves exact goal/status/modes/contract identity/digest/relevant sections/obligations/residuals/freshness/children/host/next_actions; pending child + deferred C1 residual; no full contract/native/capability/counters/revision/history/phase via all three separated helpers (``assert_no_full_contract_dump``, ``assert_no_private_capability``, ``assert_no_persisted_operational_fields``); redundant top-level ``assertNotIn`` removed |
 | 44 | test_compaction | Compact + reload; reloaded driver GetRun/RestoreRun equal pre-compaction RunView exactly (run ID/pending child/deferred); full-contract/private/persisted-operational fields asserted via all three separated helpers recursively (``assert_no_full_contract_dump``, ``assert_no_private_capability``, ``assert_no_persisted_operational_fields``), not only top-level |
-| 45 | test_protocol_host | Persisted v1 identity with hostile/partial semantic fields → exact sole run.old_version Block with canonical actions/sections before decode; v1 wire envelope → exact Fault/closed |
-| 46 | test_protocol_host | Wire variants null/empty/v1/future/partial → exact Fault/closed; persisted identities null/missing/v1/future → exact sole run.old_version Blocks with start-fresh; exact v2 + malformed/partial encoding → sole run.corrupt Block |
+| 45 | test_protocol_host | Persisted non-v2 identity with hostile/partial fields → sole run.corrupt with no field reuse; non-v2 wire envelope → exact Fault/closed |
+| 46 | test_protocol_host | Wire variants null/empty/v1/future/partial → exact Fault/closed; every rejected persisted identity/encoding → sole run.corrupt with fixed safe fields and start-fresh |
 | 47 | test_protocol_host | Unknown top-level/command/action field and action kind → exact Fault/closed; exact-v2 persisted unknown status → sole run.corrupt Block with start-fresh; no Fault|Block unions |
 | 48 | test_protocol_host | Default host RunView profile ID/tier equal exact registry; missing capabilities equal exact registry list/order; no schema parity inference |
 | 49 | test_protocol_host | Iterate all canonical profile IDs; each StartRun host view equals exact registry profile/tier/missing-capability projection; all observed exactly once |
@@ -474,8 +474,8 @@ arguments match the actual method signature, so an unsupported helper keyword (e
 - Cases 37–40 compare real selector output to loaded D2E registry arrays via `ordered_dedupe`;
   the exact compaction-surface shape (case 43) and the compaction delimiters are owned by D9 and
   may need alignment once the D9 compaction projection is implemented.
-- Case 46 distinguishes `run.old_version` (non-v2 protocol) from `run.corrupt` (v2 protocol +
-  malformed/partial encoding); the exact structural trigger for `run.corrupt` is owned by D6.
+- Case 46 unifies every rejected persisted identity/encoding as `run.corrupt`; raw non-v2 wire
+  remains exact Fault/closed. The exact structural trigger is owned by D6.
 - Case 50 asserts no private material in public surfaces via the strengthened recursive
   `assert_no_private_capability`; the exact set of private field names is owned by D10.
 

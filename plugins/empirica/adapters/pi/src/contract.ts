@@ -24,6 +24,7 @@ export interface RunSelector {
 export interface Budgets {
   max_passes?: number;
   max_spawns?: number;
+  max_audit_spawns?: number;
 }
 
 export interface Modes {

@@ -34,6 +34,15 @@ Ordinary conversation with another model is not a substitute.
 6. Reread the run. Any changed graph, evidence, or scope invalidates stale audit
    coverage and requires a new bound audit.
 
+## Stale pending retry
+
+A new canonical audit request can replace a stale **pending** audit only when audit capacity remains.
+The host atomically cancels the obsolete child and reserves a fresh dossier; the old attempt stays
+charged to `audit_spawns_used`. No capacity is borrowed or increased automatically. On
+`budget.exhausted` for `audit_spawn`, explicitly configure capacity or accept an honest residual stop;
+do not repeatedly retry unchanged state. Current pending, reserved, and launching operations are not
+replaced by this path. Cancellation is logical, not proof that native execution stopped.
+
 ## Authority
 
 Audit is a blocker, not a machine approver. It cannot turn a missing research

@@ -2,11 +2,19 @@
   "packages": [
     "..",
     {
+      "source": "npm:pi-subagents@0.50.0",
+      "autoload": false,
+      "extensions": [
+        "-index.ts"
+      ]
+    },
+    {
       "source": "https://github.com/obzenner/siffran",
       "autoload": false,
       "extensions": [
         "-plugins/empirica/adapters/pi/src/index.ts",
-        "-plugins/methodologist/adapters/pi/src/index.ts"
+        "-plugins/methodologist/adapters/pi/src/index.ts",
+        "-node_modules/pi-subagents/index.ts"
       ],
       "skills": [
         "-plugins/empirica/skills/empirica",

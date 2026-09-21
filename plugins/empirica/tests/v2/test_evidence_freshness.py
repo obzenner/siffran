@@ -17,7 +17,7 @@ import unittest
 
 from assertions import (  # noqa: E402
     ConformanceCase, action_attribution, action_evidence_leaf,
-    action_graph, action_spike_request, canonical_graph, evaluate,
+    action_graph, action_research, action_spike_request, canonical_graph, evaluate,
     get_argument, get_run, observe_action,
 )
 
@@ -205,21 +205,22 @@ class EvidenceFreshnessTests(ConformanceCase):
 
     # 11 — Passing harness exit is the only machine approval; agent/audit cannot manufacture it
     def test_only_passing_harness_exit_approves(self):
-        # Independent fresh runs for forged audit, failing exit, and passing exit.
-        for label, do_setup, expect_approved in (
-            ("forged_audit", "forged", False),
-            ("failing_exit", "failing", False),
-            ("passing_exit", "passing", True),
+        # Independent fresh runs for forged audit, failing exits on both claim kinds, and pass.
+        for label, do_setup, claim_kind, expect_approved in (
+            ("forged_audit", "forged", "needs-experiment", False),
+            ("failing_experiment", "failing", "needs-experiment", False),
+            ("failing_ordinary", "failing", "ordinary", False),
+            ("passing_exit", "passing", "needs-experiment", True),
         ):
             with self.subTest(variant=label):
                 drv = self.bind_driver(
                     "D5", "case-11",
-                    "Only exit 0 yields a spike gate pass and derived approved claim in "
-                    "GetArgument; nonzero yields fail and not approved; forged agent/audit "
-                    "input never changes machine gate. Do not equate claim approval with final "
-                    "run convergence/audit completion")
+                    "Only exit 0 yields a spike gate pass and derived approved claim; a nonzero "
+                    "active spike discards both ordinary and needs-experiment claims with exact "
+                    "claim.refuted; forged agent/audit input never changes machine gate")
                 run_id = self.start_run(drv, goal=self.GOAL)
-                graph = self.require_graph_admitted(drv, run_id, canonical_graph(n_claims=1))
+                graph = self.require_graph_admitted(
+                    drv, run_id, canonical_graph(n_claims=1, kind=claim_kind))
                 root_id = graph["root"]
                 self.require_research_recorded(drv, run_id, root_id)
                 drv.workspace_write(_BOUND, b"v1")
@@ -251,6 +252,8 @@ class EvidenceFreshnessTests(ConformanceCase):
                     self.assertNotEqual(claim["state"], "approved",
                                         "nonzero exit or forged audit must not approve the claim")
                     if do_setup == "failing":
+                        self.assertEqual(claim["state"], "discarded",
+                                         "an active failing spike must discard every claim kind")
                         arts = self.get_argument_artifacts(drv, run_id)
                         res = self.find_one_argument_artifact(arts, kind="spike",
                                                               claim_id=root_id, active=True)
@@ -258,10 +261,23 @@ class EvidenceFreshnessTests(ConformanceCase):
                                          "nonzero exit must produce spike_gate=fail")
                         self.assertNotEqual(res["exit_code"], 0,
                                              "nonzero exit must produce nonzero exit_code")
-                # Do not equate claim approval with final run convergence/audit completion.
+                        # The deterministic failure dominates even if research later conflicts.
+                        self.dispatch(drv, observe_action(run_id=run_id, action=action_research(
+                            claim_id=root_id, source_kind="docs", result="refutes")))
+                        claim = self.get_argument_claim(drv, run_id, root_id)
+                        self.assertEqual(claim["state"], "discarded",
+                                         "a failing spike must dominate conflicting research")
+                # A failing spike has a stronger exact terminal reason; other variants only prove
+                # that claim approval is not final run convergence/audit completion.
                 ev = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
                 self.assertNotEqual(ev["result"].get("converged", False), True,
                                     "claim approval must not equal final run convergence")
+                if do_setup == "failing":
+                    self.assert_block_reason(ev, "claim.refuted")
+                    self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))
+                    stopped = self.dispatch(drv, get_run(run_id=run_id))["result"]["run"]
+                    self.assertIn("claim.refuted", {r["code"] for r in stopped["residuals"]},
+                                  "honest stop must preserve failed-spike dominance")
 
     # 12 — Every state-bearing request freshly observes every active bound file (per path)
     def test_state_bearing_requests_freshly_observe_bound_files(self):
@@ -383,10 +399,11 @@ class EvidenceFreshnessTests(ConformanceCase):
         root_id = graph["root"]
         c1_id = graph["claims"][1]["id"]
         # Two approved gating claims/spikes over separate files, proved via require_approved_spike.
-        self.require_research_recorded(drv, run_id, root_id)
-        self.require_approved_spike(drv, run_id, root_id, [_BOUND_C0], content=b"v1", exit_code=0)
+        # Approve the supporting child before asserting dependency-derived approval of its parent.
         self.require_research_recorded(drv, run_id, c1_id)
         self.require_approved_spike(drv, run_id, c1_id, [_BOUND_C1], content=b"v1", exit_code=0)
+        self.require_research_recorded(drv, run_id, root_id)
+        self.require_approved_spike(drv, run_id, root_id, [_BOUND_C0], content=b"v1", exit_code=0)
         # Prove both baseline claims are approved/fresh before mutation.
         c0_before = self.get_argument_claim(drv, run_id, root_id)
         c1_before = self.get_argument_claim(drv, run_id, c1_id)

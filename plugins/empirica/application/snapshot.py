@@ -5,7 +5,8 @@ import json
 import re
 from typing import Any
 
-from core.evaluation import EvaluationSnapshot, claim_digest, digest, valid_graph
+from core.evaluation import (EvaluationSnapshot, claim_digest, digest, frozen_scope_invalid,
+                             valid_graph)
 from core.freshness import ActiveSpikeHead, FileBinding
 from core.records import Artifact
 from core.run import OperationalState
@@ -113,19 +114,8 @@ def traverse_history(state: OperationalState, stored: Any) -> tuple[dict[str, An
                 raise HistoryCorrupt("duplicate committed artifact reference")
             value = by_id.get(aid)
             if value is None:
-                if aid == state.selected_graph_artifact_id:
-                    referenced.add(aid)
-                    ordered.append({"artifact_id": aid, "kind": "invalid_graph"})
-                    continue
                 raise HistoryCorrupt("missing committed domain artifact")
-            try:
-                domain = _decode(value)
-            except HistoryCorrupt:
-                if aid == state.selected_graph_artifact_id:
-                    referenced.add(aid)
-                    ordered.append({"artifact_id": aid, "kind": "invalid_graph"})
-                    continue
-                raise
+            domain = _decode(value)
             if domain.get("kind") == "transaction_manifest":
                 raise HistoryCorrupt("manifest referenced as domain artifact")
             referenced.add(aid)
@@ -140,15 +130,17 @@ def graph_from_history(state: OperationalState, history: tuple[dict[str, Any], .
                        *, required: bool) -> dict[str, Any] | None:
     selected = state.selected_graph_artifact_id
     if selected is None:
+        if state.frozen_claim_ids is not None or state.frozen_semantic_digest is not None:
+            raise HistoryCorrupt("frozen semantic identity has no selected graph")
         if required:
             raise GraphInvalid("no selected graph")
         return None
     item = next((a for a in history if a["artifact_id"] == selected), None)
     graph = item.get("graph") if item and item.get("kind") == "graph" else None
     if not valid_graph(graph):
-        if required:
-            raise GraphInvalid("selected graph invalid or unreachable")
-        return None
+        raise HistoryCorrupt("selected graph is missing, malformed, or structurally invalid")
+    if frozen_scope_invalid(state, graph):
+        raise HistoryCorrupt("selected graph conflicts with frozen semantic identity")
     return graph
 
 
@@ -171,9 +163,27 @@ def active_spike_heads(history: tuple[dict[str, Any], ...], graph: dict[str, Any
     return tuple(heads)
 
 
+def validate_investigation_history(state: OperationalState,
+                                   history: tuple[dict[str, Any], ...]) -> None:
+    evidence_kinds = {"research", "spike_request", "spike", "attribution", "audit_verdict"}
+    evidence = [item for item in history if item.get("kind") in evidence_kinds]
+    if not evidence:
+        return
+    if state.route_stamp is None or state.investigation_stamp is None:
+        raise HistoryCorrupt("investigation evidence has no route-order witnesses")
+    for item in evidence:
+        route_stamp = item.get("route_stamp")
+        investigation_stamp = item.get("investigation_stamp")
+        if (type(route_stamp) is not int or type(investigation_stamp) is not int
+                or route_stamp != state.route_stamp
+                or investigation_stamp != state.investigation_stamp):
+            raise HistoryCorrupt("investigation evidence conflicts with route-order witnesses")
+
+
 def assemble(state: OperationalState, stored: Any, workspace: Any, *, run_id: str,
              profile_id: str, command: dict[str, Any], require_graph: bool = False) -> EvaluationSnapshot:
     history = traverse_history(state, stored)
+    validate_investigation_history(state, history)
     graph = graph_from_history(state, history, required=require_graph)
     observation = build_observation_snapshot(active_spike_heads(history, graph), workspace)
     profile = _proto._PROFILES[profile_id]

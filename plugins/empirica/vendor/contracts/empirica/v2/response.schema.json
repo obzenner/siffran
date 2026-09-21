@@ -136,6 +136,7 @@
         "resource": {
           "enum": [
             "spawn",
+            "audit_spawn",
             "pass"
           ]
         }
@@ -227,21 +228,6 @@
           ],
           "properties": {
             "code": {
-              "const": "run.old_version"
-            },
-            "parameters": {
-              "$ref": "#/$defs/emptyParams"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "code",
-            "parameters"
-          ],
-          "properties": {
-            "code": {
               "const": "run.terminal"
             },
             "parameters": {
@@ -303,6 +289,21 @@
           "properties": {
             "code": {
               "const": "route.required"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "investigation.required"
             },
             "parameters": {
               "$ref": "#/$defs/emptyParams"
@@ -753,6 +754,7 @@
       "required": [
         "child_id",
         "purpose",
+        "resource_class",
         "state"
       ],
       "properties": {
@@ -763,6 +765,12 @@
         "purpose": {
           "type": "string",
           "minLength": 1
+        },
+        "resource_class": {
+          "enum": [
+            "investigation",
+            "audit"
+          ]
         },
         "state": {
           "enum": [
@@ -1578,8 +1586,7 @@
         },
         "type": {
           "enum": [
-            "SupportedBy",
-            "InContextOf"
+            "SupportedBy"
           ]
         }
       }
@@ -1611,7 +1618,8 @@
         "active",
         "outcome",
         "source_kind",
-        "source_ref"
+        "source_ref",
+        "citation"
       ],
       "description": "Fold-1 research citation; no spike fields.",
       "properties": {
@@ -1655,6 +1663,13 @@
         "source_ref": {
           "type": "string",
           "minLength": 1
+        },
+        "citation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observed_content_digest": {
+          "$ref": "#/$defs/digest256"
         }
       }
     },

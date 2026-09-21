@@ -128,7 +128,7 @@ No row may be removed without an explicit maintainer decision and a major-contra
 
 - The graph and active evidence are authoritative argument content.
 - Operational pointers select current append-only artifacts.
-- `claims.state_of` remains the only claim-state derivation.
+- `evaluation.derive_claims` remains the only claim-state and scoped-dependency derivation.
 - Active/deferred obligations are ephemeral RunView projections and are never persisted as a
   revisioned obligation-contract artifact or alternative adjudicator.
 - Host correlation maps are transport caches; durable async-child state belongs to the application.
