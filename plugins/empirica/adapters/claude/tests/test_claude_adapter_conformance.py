@@ -45,7 +45,7 @@ class ClaudeReachabilityTests(unittest.TestCase):
                 with patch.dict(os.environ, env, clear=False):
                     started = dispatch_start_run(payload, environ={})
                     run_id = started["result"]["run"]["id"]
-                    tools = PublicTools("claude-code@2.1.270")
+                    tools = PublicTools("claude-code@2.1.278")
 
                     def observe(action: dict) -> dict:
                         result = tools.call("empirica_observe", {
@@ -97,6 +97,25 @@ class ClaudeReachabilityTests(unittest.TestCase):
                     }
                     with patch.object(lifecycle, "_payload", return_value=start_payload):
                         self.assertEqual(lifecycle.subagent_start_main(), 0)
+
+                    pending_output = io.StringIO()
+                    with patch.object(lifecycle, "_payload", return_value=payload), \
+                         redirect_stdout(pending_output):
+                        self.assertEqual(lifecycle.completion_main(), 0)
+                    pending = json.loads(pending_output.getvalue())
+                    self.assertEqual([r["code"] for r in pending["reasons"]], ["audit.pending"])
+                    self.assertEqual(pending["run"]["status"], "active")
+
+                    restore_output = io.StringIO()
+                    with patch.object(lifecycle, "_payload", return_value=payload), \
+                         redirect_stdout(restore_output):
+                        self.assertEqual(lifecycle.restore_main(), 0)
+                    restored = tools.call("empirica_read", {
+                        "run_id": run_id, "operation": "GetRun",
+                    })["structuredContent"]
+                    audit_children = [child for child in restored["run"]["children"]
+                                      if child["resource_class"] == "audit"]
+                    self.assertEqual([child["state"] for child in audit_children], ["pending"])
 
                     argument = tools.call("empirica_read", {
                         "run_id": run_id, "operation": "GetArgument",

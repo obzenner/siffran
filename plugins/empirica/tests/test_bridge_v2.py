@@ -54,7 +54,7 @@ _HOST_PROFILES = json.loads((_V2 / "host-profiles.json").read_text(encoding="utf
 
 _PROTOCOL = _PUBLIC_CONTRACT["protocol"]
 _PROFILE_IDS = [p["profile_id"] for p in _HOST_PROFILES["profiles"]]
-_CANONICAL_PROFILE = "claude-code@2.1.270"
+_CANONICAL_PROFILE = "claude-code@2.1.278"
 
 from adapters import bridge  # noqa: E402
 

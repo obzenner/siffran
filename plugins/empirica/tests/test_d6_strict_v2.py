@@ -67,7 +67,7 @@ _STATUSES = list(_PUBLIC_CONTRACT["statuses"])
 _CHILD_STATES = list(_PUBLIC_CONTRACT["child_lifecycle"]["states"])
 _CHILD_TERMINAL = list(_PUBLIC_CONTRACT["child_lifecycle"]["terminal_states"])
 _PROFILES = {p["profile_id"]: p for p in _HOST_PROFILES["profiles"]}
-_DEFAULT_PROFILE = "claude-code@2.1.270"
+_DEFAULT_PROFILE = "claude-code@2.1.278"
 
 # --- Accepted observe fixture requests for the four trusted actions ---
 _TRUSTED_FIXTURE_REQUESTS: list[dict] = []

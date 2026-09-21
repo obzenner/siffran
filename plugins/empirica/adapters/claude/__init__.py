@@ -1,4 +1,4 @@
-"""Claude Code 2.1.270 driver and request translators for ``empirica/v2``.
+"""Claude Code 2.1.278 driver and request translators for ``empirica/v2``.
 
 Thin hooks in ``hooks/`` activate these modules. Public builders exclude trusted ingress; the
 Claude lifecycle binds the shared durable audit operation to exact SubagentStart/Stop native IDs.

@@ -22,7 +22,7 @@ def profile_from_environment(environ: dict[str, str] | None = None) -> str:
     if explicit:
         return explicit
     if env.get("CLAUDE_PLUGIN_ROOT"):
-        return "claude-code@2.1.270"
+        return "claude-code@2.1.278"
     if env.get("PLUGIN_ROOT"):
         return "codex-cli@0.146.0"
     raise ValueError("Empirica MCP requires an exact host profile")

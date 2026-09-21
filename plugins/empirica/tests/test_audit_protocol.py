@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Canonical foreground-audit protocol traces shared by every host driver."""
+"""Canonical audit protocol traces shared by foreground and async host drivers."""
 from __future__ import annotations
 
 import copy
@@ -71,6 +71,7 @@ class AuditProtocolTests(unittest.TestCase):
         reservation = next(row["command"]["action"] for row in self.requests
                            if row["command"]["type"] == "ObserveAction")
         self.assertEqual(reservation["resource_class"], "audit")
+        self.assertEqual(reservation["execution"], "foreground")
         self.assertEqual(plan.evidence_ids, ["sha256:" + "1" * 64])
         self.protocol.observe_started(plan, "native-1")
         self.protocol.observe_identities(
@@ -85,6 +86,19 @@ class AuditProtocolTests(unittest.TestCase):
         auditor = self.events[3][1]
         self.assertEqual(auditor["child_id"], "ch-1")
         self.assertEqual(auditor["subject_id"], "auditor:ch-1")
+
+    def test_async_execution_is_explicit_and_invalid_modes_fail_before_dispatch(self) -> None:
+        protocol = AuditProtocol(
+            "test-profile", execution="async", dispatch=self.protocol._dispatch,
+            child_event_ingress=self.protocol._child_event,
+            attribution_ingress=self.protocol._attribution,
+            verdict_ingress=self.protocol._verdict, plan_ingress=self.protocol._plan)
+        protocol.prepare("run", role_profile="canonical-auditor")
+        reservation = next(row["command"]["action"] for row in self.requests
+                           if row["command"]["type"] == "ObserveAction")
+        self.assertEqual(reservation["execution"], "async")
+        with self.assertRaises(ValueError):
+            AuditProtocol("test-profile", execution="background")
 
     def test_purpose_collision_does_not_block_or_orphan_investigation_child(self) -> None:
         ordinary = {"child_id": "ordinary", "purpose": "audit",

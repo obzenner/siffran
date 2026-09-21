@@ -194,7 +194,7 @@ class TransportProfileTests(unittest.TestCase):
         with patch_target(bridge, "handle", fake_handle):
             from adapters.claude.run_start import dispatch_start_run
             dispatch_start_run(_payload(command_args="prove X"), environ={})
-        self.assertEqual(captured["profile_id"], "claude-code@2.1.270")
+        self.assertEqual(captured["profile_id"], "claude-code@2.1.278")
         self.assertEqual(captured["command_type"], "StartRun")
 
 

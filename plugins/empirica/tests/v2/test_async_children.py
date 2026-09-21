@@ -431,7 +431,7 @@ class AsyncChildrenTests(ConformanceCase):
                 self.assertEqual(arg_post, arg_pre,
                                  "ArgumentView must be unchanged after identical terminal replay")
 
-    # 29 — Foreground-only/observational hosts return typed unsupported reasons; tiers match registry
+    # 29 — Generic child tiers match the exact host registry
     def test_unsupported_hosts_return_typed_reasons_and_match_registry(self):
         for pid in PROFILE_IDS:
             with self.subTest(profile=pid):
@@ -444,22 +444,22 @@ class AsyncChildrenTests(ConformanceCase):
                 self.require_route_admitted(drv, run_id)
                 self.require_investigate_admitted(drv, run_id)
                 resp = self.dispatch(drv, observe_action(run_id=run_id, action=action_child_reserve(
-                    purpose="audit", resource_class="audit", role_profile=pid,
-                    execution="async")))
+                    purpose="generic async probe", resource_class="investigation",
+                    role_profile=pid, execution="async")))
                 tier = profile_tier(pid)
                 self.assertIn(tier, HOST_TIERS)
-                if tier == "foreground_only":
-                    result = self.assert_block_only(resp, ["host.async_unsupported"])
-                elif tier == "observational":
-                    result = self.assert_block_only(resp, ["host.audit_output_unobservable"])
-                else:  # full_async: exact Allow with one reserved child
-                    self.assertEqual(resp["result"]["type"], "Allow")
+                if tier == "full_async":
+                    self.assertEqual(resp["result"]["type"], "Allow", resp)
                     result = resp["result"]
                     kids = result["run"].get("children", [])
                     self.assertEqual(len(kids), 1,
                                      "full_async reserve must admit exactly one reserved child")
                     self.assertEqual(kids[0]["state"], "reserved",
                                      "the reserved child must be in state 'reserved'")
+                elif tier == "foreground_only":
+                    result = self.assert_block_only(resp, ["host.async_unsupported"])
+                else:
+                    result = self.assert_block_only(resp, ["host.audit_output_unobservable"])
                 # Assert exact host profile/tier in RunView and no silent fallback.
                 self.assert_host_view(result["run"], pid)
 

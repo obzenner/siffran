@@ -26,8 +26,10 @@ Then identify the exact active host surface from the tools and lifecycle already
 present in context. **Do not read any file, including a skill reference, before
 route acknowledgement.** Use this inline bootstrap matrix:
 
-- **Claude Code `claude-code@2.1.270`:** continue when the Empirica hooks and
-  public MCP tools are active and trusted; record route first.
+- **Claude Code `claude-code@2.1.278`:** continue when the Empirica hooks and
+  public MCP tools are active and trusted; record route first. Canonical audits
+  are host-owned async children; a current pending audit settles the parent turn
+  until Claude's native completion notification resumes it.
 - **Pi `pi@0.84.1+pi-subagents@0.50.0`:** continue when `/empirica` injected an
   opaque handle and `empirica_observe`, `empirica_read`, `report_convergence`,
   and the structured `subagent` tool are present.
@@ -138,7 +140,9 @@ When every in-scope gating claim is approved, read
 [references/audit.md](references/audit.md).
 
 The author never grades its own convergence. On Claude, invoke the exact
-`empirica:empirica-auditor`; on Pi, invoke the exact packaged
+`empirica:empirica-auditor` once and let the parent turn settle while that bound async child is
+pending; Claude's native completion notification resumes the workflow after `SubagentStop`
+admits the terminal result. On Pi, invoke the exact packaged
 `empirica.empirica-auditor`. The host protocol—not `empirica_observe`—owns concrete
 reservation, dossier replacement, correlation, identity observation, and terminal admission.
 On Codex, do not launch an ordinary child: finish the turn only when all non-audit

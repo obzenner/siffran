@@ -19,11 +19,12 @@ Ordinary conversation with another model is not a substitute.
 
 1. Request the current typed audit argument. It binds the goal, graph shape,
    evidence, frozen/deferred scope, and reviewed claims by digest.
-2. On Claude or Pi, invoke exactly one canonical plugin-scoped auditor in foreground mode.
-   Do not submit `child_reserve`: concrete reservation is a host protocol operation and is
-   intentionally absent from `empirica_observe`. On Codex, finish the evidence-complete turn
-   so the trusted Stop hook can reserve and run its managed foreground auditor; do not spawn
-   an ordinary child.
+2. On Claude, invoke exactly one canonical plugin-scoped auditor and let its host-owned async
+   execution settle the parent turn while pending; never poll or respawn. On Pi, invoke exactly
+   one canonical plugin-scoped auditor in foreground mode. Do not submit `child_reserve`:
+   concrete reservation is a host protocol operation and is intentionally absent from
+   `empirica_observe`. On Codex, finish the evidence-complete turn so the trusted Stop hook can
+   reserve and run its managed foreground auditor; do not spawn an ordinary child.
 3. Let the host inject the dossier and bind native execution. Do not expose or
    manufacture private correlation material.
 4. The auditor independently retrieves every citation, checks spike provenance,

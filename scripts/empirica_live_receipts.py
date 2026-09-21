@@ -11,12 +11,13 @@ from typing import Any
 
 FORMAT = "empirica-live-receipt/v2"
 EXPECTED = {
-    "claude": ("claude-code@2.1.270", "2.1.270", "empirica:empirica-auditor"),
+    "claude": ("claude-code@2.1.278", "2.1.278", "empirica:empirica-auditor"),
     "pi": ("pi@0.84.1+pi-subagents@0.50.0", "0.84.1", "empirica.empirica-auditor"),
 }
 MAX_TRACE_BYTES = 128 << 20
 _VERDICT = re.compile(r"```empirica-verdict\s*\n(\{.*?\})\s*\n```", re.DOTALL)
 _AGENT_ID = re.compile(r"agentId:\s*([A-Za-z0-9_-]+)")
+_TASK_ID = re.compile(r"<task-id>\s*([^<\s]+)\s*</task-id>")
 
 
 def safe_read(path: Path) -> bytes:
@@ -128,7 +129,7 @@ def _tool_result_text(item: dict) -> str:
 
 def inspect_claude(parent: list[dict], child_rows: list[dict], child: dict) -> dict:
     launches = []
-    for row in parent:
+    for index, row in enumerate(parent):
         attachment = row.get("attachment")
         if not isinstance(attachment, dict) or attachment.get("hookName") != "PreToolUse:Agent":
             continue
@@ -137,59 +138,91 @@ def inspect_claude(parent: list[dict], child_rows: list[dict], child: dict) -> d
         except ValueError:
             continue
         updated = output.get("hookSpecificOutput", {}).get("updatedInput", {})
-        if updated.get("subagent_type") == "empirica:empirica-auditor":
-            launches.append((attachment.get("toolUseID"), updated))
+        if (updated.get("subagent_type") == "empirica:empirica-auditor"
+                and updated.get("run_in_background") is True):
+            launches.append((index, attachment.get("toolUseID"), updated))
     if len(launches) != 1:
-        raise ValueError("claude: expected one bound canonical Agent launch")
-    tool_id, _ = launches[0]
-    report_ids = set()
-    for row in parent:
+        raise ValueError("claude: expected one bound background canonical Agent launch")
+    launch_index, tool_id, _ = launches[0]
+    report_uses = []
+    settlements = []
+    for index, row in enumerate(parent):
+        attachment = row.get("attachment")
+        if isinstance(attachment, dict) and attachment.get("hookName") == "Stop":
+            try:
+                stopped = json.loads(attachment.get("stdout", ""))
+            except ValueError:
+                stopped = {}
+            reasons = stopped.get("reasons", []) if isinstance(stopped, dict) else []
+            stopped_run = stopped.get("run", {}) if isinstance(stopped, dict) else {}
+            stopped_children = stopped_run.get("children", []) if isinstance(stopped_run, dict) else []
+            pending = [item for item in stopped_children if isinstance(item, dict)
+                       and item.get("resource_class") == "audit" and item.get("state") == "pending"]
+            if (stopped.get("type") == "Block" and stopped_run.get("status") == "active"
+                    and len(pending) == 1 and pending[0].get("child_id") == child["child_id"]
+                    and [reason.get("code") for reason in reasons
+                         if isinstance(reason, dict)] == ["audit.pending"]):
+                settlements.append(index)
         message = row.get("message", {})
         for item in message.get("content", []) if isinstance(message, dict) else []:
             if (isinstance(item, dict) and item.get("type") == "tool_use"
                     and isinstance(item.get("name"), str)
                     and item["name"].endswith("report_convergence")
                     and isinstance(item.get("id"), str)):
-                report_ids.add(item["id"])
-    if len(report_ids) != 1:
-        raise ValueError("claude: expected one report_convergence tool use")
+                report_uses.append((index, item["id"]))
+    if len(report_uses) != 1 or len(settlements) != 1:
+        raise ValueError("claude: expected one pending Stop settlement and convergence tool use")
+    report_use_index, report_id = report_uses[0]
+    settlement_index = settlements[0]
     agent_results = []
     report_results = []
-    for row in parent:
+    notifications = []
+    for index, row in enumerate(parent):
         message = row.get("message", {})
-        for item in message.get("content", []) if isinstance(message, dict) else []:
+        content = message.get("content") if isinstance(message, dict) else None
+        text = text_content(content)
+        if (message.get("role") == "user" and "<task-notification>" in text
+                and _TASK_ID.findall(text) == [child["native_id"]]):
+            notifications.append((index, text))
+        for item in content if isinstance(content, list) else []:
             if not isinstance(item, dict) or item.get("type") != "tool_result":
                 continue
-            text = _tool_result_text(item)
+            item_text = _tool_result_text(item)
             if item.get("tool_use_id") == tool_id:
-                agent_results.append(text)
-            if item.get("tool_use_id") not in report_ids:
+                agent_results.append((index, item_text))
+            if item.get("tool_use_id") != report_id:
                 continue
             try:
-                value = json.loads(text)
+                value = json.loads(item_text)
             except ValueError:
                 continue
             if converged_result(value):
-                report_results.append(value)
-    if len(agent_results) != 1 or len(report_results) != 1:
-        raise ValueError("claude: missing unique Agent/report result")
-    match = _AGENT_ID.search(agent_results[0])
-    if match is None or match.group(1) != child["native_id"]:
-        raise ValueError("claude: Agent result does not bind durable native id")
-    parent_verdict = verdict(agent_results[0])
+                report_results.append((index, value))
+    if len(agent_results) != 1 or len(notifications) != 1 or len(report_results) != 1:
+        raise ValueError("claude: missing unique launch acknowledgement/notification/report result")
+    launch_result_index, launch_text = agent_results[0]
+    notification_index, notification_text = notifications[0]
+    report_result_index, report_result = report_results[0]
+    match = _AGENT_ID.search(launch_text)
+    if (match is None or match.group(1) != child["native_id"]
+            or "Async agent launched successfully" not in launch_text
+            or _VERDICT.search(launch_text)):
+        raise ValueError("claude: launch acknowledgement does not bind one async native id")
     child_row, child_message, child_text = final_assistant(child_rows, "claude")
-    if child_row.get("agentId") != child["native_id"] or verdict(child_text) != parent_verdict:
-        raise ValueError("claude: child transcript verdict/native id mismatch")
+    child_verdict = verdict(child_text)
+    if child_row.get("agentId") != child["native_id"] or verdict(notification_text) != child_verdict:
+        raise ValueError("claude: completion notification/child verdict/native id mismatch")
+    if not (launch_index < launch_result_index < settlement_index < notification_index
+            < report_use_index <= report_result_index):
+        raise ValueError("claude: async launch/notification/convergence order is invalid")
     author_parent = [row for row in parent if row.get("isSidechain") is not True]
     _, author_message, _ = final_assistant(author_parent, "claude")
     return {
-        "result": report_results[0],
+        "result": report_result,
         "author": {"provider_id": "anthropic", "model_id": author_message["model"]},
         "auditor": {"provider_id": "anthropic", "model_id": child_message["model"]},
-        "verdict": parent_verdict,
+        "verdict": child_verdict,
     }
-
-
 def inspect_pi(parent: list[dict], child_rows: list[dict], child: dict,
                child_path: Path) -> dict:
     launches = []

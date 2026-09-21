@@ -311,7 +311,7 @@ class ArchitectureValidatorTests(unittest.TestCase):
                          json.dumps({"protocol": "empirica/v2", "profiles": [{"profile_id": "other@1.0"}]}))
         diags = va.check_contract_references(cfg, self.repo_root)
         self.assertIn(va.RULE_CONTRACT_REF, self._ids(diags))
-        self.assertTrue(any("claude-code@2.1.270" in d.message for d in diags), diags)
+        self.assertTrue(any("claude-code@2.1.278" in d.message for d in diags), diags)
 
     # --- §5 case 16: deterministic sorted diagnostics with path:line -----------
 

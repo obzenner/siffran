@@ -535,7 +535,7 @@ class ConformanceCase(unittest.TestCase):
     """
 
     # Default profile used by cases that do not assert a specific host tier.
-    DEFAULT_PROFILE = "claude-code@2.1.270"
+    DEFAULT_PROFILE = "claude-code@2.1.278"
     DEFAULT_GOAL = "Prove the public contract is internally consistent."
 
     # ---- SUT binding -------------------------------------------------------

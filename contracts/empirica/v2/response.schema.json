@@ -2095,6 +2095,7 @@
         "actions",
         "child_lifecycle",
         "host_tiers",
+        "audit_execution_modes",
         "claim_states",
         "claim_kinds",
         "audit_states",
@@ -2234,6 +2235,14 @@
           }
         },
         "host_tiers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "audit_execution_modes": {
           "type": "array",
           "items": {
             "type": "string",

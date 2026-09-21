@@ -56,6 +56,7 @@ class EvaluationSnapshot:
     contract_digest: str = ""
     profile_id: str = ""
     host_tier: str = "observational"
+    host_audit_execution: str = "unavailable"
     command: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
@@ -531,7 +532,9 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                 return blocked
             execution = action["execution"]
             resource_class = action["resource_class"]
-            if execution == "async" and snapshot.host_tier != "full_async":
+            if (execution == "async" and snapshot.host_tier != "full_async"
+                    and not (resource_class == "audit"
+                             and snapshot.host_audit_execution == "async")):
                 reason = ("host.audit_output_unobservable" if snapshot.host_tier == "observational"
                           else "host.async_unsupported")
                 return _decision(snapshot, state, "Block", reason=reason)
@@ -634,6 +637,9 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             budgets = dict(state.budgets)
             budgets["passes_used"] += 1
             state = replace(state, budgets=budgets, last_derivation_digest=derivation_digest)
+        if any(child["resource_class"] == "audit" and child["state"] == "pending"
+               and audit_operation_current(snapshot, child) for child in state.children):
+            return _decision(snapshot, state, "Block", reason="audit.pending")
         audits = [a for a in snapshot.history if a.get("kind") == "audit_verdict"]
         if not audits:
             return _decision(snapshot, state, "Block", reason="audit.required")
