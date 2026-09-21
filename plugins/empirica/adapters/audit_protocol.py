@@ -94,10 +94,7 @@ class AuditProtocol:
         current_run = current_result.get("run", {}) if isinstance(current_result, Mapping) else {}
         current_children = (current_run.get("children", [])
                             if isinstance(current_run, Mapping) else [])
-        if any(isinstance(child, Mapping) and child.get("resource_class") == "audit"
-               and child.get("state") in {"reserved", "launching", "pending"}
-               for child in current_children):
-            raise AuditProtocolError("an audit operation is already active")
+        # The coordinator atomically distinguishes a current audit from a stale pending one.
         before = {child.get("child_id") for child in current_children
                   if isinstance(child, Mapping)}
         reserved = self._request({"type": "ObserveAction", "run_id": run_id, "action": {
@@ -221,7 +218,19 @@ class AuditProtocol:
     def _terminal(self, child_id: str, run_id: str, state: str, native_id: str | None) -> None:
         response = self._child_event(
             self.profile_id, run_id, child_id, child_event(state, native_id))
-        if not self._allow_or_inert(response):
+        if self._allow_or_inert(response):
+            return
+        try:
+            result = response["result"]
+            reconciled = (result.get("type") == "Block"
+                and len(result.get("reasons", [])) == 1
+                and result["reasons"][0].get("code") == "child.terminal"
+                and result["reasons"][0].get("parameters") == {"state": state}
+                and any(child.get("child_id") == child_id and child.get("state") == state
+                        for child in result.get("run", {}).get("children", [])))
+        except (AttributeError, KeyError, TypeError):
+            reconciled = False
+        if not reconciled:
             raise AuditProtocolError(f"audit terminal reconciliation rejected: {state}")
 
     @classmethod

@@ -2,6 +2,7 @@
 """Canonical foreground-audit protocol traces shared by every host driver."""
 from __future__ import annotations
 
+import copy
 import sys
 import unittest
 from pathlib import Path
@@ -189,6 +190,41 @@ class AuditProtocolTests(unittest.TestCase):
         self.assertEqual(protocol.reconcile_orphans("run", native_prefix="restore"), 3)
         self.assertEqual([(row[1], row[2]) for row in self.events],
                          [("r", "orphaned"), ("l", "orphaned"), ("p", "orphaned")])
+
+    def test_terminal_acknowledgement_accepts_only_exact_committed_block(self) -> None:
+        plan = AuditLaunchPlan("test-profile", "run", "ch-1", "canonical", self.argument)
+        exact = {"type": "Block", "reasons": [{"code": "child.terminal",
+            "parameters": {"state": "timed_out"}}], "run": {"children": [
+                {"child_id": "ch-1", "state": "timed_out", "resource_class": "audit"}]}}
+        wrong_code = copy.deepcopy(exact)
+        wrong_code["reasons"][0]["code"] = "run.corrupt"
+        extra_reason = copy.deepcopy(exact)
+        extra_reason["reasons"].append({"code": "run.corrupt"})
+        wrong_reason_state = copy.deepcopy(exact)
+        wrong_reason_state["reasons"][0]["parameters"]["state"] = "failed"
+        missing_child = copy.deepcopy(exact)
+        missing_child["run"]["children"] = []
+        wrong_child = copy.deepcopy(exact)
+        wrong_child["run"]["children"][0]["child_id"] = "other"
+        wrong_child_state = copy.deepcopy(exact)
+        wrong_child_state["run"]["children"][0]["state"] = "pending"
+        for result in (wrong_code, extra_reason, wrong_reason_state, missing_child,
+                       wrong_child, wrong_child_state):
+            with self.subTest(result=result):
+                self.protocol._child_event = lambda *_args: response(result)
+                with self.assertRaises(AuditProtocolError):
+                    self.protocol.observe_failure(plan, "native-1", "timed_out")
+        self.protocol._child_event = lambda *_args: response(exact)
+        self.protocol.observe_failure(plan, "native-1", "timed_out")
+
+    def test_malformed_terminal_response_is_a_typed_reconciliation_error(self) -> None:
+        plan = AuditLaunchPlan("test-profile", "run", "ch-1", "canonical", self.argument)
+        for malformed in (None, [], {"result": None}, response({"type": "Block", "reasons": None}),
+                          response({"type": "Block", "reasons": [None]})):
+            with self.subTest(response=malformed):
+                self.protocol._child_event = lambda *_args: malformed
+                with self.assertRaises(AuditProtocolError):
+                    self.protocol.observe_failure(plan, "native-1", "timed_out")
 
     def test_multiple_reserved_children_fail_closed(self) -> None:
         self.children.append({"child_id": "ch-2", "purpose": "audit", "resource_class": "audit", "state": "reserved"})

@@ -19,6 +19,9 @@ from . import protocol as _proto
 _STATE_SCHEMA = _proto._STATE_SCHEMA
 _PROTOCOL = _proto._PROTOCOL
 _STATE_SCHEMA_ID = _proto._STATE_SCHEMA_ID
+_AUDIT_DOSSIER = jsonschema.Draft202012Validator(
+    {"$ref": "#/$defs/argumentView", "$defs": _proto._RESPONSE_SCHEMA["$defs"]},
+    registry=_proto._SCHEMA_REGISTRY)
 
 
 def _thaw(value: Any) -> Any:
@@ -77,6 +80,7 @@ def _procedural_ok(doc: dict) -> bool:
         if resource_class == "audit":
             if (ch.get("purpose") != "audit" or not isinstance(ch.get("audit_operation_id"), str)
                     or not isinstance(ch.get("audit_argument"), dict)
+                    or not _AUDIT_DOSSIER.is_valid(ch["audit_argument"])
                     or not isinstance(ch.get("audit_role_profile"), str)):
                 return False
         elif (ch.get("audit_operation_id") is not None or ch.get("audit_argument") is not None

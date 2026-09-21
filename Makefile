@@ -101,6 +101,7 @@ check-core: ## Host-neutral core: obligations lib, Empirica core/application/sta
 	@$(PYTHON) $(EMPIRICA_BRIDGE_V2_TESTS)
 	@$(PYTHON) $(EMPIRICA_PUBLIC_TOOLS_TESTS)
 	@$(PYTHON) $(EMPIRICA_AUDIT_PROTOCOL_TESTS)
+	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/test_stale_audit_retry.py
 	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/v2/__main__.py
 	@$(PYTHON) $(EMPIRICA_STATE_TESTS)
 	@$(PYTHON) $(EMPIRICA_GIT_ADAPTER_TESTS)
@@ -302,6 +303,11 @@ empirica-d7-conformance: ## run D7-owned D4 cases plus strict D6 state cases
 empirica-d7-transactions: ## run Empirica 2.0 D7-W transaction and history tests
 	@printf '$(BOLD)==> empirica d7 transactions$(RESET)\n'
 	@$(PYTHON) $(EMPIRICA_D7_TRANSACTION_TESTS)
+
+.PHONY: empirica-stale-audit-check
+empirica-stale-audit-check: ## Test bounded stale pending-audit recovery and the shared host protocol
+	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/test_stale_audit_retry.py
+	@$(PYTHON) $(EMPIRICA_AUDIT_PROTOCOL_TESTS)
 
 .PHONY: empirica-d7-location
 empirica-d7-location: ## run Empirica 2.0 D7-B location codec tests

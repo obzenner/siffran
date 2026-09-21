@@ -344,6 +344,16 @@ Committed-scope discharge owes this audit even though `stopped_frozen` remains n
 root-refuted and explicit give-up residual runs do not. Any graph wording/shape, active evidence,
 freshness, goal, frozen scope, or deferred tuple change invalidates corresponding coverage.
 
+A stale pending audit is recoverable only through the host-owned audit reservation boundary:
+with remaining audit capacity, the coordinator atomically marks the old child `cancelled` and
+reserves a fresh child/dossier. The old native ID, spent charge, and launch dossier remain unchanged;
+logical cancellation does not claim native process termination. Current pending, reserved, and
+launching audits are not superseded by this path. Exhaustion leaves state untouched and returns
+`budget.exhausted` for `audit_spawn`; configuration or honest stop remains explicit. No automatic
+retry loop, refund, ceiling increase, or borrowing is introduced. Verdict admission checks both the
+immutable launch dossier and current snapshot, so old children cannot submit newly rebound verdicts.
+Persisted malformed dossiers fail fixed-safe `run.corrupt` before recovery or projection.
+
 The old model-visible nonce is removed. Anti-forgery is the private capability field on the single
 child record plus exact native child binding. The author cannot create convergence-relevant
 attribution or submit `audit_verdict` directly. Deliberate same-OS-user access to the bridge/store

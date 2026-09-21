@@ -279,7 +279,9 @@
       "summary": "When audit is owed and how pending, unreadable, and failed audits surface.",
       "clauses": [
         {"id": "audit/owed", "text": "Audit is owed only after committed gating claims are otherwise terminal and approvable."},
-        {"id": "audit/binding", "text": "A valid audit binds one pending-audit child_id through a private adapter capability, a structured pass or fail verdict, current argument digest, and reviewed claim and evidence digests for every approved gating claim."},
+        {"id": "audit/binding", "text": "A valid audit binds one pending-audit child_id through a private adapter capability, a structured pass or fail verdict, current argument digest, and reviewed claim and evidence digests for every approved gating claim. The immutable launch dossier must still match current goal, argument, frozen/deferred scope, and approved-claim coverage; an old child cannot be rebound to a new dossier."},
+        {"id": "audit/stale_pending", "text": "A host-owned audit reservation may atomically cancel a stale pending audit and reserve a fresh child within remaining audit capacity. Cancellation retains the spent charge, native identity, and immutable dossier; no refund, budget increase, or investigation borrowing occurs. Current pending, reserved, or launching audits block replacement. Exhaustion is a zero-write budget.exhausted Block. Logical cancellation does not assert that native execution stopped; late output cannot change the first terminal state."},
+        {"id": "audit/durable_dossier", "text": "A persisted audit dossier must validate as a complete ArgumentView. Malformed selected state is fixed-safe run.corrupt, never a stale operation eligible for repair."},
         {"id": "audit/pending", "text": "An owed audit with a pending child yields audit.pending with child.wait and no respawn guidance."},
         {"id": "audit/unreadable", "text": "Invalid or missing audit output yields audit.unreadable with child.retry."},
         {"id": "audit/failed", "text": "A failed audit yields audit.failed with run.inspect and child.retry."}

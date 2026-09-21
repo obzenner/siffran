@@ -6,7 +6,8 @@ from dataclasses import replace
 from typing import Any
 
 from core.context_selector import select_sections
-from core.evaluation import (SPAWN_BUDGET, Decision, EvaluationSnapshot, audit_binding, digest,
+from core.evaluation import (SPAWN_BUDGET, Decision, EvaluationSnapshot, audit_binding,
+                             audit_operation_current, digest,
                              evaluate_snapshot, frozen_scope_invalid, plan_spike_request,
                              plan_spike_result, valid_attribution)
 from core.freshness import canonical_digest
@@ -223,7 +224,7 @@ class Coordinator:
             if (command["type"] == "ObserveAction"
                     and command["action"]["kind"] == "child_reserve"
                     and command["action"].get("resource_class") == "audit"
-                    and next_state != state):
+                    and len(next_state.children) > len(state.children)):
                 dossier = project_argument(snapshot)
                 children = list(next_state.children)
                 child = dict(children[-1])
@@ -345,7 +346,8 @@ class Coordinator:
                     return self._fault_with_run(request_id, snapshot)
                 index = next((i for i, c in enumerate(state.children)
                               if c["child_id"] == child_id and c["resource_class"] == "audit"), None)
-                if index is None or state.children[index]["state"] != "pending":
+                if (index is None or state.children[index]["state"] != "pending"
+                        or not audit_operation_current(snapshot, state.children[index])):
                     return self._fault_with_run(request_id, snapshot)
                 children = list(state.children)
                 child = dict(children[index])

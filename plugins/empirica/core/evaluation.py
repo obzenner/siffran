@@ -423,6 +423,17 @@ def audit_binding(snapshot: EvaluationSnapshot) -> dict[str, Any]:
             "scope_review": ("pass" if snapshot.state.frozen_claim_ids is not None else None)}
 
 
+def audit_operation_current(snapshot: EvaluationSnapshot, child: Mapping[str, Any]) -> bool:
+    """Compare the immutable launch dossier, including scope and freshness-derived coverage."""
+    expected = audit_binding(snapshot)
+    dossier = child["audit_argument"]
+    reviewed = [{"claim_id": c["claim_id"], "evidence_digest": c["evidence_digest"]}
+                for c in dossier["claims"] if c["gating"] and c["state"] == "approved"]
+    return (bool(expected) and reviewed == expected["reviewed_claims"]
+            and all(dossier[key] == expected[key] for key in (
+                "argument_digest", "goal_digest", "frozen_scope_digest", "deferred_scope_digest")))
+
+
 def audit_passes(snapshot: EvaluationSnapshot, verdict: Mapping[str, Any]) -> bool:
     expected = audit_binding(snapshot)
     return (bool(expected) and verdict.get("verdict") == "pass" and
@@ -520,19 +531,26 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                 return blocked
             execution = action["execution"]
             resource_class = action["resource_class"]
-            if resource_class == "audit" and any(
-                child["resource_class"] == "audit"
-                and child["state"] in {"reserved", "launching", "pending"}
-                for child in state.children
-            ):
-                return _decision(snapshot, state, "Block", reason="audit.pending")
             if execution == "async" and snapshot.host_tier != "full_async":
                 reason = ("host.audit_output_unobservable" if snapshot.host_tier == "observational"
                           else "host.async_unsupported")
                 return _decision(snapshot, state, "Block", reason=reason)
+            if resource_class == "audit":
+                children = list(state.children)
+                for index, child in enumerate(children):
+                    if child["resource_class"] != "audit" or child["state"] not in {
+                            "reserved", "launching", "pending"}:
+                        continue
+                    if child["state"] != "pending" or audit_operation_current(snapshot, child):
+                        return _decision(snapshot, state, "Block", reason="audit.pending")
+                    # Logical cancellation is not a native stop or a refundable launch rejection.
+                    children[index] = {**child, "state": "cancelled",
+                        "first_terminal_fingerprint": digest({"stale_audit": child["audit_operation_id"],
+                                                              "binding": audit_binding(snapshot)})}
+                state = replace(state, children=tuple(children))
             limit_key, used_key, resource = SPAWN_BUDGET[resource_class]
             if state.budgets[used_key] >= state.budgets[limit_key]:
-                return _decision(snapshot, state, "Block", reason="budget.exhausted",
+                return _decision(snapshot, snapshot.state, "Block", reason="budget.exhausted",
                                  parameters={"resource": resource})
             ordinal = len(state.children) + 1
             seed = {"run_id": snapshot.run_id, "ordinal": ordinal,

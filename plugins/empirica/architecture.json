@@ -132,7 +132,7 @@
   "effective_runtime": {
     "baseline": 9458,
     "baseline_ref": "4257c8d",
-    "maximum": 9457,
+    "maximum": 9484,
     "extensions": [".py", ".ts"]
   },
   "thin_hooks": {

@@ -971,3 +971,80 @@ non-converging failed audit child as expected. These are development traces, not
 
 This is development acceptance, not an installed-host release receipt. Human HITL
 acceptance is pending.
+
+### Seam 8 — Bounded stale pending-audit replacement — IMPLEMENTED, HITL accepted
+
+Worktree baseline: `1f7c6fa`. Parent remained the sole implementor; no files were staged or committed.
+ADR 50 is human-accepted, including the bounded replacement policy and the 27-line architecture-ceiling
+exception. The unreleased Empirica version remains 3.0.0.
+
+The host-owned audit reservation now compares an immutable pending dossier against current goal,
+argument, frozen/deferred scope, and ordered approved-claim evidence coverage. Graph, evidence,
+freeze, or file-freshness drift can make it stale. With remaining audit capacity, one CAS transaction
+logically cancels the obsolete pending child and reserves a fresh child/dossier. The old child keeps
+its spent charge, native ID, operation binding, and first terminal fingerprint. No refund, automatic
+budget increase, investigation borrowing, native-stop assertion, or retry loop is introduced.
+Current pending, reserved, and launching audits still block replacement. Audit-budget exhaustion
+is zero-write, preserving ADR 49; explicit configuration or honest stop is required to proceed.
+
+Verdict ingress also checks the original dossier, preventing a stale pending child from submitting
+newly rebound current coverage. Full persisted ArgumentView validation distinguishes malformed state
+from recoverable staleness and returns fixed-safe `run.corrupt`. Shared protocol reconciliation now
+accepts exact committed `child.terminal` Blocks, rejects unrelated Blocks, and turns malformed
+terminal responses into typed protocol errors. No public tools or state-repair paths were added.
+
+Red-first evidence:
+
+- stale graph/freeze operations could not be replaced, and exhausted stale audits stayed behind an
+  unhelpful active-audit precheck;
+- a stale pending child could admit a newly rebound current verdict;
+- successful timeout/orphan terminal commits were treated as protocol errors;
+- a malformed persisted dossier projected as valid instead of fixed-safe corruption;
+- an initial implementation cancelled on exhausted reservation; a zero-write regression restored
+  ADR 49 semantics before review;
+- five malformed terminal-response shapes raised untyped exceptions, fixed after Astra review.
+
+Independent non-Anthropic Astra review (`amazon-bedrock-us/us.openai.gpt-6-astra:medium`):
+
+- initial review found two validation blockers: missing negative exact-terminal acknowledgement
+  cases and a restore-labelled test that reused originating objects;
+- parent added exact/negative/malformed acknowledgement tests and fresh Coordinator/AuditProtocol
+  recovery over retained test stores, including old-child rejection and replay zero writes;
+- no resumable review child was retained, so a labelled same-role fallback re-review checked only
+  those fixes and returned **ACCEPT**; no repository edits, web research, or child fanout by reviewers;
+- reports: `/tmp/empirica-stale-audit-astra-review.md` and
+  `/tmp/empirica-stale-audit-astra-rereview.md` (review runs `32f274d4`, `e48ba529`).
+
+Green validation:
+
+- `make empirica-stale-audit-check ARGS=`: 15 recovery + 10 protocol tests;
+- D7 transactions: 26/26; host-neutral conformance: 65/65;
+- `make check ARGS=`: all static/core/Claude/Codex/Pi suites, including strict D6 49/49,
+  Claude adapter 48/48, and Pi 154/154;
+- final `make empirica-host-adapter-check empirica-architecture-check docs-check ARGS=` passes;
+- the full check first caught incomplete placeholder dossiers in codec fixtures; valid and
+  single-defect invalid fixtures were expanded rather than relaxing runtime validation;
+- contract/vendor checks pass with digest
+  `sha256:164ad4fc626115f19cf9b13077cc353468b49beaf5ff094490c09185d7d4d87a`;
+- architecture passes at 9,484 effective runtime lines. ADR 50 records the human-approved 27-line
+  ceiling increase from 9,457; no unrelated deletion or line-compression;
+- `git diff --check` is clean; `git diff --cached --name-only` is empty;
+- full-suite log: `/tmp/empirica-stale-audit-make-check.log`; red/focused logs use
+  `/tmp/empirica-stale-audit-*.log`.
+
+Active Empirica evidence remains append-only. The first sealed spike failed with exit 2 after the
+parent underdeclared its isolated import closure; that failed G1 evidence was not graded away.
+The graph replaced G1 with narrower G1R explicitly covering the complete captured closure. Its
+research-backed sealed `make empirica-stale-audit-check ARGS=` spike passed and G1R is satisfied.
+G2 was unresolved at the terminal checkpoint. `report_convergence({intent: "stop"})` returned
+`Allow(converged=false)` with `status: stopped_residual`; G1R remained satisfied with no freshness
+changes. G0/G2 remain residual in that immutable terminal snapshot (the projection emits generic
+`claim.research_missing`). The subsequent human message, “approved both,” accepts the policy and
+architecture-ceiling exception in the product records; it does not rewrite or reopen that run.
+No audited convergence was claimed. Advisory Astra review is not a bound convergence verdict.
+
+Teaching checkpoint: replacement creates a new attempt, not a new story about the old attempt.
+The old audit remains charged and terminal; with the default one-attempt audit budget, retry needs
+an explicit allowance. Logical cancellation may leave native work running. Fresh-object tests are
+not installed-host restart/crash receipts. Human HITL accepted both this policy and the
+architecture-ceiling exception. No staging or commit was authorized or performed.

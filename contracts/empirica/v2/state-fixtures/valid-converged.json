@@ -38,7 +38,20 @@
       "capability_ref": "cap-auditor",
       "audit_operation_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "audit_argument": {
-        "argument_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        "argument_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "root_claim_id": "G0",
+        "goal_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "frozen_scope_digest": null,
+        "deferred_scope_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>", "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
+        "claims": [{"claim_id": "G0", "text": "Codec fixture claim", "kind": "ordinary", "gating": true,
+          "state": "open", "wording_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "evidence_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945", "active_evidence_ids": []}],
+        "edges": [],
+        "artifacts": [],
+        "audit": {"state": "required", "independence": "unverified", "reviewed_argument_digest": null,
+          "reviewed_goal_digest": null, "reviewed_frozen_scope_digest": null,
+          "reviewed_deferred_scope_digest": null, "reviewed_claims": []}
       },
       "audit_role_profile": "empirica:empirica-auditor",
       "resource_class": "audit"
