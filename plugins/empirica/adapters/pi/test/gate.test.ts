@@ -92,6 +92,20 @@ test("/empirica dispatches StartRun and persists the opaque handle", async () =>
   assert.equal(w.pi.entries.length, 1);
   assert.equal(w.pi.entries[0].customType, "empirica.run");
   assert.match(w.pi.modelMessages[0].content, /empirica_observe/);
+  assert.equal(w.pi.userMessages.length, 1);
+  assert.match(w.pi.userMessages[0], /^# Empirica/);
+  assert.match(w.pi.userMessages[0], /The user invocation is `build the thing`/);
+  assert.match(w.pi.userMessages[0], /"kind":"route","reason":/);
+  assert.match(w.pi.userMessages[0], /operation="GetRun"/);
+  assert.doesNotMatch(w.pi.userMessages[0], /\$ARGUMENTS/);
+});
+
+test("/empirica renders the canonical skill without synthetic arguments", async () => {
+  const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+  await w.pi.command("empirica").handler("", { ui: new FakeUi() });
+  assert.equal(w.pi.userMessages.length, 1);
+  assert.match(w.pi.userMessages[0], /^# Empirica/);
+  assert.doesNotMatch(w.pi.userMessages[0], /\$ARGUMENTS/);
 });
 
 // --- tool_call gate ----------------------------------------------------------

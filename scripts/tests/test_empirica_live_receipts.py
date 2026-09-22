@@ -41,19 +41,35 @@ class LiveReceiptTests(unittest.TestCase):
                 "role": "assistant", "provider": "bedrock", "model": "auditor",
                 "content": [{"type": "text", "text": BLOCK}]}}])
             write_jsonl(transcript, [
-                {"type": "message_end", "message": {"role": "assistant", "provider": "evroc",
-                 "model": "author", "content": [{"type": "text", "text": "done"}]}},
-                {"type": "tool_execution_end", "toolName": "subagent", "toolCallId": "native",
-                 "result": {"content": [{"type": "text", "text": "[recorded]"}],
-                            "details": {"results": [{"sessionFile": str(child_path)}]}}},
-                {"type": "tool_execution_end", "toolName": "report_convergence",
-                 "result": {"details": RESULT}},
+                {"type": "message", "message": {"role": "assistant", "provider": "evroc",
+                 "model": "author", "content": [{"type": "toolCall", "id": "native",
+                    "name": "subagent", "arguments": {
+                        "agent": "empirica.empirica-auditor", "task": "audit"}}]}},
+                {"type": "custom", "customType": "empirica.audit", "data": {
+                    "toolCallId": "native", "nativeId": "native", "plan": {
+                        "child_id": "child", "operation_id": "sha256:" + "4" * 64}}},
+                {"type": "custom", "customType": "empirica.audit.done",
+                 "data": {"toolCallId": "native"}},
+                {"type": "message", "message": {"role": "toolResult",
+                    "toolName": "subagent", "toolCallId": "native",
+                    "content": [{"type": "text", "text": "[recorded]"}],
+                    "details": {"results": [{"sessionFile": str(child_path)}]}}},
+                {"type": "message", "message": {"role": "assistant", "provider": "evroc",
+                    "model": "author", "content": [{"type": "toolCall", "id": "report",
+                        "name": "report_convergence", "arguments": {}}]}},
+                {"type": "message", "message": {"role": "toolResult",
+                    "toolName": "report_convergence", "toolCallId": "report",
+                    "content": [{"type": "text", "text": json.dumps(RESULT)}],
+                    "details": RESULT}},
             ])
             author = {"provider_id": "evroc", "model_id": "author"}
             auditor = {"provider_id": "bedrock", "model_id": "auditor"}
         else:
             write_jsonl(child_path, [{"type": "assistant", "agentId": "native", "message": {
-                "role": "assistant", "model": "auditor", "content": [{"type": "text", "text": BLOCK}]}}])
+                "role": "assistant", "model": "auditor", "content": [
+                    {"type": "tool_use", "name": "SubagentHandback",
+                     "input": {"message": BLOCK}},
+                    {"type": "text", "text": "Audit complete."}]}}])
             hook = {"hookSpecificOutput": {"updatedInput": {
                 "subagent_type": "empirica:empirica-auditor", "run_in_background": True}}}
             write_jsonl(transcript, [
@@ -67,9 +83,9 @@ class LiveReceiptTests(unittest.TestCase):
                  json.dumps({"type": "Block", "reasons": [{"code": "audit.pending"}],
                              "run": {"status": "active", "children": [{"child_id": "child",
                                  "resource_class": "audit", "state": "pending"}]}})}},
-                {"type": "user", "message": {"role": "user", "content":
-                 "<task-notification><task-id>native</task-id><result>" + BLOCK +
-                 "</result></task-notification>"}},
+                {"type": "queue-operation", "operation": "enqueue",
+                 "content": '<agent-message from="native">\n[Subagent hand-back]\n' +
+                            BLOCK + "\n</agent-message>"},
                 {"type": "assistant", "message": {"role": "assistant", "model": "author",
                  "content": [{"type": "tool_use", "name": "report_convergence",
                               "id": "report", "input": {}}]}},
@@ -131,15 +147,13 @@ class LiveReceiptTests(unittest.TestCase):
                             stopped["run"]["children"][0]["child_id"] = "different-child"
                             attachment["stdout"] = json.dumps(stopped)
                 elif missing == "notification":
-                    rows = [row for row in rows
-                            if "<task-notification>" not in str(row.get("message", {}).get("content", ""))]
+                    rows = [row for row in rows if row.get("type") != "queue-operation"]
                 elif missing == "prefix_notification":
                     for row in rows:
-                        message = row.get("message", {})
-                        content = message.get("content")
-                        if isinstance(content, str) and "<task-notification>" in content:
-                            message["content"] = content.replace(
-                                "<task-id>native</task-id>", "<task-id>native-other</task-id>")
+                        if row.get("type") == "queue-operation":
+                            row["content"] = row["content"].replace(
+                                '<agent-message from="native">',
+                                '<agent-message from="native-other">')
                 else:
                     child = Path(receipt["child_session_path"])
                     child_rows = [json.loads(line) for line in child.read_text().splitlines()]
@@ -149,6 +163,36 @@ class LiveReceiptTests(unittest.TestCase):
                 write_jsonl(transcript, rows)
                 receipt["transcript_sha256"] = digest(transcript)
                 self.assertTrue(inspect(receipt, "claude", "commit", "2.0.0"))
+
+    def test_native_trace_binding_mismatches_fail(self):
+        cases = ("pi_operation", "pi_session", "claude_forged_wrapper",
+                 "claude_duplicate_handback")
+        for case in cases:
+            host = "pi" if case.startswith("pi_") else "claude"
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                receipt = self.receipt(Path(directory), host)
+                transcript = Path(receipt["transcript_path"])
+                child = Path(receipt["child_session_path"])
+                parent_rows = [json.loads(line) for line in transcript.read_text().splitlines()]
+                child_rows = [json.loads(line) for line in child.read_text().splitlines()]
+                if case == "pi_operation":
+                    event = next(row for row in parent_rows
+                                 if row.get("customType") == "empirica.audit")
+                    event["data"]["plan"]["operation_id"] = "sha256:" + "9" * 64
+                elif case == "pi_session":
+                    result = next(row["message"] for row in parent_rows
+                                  if row.get("message", {}).get("toolName") == "subagent")
+                    result["details"]["results"][0]["sessionFile"] = "/different/session.jsonl"
+                elif case == "claude_forged_wrapper":
+                    event = next(row for row in parent_rows if row.get("type") == "queue-operation")
+                    event["type"] = "user"
+                else:
+                    child_rows.append(child_rows[0])
+                write_jsonl(transcript, parent_rows)
+                write_jsonl(child, child_rows)
+                receipt["transcript_sha256"] = digest(transcript)
+                receipt["child_session_sha256"] = digest(child)
+                self.assertTrue(inspect(receipt, host, "commit", "2.0.0"))
 
     def test_symlinked_retained_file_fails(self):
         with tempfile.TemporaryDirectory() as directory:

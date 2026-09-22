@@ -89,6 +89,13 @@ const actionChoices = ((PUBLIC_TOOL_SCHEMAS.empirica_observe.properties as {
 const AUTHOR_ACTION_KIND_SET = new Set(actionChoices.map(
   (choice) => choice.properties.kind.const));
 
+function skillInvocation(skillsDir: string, args: string): string {
+  const source = readFileSync(path.resolve(skillsDir, "empirica", "SKILL.md"), "utf8");
+  const body = source.replace(/^---[\s\S]*?---\s*/, "").trim();
+  if (!body) throw new Error("canonical Empirica skill is empty");
+  return body.replaceAll("$ARGUMENTS", args);
+}
+
 /** Resolves the run selector from Pi host context. */
 export type SelectorProvider = (ctx: ExtensionContext) => RunSelector;
 
@@ -401,6 +408,9 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         if (parsed.unknownFlags.length)
           ctx.ui.notify(`empirica: unknown mode flags ignored: ${parsed.unknownFlags.join(" ")}`, "warning");
         try {
+          // Render the canonical installed skill before creating a run. If the
+          // package is incomplete, fail without leaving an active orphan.
+          const kickoff = skillInvocation(skillsDir, args);
           const response = await dispatch(startRunRequest(selectorOf(ctx), goal, randomUUID(), {
             ...startOptions, modes,
           }));
@@ -412,6 +422,10 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
               customType: "empirica",
               content: `Empirica v2 is active. Opaque run handle: ${runHandle}. Use empirica_observe, empirica_read, and report_convergence.`,
             });
+            // Extension-injected slash commands are not passed through Pi's
+            // interactive skill expander. Render the canonical SKILL.md itself
+            // so no adapter-local workflow copy can drift.
+            pi.sendUserMessage(kickoff);
           }
           const notice = startRunNotice(result);
           ctx.ui.notify(notice.text, notice.type);

@@ -68,12 +68,17 @@ Do this before reading files, searching, browsing, or running commands.
 2. List each dependency as:
    - **known** — already fixed by evidence you can cite now;
    - **unknown** — requires observation, experiment, or human judgment.
-3. Announce the route and record `ObserveAction(kind="route")` through the active
-   author-action surface.
-4. Record `ObserveAction(kind="investigate")` after route acknowledgement and
-   before any native read, search, command, evidence submission, or child launch.
-5. Then read [references/host-capabilities.md](references/host-capabilities.md)
-   for the exact host contract and begin investigation.
+3. Announce the route and record the exact public action
+   `{"kind":"route","reason":"<non-empty routing reason>"}` through the active
+   author-action surface. `reason` is a top-level action field; do not put it in
+   `payload` and do not rename the action kind.
+4. After route acknowledgement, record the exact public action
+   `{"kind":"investigate"}` before any native read, search, command, evidence
+   submission, or child launch.
+5. Then read the public run view with `empirica_read(operation="GetRun")`, read
+   [references/host-capabilities.md](references/host-capabilities.md) for the
+   exact host contract, and begin investigation. The other public read operation
+   names are `GetArgument`, `GetContract`, and `RestoreRun`; do not guess aliases.
 
 If either witness cannot be recorded, the workflow is unsupported. The core and
 supported host adapters fail closed before investigative tools, evidence, child

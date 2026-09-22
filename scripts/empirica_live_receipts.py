@@ -17,7 +17,7 @@ EXPECTED = {
 MAX_TRACE_BYTES = 128 << 20
 _VERDICT = re.compile(r"```empirica-verdict\s*\n(\{.*?\})\s*\n```", re.DOTALL)
 _AGENT_ID = re.compile(r"agentId:\s*([A-Za-z0-9_-]+)")
-_TASK_ID = re.compile(r"<task-id>\s*([^<\s]+)\s*</task-id>")
+_AGENT_MESSAGE = re.compile(r'^<agent-message from="([A-Za-z0-9_-]+)">\n')
 
 
 def safe_read(path: Path) -> bytes:
@@ -127,6 +127,24 @@ def _tool_result_text(item: dict) -> str:
     return text_content(item.get("content"))
 
 
+def _claude_handbacks(rows: list[dict]) -> list[tuple[int, str]]:
+    found = []
+    for index, row in enumerate(rows):
+        message = row.get("message")
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        content = message.get("content")
+        for item in content if isinstance(content, list) else []:
+            if (not isinstance(item, dict) or item.get("type") != "tool_use"
+                    or item.get("name") != "SubagentHandback"):
+                continue
+            tool_input = item.get("input")
+            candidate = tool_input.get("message") if isinstance(tool_input, dict) else None
+            if isinstance(candidate, str):
+                found.append((index, candidate))
+    return found
+
+
 def inspect_claude(parent: list[dict], child_rows: list[dict], child: dict) -> dict:
     launches = []
     for index, row in enumerate(parent):
@@ -178,12 +196,16 @@ def inspect_claude(parent: list[dict], child_rows: list[dict], child: dict) -> d
     report_results = []
     notifications = []
     for index, row in enumerate(parent):
+        if row.get("type") == "queue-operation" and row.get("operation") == "enqueue":
+            content = row.get("content")
+            if isinstance(content, str):
+                match = _AGENT_MESSAGE.match(content)
+                if (match is not None and match.group(1) == child["native_id"]
+                        and content.rstrip().endswith("</agent-message>")
+                        and "[Subagent hand-back]" in content):
+                    notifications.append((index, content))
         message = row.get("message", {})
         content = message.get("content") if isinstance(message, dict) else None
-        text = text_content(content)
-        if (message.get("role") == "user" and "<task-notification>" in text
-                and _TASK_ID.findall(text) == [child["native_id"]]):
-            notifications.append((index, text))
         for item in content if isinstance(content, list) else []:
             if not isinstance(item, dict) or item.get("type") != "tool_result":
                 continue
@@ -208,10 +230,16 @@ def inspect_claude(parent: list[dict], child_rows: list[dict], child: dict) -> d
             or "Async agent launched successfully" not in launch_text
             or _VERDICT.search(launch_text)):
         raise ValueError("claude: launch acknowledgement does not bind one async native id")
-    child_row, child_message, child_text = final_assistant(child_rows, "claude")
-    child_verdict = verdict(child_text)
-    if child_row.get("agentId") != child["native_id"] or verdict(notification_text) != child_verdict:
-        raise ValueError("claude: completion notification/child verdict/native id mismatch")
+    child_row, child_message, _ = final_assistant(child_rows, "claude")
+    handbacks = _claude_handbacks(child_rows)
+    if len(handbacks) != 1:
+        raise ValueError("claude: child transcript lacks one authoritative SubagentHandback")
+    _, child_handback = handbacks[0]
+    child_verdict = verdict(child_handback)
+    if child_row.get("agentId") != child["native_id"]:
+        raise ValueError("claude: child transcript/native id mismatch")
+    if verdict(notification_text) != child_verdict:
+        raise ValueError("claude: completion handback/child verdict mismatch")
     if not (launch_index < launch_result_index < settlement_index < notification_index
             < report_use_index <= report_result_index):
         raise ValueError("claude: async launch/notification/convergence order is invalid")
@@ -225,44 +253,89 @@ def inspect_claude(parent: list[dict], child_rows: list[dict], child: dict) -> d
     }
 def inspect_pi(parent: list[dict], child_rows: list[dict], child: dict,
                child_path: Path) -> dict:
-    launches = []
-    reports = []
-    for row in parent:
-        if row.get("type") != "tool_execution_end":
+    calls: list[tuple[int, dict, dict]] = []
+    results: list[tuple[int, dict]] = []
+    for index, row in enumerate(parent):
+        message = row.get("message")
+        if not isinstance(message, dict):
             continue
-        result = row.get("result", {})
-        if row.get("toolName") == "subagent" and result.get("details", {}).get("results"):
-            launches.append(row)
-        if row.get("toolName") == "report_convergence":
-            value = result.get("details")
-            if converged_result(value):
-                reports.append(value)
-    if len(launches) != 1 or len(reports) != 1:
-        raise ValueError("pi: expected one native child result and one converged report")
-    launch = launches[0]
-    rows = launch["result"]["details"]["results"]
-    if (len(rows) != 1 or rows[0].get("sessionFile") != str(child_path)
-            or launch.get("toolCallId") != child["native_id"]):
+        if message.get("role") == "assistant":
+            content = message.get("content")
+            for item in content if isinstance(content, list) else []:
+                if isinstance(item, dict) and item.get("type") == "toolCall":
+                    calls.append((index, message, item))
+        elif message.get("role") == "toolResult":
+            results.append((index, message))
+
+    launch_calls = []
+    report_calls = []
+    for index, message, item in calls:
+        arguments = item.get("arguments")
+        if (item.get("name") == "subagent" and isinstance(arguments, dict)
+                and arguments.get("agent") == "empirica.empirica-auditor"
+                and set(arguments) == {"agent", "task"}):
+            launch_calls.append((index, message, item))
+        if item.get("name") == "report_convergence":
+            report_calls.append((index, message, item))
+    if len(launch_calls) != 1 or len(report_calls) != 1:
+        raise ValueError("pi: expected one canonical child call and one convergence call")
+    launch_index, author_message, launch_call = launch_calls[0]
+    report_index, _, report_call = report_calls[0]
+    launch_id = launch_call.get("id")
+    report_id = report_call.get("id")
+    launch_results = [(index, message) for index, message in results
+                      if message.get("toolName") == "subagent"
+                      and message.get("toolCallId") == launch_id]
+    report_results = [(index, message) for index, message in results
+                      if message.get("toolName") == "report_convergence"
+                      and message.get("toolCallId") == report_id]
+    if len(launch_results) != 1 or len(report_results) != 1:
+        raise ValueError("pi: native calls lack unique paired results")
+    launch_result_index, launch_result = launch_results[0]
+    report_result_index, report_result_message = report_results[0]
+    details = launch_result.get("details", {})
+    child_results = details.get("results", []) if isinstance(details, dict) else []
+    if (len(child_results) != 1 or not isinstance(child_results[0], dict)
+            or child_results[0].get("sessionFile") != str(child_path)
+            or launch_id != child["native_id"]):
         raise ValueError("pi: child result does not bind session/native id")
-    rendered = json.dumps(launch["result"])
-    if "```empirica-verdict" in rendered:
+    if "```empirica-verdict" in json.dumps(launch_result):
         raise ValueError("pi: author-visible child result retains a verdict")
-    child_row, child_message, child_text = final_assistant(child_rows, "pi")
+    report_result = report_result_message.get("details")
+    if not converged_result(report_result):
+        raise ValueError("pi: report result is not converged")
+
+    audit_events = [(index, row.get("data")) for index, row in enumerate(parent)
+                    if row.get("type") == "custom" and row.get("customType") == "empirica.audit"
+                    and isinstance(row.get("data"), dict)
+                    and row["data"].get("toolCallId") == launch_id]
+    done_events = [(index, row.get("data")) for index, row in enumerate(parent)
+                   if row.get("type") == "custom" and row.get("customType") == "empirica.audit.done"
+                   and isinstance(row.get("data"), dict)
+                   and row["data"].get("toolCallId") == launch_id]
+    if len(audit_events) != 1 or len(done_events) != 1:
+        raise ValueError("pi: missing unique host audit binding events")
+    audit_index, audit_data = audit_events[0]
+    done_index, _ = done_events[0]
+    plan = audit_data.get("plan", {})
+    if (not isinstance(plan, dict) or audit_data.get("nativeId") != child["native_id"]
+            or plan.get("child_id") != child["child_id"]
+            or plan.get("operation_id") != child["audit_operation_id"]):
+        raise ValueError("pi: host audit binding does not match durable child")
+    if not (launch_index < audit_index < done_index < launch_result_index
+            < report_index <= report_result_index):
+        raise ValueError("pi: child/report ordering is invalid")
+
+    _, child_message, child_text = final_assistant(child_rows, "pi")
     child_verdict = verdict(child_text)
     provider = child_message.get("provider")
     if not isinstance(provider, str) or not provider:
         raise ValueError("pi: child transcript lacks provider")
-    authors = []
-    for row in parent:
-        if row.get("type") == "message_end" and isinstance(row.get("message"), dict):
-            message = row["message"]
-            if message.get("role") == "assistant" and message.get("provider") and message.get("model"):
-                authors.append(message)
-    if not authors:
-        raise ValueError("pi: parent transcript lacks native author identity")
+    if not author_message.get("provider") or not author_message.get("model"):
+        raise ValueError("pi: launch message lacks native author identity")
     return {
-        "result": reports[0],
-        "author": {"provider_id": authors[-1]["provider"], "model_id": authors[-1]["model"]},
+        "result": report_result,
+        "author": {"provider_id": author_message["provider"], "model_id": author_message["model"]},
         "auditor": {"provider_id": provider, "model_id": child_message["model"]},
         "verdict": child_verdict,
     }

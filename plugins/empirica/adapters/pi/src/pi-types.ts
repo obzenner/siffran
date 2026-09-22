@@ -93,6 +93,7 @@ export interface ExtensionAPI {
   sendMessage?(
     message: { customType: string; content: string; display?: boolean },
   ): void;
+  sendUserMessage(content: string): void;
   on(event: "tool_result", handler: (event: ToolResultEvent, ctx: ExtensionContext) => unknown): void;
   on(event: "resources_discover", handler: ResourcesDiscoverHandler): void;
   on(event: "tool_call", handler: ToolCallHandler): void;
