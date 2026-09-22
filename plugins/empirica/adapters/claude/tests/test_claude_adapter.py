@@ -626,14 +626,17 @@ class SpawnLifecycleTests(unittest.TestCase):
             transcript = Path(directory) / "child.jsonl"
             transcript.write_text(json.dumps({"message": {"role": "assistant", "content": [
                 {"type": "text", "text": "legacy final output"}]}}) + "\n")
-            self.assertEqual(_transcript_handbacks(str(transcript)), [])
+            self.assertEqual(_transcript_handbacks(str(transcript)), (True, []))
             transcript.write_text("\n".join(json.dumps({"message": {
                 "role": "assistant", "content": [{"type": "tool_use",
                     "name": "SubagentHandback", "input": {"message": value}}]}})
                 for value in ("first", "second")) + "\n")
-            self.assertEqual(_transcript_handbacks(str(transcript)), ["first", "second"])
+            self.assertEqual(_transcript_handbacks(str(transcript)),
+                             (True, ["first", "second"]))
+            transcript.write_text(transcript.read_text() + "{")
+            self.assertEqual(_transcript_handbacks(str(transcript)), (False, []))
 
-    def test_subagent_stop_does_not_fallback_past_a_malformed_handback(self) -> None:
+    def test_subagent_stop_does_not_fallback_past_an_unreadable_handback_transcript(self) -> None:
         from adapters.claude.lifecycle import subagent_stop_main
         valid = "```empirica-verdict\n" + json.dumps({"verdict": "pass"}) + "\n```"
         resolved = ("active-run", {"run": {"children": [{
@@ -642,7 +645,8 @@ class SpawnLifecycleTests(unittest.TestCase):
             transcript = Path(directory) / "child.jsonl"
             transcript.write_text(json.dumps({"message": {"role": "assistant",
                 "model": "auditor", "content": [{"type": "tool_use",
-                    "name": "SubagentHandback", "input": {"message": "not a verdict"}}]}}) + "\n")
+                    "name": "SubagentHandback", "input": {"message": "not a verdict"}}]}})
+                + "\n{")
             payload = StringIO(json.dumps({"agent_type": "empirica:empirica-auditor",
                 "agent_id": "native-1", "agent_transcript_path": str(transcript),
                 "last_assistant_message": valid}))

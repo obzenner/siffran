@@ -17,14 +17,27 @@ SPEC.loader.exec_module(MODULE)
 
 
 class ConfigurePiCanaryTests(unittest.TestCase):
-    def test_detects_string_and_object_global_pi_subagents(self) -> None:
-        self.assertTrue(MODULE.has_global_pi_subagents({"packages": ["npm:pi-subagents@0.50.0"]}))
-        self.assertTrue(
-            MODULE.has_global_pi_subagents(
-                {"packages": [{"source": "npm:pi-subagents", "extensions": []}]}
-            )
-        )
-        self.assertFalse(MODULE.has_global_pi_subagents({"packages": ["npm:other"]}))
+    def test_detects_only_enabled_pinned_global_pi_subagents(self) -> None:
+        pinned = "npm:pi-subagents@0.50.0"
+        self.assertTrue(MODULE.has_global_pi_subagents({"packages": [pinned]}))
+        self.assertTrue(MODULE.has_global_pi_subagents(
+            {"packages": [{"source": pinned, "extensions": ["index.ts"]}]}))
+        for entry in (
+            {"source": pinned, "extensions": []},
+            {"source": pinned, "extensions": ["-index.ts"]},
+            {"source": pinned, "extensions": ["-./index.ts"]},
+            {"source": pinned, "autoload": False},
+            "npm:pi-subagents@0.49.0",
+            "npm:pi-subagents",
+            "npm:other",
+        ):
+            with self.subTest(entry=entry):
+                self.assertFalse(MODULE.has_global_pi_subagents({"packages": [entry]}))
+
+        global_settings = {"packages": [pinned]}
+        project_delta = {"packages": [{"source": pinned, "autoload": False,
+                                        "extensions": ["-./index.ts"]}]}
+        self.assertFalse(MODULE.has_global_pi_subagents(global_settings, project_delta))
 
     def test_converts_installed_string_and_preserves_other_packages(self) -> None:
         source = "git:github.com/obzenner/siffran@feature"
@@ -76,6 +89,14 @@ class ConfigurePiCanaryTests(unittest.TestCase):
             entry = json.loads(project_path.read_text())["packages"][0]
             self.assertEqual(entry["source"], source)
             self.assertEqual(entry["extensions"], [MODULE.BUNDLED_SUBAGENTS])
+
+            global_path.write_text(json.dumps({"packages": ["npm:other"]}), encoding="utf-8")
+            subprocess.run(
+                [sys.executable, str(SCRIPT), str(project_dir), source],
+                check=True,
+                env=env,
+            )
+            self.assertEqual(json.loads(project_path.read_text()), {"packages": [source]})
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import sys
@@ -20,16 +21,60 @@ def package_source(entry: Any) -> str | None:
     return None
 
 
-def has_global_pi_subagents(settings: Any) -> bool:
-    if not isinstance(settings, dict) or not isinstance(settings.get("packages"), list):
+def _is_pinned_subagents(source: str | None) -> bool:
+    return source == "npm:pi-subagents@0.50.0"
+
+
+def _normalize_filter_pattern(pattern: str) -> str:
+    return pattern[2:] if pattern.startswith("./") else pattern
+
+
+def _extension_enabled(entry: Any) -> bool:
+    if isinstance(entry, str):
+        return True
+    if not isinstance(entry, dict) or entry.get("autoload") is False:
         return False
-    for entry in settings["packages"]:
-        source = package_source(entry)
-        if source == "npm:pi-subagents" or (
-            isinstance(source, str) and source.startswith("npm:pi-subagents@")
-        ):
-            return True
-    return False
+    extensions = entry.get("extensions")
+    if extensions is None:
+        return True
+    if not isinstance(extensions, list) or not extensions:
+        return False
+    patterns = [item for item in extensions if isinstance(item, str)]
+    negatives = [_normalize_filter_pattern(item[1:]) for item in patterns
+                 if item.startswith(("-", "!"))]
+    if any(fnmatch.fnmatch("index.ts", pattern) for pattern in negatives):
+        return False
+    positives = [_normalize_filter_pattern(item[1:] if item.startswith("+") else item)
+                 for item in patterns if not item.startswith(("-", "!"))]
+    return not positives or any(fnmatch.fnmatch("index.ts", pattern) for pattern in positives)
+
+
+def _package_entry(settings: Any) -> Any | None:
+    if not isinstance(settings, dict) or not isinstance(settings.get("packages"), list):
+        return None
+    return next((entry for entry in settings["packages"]
+                 if package_source(entry) and
+                 package_source(entry).split("@", 1)[0] == "npm:pi-subagents"), None)
+
+
+def has_global_pi_subagents(global_settings: Any, project_settings: Any | None = None) -> bool:
+    global_entry = _package_entry(global_settings)
+    if not _is_pinned_subagents(package_source(global_entry)) or not _extension_enabled(global_entry):
+        return False
+    project_entry = _package_entry(project_settings)
+    if project_entry is None:
+        return True
+    if isinstance(project_entry, dict) and project_entry.get("autoload") is False:
+        extensions = project_entry.get("extensions")
+        if isinstance(extensions, list) and any(
+                isinstance(item, str) and item.startswith(("-", "!"))
+                and fnmatch.fnmatch(
+                    "index.ts", _normalize_filter_pattern(item[1:]))
+                for item in extensions):
+            return False
+        return True
+    return (_is_pinned_subagents(package_source(project_entry))
+            and _extension_enabled(project_entry))
 
 
 def exclude_bundled_subagents(settings: Any, source: str) -> bool:
@@ -61,6 +106,27 @@ def exclude_bundled_subagents(settings: Any, source: str) -> bool:
     raise ValueError(f"installed canary package is missing from project settings: {source}")
 
 
+def restore_bundled_subagents(settings: Any, source: str) -> bool:
+    if not isinstance(settings, dict) or not isinstance(settings.get("packages"), list):
+        raise ValueError("project Pi settings must contain a packages array")
+    packages = settings["packages"]
+    for index, entry in enumerate(packages):
+        if package_source(entry) != source or not isinstance(entry, dict):
+            continue
+        extensions = entry.get("extensions")
+        if not isinstance(extensions, list) or BUNDLED_SUBAGENTS not in extensions:
+            return False
+        remaining = [item for item in extensions if item != BUNDLED_SUBAGENTS]
+        if remaining:
+            entry["extensions"] = remaining
+        elif set(entry) == {"source", "extensions"}:
+            packages[index] = entry["source"]
+        else:
+            entry.pop("extensions")
+        return True
+    return False
+
+
 def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -76,17 +142,21 @@ def main(argv: list[str]) -> int:
         os.environ.get("PI_CODING_AGENT_DIR", str(Path.home() / ".pi" / "agent"))
     )
     global_path = agent_dir / "settings.json"
-    if not global_path.exists() or not has_global_pi_subagents(load_json(global_path)):
-        return 0
-
     project_path = project_dir / ".pi" / "settings.json"
     settings = load_json(project_path)
-    if exclude_bundled_subagents(settings, source):
+    global_usable = (global_path.exists()
+                     and has_global_pi_subagents(load_json(global_path), settings))
+    changed = (exclude_bundled_subagents(settings, source) if global_usable
+               else restore_bundled_subagents(settings, source))
+    if changed:
         project_path.write_text(
             json.dumps(settings, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
-        print("  using the global pi-subagents package; disabled siffran's bundled duplicate")
+        if global_usable:
+            print("  using the global pi-subagents package; disabled siffran's bundled duplicate")
+        else:
+            print("  global pi-subagents unavailable; restored siffran's bundled runtime")
     return 0
 
 

@@ -140,8 +140,7 @@ def _claude_handbacks(rows: list[dict]) -> list[tuple[int, str]]:
                 continue
             tool_input = item.get("input")
             candidate = tool_input.get("message") if isinstance(tool_input, dict) else None
-            if isinstance(candidate, str):
-                found.append((index, candidate))
+            found.append((index, candidate if isinstance(candidate, str) else ""))
     return found
 
 
@@ -386,7 +385,14 @@ def inspect(receipt: dict, host: str, expected_commit: str,
         if facts["author"] == facts["auditor"]:
             raise ValueError("author and auditor native identities are equal")
         result_children = facts["result"]["run"].get("children", [])
-        if {"child_id": child["child_id"], "purpose": "audit", "state": "completed"} not in result_children:
+        completed_child = any(
+            isinstance(row, dict)
+            and row.get("child_id") == child["child_id"]
+            and row.get("purpose") == "audit"
+            and row.get("state") == "completed"
+            for row in result_children
+        )
+        if not completed_child:
             raise ValueError("native report does not include the completed bound child")
         if state.get("status") != facts["result"]["run"].get("status"):
             raise ValueError("durable/native terminal status mismatch")

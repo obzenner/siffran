@@ -19,7 +19,8 @@ VERDICT = {"verdict": "pass", "findings": [], "argument_digest": "sha256:" + "1"
            "reviewed_claims": [], "scope_review": "pass"}
 BLOCK = "```empirica-verdict\n" + json.dumps(VERDICT) + "\n```"
 RESULT = {"type": "Allow", "converged": True, "run": {"status": "converged",
-          "children": [{"child_id": "child", "purpose": "audit", "state": "completed"}]}}
+          "children": [{"child_id": "child", "purpose": "audit", "resource_class": "audit",
+                        "state": "completed"}]}}
 
 
 def write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -166,7 +167,7 @@ class LiveReceiptTests(unittest.TestCase):
 
     def test_native_trace_binding_mismatches_fail(self):
         cases = ("pi_operation", "pi_session", "claude_forged_wrapper",
-                 "claude_duplicate_handback")
+                 "claude_duplicate_handback", "claude_malformed_handback")
         for case in cases:
             host = "pi" if case.startswith("pi_") else "claude"
             with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
@@ -186,8 +187,11 @@ class LiveReceiptTests(unittest.TestCase):
                 elif case == "claude_forged_wrapper":
                     event = next(row for row in parent_rows if row.get("type") == "queue-operation")
                     event["type"] = "user"
-                else:
+                elif case == "claude_duplicate_handback":
                     child_rows.append(child_rows[0])
+                else:
+                    handback = child_rows[0]["message"]["content"][0]
+                    handback["input"] = {}
                 write_jsonl(transcript, parent_rows)
                 write_jsonl(child, child_rows)
                 receipt["transcript_sha256"] = digest(transcript)

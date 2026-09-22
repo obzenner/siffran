@@ -417,6 +417,11 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     pi.registerCommand("empirica", {
       description: "Start a complete Empirica v2 convergence run.",
       handler: async (args, ctx) => {
+        if (ctx.isIdle?.() === false) {
+          ctx.ui.notify("/empirica requires an idle session; retry after the current turn finishes.",
+            "warning");
+          return;
+        }
         const parsed = parseModeFlags(args);
         const goal = parsed.goal || "(goal to be refined from the current task)";
         const modes = { ...startOptions.modes, ...parsed.modes };
@@ -440,7 +445,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             // Extension-injected slash commands are not passed through Pi's
             // interactive skill expander. Render the canonical SKILL.md itself
             // so no adapter-local workflow copy can drift.
-            pi.sendUserMessage(kickoff);
+            pi.sendUserMessage(kickoff, { deliverAs: "followUp" });
           }
           const notice = startRunNotice(result);
           ctx.ui.notify(notice.text, notice.type);

@@ -93,6 +93,7 @@ test("/empirica dispatches StartRun and persists the opaque handle", async () =>
   assert.equal(w.pi.entries[0].customType, "empirica.run");
   assert.match(w.pi.modelMessages[0].content, /empirica_observe/);
   assert.equal(w.pi.userMessages.length, 1);
+  assert.deepEqual(w.pi.userMessageOptions, [{ deliverAs: "followUp" }]);
   assert.match(w.pi.userMessages[0], /^# Empirica/);
   assert.match(w.pi.userMessages[0], /The user invocation is `build the thing`/);
   assert.match(w.pi.userMessages[0], /"kind":"route","reason":/);
@@ -106,6 +107,17 @@ test("/empirica renders the canonical skill without synthetic arguments", async 
   assert.equal(w.pi.userMessages.length, 1);
   assert.match(w.pi.userMessages[0], /^# Empirica/);
   assert.doesNotMatch(w.pi.userMessages[0], /\$ARGUMENTS/);
+});
+
+test("/empirica rejects a busy session before creating a run", async () => {
+  const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+  const ui = new FakeUi();
+  await w.pi.command("empirica").handler("build the thing", { ui, isIdle: () => false });
+  assert.equal(w.requests.length, 0);
+  assert.equal(w.pi.entries.length, 0);
+  assert.equal(w.pi.userMessages.length, 0);
+  assert.match(ui.notifications[0].message, /requires an idle session/);
+  assert.equal(ui.notifications[0].type, "warning");
 });
 
 // --- tool_call gate ----------------------------------------------------------
