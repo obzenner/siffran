@@ -29,7 +29,7 @@ class PublicToolContractTests(unittest.TestCase):
                 "result": {"type": "Inert", "reason": "no_run"},
             }
 
-        return PublicTools("claude-code@2.1.270", dispatch=dispatch)
+        return PublicTools("claude-code@2.1.278", dispatch=dispatch)
 
     def test_definitions_expose_only_public_read_observe_and_report(self):
         tools = self._tools()
@@ -58,7 +58,7 @@ class PublicToolContractTests(unittest.TestCase):
         )
         self.assertFalse(result["isError"])
         request, profile = self.requests[-1]
-        self.assertEqual(profile, "claude-code@2.1.270")
+        self.assertEqual(profile, "claude-code@2.1.278")
         self.assertEqual(request["protocol"], "empirica/v2")
         self.assertEqual(
             request["command"],
@@ -108,7 +108,7 @@ class PublicToolContractTests(unittest.TestCase):
         from adapters.public_tools import PublicTools
 
         tools = PublicTools(
-            "claude-code@2.1.270",
+            "claude-code@2.1.278",
             dispatch=lambda _request, _profile: (_ for _ in ()).throw(OSError("down")),
         )
         result = tools.call("empirica_read", {"run_id": "r", "operation": "GetRun"})
@@ -147,7 +147,7 @@ class McpTransportTests(unittest.TestCase):
         from adapters.public_tools import PublicTools
 
         return PublicTools(
-            "claude-code@2.1.270",
+            "claude-code@2.1.278",
             dispatch=lambda request, _profile: {
                 "protocol": "empirica/v2",
                 "request_id": request["request_id"],
@@ -171,7 +171,7 @@ class McpTransportTests(unittest.TestCase):
 
         self.assertEqual(
             profile_from_environment({"CLAUDE_PLUGIN_ROOT": "/plugin"}),
-            "claude-code@2.1.270",
+            "claude-code@2.1.278",
         )
         self.assertEqual(
             profile_from_environment({"PLUGIN_ROOT": "/plugin"}),

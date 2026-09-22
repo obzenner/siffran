@@ -2,7 +2,7 @@
 
 **Status:** Parent-frozen support decision for implementation and conformance.
 
-**Host versions examined:** Claude Code 2.1.270; Codex CLI 0.146.0; Pi 0.84.1;
+**Host versions examined:** Claude Code 2.1.278; Codex CLI 0.146.0; Pi 0.84.1;
 pi-subagents 0.50.0.
 
 **Evidence date:** 2026-09-13.
@@ -47,7 +47,7 @@ an audit or evidence obligation. It must not claim automatic independent audit s
 
 | Host/profile | Tier | Advertised automatic audit | Privacy statement | Required implementation evidence |
 |---|---|---|---|---|
-| Claude Code 2.1.270 | `foreground_only`, promoted; candidate `full_async` | Yes in foreground; async only after separate promotion | Dossier can be inserted into the admitted Agent input; the child's final answer is host-visible to the parent/author, so output privacy is **not** guaranteed | Installed foreground trace binds the exact admitted Agent invocation to native `agent_id`; candidate async still requires its separate correlation probe |
+| Claude Code 2.1.278 | generic tier `foreground_only`, promoted; managed audit execution `async`; candidate generic `full_async` | Yes through one host-owned async audit and native completion notification | Dossier can be inserted into the admitted Agent input; the child's final answer is host-visible to the parent/author, so output privacy is **not** guaranteed | Installed async trace binds reservation → native `agent_id` → parent settlement on exact `audit.pending` → SubagentStop verdict ingress → resumed guarded decision; generic async promotion still requires its separate correlation probe |
 | Pi 0.84.1 + pi-subagents 0.50.0 | `foreground_only`, promoted | Yes when the exact host-generated child session binds a concrete native assistant identity to the admitted verdict | The bound tool result is parent-visible, so output privacy is **not** guaranteed | Installed foreground trace: canonical packaged agent → `toolCallId` correlation, synchronous closed redaction, bounded session evidence, verdict-bound native identity, private ingress, and guarded `Allow(converged=true)`; async remains unsupported |
 | Codex CLI 0.146.0 | `observational`, `wip_unsupported`; candidate `foreground_only` | No supported convergent audit: managed-process resolved model is not natively observed | Final output is observed by the adapter process; output privacy is **not** guaranteed | WIP public MCP and bounded-process conformance only; exact final-output parsing and Stop re-evaluation honestly end in `audit.independence_unverified` until native identity and the candidate probe exist |
 
@@ -70,24 +70,25 @@ Official hooks establish:
 Sources: `https://code.claude.com/docs/en/hooks`, retrieved 2026-09-13, especially the
 PreToolUse, SubagentStart, SubagentStop, PostToolUseFailure, SessionStart, and Stop sections.
 
-Empirica foreground binding contract:
+Empirica managed-async audit contract:
 
 1. PreToolUse verifies the exact plugin-scoped auditor, forbids model overrides, reserves exactly
-   one audit operation, and replaces the complete child prompt with the immutable dossier/rubric.
-2. A second outstanding reserved audit is refused; there is never an order-based choice among
-   multiple reservations.
+   one async audit operation, and replaces the complete child prompt with the immutable dossier/rubric.
+2. A second outstanding reserved, launching, or pending audit is refused; there is never an
+   order-based choice among multiple reservations.
 3. SubagentStart is the first native-start observation. Its exact `agent_id` drives
    `reserved -> launching -> pending`; the adapter retains that native ID privately.
-4. SubagentStop must carry the same exact `agent_id`. Private correlation resolves that ID to one
-   pending child before identity or verdict admission; purpose, timing, and list order are ignored.
-5. Parent and child model identities are read from their host transcripts at terminal observation,
-   not from requested model aliases. Missing concrete identity remains `unverified`.
-6. PostToolUseFailure while the operation is still reserved records `launch_rejected` and refunds
-   once; malformed terminal output records `failed` after observed start.
-7. A future candidate full-async promotion requires a separate live falsifier for concurrent
-   same-type starts, resume, cancellation, and out-of-order terminal delivery.
-8. Application deadlines produce `timed_out`; later output is append-only diagnostic evidence and
-   cannot reopen or converge a terminal child or run.
+4. An exact `audit.pending` Stop decision with exactly one pending audit child lets the parent turn
+   settle without terminalizing the run or suggesting respawn; every other Block remains closed.
+5. Claude's native task notification resumes the parent after completion. SubagentStop must carry
+   the same exact `agent_id`; private correlation resolves it to one pending child before identity
+   or verdict admission, ignoring purpose, timing, and list order.
+6. Parent and child model identities are read from their host transcripts at terminal observation,
+   not from requested aliases. Missing concrete identity remains `unverified`.
+7. PostToolUseFailure while still reserved records `launch_rejected` and refunds once; malformed
+   terminal output records `failed` after observed start.
+8. Managed async audit does not promote generic children to `full_async`; that still requires live
+   falsifiers for concurrent starts, resume, cancellation, timeout, and out-of-order delivery.
 
 ## 4. Pi binding protocols
 

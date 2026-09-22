@@ -55,15 +55,21 @@ class LiveReceiptTests(unittest.TestCase):
             write_jsonl(child_path, [{"type": "assistant", "agentId": "native", "message": {
                 "role": "assistant", "model": "auditor", "content": [{"type": "text", "text": BLOCK}]}}])
             hook = {"hookSpecificOutput": {"updatedInput": {
-                "subagent_type": "empirica:empirica-auditor"}}}
+                "subagent_type": "empirica:empirica-auditor", "run_in_background": True}}}
             write_jsonl(transcript, [
                 {"type": "assistant", "message": {"role": "assistant", "model": "author",
                  "content": [{"type": "text", "text": "start"}]}},
                 {"type": "attachment", "attachment": {"hookName": "PreToolUse:Agent",
                  "toolUseID": "tool", "stdout": json.dumps(hook)}},
                 {"type": "user", "message": {"content": [{"type": "tool_result",
-                 "tool_use_id": "tool", "content": [{"type": "text", "text": BLOCK},
-                 {"type": "text", "text": "agentId: native"}]}]}},
+                 "tool_use_id": "tool", "content": "Async agent launched successfully…\nagentId: native"}]}},
+                {"type": "attachment", "attachment": {"hookName": "Stop", "stdout":
+                 json.dumps({"type": "Block", "reasons": [{"code": "audit.pending"}],
+                             "run": {"status": "active", "children": [{"child_id": "child",
+                                 "resource_class": "audit", "state": "pending"}]}})}},
+                {"type": "user", "message": {"role": "user", "content":
+                 "<task-notification><task-id>native</task-id><result>" + BLOCK +
+                 "</result></task-notification>"}},
                 {"type": "assistant", "message": {"role": "assistant", "model": "author",
                  "content": [{"type": "tool_use", "name": "report_convergence",
                               "id": "report", "input": {}}]}},
@@ -106,6 +112,43 @@ class LiveReceiptTests(unittest.TestCase):
             self.assertTrue(inspect(receipt, "pi", "commit", "2.0.0"))
             receipt = self.receipt(Path(directory), "pi")
             self.assertTrue(inspect(receipt, "pi", "different", "2.0.0"))
+
+    def test_claude_async_lifecycle_omissions_fail(self):
+        for missing in ("settlement", "wrong_settlement_child", "notification",
+                        "prefix_notification", "trusted_completion"):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as directory:
+                receipt = self.receipt(Path(directory), "claude")
+                transcript = Path(receipt["transcript_path"])
+                rows = [json.loads(line) for line in transcript.read_text().splitlines()]
+                if missing == "settlement":
+                    rows = [row for row in rows
+                            if row.get("attachment", {}).get("hookName") != "Stop"]
+                elif missing == "wrong_settlement_child":
+                    for row in rows:
+                        attachment = row.get("attachment", {})
+                        if attachment.get("hookName") == "Stop":
+                            stopped = json.loads(attachment["stdout"])
+                            stopped["run"]["children"][0]["child_id"] = "different-child"
+                            attachment["stdout"] = json.dumps(stopped)
+                elif missing == "notification":
+                    rows = [row for row in rows
+                            if "<task-notification>" not in str(row.get("message", {}).get("content", ""))]
+                elif missing == "prefix_notification":
+                    for row in rows:
+                        message = row.get("message", {})
+                        content = message.get("content")
+                        if isinstance(content, str) and "<task-notification>" in content:
+                            message["content"] = content.replace(
+                                "<task-id>native</task-id>", "<task-id>native-other</task-id>")
+                else:
+                    child = Path(receipt["child_session_path"])
+                    child_rows = [json.loads(line) for line in child.read_text().splitlines()]
+                    child_rows[0]["agentId"] = "different-native"
+                    write_jsonl(child, child_rows)
+                    receipt["child_session_sha256"] = digest(child)
+                write_jsonl(transcript, rows)
+                receipt["transcript_sha256"] = digest(transcript)
+                self.assertTrue(inspect(receipt, "claude", "commit", "2.0.0"))
 
     def test_symlinked_retained_file_fails(self):
         with tempfile.TemporaryDirectory() as directory:

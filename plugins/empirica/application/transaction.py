@@ -669,7 +669,8 @@ class Coordinator:
         snapshot = EvaluationSnapshot(state, (), None, run_id=run_id,
             contract_id=_proto._PUBLIC_CONTRACT["id"], contract_version=_proto._PUBLIC_CONTRACT["version"],
             contract_digest=_proto._DIGEST, profile_id=self.profile_id,
-            host_tier=profile["current_tier"], command=command)
+            host_tier=profile["current_tier"],
+            host_audit_execution=profile["audit_execution"], command=command)
         return self._block_from_snapshot(snapshot, request_id, code)
 
     def _safe_block(self, key: RunKey, request_id: str, code: str):

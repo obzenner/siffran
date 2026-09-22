@@ -169,13 +169,13 @@ def spawn_main() -> int:
                     if decision.exit_code else 0)
         if "model" in tool_input:
             return _deny("empirica auditor launch forbids model overrides")
-        plan = AuditProtocol(CLAUDE_PROFILE_ID).prepare(
+        plan = AuditProtocol(CLAUDE_PROFILE_ID, execution="async").prepare(
             handle, role_profile="empirica:empirica-auditor")
         updated = {
             "subagent_type": "empirica:empirica-auditor",
             "description": "Bound Empirica audit",
             "prompt": child_prompt(plan.argument),
-            "run_in_background": False,
+            "run_in_background": True,
             "max_turns": 8,
         }
         json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse",
@@ -253,10 +253,8 @@ def restore_main() -> int:
     try:
         handle, _ = _resolve(payload)
         if handle is not None:
-            AuditProtocol(CLAUDE_PROFILE_ID).reconcile_orphans(
-                handle, native_prefix="claude-session-restore")
-            context = restore_context(dispatch_restore(payload, handle))
-            if context:
+            AuditProtocol(CLAUDE_PROFILE_ID).reconcile_orphans(handle, native_prefix="claude-session-restore", include_pending=False)
+            if context := restore_context(dispatch_restore(payload, handle)):
                 print(context)
     except Exception:  # noqa: BLE001 - restore never wedges session start
         pass

@@ -1,11 +1,4 @@
-"""Inactive Claude ``Stop`` translation and exact native result mapping.
-
-The adapter owns only host mechanics: ``Stop`` asks the application to
-``EvaluateRun(report_convergence)`` and maps the typed result to Claude's documented
-exit/stdout/stderr contract.  ``observed_at`` is only ever a string or null (a numeric timestamp is
-never emitted); it is omitted when the host event carries no timestamp.  This module registers no
-hook and reads no run files.
-"""
+"""Claude Stop translation: host mechanics only; application/core own convergence."""
 from __future__ import annotations
 
 import json
@@ -39,11 +32,7 @@ def _handle(run_id: object) -> str:
 def build_stop_request(
     payload: Mapping[str, object], run_id: str, *, correlation_id: str | None = None,
 ) -> dict:
-    """Translate a Claude ``Stop`` payload to the one authoritative convergence gate.
-
-    ``observed_at`` is forwarded only as a string when the host event supplies one; a numeric
-    timestamp is never fabricated.
-    """
+    """Translate Claude ``Stop`` to the authoritative convergence gate."""
     context_from_payload(payload)
     command: dict = {
         "type": "EvaluateRun",
@@ -73,18 +62,19 @@ def _json_line(result: dict) -> str:
     return json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n"
 
 
+def _async_audit_wait(result: Mapping[str, object]) -> bool:
+    reasons, run = result.get("reasons"), result.get("run")
+    children = run.get("children") if isinstance(run, Mapping) else None
+    return (isinstance(reasons, list) and len(reasons) == 1
+        and isinstance(reasons[0], Mapping) and reasons[0].get("code") == "audit.pending"
+        and isinstance(run, Mapping) and run.get("status") == "active"
+        and isinstance(children, list) and sum(isinstance(c, Mapping)
+            and c.get("resource_class") == "audit" and c.get("state") == "pending"
+            and bool(c.get("child_id")) for c in children) == 1)
+
+
 def stop_result(response: object) -> StopResult:
-    """Map every typed wire result to Claude's Stop process contract.
-
-    * ``Block`` and fail-closed ``Fault``: exit 2, reason/message on stderr, no stdout.
-    * ``Allow``: exit 0 and the typed result on stdout (including honest cap termination,
-      convergence, and already-terminal runs).
-    * ``Inert``: silent exit 0; no active run exists to gate.
-    * malformed/transport failures: fail closed for completion, with a deterministic diagnostic.
-
-    Keeping the streams mutually exclusive matters: Claude treats exit-2 stderr as the blocking
-    reason, while exit-0 stdout is context/report data.
-    """
+    """Map wire results to Stop: only one current async audit wait may settle nonterminally."""
     if not isinstance(response, dict) or not isinstance(response.get("result"), dict):
         return StopResult(2, stderr="empirica completion gate returned a malformed response\n")
     result = response["result"]
@@ -94,6 +84,8 @@ def stop_result(response: object) -> StopResult:
     if kind == "Allow":
         return StopResult(0, stdout=_json_line(result))
     if kind == "Block":
+        if _async_audit_wait(result):
+            return StopResult(0, stdout=_json_line(result))
         reasons = result.get("reasons")
         messages = [row.get("message") or row.get("code") for row in reasons
                     if isinstance(row, dict)] if isinstance(reasons, list) else []

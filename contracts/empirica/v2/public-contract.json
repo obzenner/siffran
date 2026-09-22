@@ -38,6 +38,7 @@
     ]
   },
   "host_tiers": ["full_async", "foreground_only", "observational"],
+  "audit_execution_modes": ["async", "foreground", "unavailable"],
   "claim_states": ["open", "approved", "blocked", "discarded"],
   "claim_kinds": ["ordinary", "needs-experiment", "needs-decision"],
   "audit_states": ["not_required", "required", "pending", "passed", "failed", "stale"],
@@ -348,7 +349,8 @@
       "title": "Host capabilities",
       "summary": "Capability tiers and the unsupported-capability residuals.",
       "clauses": [
-        {"id": "hosts/capabilities/tiers", "text": "A host profile is full_async, foreground_only, or observational; only an exact conformance-listed profile receives its declared tier."},
+        {"id": "hosts/capabilities/tiers", "text": "A host profile is full_async, foreground_only, or observational for generic children and separately declares async, foreground, or unavailable audit execution; only an exact conformance-listed profile receives its declared capabilities."},
+        {"id": "hosts/capabilities/audit_execution", "text": "Claude's managed auditor is host-owned async: one current pending audit lets the parent turn settle without terminalizing the run or suggesting respawn, and only trusted completion ingress can resume convergence. Pi forces the managed auditor to foreground execution. Generic async support is not implied by async audit execution."},
         {"id": "hosts/capabilities/async_unsupported", "text": "A host that cannot run async children returns host.async_unsupported with residual.accept rather than silently downgrading."},
         {"id": "hosts/capabilities/audit_unobservable", "text": "A host that cannot observe trusted audit output returns host.audit_output_unobservable with residual.accept and stops honestly with residual."}
       ]

@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": [
     "id", "version", "protocol", "commands", "decisions", "statuses",
-    "actions", "child_lifecycle", "host_tiers",
+    "actions", "child_lifecycle", "host_tiers", "audit_execution_modes",
     "claim_states", "claim_kinds", "audit_states", "independence_states", "freshness_states",
     "artifact_kinds", "artifact_outcomes", "spike_gates",
     "attribution_subject_kinds", "attribution_observers", "audit_verdicts", "scope_reviews",
@@ -50,6 +50,7 @@
       }
     },
     "host_tiers": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "audit_execution_modes": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
     "claim_states": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
     "claim_kinds": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "minItems": 1},
     "audit_states": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},

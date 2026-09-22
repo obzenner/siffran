@@ -403,8 +403,10 @@ class AuditTests(ConformanceCase):
         child_b = self.require_pending_audit_child(drv, run_id)
         self.require_trusted_audit_attribution(
             drv, run_id, child_b, scope["c0_artifact_id"], variant="decorrelated")
+        # While child B is current and pending, its managed execution takes precedence over the
+        # stale same-model verdict so Claude can settle the parent turn without respawning.
         blocked = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
-        self.assert_block_only(blocked, ["audit.same_model"])
+        self.assert_block_only(blocked, ["audit.pending"])
 
         # Once child B supplies its own exact verdict, its bound identity may satisfy the audit.
         verdict_b = self.build_audit_verdict_payload(

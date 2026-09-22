@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from adapters.audit import child_event  # noqa: E402
 from application import protocol  # noqa: E402
 from application.snapshot import (HistoryCorrupt, graph_from_history, make_artifact,  # noqa: E402
                                   state_digest, traverse_history)
@@ -419,6 +420,46 @@ class D7TransactionTests(unittest.TestCase):
                              "investigation.required")
             self.assertEqual((runs.data[key], runs.cas_calls, artifacts_repo.append_calls,
                               len(artifacts_repo.values[key]), harness.calls), before)
+
+    def test_audit_execution_mode_is_profile_specific_without_granting_generic_async(self):
+        def reserve(profile, session, resource_class):
+            coordinator = Coordinator(Workspace(), Harness(), Runs(), Artifacts(), profile, {})
+            started = coordinator.handle({"type": "StartRun",
+                "selector": {"project": "p", "session": session}, "goal": "execution",
+                "budgets": {"max_spawns": 1, "max_audit_spawns": 1}}, "start")
+            run_id = started["result"]["run"]["id"]
+            activate_investigation(coordinator, run_id)
+            graph = {"root": "C0", "claims": [{"id": "C0", "text": "t",
+                "gating": True, "kind": "ordinary"}], "edges": []}
+            coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                                "action": {"kind": "graph", "payload": graph}}, "graph")
+            coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                "action": {"kind": "research", "claim_id": "C0", "source_kind": "code",
+                    "result": "supports", "payload": {"source_ref": "review",
+                                                        "citation": "active audit fixture"}}}, "research")
+            action = {"kind": "child_reserve", "purpose": "audit",
+                "role_profile": "empirica:empirica-auditor", "execution": "async",
+                "resource_class": resource_class}
+            reserved = coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                                           "action": action}, "reserve")["result"]
+            if profile.startswith("claude") and resource_class == "audit":
+                self.assertEqual(coordinator.handle({"type": "EvaluateRun", "run_id": run_id,
+                    "intent": "report_convergence"}, "reserved")["result"]["reasons"][0]["code"],
+                                 "audit.pending")
+                child_id = reserved["run"]["children"][0]["child_id"]
+                coordinator.trusted_child_event(
+                    run_id, child_id, child_event("launching", "native"), "launching")
+                self.assertEqual(coordinator.handle({"type": "EvaluateRun", "run_id": run_id,
+                    "intent": "report_convergence"}, "launching")["result"]["reasons"][0]["code"],
+                                 "audit.pending")
+            return reserved
+
+        claude_audit = reserve("claude-code@2.1.278", "claude-audit", "audit")
+        self.assertEqual(claude_audit["type"], "Allow")
+        claude_generic = reserve("claude-code@2.1.278", "claude-generic", "investigation")
+        self.assertEqual(claude_generic["reasons"][0]["code"], "host.async_unsupported")
+        pi_audit = reserve("pi@0.84.1+pi-subagents@0.50.0", "pi-audit", "audit")
+        self.assertEqual(pi_audit["reasons"][0]["code"], "host.async_unsupported")
 
     def test_split_child_budgets_are_isolated_and_purpose_cannot_select_audit(self):
         def setup(session, audit_limit):

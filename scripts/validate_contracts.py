@@ -48,8 +48,8 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:164ad4fc626115f19cf9b13077cc353468b49beaf5ff094490c09185d7d4d87a"
-REVIEWED_HOST_PROFILES_DIGEST = "sha256:aad8b0b5cad21532a426a564d911c89ee64e4e94a750a1341b6adbbd5a22bebb"
+REVIEWED_REGISTRY_DIGEST = "sha256:525fa2359be90b80df00b3a50b6863367d3911cc6bc76e91c76debcb04de89ff"
+REVIEWED_HOST_PROFILES_DIGEST = "sha256:4eeab93869dd3e002c2c22050067a7f7f5555836340334727de8b21b70736e0c"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
 REGISTRY_VERSION = "2.0.0"
@@ -346,6 +346,7 @@ def check_host_profiles(profiles_doc: dict, contract: dict, known_fixture_ids: s
     """Load host profiles as canonical data and check them structurally/referentially; the
     complete reviewed field set is frozen by one compact digest, not a duplicated Python row."""
     host_tiers = set(contract.get("host_tiers", []))
+    audit_execution_modes = set(contract.get("audit_execution_modes", []))
     reason_ids = set(contract.get("reasons", {}))
     profiles = profiles_doc.get("profiles", [])
     if not isinstance(profiles, list):
@@ -369,6 +370,9 @@ def check_host_profiles(profiles_doc: dict, contract: dict, known_fixture_ids: s
         tier = profile.get("current_tier")
         if tier not in host_tiers:
             errors.append(f"{pwhere}: unknown current_tier {tier!r}")
+        audit_execution = profile.get("audit_execution")
+        if audit_execution not in audit_execution_modes:
+            errors.append(f"{pwhere}: unknown audit_execution {audit_execution!r}")
         cand = profile.get("candidate_tier")
         if cand is not None and cand not in host_tiers:
             errors.append(f"{pwhere}: unknown candidate_tier {cand!r}")
@@ -2495,7 +2499,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                "freshness": {"changes": []}, "children": [], "next_actions": [],
                "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
                                         "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
-               "host": {"profile_id": "claude-code@2.1.270", "tier": "foreground_only",
+               "host": {"profile_id": "claude-code@2.1.278", "tier": "foreground_only",
                         "missing_capabilities": ["host.async_unsupported"]}}
 
     # (a) old partial RunView omitting required fields is schema-rejected.
@@ -3447,7 +3451,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                               "digest": d64, "relevant_sections": sections or ["audit"]},
                 "obligations": {"active": [], "deferred": []}, "residuals": [],
                 "freshness": {"changes": []}, "children": children or [],
-                "host": {"profile_id": "claude-code@2.1.270", "tier": "foreground_only",
+                "host": {"profile_id": "claude-code@2.1.278", "tier": "foreground_only",
                           "missing_capabilities": []}}
 
     def _artifacts() -> list:

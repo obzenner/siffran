@@ -71,7 +71,7 @@ class ExactV2ProfileTests(unittest.TestCase):
     """The transport reaches the shared bridge with the fixed exact Claude profile and no cwd."""
 
     def test_profile_id_is_the_exact_claude_registry_profile(self) -> None:
-        self.assertEqual(CLAUDE_PROFILE_ID, "claude-code@2.1.270")
+        self.assertEqual(CLAUDE_PROFILE_ID, "claude-code@2.1.278")
 
     def test_transport_dispatches_via_bridge_handle_with_profile_and_no_cwd(self) -> None:
         captured: dict = {}
@@ -398,6 +398,24 @@ class ResponseMappingTests(unittest.TestCase):
                                         "run": {"id": "r", "status": "converged"}}})
         self.assertEqual(allow.exit_code, 0)
         self.assertEqual(json.loads(allow.stdout)["type"], "Allow")
+        pending_result = {"type": "Block", "run": {"status": "active", "children": [
+            {"child_id": "ch-audit", "resource_class": "audit", "state": "pending"},
+        ]}, "reasons": [
+            {"code": "audit.pending", "message": "Audit child is pending; wait."},
+        ]}
+        pending = stop_result({"result": pending_result})
+        self.assertEqual(pending.exit_code, 0)
+        self.assertEqual(json.loads(pending.stdout)["reasons"][0]["code"], "audit.pending")
+        self.assertEqual(pending.stderr, "")
+        for malformed in (
+            {**pending_result, "run": {"status": "active", "children": []}},
+            {**pending_result, "run": {"status": "active", "children": [
+                {"child_id": "ordinary", "resource_class": "investigation", "state": "pending"}]}},
+            {**pending_result, "reasons": [*pending_result["reasons"],
+                                           {"code": "graph.missing", "message": "missing"}]},
+        ):
+            with self.subTest(malformed=malformed):
+                self.assertEqual(stop_result({"result": malformed}).exit_code, 2)
         block = stop_result({"result": {"type": "Block", "reasons": [
             {"code": "graph.missing", "message": "not converged"},
             {"code": "route.required", "message": "route first"},
@@ -532,7 +550,7 @@ class SpawnLifecycleTests(unittest.TestCase):
         from adapters.audit_protocol import AuditLaunchPlan
         from adapters.claude.lifecycle import spawn_main
         argument = {"argument_digest": "sha256:" + "1" * 64, "claims": []}
-        plan = AuditLaunchPlan("claude-code@2.1.270", "active-run", "ch-audit",
+        plan = AuditLaunchPlan("claude-code@2.1.278", "active-run", "ch-audit",
                                "empirica:empirica-auditor", argument)
         payload = self._stdin({"subagent_type": "empirica:empirica-auditor",
                                "prompt": "author-controlled prompt"})
@@ -550,7 +568,7 @@ class SpawnLifecycleTests(unittest.TestCase):
         self.assertIn("AUDIT DOSSIER", updated["prompt"])
         self.assertNotIn("author-controlled prompt", updated["prompt"])
         self.assertEqual(updated["subagent_type"], "empirica:empirica-auditor")
-        self.assertIs(updated["run_in_background"], False)
+        self.assertIs(updated["run_in_background"], True)
         self.assertEqual(updated["max_turns"], 8)
         self.assertEqual(set(updated), {"subagent_type", "description", "prompt",
                                         "run_in_background", "max_turns"})

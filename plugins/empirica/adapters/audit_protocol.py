@@ -1,4 +1,4 @@
-"""One host-neutral foreground-audit lifecycle over narrow native host seams.
+"""One host-neutral audit lifecycle over narrow native host seams.
 
 The protocol owns reservation, dossier binding, trusted lifecycle ordering, identity
 attribution, replay handling, failure reconciliation, and verdict admission. Host adapters
@@ -56,16 +56,19 @@ class AuditLaunchPlan:
 
 
 class AuditProtocol:
-    """Canonical foreground lifecycle; native hosts supply only observations."""
+    """Canonical lifecycle; the exact host profile owns foreground versus async execution."""
 
     def __init__(
-        self, profile_id: str, *, dispatch: Dispatch = application_bridge.handle,
+        self, profile_id: str, *, execution: str = "foreground",
+        dispatch: Dispatch = application_bridge.handle,
         child_event_ingress: TrustedEvent = application_bridge.trusted_child_event,
         attribution_ingress: TrustedAttribution = application_bridge.trusted_attribution,
         verdict_ingress: TrustedVerdict = application_bridge.trusted_audit_verdict,
         plan_ingress: TrustedPlan = application_bridge.trusted_audit_plan,
     ) -> None:
-        self.profile_id = profile_id
+        if execution not in {"foreground", "async"}:
+            raise ValueError("audit execution must be foreground or async")
+        self.profile_id, self.execution = profile_id, execution
         self._dispatch = dispatch
         self._child_event = child_event_ingress
         self._attribution = attribution_ingress
@@ -99,7 +102,7 @@ class AuditProtocol:
                   if isinstance(child, Mapping)}
         reserved = self._request({"type": "ObserveAction", "run_id": run_id, "action": {
             "kind": "child_reserve", "purpose": "audit", "role_profile": role_profile,
-            "execution": "foreground", "resource_class": "audit",
+            "execution": self.execution, "resource_class": "audit",
         }})
         result = reserved.get("result", {})
         if not isinstance(result, Mapping) or result.get("type") != "Allow":
@@ -135,15 +138,15 @@ class AuditProtocol:
                 raise
             raise AuditProtocolError("durable audit operation unavailable") from exc
 
-    def reconcile_orphans(self, run_id: str, *, native_prefix: str) -> int:
-        """Close every active audit reservation left by an interrupted foreground driver."""
+    def reconcile_orphans(self, run_id: str, *, native_prefix: str, include_pending: bool = True) -> int:
         current = self._request({"type": "GetRun", "run_id": run_id})
         result = current.get("result", {})
         run = result.get("run", {}) if isinstance(result, Mapping) else {}
         children = run.get("children", []) if isinstance(run, Mapping) else []
         active = [child for child in children if isinstance(child, Mapping)
                   and child.get("resource_class") == "audit"
-                  and child.get("state") in {"reserved", "launching", "pending"}
+                  and child.get("state") in ({"reserved", "launching", "pending"} if include_pending
+                                              else {"reserved", "launching"})
                   and isinstance(child.get("child_id"), str)]
         for child in active:
             child_id = str(child["child_id"])

@@ -10,16 +10,19 @@ argument, binds and observes an independent auditor, admits its output privately
 guarded terminal decision. Trusted evidence, attribution, child events, and verdicts are never
 model-callable.
 
-## Claude Code `claude-code@2.1.270`
+## Claude Code `claude-code@2.1.278`
 
 Required surfaces:
 
 - active and trusted Empirica activation/route/spawn/Stop hooks;
 - MCP tools `empirica_observe`, `empirica_read`, and `report_convergence`;
-- canonical `empirica:empirica-auditor` foreground child.
+- canonical `empirica:empirica-auditor` async child with native completion notification.
 
-The host mutates the auditor prompt with the typed dossier and observes the final output through
-its native subagent completion hook. The profile is `foreground_only`; async is unsupported.
+The host mutates the auditor prompt with the typed dossier, binds the async native ID at
+`SubagentStart`, and admits the first terminal output only through `SubagentStop`. While that exact
+audit is pending, the Stop hook lets the parent turn settle without terminalizing the run or
+suggesting another spawn; Claude's native task notification resumes the parent after completion.
+The generic child tier remains `foreground_only`; the registered audit execution mode is `async`.
 
 ## Pi `pi@0.84.1+pi-subagents@0.50.0`
 

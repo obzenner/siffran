@@ -29,7 +29,7 @@
             "children",
             "audit"
           ],
-          "digest": "sha256:164ad4fc626115f19cf9b13077cc353468b49beaf5ff094490c09185d7d4d87a"
+          "digest": "sha256:525fa2359be90b80df00b3a50b6863367d3911cc6bc76e91c76debcb04de89ff"
         },
         "obligations": {
           "active": [],
@@ -49,7 +49,7 @@
           }
         ],
         "host": {
-          "profile_id": "claude-code@2.1.270",
+          "profile_id": "claude-code@2.1.278",
           "tier": "foreground_only",
           "missing_capabilities": [
             "host.async_unsupported"

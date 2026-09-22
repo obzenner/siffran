@@ -1,7 +1,7 @@
 """Reusable in-process transport from Claude adapters to the shared v2 composition bridge.
 
 The Claude hooks run in-process and reach the one shared bridge (:mod:`adapters.bridge`) with a
-fixed exact registry profile (``claude-code@2.1.270``); there is no host default, no ``cwd`` and no
+fixed exact registry profile (``claude-code@2.1.278``); there is no host default, no ``cwd`` and no
 fallback to another host (D6-C spec §3/C2, §4).  Correlation is exact v2 (:func:`correlate`).
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ from adapters import bridge
 from .correlation import correlate
 
 #: Fixed exact registry profile supplied at bridge construction, never in a public request.
-CLAUDE_PROFILE_ID = "claude-code@2.1.270"
+CLAUDE_PROFILE_ID = "claude-code@2.1.278"
 
 
 class Transport(Protocol):
