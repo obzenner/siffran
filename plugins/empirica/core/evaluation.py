@@ -637,7 +637,7 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             budgets = dict(state.budgets)
             budgets["passes_used"] += 1
             state = replace(state, budgets=budgets, last_derivation_digest=derivation_digest)
-        if any(child["resource_class"] == "audit" and child["state"] == "pending"
+        if any(child["resource_class"] == "audit" and child["state"] in {"reserved", "launching", "pending"}
                and audit_operation_current(snapshot, child) for child in state.children):
             return _decision(snapshot, state, "Block", reason="audit.pending")
         audits = [a for a in snapshot.history if a.get("kind") == "audit_verdict"]

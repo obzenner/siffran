@@ -202,6 +202,11 @@ class AuditProtocolTests(unittest.TestCase):
             child_event_ingress=self.protocol._child_event,
             attribution_ingress=self.protocol._attribution,
             verdict_ingress=self.protocol._verdict)
+        self.assertEqual(protocol.reconcile_orphans(
+            "run", native_prefix="restore", include_pending=False), 2)
+        self.assertEqual([(row[1], row[2]) for row in self.events],
+                         [("r", "orphaned"), ("l", "orphaned")])
+        self.events.clear()
         self.assertEqual(protocol.reconcile_orphans("run", native_prefix="restore"), 3)
         self.assertEqual([(row[1], row[2]) for row in self.events],
                          [("r", "orphaned"), ("l", "orphaned"), ("p", "orphaned")])

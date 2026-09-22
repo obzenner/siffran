@@ -253,8 +253,8 @@ def restore_main() -> int:
     try:
         handle, _ = _resolve(payload)
         if handle is not None:
-            context = restore_context(dispatch_restore(payload, handle))
-            if context:
+            AuditProtocol(CLAUDE_PROFILE_ID).reconcile_orphans(handle, native_prefix="claude-session-restore", include_pending=False)
+            if context := restore_context(dispatch_restore(payload, handle)):
                 print(context)
     except Exception:  # noqa: BLE001 - restore never wedges session start
         pass

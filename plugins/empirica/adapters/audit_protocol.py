@@ -138,15 +138,15 @@ class AuditProtocol:
                 raise
             raise AuditProtocolError("durable audit operation unavailable") from exc
 
-    def reconcile_orphans(self, run_id: str, *, native_prefix: str) -> int:
-        """Close every active audit reservation left by an interrupted driver."""
+    def reconcile_orphans(self, run_id: str, *, native_prefix: str, include_pending: bool = True) -> int:
         current = self._request({"type": "GetRun", "run_id": run_id})
         result = current.get("result", {})
         run = result.get("run", {}) if isinstance(result, Mapping) else {}
         children = run.get("children", []) if isinstance(run, Mapping) else []
         active = [child for child in children if isinstance(child, Mapping)
                   and child.get("resource_class") == "audit"
-                  and child.get("state") in {"reserved", "launching", "pending"}
+                  and child.get("state") in ({"reserved", "launching", "pending"} if include_pending
+                                              else {"reserved", "launching"})
                   and isinstance(child.get("child_id"), str)]
         for child in active:
             child_id = str(child["child_id"])

@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from adapters.audit import child_event  # noqa: E402
 from application import protocol  # noqa: E402
 from application.snapshot import (HistoryCorrupt, graph_from_history, make_artifact,  # noqa: E402
                                   state_digest, traverse_history)
@@ -432,11 +433,26 @@ class D7TransactionTests(unittest.TestCase):
                 "gating": True, "kind": "ordinary"}], "edges": []}
             coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                                 "action": {"kind": "graph", "payload": graph}}, "graph")
+            coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                "action": {"kind": "research", "claim_id": "C0", "source_kind": "code",
+                    "result": "supports", "payload": {"source_ref": "review",
+                                                        "citation": "active audit fixture"}}}, "research")
             action = {"kind": "child_reserve", "purpose": "audit",
                 "role_profile": "empirica:empirica-auditor", "execution": "async",
                 "resource_class": resource_class}
-            return coordinator.handle({"type": "ObserveAction", "run_id": run_id,
-                                       "action": action}, "reserve")["result"]
+            reserved = coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                                           "action": action}, "reserve")["result"]
+            if profile.startswith("claude") and resource_class == "audit":
+                self.assertEqual(coordinator.handle({"type": "EvaluateRun", "run_id": run_id,
+                    "intent": "report_convergence"}, "reserved")["result"]["reasons"][0]["code"],
+                                 "audit.pending")
+                child_id = reserved["run"]["children"][0]["child_id"]
+                coordinator.trusted_child_event(
+                    run_id, child_id, child_event("launching", "native"), "launching")
+                self.assertEqual(coordinator.handle({"type": "EvaluateRun", "run_id": run_id,
+                    "intent": "report_convergence"}, "launching")["result"]["reasons"][0]["code"],
+                                 "audit.pending")
+            return reserved
 
         claude_audit = reserve("claude-code@2.1.278", "claude-audit", "audit")
         self.assertEqual(claude_audit["type"], "Allow")
