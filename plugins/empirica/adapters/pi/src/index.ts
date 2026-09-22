@@ -18,7 +18,7 @@
 
 import { fileURLToPath } from "node:url";
 import * as path from "node:path";
-import { lstatSync, readFileSync } from "node:fs";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 
 import type { Dispatch, Request, Response, RunSelector } from "./contract.ts";
@@ -76,6 +76,14 @@ export const DEFAULT_SKILLS_DIR = path.resolve(
   "..",
   "skills",
 );
+
+function canonicalPath(value: string): string {
+  try {
+    return realpathSync.native(value);
+  } catch {
+    return path.resolve(value);
+  }
+}
 
 const PUBLIC_TOOLS_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "..",
@@ -580,7 +588,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         try {
           const resolvedAudit = await resolveAuditContract(event.input, ctx);
           const expectedAgent = path.resolve(skillsDir, "..", "agents", "pi", "empirica-auditor.md");
-          if (path.resolve(resolvedAudit.agentFilePath) !== expectedAgent)
+          if (canonicalPath(resolvedAudit.agentFilePath) !== canonicalPath(expectedAgent))
             return { block: true, reason: "empirica auditor package identity was shadowed" };
           const [auditorProvider, auditorModel] = modelPair(resolvedAudit.model, "pi-subagents");
           if (!auditorProvider || !auditorModel)
