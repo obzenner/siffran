@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { PROTOCOL, type Request, type Response, type Result } from "../src/contract.ts";
 import { REPORT_CONVERGENCE_TOOL, SUBAGENT_TOOL } from "../src/translate.ts";
 import { createEmpiricaExtension, DEFAULT_SKILLS_DIR } from "../src/index.ts";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { FakePi, FakeUi, fakeCtx } from "./fakes.ts";
@@ -544,6 +544,36 @@ test("canonical auditor identity follows filesystem symlinks", async (t) => {
   const decision = await pi.toolCall()(event, fakeCtx());
   assert.equal(decision, undefined);
   assert.equal((event.input as Record<string, unknown>).model, "bedrock/auditor-model");
+});
+
+test("byte-identical packaged auditor copies preserve canonical identity", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "empirica-agent-copy-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const expectedAgent = resolve(DEFAULT_SKILLS_DIR, "..", "agents", "pi", "empirica-auditor.md");
+  const copiedAgent = join(root, "empirica-auditor.md");
+  writeFileSync(copiedAgent, readFileSync(expectedAgent));
+
+  const pi = new FakePi();
+  createEmpiricaExtension({
+    dispatch: (request) => ({
+      ...envelope({ type: "Allow", converged: false, run: run() }),
+      request_id: request.request_id,
+    }),
+    deriveSelector: () => ({ project: "p", session: "s" }),
+    privateIngress: async (request) => request.operation === "audit_prepare"
+      ? { type: "audit_plan", plan: { child_id: "ch-copy",
+          role_profile: "empirica.empirica-auditor",
+          operation_id: `sha256:${"b".repeat(64)}`,
+          argument: { argument_digest: `sha256:${"a".repeat(64)}`, claims: [] } } }
+      : { type: "ok" },
+    resolveAuditContract: async () => ({ agentFilePath: copiedAgent,
+                                         model: "bedrock/auditor-model" }),
+  })(pi);
+  await (pi.handlers.get("session_start") as (e: unknown, c: unknown) => unknown)(
+    {}, fakeCtx("/work", [{ customType: "empirica.run", data: { runHandle: HANDLE } }]));
+  const decision = await pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "copied",
+    input: { agent: "empirica.empirica-auditor", task: "audit" } }, fakeCtx());
+  assert.equal(decision, undefined);
 });
 
 test("shadowed packaged auditor identity is blocked before reservation", async () => {

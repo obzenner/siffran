@@ -85,6 +85,13 @@ function canonicalPath(value: string): string {
   }
 }
 
+function sameCanonicalAgentFile(candidate: string, expected: string): boolean {
+  if (canonicalPath(candidate) === canonicalPath(expected)) return true;
+  const candidateText = readAuditSession(candidate);
+  const expectedText = readAuditSession(expected);
+  return candidateText !== null && expectedText !== null && candidateText === expectedText;
+}
+
 const PUBLIC_TOOLS_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "..",
   "contracts", "empirica", "v2", "public-tools.json");
@@ -588,7 +595,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         try {
           const resolvedAudit = await resolveAuditContract(event.input, ctx);
           const expectedAgent = path.resolve(skillsDir, "..", "agents", "pi", "empirica-auditor.md");
-          if (canonicalPath(resolvedAudit.agentFilePath) !== canonicalPath(expectedAgent))
+          if (!sameCanonicalAgentFile(resolvedAudit.agentFilePath, expectedAgent))
             return { block: true, reason: "empirica auditor package identity was shadowed" };
           const [auditorProvider, auditorModel] = modelPair(resolvedAudit.model, "pi-subagents");
           if (!auditorProvider || !auditorModel)
