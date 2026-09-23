@@ -10,11 +10,26 @@ from pathlib import Path
 from typing import Any
 
 FORMAT = "empirica-live-receipt/v2"
+_PROFILE_REGISTRY = json.loads((Path(__file__).resolve().parents[1]
+                               / "contracts/empirica/v2/host-profiles.json").read_text())
+_RECEIPT_HOSTS = {
+    "claude": ("claude-code", "empirica:empirica-auditor"),
+    "pi": ("pi", "empirica.empirica-auditor"),
+}
+_POLICIES = {}
+for _receipt_host, (_host_id, _role) in _RECEIPT_HOSTS.items():
+    _profile = next(profile for profile in _PROFILE_REGISTRY["profiles"]
+                    if profile["host_id"] == _host_id and profile["promotion_status"] == "promoted")
+    _POLICIES[_receipt_host] = _profile
 EXPECTED = {
-    "claude": ("claude-code@2.1.278", "2.1.278", "empirica:empirica-auditor"),
-    "pi": ("pi@0.84.1+pi-subagents@0.50.0", "0.84.1", "empirica.empirica-auditor"),
+    host: (policy["profile_id"], policy["version"], _RECEIPT_HOSTS[host][1])
+    for host, policy in _POLICIES.items()
 }
 MAX_TRACE_BYTES = 128 << 20
+_VERSION_OUTPUT = {
+    "claude": re.compile(r"^([0-9]+\.[0-9]+\.[0-9]+)(?:\s+\(Claude Code\))?\s*$"),
+    "pi": re.compile(r"^([0-9]+\.[0-9]+\.[0-9]+)\s*$"),
+}
 _VERDICT = re.compile(r"```empirica-verdict\s*\n(\{.*?\})\s*\n```", re.DOTALL)
 _AGENT_ID = re.compile(r"agentId:\s*([A-Za-z0-9_-]+)")
 _AGENT_MESSAGE = re.compile(r'^<agent-message from="([A-Za-z0-9_-]+)">\n')
@@ -36,6 +51,38 @@ def safe_read(path: Path) -> bytes:
         return content
     finally:
         os.close(fd)
+
+
+def native_version(host: str, path: Path) -> str:
+    try:
+        text = safe_read(path).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("native version output is not UTF-8") from exc
+    pattern = _VERSION_OUTPUT.get(host)
+    if pattern is None:
+        raise ValueError(f"unsupported receipt host: {host!r}")
+    match = pattern.fullmatch(text)
+    if match is None:
+        raise ValueError("native version output is malformed")
+    return match.group(1)
+
+
+def _version_tuple(value: str) -> tuple[int, int, int]:
+    match = re.fullmatch(r"([0-9]+)\.([0-9]+)\.([0-9]+)", value)
+    if match is None:
+        raise ValueError(f"invalid semantic version: {value!r}")
+    return tuple(int(part) for part in match.groups())  # type: ignore[return-value]
+
+
+def require_compatible_version(host: str, version: str) -> None:
+    compatibility = _POLICIES[host]["compatibility"]
+    current = _version_tuple(version)
+    minimum = _version_tuple(compatibility["minimum"])
+    maximum = _version_tuple(compatibility["maximum_exclusive"])
+    if not minimum <= current < maximum:
+        raise ValueError(
+            f"host version {version} is outside compatible range "
+            f"[{compatibility['minimum']}, {compatibility['maximum_exclusive']})")
 
 
 def digest(path: Path) -> str:
@@ -344,13 +391,15 @@ def inspect(receipt: dict, host: str, expected_commit: str,
             expected_plugin_version: str) -> list[str]:
     errors = []
     try:
-        profile, host_version, role = EXPECTED[host]
+        profile, _, role = EXPECTED[host]
         if receipt.get("format") != FORMAT or receipt.get("operator_attested") is not True:
             raise ValueError("operator-attested v2 receipt is required")
         if receipt.get("host") != host or receipt.get("profile_id") != profile:
-            raise ValueError("exact host/profile mismatch")
-        if receipt.get("host_version") != host_version:
-            raise ValueError("exact host version mismatch")
+            raise ValueError("host/capability profile mismatch")
+        host_version = receipt.get("host_version")
+        if not isinstance(host_version, str):
+            raise ValueError("exact observed host version is required")
+        require_compatible_version(host, host_version)
         if receipt.get("plugin_version") != expected_plugin_version:
             raise ValueError("release plugin version mismatch")
         if receipt.get("release_commit") != expected_commit:
@@ -362,7 +411,7 @@ def inspect(receipt: dict, host: str, expected_commit: str,
         for name, path in paths.items():
             if digest(path) != receipt.get(f"{name}_sha256"):
                 raise ValueError(f"{name} digest mismatch")
-        if safe_read(paths["version_output"]).decode("utf-8").strip() != host_version:
+        if native_version(host, paths["version_output"]) != host_version:
             raise ValueError("native version output mismatch")
         state, child = state_facts(paths["run_state"], role)
         parent = jsonl(paths["transcript"])

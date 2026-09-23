@@ -14,14 +14,23 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "host_id", "profile_id", "version", "current_tier", "audit_execution",
+          "host_id", "profile_id", "version", "compatibility", "current_tier", "audit_execution",
           "required_fixture_ids", "required_live_probe_ids", "promotion_status",
           "input_private", "output_private", "unsupported_reason_ids", "sources"
         ],
         "properties": {
           "host_id": {"type": "string", "minLength": 1},
           "profile_id": {"type": "string", "minLength": 1},
-          "version": {"type": "string", "minLength": 1},
+          "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+          "compatibility": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["minimum", "maximum_exclusive"],
+            "properties": {
+              "minimum": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+              "maximum_exclusive": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"}
+            }
+          },
           "current_tier": {"enum": ["full_async", "foreground_only", "observational"]},
           "audit_execution": {"enum": ["async", "foreground", "unavailable"]},
           "candidate_tier": {"enum": ["full_async", "foreground_only", "observational"]},

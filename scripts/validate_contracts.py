@@ -49,7 +49,7 @@ V2 = CONTRACTS / "empirica" / "v2"
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
 REVIEWED_REGISTRY_DIGEST = "sha256:525fa2359be90b80df00b3a50b6863367d3911cc6bc76e91c76debcb04de89ff"
-REVIEWED_HOST_PROFILES_DIGEST = "sha256:4eeab93869dd3e002c2c22050067a7f7f5555836340334727de8b21b70736e0c"
+REVIEWED_HOST_PROFILES_DIGEST = "sha256:41ef8b89da3f880fb5d256202d9ee5b6e28301b75e52490a41e65d16e09b8caa"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
 REGISTRY_VERSION = "2.0.0"
@@ -366,7 +366,20 @@ def check_host_profiles(profiles_doc: dict, contract: dict, known_fixture_ids: s
         pwhere = f"{where}.profiles[{i}] ({pid})"
         version = profile.get("version", "")
         if not isinstance(version, str) or RANGE_OPS.search(version):
-            errors.append(f"{pwhere}: version {version!r} must be exact (no range)")
+            errors.append(f"{pwhere}: qualification version {version!r} must be exact")
+        compatibility = profile.get("compatibility", {})
+        minimum = compatibility.get("minimum") if isinstance(compatibility, dict) else None
+        maximum = compatibility.get("maximum_exclusive") if isinstance(compatibility, dict) else None
+        try:
+            minimum_parts = tuple(int(part) for part in minimum.split("."))
+            maximum_parts = tuple(int(part) for part in maximum.split("."))
+            version_parts = tuple(int(part) for part in version.split("."))
+            if not (len(minimum_parts) == len(maximum_parts) == len(version_parts) == 3
+                    and minimum_parts <= version_parts < maximum_parts):
+                raise ValueError
+        except (AttributeError, TypeError, ValueError):
+            errors.append(f"{pwhere}: compatibility must contain an ordered semver range "
+                          "covering the qualification version")
         tier = profile.get("current_tier")
         if tier not in host_tiers:
             errors.append(f"{pwhere}: unknown current_tier {tier!r}")
@@ -2310,7 +2323,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     bad_range = copy.deepcopy(host_profiles_doc)
     bad_range["profiles"][0]["version"] = ">=2.0"
     expect(lambda e: check_host_profiles(bad_range, registry, required_fixtures, e, "neg"),
-           "must be exact (no range)", "host profile semver range")
+           "qualification version", "host profile semver range")
     # (b) duplicate profile ID.
     bad_dup = copy.deepcopy(host_profiles_doc)
     bad_dup["profiles"].append(copy.deepcopy(bad_dup["profiles"][0]))

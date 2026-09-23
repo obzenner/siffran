@@ -106,8 +106,8 @@ def main() -> int:
         if term in skill_text:
             fail(f"SKILL.md retains stale runtime term: {term}")
     for required in (
-        "claude-code@2.1.278", "pi@0.84.1+pi-subagents@0.50.0",
-        "codex-cli@0.146.0", "empirica_observe", "empirica_read", "report_convergence",
+        ">=2.1.278,<2.2.0", ">=0.84.1,<0.85.0", "pi-subagents@0.50.0",
+        ">=0.146.0,<0.147.0", "empirica_observe", "empirica_read", "report_convergence",
     ):
         if required not in skill_text:
             fail(f"SKILL.md omits complete host/tool disclosure: {required}")

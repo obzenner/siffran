@@ -3,9 +3,11 @@
 This is the v2-only Pi translation shell. It exposes the same public author/read/report
 surface as the Claude and Codex adapters and owns no convergence policy.
 
-## Exact profile
+## Capability profile
 
-The exact profile is `pi@0.84.1+pi-subagents@0.50.0`, tier `foreground_only`, with
+The promoted profile is qualified on Pi `0.84.1` and admits compatible Pi releases
+`>=0.84.1,<0.85.0`; receipts still record the exact observed Pi version. The controlled
+`pi-subagents` dependency remains pinned at `0.50.0`. The profile tier is `foreground_only`, with
 `promotion_status=promoted` after an installed-host foreground trace reached guarded
 `Allow(converged=true)`. `pi-subagents` must provide its structured `subagent` tool.
 Asynchronous audit execution is not supported and is never silently downgraded.
@@ -22,8 +24,8 @@ Asynchronous audit execution is not supported and is never silently downgraded.
 | `tool_result(subagent)` | private `audit_identity` + `audit_verdict` | Correlates by `toolCallId`, redacts before the first await, binds the verdict to the final native assistant record in the host-generated child session, and admits only one exact fenced verdict. |
 | compaction | `RestoreRun` | Carries the opaque handle and restores the selected run. |
 
-The packaged auditor pins `amazon-bedrock/eu.anthropic.claude-opus-4-8`, a stock Pi 0.84.1
-provider-qualified registry identity. Deployments may override it with
+The packaged auditor pins `amazon-bedrock/eu.anthropic.claude-opus-4-8`, qualified on stock Pi
+`0.84.1` with a provider-qualified registry identity. Deployments may override it with
 `EMPIRICA_PI_AUDITOR_MODEL` when their registry uses a concrete private provider alias; the adapter
 resolves that launch contract and rejects shadowed agent definitions and author-supplied overrides.
 The adapter never trusts `details.results[].model`, which is requested launch configuration.
@@ -31,6 +33,10 @@ Instead it reads the exact result row's host-generated `sessionFile` and accepts
 the final native assistant record carries concrete provider/model fields and its sole verdict equals
 the admitted tool-result verdict. Missing, malformed, oversized, changed, or ambiguous sessions
 remain unverified and block convergence.
+
+The adapter explicitly disables generic writer acceptance gates on this host-owned read-only audit
+call. Empirica's bound verdict contract remains authoritative; author-supplied acceptance, model,
+context, or tool overrides are rejected before that runtime-owned mutation.
 
 The adapter-private Python subprocess exposes no Pi tool. It is the imperative ingress shell for
 host-observed attribution, child events, and audit verdicts. Public tools cannot express these
