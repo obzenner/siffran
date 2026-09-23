@@ -28,7 +28,7 @@ def main() -> int:
     plugin_version = json.loads(
         (repo / "plugins/empirica/.claude-plugin/plugin.json").read_text(encoding="utf-8"))["version"]
     profile, _, role = EXPECTED[args.host]
-    host_version = native_version(args.version_output)
+    host_version = native_version(args.host, args.version_output)
     require_compatible_version(args.host, host_version)
     state, child = state_facts(args.state, role)
     parent = jsonl(args.transcript)

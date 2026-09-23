@@ -2,7 +2,7 @@
 name: empirica
 description: "Empirical-convergence workflow for non-trivial work whose plan is uncertain. Route before investigating, represent unknowns as claims, require cited research before deterministic spikes, discard refuted claims, and request an independently audited convergence decision. Use for design-and-implement work, architectural uncertainty, competing approaches, and risky assumptions. Host capabilities differ; run the capability preflight before promising convergence. Invoke as /empirica <goal>."
 allowed-tools: Read Glob Grep Bash Edit Write Agent TaskCreate TaskUpdate WebFetch
-compatibility: Designed for Claude Code, Codex CLI 0.146.0+, and Pi; requires methodologist as a companion and python3 for hook-backed hosts. Execution capability depends on the exact host profile.
+compatibility: Designed for Claude Code >=2.1.278,<2.2.0, Codex CLI >=0.146.0,<0.147.0, and Pi >=0.84.1,<0.85.0 with pi-subagents 0.50.0; requires methodologist and python3 for hook-backed hosts. Exact observed versions remain receipt provenance; live capabilities still gate execution.
 argument-hint: "[--cli-exec] [--multi-provider] <goal>"
 ---
 

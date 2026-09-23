@@ -26,7 +26,10 @@ EXPECTED = {
     for host, policy in _POLICIES.items()
 }
 MAX_TRACE_BYTES = 128 << 20
-_VERSION = re.compile(r"^([0-9]+\.[0-9]+\.[0-9]+)(?:\s+\(Claude Code\))?\s*$")
+_VERSION_OUTPUT = {
+    "claude": re.compile(r"^([0-9]+\.[0-9]+\.[0-9]+)(?:\s+\(Claude Code\))?\s*$"),
+    "pi": re.compile(r"^([0-9]+\.[0-9]+\.[0-9]+)\s*$"),
+}
 _VERDICT = re.compile(r"```empirica-verdict\s*\n(\{.*?\})\s*\n```", re.DOTALL)
 _AGENT_ID = re.compile(r"agentId:\s*([A-Za-z0-9_-]+)")
 _AGENT_MESSAGE = re.compile(r'^<agent-message from="([A-Za-z0-9_-]+)">\n')
@@ -50,12 +53,15 @@ def safe_read(path: Path) -> bytes:
         os.close(fd)
 
 
-def native_version(path: Path) -> str:
+def native_version(host: str, path: Path) -> str:
     try:
         text = safe_read(path).decode("utf-8")
     except UnicodeDecodeError as exc:
         raise ValueError("native version output is not UTF-8") from exc
-    match = _VERSION.fullmatch(text)
+    pattern = _VERSION_OUTPUT.get(host)
+    if pattern is None:
+        raise ValueError(f"unsupported receipt host: {host!r}")
+    match = pattern.fullmatch(text)
     if match is None:
         raise ValueError("native version output is malformed")
     return match.group(1)
@@ -405,7 +411,7 @@ def inspect(receipt: dict, host: str, expected_commit: str,
         for name, path in paths.items():
             if digest(path) != receipt.get(f"{name}_sha256"):
                 raise ValueError(f"{name} digest mismatch")
-        if native_version(paths["version_output"]) != host_version:
+        if native_version(host, paths["version_output"]) != host_version:
             raise ValueError("native version output mismatch")
         state, child = state_facts(paths["run_state"], role)
         parent = jsonl(paths["transcript"])

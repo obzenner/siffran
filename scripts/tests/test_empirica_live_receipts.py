@@ -149,6 +149,18 @@ class LiveReceiptTests(unittest.TestCase):
             self.assertTrue(any("native version output mismatch" in error for error in
                                 inspect(receipt, "claude", "commit", "2.0.0")))
 
+    def test_native_version_output_rejects_wrong_host_label_and_malformed_text(self):
+        cases = {"pi": "0.84.2 (Claude Code)\n", "claude": "Claude Code version 2.1.280\n"}
+        for host, output in cases.items():
+            with self.subTest(host=host), tempfile.TemporaryDirectory() as directory:
+                receipt = self.receipt(Path(directory), host)
+                version_path = Path(receipt["version_output_path"])
+                version_path.write_text(output, encoding="utf-8")
+                receipt["version_output_sha256"] = digest(version_path)
+                errors = inspect(receipt, host, "commit", "2.0.0")
+                self.assertTrue(any("native version output is malformed" in error
+                                    for error in errors), errors)
+
     def test_arbitrary_text_and_candidate_mismatch_fail(self):
         with tempfile.TemporaryDirectory() as directory:
             receipt = self.receipt(Path(directory), "pi")
