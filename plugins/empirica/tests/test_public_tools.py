@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+import jsonschema
 
 PLUGIN = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN))
@@ -49,6 +52,31 @@ class PublicToolContractTests(unittest.TestCase):
             self.assertNotIn(private, text)
         self.assertTrue(definitions[0]["annotations"]["readOnlyHint"])
         self.assertFalse(definitions[1]["annotations"]["readOnlyHint"])
+
+    def test_definitions_satisfy_claude_code_schema_admission(self):
+        definitions = self._tools().definitions()
+        property_name = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+        for definition in definitions:
+            schema = definition["inputSchema"]
+            jsonschema.Draft202012Validator.check_schema(schema)
+            self.assertTrue(
+                {"allOf", "anyOf", "oneOf"}.isdisjoint(schema),
+                definition["name"],
+            )
+            for name, field in schema["properties"].items():
+                self.assertRegex(name, property_name)
+                self.assertTrue(field.get("description"), (definition["name"], name))
+            self.assertNotEqual(definition["title"], definition["description"])
+            self.assertGreaterEqual(len(definition["description"].split(". ")), 4)
+            self.assertLessEqual(len(definition["description"]), 2048)
+
+    def test_host_handle_read_schema_also_avoids_root_combinators(self):
+        from adapters.public_tools import _PUBLIC_SCHEMAS
+
+        schema = _PUBLIC_SCHEMAS["host_handle"]["empirica_read"]
+        self.assertTrue({"allOf", "anyOf", "oneOf"}.isdisjoint(schema))
+        self.assertNotIn("run_id", schema["properties"])
+        jsonschema.Draft202012Validator.check_schema(schema)
 
     def test_observe_wraps_one_canonical_author_action(self):
         tools = self._tools()
@@ -119,6 +147,19 @@ class PublicToolContractTests(unittest.TestCase):
         tools = self._tools()
         tools.call("empirica_read", {"run_id": "r", "operation": "GetRun"})
         self.assertEqual(self.requests[-1][0]["command"], {"type": "GetRun", "run_id": "r"})
+        tools.call("empirica_read", {"operation": "GetContract", "target": "index"})
+        self.assertEqual(
+            self.requests[-1][0]["command"],
+            {"type": "GetContract", "target": "index"},
+        )
+        tools.call(
+            "empirica_read",
+            {"operation": "GetContract", "target": "section", "section_id": "workflow"},
+        )
+        self.assertEqual(
+            self.requests[-1][0]["command"],
+            {"type": "GetContract", "target": "section", "section_id": "workflow"},
+        )
         tools.call("report_convergence", {"run_id": "r"})
         self.assertEqual(
             self.requests[-1][0]["command"],
@@ -129,6 +170,25 @@ class PublicToolContractTests(unittest.TestCase):
             self.requests[-1][0]["command"],
             {"type": "EvaluateRun", "run_id": "r", "intent": "stop"},
         )
+
+    def test_read_conditional_requirements_return_actionable_errors(self):
+        tools = self._tools()
+        cases = (
+            ({"operation": "GetRun"}, "GetRun requires run_id"),
+            ({"operation": "GetArgument"}, "GetArgument requires run_id"),
+            ({"operation": "RestoreRun"}, "RestoreRun requires run_id"),
+            ({"operation": "GetContract"}, "GetContract requires target"),
+            (
+                {"operation": "GetContract", "target": "section"},
+                "target=section requires section_id",
+            ),
+        )
+        for arguments, message in cases:
+            with self.subTest(arguments=arguments):
+                result = tools.call("empirica_read", arguments)
+                self.assertTrue(result["isError"])
+                self.assertIn(message, result["content"][0]["text"])
+        self.assertEqual(self.requests, [])
 
     def test_caller_cannot_supply_protocol_profile_or_request_id(self):
         tools = self._tools()

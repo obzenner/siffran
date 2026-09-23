@@ -1,6 +1,6 @@
 {
   "name": "empirica",
-  "version": "3.1.4",
+  "version": "3.1.5",
   "description": "Empirical convergence for Codex 0.146.0 with canonical public MCP tools, durable runs, deterministic spikes, a managed foreground auditor, and a fail-closed Stop gate.",
   "author": {
     "name": "obzenner"

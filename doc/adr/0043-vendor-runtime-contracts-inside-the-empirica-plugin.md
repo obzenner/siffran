@@ -40,7 +40,9 @@ plugin either.
 The seven files loaded by `application/protocol.py` and `adapters/public_tools.py` are generated into
 `plugins/empirica/vendor/contracts/empirica/v2/`. Runtime code reads only that plugin-relative copy.
 `make vendor-contracts` regenerates it; `make vendor-check`, composed into `check-static`, compares
-all bytes and rejects missing, changed, or extra files.
+all bytes and rejects missing, changed, or extra files. The public-tools artifact is code-derived:
+change the projection in `adapters/public_tools.py` and the root `public-tools.json` in lockstep,
+then run `make vendor-contracts`; import-time equality and vendor checks reject either half alone.
 
 Fixtures and validator-only schemas are not shipped. Repository validators continue to read the
 root source of truth, while an isolated-copy test starts the actual MCP server with no parent
