@@ -28,6 +28,7 @@ EMPIRICA_OBSERVATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_observation.py
 EMPIRICA_EXECUTION_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/tests/test_execution_adapter.py
 EMPIRICA_PROTOCOL_ISOLATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_protocol_isolation.py
 EMPIRICA_LIVE_RECEIPT_TESTS := $(SCRIPTS)/tests/test_empirica_live_receipts.py
+EMPIRICA_CLAUDE_MCP_LOG_TESTS := $(SCRIPTS)/tests/test_check_claude_mcp_log.py
 PI_CANARY_CONFIG_TESTS := $(SCRIPTS)/tests/test_configure_pi_canary.py
 EMPIRICA_D6_STRICT_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d6_strict_v2.py
 EMPIRICA_D7_LOCATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_location.py
@@ -86,7 +87,7 @@ check-ci: check-static check-core check-claude check-codex ## Every suite except
 	@if [ "$(PI_CHECKS)" = "1" ]; then $(MAKE) check-pi; else printf '$(DIM)Pi suite skipped in CI (PI_CHECKS=1 to include)$(RESET)\n'; fi
 	@printf '\n$(BOLD)CI checks passed.$(RESET)\n'
 
-check-static: lint validate docs-check adr-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check pi-canary-unit-check ## Lint, manifests, docs, ADRs, contracts, vendor copies, activation, receipts, canary config
+check-static: lint validate docs-check adr-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check empirica-claude-mcp-log-unit-check pi-canary-unit-check ## Lint, manifests, docs, ADRs, contracts, vendor copies, activation, receipts, canary config
 	@printf '$(BOLD)==> static suite ok$(RESET)\n'
 
 check-core: ## Host-neutral core: obligations lib, Empirica core/application/state/git store, Methodologist core
@@ -259,6 +260,16 @@ empirica-host-adapter-check: ## validate public tools and three host adapter tra
 	@node --experimental-strip-types --test $(EMPIRICA_PI_ADAPTER_CONFORMANCE_TESTS)
 	@cd $(PLUGINS_DIR)/empirica/tests/v2 && PYTHONPATH=../.. $(PYTHON) -m unittest -v \
 		test_public_host_path.PublicHostPathTests
+
+.PHONY: empirica-claude-mcp-log-unit-check
+empirica-claude-mcp-log-unit-check: ## Test native Claude MCP admission-log verification
+	@printf '$(BOLD)==> Claude MCP admission-log unit checks$(RESET)\n'
+	@$(PYTHON) $(EMPIRICA_CLAUDE_MCP_LOG_TESTS)
+
+.PHONY: empirica-claude-mcp-log-check
+empirica-claude-mcp-log-check: ## Verify one native Claude MCP log: LOG=... [ARGS="--expected-version ... --require-call ..."]
+	@test -n "$(LOG)" || { printf 'LOG is required\n' >&2; exit 2; }
+	@$(PYTHON) $(SCRIPTS)/check_claude_mcp_log.py "$(LOG)" $(ARGS)
 
 .PHONY: empirica-host-receipt-unit-check
 empirica-host-receipt-unit-check: ## test structural installed-host receipt verification

@@ -6,6 +6,7 @@
         "additionalProperties": false,
         "properties": {
           "action": {
+            "description": "One schema-validated public author action for this run.",
             "oneOf": [
               {
                 "additionalProperties": false,
@@ -130,15 +131,15 @@
                   "budgets": {
                     "additionalProperties": false,
                     "properties": {
+                      "max_audit_spawns": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
                       "max_passes": {
                         "minimum": 1,
                         "type": "integer"
                       },
                       "max_spawns": {
-                        "minimum": 0,
-                        "type": "integer"
-                      },
-                      "max_audit_spawns": {
                         "minimum": 0,
                         "type": "integer"
                       }
@@ -238,48 +239,9 @@
       },
       "empirica_read": {
         "additionalProperties": false,
-        "allOf": [
-          {
-            "if": {
-              "properties": {
-                "operation": {
-                  "const": "GetContract"
-                }
-              },
-              "required": [
-                "operation"
-              ]
-            },
-            "then": {
-              "required": [
-                "target"
-              ]
-            }
-          },
-          {
-            "if": {
-              "properties": {
-                "operation": {
-                  "const": "GetContract"
-                },
-                "target": {
-                  "const": "section"
-                }
-              },
-              "required": [
-                "operation",
-                "target"
-              ]
-            },
-            "then": {
-              "required": [
-                "section_id"
-              ]
-            }
-          }
-        ],
         "properties": {
           "operation": {
+            "description": "Read the public run view, obtain the current audit argument, inspect the public contract, or restore a persisted run.",
             "enum": [
               "GetRun",
               "GetArgument",
@@ -288,10 +250,12 @@
             ]
           },
           "section_id": {
+            "description": "Public contract section identifier when target is section.",
             "minLength": 1,
             "type": "string"
           },
           "target": {
+            "description": "Contract projection for GetContract. Use section with section_id.",
             "enum": [
               "index",
               "section",
@@ -308,6 +272,7 @@
         "additionalProperties": false,
         "properties": {
           "intent": {
+            "description": "Request convergence by default, or request an honest non-converged stop.",
             "enum": [
               "report_convergence",
               "stop"
@@ -323,6 +288,7 @@
         "additionalProperties": false,
         "properties": {
           "action": {
+            "description": "One schema-validated public author action for this run.",
             "oneOf": [
               {
                 "additionalProperties": false,
@@ -447,15 +413,15 @@
                   "budgets": {
                     "additionalProperties": false,
                     "properties": {
+                      "max_audit_spawns": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
                       "max_passes": {
                         "minimum": 1,
                         "type": "integer"
                       },
                       "max_spawns": {
-                        "minimum": 0,
-                        "type": "integer"
-                      },
-                      "max_audit_spawns": {
                         "minimum": 0,
                         "type": "integer"
                       }
@@ -548,6 +514,7 @@
             ]
           },
           "run_id": {
+            "description": "Opaque identifier of the active Empirica run.",
             "minLength": 1,
             "type": "string"
           }
@@ -560,53 +527,9 @@
       },
       "empirica_read": {
         "additionalProperties": false,
-        "allOf": [
-          {
-            "else": {
-              "required": [
-                "run_id"
-              ]
-            },
-            "if": {
-              "properties": {
-                "operation": {
-                  "const": "GetContract"
-                }
-              },
-              "required": [
-                "operation"
-              ]
-            },
-            "then": {
-              "required": [
-                "target"
-              ]
-            }
-          },
-          {
-            "if": {
-              "properties": {
-                "operation": {
-                  "const": "GetContract"
-                },
-                "target": {
-                  "const": "section"
-                }
-              },
-              "required": [
-                "operation",
-                "target"
-              ]
-            },
-            "then": {
-              "required": [
-                "section_id"
-              ]
-            }
-          }
-        ],
         "properties": {
           "operation": {
+            "description": "Read the public run view, obtain the current audit argument, inspect the public contract, or restore a persisted run.",
             "enum": [
               "GetRun",
               "GetArgument",
@@ -615,14 +538,17 @@
             ]
           },
           "run_id": {
+            "description": "Opaque identifier of the active Empirica run.",
             "minLength": 1,
             "type": "string"
           },
           "section_id": {
+            "description": "Public contract section identifier when target is section.",
             "minLength": 1,
             "type": "string"
           },
           "target": {
+            "description": "Contract projection for GetContract. Use section with section_id.",
             "enum": [
               "index",
               "section",
@@ -639,12 +565,14 @@
         "additionalProperties": false,
         "properties": {
           "intent": {
+            "description": "Request convergence by default, or request an honest non-converged stop.",
             "enum": [
               "report_convergence",
               "stop"
             ]
           },
           "run_id": {
+            "description": "Opaque identifier of the active Empirica run.",
             "minLength": 1,
             "type": "string"
           }
