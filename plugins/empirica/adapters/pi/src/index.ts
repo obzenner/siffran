@@ -108,7 +108,7 @@ function skillInvocation(skillsDir: string, args: string): string {
   const source = readFileSync(path.resolve(skillsDir, "empirica", "SKILL.md"), "utf8");
   const body = source.replace(/^---[\s\S]*?---\s*/, "").trim();
   if (!body) throw new Error("canonical Empirica skill is empty");
-  return body.replaceAll("$ARGUMENTS", args);
+  return body.replaceAll("$ARGUMENTS", () => args);
 }
 
 /** Resolves the run selector from Pi host context. */

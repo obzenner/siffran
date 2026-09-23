@@ -389,6 +389,7 @@ def inspect(receipt: dict, host: str, expected_commit: str,
             isinstance(row, dict)
             and row.get("child_id") == child["child_id"]
             and row.get("purpose") == "audit"
+            and row.get("resource_class") == "audit"
             and row.get("state") == "completed"
             for row in result_children
         )

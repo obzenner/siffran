@@ -101,6 +101,13 @@ test("/empirica dispatches StartRun and persists the opaque handle", async () =>
   assert.doesNotMatch(w.pi.userMessages[0], /\$ARGUMENTS/);
 });
 
+test("/empirica preserves replacement tokens in the literal goal", async () => {
+  const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+  await w.pi.command("empirica").handler("keep $& and $$ literal", { ui: new FakeUi() });
+  assert.match(w.pi.userMessages[0], /The user invocation is `keep \$& and \$\$ literal`/);
+  assert.doesNotMatch(w.pi.userMessages[0], /\$ARGUMENTS/);
+});
+
 test("/empirica renders the canonical skill without synthetic arguments", async () => {
   const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
   await w.pi.command("empirica").handler("", { ui: new FakeUi() });

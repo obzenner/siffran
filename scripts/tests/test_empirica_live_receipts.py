@@ -130,6 +130,24 @@ class LiveReceiptTests(unittest.TestCase):
             receipt = self.receipt(Path(directory), "pi")
             self.assertTrue(inspect(receipt, "pi", "different", "2.0.0"))
 
+    def test_completed_child_must_retain_audit_resource_class(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = self.receipt(Path(directory), "pi")
+            wrong_result = json.loads(json.dumps(receipt["result"]))
+            wrong_result["run"]["children"][0]["resource_class"] = "investigation"
+            receipt["result"] = wrong_result
+            transcript = Path(receipt["transcript_path"])
+            rows = [json.loads(line) for line in transcript.read_text().splitlines()]
+            report = next(row for row in rows
+                          if row.get("message", {}).get("toolName") == "report_convergence")
+            report["message"]["details"] = wrong_result
+            report["message"]["content"] = [
+                {"type": "text", "text": json.dumps(wrong_result)}]
+            write_jsonl(transcript, rows)
+            receipt["transcript_sha256"] = digest(transcript)
+            errors = inspect(receipt, "pi", "commit", "2.0.0")
+            self.assertTrue(any("completed bound child" in error for error in errors))
+
     def test_claude_async_lifecycle_omissions_fail(self):
         for missing in ("settlement", "wrong_settlement_child", "notification",
                         "prefix_notification", "trusted_completion"):
