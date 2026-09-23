@@ -48,6 +48,8 @@ export class FakePi implements ExtensionAPI {
   readonly handlers = new Map<string, unknown>();
   readonly tools = new Map<string, ToolDefinition>();
   readonly modelMessages: Array<{ customType: string; content: string }> = [];
+  readonly userMessages: string[] = [];
+  readonly userMessageOptions: Array<{ deliverAs?: "steer" | "followUp" } | undefined> = [];
   readonly entries: Array<{ customType: string; data?: unknown }> = [];
 
   registerTool(def: ToolDefinition): void {
@@ -58,6 +60,11 @@ export class FakePi implements ExtensionAPI {
   }
   sendMessage(message: { customType: string; content: string; display?: boolean }): void {
     this.modelMessages.push(message);
+  }
+  sendUserMessage(content: string,
+                  options?: { deliverAs?: "steer" | "followUp" }): void {
+    this.userMessages.push(content);
+    this.userMessageOptions.push(options);
   }
 
   registerCommand(name: string, def: CommandDefinition): void {

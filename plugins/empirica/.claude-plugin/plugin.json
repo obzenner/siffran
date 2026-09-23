@@ -1,7 +1,7 @@
 {
   "name": "empirica",
   "description": "Host-neutral empirical-convergence workflow \u2014 routes uncertainty into a claim graph, requires cited research before deterministic spikes, derives claim state, and binds convergence to a current independent audit. Full execution is hook-enforced only on profiles with author-action and bound-audit capabilities; unsupported profiles fail explicitly before starting.",
-  "version": "3.1.0",
+  "version": "3.1.3",
   "author": {
     "name": "obzenner"
   }

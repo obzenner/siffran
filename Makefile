@@ -28,6 +28,7 @@ EMPIRICA_OBSERVATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_observation.py
 EMPIRICA_EXECUTION_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/tests/test_execution_adapter.py
 EMPIRICA_PROTOCOL_ISOLATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_protocol_isolation.py
 EMPIRICA_LIVE_RECEIPT_TESTS := $(SCRIPTS)/tests/test_empirica_live_receipts.py
+PI_CANARY_CONFIG_TESTS := $(SCRIPTS)/tests/test_configure_pi_canary.py
 EMPIRICA_D6_STRICT_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d6_strict_v2.py
 EMPIRICA_D7_LOCATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_location.py
 EMPIRICA_D7_TRANSACTION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_transactions.py
@@ -85,7 +86,7 @@ check-ci: check-static check-core check-claude check-codex ## Every suite except
 	@if [ "$(PI_CHECKS)" = "1" ]; then $(MAKE) check-pi; else printf '$(DIM)Pi suite skipped in CI (PI_CHECKS=1 to include)$(RESET)\n'; fi
 	@printf '\n$(BOLD)CI checks passed.$(RESET)\n'
 
-check-static: lint validate docs-check adr-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check ## Lint, manifests, generated docs, ADR health, API/obligation contracts, vendor copies, activation isolation
+check-static: lint validate docs-check adr-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check pi-canary-unit-check ## Lint, manifests, docs, ADRs, contracts, vendor copies, activation, receipts, canary config
 	@printf '$(BOLD)==> static suite ok$(RESET)\n'
 
 check-core: ## Host-neutral core: obligations lib, Empirica core/application/state/git store, Methodologist core
@@ -264,6 +265,11 @@ empirica-host-receipt-unit-check: ## test structural installed-host receipt veri
 	@printf '$(BOLD)==> empirica receipt verifier$(RESET)\n'
 	@$(PYTHON) $(EMPIRICA_LIVE_RECEIPT_TESTS)
 
+.PHONY: pi-canary-unit-check
+pi-canary-unit-check: ## Test project-local Pi canary package filtering
+	@printf '$(BOLD)==> Pi canary configuration$(RESET)\n'
+	@$(PYTHON) $(PI_CANARY_CONFIG_TESTS)
+
 .PHONY: empirica-host-receipt
 empirica-host-receipt: ## capture one operator-attested receipt: HOST=... TRANSCRIPT=... STATE=... CHILD_SESSION=... VERSION_OUTPUT=... COMMAND=... OUTPUT=...
 	@if [ -z "$(HOST)" ] || [ -z "$(TRANSCRIPT)" ] || [ -z "$(STATE)" ] || [ -z "$(CHILD_SESSION)" ] || [ -z "$(VERSION_OUTPUT)" ] || [ -z "$(COMMAND)" ] || [ -z "$(OUTPUT)" ]; then \
@@ -356,12 +362,15 @@ pi-dev: ## Run Pi with siffran overridden by THIS checkout (dogfood; other packa
 
 # Canary: dogfood a pushed PR branch inside a REAL project, not inside siffran. Installs the branch
 # as a project-local package there (project wins over the global install; identity is the repo URL,
-# so the global entry is shadowed, not duplicated). `pi update --extensions` reconciles the clone.
+# so the global entry is shadowed, not duplicated). When pi-subagents is already installed globally,
+# filter siffran's bundled copy from the project entry to avoid duplicate tool registration.
+# `pi update --extensions` reconciles the clone.
 SIFFRAN_GIT ?= git:github.com/obzenner/siffran
 .PHONY: pi-canary pi-canary-remove
 pi-canary: ## Install a siffran branch project-locally in DIR for dogfooding: make pi-canary REF=<branch> [DIR=<project>]
 	@if [ -z "$(REF)" ]; then printf 'usage: make pi-canary REF=<branch-or-tag> [DIR=<project dir, default: this checkout>]\n' >&2; exit 2; fi
 	@cd "$(or $(DIR),$(CURDIR))" && $(PI) install -l "$(SIFFRAN_GIT)@$(REF)"
+	@$(PYTHON) $(SCRIPTS)/configure_pi_canary.py "$(or $(DIR),$(CURDIR))" "$(SIFFRAN_GIT)@$(REF)"
 	@printf '$(BOLD)==> canary$(RESET) %s@%s installed project-locally in %s; run `pi` there (trust the folder when asked); `make pi-canary-remove DIR=...` to undo\n' "$(SIFFRAN_GIT)" "$(REF)" "$(or $(DIR),$(CURDIR))"
 
 pi-canary-remove: ## Remove the project-local siffran canary from DIR: make pi-canary-remove [DIR=<project>]

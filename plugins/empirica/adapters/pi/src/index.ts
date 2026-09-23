@@ -18,7 +18,7 @@
 
 import { fileURLToPath } from "node:url";
 import * as path from "node:path";
-import { lstatSync, readFileSync } from "node:fs";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 
 import type { Dispatch, Request, Response, RunSelector } from "./contract.ts";
@@ -77,6 +77,21 @@ export const DEFAULT_SKILLS_DIR = path.resolve(
   "skills",
 );
 
+function canonicalPath(value: string): string {
+  try {
+    return realpathSync.native(value);
+  } catch {
+    return path.resolve(value);
+  }
+}
+
+function sameCanonicalAgentFile(candidate: string, expected: string): boolean {
+  if (canonicalPath(candidate) === canonicalPath(expected)) return true;
+  const candidateText = readAuditSession(candidate);
+  const expectedText = readAuditSession(expected);
+  return candidateText !== null && expectedText !== null && candidateText === expectedText;
+}
+
 const PUBLIC_TOOLS_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "..",
   "contracts", "empirica", "v2", "public-tools.json");
@@ -88,6 +103,13 @@ const actionChoices = ((PUBLIC_TOOL_SCHEMAS.empirica_observe.properties as {
 }).action.oneOf);
 const AUTHOR_ACTION_KIND_SET = new Set(actionChoices.map(
   (choice) => choice.properties.kind.const));
+
+function skillInvocation(skillsDir: string, args: string): string {
+  const source = readFileSync(path.resolve(skillsDir, "empirica", "SKILL.md"), "utf8");
+  const body = source.replace(/^---[\s\S]*?---\s*/, "").trim();
+  if (!body) throw new Error("canonical Empirica skill is empty");
+  return body.replaceAll("$ARGUMENTS", () => args);
+}
 
 /** Resolves the run selector from Pi host context. */
 export type SelectorProvider = (ctx: ExtensionContext) => RunSelector;
@@ -395,12 +417,20 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     pi.registerCommand("empirica", {
       description: "Start a complete Empirica v2 convergence run.",
       handler: async (args, ctx) => {
+        if (ctx.isIdle?.() === false) {
+          ctx.ui.notify("/empirica requires an idle session; retry after the current turn finishes.",
+            "warning");
+          return;
+        }
         const parsed = parseModeFlags(args);
         const goal = parsed.goal || "(goal to be refined from the current task)";
         const modes = { ...startOptions.modes, ...parsed.modes };
         if (parsed.unknownFlags.length)
           ctx.ui.notify(`empirica: unknown mode flags ignored: ${parsed.unknownFlags.join(" ")}`, "warning");
         try {
+          // Render the canonical installed skill before creating a run. If the
+          // package is incomplete, fail without leaving an active orphan.
+          const kickoff = skillInvocation(skillsDir, args);
           const response = await dispatch(startRunRequest(selectorOf(ctx), goal, randomUUID(), {
             ...startOptions, modes,
           }));
@@ -412,6 +442,10 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
               customType: "empirica",
               content: `Empirica v2 is active. Opaque run handle: ${runHandle}. Use empirica_observe, empirica_read, and report_convergence.`,
             });
+            // Extension-injected slash commands are not passed through Pi's
+            // interactive skill expander. Render the canonical SKILL.md itself
+            // so no adapter-local workflow copy can drift.
+            pi.sendUserMessage(kickoff, { deliverAs: "followUp" });
           }
           const notice = startRunNotice(result);
           ctx.ui.notify(notice.text, notice.type);
@@ -566,7 +600,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         try {
           const resolvedAudit = await resolveAuditContract(event.input, ctx);
           const expectedAgent = path.resolve(skillsDir, "..", "agents", "pi", "empirica-auditor.md");
-          if (path.resolve(resolvedAudit.agentFilePath) !== expectedAgent)
+          if (!sameCanonicalAgentFile(resolvedAudit.agentFilePath, expectedAgent))
             return { block: true, reason: "empirica auditor package identity was shadowed" };
           const [auditorProvider, auditorModel] = modelPair(resolvedAudit.model, "pi-subagents");
           if (!auditorProvider || !auditorModel)

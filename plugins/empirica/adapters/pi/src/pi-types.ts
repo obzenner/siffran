@@ -18,6 +18,7 @@ export interface ExtensionContext {
   sessionManager?: {
     getEntries(): Array<{ type?: string; customType?: string; data?: unknown }>;
   };
+  isIdle?(): boolean;
 }
 
 export interface CommandDefinition {
@@ -93,6 +94,7 @@ export interface ExtensionAPI {
   sendMessage?(
     message: { customType: string; content: string; display?: boolean },
   ): void;
+  sendUserMessage(content: string, options?: { deliverAs?: "steer" | "followUp" }): void;
   on(event: "tool_result", handler: (event: ToolResultEvent, ctx: ExtensionContext) => unknown): void;
   on(event: "resources_discover", handler: ResourcesDiscoverHandler): void;
   on(event: "tool_call", handler: ToolCallHandler): void;

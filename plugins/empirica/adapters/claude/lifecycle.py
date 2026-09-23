@@ -290,6 +290,43 @@ def _transcript_observation(path: object) -> tuple[str | None, str | None]:
     return model, final
 
 
+def _transcript_handbacks(path: object) -> tuple[bool, list[str]]:
+    """Return whether the transcript scan succeeded and all handback messages.
+
+    Claude 2.1.278 may append explanatory assistant prose after delivering the
+    actual final report through SubagentHandback. The handback tool input is
+    therefore authoritative whenever a successful scan finds one. Unreadable or
+    malformed transcripts are distinct from a valid transcript with no handback
+    so corruption can never enable the legacy final-message fallback.
+    """
+    if not isinstance(path, str) or not path:
+        return False, []
+    messages: list[str] = []
+    try:
+        with open(path, encoding="utf-8") as stream:
+            for line in stream:
+                row = json.loads(line)
+                message = row.get("message", {}) if isinstance(row, dict) else {}
+                if message.get("role") != "assistant":
+                    continue
+                content = message.get("content")
+                if not isinstance(content, list):
+                    continue
+                for item in content:
+                    if (not isinstance(item, Mapping) or item.get("type") != "tool_use"
+                            or item.get("name") != "SubagentHandback"):
+                        continue
+                    tool_input = item.get("input")
+                    candidate = tool_input.get("message") if isinstance(tool_input, Mapping) else None
+                    if isinstance(candidate, str):
+                        messages.append(candidate)
+                    else:
+                        messages.append("")
+    except (OSError, ValueError, TypeError):
+        return False, []
+    return True, messages
+
+
 def _durable_plan(handle: str, child_id: str) -> AuditLaunchPlan | None:
     operation = application_bridge.trusted_audit_plan(CLAUDE_PROFILE_ID, handle, child_id)
     if not isinstance(operation, Mapping):
@@ -382,8 +419,16 @@ def subagent_stop_main() -> int:
         child_path = payload.get("agent_transcript_path")
         auditor_model, transcript_final = _transcript_observation(child_path)
         author_model, _ = _transcript_observation(payload.get("transcript_path"))
-        output = payload.get("last_assistant_message") or transcript_final
-        verdict = verdict_from_final_output(output)
+        handback_scan_ok, handbacks = _transcript_handbacks(child_path)
+        if not handback_scan_ok:
+            verdict = None
+        elif handbacks:
+            # A handback is authoritative. Duplicate or malformed handbacks fail
+            # closed rather than falling back to later assistant prose.
+            verdict = verdict_from_final_output(handbacks[0]) if len(handbacks) == 1 else None
+        else:
+            output = payload.get("last_assistant_message") or transcript_final
+            verdict = verdict_from_final_output(output)
         protocol = AuditProtocol(CLAUDE_PROFILE_ID)
         if verdict is None:
             protocol.observe_failure(plan, native_id, "failed")

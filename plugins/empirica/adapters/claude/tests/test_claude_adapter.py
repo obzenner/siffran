@@ -14,6 +14,7 @@ import sys
 import unittest
 from io import StringIO
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[3]
@@ -585,32 +586,83 @@ class SpawnLifecycleTests(unittest.TestCase):
             ):
                 self.assertIsNone(_durable_plan("run", "child"))
 
-    def test_subagent_stop_delivers_verdict_to_exact_native_child(self) -> None:
+    def test_subagent_stop_delivers_handback_verdict_before_trailing_prose(self) -> None:
         from adapters.claude.lifecycle import subagent_stop_main
         verdict = {"verdict": "pass", "findings": ["ok"]}
         text = "```empirica-verdict\n" + json.dumps(verdict) + "\n```"
-        payload = StringIO(json.dumps({"agent_type": "empirica:empirica-auditor",
-                                      "agent_id": "native-1",
-                                      "last_assistant_message": text}))
         resolved = ("active-run", {"run": {"children": [
             {"child_id": "ordinary", "purpose": "audit",
              "resource_class": "investigation", "state": "pending"},
             {"child_id": "ch-audit", "purpose": "audit",
              "resource_class": "audit", "state": "pending"}]}})
         argument = {"argument_digest": "sha256:" + "1" * 64, "claims": []}
-        with patch("adapters.claude.lifecycle._resolve", return_value=resolved), \
-             patch("adapters.claude.lifecycle.application_bridge.trusted_audit_plan",
-                   return_value={"operation_id": "sha256:" + "2" * 64,
-                                 "role_profile": "empirica:empirica-auditor",
-                                 "argument": argument}), \
-             patch("adapters.claude.lifecycle.application_bridge.trusted_resolve_child",
-                   return_value="ch-audit"), \
-             patch("adapters.claude.lifecycle.AuditProtocol.observe_identities"), \
-             patch("adapters.claude.lifecycle.AuditProtocol.observe_verdict",
-                   return_value=True) as deliver, \
-             patch("sys.stdin", new=payload):
-            self.assertEqual(subagent_stop_main(), 0)
+        with TemporaryDirectory() as directory:
+            transcript = Path(directory) / "child.jsonl"
+            transcript.write_text(json.dumps({"message": {"role": "assistant",
+                "model": "auditor", "content": [
+                    {"type": "tool_use", "name": "SubagentHandback",
+                     "input": {"message": text}},
+                    {"type": "text", "text": "Audit complete."}]}}) + "\n")
+            payload = StringIO(json.dumps({"agent_type": "empirica:empirica-auditor",
+                "agent_id": "native-1", "agent_transcript_path": str(transcript),
+                "last_assistant_message": "Audit complete."}))
+            with patch("adapters.claude.lifecycle._resolve", return_value=resolved), \
+                 patch("adapters.claude.lifecycle.application_bridge.trusted_audit_plan",
+                       return_value={"operation_id": "sha256:" + "2" * 64,
+                                     "role_profile": "empirica:empirica-auditor",
+                                     "argument": argument}), \
+                 patch("adapters.claude.lifecycle.application_bridge.trusted_resolve_child",
+                       return_value="ch-audit"), \
+                 patch("adapters.claude.lifecycle.AuditProtocol.observe_identities"), \
+                 patch("adapters.claude.lifecycle.AuditProtocol.observe_verdict",
+                       return_value=True) as deliver, \
+                 patch("sys.stdin", new=payload):
+                self.assertEqual(subagent_stop_main(), 0)
         self.assertEqual(deliver.call_args.args[2], verdict)
+
+    def test_handback_extraction_preserves_legacy_and_rejects_ambiguity(self) -> None:
+        from adapters.claude.lifecycle import _transcript_handbacks
+        with TemporaryDirectory() as directory:
+            transcript = Path(directory) / "child.jsonl"
+            transcript.write_text(json.dumps({"message": {"role": "assistant", "content": [
+                {"type": "text", "text": "legacy final output"}]}}) + "\n")
+            self.assertEqual(_transcript_handbacks(str(transcript)), (True, []))
+            transcript.write_text("\n".join(json.dumps({"message": {
+                "role": "assistant", "content": [{"type": "tool_use",
+                    "name": "SubagentHandback", "input": {"message": value}}]}})
+                for value in ("first", "second")) + "\n")
+            self.assertEqual(_transcript_handbacks(str(transcript)),
+                             (True, ["first", "second"]))
+            transcript.write_text(transcript.read_text() + "{")
+            self.assertEqual(_transcript_handbacks(str(transcript)), (False, []))
+
+    def test_subagent_stop_does_not_fallback_past_an_unreadable_handback_transcript(self) -> None:
+        from adapters.claude.lifecycle import subagent_stop_main
+        valid = "```empirica-verdict\n" + json.dumps({"verdict": "pass"}) + "\n```"
+        resolved = ("active-run", {"run": {"children": [{
+            "child_id": "ch-audit", "resource_class": "audit", "state": "pending"}]}})
+        with TemporaryDirectory() as directory:
+            transcript = Path(directory) / "child.jsonl"
+            transcript.write_text(json.dumps({"message": {"role": "assistant",
+                "model": "auditor", "content": [{"type": "tool_use",
+                    "name": "SubagentHandback", "input": {"message": "not a verdict"}}]}})
+                + "\n{")
+            payload = StringIO(json.dumps({"agent_type": "empirica:empirica-auditor",
+                "agent_id": "native-1", "agent_transcript_path": str(transcript),
+                "last_assistant_message": valid}))
+            with patch("adapters.claude.lifecycle._resolve", return_value=resolved), \
+                 patch("adapters.claude.lifecycle.application_bridge.trusted_audit_plan",
+                       return_value={"operation_id": "sha256:" + "2" * 64,
+                                     "role_profile": "empirica:empirica-auditor",
+                                     "argument": {}}), \
+                 patch("adapters.claude.lifecycle.application_bridge.trusted_resolve_child",
+                       return_value="ch-audit"), \
+                 patch("adapters.claude.lifecycle.AuditProtocol.observe_failure") as failed, \
+                 patch("adapters.claude.lifecycle.AuditProtocol.observe_verdict") as deliver, \
+                 patch("sys.stdin", new=payload):
+                self.assertEqual(subagent_stop_main(), 0)
+        failed.assert_called_once()
+        deliver.assert_not_called()
 
     def test_spawn_denies_on_adapter_exception_with_active_run(self) -> None:
         from adapters.claude.lifecycle import spawn_main
