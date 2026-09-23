@@ -306,6 +306,8 @@ test("subagent: canonical auditor is reserved, bound, attributed, and prompt-inj
   );
   assert.equal(decision, undefined);
   assert.equal(input.async, false);
+  assert.deepEqual(input.acceptance, { level: "none",
+    reason: "Empirica's bound canonical auditor is read-only and has its own verdict contract." });
   assert.equal(input.timeoutMs, 900_000);
   assert.deepEqual(input.turnBudget, { maxTurns: 8, graceTurns: 1 });
   assert.deepEqual(input.toolBudget, { soft: 20, hard: 30, block: ["write", "edit"] });

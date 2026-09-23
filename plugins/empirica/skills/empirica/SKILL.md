@@ -26,18 +26,24 @@ Then identify the exact active host surface from the tools and lifecycle already
 present in context. **Do not read any file, including a skill reference, before
 route acknowledgement.** Use this inline bootstrap matrix:
 
-- **Claude Code `claude-code@2.1.278`:** continue when the Empirica hooks and
+- **Claude Code capability profile (qualified on `2.1.278`, compatible
+  `>=2.1.278,<2.2.0`):** continue when the Empirica hooks and
   public MCP tools are active and trusted; record route first. Canonical audits
   are host-owned async children; a current pending audit settles the parent turn
   until Claude's native completion notification resumes it.
-- **Pi `pi@0.84.1+pi-subagents@0.50.0`:** continue when `/empirica` injected an
+- **Pi capability profile (qualified on `0.84.1`, compatible
+  `>=0.84.1,<0.85.0`, with packaged `pi-subagents@0.50.0`):** continue when `/empirica` injected an
   opaque handle and `empirica_observe`, `empirica_read`, `report_convergence`,
   and the structured `subagent` tool are present.
-- **Codex CLI `codex-cli@0.146.0`:** continue when activation injected the opaque
+- **Codex CLI observational profile (qualified on `0.146.0`, compatible
+  `>=0.146.0,<0.147.0`):** continue when activation injected the opaque
   handle, the public MCP tools are present, and the Stop hook is trusted; Stop
   owns the managed foreground audit.
-- **Unknown or partial surface:** stop as unsupported rather than borrowing
-  another profile's capabilities.
+- **Unknown, partial, or outside a qualified compatibility range:** stop as unsupported pending
+  qualification rather than borrowing another profile's capabilities.
+
+The exact observed harness version is provenance recorded in an installed-host receipt; it is not
+itself the capability-profile identity and need not equal the qualification baseline.
 
 A runnable convergence workflow requires all of these capabilities:
 

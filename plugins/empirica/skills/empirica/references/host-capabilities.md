@@ -1,7 +1,9 @@
 # Host capability preflight
 
-Read this file after route acknowledgement. Capability claims come from the exact registered
-profile and live adapter surface, not generic host documentation.
+Read this file after route acknowledgement. Capability claims come from the registered
+profile, its qualified compatibility range, and the live adapter surface—not generic host
+documentation or exact equality with one qualification build. Installed-host receipts retain the
+exact observed version as provenance.
 
 ## Required surface
 
@@ -10,7 +12,7 @@ argument, binds and observes an independent auditor, admits its output privately
 guarded terminal decision. Trusted evidence, attribution, child events, and verdicts are never
 model-callable.
 
-## Claude Code `claude-code@2.1.278`
+## Claude Code capability profile (`>=2.1.278,<2.2.0`)
 
 Required surfaces:
 
@@ -24,7 +26,7 @@ audit is pending, the Stop hook lets the parent turn settle without terminalizin
 suggesting another spawn; Claude's native task notification resumes the parent after completion.
 The generic child tier remains `foreground_only`; the registered audit execution mode is `async`.
 
-## Pi `pi@0.84.1+pi-subagents@0.50.0`
+## Pi capability profile (`>=0.84.1,<0.85.0` + `pi-subagents@0.50.0`)
 
 Required surfaces:
 
@@ -38,10 +40,10 @@ redacts the verdict before its first await, and uses adapter-private ingress. It
 configured result model and binds identity to the final native assistant record in the exact
 host-generated child session only when that record's verdict equals the admitted result. Missing
 or ambiguous session evidence remains unverified and blocks. Pi has no native completion veto;
-call `report_convergence` before any status claim. Bare `pi@0.84.1` without the subagent surface is
-unsupported.
+call `report_convergence` before any status claim. Bare Pi without the subagent surface is
+unsupported even when its harness version lies in the compatible range.
 
-## Codex CLI `codex-cli@0.146.0`
+## Codex CLI observational profile (`>=0.146.0,<0.147.0`)
 
 Required surfaces:
 
@@ -50,7 +52,8 @@ Required surfaces:
 - the Empirica Stop hook is enabled and trusted;
 - `codex exec` and the configured auditor model are available.
 
-Codex 0.146.0 cannot observe an arbitrary native child's final output. Its adapter therefore
+The profile was qualified on Codex 0.146.0, which cannot observe an arbitrary native child's final
+output. Its adapter therefore
 owns a bounded foreground `codex exec` auditor at Stop, records lifecycle, privately admits the
 exact final verdict, and re-evaluates before completion. The process argv is configuration, not an
 observed resolved model, so auditor identity remains unverified and convergence blocks. Do not

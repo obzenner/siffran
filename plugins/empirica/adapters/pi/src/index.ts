@@ -631,6 +631,11 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             "--- END AUDIT DOSSIER ---\nReturn exactly one fenced block tagged empirica-verdict.";
           event.input.model = resolvedAudit.model;
           event.input.async = false;
+          // pi-subagents may classify the original author call before this adapter replaces its
+          // task with the host-owned read-only dossier. Make the runtime-owned exemption explicit
+          // so a canonical auditor is not assigned writer evidence gates by extension ordering.
+          event.input.acceptance = { level: "none",
+            reason: "Empirica's bound canonical auditor is read-only and has its own verdict contract." };
           event.input.timeoutMs = 900_000;
           event.input.turnBudget = { maxTurns: 8, graceTurns: 1 };
           event.input.toolBudget = { soft: 20, hard: 30, block: ["write", "edit"] };

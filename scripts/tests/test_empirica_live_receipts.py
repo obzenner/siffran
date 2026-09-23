@@ -120,6 +120,35 @@ class LiveReceiptTests(unittest.TestCase):
                 self.assertEqual(inspect(self.receipt(Path(directory), host), host,
                                          "commit", "2.0.0"), [])
 
+    def test_compatible_harness_patch_versions_pass_and_are_recorded_exactly(self):
+        cases = {"claude": ("2.1.280", "2.1.280 (Claude Code)\n"),
+                 "pi": ("0.84.2", "0.84.2\n")}
+        for host, (version, native_output) in cases.items():
+            with self.subTest(host=host), tempfile.TemporaryDirectory() as directory:
+                receipt = self.receipt(Path(directory), host)
+                version_path = Path(receipt["version_output_path"])
+                version_path.write_text(native_output, encoding="utf-8")
+                receipt["version_output_sha256"] = digest(version_path)
+                receipt["host_version"] = version
+                self.assertEqual(inspect(receipt, host, "commit", "2.0.0"), [])
+
+    def test_incompatible_or_misreported_harness_versions_fail(self):
+        cases = {"claude": "2.2.0", "pi": "0.85.0"}
+        for host, version in cases.items():
+            with self.subTest(host=host), tempfile.TemporaryDirectory() as directory:
+                receipt = self.receipt(Path(directory), host)
+                version_path = Path(receipt["version_output_path"])
+                version_path.write_text(version + "\n", encoding="utf-8")
+                receipt["version_output_sha256"] = digest(version_path)
+                receipt["host_version"] = version
+                self.assertTrue(any("compatible range" in error for error in
+                                    inspect(receipt, host, "commit", "2.0.0")))
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = self.receipt(Path(directory), "claude")
+            receipt["host_version"] = "2.1.280"
+            self.assertTrue(any("native version output mismatch" in error for error in
+                                inspect(receipt, "claude", "commit", "2.0.0")))
+
     def test_arbitrary_text_and_candidate_mismatch_fail(self):
         with tempfile.TemporaryDirectory() as directory:
             receipt = self.receipt(Path(directory), "pi")
