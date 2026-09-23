@@ -50,6 +50,8 @@ class CompactionTests(ConformanceCase):
                          "compaction must preserve the exact status")
         self.assertEqual(compacted.get("modes"), run_before["modes"],
                          "compaction must preserve the exact modes")
+        self.assertEqual(compacted["governance"], run_before["governance"],
+                         "compaction preserves exact proposal, approval and budget telemetry")
         c_comp = compacted.get("contract", {})
         self.assertEqual(c_comp.get("id"), run_before["contract"]["id"])
         self.assertEqual(c_comp.get("version"), run_before["contract"]["version"])

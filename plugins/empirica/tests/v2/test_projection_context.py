@@ -33,7 +33,7 @@ class ProjectionContextTests(ConformanceCase):
         run_id = self.start_run(drv, goal=self.GOAL)
         # Block 1: empty run → exact sole graph.missing (not scoped: no affected)
         resp1 = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
-        result1 = self.assert_block_sole_reason(resp1, "graph.missing")
+        result1 = self.assert_block_sole_reason(resp1, "governance.approval_required")
         self.assertNotIn("affected", result1["reasons"][0],
                          "graph.missing is not scoped and must not carry affected")
         # Block 2: admitted canonical ordinary graph → exact sole claim.research_missing (scoped)
@@ -181,7 +181,7 @@ class ProjectionContextTests(ConformanceCase):
         run_id = start["result"]["run"]["id"]
         # Evaluate on empty run → exact sole graph.missing Block and no dump (no conditional)
         ev = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
-        self.assert_block_sole_reason(ev, "graph.missing")
+        self.assert_block_sole_reason(ev, "governance.approval_required")
         self.assert_no_full_contract_dump(ev["result"]["run"])
         # compacted view no full contract/private/persisted material via separated helpers
         compacted = drv.compact()

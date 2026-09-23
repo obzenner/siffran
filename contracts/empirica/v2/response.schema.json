@@ -49,7 +49,7 @@
           "const": "empirica/public"
         },
         "version": {
-          "const": "2.0.0"
+          "const": "2.1.0"
         },
         "digest": {
           "type": "string",
@@ -624,6 +624,216 @@
               "$ref": "#/$defs/freezeDeferredParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.approval_required"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.revision_required"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.approval_unavailable"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.inventory_unknown"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.identity_mismatch"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.revision_limit"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.auto_ceiling"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.budget_invalid"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.stale_proposal"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.receipt_replay"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.author_unknown"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.auditor_unknown"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.auditor_required"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.interaction_limit"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
         }
       ]
     },
@@ -885,7 +1095,8 @@
         "children",
         "host",
         "next_actions",
-        "untrusted_delimiters"
+        "untrusted_delimiters",
+        "governance"
       ],
       "description": "Public run view. converged lives only on Allow, never duplicated here.",
       "properties": {
@@ -945,6 +1156,456 @@
         },
         "untrusted_delimiters": {
           "$ref": "#/$defs/untrustedDelimiters"
+        },
+        "governance": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "control_mode",
+                "revision_limit",
+                "plan_revision",
+                "revisions_used",
+                "approved_digest",
+                "approval_kind",
+                "proposal_digest",
+                "proposal",
+                "context",
+                "scope",
+                "budgets",
+                "remaining",
+                "inventory_status",
+                "next_action",
+                "interactions_remaining",
+                "prompt_error"
+              ],
+              "properties": {
+                "state": {
+                  "enum": [
+                    "pending",
+                    "approved",
+                    "revision_pending",
+                    "rejected"
+                  ]
+                },
+                "control_mode": {
+                  "enum": [
+                    "deliberative",
+                    "auto"
+                  ]
+                },
+                "revision_limit": {
+                  "enum": [
+                    8,
+                    64
+                  ]
+                },
+                "plan_revision": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "revisions_used": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 64
+                },
+                "approved_digest": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "approval_kind": {
+                  "enum": [
+                    null,
+                    "host_ui",
+                    "auto"
+                  ]
+                },
+                "proposal_digest": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "proposal": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "budgets",
+                    "modes",
+                    "auditor",
+                    "allow_same_model"
+                  ],
+                  "properties": {
+                    "budgets": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "max_passes",
+                        "max_spawns",
+                        "max_audit_spawns"
+                      ],
+                      "properties": {
+                        "max_passes": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 1024
+                        },
+                        "max_spawns": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 128
+                        },
+                        "max_audit_spawns": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 128
+                        }
+                      }
+                    },
+                    "modes": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "multi_provider",
+                        "cli_exec"
+                      ],
+                      "properties": {
+                        "multi_provider": {
+                          "type": "boolean"
+                        },
+                        "cli_exec": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    "auditor": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "provider_id",
+                            "model_id"
+                          ],
+                          "properties": {
+                            "provider_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128
+                            },
+                            "model_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "allow_same_model": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "context": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "inventory",
+                    "author",
+                    "ingress"
+                  ],
+                  "properties": {
+                    "inventory": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "members",
+                        "source",
+                        "complete",
+                        "authorized"
+                      ],
+                      "properties": {
+                        "members": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "provider_id",
+                              "model_id"
+                            ],
+                            "properties": {
+                              "provider_id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128
+                              },
+                              "model_id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128
+                              }
+                            }
+                          },
+                          "maxItems": 32,
+                          "uniqueItems": true
+                        },
+                        "source": {
+                          "enum": [
+                            "unknown",
+                            "operator_declared",
+                            "pi_registry"
+                          ]
+                        },
+                        "complete": {
+                          "type": "boolean"
+                        },
+                        "authorized": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    "author": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "provider_id",
+                            "model_id"
+                          ],
+                          "properties": {
+                            "provider_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128
+                            },
+                            "model_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "ingress": {
+                      "enum": [
+                        "unavailable",
+                        "mcp_elicitation",
+                        "pi_ui"
+                      ]
+                    }
+                  }
+                },
+                "scope": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "root",
+                        "claims",
+                        "edges"
+                      ],
+                      "properties": {
+                        "root": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "claims": {
+                          "type": "array",
+                          "minItems": 1,
+                          "maxItems": 32,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "id",
+                              "text",
+                              "kind",
+                              "gating"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128
+                              },
+                              "text": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 2048
+                              },
+                              "kind": {
+                                "enum": [
+                                  "ordinary",
+                                  "needs-experiment",
+                                  "needs-decision"
+                                ]
+                              },
+                              "gating": {
+                                "type": "boolean"
+                              }
+                            }
+                          }
+                        },
+                        "edges": {
+                          "type": "array",
+                          "maxItems": 128,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "from",
+                              "to",
+                              "type"
+                            ],
+                            "properties": {
+                              "from": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128
+                              },
+                              "to": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128
+                              },
+                              "type": {
+                                "const": "SupportedBy"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "budgets": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "max_passes",
+                    "passes_used",
+                    "max_spawns",
+                    "spawns_used",
+                    "max_audit_spawns",
+                    "audit_spawns_used"
+                  ],
+                  "properties": {
+                    "max_passes": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "passes_used": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "max_spawns": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "spawns_used": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "max_audit_spawns": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "audit_spawns_used": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "remaining": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "max_passes",
+                    "max_spawns",
+                    "max_audit_spawns"
+                  ],
+                  "properties": {
+                    "max_passes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "max_spawns": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "max_audit_spawns": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "inventory_status": {
+                  "enum": [
+                    "unknown",
+                    "zero",
+                    "singleton",
+                    "multiple",
+                    "partial"
+                  ]
+                },
+                "next_action": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "interactions_remaining": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "proposal",
+                    "total"
+                  ],
+                  "properties": {
+                    "proposal": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 3
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 128
+                    }
+                  }
+                },
+                "prompt_error": {
+                  "enum": [
+                    null,
+                    "governance.inventory_unknown",
+                    "governance.author_unknown",
+                    "governance.identity_mismatch",
+                    "governance.interaction_limit"
+                  ]
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -1308,7 +1969,7 @@
           "const": "empirica/public"
         },
         "version": {
-          "const": "2.0.0"
+          "const": "2.1.0"
         },
         "sections": {
           "type": "array",
@@ -2121,7 +2782,7 @@
           "const": "empirica/public"
         },
         "version": {
-          "const": "2.0.0"
+          "const": "2.1.0"
         },
         "protocol": {
           "const": "empirica/v2"
@@ -2396,7 +3057,7 @@
             "terminal_sections",
             "unknown_reason_sections"
           ],
-          "description": "Canonical ordered presentation selector registry (D1 §12). The JSON registry is the executable SSOT; exact operation-context key parity and section resolution are enforced procedurally (no Python selector mapping).",
+          "description": "Canonical ordered presentation selector registry (D1 \u00a712). The JSON registry is the executable SSOT; exact operation-context key parity and section resolution are enforced procedurally (no Python selector mapping).",
           "properties": {
             "context_sections": {
               "type": "object",

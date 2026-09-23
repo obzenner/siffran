@@ -6,6 +6,7 @@ from dataclasses import replace
 from typing import Any
 
 from core.context_selector import select_sections
+from core import governance
 from core.evaluation import (SPAWN_BUDGET, Decision, EvaluationSnapshot, audit_binding,
                              audit_operation_current, digest,
                              evaluate_snapshot, frozen_scope_invalid, plan_spike_request,
@@ -79,6 +80,7 @@ class Coordinator:
         return OperationalState(
             protocol=_proto._PROTOCOL, state_schema=_proto._STATE_SCHEMA_ID,
             goal=command["goal"], status="active", modes=modes, budgets=budgets,
+            governance=governance.initial(command["goal"], budgets, modes, command.get("control_mode", "deliberative")),
             selected_graph_artifact_id=None, frozen_claim_ids=None, frozen_semantic_digest=None,
             route_stamp=None,
             investigation_stamp=None, stamp_seq=0, last_derivation_digest=None,
@@ -230,9 +232,13 @@ class Coordinator:
                 child = dict(children[-1])
                 child["audit_argument"] = dossier
                 child["audit_role_profile"] = command["action"]["role_profile"]
+                child["audit_auditor"] = _plain(state.governance["proposal"]["auditor"])
+                child["audit_inventory_digest"] = governance.canonical_digest(state.governance["context"]["inventory"])
                 child["audit_operation_id"] = digest({
                     "run_id": snapshot.run_id, "child_id": child["child_id"],
                     "argument_digest": dossier["argument_digest"],
+                    "governance_digest": state.governance["proposal_digest"],
+                    "plan_revision": state.governance["plan_revision"],
                 })
                 children[-1] = child
                 next_state = replace(next_state, children=tuple(children))
@@ -278,6 +284,8 @@ class Coordinator:
             "child_id": child_id,
             "role_profile": child["audit_role_profile"],
             "argument": _plain(child["audit_argument"]),
+            "auditor": _plain(child["audit_auditor"]),
+            "inventory_digest": child["audit_inventory_digest"],
         }
 
     def trusted_attribution(self, run_id: str, payload: dict[str, Any],
@@ -313,6 +321,8 @@ class Coordinator:
                 return self._safe_block(key, request_id, "run.corrupt")
             if frozen_scope_invalid(snapshot.state, snapshot.graph):
                 return self._fault_with_run(request_id, snapshot)
+            if governance.admission(state.governance):
+                return self._block_from_snapshot(snapshot, request_id, governance.admission(state.governance))
             if state.route_stamp is None:
                 return self._block_from_snapshot(snapshot, request_id, "route.required")
             if state.investigation_stamp is None:
@@ -333,6 +343,19 @@ class Coordinator:
             next_state = state
             if kind == "attribution" and not valid_attribution(snapshot, payload):
                 return self._fault_with_run(request_id, snapshot)
+            if kind == "attribution":
+                selected = (state.governance["proposal"]["auditor"] if payload["subject_kind"] == "auditor"
+                            else state.governance["context"]["author"])
+                if (payload.get("observed_by") != "host" or governance.model_key(payload) is None
+                        or governance.model_key(payload) != governance.model_key(selected)):
+                    revoked = replace(state, governance={**state.governance, "state": "revision_pending"})
+                    try:
+                        _, _, _, planned = self._commit(key, read.revision, snapshot, revoked, ())
+                    except Exception as exc:
+                        if self._is_conflict(exc):
+                            continue
+                        return self._fault(request_id, "unavailable")
+                    return self._block_from_snapshot(planned, request_id, "governance.identity_mismatch")
             if kind == "audit_verdict":
                 expected = audit_binding(snapshot)
                 bound_keys = ("argument_digest", "goal_digest", "frozen_scope_digest",
@@ -413,6 +436,11 @@ class Coordinator:
                 if child["state"] == target and child["first_terminal_fingerprint"] == fingerprint:
                     return self._inert_with_run(request_id, snapshot)
                 return self._fault_with_run(request_id, snapshot)
+            # Revocation forbids launches and success admission, not failure cleanup of
+            # an already reserved execution. Registry edges/refunds still apply below.
+            if (reason := governance.admission(state.governance)) and target not in {
+                    "launch_rejected", "failed", "cancelled", "timed_out", "orphaned"}:
+                return self._block_from_snapshot(snapshot, request_id, reason)
             if child["state"] == target:
                 if child.get("native_id") == event.get("native_id"):
                     return self._allow(request_id, snapshot)
@@ -683,7 +711,7 @@ class Coordinator:
         run_id = encode_handle(key) if isinstance(key, RunKey) else str(key)
         run = {
             "id": run_id, "goal": goal, "status": "active",
-            "modes": {"multi_provider": False, "cli_exec": False},
+            "modes": {"multi_provider": False, "cli_exec": False}, "governance": None,
             "contract": {"id": _proto._PUBLIC_CONTRACT["id"],
                          "version": _proto._PUBLIC_CONTRACT["version"],
                          "digest": _proto._DIGEST, "relevant_sections": sections},

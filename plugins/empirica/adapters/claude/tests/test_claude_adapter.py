@@ -302,6 +302,17 @@ class RouteAndInvestigateTests(unittest.TestCase):
         self.assertEqual(build_investigation_request(own, "run")["command"]["action"],
                          {"kind": "investigate"})
 
+    def test_unknown_mcp_research_and_writers_require_admission_but_public_preparation_does_not(self):
+        for name in ("mcp__web__search", "Write", "Edit", "custom_tool",
+                     "mcp__other__empirica_read"):
+            with self.subTest(tool=name):
+                request = build_investigation_request(_payload(tool_name=name), "run")
+                self.assertEqual(request["command"]["action"], {"kind": "investigate"})
+        for name in ("mcp__plugin_empirica_empirica__empirica_read",
+                     "mcp__plugin_empirica_empirica__empirica_observe",
+                     "mcp__plugin_empirica_empirica__report_convergence", "ToolSearch", "AskUserQuestion"):
+            self.assertIsNone(build_investigation_request(_payload(tool_name=name), "run"))
+
     def test_route_announcement_is_exact_v2(self) -> None:
         request = build_route_announcement_request(
             _payload(tool_name="Bash", tool_input={"command": "announce"}),
@@ -336,6 +347,12 @@ class DispatchTests(unittest.TestCase):
 
 class ConfigureRunTests(unittest.TestCase):
     def test_mode_becomes_exact_configure_run(self) -> None:
+        automatic = parse_invocation(
+            {"command_args": "--auto --cli-exec --multi-provider prove X"}, environ={}, fallback_goal="g",
+        )
+        self.assertEqual(automatic.control_mode, "auto")
+        self.assertTrue(automatic.modes["cli_exec"])
+        self.assertTrue(automatic.modes["multi_provider"])
         invocation = parse_invocation(
             {"command_args": "--cli-exec --multi-provider prove X"}, environ={}, fallback_goal="g",
         )
@@ -552,7 +569,8 @@ class SpawnLifecycleTests(unittest.TestCase):
         from adapters.claude.lifecycle import spawn_main
         argument = {"argument_digest": "sha256:" + "1" * 64, "claims": []}
         plan = AuditLaunchPlan("claude-code@2.1.278", "active-run", "ch-audit",
-                               "empirica:empirica-auditor", argument)
+                               "empirica:empirica-auditor", argument,
+                               auditor={"provider_id": "anthropic", "model_id": "claude-opus-4-6"})
         payload = self._stdin({"subagent_type": "empirica:empirica-auditor",
                                "prompt": "author-controlled prompt"})
         out = StringIO()
@@ -563,6 +581,7 @@ class SpawnLifecycleTests(unittest.TestCase):
              patch("adapters.claude.lifecycle.dispatch_investigation",
                    return_value=investigation), \
              patch("adapters.claude.lifecycle.AuditProtocol.prepare", return_value=plan), \
+             patch("adapters.claude.lifecycle._governance_context"), \
              patch("sys.stdin", new=payload), patch("sys.stdout", new=out):
             self.assertEqual(spawn_main(), 0)
         updated = json.loads(out.getvalue())["hookSpecificOutput"]["updatedInput"]
@@ -572,7 +591,8 @@ class SpawnLifecycleTests(unittest.TestCase):
         self.assertIs(updated["run_in_background"], True)
         self.assertEqual(updated["max_turns"], 8)
         self.assertEqual(set(updated), {"subagent_type", "description", "prompt",
-                                        "run_in_background", "max_turns"})
+                                        "run_in_background", "max_turns", "model"})
+        self.assertEqual(updated["model"], "claude-opus-4-6")
 
     def test_durable_plan_rejects_missing_operation_or_wrong_role(self) -> None:
         from adapters.claude.lifecycle import _durable_plan

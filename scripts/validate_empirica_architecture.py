@@ -8,9 +8,9 @@ and scans scoped runtime/Make surfaces for forbidden files, symbols, fields, act
 literals. It owns no domain reason tables; the accepted D2 PublicContract/host-profiles registry is
 loaded only to assert the configured required identity references resolve.
 
-This target is intentionally NOT composed into ``check-static`` in D3. The current pre-D6/D7 tree is
-expected to be RED: the reported violations are the red acceptance list for D6/D7, not a baseline to
-silently except. D3-M composes the target only after the target-state implementation is green.
+ADR 0053 composes this target into ``check-static`` after re-establishing a measured finite
+runtime ceiling. The historical baseline remains visible; growth beyond the accepted ceiling,
+forbidden authority patterns, and dependency violations still fail closed.
 
 Stdlib only. No plugin/runtime import or execution. The check functions are pure: each takes explicit
 inputs (config values, file lists, roots) and returns a list of :class:`Diagnostic`. ``main`` is the

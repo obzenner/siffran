@@ -140,7 +140,8 @@ class ExactV2ProfileTests(unittest.TestCase):
     def test_managed_runner_without_start_ack_rejects_reservation(self) -> None:
         from adapters.codex.audit import execute_audit
         protocol = MagicMock()
-        protocol.prepare.return_value = SimpleNamespace(argument={}, child_id="ch-1")
+        protocol.prepare.return_value = SimpleNamespace(argument={}, child_id="ch-1",
+            auditor={"provider_id": "openai", "model_id": "gpt-4.1-2025-04-14"})
         with patch("adapters.codex.audit.AuditProtocol", return_value=protocol):
             self.assertFalse(execute_audit(
                 {}, "run", runner=lambda _p, _m, _c, _started: (0, "no start")))
@@ -150,7 +151,8 @@ class ExactV2ProfileTests(unittest.TestCase):
     def test_managed_timeout_after_native_start_closes_timed_out(self) -> None:
         from adapters.codex.audit import execute_audit
         protocol = MagicMock()
-        protocol.prepare.return_value = SimpleNamespace(argument={}, child_id="ch-1")
+        protocol.prepare.return_value = SimpleNamespace(argument={}, child_id="ch-1",
+            auditor={"provider_id": "openai", "model_id": "gpt-4.1-2025-04-14"})
 
         def timeout(_prompt, _model, _cwd, started):
             started("native-1")

@@ -28,17 +28,27 @@ test("Pi public tools and injected foreground observations satisfy adapter confo
     config.cwd = root;
     config.env = { ...process.env };
     const pi = new FakePi();
+    const privateErrors: string[] = [];
+    const ingress = createPrivateIngress();
     createEmpiricaExtension({
       dispatch: createStdioBridgeDispatch(config),
-      privateIngress: createPrivateIngress(),
+      privateIngress: async request => {
+        try { return await ingress(request); }
+        catch (error) { privateErrors.push(`${request.operation}: ${String(error)}`); throw error; }
+      },
       deriveSelector: () => ({ project: "pi-reach-project", session: "pi-reach-session" }),
       resolveAuditContract: async () => ({
         agentFilePath: resolve(DEFAULT_SKILLS_DIR, "..", "agents", "pi", "empirica-auditor.md"),
-        model: "bedrock/auditor-model",
+        model: "anthropic/claude-opus-4-6",
       }),
     })(pi);
     const ctx = fakeCtx(root);
-    ctx.model = { provider: "bedrock", id: "author-model" };
+    ctx.model = { provider: "anthropic", id: "claude-sonnet-4-6" };
+    ctx.modelRegistry = { getAvailable: () => [ctx.model!, { provider: "anthropic", id: "claude-opus-4-6" }] };
+    ctx.hasUI = true;
+    ctx.ui.select = async (title, options) => title.includes("auditor") ? options.find(o => o.endsWith("claude-opus-4-6")) : "Approve";
+    ctx.ui.confirm = async () => true;
+    ctx.ui.input = async () => undefined;
     await pi.command("empirica").handler("prove the Pi host path", ctx);
 
     const execute = async (name: string, params: unknown) =>
@@ -47,13 +57,14 @@ test("Pi public tools and injected foreground observations satisfy adapter confo
       execute("empirica_observe", { action });
 
     await observe({ kind: "route", reason: "route first" });
-    await observe({ kind: "investigate" });
     await observe({ kind: "graph", payload: {
       root: "G0",
       claims: [{ id: "G0", text: "Pi can drive v2.", gating: true,
                  kind: "needs-experiment" }],
       edges: [],
     }});
+    await observe({ kind: "configure_run", auditor: { provider_id: "anthropic", model_id: "claude-opus-4-6" } });
+    await observe({ kind: "investigate" });
     await observe({ kind: "research", claim_id: "G0", source_kind: "code",
                     result: "supports", payload: { source_ref: "probe.py",
                       citation: "The probe executes successfully." } });
@@ -94,8 +105,8 @@ test("Pi public tools and injected foreground observations satisfy adapter confo
         role: "assistant",
         content: [{ type: "text", text: "```empirica-verdict\n" +
           JSON.stringify(verdict) + "\n```" }],
-        provider: "bedrock",
-        model: "native-auditor-model",
+        provider: "anthropic",
+        model: "claude-opus-4-6",
       },
     }) + "\n");
     const event: ToolResultEvent = {
@@ -114,6 +125,7 @@ test("Pi public tools and injected foreground observations satisfy adapter confo
     await toolResult(event, ctx);
     assert.doesNotMatch(String(event.content), /```empirica-verdict/);
 
+    assert.deepEqual(privateErrors, [], "private lifecycle must reconcile without hidden errors");
     const final = await execute("report_convergence", {});
     const result = final.details as { type: string; converged: boolean; run: { status: string } };
     assert.equal(result.type, "Allow");

@@ -26,6 +26,7 @@ export interface ParsedModeFlags {
   goal: string;
   modes: Modes;
   unknownFlags: string[];
+  controlMode?: "auto";
 }
 
 /** Consume only leading recognized flags; unknown flags are surfaced, never enabled. */
@@ -33,21 +34,24 @@ export function parseModeFlags(args: string): ParsedModeFlags {
   const tokens = args.trim().split(/\s+/).filter(Boolean);
   const modes: Modes = {};
   const unknownFlags: string[] = [];
+  let controlMode: "auto" | undefined;
   let i = 0;
   while (i < tokens.length && tokens[i].startsWith("--")) {
     const flag = tokens[i++];
-    if (flag === "--cli-exec") modes.cli_exec = true;
+    if (flag === "--auto") controlMode = "auto";
+    else if (flag === "--cli-exec") modes.cli_exec = true;
     else if (flag === "--no-cli-exec") modes.cli_exec = false;
     else if (flag === "--multi-provider") modes.multi_provider = true;
     else if (flag === "--no-multi-provider") modes.multi_provider = false;
     else unknownFlags.push(flag);
   }
-  return { goal: tokens.slice(i).join(" "), modes, unknownFlags };
+  return { goal: tokens.slice(i).join(" "), modes, unknownFlags, ...(controlMode ? { controlMode } : {}) };
 }
 
 // --- Pi invocation -> Request -----------------------------------------------
 
 export interface StartRunOptions {
+  controlMode?: "auto" | "deliberative";
   maxPasses?: number;
   maxSpawns?: number;
   maxAuditSpawns?: number;
@@ -75,6 +79,7 @@ export function startRunRequest(
     command.budgets = budgets;
   }
   if (options.modes !== undefined) command.modes = options.modes;
+  if (options.controlMode !== undefined) command.control_mode = options.controlMode;
   return { protocol: PROTOCOL, request_id: requestId, command };
 }
 

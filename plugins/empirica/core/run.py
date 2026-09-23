@@ -22,6 +22,7 @@ class OperationalState:
     status: str
     modes: Mapping[str, bool]
     budgets: Mapping[str, int]
+    governance: Mapping[str, Any]
     selected_graph_artifact_id: str | None
     frozen_claim_ids: tuple[str, ...] | None
     frozen_semantic_digest: str | None
@@ -35,6 +36,7 @@ class OperationalState:
     def __post_init__(self) -> None:
         object.__setattr__(self, "modes", _immutable(self.modes))
         object.__setattr__(self, "budgets", _immutable(self.budgets))
+        object.__setattr__(self, "governance", _immutable(self.governance))
         object.__setattr__(self, "children", _immutable(self.children))
         if self.frozen_claim_ids is not None:
             object.__setattr__(self, "frozen_claim_ids", tuple(self.frozen_claim_ids))

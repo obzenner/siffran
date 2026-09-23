@@ -134,18 +134,19 @@ def _load_schemas() -> dict[str, dict[str, dict]]:
     return artifact["schemas"]
 
 
-_PUBLIC_SCHEMAS = _load_schemas()
+_PUBLIC_SCHEMAS = {"model": _project_schemas(), "host_handle": _host_handle_schemas(_project_schemas())}
 
 
 class PublicTools:
     """Profile-bound public tools over the canonical Empirica bridge."""
 
-    def __init__(self, profile_id: str, *, dispatch: Dispatch = _bridge.handle):
+    def __init__(self, profile_id: str, *, dispatch: Dispatch = _bridge.handle, govern=None):
         if profile_id not in _PROFILES:
             raise ValueError(f"unknown exact Empirica profile: {profile_id!r}")
         self._profile_id = profile_id
         self._dispatch = dispatch
-        self._schemas = copy.deepcopy(_PUBLIC_SCHEMAS["model"])
+        self._govern = govern
+        self._schemas = copy.deepcopy(_load_schemas()["model"])
 
     def definitions(self) -> list[dict[str, object]]:
         metadata = {
@@ -164,8 +165,8 @@ class PublicTools:
                 "description": (
                     "Submit exactly one public author action for an active Empirica run. Use it "
                     "to route before investigation, construct or refine the claim graph, record "
-                    "cited research, request deterministic spikes, configure bounded modes, or "
-                    "freeze scope. The action must match one advertised variant and run_id must "
+                    "cited research, request deterministic spikes, propose bounded modes/budgets/auditor, or "
+                    "freeze approved scope. configure_run requests host-mediated approval; it never self-approves. Material graph/configuration changes revoke investigation authority. The action must match one advertised variant and run_id must "
                     "identify the active run. This tool does not accept host-owned lifecycle facts."
                 ),
             },
@@ -223,6 +224,8 @@ class PublicTools:
         result = response.get("result") if isinstance(response, dict) else None
         if not isinstance(result, dict):
             return self._error("Empirica bridge returned no typed result.")
+        if self._govern and name == OBSERVE_TOOL and arguments["action"]["kind"] == "configure_run":
+            result = self._govern(result)
         text = json.dumps(result, sort_keys=True, separators=(",", ":"))
         return {
             "content": [{"type": "text", "text": text}],

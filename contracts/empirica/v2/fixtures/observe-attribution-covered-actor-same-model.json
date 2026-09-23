@@ -42,13 +42,13 @@
         },
         "contract": {
           "id": "empirica/public",
-          "version": "2.0.0",
+          "version": "2.1.0",
           "relevant_sections": [
             "evidence/research",
             "evidence/spike",
             "audit"
           ],
-          "digest": "sha256:525fa2359be90b80df00b3a50b6863367d3911cc6bc76e91c76debcb04de89ff"
+          "digest": "sha256:f656d9988ee3fa0b750f2e165cf5b822bc5d630512a26320f860cc5a8df5de98"
         },
         "obligations": {
           "active": [],
@@ -70,7 +70,8 @@
         "untrusted_delimiters": {
           "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
           "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
-        }
+        },
+        "governance": null
       },
       "argument": {
         "root_claim_id": "G0",

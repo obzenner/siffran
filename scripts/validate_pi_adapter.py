@@ -126,11 +126,11 @@ def check_manifest(adapter: Path, errors: list[str]) -> dict:
             errors.append(f"{rel(manifest_path)}: packaged Empirica auditor agent is not declared")
         elif agent_path is None or not agent_path.is_file():
             errors.append(f"{rel(manifest_path)}: packaged Empirica auditor agent is missing")
-        elif not re.search(
-                r"^model: amazon-bedrock/eu\.anthropic\.claude-opus-4-8$",
+        elif re.search(
+                r"^model:",
                 agent_path.read_text(encoding="utf-8"), re.MULTILINE):
             errors.append(
-                f"{rel(agent_path)}: auditor model must be the promoted provider-qualified identity")
+                f"{rel(agent_path)}: auditor must not pin a model; trusted approved selection is host-injected")
     return manifest
 
 

@@ -20,6 +20,7 @@ import sys
 from collections.abc import Mapping
 
 from adapters import bridge as application_bridge
+from adapters.governance import operator_inventory
 from adapters.audit import child_prompt, verdict_from_final_output
 from adapters.audit_protocol import (AuditLaunchPlan, AuditProtocol, AuditProtocolError,
                                      IdentityObservation)
@@ -28,6 +29,7 @@ from .dispatch import bash_command, dispatched_harness
 from .restore import dispatch_restore, restore_context
 from .route import dispatch_investigation
 from .run_start import dispatch_resolve, dispatch_start_run
+from .selector import SelectorError
 from .spawn import dispatch_child_reserve, spawn_decision
 from .transport import CLAUDE_PROFILE_ID
 
@@ -102,6 +104,27 @@ def _agent_identity(tool_input: Mapping[str, object]) -> tuple[str | None, str |
     return purpose, role_profile
 
 
+def _model_observation(raw):
+    from core.governance import normalized_model_identity
+    if not isinstance(raw, str) or not raw:
+        return None
+    provider = "bedrock" if raw.startswith(("anthropic.", "eu.anthropic.", "us.anthropic.", "global.anthropic.", "apac.anthropic.")) else (
+        "anthropic" if normalized_model_identity("anthropic", raw) else "unknown")
+    return {"provider_id": provider, "model_id": raw}
+
+
+def _governance_context(payload, handle):
+    model, _ = _transcript_observation(payload.get("transcript_path"))
+    # to_model is host-native PostModelSwitch input, never author tool content.
+    if payload.get("hook_event_name") == "PostModelSwitch":
+        model = payload.get("to_model")
+    response = application_bridge.trusted_governance_context(CLAUDE_PROFILE_ID, handle, {
+        "inventory": operator_inventory(), "author": _model_observation(model),
+        "ingress": "mcp_elicitation"})
+    if response.get("result", {}).get("type") not in {"Allow", "Inert"}:
+        raise RuntimeError("governance context unavailable")
+
+
 def run_start_main() -> int:
     """UserPromptExpansion: activate and inject the opaque handle/public tool contract."""
     payload = _payload()
@@ -111,6 +134,7 @@ def run_start_main() -> int:
         run = result.get("run", {}) if isinstance(result, Mapping) else {}
         handle = run.get("id") if isinstance(run, Mapping) else None
         if isinstance(handle, str) and handle:
+            _governance_context(payload, handle)
             context = (
                 f"Empirica v2 is active. Opaque run handle: {handle}. "
                 "Use empirica_observe for public author actions, empirica_read for the "
@@ -152,6 +176,7 @@ def spawn_main() -> int:
     if handle is None:
         return 0  # exact no-active-run response → no cap to enforce
     try:
+        _governance_context(payload, handle)
         investigation = dispatch_investigation(payload, handle)
         if investigation is not None:
             decision = spawn_decision(investigation)
@@ -172,6 +197,7 @@ def spawn_main() -> int:
         plan = AuditProtocol(CLAUDE_PROFILE_ID, execution="async").prepare(
             handle, role_profile="empirica:empirica-auditor")
         updated = {
+            "model": plan.auditor["model_id"],
             "subagent_type": "empirica:empirica-auditor",
             "description": "Bound Empirica audit",
             "prompt": child_prompt(plan.argument),
@@ -195,6 +221,7 @@ def route_main() -> int:
         handle, _ = _resolve(payload, strict=True)
         if handle is None:
             return 0
+        _governance_context(payload, handle)
         response = dispatch_investigation(payload, handle)
         if response is None:
             return 0
@@ -233,10 +260,12 @@ def completion_main() -> int:
     """Stop: fail closed for an active/blocked run, silent when no run exists."""
     payload = _payload()
     try:
-        handle, _ = _resolve(payload)
+        handle, _ = _resolve(payload, strict=True)
         if handle is None:
-            return 0  # no active run to gate (D7 owns run identity/evaluation)
+            return 0  # exact no-active-run response → nothing to gate
         mapped = stop_result(dispatch_stop(payload, handle))
+    except SelectorError:
+        return 0  # malformed non-session Stop events retain observational behavior
     except Exception as exc:  # noqa: BLE001 - completion is the fail-closed boundary
         print(f"empirica completion gate unavailable: {exc}", file=sys.stderr)
         return 2
@@ -339,7 +368,7 @@ def _durable_plan(handle: str, child_id: str) -> AuditLaunchPlan | None:
             or not isinstance(argument, dict)):
         return None
     return AuditLaunchPlan(
-        CLAUDE_PROFILE_ID, handle, child_id, role, argument, operation_id)
+        CLAUDE_PROFILE_ID, handle, child_id, role, argument, operation_id, operation.get("auditor"))
 
 
 def _reserved_plan(handle: str, result: Mapping[str, object]) -> AuditLaunchPlan | None:
@@ -437,10 +466,10 @@ def subagent_stop_main() -> int:
         protocol.observe_identities(
             plan, native_id,
             author=IdentityObservation(
-                "anthropic" if author_model else None, author_model, "host",
+                (_model_observation(author_model) or {}).get("provider_id"), author_model, "host",
                 "claude-parent-transcript"),
             auditor=IdentityObservation(
-                "anthropic" if auditor_model else None, auditor_model, "host",
+                (_model_observation(auditor_model) or {}).get("provider_id"), auditor_model, "host",
                 "claude-child-transcript"),
         )
         if not protocol.observe_verdict(plan, native_id, verdict):

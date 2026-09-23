@@ -1,0 +1,417 @@
+#!/usr/bin/env python3
+"""Governance real service/manifest/CAS regressions, not a policy-only scaffold."""
+import copy
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from application.v2 import compose
+from application.run_state import classify_and_decode
+from application.snapshot import traverse_history
+from core.governance import identity_relation
+from test_d7_transactions import Runs, Artifacts, Workspace, Harness
+
+PROFILE = "pi@0.84.1+pi-subagents@0.50.0"
+AUTHOR = {"provider_id": "anthropic", "model_id": "claude-sonnet-4-6"}
+AUDITOR = {"provider_id": "anthropic", "model_id": "claude-opus-4-6"}
+GRAPH = {"root": "C0", "claims": [{"id": "C0", "text": "supplied uncertainty", "gating": True,
+                                   "kind": "ordinary"}], "edges": []}
+CONTEXT = {"inventory": {"members": [AUTHOR, AUDITOR], "source": "pi_registry",
+                          "complete": True, "authorized": True}, "author": AUTHOR, "ingress": "pi_ui"}
+
+
+class GovernanceServiceTests(unittest.TestCase):
+    def setUp(self):
+        self.runs, self.artifacts = Runs(), Artifacts()
+        self.service = compose(Workspace(), Harness(), self.runs, self.artifacts, None, PROFILE, {}, None)
+        self.run_id = self.request({"type": "StartRun", "goal": "governed task",
+                                    "selector": {"project": "p", "session": "s"}})["run"]["id"]
+
+    def request(self, command):
+        return self.service.dispatch({"protocol": "empirica/v2", "request_id": "test", "command": command})["result"]
+
+    def action(self, kind, **kwargs):
+        return self.request({"type": "ObserveAction", "run_id": self.run_id,
+                             "action": {"kind": kind, **kwargs}})
+
+    def view(self):
+        return self.request({"type": "GetRun", "run_id": self.run_id})["run"]
+
+    def decision(self, receipt="receipt", outcome="approve", *, reserve=True, **kwargs):
+        """Explicit simulated-host reservation before constructing a final UI decision."""
+        g = self.view()["governance"]
+        payload = {"run_id": self.run_id, "receipt_id": receipt + "-" + str(g["plan_revision"]), "proposal_digest": g["proposal_digest"],
+                   "plan_revision": g["plan_revision"], "approval_kind": "host_ui", "outcome": outcome, **kwargs}
+        if reserve and outcome != "present" and payload["approval_kind"] == "host_ui" and g["state"] != "approved" and not g["prompt_error"]:
+            present = {k: v for k, v in payload.items() if k != "amendment"}
+            present["outcome"] = "present"
+            self.assertIn(self.admit(present)["type"], {"Allow", "Inert"})
+        return payload
+
+    def admit(self, payload):
+        return self.service.trusted_governance_decision(run_id=self.run_id, payload=payload)["result"]
+
+    def prepare(self):
+        self.assertEqual(self.action("route", reason="supplied context")["type"], "Allow")
+        self.assertEqual(self.action("graph", payload=copy.deepcopy(GRAPH))["type"], "Allow")
+        self.assertEqual(self.action("configure_run", auditor=AUDITOR)["type"], "Allow")
+        result = self.service.trusted_governance_context(run_id=self.run_id, payload=copy.deepcopy(CONTEXT))
+        self.assertEqual(result["result"]["type"], "Allow", result)
+
+    def test_real_pending_approval_investigation_then_revision_revokes_all_paths(self):
+        self.assertEqual(self.view()["governance"]["state"], "pending")
+        self.prepare()
+        self.assertEqual(self.action("investigate")["reasons"][0]["code"], "governance.approval_required")
+        counters = self.view()["governance"]["budgets"]
+        self.assertEqual(self.admit(self.decision())["type"], "Allow")
+        self.assertEqual(self.action("investigate")["type"], "Allow")
+        graph = copy.deepcopy(GRAPH)
+        graph["claims"][0]["text"] = "revised scope"
+        self.assertEqual(self.action("graph", payload=graph)["type"], "Allow")
+        self.assertEqual(self.view()["governance"]["state"], "revision_pending")
+        for kind, fields in [("investigate", {}), ("freeze", {}),
+                             ("research", {"claim_id": "C0", "source_kind": "docs", "result": "supports",
+                                           "payload": {"source_ref": "provided", "citation": "text"}}),
+                             ("spike_request", {"claim_id": "C0", "command": "false", "dependent_files": ["f.py"]})]:
+            result = self.action(kind, **fields)
+            self.assertEqual(result["type"], "Block", result)
+            self.assertEqual(result["reasons"][0]["code"], "governance.revision_required")
+        self.assertEqual(self.view()["governance"]["budgets"], counters)
+        self.assertEqual(self.request({"type": "EvaluateRun", "run_id": self.run_id, "intent": "stop"})["type"], "Allow")
+
+    def test_private_exact_replay_conflict_stale_cross_run_and_cas(self):
+        self.prepare()
+        decision = self.decision()
+        before = copy.deepcopy(self.runs.data)
+        for changed in [{"run_id": "other"}, {"plan_revision": 900}, {"approval_kind": "auto"},
+                        {"proposal_digest": "sha256:" + "a" * 64}]:
+            self.assertEqual(self.admit({**decision, **changed})["type"], "Block")
+            self.assertEqual(self.runs.data, before)
+        self.runs.conflicts = 1
+        self.assertEqual(self.admit(decision)["type"], "Allow")
+        after = copy.deepcopy(self.runs.data)
+        self.assertEqual(self.admit(decision)["type"], "Inert")
+        self.assertEqual(self.admit({**decision, "outcome": "reject"})["type"], "Block")
+        self.assertEqual(self.runs.data, after)
+        key = next(iter(self.runs.data))
+        decoded = classify_and_decode(self.runs.data[key].value)
+        self.assertEqual(decoded.kind, "valid")
+        traverse_history(decoded.state, self.artifacts.read(key))
+
+    def test_configuration_is_proposal_only_and_freeze_preserves_approval(self):
+        self.prepare()
+        self.admit(self.decision())
+        before = self.view()["governance"]
+        self.assertEqual(self.action("freeze")["type"], "Allow")
+        self.assertEqual(self.view()["governance"]["approved_digest"], before["approved_digest"])
+        self.action("configure_run", budgets={"max_passes": 12})
+        g = self.view()["governance"]
+        self.assertEqual(g["budgets"]["max_passes"], 8)
+        self.assertEqual(g["proposal"]["budgets"]["max_passes"], 12)
+        self.assertEqual(g["state"], "revision_pending")
+        self.assertEqual(self.admit(self.decision("second"))["type"], "Allow")
+        self.assertEqual(self.view()["governance"]["budgets"]["max_passes"], 12)
+
+    def test_cancel_unknown_inventory_singleton_and_no_public_approval(self):
+        self.prepare()
+        self.assertEqual(self.action("governance_decision", payload=self.decision())["type"], "Fault")
+        context = copy.deepcopy(CONTEXT)
+        context["inventory"]["complete"] = False
+        self.service.trusted_governance_context(run_id=self.run_id, payload=context)
+        self.assertEqual(self.admit(self.decision())["reasons"][0]["code"], "governance.inventory_unknown")
+        context["inventory"].update(complete=True, members=[AUTHOR])
+        self.service.trusted_governance_context(run_id=self.run_id, payload=context)
+        self.action("configure_run", auditor=AUTHOR)
+        self.assertEqual(self.admit(self.decision())["reasons"][0]["code"], "audit.same_model")
+        self.action("configure_run", allow_same_model=True)
+        self.assertEqual(self.admit(self.decision())["type"], "Allow")
+
+    def test_auto_explicit_no_ceiling_increase_and_bounded_revisions(self):
+        self.run_id = self.request({"type": "StartRun", "goal": "auto task", "control_mode": "auto",
+                                    "selector": {"project": "p", "session": "auto"}})["run"]["id"]
+        self.prepare()
+        self.assertEqual(self.admit(self.decision(approval_kind="auto"))["type"], "Allow")
+        self.assertEqual(self.action("configure_run", budgets={"max_audit_spawns": 2})["reasons"][0]["code"], "governance.auto_ceiling")
+        for i in range(8):
+            graph = copy.deepcopy(GRAPH)
+            graph["claims"][0]["text"] = str(i)
+            self.assertEqual(self.action("graph", payload=graph)["type"], "Allow")
+            self.assertEqual(self.admit(self.decision(str(i), approval_kind="auto"))["type"], "Allow")
+        graph["claims"][0]["text"] = "ninth"
+        self.assertEqual(self.action("graph", payload=graph)["reasons"][0]["code"], "governance.revision_limit")
+
+    def test_honest_stop_without_graph_and_strict_old_state(self):
+        self.assertEqual(self.request({"type": "EvaluateRun", "run_id": self.run_id, "intent": "stop"})["type"], "Allow")
+        raw = copy.deepcopy(next(iter(self.runs.data.values())).value)
+        del raw["governance"]
+        self.assertEqual(classify_and_decode(raw).kind, "current_corrupt")
+
+    def audit_ready(self, *, singleton=False, partial=False):
+        from governance_setup import approve_current
+        from adapters.audit_protocol import AuditProtocol
+        self.prepare()
+        approve_current(self.service._coordinator, self.run_id,
+                        auditor=AUTHOR if singleton else AUDITOR, singleton=singleton)
+        if partial:
+            context = copy.deepcopy(CONTEXT)
+            context["inventory"]["members"].append({"provider_id": "private", "model_id": "unknown"})
+            self.service.trusted_governance_context(run_id=self.run_id, payload=context)
+            self.assertEqual(self.admit(self.decision("partial"))["type"], "Allow")
+        self.assertEqual(self.action("investigate")["type"], "Allow")
+        self.assertEqual(self.action("research", claim_id="C0", source_kind="code", result="supports",
+                                    payload={"source_ref": "supplied", "citation": "observed"})["type"], "Allow")
+        c = self.service._coordinator
+        protocol = AuditProtocol(PROFILE,
+            dispatch=lambda r, _p: self.service.dispatch(r),
+            child_event_ingress=lambda _p, r, ch, v: c.trusted_child_event(r, ch, v),
+            attribution_ingress=lambda _p, r, v: c.trusted_attribution(r, v),
+            verdict_ingress=lambda _p, r, ch, v: c.trusted_audit_verdict(r, ch, v),
+            plan_ingress=lambda _p, r, ch: c.trusted_audit_plan(r, ch))
+        plan = protocol.prepare(self.run_id, role_profile="empirica:empirica-auditor")
+        protocol.observe_started(plan, "native-test")
+        return protocol, plan
+
+    def test_singleton_exception_real_bound_audit_converges_with_raw_alias_provenance(self):
+        from adapters.audit_protocol import IdentityObservation
+        from core.evaluation import audit_binding
+        protocol, plan = self.audit_ready(singleton=True)
+        protocol.observe_identities(plan, "native-test",
+            author=IdentityObservation("anthropic", AUTHOR["model_id"], "host", "test-host"),
+            auditor=IdentityObservation("bedrock", "eu.anthropic.claude-sonnet-4-6", "host", "test-host"))
+        c = self.service._coordinator
+        key = next(iter(self.runs.data))
+        state = classify_and_decode(self.runs.data[key].value).state
+        snapshot = c._assemble(key, state, {"type": "GetArgument", "run_id": self.run_id}, require_graph=True)
+        verdict = {"verdict": "pass", "findings": ["bound singleton audit"], **audit_binding(snapshot)}
+        self.assertTrue(protocol.observe_verdict(plan, "native-test", verdict))
+        result = self.request({"type": "EvaluateRun", "run_id": self.run_id, "intent": "report_convergence"})
+        self.assertTrue(result["converged"], result)
+        self.assertEqual(result["run"]["governance"]["inventory_status"], "singleton")
+        self.assertEqual(result["run"]["governance"]["context"]["inventory"]["source"], "pi_registry")
+        history = traverse_history(classify_and_decode(self.runs.data[key].value).state,
+                                   self.artifacts.read(key))
+        self.assertTrue(any(a.get("model_id") == "eu.anthropic.claude-sonnet-4-6" for a in history))
+
+    def test_partial_inventory_real_bound_different_model_audit_converges(self):
+        from adapters.audit_protocol import IdentityObservation
+        from core.evaluation import audit_binding
+        protocol, plan = self.audit_ready(partial=True)
+        protocol.observe_identities(plan, "native-test",
+            author=IdentityObservation("anthropic", AUTHOR["model_id"], "host", "test-host"),
+            auditor=IdentityObservation("bedrock", "eu.anthropic.claude-opus-4-6-v1", "host", "test-host"))
+        c = self.service._coordinator
+        key = next(iter(self.runs.data))
+        state = classify_and_decode(self.runs.data[key].value).state
+        snapshot = c._assemble(key, state, {"type": "GetArgument", "run_id": self.run_id}, require_graph=True)
+        verdict = {"verdict": "pass", "findings": ["bound singleton audit"], **audit_binding(snapshot)}
+        self.assertTrue(protocol.observe_verdict(plan, "native-test", verdict))
+        result = self.request({"type": "EvaluateRun", "run_id": self.run_id, "intent": "report_convergence"})
+        self.assertTrue(result["converged"], result)
+        self.assertEqual(result["run"]["governance"]["inventory_status"], "partial")
+        self.assertEqual(result["run"]["governance"]["context"]["inventory"]["source"], "pi_registry")
+        history = traverse_history(classify_and_decode(self.runs.data[key].value).state,
+                                   self.artifacts.read(key))
+        self.assertTrue(any(a.get("model_id") == "eu.anthropic.claude-opus-4-6-v1" for a in history))
+
+    def test_selected_observed_mismatch_revokes_and_cannot_admit_verdict(self):
+        from adapters.audit_protocol import IdentityObservation, AuditProtocolError
+        protocol, plan = self.audit_ready()
+        before = self.view()["governance"]["budgets"]
+        with self.assertRaises(AuditProtocolError):
+            protocol.observe_identities(plan, "native-test",
+                author=IdentityObservation("anthropic", AUTHOR["model_id"], "host", "test-host"),
+                auditor=IdentityObservation("anthropic", AUTHOR["model_id"], "host", "test-host"))
+        self.assertEqual(self.view()["governance"]["state"], "revision_pending")
+        self.assertEqual(self.view()["governance"]["budgets"], before)
+        protocol.observe_failure(plan, "native-test", "failed")
+        self.assertEqual(self.view()["children"][0]["state"], "failed")
+        self.assertEqual(self.view()["governance"]["budgets"], before)
+        self.assertEqual(self.action("investigate")["reasons"][0]["code"], "governance.revision_required")
+        self.assertEqual(self.request({"type": "EvaluateRun", "run_id": self.run_id,
+                                      "intent": "stop"})["type"], "Allow")
+
+    def test_inventory_change_and_canonical_reordering_and_strict_rejects(self):
+        self.prepare()
+        self.admit(self.decision())
+        before = self.view()["governance"]
+        reordered = copy.deepcopy(CONTEXT)
+        reordered["inventory"]["members"].reverse()
+        result = self.service.trusted_governance_context(run_id=self.run_id, payload=reordered)
+        self.assertEqual(result["result"]["type"], "Inert")
+        self.assertEqual(self.view()["governance"], before)
+        persisted = copy.deepcopy(self.runs.data)
+        self.assertEqual(self.admit({**self.decision("bad"), "extra": True})["type"], "Fault")
+        self.assertEqual(self.runs.data, persisted)
+        reordered["inventory"]["complete"] = False
+        self.service.trusted_governance_context(run_id=self.run_id, payload=reordered)
+        self.assertEqual(self.view()["governance"]["state"], "revision_pending")
+        self.assertEqual(self.admit(self.decision("new"))["reasons"][0]["code"], "governance.inventory_unknown")
+
+    def test_canonical_graph_order_preserves_consent_and_oversize_cannot_replace_scope(self):
+        self.prepare()
+        graph = copy.deepcopy(GRAPH)
+        graph["claims"].append({"id": "C1", "text": "dependent uncertainty", "gating": True, "kind": "ordinary"})
+        graph["edges"] = [{"from": "C0", "to": "C1", "type": "SupportedBy"}]
+        self.assertEqual(self.action("graph", payload=graph)["type"], "Allow")
+        self.assertEqual(self.admit(self.decision())["type"], "Allow")
+        before = self.view()["governance"]
+        graph["claims"].reverse()
+        self.assertEqual(self.action("graph", payload=graph)["type"], "Allow")
+        self.assertEqual(self.view()["governance"], before)
+        persisted = copy.deepcopy(self.runs.data)
+        graph["claims"][0]["text"] = "x" * 2049
+        self.assertIn(self.action("graph", payload=graph)["type"], {"Fault", "Block"})
+        self.assertEqual(self.runs.data, persisted)
+
+    def test_partial_inventory_known_pair_unknown_subjects_and_singleton_adversaries(self):
+        self.prepare()
+        unknown = {"provider_id": "private", "model_id": "moving"}
+        for author, auditor, members, expected in [
+            (AUTHOR, AUDITOR, [AUTHOR, AUDITOR, unknown], None),
+            (unknown, AUDITOR, [unknown, AUDITOR], "governance.author_unknown"),
+            (AUTHOR, unknown, [AUTHOR, unknown], "governance.auditor_unknown"),
+            (AUTHOR, AUTHOR, [AUTHOR, unknown], "audit.same_model"),
+            (AUTHOR, AUTHOR, [AUTHOR, AUDITOR], "audit.same_model"),
+            (AUTHOR, AUDITOR, [], "governance.inventory_unknown"),
+        ]:
+            with self.subTest(expected=expected):
+                context = copy.deepcopy(CONTEXT)
+                context.update(author=author)
+                context["inventory"]["members"] = members
+                self.service.trusted_governance_context(run_id=self.run_id, payload=context)
+                self.action("configure_run", auditor=auditor, allow_same_model=author == auditor)
+                result = self.admit(self.decision("pair-" + str(expected)))
+                self.assertEqual(result["type"], "Block" if expected else "Allow", result)
+                if expected:
+                    self.assertEqual(result["reasons"][0]["code"], expected)
+        context["author"] = AUTHOR
+        context["inventory"]["members"] = [AUTHOR, {"provider_id": "amazon-bedrock-eu", "model_id": "eu.anthropic.claude-sonnet-4-6"}]
+        self.service.trusted_governance_context(run_id=self.run_id, payload=context)
+        self.action("configure_run", auditor=AUTHOR, allow_same_model=True)
+        self.assertEqual(self.view()["governance"]["inventory_status"], "singleton")
+        self.assertEqual(self.admit(self.decision("alias"))["type"], "Allow")
+        before = copy.deepcopy(self.runs.data)
+        context["inventory"]["members"] = [AUTHOR, AUTHOR]
+        self.assertEqual(self.service.trusted_governance_context(run_id=self.run_id, payload=context)["result"]["type"], "Fault")
+        self.assertEqual(self.runs.data, before)
+
+    def test_auto_null_selection_prepared_before_digest_and_never_human(self):
+        unknown = {"provider_id": "private", "model_id": "moving"}
+        for index, members, selected, error in [
+            (0, [AUTHOR, AUDITOR, unknown], AUDITOR, None),
+            (1, [AUTHOR], AUTHOR, None),
+            (2, [AUTHOR, unknown], None, "governance.auditor_required"),
+            (3, [unknown], None, "governance.author_unknown"),
+        ]:
+            self.run_id = self.request({"type": "StartRun", "goal": "auto", "control_mode": "auto",
+                "selector": {"project": "p", "session": "auto-null-" + str(index)}})["run"]["id"]
+            self.action("graph", payload=GRAPH)
+            context = copy.deepcopy(CONTEXT)
+            context["inventory"]["members"] = members
+            if index == 3:
+                context["author"] = unknown
+            self.service.trusted_governance_context(run_id=self.run_id, payload=context)
+            g = self.view()["governance"]
+            self.assertEqual(g["proposal"]["auditor"], selected)
+            result = self.admit(self.decision(approval_kind="auto"))
+            if error:
+                self.assertEqual(result["reasons"][0]["code"], error)
+            else:
+                self.assertEqual(result["run"]["governance"]["approved_digest"], g["proposal_digest"])
+                self.assertEqual(result["run"]["governance"]["approval_kind"], "auto")
+                self.action("route", reason="supplied")
+                self.assertEqual(self.action("investigate")["type"], "Allow")
+
+    def test_present_reservation_replay_final_binding_and_third_completion(self):
+        self.prepare()
+        unreserved = self.decision("unreserved", reserve=False)
+        before = copy.deepcopy(self.runs.data)
+        self.assertEqual(self.admit(unreserved)["reasons"][0]["code"], "governance.receipt_replay")
+        self.assertEqual(self.runs.data, before)
+        presents = [self.decision(str(n), "present", reserve=False) for n in range(4)]
+        for presented in presents[:3]:
+            self.runs.conflicts = 1
+            self.assertEqual(self.admit(presented)["type"], "Allow")
+        before = copy.deepcopy(self.runs.data)
+        self.assertEqual(self.admit(presents[3])["reasons"][0]["code"], "governance.interaction_limit")
+        self.assertEqual(self.admit(presents[2])["type"], "Inert")
+        self.assertEqual(self.runs.data, before)
+        final = {**presents[2], "outcome": "approve"}
+        for changed in ({"run_id": "other"}, {"plan_revision": 1000}, {"proposal_digest": "sha256:" + "a" * 64}, {"approval_kind": "auto"}):
+            self.assertEqual(self.admit({**final, **changed})["type"], "Block")
+            self.assertEqual(self.runs.data, before)
+        self.assertEqual(self.admit(final)["run"]["governance"]["state"], "approved")
+        before = copy.deepcopy(self.runs.data)
+        self.assertEqual(self.admit(final)["type"], "Inert")
+        self.assertEqual(self.admit(presents[2])["type"], "Inert")
+        self.assertEqual(self.admit({**final, "outcome": "reject"})["type"], "Block")
+        self.assertEqual(self.runs.data, before)
+        raw = copy.deepcopy(next(iter(self.runs.data.values())).value)
+        raw["governance"]["receipts"][0].pop("presentation_fingerprint")
+        self.assertEqual(classify_and_decode(raw).kind, "current_corrupt")
+
+    def test_dismiss_receipt_replay_strict_no_write_and_global_cap_across_initial_revisions(self):
+        self.prepare()
+        first = self.decision("dismiss", "dismiss")
+        self.assertEqual(self.admit(first)["type"], "Allow")
+        self.service = compose(Workspace(), Harness(), self.runs, self.artifacts, None, PROFILE, {}, None)
+        self.assertEqual(self.admit(first)["type"], "Inert")
+        before = copy.deepcopy(self.runs.data)
+        for payload in ({**first, "outcome": "reject"}, {**first, "extra": True},
+                        {**first, "receipt_id": "new", "plan_revision": 1000}):
+            self.assertIn(self.admit(payload)["type"], {"Fault", "Block"})
+            self.assertEqual(self.runs.data, before)
+        for n in range(127):
+            graph = copy.deepcopy(GRAPH)
+            graph["claims"][0]["text"] = str(n)
+            self.assertEqual(self.action("graph", payload=graph)["type"], "Allow")
+            if n % 2:
+                self.assertEqual(self.admit(self.decision(str(n), "dismiss"))["type"], "Allow")
+            else:
+                # An abandoned dialog remains charged after a material revision.
+                presented = self.decision(str(n), "present", reserve=False)
+                self.assertEqual(self.admit(presented)["type"], "Allow")
+        graph["claims"][0]["text"] = "after cap"
+        self.action("graph", payload=graph)
+        g = self.view()["governance"]
+        self.assertEqual(g["revisions_used"], 0)
+        self.assertEqual(g["interactions_remaining"], {"proposal": 3, "total": 0})
+        self.assertEqual(g["prompt_error"], "governance.interaction_limit")
+        self.assertEqual(self.admit(self.decision("overflow", "dismiss"))["reasons"][0]["code"], "governance.interaction_limit")
+        self.assertEqual(self.admit(first)["type"], "Inert")
+        before = copy.deepcopy(self.runs.data)
+        self.assertEqual(self.admit({**presented, "outcome": "dismiss"})["reasons"][0]["code"], "governance.stale_proposal")
+        self.assertEqual(self.admit(presented)["type"], "Inert")
+        self.assertEqual(self.runs.data, before)
+
+    def test_maximal_escaped_graph_amendment_round_trip(self):
+        import json
+        from adapters.governance import MAX_SCOPE_JSON
+        from core.evaluation import valid_graph
+        self.prepare()
+        ids = [chr(0x10000 + n) * 128 for n in range(32)]
+        claims = [{"id": key, "text": "\U0001f600" * 2048, "kind": "needs-experiment", "gating": False} for key in ids]
+        pairs = [(0, n) for n in range(1, 32)] + [(a, b) for a in range(1, 32) for b in range(a + 1, 32)]
+        graph = {"root": ids[0], "claims": claims, "edges": [{"from": ids[a], "to": ids[b], "type": "SupportedBy"} for a, b in pairs[:128]]}
+        self.assertTrue(valid_graph(graph))
+        raw = json.dumps(graph, ensure_ascii=True)
+        self.assertGreater(len(raw), 1000000)
+        self.assertLessEqual(len(raw), MAX_SCOPE_JSON)
+        self.assertEqual(self.admit(self.decision("max", "amend", amendment={
+            "graph": json.loads(raw), "configuration": self.view()["governance"]["proposal"]}))["type"], "Allow")
+        self.assertEqual(self.view()["governance"]["scope"], graph)
+        for text in ('"' * 2048, "\\" * 2048, "\u0000" * 2048):
+            graph["claims"][0]["text"] = text
+            self.assertLessEqual(len(json.dumps(graph)), MAX_SCOPE_JSON)
+
+    def test_exact_model_normalization_unknown_never_decorrelates(self):
+        def host(row):
+            return {**row, "observed_by": "host"}
+        self.assertEqual(identity_relation(host(AUTHOR), host({"provider_id": "bedrock", "model_id": "eu.anthropic.claude-sonnet-4-6"})), "same_model")
+        self.assertEqual(identity_relation(host(AUTHOR), host(AUDITOR)), "different_model")
+        self.assertEqual(identity_relation(host(AUTHOR), host({"provider_id": "other", "model_id": "latest"})), "unknown_equivalence")
+
+
+if __name__ == "__main__":
+    unittest.main()

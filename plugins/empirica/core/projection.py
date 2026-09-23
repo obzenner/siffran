@@ -4,6 +4,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from . import governance
+
 from .evaluation import (EvaluationSnapshot, active_evidence, audit_attributions, claim_conflicted,
                          claim_digest, derive_claims, digest, identity_pair, stale_artifact_ids)
 
@@ -97,6 +99,22 @@ def _residuals(snapshot: EvaluationSnapshot, states: Mapping[str, str]) -> list[
     return []
 
 
+def project_governance(snapshot: EvaluationSnapshot) -> dict:
+    value = governance.plain(snapshot.state.governance)
+    value.update(interactions_remaining=governance.interactions_remaining(snapshot.state.governance),
+                 prompt_error=governance.context_error(snapshot.state.governance) or
+                              governance.interaction_error(snapshot.state.governance))
+    value.pop("receipts")
+    value.update(scope=governance.canonical_graph(snapshot.graph),
+                 budgets=dict(snapshot.state.budgets),
+                 remaining={ceiling: snapshot.state.budgets[ceiling] - snapshot.state.budgets[used]
+                            for ceiling, used in governance.CEILINGS.items()},
+                 inventory_status=governance.inventory_status(value["context"]["inventory"]),
+                 next_action="investigation.record" if not governance.admission(snapshot.state.governance)
+                             else "governance.propose")
+    return value
+
+
 def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] | None = None) -> dict[str, Any]:
     changes, _ = _freshness(snapshot)
     states = derive_claims(snapshot).states
@@ -112,6 +130,7 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
     return {
         "id": snapshot.run_id, "goal": snapshot.state.goal, "status": snapshot.state.status,
         "modes": dict(snapshot.state.modes),
+        "governance": project_governance(snapshot),
         "contract": {"id": snapshot.contract_id, "version": snapshot.contract_version,
                      "digest": snapshot.contract_digest,
                      "relevant_sections": list(["protocol"] if relevant_sections is None

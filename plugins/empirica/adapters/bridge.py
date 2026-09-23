@@ -68,12 +68,31 @@ def _fault(code: str, request_id: str) -> dict:
     }
 
 
+class _LazyGitArtifactRepository:
+    """Defer Git discovery until an active run actually needs its knowledge plane.
+
+    ``ResolveRun`` first reads the machine-local run location.  Constructing the artifact adapter
+    before that read incorrectly made an otherwise inert hook depend on its cwd being a Git
+    repository.  Attribute forwarding deliberately does not translate Git failures: once a run
+    is found, storage errors remain errors and the bridge maps them to a closed fault.
+    """
+
+    def __init__(self, repo_dir: Path) -> None:
+        self._repo_dir = repo_dir
+        self._repository: GitArtifactRepository | None = None
+
+    def __getattr__(self, name: str):
+        if self._repository is None:
+            self._repository = GitArtifactRepository(self._repo_dir)
+        return getattr(self._repository, name)
+
+
 def build_service(profile_id: str):
     """Compose the v2 service with an explicit exact registry ``profile_id`` (D6-C §4).
 
     Requires an explicit exact ``profile_id``; there is no host default. A missing (``None``) or
-    unknown profile raises :class:`ValueError`. The service uses the hardened machine-local run
-    repository and a Git-backed append-only artifact store rooted at ``EMPIRICA_REPO_DIR`` or cwd.
+    unknown profile raises :class:`ValueError`. The machine-local run repository is composed
+    eagerly; Git artifact discovery is deferred until a resolved run needs its knowledge plane.
     """
     if not isinstance(profile_id, str) or not profile_id:
         raise ValueError("an explicit exact registry profile_id is required")
@@ -81,12 +100,20 @@ def build_service(profile_id: str):
         raise ValueError(f"unknown host profile_id: {profile_id!r}")
     runs = LocatedRunRepository()
     repo_dir = Path(os.environ.get("EMPIRICA_REPO_DIR", Path.cwd()))
-    artifacts = GitArtifactRepository(repo_dir)
+    artifacts = _LazyGitArtifactRepository(repo_dir)
     return _v2.compose(
         workspace=FilesystemWorkspace(Path.cwd()), harness=SubprocessSpikeHarness(),
         runs=runs, artifacts=artifacts,
         host=None, profile_id=profile_id, limits={}, clock=None,
     )
+
+
+def trusted_governance_context(profile_id: str, run_id: str, payload: dict) -> dict:
+    return build_service(profile_id).trusted_governance_context(run_id=run_id, payload=payload)
+
+
+def trusted_governance_decision(profile_id: str, run_id: str, payload: dict) -> dict:
+    return build_service(profile_id).trusted_governance_decision(run_id=run_id, payload=payload)
 
 
 def trusted_audit_plan(profile_id: str, run_id: str, child_id: str) -> dict | None:
@@ -130,9 +157,9 @@ def handle(request: object, profile_id: str) -> dict:
     def handler(envelope: dict) -> dict:
         try:
             service = build_service(profile_id)
-        except ValueError:
+            return service._dispatch_validated(envelope)
+        except Exception:  # resolved storage/adapter failures are closed, never inert
             return _fault("unavailable", envelope["request_id"])
-        return service._dispatch_validated(envelope)
 
     return _proto.dispatch_request(request, handler)
 

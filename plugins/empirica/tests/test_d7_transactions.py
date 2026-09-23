@@ -27,6 +27,8 @@ from core.projection import project_runview  # noqa: E402
 from core.records import (ABSENT, Artifact, Conflict, Corrupt, Present, Revision,  # noqa: E402
                           RunKey)
 from core.run import OperationalState  # noqa: E402
+from core.governance import initial as initial_governance  # noqa: E402
+from governance_setup import approve_current  # noqa: E402
 
 
 class Runs:
@@ -135,8 +137,11 @@ class Harness:
 def activate_investigation(coordinator: Coordinator, run_id: str) -> None:
     coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                         "action": {"kind": "route", "reason": "test"}}, "route")
-    coordinator.handle({"type": "ObserveAction", "run_id": run_id,
-                        "action": {"kind": "investigate"}}, "investigate")
+    current = coordinator.handle({"type": "GetRun", "run_id": run_id}, "setup-read")
+    if current["result"]["run"]["governance"]["scope"] is not None:
+        approve_current(coordinator, run_id)
+        coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                            "action": {"kind": "investigate"}}, "investigate")
 
 
 def initial() -> OperationalState:
@@ -145,6 +150,8 @@ def initial() -> OperationalState:
         modes={"multi_provider": False, "cli_exec": False},
         budgets={"max_passes": 8, "passes_used": 0, "max_spawns": 1, "spawns_used": 0,
                  "max_audit_spawns": 1, "audit_spawns_used": 0},
+        governance=initial_governance("g", {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 1},
+                                      {"multi_provider": False, "cli_exec": False}),
         selected_graph_artifact_id=None, frozen_claim_ids=None, frozen_semantic_digest=None,
         route_stamp=None,
         investigation_stamp=None, stamp_seq=0, last_derivation_digest=None, children=(),
@@ -234,6 +241,8 @@ class D7TransactionTests(unittest.TestCase):
         activate_investigation(coordinator, run_id)
         for command in (graph_command, graph_command, research_command, research_command):
             self.assertEqual(coordinator.handle(command, "repeat")["result"]["type"], "Allow")
+            if command["action"]["kind"] == "graph":
+                activate_investigation(coordinator, run_id)
         key = next(iter(runs.data))
         state = decode_state(runs.data[key].value)
         history = traverse_history(state, artifacts_repo.values[key].values())
@@ -267,6 +276,7 @@ class D7TransactionTests(unittest.TestCase):
                                               "kind": "ordinary"}], "edges": []}
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "graph", "payload": graph}}, "g")
+        activate_investigation(coordinator, run_id)
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "research", "claim_id": "C0",
                                        "source_kind": "code", "result": "supports", "payload": {
@@ -302,6 +312,7 @@ class D7TransactionTests(unittest.TestCase):
                                                "kind": "ordinary"}], "edges": []}
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "graph", "payload": graph}}, "graph")
+        approve_current(coordinator, run_id)
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "freeze"}}, "freeze")
         key = next(iter(runs.data))
@@ -338,6 +349,7 @@ class D7TransactionTests(unittest.TestCase):
             "gating": True, "kind": "ordinary"}], "edges": []}
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "graph", "payload": graph}}, "graph")
+        approve_current(coordinator, run_id)
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "freeze"}}, "freeze")
         key = next(iter(runs.data))
@@ -389,6 +401,7 @@ class D7TransactionTests(unittest.TestCase):
             "gating": True, "kind": "needs-experiment"}], "edges": []}
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "graph", "payload": graph}}, "graph")
+        approve_current(coordinator, run_id)
         key = next(iter(runs.data))
 
         actions = (
@@ -426,6 +439,7 @@ class D7TransactionTests(unittest.TestCase):
             coordinator = Coordinator(Workspace(), Harness(), Runs(), Artifacts(), profile, {})
             started = coordinator.handle({"type": "StartRun",
                 "selector": {"project": "p", "session": session}, "goal": "execution",
+                "control_mode": "auto" if profile.startswith("codex") else "deliberative",
                 "budgets": {"max_spawns": 1, "max_audit_spawns": 1}}, "start")
             run_id = started["result"]["run"]["id"]
             activate_investigation(coordinator, run_id)
@@ -433,6 +447,7 @@ class D7TransactionTests(unittest.TestCase):
                 "gating": True, "kind": "ordinary"}], "edges": []}
             coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                                 "action": {"kind": "graph", "payload": graph}}, "graph")
+            activate_investigation(coordinator, run_id)
             coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                 "action": {"kind": "research", "claim_id": "C0", "source_kind": "code",
                     "result": "supports", "payload": {"source_ref": "review",
@@ -476,6 +491,7 @@ class D7TransactionTests(unittest.TestCase):
                 "gating": True, "kind": "ordinary"}], "edges": []}
             coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                                 "action": {"kind": "graph", "payload": graph}}, "graph")
+            activate_investigation(coordinator, run_id)
             return coordinator, runs, run_id
 
         coordinator, runs, run_id = setup("both", 1)
@@ -563,6 +579,7 @@ class D7TransactionTests(unittest.TestCase):
             "edges": [{"from": "C0", "to": "C1", "type": "SupportedBy"}]}
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "graph", "payload": graph}}, "graph")
+        approve_current(coordinator, run_id)
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "freeze"}}, "freeze")
         key = next(iter(runs.data))
@@ -597,6 +614,7 @@ class D7TransactionTests(unittest.TestCase):
             "edges": [{"from": "C0", "to": "C1", "type": "SupportedBy"}]}
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "graph", "payload": graph}}, "g")
+        activate_investigation(coordinator, run_id)
         for claim, path in (("C0", "src/0.py"), ("C1", "src/1.py")):
             coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                                 "action": {"kind": "research", "claim_id": claim,
@@ -612,9 +630,11 @@ class D7TransactionTests(unittest.TestCase):
         c1_graph = {"root": "C1", "claims": [graph["claims"][1]], "edges": []}
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "graph", "payload": c1_graph}}, "remove")
+        activate_investigation(coordinator, run_id)
         self.assertEqual(workspace.calls[-1], ("src/1.py",))
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "graph", "payload": graph}}, "restore")
+        activate_investigation(coordinator, run_id)
         self.assertEqual(workspace.calls[-1], ("src/0.py", "src/1.py"))
         before = len(workspace.calls)
         evaluated = coordinator.handle({"type": "EvaluateRun", "run_id": run_id,
@@ -657,6 +677,7 @@ class D7TransactionTests(unittest.TestCase):
                                                "kind": "ordinary"}], "edges": []}
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "graph", "payload": graph}}, "graph")
+        approve_current(coordinator, run_id)
         coordinator.handle({"type": "EvaluateRun", "run_id": run_id, "intent": "stop"}, "stop")
         resolve = {"type": "ResolveRun", "selector": {"project": "p", "session": "s"}}
         self.assertEqual(coordinator.handle(resolve, "valid")["result"],
@@ -684,6 +705,7 @@ class D7TransactionTests(unittest.TestCase):
                           "gating": True, "kind": "ordinary"}], "edges": []}
                 coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                                     "action": {"kind": "graph", "payload": graph}}, "g")
+                approve_current(coordinator, run_id)
                 key = next(iter(runs.data))
                 graph_id = runs.data[key].value["selected_graph_artifact_id"]
                 if corruption == "malformed":
@@ -736,6 +758,7 @@ class D7TransactionTests(unittest.TestCase):
                         "gating": True, "kind": "ordinary"}], "edges": []}
                     coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                                         "action": {"kind": "graph", "payload": graph}}, "graph")
+                    approve_current(coordinator, run_id)
                     key = next(iter(runs.data))
                     if corruption == "store":
                         runs.data[key] = Corrupt("bad bytes")
@@ -762,6 +785,7 @@ class D7TransactionTests(unittest.TestCase):
                                               "kind": "needs-experiment"}], "edges": []}
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "graph", "payload": graph}}, "g")
+        activate_investigation(coordinator, run_id)
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "research", "claim_id": "C0",
                                        "source_kind": "code", "result": "supports", "payload": {

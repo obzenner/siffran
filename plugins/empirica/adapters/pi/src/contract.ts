@@ -34,6 +34,7 @@ export interface Modes {
 
 export interface StartRunCommand {
   type: "StartRun";
+  control_mode?: "auto" | "deliberative";
   selector: RunSelector;
   goal: string;
   budgets?: Budgets;

@@ -11,6 +11,7 @@ from typing import Any
 
 from .freshness import ActiveSpikeHead, FileBinding, evaluate_freshness
 from .run import OperationalState
+from . import governance
 
 SPAWN_BUDGET = {"investigation": ("max_spawns", "spawns_used", "spawn"),
                 "audit": ("max_audit_spawns", "audit_spawns_used", "audit_spawn")}
@@ -91,17 +92,20 @@ def valid_graph(value: Any) -> bool:
     if not isinstance(value, Mapping) or set(value) != {"root", "claims", "edges"}:
         return False
     claims = value.get("claims")
-    if not isinstance(value.get("root"), str) or not isinstance(claims, (list, tuple)) or not claims:
+    if not isinstance(value.get("root"), str) or not isinstance(claims, (list, tuple)) or not 1 <= len(claims) <= 32:
         return False
     ids: list[str] = []
     for claim in claims:
         if (not isinstance(claim, Mapping) or set(claim) != {"id", "text", "gating", "kind"}
                 or not isinstance(claim["id"], str) or not claim["id"] or not isinstance(claim["text"], str)
+                or len(claim["id"]) > 128 or not 1 <= len(claim["text"]) <= 2048
                 or type(claim["gating"]) is not bool
                 or claim["kind"] not in {"ordinary", "needs-experiment", "needs-decision"}):
             return False
         ids.append(claim["id"])
     if len(ids) != len(set(ids)) or value["root"] not in ids or not isinstance(value["edges"], (list, tuple)):
+        return False
+    if len(value["edges"]) > 128:
         return False
     children: dict[str, list[str]] = {claim_id: [] for claim_id in ids}
     seen_edges: set[tuple[str, str]] = set()
@@ -277,6 +281,8 @@ def _decision(snapshot: EvaluationSnapshot, state: OperationalState, result: str
 
 def _investigation_block(snapshot: EvaluationSnapshot) -> Decision | None:
     state = snapshot.state
+    if reason := governance.admission(state.governance):
+        return _decision(snapshot, state, "Block", reason=reason)
     if state.route_stamp is None:
         return _decision(snapshot, state, "Block", reason="route.required",
                          affected="obligation.route")
@@ -366,18 +372,12 @@ def valid_attribution(snapshot: EvaluationSnapshot, payload: Mapping[str, Any]) 
     return False
 
 
-_MODEL_ALIASES = {"default", "latest", "opus", "sonnet", "haiku", "fable", "mini"}
-
-
 def identity_pair(value: Mapping[str, Any] | None) -> tuple[str, str] | None:
     """Return a concrete dispatcher identity; tier/latest aliases are never identities."""
     if not value or value.get("observed_by") != "host":
         return None
-    provider, model = value.get("provider_id"), value.get("model_id")
-    if (not isinstance(provider, str) or not provider or not isinstance(model, str)
-            or not model or model.lower() in _MODEL_ALIASES):
-        return None
-    return provider, model
+    normalized = governance.model_key(value)
+    return ("concrete-model/1", normalized) if normalized else None
 
 
 def audit_attributions(
@@ -430,14 +430,19 @@ def audit_operation_current(snapshot: EvaluationSnapshot, child: Mapping[str, An
     dossier = child["audit_argument"]
     reviewed = [{"claim_id": c["claim_id"], "evidence_digest": c["evidence_digest"]}
                 for c in dossier["claims"] if c["gating"] and c["state"] == "approved"]
-    return (bool(expected) and reviewed == expected["reviewed_claims"]
+    operation = digest({"run_id": snapshot.run_id, "child_id": child["child_id"],
+                        "argument_digest": dossier["argument_digest"],
+                        "governance_digest": snapshot.state.governance["proposal_digest"],
+                        "plan_revision": snapshot.state.governance["plan_revision"]})
+    return (child["audit_operation_id"] == operation and bool(expected) and reviewed == expected["reviewed_claims"]
             and all(dossier[key] == expected[key] for key in (
                 "argument_digest", "goal_digest", "frozen_scope_digest", "deferred_scope_digest")))
 
 
 def audit_passes(snapshot: EvaluationSnapshot, verdict: Mapping[str, Any]) -> bool:
     expected = audit_binding(snapshot)
-    return (bool(expected) and verdict.get("verdict") == "pass" and
+    child = next((c for c in snapshot.state.children if c["child_id"] == verdict.get("child_id")), None)
+    return (child is not None and audit_operation_current(snapshot, child) and bool(expected) and verdict.get("verdict") == "pass" and
             all(_plain(verdict.get(key)) == value for key, value in expected.items()))
 
 
@@ -457,6 +462,15 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
     if kind == "GetArgument":
         return (_decision(snapshot, state) if snapshot.graph is not None
                 else _decision(snapshot, state, "Block", reason="graph.invalid"))
+
+    if kind == "EvaluateRun" and command["intent"] == "stop" and snapshot.graph is None:
+        return _decision(snapshot, replace(state, status="stopped_residual"))
+    if kind == "ObserveAction" and command["action"]["kind"] == "investigate" and state.route_stamp is None:
+        return _decision(snapshot, state, "Block", reason="route.required", affected="obligation.route")
+    preparation = (kind == "ObserveAction" and command["action"]["kind"] in {"route", "graph", "configure_run"})
+    honest_stop = kind == "EvaluateRun" and command["intent"] == "stop"
+    if not preparation and not honest_stop and (reason := governance.admission(state.governance)):
+        return _decision(snapshot, state, "Block", reason=reason)
 
     if kind == "ObserveAction":
         action = command["action"]
@@ -481,8 +495,13 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             graph = action.get("payload")
             if not valid_graph(graph) or frozen_scope_invalid(state, graph):
                 return _decision(snapshot, state, "Block", reason="graph.invalid")
+            graph = governance.canonical_graph(graph)
+            try:
+                governed = governance.revise(state.goal, graph, state.governance)
+            except ValueError as exc:
+                return _decision(snapshot, state, "Block", reason=str(exc))
             art = artifact("graph", {"graph": graph})
-            return _decision(snapshot, replace(state, selected_graph_artifact_id=art["artifact_id"]),
+            return _decision(snapshot, replace(state, selected_graph_artifact_id=art["artifact_id"], governance=governed),
                              artifacts=(art,))
         if akind in {"research", "freeze"} and snapshot.graph is None:
             return _decision(snapshot, state, "Block", reason="graph.invalid")
@@ -515,17 +534,23 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             return _decision(snapshot, replace(state, frozen_claim_ids=ids,
                                                 frozen_semantic_digest=semantic_digest))
         if akind == "configure_run":
-            modes, budgets = dict(state.modes), dict(state.budgets)
-            modes.update(action.get("modes", {}))
-            for key, value in action.get("budgets", {}).items():
-                used_key, resource = {"max_passes": ("passes_used", "pass"),
-                                      "max_spawns": ("spawns_used", "spawn"),
-                                      "max_audit_spawns": ("audit_spawns_used", "audit_spawn")}[key]
-                if value < budgets[used_key]:
-                    return _decision(snapshot, state, "Block", reason="budget.exhausted",
-                                     parameters={"resource": resource})
-                budgets[key] = value
-            return _decision(snapshot, replace(state, modes=modes, budgets=budgets))
+            proposed = governance.plain(state.governance["proposal"])
+            proposed["modes"].update(action.get("modes", {}))
+            proposed["budgets"].update(action.get("budgets", {}))
+            for key in ("auditor", "allow_same_model"):
+                if key in action:
+                    proposed[key] = governance.plain(action[key])
+            if reason := governance.configuration_error(state, proposed):
+                if reason == "governance.budget_invalid":
+                    ceiling = next(k for k, used in governance.CEILINGS.items() if proposed["budgets"][k] < state.budgets[used])
+                    resource = {"max_passes": "pass", "max_spawns": "spawn", "max_audit_spawns": "audit_spawn"}[ceiling]
+                    return _decision(snapshot, state, "Block", reason="budget.exhausted", parameters={"resource": resource})
+                return _decision(snapshot, state, "Block", reason=reason)
+            try:
+                governed = governance.revise(state.goal, snapshot.graph, state.governance, proposal=proposed)
+            except ValueError as exc:
+                return _decision(snapshot, state, "Block", reason=str(exc))
+            return _decision(snapshot, replace(state, governance=governed))
         if akind == "child_reserve":
             blocked = _investigation_block(snapshot)
             if blocked is not None:
@@ -566,7 +591,7 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                      "first_terminal_fingerprint": None,
                      "capability_ref": digest({"capability": seed}),
                      "audit_operation_id": None, "audit_argument": None,
-                     "audit_role_profile": None}
+                     "audit_role_profile": None, "audit_auditor": None, "audit_inventory_digest": None}
             budgets = dict(state.budgets)
             budgets[used_key] += 1
             return _decision(snapshot, replace(state, budgets=budgets,
@@ -653,7 +678,9 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
         auditor_pair, covered_pair = identity_pair(auditor), identity_pair(covered)
         if auditor_pair is None or covered_pair is None:
             return _decision(snapshot, state, "Block", reason="audit.independence_unverified")
-        if auditor_pair == covered_pair:
+        if governance.model_key(auditor) != governance.model_key(state.governance["proposal"]["auditor"]) or governance.model_key(covered) != governance.model_key(state.governance["context"]["author"]):
+            return _decision(snapshot, state, "Block", reason="governance.identity_mismatch")
+        if auditor_pair == covered_pair and (governance.selection_error(state.governance) or not state.governance["proposal"]["allow_same_model"]):
             return _decision(snapshot, state, "Block", reason="audit.same_model")
         return _decision(snapshot, replace(state, status="converged"))
 

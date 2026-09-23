@@ -104,6 +104,7 @@ class ActivationRouteGraphTests(ConformanceCase):
             "either first-write-wins witness, leaving the exact full obligation rows from "
             "route+investigate unchanged")
         run_id = self.start_run(drv)
+        self.require_governance_approved(drv, run_id)
         # Capture the RunView before route to derive obligation IDs changed by route+investigate.
         before_run = self.dispatch(drv, get_run(run_id=run_id))["result"]["run"]
         before_idx = self._obligation_index(before_run)
@@ -190,6 +191,7 @@ class ActivationRouteGraphTests(ConformanceCase):
                 run_id = self.start_run(drv)
                 self.assert_allow(self.dispatch(drv, observe_action(
                     run_id=run_id, action=action_graph(payload=graph))), converged=False)
+                self.require_governance_approved(drv, run_id)
                 blocked = self.dispatch(drv, observe_action(run_id=run_id, action=action))
                 self.assert_block_only(blocked, ["route.required"])
 
@@ -199,6 +201,7 @@ class ActivationRouteGraphTests(ConformanceCase):
                 run_id = self.start_run(drv)
                 self.assert_allow(self.dispatch(drv, observe_action(
                     run_id=run_id, action=action_graph(payload=graph))), converged=False)
+                self.require_governance_approved(drv, run_id)
                 self.require_route_admitted(drv, run_id)
                 blocked = self.dispatch(drv, observe_action(run_id=run_id, action=action))
                 self.assert_block_only(blocked, ["investigation.required"])
@@ -209,6 +212,7 @@ class ActivationRouteGraphTests(ConformanceCase):
                 run_id = self.start_run(drv)
                 self.assert_allow(self.dispatch(drv, observe_action(
                     run_id=run_id, action=action_graph(payload=graph))), converged=False)
+                self.require_governance_approved(drv, run_id)
                 self.require_route_admitted(drv, run_id)
                 self.assert_allow(self.dispatch(drv, observe_action(
                     run_id=run_id, action=action_investigate())), converged=False)
@@ -271,7 +275,7 @@ class ActivationRouteGraphTests(ConformanceCase):
                     # Malformed variant: submit a malformed graph.
                     resp = self.dispatch(drv, observe_action(
                         run_id=run_id, action=action_graph(payload={"malformed": True})))
-                self.assert_block_only(resp, ["graph.missing" if label == "missing"
+                self.assert_block_only(resp, ["governance.approval_required" if label == "missing"
                                                else "graph.invalid"])
 
     def test_structurally_invalid_dependency_graphs_are_rejected_without_replacement(self):

@@ -15,7 +15,7 @@
   ],
   "properties": {
     "id": {"const": "empirica/public"},
-    "version": {"const": "2.0.0"},
+    "version": {"const": "2.1.0"},
     "protocol": {"const": "empirica/v2"},
     "commands": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
     "decisions": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},

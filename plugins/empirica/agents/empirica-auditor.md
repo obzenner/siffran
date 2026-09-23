@@ -2,7 +2,6 @@
 name: empirica-auditor
 description: "Independent read-only auditor for one host-injected Empirica argument dossier."
 tools: Read, Glob, Grep, WebFetch
-model: claude-opus-4-8
 effort: xhigh
 ---
 

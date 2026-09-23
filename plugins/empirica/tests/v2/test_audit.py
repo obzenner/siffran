@@ -285,17 +285,17 @@ class AuditTests(ConformanceCase):
         rows = {claim["claim_id"]: claim for claim in after["claims"]}
         self.assertEqual(rows[expanded["root"]]["state"], "approved")
         self.assertFalse(rows["C1"]["gating"])
+        pending = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
+        self.assert_block_only(pending, ["governance.revision_required"])
+        self.require_governance_approved(drv, run_id)
         stale = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
         self.assert_block_only(stale, ["audit.failed"])
 
     # 33 — Independence derived from trusted observed attribution only; reported honestly
     def test_independence_derived_reported_honestly(self):
-        for variant, expected_independence, expected_reason in (
-            ("same_model", "same_model", "audit.same_model"),
-            ("unverified", "unverified", "audit.independence_unverified"),
-            ("alias", "unverified", "audit.independence_unverified"),
-            ("configuration", "unverified", "audit.independence_unverified"),
-        ):
+        # 2.1 rejects these observations against the approved concrete target before
+        # a verdict can complete. None can be silently upgraded to decorrelation.
+        for variant in ("same_model", "unverified", "alias", "configuration"):
             with self.subTest(variant=variant):
                 drv = self.bind_driver(
                     "D9", "case-33",
@@ -315,25 +315,24 @@ class AuditTests(ConformanceCase):
                                                             scope_review="pass")
                 resp_v = drv.trusted_audit_verdict(run_id, child_id, payload)
                 self.assert_valid_response(resp_v)
-                self.assert_child_summary(resp_v["result"]["run"], child_id, state="completed")
-                # GetArgument audit.independence equals exact variant.
+                self.assert_block_only(resp_v, ["governance.revision_required"])
+                self.assert_child_summary(resp_v["result"]["run"], child_id, state="pending")
+                # Rejected identity cannot become an admitted independence witness.
                 arg = self.assert_argument_view(
                     self.dispatch(drv, get_argument(run_id=run_id))["result"])
-                self.assert_audit_view(arg, independence=expected_independence)
+                self.assert_audit_view(arg, independence="unverified")
+                self.assertEqual(arg["audit"]["state"], "pending")
                 # Evaluate exact sole matching public reason (no set-of-reasons
                 # shortcut); failed independence leaves the run active.
                 ev = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
-                result = self.assert_block_only(ev, [expected_reason])
+                result = self.assert_block_only(ev, ["governance.revision_required"])
                 self.assert_status(result["run"], "active")
 
     # 34 — Same-model/unverified can Block per public reasons; never upgraded by author input
     def test_same_model_unverified_blocks_never_upgraded_by_author(self):
-        for variant, expected_independence, expected_reason in (
-            ("same_model", "same_model", "audit.same_model"),
-            ("unverified", "unverified", "audit.independence_unverified"),
-            ("alias", "unverified", "audit.independence_unverified"),
-            ("configuration", "unverified", "audit.independence_unverified"),
-        ):
+        # 2.1 rejects these observations against the approved concrete target before
+        # a verdict can complete. None can be silently upgraded to decorrelation.
+        for variant in ("same_model", "unverified", "alias", "configuration"):
             with self.subTest(variant=variant):
                 drv = self.bind_driver(
                     "D9", "case-34",
@@ -351,7 +350,8 @@ class AuditTests(ConformanceCase):
                                                             scope_review="pass")
                 resp_v = drv.trusted_audit_verdict(run_id, child_id, payload)
                 self.assert_valid_response(resp_v)
-                self.assert_child_summary(resp_v["result"]["run"], child_id, state="completed")
+                self.assert_block_only(resp_v, ["governance.revision_required"])
+                self.assert_child_summary(resp_v["result"]["run"], child_id, state="pending")
                 # Snapshot before author attempt.
                 snap_before = self.snapshot_run_state(drv, run_id)
                 arg_before = self.assert_argument_view(
@@ -377,10 +377,11 @@ class AuditTests(ConformanceCase):
                                  "ArgumentView must be unchanged after author attempt")
                 # Exact subsequent audit projection: independence remains the original value,
                 # never upgraded to decorrelated.
-                self.assert_audit_view(arg_after, independence=expected_independence)
-                # Sole exact Block reason remains the original non-decorrelated value.
+                self.assert_audit_view(arg_after, independence="unverified")
+                self.assertEqual(arg_after["audit"]["state"], "pending")
+                # Governance remains revoked after the author forgery attempt.
                 ev = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
-                self.assert_block_only(ev, [expected_reason])
+                self.assert_block_only(ev, ["governance.revision_required"])
 
     def test_independence_is_bound_to_verdict_child_and_reaudit_can_replace_it(self):
         drv = self.bind_driver(
@@ -393,18 +394,18 @@ class AuditTests(ConformanceCase):
 
         child_a = self.require_pending_audit_child(drv, run_id)
         self.require_trusted_audit_attribution(
-            drv, run_id, child_a, scope["c0_artifact_id"], variant="same_model")
+            drv, run_id, child_a, scope["c0_artifact_id"], variant="decorrelated")
         verdict_a = self.build_audit_verdict_payload(
-            drv, run_id, verdict="pass", scope_review="pass")
+            drv, run_id, verdict="fail", scope_review="pass")
         self.assertEqual(
             drv.trusted_audit_verdict(run_id, child_a, verdict_a)["result"]["type"], "Allow")
 
-        # A later child's identity cannot retroactively decorate child A's verdict.
+        # A later child's identity cannot retroactively pass child A's failed verdict.
         child_b = self.require_pending_audit_child(drv, run_id)
         self.require_trusted_audit_attribution(
             drv, run_id, child_b, scope["c0_artifact_id"], variant="decorrelated")
         # While child B is current and pending, its managed execution takes precedence over the
-        # stale same-model verdict so Claude can settle the parent turn without respawning.
+        # prior failed verdict so Claude can settle the parent turn without respawning.
         blocked = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
         self.assert_block_only(blocked, ["audit.pending"])
 

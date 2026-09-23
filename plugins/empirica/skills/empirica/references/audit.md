@@ -5,7 +5,8 @@ preflight confirms a bound audit lifecycle.
 
 ## Preconditions
 
-- The selected graph is valid and current.
+- The selected graph is valid, current, and covered by current governance approval.
+- Approved inventory is revalidated and the host launches the selected visible auditor model.
 - Every in-scope gating claim is approved from real evidence.
 - Every experiment claim has a current passing spike.
 - Freeze scope, if any, is already committed.
@@ -40,7 +41,7 @@ Ordinary conversation with another model is not a substitute.
 A new canonical audit request can replace a stale **pending** audit only when audit capacity remains.
 The host atomically cancels the obsolete child and reserves a fresh dossier; the old attempt stays
 charged to `audit_spawns_used`. No capacity is borrowed or increased automatically. On
-`budget.exhausted` for `audit_spawn`, explicitly configure capacity or accept an honest residual stop;
+`budget.exhausted` for `audit_spawn`, propose capacity and obtain host approval (deliberative only), or accept an honest residual stop;
 do not repeatedly retry unchanged state. Current pending, reserved, and launching operations are not
 replaced by this path. Cancellation is logical, not proof that native execution stopped.
 
@@ -69,3 +70,7 @@ models alone.
 The first child terminal event wins. An identical replay is inert; a conflicting
 replay faults. A terminal run cannot be reopened by late child output and cannot
 later become converged.
+
+A positive authorized-singleton exception may permit observed `same_model` only under the exact
+approved policy described in [governance.md](governance.md). Unknown aliases and selected/observed
+substitution never pass. No provider difference is required.

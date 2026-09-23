@@ -55,6 +55,8 @@ def build_start_run_request(
         "selector": selector_from_payload(payload),
         "goal": invocation.goal,
     }
+    if invocation.control_mode == "auto":
+        command["control_mode"] = "auto"
     if invocation.modes:
         command["modes"] = invocation.modes
     env = os.environ if environ is None else environ

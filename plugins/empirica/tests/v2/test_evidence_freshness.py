@@ -136,6 +136,9 @@ class EvidenceFreshnessTests(ConformanceCase):
         }
         self.dispatch(drv, observe_action(
             run_id=run_id, action=action_graph(payload=reworded)))
+        pending = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
+        self.assert_block_only(pending, ["governance.revision_required"])
+        self.require_governance_approved(drv, run_id)
         resp = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
         result = self.assert_block_reason(resp, "claim.research_unbound")
         # Correlate nonempty affected.obligation_id to returned RunView obligation (D4-S2

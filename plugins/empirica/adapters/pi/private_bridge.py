@@ -27,12 +27,12 @@ def _plan(profile: str, raw: dict) -> AuditLaunchPlan:
         raise ValueError("audit operation does not match durable plan")
     return AuditLaunchPlan(
         profile, raw["run_id"], value["child_id"], value["role_profile"], durable["argument"],
-        durable["operation_id"])
+        durable["operation_id"], durable["auditor"])
 
 
 def _plan_json(plan: AuditLaunchPlan) -> dict:
     return {"child_id": plan.child_id, "role_profile": plan.role_profile,
-            "argument": plan.argument, "operation_id": plan.operation_id}
+            "argument": plan.argument, "operation_id": plan.operation_id, "auditor": plan.auditor}
 
 
 def main() -> int:
@@ -42,7 +42,11 @@ def main() -> int:
         operation = raw["operation"]
         run_id = raw["run_id"]
         payload = raw.get("payload", {})
-        if operation == "audit_prepare":
+        if operation == "governance_context":
+            result = bridge.trusted_governance_context(profile, run_id, payload)
+        elif operation == "governance_decision":
+            result = bridge.trusted_governance_decision(profile, run_id, payload)
+        elif operation == "audit_prepare":
             plan = AuditProtocol(profile).prepare(
                 run_id, role_profile=raw["role_profile"])
             result = {"type": "audit_plan", "plan": _plan_json(plan)}

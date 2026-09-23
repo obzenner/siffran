@@ -10,6 +10,7 @@ from core.evaluation import (EvaluationSnapshot, claim_digest, digest, frozen_sc
 from core.freshness import ActiveSpikeHead, FileBinding
 from core.records import Artifact
 from core.run import OperationalState
+from core.governance import canonical_digest, proposal_body
 from . import protocol as _proto
 from .observation import build_observation_snapshot
 from .run_state import encode_state
@@ -185,6 +186,8 @@ def assemble(state: OperationalState, stored: Any, workspace: Any, *, run_id: st
     history = traverse_history(state, stored)
     validate_investigation_history(state, history)
     graph = graph_from_history(state, history, required=require_graph)
+    if canonical_digest(proposal_body(state.goal, graph, state.governance)) != state.governance["proposal_digest"]:
+        raise HistoryCorrupt("proposal digest conflicts with selected graph/context")
     observation = build_observation_snapshot(active_spike_heads(history, graph), workspace)
     profile = _proto._PROFILES[profile_id]
     return EvaluationSnapshot(

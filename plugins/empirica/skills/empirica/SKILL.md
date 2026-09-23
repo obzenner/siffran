@@ -3,7 +3,7 @@ name: empirica
 description: "Empirical-convergence workflow for non-trivial work whose plan is uncertain. Route before investigating, represent unknowns as claims, require cited research before deterministic spikes, discard refuted claims, and request an independently audited convergence decision. Use for design-and-implement work, architectural uncertainty, competing approaches, and risky assumptions. Host capabilities differ; run the capability preflight before promising convergence. Invoke as /empirica <goal>."
 allowed-tools: Read Glob Grep Bash Edit Write Agent TaskCreate TaskUpdate WebFetch
 compatibility: Designed for Claude Code >=2.1.278,<2.2.0, Codex CLI >=0.146.0,<0.147.0, and Pi >=0.84.1,<0.85.0 with pi-subagents 0.50.0; requires methodologist and python3 for hook-backed hosts. Exact observed versions remain receipt provenance; live capabilities still gate execution.
-argument-hint: "[--cli-exec] [--multi-provider] <goal>"
+argument-hint: "[--auto] [--cli-exec] [--multi-provider] <goal>"
 ---
 
 # Empirica — empirical convergence
@@ -52,7 +52,8 @@ A runnable convergence workflow requires all of these capabilities:
 3. obtain the current audit argument;
 4. launch and observe a bound independent auditor;
 5. submit the observed verdict through private host ingress;
-6. request the guarded convergence decision.
+6. request the guarded convergence decision;
+7. obtain exact proposal approval through supported host UI (or explicit bounded auto).
 
 If any capability is absent, stop before investigation and report the exact
 unsupported capability. Do not imitate the missing operation in prose or write
@@ -78,21 +79,37 @@ Do this before reading files, searching, browsing, or running commands.
    `{"kind":"route","reason":"<non-empty routing reason>"}` through the active
    author-action surface. `reason` is a top-level action field; do not put it in
    `payload` and do not rename the action kind.
-4. After route acknowledgement, record the exact public action
-   `{"kind":"investigate"}` before any native read, search, command, evidence
-   submission, or child launch.
-5. Then read the public run view with `empirica_read(operation="GetRun")`, read
-   [references/host-capabilities.md](references/host-capabilities.md) for the
-   exact host contract, and begin investigation. The other public read operation
-   names are `GetArgument`, `GetContract`, and `RestoreRun`; do not guess aliases.
+4. Before investigation, propose the exact graph from supplied context only. Claims can name
+   discovery uncertainty. Inline shape: `{"root":"G0","claims":[{"id":"G0","text":"<uncertainty>",
+   "kind":"ordinary","gating":true}],"edges":[]}`. Larger graphs must be root-connected DAGs
+   with edges `{"from":"G0","to":"C1","type":"SupportedBy"}`.
+5. Read `empirica_read(operation="GetRun")` and its governance inventory. Initial Claude reads may
+   have no inventory until a host lifecycle refresh or `configure_run` reads operator configuration.
+   Once populated, propose an auditor from `run.governance.context.inventory.members` together with
+   budgets/modes in `configure_run` for one-dialog approval. Otherwise the first dialog selects
+   the auditor and amends the proposal; a second `configure_run` obtains fresh final consent.
+   Do not read project files or skill references to prepare this proposal.
+   Default deliberative mode requires host UI; explicit `--auto` prepares a deterministic known
+   eligible auditor when null and is labeled automatic acceptance, not human consent. Unknown/no
+   inventory is not a singleton. Complete authorized partial inventory permits known different
+   author/auditor pairs, but unmapped members prevent singleton proof.
+   The host-owned human deadline is 900s, with `EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS` in 1..1500s;
+   at most 3 presentations per revision and 128 per run are durably reserved before UI. Timeout
+   is dismissal, not human rejection. Do not loop on refusal or exhaustion.
+6. Wait for `run.governance.state == "approved"` bound to the exact displayed proposal. Amendments
+   need a second review. Then record `{"kind":"investigate"}` before any native read, search,
+   command, evidence submission, or child launch. Approval does not supply either witness.
+7. Read [references/governance.md](references/governance.md) and
+   [references/host-capabilities.md](references/host-capabilities.md), then investigate. Public
+   reads/corrections and explicit honest stop remain available without approval.
 
 If either witness cannot be recorded, the workflow is unsupported. The core and
 supported host adapters fail closed before investigative tools, evidence, child
 budget, or harness execution; do not continue with an unrecorded substitute.
 
-## 2. Seed the claim graph
+## 2. Refine the approved claim graph
 
-Before writing production code, read
+After approval and investigation admission, read
 [references/claim-graph.md](references/claim-graph.md). Construct the smallest
 closed graph whose root is the goal and whose gating claims cover every material
 unknown.
@@ -101,7 +118,11 @@ Submit the graph through the active author-action surface. Never persist a claim
 state or confidence: claim state is derived from current evidence on every read.
 A malformed, detached, missing, or corrupt selected graph fails closed.
 
-After the graph is accepted, use the returned `run.contract` obligations as the
+Material graph or configuration changes revoke approval, even after investigation has begun.
+Request new host approval through `configure_run`; never reuse old consent. Freeze is not a
+substitute for consent.
+
+After the graph is approved, use the returned `run.contract` obligations as the
 worklist. Counts and reason strings are telemetry, not authority.
 
 ## 3. Earn or discard every gating claim
@@ -207,7 +228,9 @@ stores, not in the product tree.
 
 ## Non-negotiable invariants
 
-- Route before investigation.
+- Route and exact host-mediated proposal approval before investigation.
+- Public configuration proposes; only private host decisions approve.
+- Explicit auto never raises ceilings and stops at its finite revision limit.
 - Research precedes a spike.
 - Process exit code is the sole machine approver.
 - Claim state is derived; it is never author-assigned.

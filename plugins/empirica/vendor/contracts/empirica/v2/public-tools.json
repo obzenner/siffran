@@ -1,586 +1,614 @@
 {
   "protocol": "empirica/v2",
   "schemas": {
-    "host_handle": {
-      "empirica_observe": {
-        "additionalProperties": false,
-        "properties": {
-          "action": {
-            "description": "One schema-validated public author action for this run.",
-            "oneOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "kind": {
-                    "const": "graph"
-                  },
-                  "payload": {
-                    "description": "Extensible deep graph/evidence/actor domain data; only this object may carry D6-validated payload. The control object itself is closed.",
-                    "type": "object"
-                  }
-                },
-                "required": [
-                  "kind"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "claim_id": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "kind": {
-                    "const": "research"
-                  },
-                  "payload": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "citation": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "observed_content_digest": {
-                        "pattern": "^sha256:[0-9a-f]{64}$",
-                        "type": "string"
-                      },
-                      "source_ref": {
-                        "minLength": 1,
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "source_ref",
-                      "citation"
-                    ],
-                    "type": "object"
-                  },
-                  "result": {
-                    "enum": [
-                      "supports",
-                      "refutes"
-                    ]
-                  },
-                  "source_kind": {
-                    "enum": [
-                      "docs",
-                      "code",
-                      "runtime",
-                      "web"
-                    ]
-                  }
-                },
-                "required": [
-                  "kind",
-                  "claim_id",
-                  "source_kind",
-                  "result",
-                  "payload"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "claim_id": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "command": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "dependent_files": {
-                    "items": {
-                      "minLength": 1,
-                      "pattern": "^[^/].*$",
-                      "type": "string"
-                    },
-                    "minItems": 1,
-                    "type": "array",
-                    "uniqueItems": true
-                  },
-                  "kind": {
-                    "const": "spike_request"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "claim_id",
-                  "command",
-                  "dependent_files"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "anyOf": [
-                  {
-                    "required": [
-                      "budgets"
-                    ]
-                  },
-                  {
-                    "required": [
-                      "modes"
-                    ]
-                  }
-                ],
-                "properties": {
-                  "budgets": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "max_audit_spawns": {
-                        "minimum": 0,
-                        "type": "integer"
-                      },
-                      "max_passes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "max_spawns": {
-                        "minimum": 0,
-                        "type": "integer"
-                      }
-                    },
-                    "type": "object"
-                  },
-                  "kind": {
-                    "const": "configure_run"
-                  },
-                  "modes": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "cli_exec": {
-                        "type": "boolean"
-                      },
-                      "multi_provider": {
-                        "type": "boolean"
-                      }
-                    },
-                    "type": "object"
-                  }
-                },
-                "required": [
-                  "kind"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "kind": {
-                    "const": "route"
-                  },
-                  "reason": {
-                    "minLength": 1,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "reason"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "kind": {
-                    "const": "investigate"
-                  }
-                },
-                "required": [
-                  "kind"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "kind": {
-                    "const": "freeze"
-                  }
-                },
-                "required": [
-                  "kind"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "claim_id": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "kind": {
-                    "const": "dispatch"
-                  },
-                  "target": {
-                    "minLength": 1,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "target"
-                ],
-                "type": "object"
-              }
-            ]
-          }
-        },
-        "required": [
-          "action"
-        ],
-        "type": "object"
-      },
+    "model": {
       "empirica_read": {
+        "type": "object",
         "additionalProperties": false,
+        "required": [
+          "operation"
+        ],
         "properties": {
           "operation": {
-            "description": "Read the public run view, obtain the current audit argument, inspect the public contract, or restore a persisted run.",
             "enum": [
               "GetRun",
               "GetArgument",
               "GetContract",
               "RestoreRun"
-            ]
+            ],
+            "description": "Read the public run view, obtain the current audit argument, inspect the public contract, or restore a persisted run."
           },
-          "section_id": {
-            "description": "Public contract section identifier when target is section.",
+          "run_id": {
+            "type": "string",
             "minLength": 1,
-            "type": "string"
+            "description": "Opaque identifier of the active Empirica run."
           },
           "target": {
-            "description": "Contract projection for GetContract. Use section with section_id.",
             "enum": [
               "index",
               "section",
               "full"
-            ]
-          }
-        },
-        "required": [
-          "operation"
-        ],
-        "type": "object"
-      },
-      "report_convergence": {
-        "additionalProperties": false,
-        "properties": {
-          "intent": {
-            "description": "Request convergence by default, or request an honest non-converged stop.",
-            "enum": [
-              "report_convergence",
-              "stop"
-            ]
-          }
-        },
-        "required": [],
-        "type": "object"
-      }
-    },
-    "model": {
-      "empirica_observe": {
-        "additionalProperties": false,
-        "properties": {
-          "action": {
-            "description": "One schema-validated public author action for this run.",
-            "oneOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "kind": {
-                    "const": "graph"
-                  },
-                  "payload": {
-                    "description": "Extensible deep graph/evidence/actor domain data; only this object may carry D6-validated payload. The control object itself is closed.",
-                    "type": "object"
-                  }
-                },
-                "required": [
-                  "kind"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "claim_id": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "kind": {
-                    "const": "research"
-                  },
-                  "payload": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "citation": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "observed_content_digest": {
-                        "pattern": "^sha256:[0-9a-f]{64}$",
-                        "type": "string"
-                      },
-                      "source_ref": {
-                        "minLength": 1,
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "source_ref",
-                      "citation"
-                    ],
-                    "type": "object"
-                  },
-                  "result": {
-                    "enum": [
-                      "supports",
-                      "refutes"
-                    ]
-                  },
-                  "source_kind": {
-                    "enum": [
-                      "docs",
-                      "code",
-                      "runtime",
-                      "web"
-                    ]
-                  }
-                },
-                "required": [
-                  "kind",
-                  "claim_id",
-                  "source_kind",
-                  "result",
-                  "payload"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "claim_id": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "command": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "dependent_files": {
-                    "items": {
-                      "minLength": 1,
-                      "pattern": "^[^/].*$",
-                      "type": "string"
-                    },
-                    "minItems": 1,
-                    "type": "array",
-                    "uniqueItems": true
-                  },
-                  "kind": {
-                    "const": "spike_request"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "claim_id",
-                  "command",
-                  "dependent_files"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "anyOf": [
-                  {
-                    "required": [
-                      "budgets"
-                    ]
-                  },
-                  {
-                    "required": [
-                      "modes"
-                    ]
-                  }
-                ],
-                "properties": {
-                  "budgets": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "max_audit_spawns": {
-                        "minimum": 0,
-                        "type": "integer"
-                      },
-                      "max_passes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "max_spawns": {
-                        "minimum": 0,
-                        "type": "integer"
-                      }
-                    },
-                    "type": "object"
-                  },
-                  "kind": {
-                    "const": "configure_run"
-                  },
-                  "modes": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "cli_exec": {
-                        "type": "boolean"
-                      },
-                      "multi_provider": {
-                        "type": "boolean"
-                      }
-                    },
-                    "type": "object"
-                  }
-                },
-                "required": [
-                  "kind"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "kind": {
-                    "const": "route"
-                  },
-                  "reason": {
-                    "minLength": 1,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "reason"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "kind": {
-                    "const": "investigate"
-                  }
-                },
-                "required": [
-                  "kind"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "kind": {
-                    "const": "freeze"
-                  }
-                },
-                "required": [
-                  "kind"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "claim_id": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "kind": {
-                    "const": "dispatch"
-                  },
-                  "target": {
-                    "minLength": 1,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "target"
-                ],
-                "type": "object"
-              }
-            ]
+            ],
+            "description": "Contract projection for GetContract. Use section with section_id."
           },
-          "run_id": {
-            "description": "Opaque identifier of the active Empirica run.",
+          "section_id": {
+            "type": "string",
             "minLength": 1,
-            "type": "string"
+            "description": "Public contract section identifier when target is section."
           }
-        },
+        }
+      },
+      "empirica_observe": {
+        "type": "object",
+        "additionalProperties": false,
         "required": [
           "run_id",
           "action"
         ],
-        "type": "object"
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Opaque identifier of the active Empirica run."
+          },
+          "action": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "graph"
+                  },
+                  "payload": {
+                    "type": "object",
+                    "description": "Extensible deep graph/evidence/actor domain data; only this object may carry D6-validated payload. The control object itself is closed."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "claim_id",
+                  "source_kind",
+                  "result",
+                  "payload"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "research"
+                  },
+                  "claim_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "source_kind": {
+                    "enum": [
+                      "docs",
+                      "code",
+                      "runtime",
+                      "web"
+                    ]
+                  },
+                  "result": {
+                    "enum": [
+                      "supports",
+                      "refutes"
+                    ]
+                  },
+                  "payload": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "source_ref",
+                      "citation"
+                    ],
+                    "properties": {
+                      "source_ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "citation": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "observed_content_digest": {
+                        "type": "string",
+                        "pattern": "^sha256:[0-9a-f]{64}$"
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "claim_id",
+                  "command",
+                  "dependent_files"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "spike_request"
+                  },
+                  "claim_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "command": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "dependent_files": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[^/].*$"
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "configure_run"
+                  },
+                  "budgets": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "max_passes": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1024
+                      },
+                      "max_spawns": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 128
+                      },
+                      "max_audit_spawns": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 128
+                      }
+                    }
+                  },
+                  "modes": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "multi_provider": {
+                        "type": "boolean"
+                      },
+                      "cli_exec": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "auditor": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "provider_id",
+                      "model_id"
+                    ],
+                    "properties": {
+                      "provider_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "model_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      }
+                    }
+                  },
+                  "allow_same_model": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "reason"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "route"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "investigate"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "freeze"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "dispatch"
+                  },
+                  "target": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "claim_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            ],
+            "description": "One schema-validated public author action for this run."
+          }
+        }
       },
-      "empirica_read": {
+      "report_convergence": {
+        "type": "object",
         "additionalProperties": false,
+        "required": [
+          "run_id"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Opaque identifier of the active Empirica run."
+          },
+          "intent": {
+            "enum": [
+              "report_convergence",
+              "stop"
+            ],
+            "description": "Request convergence by default, or request an honest non-converged stop."
+          }
+        }
+      }
+    },
+    "host_handle": {
+      "empirica_read": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation"
+        ],
         "properties": {
           "operation": {
-            "description": "Read the public run view, obtain the current audit argument, inspect the public contract, or restore a persisted run.",
             "enum": [
               "GetRun",
               "GetArgument",
               "GetContract",
               "RestoreRun"
-            ]
-          },
-          "run_id": {
-            "description": "Opaque identifier of the active Empirica run.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "section_id": {
-            "description": "Public contract section identifier when target is section.",
-            "minLength": 1,
-            "type": "string"
+            ],
+            "description": "Read the public run view, obtain the current audit argument, inspect the public contract, or restore a persisted run."
           },
           "target": {
-            "description": "Contract projection for GetContract. Use section with section_id.",
             "enum": [
               "index",
               "section",
               "full"
-            ]
+            ],
+            "description": "Contract projection for GetContract. Use section with section_id."
+          },
+          "section_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Public contract section identifier when target is section."
           }
-        },
+        }
+      },
+      "empirica_observe": {
+        "type": "object",
+        "additionalProperties": false,
         "required": [
-          "operation"
+          "action"
         ],
-        "type": "object"
+        "properties": {
+          "action": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "graph"
+                  },
+                  "payload": {
+                    "type": "object",
+                    "description": "Extensible deep graph/evidence/actor domain data; only this object may carry D6-validated payload. The control object itself is closed."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "claim_id",
+                  "source_kind",
+                  "result",
+                  "payload"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "research"
+                  },
+                  "claim_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "source_kind": {
+                    "enum": [
+                      "docs",
+                      "code",
+                      "runtime",
+                      "web"
+                    ]
+                  },
+                  "result": {
+                    "enum": [
+                      "supports",
+                      "refutes"
+                    ]
+                  },
+                  "payload": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "source_ref",
+                      "citation"
+                    ],
+                    "properties": {
+                      "source_ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "citation": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "observed_content_digest": {
+                        "type": "string",
+                        "pattern": "^sha256:[0-9a-f]{64}$"
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "claim_id",
+                  "command",
+                  "dependent_files"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "spike_request"
+                  },
+                  "claim_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "command": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "dependent_files": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[^/].*$"
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "configure_run"
+                  },
+                  "budgets": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "max_passes": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1024
+                      },
+                      "max_spawns": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 128
+                      },
+                      "max_audit_spawns": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 128
+                      }
+                    }
+                  },
+                  "modes": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "multi_provider": {
+                        "type": "boolean"
+                      },
+                      "cli_exec": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "auditor": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "provider_id",
+                      "model_id"
+                    ],
+                    "properties": {
+                      "provider_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "model_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      }
+                    }
+                  },
+                  "allow_same_model": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "reason"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "route"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "investigate"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "freeze"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "dispatch"
+                  },
+                  "target": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "claim_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            ],
+            "description": "One schema-validated public author action for this run."
+          }
+        }
       },
       "report_convergence": {
+        "type": "object",
         "additionalProperties": false,
+        "required": [],
         "properties": {
           "intent": {
-            "description": "Request convergence by default, or request an honest non-converged stop.",
             "enum": [
               "report_convergence",
               "stop"
-            ]
-          },
-          "run_id": {
-            "description": "Opaque identifier of the active Empirica run.",
-            "minLength": 1,
-            "type": "string"
+            ],
+            "description": "Request convergence by default, or request an honest non-converged stop."
           }
-        },
-        "required": [
-          "run_id"
-        ],
-        "type": "object"
+        }
       }
     }
   }

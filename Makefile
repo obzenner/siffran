@@ -38,6 +38,7 @@ EMPIRICA_PUBLIC_TOOLS_TESTS := $(PLUGINS_DIR)/empirica/tests/test_public_tools.p
 EMPIRICA_AUDIT_PROTOCOL_TESTS := $(PLUGINS_DIR)/empirica/tests/test_audit_protocol.py
 EMPIRICA_STATE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_state_adapter.py
 EMPIRICA_GIT_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/git/tests/test_git_artifact_repo.py
+EMPIRICA_GOVERNANCE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_governance.py
 EMPIRICA_CLAUDE_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/claude/tests/test_claude_adapter.py
 EMPIRICA_CLAUDE_ADAPTER_CONFORMANCE_TESTS := $(PLUGINS_DIR)/empirica/adapters/claude/tests/test_claude_adapter_conformance.py
 EMPIRICA_CODEX_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/codex/tests/test_codex_adapter.py
@@ -87,7 +88,7 @@ check-ci: check-static check-core check-claude check-codex ## Every suite except
 	@if [ "$(PI_CHECKS)" = "1" ]; then $(MAKE) check-pi; else printf '$(DIM)Pi suite skipped in CI (PI_CHECKS=1 to include)$(RESET)\n'; fi
 	@printf '\n$(BOLD)CI checks passed.$(RESET)\n'
 
-check-static: lint validate docs-check adr-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check empirica-claude-mcp-log-unit-check pi-canary-unit-check ## Lint, manifests, docs, ADRs, contracts, vendor copies, activation, receipts, canary config
+check-static: lint validate docs-check adr-check empirica-architecture-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check empirica-claude-mcp-log-unit-check pi-canary-unit-check ## Lint, manifests, docs, ADRs, contracts, vendor copies, activation, receipts, canary config
 	@printf '$(BOLD)==> static suite ok$(RESET)\n'
 
 check-core: ## Host-neutral core: obligations lib, Empirica core/application/state/git store, Methodologist core
@@ -107,6 +108,8 @@ check-core: ## Host-neutral core: obligations lib, Empirica core/application/sta
 	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/v2/__main__.py
 	@$(PYTHON) $(EMPIRICA_STATE_TESTS)
 	@$(PYTHON) $(EMPIRICA_GIT_ADAPTER_TESTS)
+	@$(PYTHON) $(EMPIRICA_GOVERNANCE_TESTS)
+	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/test_governance_hosts.py
 	@$(PYTHON) $(METHODOLOGIST_CORE_TESTS)
 
 check-claude: ## Claude Code host: activation lifecycle + Claude adapter tests
@@ -123,6 +126,11 @@ check-codex: methodologist-codex-check empirica-codex-check ## Codex host: adapt
 
 check-pi: pi-bundle-check methodologist-pi-check empirica-pi-check ## Pi host: bundle + both adapters (static, typecheck, tests, live bridge) — needs Node
 	@printf '$(BOLD)==> pi suite ok$(RESET)\n'
+
+.PHONY: empirica-governance-check
+empirica-governance-check: ## Test real governance service/CAS and simulated host approval flows
+	@$(PYTHON) $(EMPIRICA_GOVERNANCE_TESTS)
+	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/test_governance_hosts.py
 
 .PHONY: test
 test: check-core check-claude check-codex ## Run every test suite (core + claude + codex; Pi tests live in check-pi)
@@ -241,9 +249,8 @@ codex-live-check: ## Smoke Codex 0.146.0 marketplace/plugin loading (set CODEX=.
 
 # Empirica 2.0 target-state architecture validator (D3). Structural-only: ownership/dependency
 # direction, subtraction (forbidden files/symbols/fields/actions/protocols), effective runtime budget,
-# thin hooks, public-contract/profile alignment, and Make lifecycle. Intentionally NOT composed into
-# check-static/check/check-ci in D3 — the current pre-D6/D7 tree is expected to be RED; the reported
-# violations are the red acceptance list for D6/D7. D3-M composes the target once the state is green.
+# thin hooks, public-contract/profile alignment, and Make lifecycle. ADR 0053 re-establishes
+# the measured finite ceiling and composes this target into check-static/check/check-ci.
 # Pass ARGS=--self-test to run the committed synthetic suite (GREEN) instead of validating the repo.
 .PHONY: empirica-architecture-check
 empirica-architecture-check: ## validate Empirica 2.0 target ownership, dependencies, subtraction, and code budget
@@ -455,3 +462,8 @@ clean-runs: ## Remove machine-local empirica operational runs (never legacy .cla
 	else \
 		printf '  no operational runs to remove\n'; \
 	fi
+
+.PHONY: empirica-public-tools-sync
+empirica-public-tools-sync: vendor-contracts ## Regenerate public tool schemas after canonical request edits, then sync vendor copies
+	$(PYTHON) scripts/sync_empirica_public_tools.py
+	$(MAKE) vendor-contracts

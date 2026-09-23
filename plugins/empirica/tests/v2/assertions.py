@@ -236,12 +236,12 @@ def _envelope(request_id: str, command: dict) -> dict:
 
 def start_run(*, goal: str, project: str = "demo", session: str = "s1",
               request_id: str | None = None, budgets: dict | None = None,
-              modes: dict | None = None) -> dict:
+              modes: dict | None = None, control_mode: str = "deliberative") -> dict:
     """Build a valid StartRun envelope. Host profile selection is a driver-factory fact, never an
     invented StartRun field — there is deliberately no ``profile_id`` parameter (D4 spec §4)."""
     cmd: dict = {"type": "StartRun",
                  "selector": {"project": project, "session": session},
-                 "goal": goal}
+                 "goal": goal, "control_mode": control_mode}
     if budgets is not None:
         cmd["budgets"] = budgets
     if modes is not None:
@@ -747,16 +747,18 @@ class ConformanceCase(unittest.TestCase):
         )
         banned_value_substrings = ("capability_ref", "<redacted>", "topsecret")
 
-        def _walk(o):
+        def _walk(o, path=()):
             if isinstance(o, dict):
                 for k, v in o.items():
-                    if k in banned_keys:
+                    # 2.1 explicitly discloses inventory/selected models only in governance.
+                    public_model = "governance" in path and k in {"provider_id", "model_id"}
+                    if k in banned_keys and not public_model:
                         self.fail(
                             f"private/banned field {k!r} must not appear in a public view")
-                    _walk(v)
+                    _walk(v, (*path, k))
             elif isinstance(o, list):
                 for item in o:
-                    _walk(item)
+                    _walk(item, path)
             elif isinstance(o, str):
                 for sub in banned_value_substrings:
                     if sub in o:
@@ -809,17 +811,21 @@ class ConformanceCase(unittest.TestCase):
                     or k == "hash" or k == "sha256" or k.endswith("_hash")
                     or k == "revision" or k == "pointer" or k == "history")
 
-        def _walk(o):
+        def _walk(o, path=()):
             if isinstance(o, dict):
                 for k, v in o.items():
-                    if _is_persisted_operational(k):
+                    # 2.1 exposes bounded proposal revision and accounting telemetry,
+                    # not manifest revisions, receipts, or selected-history pointers.
+                    public_governance = "governance" in path and k in {
+                        "plan_revision", "revisions_used", "passes_used", "spawns_used", "audit_spawns_used"}
+                    if _is_persisted_operational(k) and not public_governance:
                         self.fail(
                             f"persisted operational field {k!r} must not appear in a "
                             f"public/compaction surface")
-                    _walk(v)
+                    _walk(v, (*path, k))
             elif isinstance(o, list):
                 for item in o:
-                    _walk(item)
+                    _walk(item, path)
         _walk(obj)
 
     def assert_claim_kind(self, claim: dict, kind: str) -> None:
@@ -1071,6 +1077,7 @@ class ConformanceCase(unittest.TestCase):
         if resp["result"]["type"] != "Allow":
             raise HarnessDefect(
                 f"a valid graph must be admitted (prerequisite); got {resp['result'].get('type')}")
+        drv.approve_governance(run_id)  # explicit host consent to this exact fixture graph
         # Graph admission is proved by the typed ArgumentView claim/edge projection (D2C).
         arg_resp = self.dispatch(drv, get_argument(run_id=run_id))
         try:
@@ -1122,6 +1129,7 @@ class ConformanceCase(unittest.TestCase):
         if argument["result"]["type"] != "Allow":
             self.require_graph_admitted(drv, run_id)
             argument = self.dispatch(drv, get_argument(run_id=run_id))
+        self.require_governance_approved(drv, run_id)
         before = {child["child_id"] for child in argument["result"].get("run", {}).get("children", [])}
         resp = self.dispatch(drv, observe_action(run_id=run_id, action=action_child_reserve(
             purpose="audit", resource_class="audit",
@@ -1261,20 +1269,20 @@ class ConformanceCase(unittest.TestCase):
         Raises HarnessDefect if any response is not valid."""
         covered_observer = auditor_observer = "host"
         if variant == "same_model":
-            covered_provider, covered_model = "p1", "m1"
-            auditor_provider, auditor_model = "p1", "m1"
+            covered_provider, covered_model = "anthropic", "claude-sonnet-4-6"
+            auditor_provider, auditor_model = "anthropic", "claude-sonnet-4-6"
         elif variant == "decorrelated":
-            covered_provider, covered_model = "p1", "m1"
-            auditor_provider, auditor_model = "p2", "m2"
+            covered_provider, covered_model = "anthropic", "claude-sonnet-4-6"
+            auditor_provider, auditor_model = "anthropic", "claude-opus-4-6"
         elif variant == "unverified":
-            covered_provider, covered_model = "p1", "m1"
+            covered_provider, covered_model = "anthropic", "claude-sonnet-4-6"
             auditor_provider, auditor_model = None, None
         elif variant == "alias":
-            covered_provider, covered_model = "p1", "m1"
+            covered_provider, covered_model = "anthropic", "claude-sonnet-4-6"
             auditor_provider, auditor_model = "p2", "opus"
         elif variant == "configuration":
-            covered_provider, covered_model = "p1", "m1"
-            auditor_provider, auditor_model = "p2", "m2"
+            covered_provider, covered_model = "anthropic", "claude-sonnet-4-6"
+            auditor_provider, auditor_model = "anthropic", "claude-opus-4-6"
             auditor_observer = "configuration"
         else:
             raise HarnessDefect(f"unknown attribution variant {variant!r}")
@@ -1382,10 +1390,17 @@ class ConformanceCase(unittest.TestCase):
             raise HarnessDefect(f"a valid route must be admitted (prerequisite); got {resp['result'].get('type')}")
         return resp
 
+    def require_governance_approved(self, drv, run_id: str) -> None:
+        current = self.dispatch(drv, get_run(run_id=run_id))["result"]["run"]
+        if current["governance"]["scope"] is None:
+            self.dispatch(drv, observe_action(run_id=run_id, action=action_graph(canonical_graph())))
+        drv.approve_governance(run_id)
+
     def require_investigate_admitted(self, drv, run_id: str) -> None:
         """Assert investigation was admitted (Allow) through derived RunView obligation state.
         Route and investigation witnesses are proved by derived RunView obligation statuses, not
         private artifact IDs (D2C)."""
+        self.require_governance_approved(drv, run_id)
         resp = self.dispatch(drv, observe_action(run_id=run_id, action=action_investigate()))
         if resp["result"]["type"] != "Allow":
             raise HarnessDefect(

@@ -1,7 +1,6 @@
 """Codex native driver for the shared foreground-audit protocol."""
 from __future__ import annotations
 
-import os
 import subprocess
 import tempfile
 from collections.abc import Callable, Mapping
@@ -60,12 +59,15 @@ def execute_audit(
         CODEX_PROFILE_ID,
         dispatch=lambda request, _profile: tx.dispatch(request),
     )
-    model = os.environ.get("EMPIRICA_CODEX_AUDITOR_MODEL", "gpt-5.1-codex-mini")
     cwd_raw = payload.get("cwd")
     cwd = Path(cwd_raw) if isinstance(cwd_raw, str) and cwd_raw else Path.cwd()
     try:
         protocol.reconcile_orphans(run_id, native_prefix="codex-stop-recovery")
         plan = protocol.prepare(run_id, role_profile="empirica:empirica-auditor")
+        if not plan.auditor:
+            protocol.reject(plan)
+            return False
+        model = plan.auditor["model_id"]
     except AuditProtocolError:
         return False
 

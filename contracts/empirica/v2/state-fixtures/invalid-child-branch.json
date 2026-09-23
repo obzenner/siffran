@@ -40,19 +40,76 @@
         "goal_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "frozen_scope_digest": null,
         "deferred_scope_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-        "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>", "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
-        "claims": [{"claim_id": "G0", "text": "Codec fixture claim", "kind": "ordinary", "gating": true,
-          "state": "open", "wording_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "evidence_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945", "active_evidence_ids": []}],
+        "untrusted_delimiters": {
+          "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+          "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+        },
+        "claims": [
+          {
+            "claim_id": "G0",
+            "text": "Codec fixture claim",
+            "kind": "ordinary",
+            "gating": true,
+            "state": "open",
+            "wording_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "evidence_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+            "active_evidence_ids": []
+          }
+        ],
         "edges": [],
         "artifacts": [],
-        "audit": {"state": "required", "independence": "unverified", "reviewed_argument_digest": null,
-          "reviewed_goal_digest": null, "reviewed_frozen_scope_digest": null,
-          "reviewed_deferred_scope_digest": null, "reviewed_claims": []}
+        "audit": {
+          "state": "required",
+          "independence": "unverified",
+          "reviewed_argument_digest": null,
+          "reviewed_goal_digest": null,
+          "reviewed_frozen_scope_digest": null,
+          "reviewed_deferred_scope_digest": null,
+          "reviewed_claims": []
+        }
       },
       "audit_role_profile": "empirica:empirica-auditor",
-      "resource_class": "audit"
+      "resource_class": "audit",
+      "audit_auditor": {
+        "provider_id": "anthropic",
+        "model_id": "claude-opus-4-6"
+      },
+      "audit_inventory_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     }
   ],
-  "committed_artifact_head_id": null
+  "committed_artifact_head_id": null,
+  "governance": {
+    "state": "pending",
+    "control_mode": "deliberative",
+    "revision_limit": 64,
+    "plan_revision": 0,
+    "revisions_used": 0,
+    "approved_digest": null,
+    "approval_kind": null,
+    "receipts": [],
+    "proposal": {
+      "budgets": {
+        "max_passes": 1,
+        "max_spawns": 0,
+        "max_audit_spawns": 1
+      },
+      "modes": {
+        "multi_provider": false,
+        "cli_exec": false
+      },
+      "auditor": null,
+      "allow_same_model": false
+    },
+    "context": {
+      "inventory": {
+        "members": [],
+        "source": "unknown",
+        "complete": false,
+        "authorized": false
+      },
+      "author": null,
+      "ingress": "unavailable"
+    },
+    "proposal_digest": "sha256:f4d3b7519e51b39aeaed820a9ec5d9ee2f7b77893bd763c09883453899eed724"
+  }
 }

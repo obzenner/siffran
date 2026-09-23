@@ -22,7 +22,8 @@ function envelope(result: Result, requestId = "x"): Response {
   return { protocol: PROTOCOL, request_id: requestId, result };
 }
 function run(status = "active") {
-  return { id: HANDLE, status: status as never };
+  return { id: HANDLE, status: status as never, governance: { state: "approved",
+    proposal: { auditor: { provider_id: "bedrock", model_id: "auditor-model" } } } };
 }
 
 interface Wired {
@@ -49,11 +50,14 @@ function wire(
     dispatch,
     deriveSelector: () => ({ project: "p", session: "s" }),
     privateIngress: async (request) => {
+      if (request.operation === "governance_context") return { protocol: PROTOCOL,
+        request_id: "trusted-governance", result: { type: "Inert", reason: "unsupported_host_event", run: run() } };
       privateRequests.push(request);
       if (request.operation === "audit_prepare") return {
         type: "audit_plan",
         plan: { child_id: "ch-1", role_profile: "empirica.empirica-auditor",
           operation_id: `sha256:${"b".repeat(64)}`,
+          auditor: { provider_id: "bedrock", model_id: "auditor-model" },
           argument: { argument_digest: `sha256:${"a".repeat(64)}`, claims: [] } },
       };
       if (request.operation === "audit_verdict")
@@ -403,6 +407,7 @@ test("missing native session keeps auditor identity unverified", async () => {
 test("session restore orphans unresolved audits and tombstones completed correlations", async () => {
   const plan = { child_id: "ch-1", role_profile: "empirica.empirica-auditor",
     operation_id: `sha256:${"b".repeat(64)}`,
+          auditor: { provider_id: "bedrock", model_id: "auditor-model" },
     argument: { argument_digest: `sha256:${"a".repeat(64)}`, claims: [] } };
   const correlation = { toolCallId: "tc-restored", runHandle: HANDLE, nativeId: "tc-restored",
     plan,
@@ -548,10 +553,13 @@ test("canonical auditor identity follows filesystem symlinks", async (t) => {
       request_id: request.request_id,
     }),
     deriveSelector: () => ({ project: "p", session: "s" }),
-    privateIngress: async (request) => request.operation === "audit_prepare"
+    privateIngress: async (request) => request.operation === "governance_context"
+      ? { protocol: PROTOCOL, request_id: "trusted-governance", result: { type: "Inert", reason: "unsupported_host_event", run: run() } }
+      : request.operation === "audit_prepare"
       ? { type: "audit_plan", plan: { child_id: "ch-1",
           role_profile: "empirica.empirica-auditor",
           operation_id: `sha256:${"b".repeat(64)}`,
+          auditor: { provider_id: "bedrock", model_id: "auditor-model" },
           argument: { argument_digest: `sha256:${"a".repeat(64)}`, claims: [] } } }
       : { type: "ok" },
     resolveAuditContract: async () => ({ agentFilePath: realAgent,
@@ -581,10 +589,13 @@ test("byte-identical packaged auditor copies preserve canonical identity", async
       request_id: request.request_id,
     }),
     deriveSelector: () => ({ project: "p", session: "s" }),
-    privateIngress: async (request) => request.operation === "audit_prepare"
+    privateIngress: async (request) => request.operation === "governance_context"
+      ? { protocol: PROTOCOL, request_id: "trusted-governance", result: { type: "Inert", reason: "unsupported_host_event", run: run() } }
+      : request.operation === "audit_prepare"
       ? { type: "audit_plan", plan: { child_id: "ch-copy",
           role_profile: "empirica.empirica-auditor",
           operation_id: `sha256:${"b".repeat(64)}`,
+          auditor: { provider_id: "bedrock", model_id: "auditor-model" },
           argument: { argument_digest: `sha256:${"a".repeat(64)}`, claims: [] } } }
       : { type: "ok" },
     resolveAuditContract: async () => ({ agentFilePath: copiedAgent,
@@ -606,7 +617,8 @@ test("shadowed packaged auditor identity is blocked before reservation", async (
       request_id: request.request_id,
     }; },
     deriveSelector: () => ({ project: "p", session: "s" }),
-    privateIngress: async () => ({ type: "ok" }),
+    privateIngress: async () => ({ protocol: PROTOCOL, request_id: "trusted-governance",
+      result: { type: "Inert", reason: "unsupported_host_event", run: run() } }),
     resolveAuditContract: async () => ({ agentFilePath: "/project/.pi/agents/shadow.md",
                                          model: "bedrock/auditor-model" }),
   })(pi);
@@ -616,7 +628,7 @@ test("shadowed packaged auditor identity is blocked before reservation", async (
     input: { agent: "empirica.empirica-auditor", task: "audit" } }, fakeCtx());
   assert.equal(decision?.block, true);
   assert.match(decision!.reason!, /shadowed/);
-  assert.equal(requests.length, 1);
+  assert.equal(requests.length, 2); // investigation + read-only approved-selection lookup
   assert.equal(requests[0].command.type, "ObserveAction");
   assert.equal(requests[0].command.type === "ObserveAction"
     ? requests[0].command.action.kind : null, "investigate");

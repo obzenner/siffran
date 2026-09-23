@@ -27,6 +27,7 @@ PLUGIN = HERE.parent.parent  # plugins/empirica — makes application/core/vendo
 
 sys.path.insert(0, str(PLUGIN))
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parent))
 
 
 def _load_suite() -> unittest.TestSuite:

@@ -34,13 +34,13 @@
         },
         "contract": {
           "id": "empirica/public",
-          "version": "2.0.0",
+          "version": "2.1.0",
           "relevant_sections": [
             "core",
             "roles",
             "hosts/capabilities"
           ],
-          "digest": "sha256:525fa2359be90b80df00b3a50b6863367d3911cc6bc76e91c76debcb04de89ff"
+          "digest": "sha256:f656d9988ee3fa0b750f2e165cf5b822bc5d630512a26320f860cc5a8df5de98"
         },
         "obligations": {
           "active": [
@@ -68,6 +68,57 @@
         "untrusted_delimiters": {
           "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
           "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+        },
+        "governance": {
+          "state": "pending",
+          "control_mode": "deliberative",
+          "revision_limit": 64,
+          "plan_revision": 0,
+          "revisions_used": 0,
+          "approved_digest": null,
+          "approval_kind": null,
+          "proposal": {
+            "budgets": {
+              "max_passes": 10,
+              "max_spawns": 5,
+              "max_audit_spawns": 1
+            },
+            "modes": {
+              "multi_provider": false,
+              "cli_exec": false
+            },
+            "auditor": null,
+            "allow_same_model": false
+          },
+          "context": {
+            "inventory": {
+              "members": [],
+              "source": "unknown",
+              "complete": false,
+              "authorized": false
+            },
+            "author": null,
+            "ingress": "unavailable"
+          },
+          "proposal_digest": "sha256:5e64f0b05d749be8af867c490a9e30c6c5c83aa0396bde6935d6f49ac87984d2",
+          "scope": null,
+          "budgets": {
+            "max_passes": 10,
+            "passes_used": 3,
+            "max_spawns": 5,
+            "spawns_used": 0,
+            "max_audit_spawns": 1,
+            "audit_spawns_used": 1
+          },
+          "remaining": {
+            "max_passes": 7,
+            "max_spawns": 5,
+            "max_audit_spawns": 0
+          },
+          "inventory_status": "unknown",
+          "interactions_remaining": {"proposal": 3, "total": 128},
+          "prompt_error": "governance.inventory_unknown",
+          "next_action": "governance.propose"
         }
       }
     }

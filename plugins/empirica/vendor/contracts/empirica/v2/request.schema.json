@@ -71,15 +71,18 @@
       "properties": {
         "max_passes": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "maximum": 1024
         },
         "max_spawns": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 128
         },
         "max_audit_spawns": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 128
         }
       }
     },
@@ -740,18 +743,6 @@
       "required": [
         "kind"
       ],
-      "anyOf": [
-        {
-          "required": [
-            "budgets"
-          ]
-        },
-        {
-          "required": [
-            "modes"
-          ]
-        }
-      ],
       "properties": {
         "kind": {
           "const": "configure_run"
@@ -761,6 +752,29 @@
         },
         "modes": {
           "$ref": "#/$defs/modes"
+        },
+        "auditor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider_id",
+            "model_id"
+          ],
+          "properties": {
+            "provider_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "model_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        },
+        "allow_same_model": {
+          "type": "boolean"
         }
       }
     },
@@ -833,12 +847,16 @@
         {
           "if": {
             "properties": {
-              "resource_class": {"const": "audit"}
+              "resource_class": {
+                "const": "audit"
+              }
             }
           },
           "then": {
             "properties": {
-              "purpose": {"const": "audit"}
+              "purpose": {
+                "const": "audit"
+              }
             }
           }
         }
@@ -1032,13 +1050,20 @@
         },
         "goal": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 4096
         },
         "budgets": {
           "$ref": "#/$defs/budgets"
         },
         "modes": {
           "$ref": "#/$defs/modes"
+        },
+        "control_mode": {
+          "enum": [
+            "deliberative",
+            "auto"
+          ]
         }
       }
     },
@@ -1232,6 +1257,346 @@
           "const": "full"
         }
       }
+    },
+    "governanceContextPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inventory",
+        "author",
+        "ingress"
+      ],
+      "properties": {
+        "inventory": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "members",
+            "source",
+            "complete",
+            "authorized"
+          ],
+          "properties": {
+            "members": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "provider_id",
+                  "model_id"
+                ],
+                "properties": {
+                  "provider_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "model_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  }
+                }
+              },
+              "maxItems": 32,
+              "uniqueItems": true
+            },
+            "source": {
+              "enum": [
+                "unknown",
+                "operator_declared",
+                "pi_registry"
+              ]
+            },
+            "complete": {
+              "type": "boolean"
+            },
+            "authorized": {
+              "type": "boolean"
+            }
+          }
+        },
+        "author": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "provider_id",
+                "model_id"
+              ],
+              "properties": {
+                "provider_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "model_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ingress": {
+          "enum": [
+            "unavailable",
+            "mcp_elicitation",
+            "pi_ui"
+          ]
+        }
+      }
+    },
+    "governanceDecisionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "receipt_id",
+        "proposal_digest",
+        "plan_revision",
+        "approval_kind",
+        "outcome"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "receipt_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "proposal_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "plan_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "approval_kind": {
+          "enum": [
+            "auto",
+            "host_ui"
+          ]
+        },
+        "outcome": {
+          "enum": [
+            "approve",
+            "amend",
+            "reject",
+            "dismiss",
+            "present"
+          ]
+        },
+        "amendment": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "graph",
+            "configuration"
+          ],
+          "properties": {
+            "graph": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "root",
+                "claims",
+                "edges"
+              ],
+              "properties": {
+                "root": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "claims": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 32,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "text",
+                      "kind",
+                      "gating"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2048
+                      },
+                      "kind": {
+                        "enum": [
+                          "ordinary",
+                          "needs-experiment",
+                          "needs-decision"
+                        ]
+                      },
+                      "gating": {
+                        "type": "boolean"
+                      }
+                    }
+                  }
+                },
+                "edges": {
+                  "type": "array",
+                  "maxItems": 128,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "from",
+                      "to",
+                      "type"
+                    ],
+                    "properties": {
+                      "from": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "to": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "type": {
+                        "const": "SupportedBy"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "configuration": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "budgets",
+                "modes",
+                "auditor",
+                "allow_same_model"
+              ],
+              "properties": {
+                "budgets": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "max_passes",
+                    "max_spawns",
+                    "max_audit_spawns"
+                  ],
+                  "properties": {
+                    "max_passes": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 1024
+                    },
+                    "max_spawns": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 128
+                    },
+                    "max_audit_spawns": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 128
+                    }
+                  }
+                },
+                "modes": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "multi_provider",
+                    "cli_exec"
+                  ],
+                  "properties": {
+                    "multi_provider": {
+                      "type": "boolean"
+                    },
+                    "cli_exec": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "auditor": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "provider_id",
+                        "model_id"
+                      ],
+                      "properties": {
+                        "provider_id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "model_id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "allow_same_model": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "amend"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "amendment"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "amendment"
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }

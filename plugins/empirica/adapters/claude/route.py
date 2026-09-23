@@ -58,7 +58,12 @@ def build_investigation_request(
 ) -> dict | None:
     """Build the first-investigation operation for every investigative native tool."""
     context_from_payload(payload)
-    if payload.get("tool_name") not in INVESTIGATIVE_TOOLS:
+    name = payload.get("tool_name")
+    # Unknown tools (including third-party MCP research and writers) fail closed.
+    # Only exact preparation/public names are exempt; suffix matching can spoof a server.
+    public = {prefix + tool for prefix in ("", "mcp__plugin_empirica_empirica__")
+              for tool in ("empirica_read", "empirica_observe", "report_convergence")}
+    if not isinstance(name, str) or name in public | {"ToolSearch", "AskUserQuestion"}:
         return None
     return _request(
         payload, run_id, {"kind": "investigate"}, "investigate", correlation_id,

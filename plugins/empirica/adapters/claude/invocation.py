@@ -26,6 +26,7 @@ class Invocation:
     modes: dict[str, bool]
     sources: dict[str, str]
     unknown_flags: tuple[str, ...]
+    control_mode: str = "deliberative"
 
 
 def invocation_args(payload: Mapping[str, object]) -> str:
@@ -63,10 +64,13 @@ def parse_invocation(
     tokens = invocation_args(payload).split()
     flags: dict[str, bool] = {}
     unknown: list[str] = []
+    control_mode = "deliberative"
     index = 0
     while index < len(tokens) and tokens[index].startswith("--"):
         token = tokens[index]
-        if token in FLAGS:
+        if token == "--auto":
+            control_mode = "auto"
+        elif token in FLAGS:
             flags[FLAGS[token]] = True
         elif token.startswith("--no-") and f"--{token[5:]}" in FLAGS:
             flags[FLAGS[f"--{token[5:]}"]] = False
@@ -87,7 +91,7 @@ def parse_invocation(
         else:
             sources[mode] = "default"
     goal = " ".join(tokens[index:]).strip() or fallback_goal
-    return Invocation(goal, modes, sources, tuple(unknown))
+    return Invocation(goal, modes, sources, tuple(unknown), control_mode)
 
 
 def build_configure_run_request(

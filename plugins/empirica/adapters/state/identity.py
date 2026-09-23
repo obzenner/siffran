@@ -23,6 +23,7 @@ boundary or the resolved path, never from plugin debris.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -34,6 +35,22 @@ _PROJECT_HASH_LEN = 16
 _RUN_HASH_LEN = 12
 _READABLE_PREFIX_MAX = 32
 _UNSAFE = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
+def _git_boundary(path: Path) -> bool:
+    """Recognize a failed Git discovery without crossing explicit discovery ceilings."""
+    if os.environ.get("GIT_DIR"):
+        return True
+    ceilings = {Path(p).resolve() for p in os.environ.get("GIT_CEILING_DIRECTORIES", "").split(os.pathsep) if p}
+    for parent in (path, *path.parents):
+        if parent != path and parent in ceilings:
+            break
+        marker = parent / ".git"
+        if marker.exists() or marker.is_symlink():
+            return True
+        if (parent / "HEAD").is_file() and (parent / "objects").is_dir() and (parent / "refs").is_dir():
+            return True
+    return False
 
 
 def _git_common_dir(path: Path) -> Path | None:
@@ -50,11 +67,17 @@ def _git_common_dir(path: Path) -> Path | None:
             capture_output=True, text=True, check=False,
         )
     except (OSError, ValueError):
+        if _git_boundary(path):
+            raise RuntimeError("Git project identity is unavailable") from None
         return None
     if completed.returncode != 0:
+        if _git_boundary(path):
+            raise RuntimeError("Git project identity is unavailable")
         return None
     raw = completed.stdout.strip()
     if not raw:
+        if _git_boundary(path):
+            raise RuntimeError("Git project identity is unavailable")
         return None
     return (path / raw).resolve()
 
