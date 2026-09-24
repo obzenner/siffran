@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from core import governance as policy
-from core.evaluation import artifact, valid_graph, frozen_scope_invalid
+from core.evaluation import artifact, bootstrap_precondition, valid_graph, frozen_scope_invalid
 from core.records import Corrupt
 from .location import decode_handle
 from .run_state import classify_and_decode
@@ -49,7 +49,10 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
             else:
                 reason = policy.decision_error(run_id, governed, payload)
                 if reason == "inert":
+                    # Historical graphless presentations remain exactly replayable.
                     return c._inert_with_run(rid, snapshot)
+                if missing := bootstrap_precondition(snapshot, "governance.present"):
+                    return c._block_from_snapshot(snapshot, rid, missing[1])
                 if reason:
                     return c._block_from_snapshot(snapshot, rid, reason)
                 outcome = payload["outcome"]
@@ -57,8 +60,6 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                     # Whitespace-only feedback is not a meaningful request; treat as malformed.
                     return c._fault(rid, "invalid_request")
                 if outcome == "approve":
-                    if snapshot.graph is None:
-                        return c._block_from_snapshot(snapshot, rid, "graph.missing")
                     reason = policy.configuration_error(state, governed["proposal"]) or policy.selection_error(governed)
                     if reason:
                         return c._block_from_snapshot(snapshot, rid, reason)

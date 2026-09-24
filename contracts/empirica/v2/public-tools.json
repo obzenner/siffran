@@ -1,5 +1,136 @@
 {
   "protocol": "empirica/v2",
+  "definitions": {
+    "empirica_read": {
+      "title": "Read Empirica state",
+      "description": "Read public state owned by Empirica. Get the current run, audit argument, public contract, or restored run. Inspect state after an uncertain configure_run outcome. Do not blindly reopen host UI."
+    },
+    "empirica_observe": {
+      "title": "Record an Empirica author action",
+      "description": "Submit exactly one public author action. Normal bootstrap is route, graph, configure_run, then investigate after approval. Graph may precede route and needs no prior investigation. configure_run requires a selected graph and requests host mediation without self-approval. Host-owned lifecycle facts are not author actions."
+    },
+    "report_convergence": {
+      "title": "Request an Empirica decision",
+      "description": "Request guarded convergence or an honest residual stop. Current obligations and audit gates remain authoritative. Human waiting is neither investigation nor convergence. Typed blocks identify current recovery."
+    }
+  },
+  "bootstrap_actions": {
+    "route": {
+      "description": "Record the chosen reasoning route before investigation; graph declaration may occur first.",
+      "example": {
+        "kind": "route",
+        "reason": "Primary empirical route for the supplied goal."
+      },
+      "operation": "route"
+    },
+    "graph": {
+      "description": "Propose claims and unknowns from supplied context. No repository investigation or evidence is required.",
+      "example": {
+        "kind": "graph",
+        "payload": {
+          "root": "C0",
+          "claims": [
+            {
+              "id": "C0",
+              "text": "The supplied goal can be achieved safely.",
+              "gating": true,
+              "kind": "ordinary"
+            }
+          ],
+          "edges": []
+        }
+      },
+      "operation": "graph"
+    },
+    "configure_run": {
+      "description": "After a graph exists, propose bounded configuration and request host mediation. It never self-approves or changes effective budgets before consent.",
+      "example": {
+        "kind": "configure_run",
+        "budgets": {
+          "max_passes": 5
+        }
+      },
+      "operation": "configure_run"
+    },
+    "investigate": {
+      "description": "Record the first investigation witness only after route and exact current host approval.",
+      "example": {
+        "kind": "investigate"
+      },
+      "operation": "investigate"
+    }
+  },
+  "recovery": {
+    "graph.missing": {
+      "message": "No selected argument graph. Propose one from supplied context before configure_run; investigation and evidence are not prerequisites.",
+      "sections": [
+        "claims/graph"
+      ],
+      "next_actions": [
+        "graph.record"
+      ]
+    },
+    "governance.approval_unavailable": {
+      "message": "Host approval UI unavailable/cancelled. Keep pending; use supported UI or start an explicitly auto fresh run.",
+      "sections": [
+        "governance"
+      ],
+      "next_actions": [
+        "host.repair_context",
+        "residual.accept"
+      ]
+    },
+    "governance.inventory_unknown": {
+      "message": "Authorized inventory is unknown, empty, incomplete or cannot verify selection. Ask the operator to supply a complete inventory.",
+      "sections": [
+        "governance"
+      ],
+      "next_actions": [
+        "host.repair_context",
+        "residual.accept"
+      ]
+    },
+    "governance.author_unknown": {
+      "message": "The host-observed author has no supported concrete identity mapping.",
+      "sections": [
+        "governance"
+      ],
+      "next_actions": [
+        "governance.propose",
+        "residual.accept"
+      ]
+    },
+    "governance.identity_mismatch": {
+      "message": "Observed author/auditor identity does not match the approved concrete model. Re-negotiate; do not substitute.",
+      "sections": [
+        "governance"
+      ],
+      "next_actions": [
+        "governance.propose",
+        "residual.accept"
+      ]
+    },
+    "governance.interaction_limit": {
+      "message": "The durable proposal (3) or total (128) interaction limit is exhausted. Stop honestly or start a fresh run.",
+      "sections": [
+        "governance"
+      ],
+      "next_actions": [
+        "governance.propose",
+        "residual.accept"
+      ]
+    },
+    "governance.changes_requested": {
+      "message": "A human requested changes in plain language and approved nothing. Read run.governance.change_request, draft a revised graph/configuration, and request approval again. The request is guidance, not consent and not evidence.",
+      "sections": [
+        "governance"
+      ],
+      "next_actions": [
+        "governance.propose",
+        "residual.accept"
+      ]
+    }
+  },
   "schemas": {
     "model": {
       "empirica_read": {
@@ -67,7 +198,25 @@
                     "type": "object",
                     "description": "Extensible deep graph/evidence/actor domain data; only this object may carry D6-validated payload. The control object itself is closed."
                   }
-                }
+                },
+                "description": "Propose claims and unknowns from supplied context. No repository investigation or evidence is required.",
+                "examples": [
+                  {
+                    "kind": "graph",
+                    "payload": {
+                      "root": "C0",
+                      "claims": [
+                        {
+                          "id": "C0",
+                          "text": "The supplied goal can be achieved safely.",
+                          "gating": true,
+                          "kind": "ordinary"
+                        }
+                      ],
+                      "edges": []
+                    }
+                  }
+                ]
               },
               {
                 "type": "object",
@@ -224,7 +373,16 @@
                   "allow_same_model": {
                     "type": "boolean"
                   }
-                }
+                },
+                "description": "After a graph exists, propose bounded configuration and request host mediation. It never self-approves or changes effective budgets before consent.",
+                "examples": [
+                  {
+                    "kind": "configure_run",
+                    "budgets": {
+                      "max_passes": 5
+                    }
+                  }
+                ]
               },
               {
                 "type": "object",
@@ -241,7 +399,14 @@
                     "type": "string",
                     "minLength": 1
                   }
-                }
+                },
+                "description": "Record the chosen reasoning route before investigation; graph declaration may occur first.",
+                "examples": [
+                  {
+                    "kind": "route",
+                    "reason": "Primary empirical route for the supplied goal."
+                  }
+                ]
               },
               {
                 "type": "object",
@@ -253,7 +418,13 @@
                   "kind": {
                     "const": "investigate"
                   }
-                }
+                },
+                "description": "Record the first investigation witness only after route and exact current host approval.",
+                "examples": [
+                  {
+                    "kind": "investigate"
+                  }
+                ]
               },
               {
                 "type": "object",
@@ -370,7 +541,25 @@
                     "type": "object",
                     "description": "Extensible deep graph/evidence/actor domain data; only this object may carry D6-validated payload. The control object itself is closed."
                   }
-                }
+                },
+                "description": "Propose claims and unknowns from supplied context. No repository investigation or evidence is required.",
+                "examples": [
+                  {
+                    "kind": "graph",
+                    "payload": {
+                      "root": "C0",
+                      "claims": [
+                        {
+                          "id": "C0",
+                          "text": "The supplied goal can be achieved safely.",
+                          "gating": true,
+                          "kind": "ordinary"
+                        }
+                      ],
+                      "edges": []
+                    }
+                  }
+                ]
               },
               {
                 "type": "object",
@@ -527,7 +716,16 @@
                   "allow_same_model": {
                     "type": "boolean"
                   }
-                }
+                },
+                "description": "After a graph exists, propose bounded configuration and request host mediation. It never self-approves or changes effective budgets before consent.",
+                "examples": [
+                  {
+                    "kind": "configure_run",
+                    "budgets": {
+                      "max_passes": 5
+                    }
+                  }
+                ]
               },
               {
                 "type": "object",
@@ -544,7 +742,14 @@
                     "type": "string",
                     "minLength": 1
                   }
-                }
+                },
+                "description": "Record the chosen reasoning route before investigation; graph declaration may occur first.",
+                "examples": [
+                  {
+                    "kind": "route",
+                    "reason": "Primary empirical route for the supplied goal."
+                  }
+                ]
               },
               {
                 "type": "object",
@@ -556,7 +761,13 @@
                   "kind": {
                     "const": "investigate"
                   }
-                }
+                },
+                "description": "Record the first investigation witness only after route and exact current host approval.",
+                "examples": [
+                  {
+                    "kind": "investigate"
+                  }
+                ]
               },
               {
                 "type": "object",

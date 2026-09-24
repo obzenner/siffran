@@ -917,12 +917,16 @@ class D7TransactionTests(unittest.TestCase):
         state = initial()
         snapshot = EvaluationSnapshot(
             state=state, history=(), graph=None, run_id="er2:test:test",
-            contract_id="empirica/public", contract_version="2.0.0",
-            contract_digest="sha256:" + "0" * 64, profile_id="pi@0.84.1+pi-subagents@0.50.0",
+            contract_id=protocol._PUBLIC_CONTRACT["id"], contract_version=protocol._PUBLIC_CONTRACT["version"],
+            contract_digest=protocol._DIGEST, profile_id="pi@0.84.1+pi-subagents@0.50.0",
+            bootstrap_requirements=protocol._BOOTSTRAP_REQUIREMENTS,
+            bootstrap_operations=protocol._BOOTSTRAP_OPERATIONS,
             host_tier="foreground_only", command={"type": "GetRun"})
         left, right = project_runview(snapshot), project_runview(snapshot)
         self.assertEqual(left, right)
         self.assertNotIn("committed_artifact_head_id", json.dumps(left))
+        with self.assertRaisesRegex(ValueError, "unknown bootstrap operation"):
+            project_runview(replace(snapshot, bootstrap_operations=()))
 
 
 if __name__ == "__main__":

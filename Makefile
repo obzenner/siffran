@@ -101,7 +101,12 @@ check-core: ## Fast host-neutral contracts, malformed input, state, bridge, and 
 	@$(PYTHON) $(METHODOLOGIST_CORE_TESTS)
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q \
 		test_governance.GovernanceServiceTests.test_private_exact_replay_conflict_stale_cross_run_and_cas \
-		test_governance.GovernanceServiceTests.test_cancel_unknown_inventory_singleton_and_no_public_approval
+		test_governance.GovernanceServiceTests.test_cancel_unknown_inventory_singleton_and_no_public_approval \
+		test_governance.GovernanceServiceTests.test_graphless_configure_and_private_present_are_effect_free_blocks \
+		test_governance.GovernanceServiceTests.test_bootstrap_graphless_convergence_is_preparation_not_human_wait \
+		test_governance.GovernanceServiceTests.test_bootstrap_contract_examples_have_real_postconditions \
+		test_governance.GovernanceServiceTests.test_bootstrap_terminal_run_has_no_preparation_actions \
+		test_governance.GovernanceServiceTests.test_real_pending_approval_investigation_then_revision_revokes_all_paths
 
 check-claude: ## Fast Claude payload, lifecycle translation, and fail-closed adapter tests
 	@printf '$(BOLD)==> claude suite$(RESET)\n'
@@ -125,7 +130,10 @@ check-codex: methodologist-codex-check empirica-codex-check ## Fast Codex packag
 check-pi: pi-bundle-check methodologist-pi-check empirica-pi-check ## Fast Pi package, type, unit, guard, and bounded bridge tests — needs Node
 	@printf '$(BOLD)==> pi suite ok$(RESET)\n'
 
-.PHONY: empirica-governance-check empirica-core-integration empirica-host-integration empirica-governance-host-check
+.PHONY: empirica-governance-check empirica-core-integration empirica-host-integration empirica-governance-host-check empirica-governance-service-check
+empirica-governance-service-check: ## Check real-service governance transitions (ARGS="-k test_name" selects cases)
+	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_governance $(ARGS)
+
 empirica-governance-host-check: ## Check real-service Claude form mediation (ARGS="-k test_name" selects cases)
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_governance_hosts $(ARGS)
 
@@ -133,9 +141,13 @@ empirica-governance-check: ## Diagnose full real-service governance CAS, replay,
 	@$(PYTHON) $(EMPIRICA_GOVERNANCE_TESTS)
 	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/test_governance_hosts.py
 
+.PHONY: empirica-transaction-check
+empirica-transaction-check: ## Check transaction/projection invariants (ARGS="-k test_name" selects cases)
+	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_d7_transactions $(ARGS)
+
 empirica-core-integration: ## Diagnose expensive persistence, transaction, retry, and v2 behavior
 	@$(PYTHON) $(EMPIRICA_D6_STRICT_TESTS)
-	@$(PYTHON) $(EMPIRICA_TRANSACTION_TESTS)
+	@$(MAKE) --no-print-directory empirica-transaction-check
 	@$(PYTHON) $(EMPIRICA_GIT_ADAPTER_TESTS)
 	@$(PYTHON) $(EMPIRICA_BRIDGE_V2_TESTS)
 	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/test_stale_audit_retry.py

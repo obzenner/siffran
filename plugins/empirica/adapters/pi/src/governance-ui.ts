@@ -2,10 +2,19 @@
 // Pinned 0.84.1 and native rendering still require separate qualification.
 // No UI response is accepted as a public author action. Core revalidates every binding.
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import * as path from "node:path";
 import type { ExtensionContext } from "./pi-types.ts";
 import type { PrivateIngress } from "./private-transport.ts";
 import type { Response } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
+
+const PUBLIC_TOOLS_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
+  "..", "..", "..", "..", "..", "contracts", "empirica", "v2", "public-tools.json");
+const RECOVERY = (JSON.parse(readFileSync(PUBLIC_TOOLS_PATH, "utf8")) as {
+  recovery: Record<string, { message: string; sections: string[]; next_actions: string[] }>;
+}).recovery;
 
 interface Model { provider_id: string; model_id: string }
 interface Claim { id: string; text: string; kind: string; gating: boolean }
@@ -127,13 +136,10 @@ export async function refreshGovernance(runId: string, ctx: ExtensionContext,
 }
 
 function unavailable(response: Response, code = "governance.approval_unavailable"): Response {
+  if (!(code in RECOVERY)) throw new Error(`Missing canonical governance recovery metadata: ${code}`);
   if (!("run" in response.result)) return response;
-  const message = code === "governance.changes_requested"
-    ? "Read run.governance.change_request, draft a revised proposal, and request fresh approval. This request is guidance, not consent or evidence."
-    : `${code}: host approval cannot proceed. Inspect governance context and remaining interactions; correct the proposal or stop honestly.`;
   return { ...response, result: { type: "Block", run: response.result.run,
-    reasons: [{ code, parameters: {}, message,
-      sections: ["governance"], next_actions: ["governance.propose", "residual.accept"] }] } };
+    reasons: [{ code, parameters: {}, ...RECOVERY[code] }] } };
 }
 
 export function governanceTimeout(): number {

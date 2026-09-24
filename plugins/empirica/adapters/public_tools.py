@@ -1,7 +1,4 @@
-"""Model-callable projection of Empirica's public v2 surface.
-
-Schemas are derived from the canonical contracts; trusted ingress is never registered.
-"""
+"""Model-callable projection of Empirica's canonical public v2 surface."""
 from __future__ import annotations
 
 import copy
@@ -43,10 +40,16 @@ def _deref(value: Any) -> Any:
 
 def _author_action_schema() -> dict:
     choices = []
+    guidance = _protocol._PUBLIC_CONTRACT["bootstrap"]["actions"]
     for item in _protocol._REQUEST_SCHEMA["$defs"]["action"]["oneOf"]:
         expanded = _deref(item)
         kind = expanded.get("properties", {}).get("kind", {}).get("const")
         if kind in _AUTHOR_KINDS:
+            if kind in guidance:
+                row = guidance[kind]
+                if row["operation"] != kind or row["example"].get("kind") != kind:
+                    raise RuntimeError("bootstrap action guidance is bound to the wrong request kind")
+                expanded.update(description=row["description"], examples=[copy.deepcopy(row["example"])])
             choices.append(expanded)
     if {row["properties"]["kind"]["const"] for row in choices} != _AUTHOR_KINDS:
         raise RuntimeError("request schema and PublicContract author actions drifted")
@@ -123,18 +126,31 @@ def _host_handle_schemas(model: dict[str, dict]) -> dict[str, dict]:
     return result
 
 
-def _load_schemas() -> dict[str, dict[str, dict]]:
+def _project_public_tools() -> dict:
+    bootstrap = _protocol._PUBLIC_CONTRACT["bootstrap"]
+    recovery = _protocol._PUBLIC_CONTRACT["reasons"]
+    return {"protocol": _protocol._PROTOCOL,
+            "definitions": copy.deepcopy(bootstrap["tools"]),
+            "bootstrap_actions": copy.deepcopy(bootstrap["actions"]),
+            "recovery": {code: {key: copy.deepcopy(recovery[code][key])
+                       for key in ("message", "sections", "next_actions")}
+                       for code in ("graph.missing", "governance.approval_unavailable",
+                                    "governance.inventory_unknown", "governance.author_unknown",
+                                    "governance.identity_mismatch", "governance.interaction_limit",
+                                    "governance.changes_requested")},
+            "schemas": {"model": _project_schemas(),
+                        "host_handle": _host_handle_schemas(_project_schemas())}}
+
+
+_projected = _project_public_tools()
+_PUBLIC_SCHEMAS = _projected["schemas"]
+
+
+def _load_artifact() -> dict:
     artifact = json.loads(_PUBLIC_TOOL_ARTIFACT.read_text(encoding="utf-8"))
-    projected = _project_schemas()
-    expected = {"protocol": _protocol._PROTOCOL,
-                "schemas": {"model": projected,
-                            "host_handle": _host_handle_schemas(projected)}}
-    if artifact != expected:
+    if artifact != _projected:
         raise RuntimeError("public-tools.json drifted from the canonical v2 contracts")
-    return artifact["schemas"]
-
-
-_PUBLIC_SCHEMAS = {"model": _project_schemas(), "host_handle": _host_handle_schemas(_project_schemas())}
+    return artifact
 
 
 class PublicTools:
@@ -146,42 +162,11 @@ class PublicTools:
         self._profile_id = profile_id
         self._dispatch = dispatch
         self._govern = govern
-        self._schemas = copy.deepcopy(_load_schemas()["model"])
+        self._artifact = _load_artifact()
+        self._schemas = copy.deepcopy(self._artifact["schemas"]["model"])
 
     def definitions(self) -> list[dict[str, object]]:
-        metadata = {
-            READ_TOOL: {
-                "title": "Read Empirica state",
-                "description": (
-                    "Read public state owned by Empirica. Use GetRun for the current run view, "
-                    "GetArgument for the snapshot-bound audit dossier, GetContract for public "
-                    "protocol guidance, and RestoreRun only when resuming persisted state. "
-                    "GetContract needs target; target=section also needs section_id. Every other "
-                    "operation needs run_id. This tool cannot mutate evidence or admit a verdict."
-                ),
-            },
-            OBSERVE_TOOL: {
-                "title": "Record an Empirica author action",
-                "description": (
-                    "Submit exactly one public author action for an active Empirica run. Use it "
-                    "to route before investigation, construct or refine the claim graph, record "
-                    "cited research, request deterministic spikes, propose bounded modes/budgets/auditor, or "
-                    "freeze approved scope. configure_run requests host-mediated approval; it never self-approves. Material graph/configuration changes revoke investigation authority. The action must match one advertised variant and run_id must "
-                    "identify the active run. This tool does not accept host-owned lifecycle facts."
-                ),
-            },
-            REPORT_TOOL: {
-                "title": "Request an Empirica decision",
-                "description": (
-                    "Ask Empirica for its guarded terminal decision after current obligations and "
-                    "independent audit handling are complete. Omit intent for the normal convergence "
-                    "decision; use intent=stop only to request an honest non-converged terminal "
-                    "result for accepted residual or exhausted scope. A blocked result identifies "
-                    "the next unmet obligation. Treat the typed result as authoritative and call "
-                    "once rather than retrying for a different answer."
-                ),
-            },
-        }
+        metadata = self._artifact["definitions"]
         definitions = []
         for name in _TOOL_ORDER:
             read_only = name == READ_TOOL

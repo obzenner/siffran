@@ -242,6 +242,150 @@
       "recovery"
     ]
   },
+  "bootstrap": {
+    "requirements": [
+      {
+        "predicate": "route.recorded",
+        "obligation_id": "obligation.route",
+        "must": "Record routing before investigation."
+      },
+      {
+        "predicate": "graph.selected",
+        "obligation_id": "obligation.graph",
+        "must": "Propose a valid claim graph from supplied context before requesting review."
+      },
+      {
+        "predicate": "governance.approved",
+        "obligation_id": "obligation.approval",
+        "must": "Obtain exact host-mediated approval for the current graph and configuration."
+      },
+      {
+        "predicate": "investigation.recorded",
+        "obligation_id": "obligation.investigation",
+        "must": "Record investigation only after routing and current approval."
+      }
+    ],
+    "actions": {
+      "route": {
+        "description": "Record the chosen reasoning route before investigation; graph declaration may occur first.",
+        "example": {
+          "kind": "route",
+          "reason": "Primary empirical route for the supplied goal."
+        },
+        "operation": "route"
+      },
+      "graph": {
+        "description": "Propose claims and unknowns from supplied context. No repository investigation or evidence is required.",
+        "example": {
+          "kind": "graph",
+          "payload": {
+            "root": "C0",
+            "claims": [
+              {
+                "id": "C0",
+                "text": "The supplied goal can be achieved safely.",
+                "gating": true,
+                "kind": "ordinary"
+              }
+            ],
+            "edges": []
+          }
+        },
+        "operation": "graph"
+      },
+      "configure_run": {
+        "description": "After a graph exists, propose bounded configuration and request host mediation. It never self-approves or changes effective budgets before consent.",
+        "example": {
+          "kind": "configure_run",
+          "budgets": {
+            "max_passes": 5
+          }
+        },
+        "operation": "configure_run"
+      },
+      "investigate": {
+        "description": "Record the first investigation witness only after route and exact current host approval.",
+        "example": {
+          "kind": "investigate"
+        },
+        "operation": "investigate"
+      }
+    },
+    "tools": {
+      "empirica_read": {
+        "title": "Read Empirica state",
+        "description": "Read public state owned by Empirica. Get the current run, audit argument, public contract, or restored run. Inspect state after an uncertain configure_run outcome. Do not blindly reopen host UI."
+      },
+      "empirica_observe": {
+        "title": "Record an Empirica author action",
+        "description": "Submit exactly one public author action. Normal bootstrap is route, graph, configure_run, then investigate after approval. Graph may precede route and needs no prior investigation. configure_run requires a selected graph and requests host mediation without self-approval. Host-owned lifecycle facts are not author actions."
+      },
+      "report_convergence": {
+        "title": "Request an Empirica decision",
+        "description": "Request guarded convergence or an honest residual stop. Current obligations and audit gates remain authoritative. Human waiting is neither investigation nor convergence. Typed blocks identify current recovery."
+      }
+    },
+    "operations": {
+      "route": {
+        "preconditions": []
+      },
+      "graph": {
+        "preconditions": []
+      },
+      "configure_run": {
+        "preconditions": [
+          {
+            "predicate": "graph.selected",
+            "reason": "graph.missing"
+          }
+        ]
+      },
+      "governance.present": {
+        "preconditions": [
+          {
+            "predicate": "graph.selected",
+            "reason": "graph.missing"
+          }
+        ]
+      },
+      "investigate": {
+        "preconditions": [
+          {
+            "predicate": "route.recorded",
+            "reason": "route.required"
+          },
+          {
+            "predicate": "graph.selected",
+            "reason": "graph.missing"
+          },
+          {
+            "predicate": "governance.approved",
+            "reason": "governance.approval_required"
+          }
+        ]
+      },
+      "report_convergence": {
+        "preconditions": [
+          {
+            "predicate": "graph.selected",
+            "reason": "graph.missing"
+          },
+          {
+            "predicate": "route.recorded",
+            "reason": "route.required"
+          },
+          {
+            "predicate": "governance.approved",
+            "reason": "governance.approval_required"
+          },
+          {
+            "predicate": "investigation.recorded",
+            "reason": "investigation.required"
+          }
+        ]
+      }
+    }
+  },
   "next_actions": {
     "run.start_fresh": {
       "description": "Start a fresh v2 run.",
@@ -274,6 +418,31 @@
           "goal": {
             "type": "string",
             "minLength": 1
+          }
+        }
+      }
+    },
+    "graph.record": {
+      "description": "Propose a minimal valid claim graph from supplied context; no repository investigation or evidence is required.",
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "root",
+          "claims",
+          "edges"
+        ],
+        "properties": {
+          "root": {
+            "type": "string",
+            "minLength": 1
+          },
+          "claims": {
+            "type": "array",
+            "minItems": 1
+          },
+          "edges": {
+            "type": "array"
           }
         }
       }
@@ -550,6 +719,14 @@
         }
       }
     },
+    "host.repair_context": {
+      "description": "Host or operator must refresh or repair unavailable governance inventory; do not retry configure_run blindly.",
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
     "governance.propose": {
       "description": "Correct graph/configure_run proposal and request host-mediated decision; cannot self-approve.",
       "params": {
@@ -619,12 +796,12 @@
         "properties": {}
       },
       "next_actions": [
-        "run.inspect"
+        "graph.record"
       ],
       "sections": [
         "claims/graph"
       ],
-      "message": "No selected argument graph."
+      "message": "No selected argument graph. Propose one from supplied context before configure_run; investigation and evidence are not prerequisites."
     },
     "graph.invalid": {
       "params": {
@@ -1094,7 +1271,7 @@
         "properties": {}
       },
       "next_actions": [
-        "governance.propose",
+        "host.repair_context",
         "residual.accept"
       ],
       "sections": [
@@ -1109,7 +1286,7 @@
         "properties": {}
       },
       "next_actions": [
-        "governance.propose",
+        "host.repair_context",
         "residual.accept"
       ],
       "sections": [
@@ -1368,7 +1545,7 @@
         },
         {
           "id": "claims/graph/missing",
-          "text": "A current run with no selected graph yields graph.missing with run.inspect when a graph is required."
+          "text": "A current run with no selected graph yields graph.missing with graph.record before configure_run mutation or private presentation reservation. A graph proposes the goal's claims and unknowns from supplied context; it requires no investigation or evidence, and may be recorded before route."
         },
         {
           "id": "claims/graph/invalid",

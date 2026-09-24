@@ -55,6 +55,8 @@ class EvaluationSnapshot:
     contract_id: str = "empirica-public-contract"
     contract_version: str = "2.0.0"
     contract_digest: str = ""
+    bootstrap_requirements: tuple[tuple[str, str, str], ...] = ()
+    bootstrap_operations: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = ()
     profile_id: str = ""
     host_tier: str = "observational"
     host_audit_execution: str = "unavailable"
@@ -275,19 +277,74 @@ def derive_claims(snapshot: EvaluationSnapshot) -> ClaimDerivation:
     return ClaimDerivation(MappingProxyType(states), MappingProxyType(blockers), scoped)
 
 
+def _bootstrap_facts(snapshot: EvaluationSnapshot) -> dict[str, bool]:
+    """Primitive bootstrap facts: pure core code, never contract expressions."""
+    state, governed = snapshot.state, snapshot.state.governance
+    return {
+        "route.recorded": state.route_stamp is not None,
+        "graph.selected": snapshot.graph is not None,
+        "governance.approved": snapshot.graph is not None and governance.admission(governed) is None,
+        "investigation.recorded": state.investigation_stamp is not None,
+    }
+
+
+def bootstrap_precondition(snapshot: EvaluationSnapshot, operation: str) -> tuple[str, str] | None:
+    """Return the first unmet member of the finite, application-supplied operation binding."""
+    operations = dict(snapshot.bootstrap_operations)
+    if operation not in operations:
+        raise ValueError(f"unknown bootstrap operation: {operation}")
+    facts = _bootstrap_facts(snapshot)
+    return next(((predicate, (governance.admission(snapshot.state.governance) or reason)
+                  if predicate == "governance.approved" else reason)
+                 for predicate, reason in operations[operation] if not facts[predicate]), None)
+
+
+def bootstrap_status(snapshot: EvaluationSnapshot) -> dict[str, Any]:
+    facts = _bootstrap_facts(snapshot)
+    state, governed = snapshot.state, snapshot.state.governance
+    active = []
+    for predicate, obligation_id, must in snapshot.bootstrap_requirements:
+        if ((predicate == "governance.approved" and not facts["graph.selected"])
+                or (predicate == "investigation.recorded" and not facts["governance.approved"])):
+            continue
+        active.append({"id": obligation_id, "must": must,
+                       "status": "satisfied" if facts[predicate] else "residual"})
+    actions = []
+    active_run = state.status == "active"
+    if active_run:
+        if not facts["route.recorded"]:
+            actions.append("route.record")
+        if not facts["graph.selected"]:
+            actions.append("graph.record")
+        elif not facts["governance.approved"]:
+            context_error = governance.context_error(governed)
+            if governance.interaction_error(governed):
+                actions.append("residual.accept")
+            elif context_error and governed["context"]["inventory"]["source"] != "unknown":
+                actions.append("host.repair_context")
+            else:
+                actions.append("governance.propose")
+        elif facts["route.recorded"] and not facts["investigation.recorded"]:
+            actions.append("investigation.record")
+    request_ready = active_run and bootstrap_precondition(snapshot, "configure_run") is None
+    display_ready = (active_run and bootstrap_precondition(snapshot, "governance.present") is None
+                     and governance.context_error(governed) is None
+                     and governance.interaction_error(governed) is None)
+    return {"active": active, "next_actions": actions,
+            "request_ready": request_ready, "display_ready": display_ready}
+
+
 def _decision(snapshot: EvaluationSnapshot, state: OperationalState, result: str = "Allow", artifacts: tuple[dict[str, Any], ...] = (), reason: str | None = None, parameters: dict[str, Any] | None = None, affected: str | None = None) -> Decision:
     return Decision(result, StateIntent(state, artifacts), reason, tuple((parameters or {}).items()), affected)
 
 
 def _investigation_block(snapshot: EvaluationSnapshot) -> Decision | None:
-    state = snapshot.state
-    if reason := governance.admission(state.governance):
-        return _decision(snapshot, state, "Block", reason=reason)
-    if state.route_stamp is None:
-        return _decision(snapshot, state, "Block", reason="route.required",
-                         affected="obligation.route")
-    if state.investigation_stamp is None:
-        return _decision(snapshot, state, "Block", reason="investigation.required",
+    if missing := bootstrap_precondition(snapshot, "investigate"):
+        predicate, reason = missing
+        affected = "obligation.route" if predicate == "route.recorded" else None
+        return _decision(snapshot, snapshot.state, "Block", reason=reason, affected=affected)
+    if snapshot.state.investigation_stamp is None:
+        return _decision(snapshot, snapshot.state, "Block", reason="investigation.required",
                          affected="obligation.investigation")
     return None
 
@@ -465,8 +522,15 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
 
     if kind == "EvaluateRun" and command["intent"] == "stop" and snapshot.graph is None:
         return _decision(snapshot, replace(state, status="stopped_residual"))
-    if kind == "ObserveAction" and command["action"]["kind"] == "investigate" and state.route_stamp is None:
-        return _decision(snapshot, state, "Block", reason="route.required", affected="obligation.route")
+    operation = (command["action"]["kind"] if kind == "ObserveAction"
+                 and command["action"]["kind"] in {"route", "graph", "configure_run", "investigate"}
+                 else "report_convergence" if kind == "EvaluateRun"
+                 and command["intent"] == "report_convergence" else None)
+    if operation and (missing := bootstrap_precondition(snapshot, operation)):
+        predicate, reason = missing
+        affected = {"route.recorded": "obligation.route",
+                    "investigation.recorded": "obligation.investigation"}.get(predicate)
+        return _decision(snapshot, state, "Block", reason=reason, affected=affected)
     preparation = (kind == "ObserveAction" and command["action"]["kind"] in {"route", "graph", "configure_run"})
     honest_stop = kind == "EvaluateRun" and command["intent"] == "stop"
     if not preparation and not honest_stop and (reason := governance.admission(state.governance)):
@@ -484,9 +548,6 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             return _decision(snapshot, replace(state, stamp_seq=state.stamp_seq + 1,
                                                 route_stamp=state.stamp_seq + 1))
         if akind == "investigate":
-            if state.route_stamp is None:
-                return _decision(snapshot, state, "Block", reason="route.required",
-                                 affected="obligation.route")
             if state.investigation_stamp is not None:
                 return _decision(snapshot, state)
             return _decision(snapshot, replace(state, stamp_seq=state.stamp_seq + 1,
@@ -599,8 +660,6 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
         return _decision(snapshot, state, "Fault", reason="unsupported")
 
     if kind == "EvaluateRun":
-        if snapshot.graph is None:
-            return _decision(snapshot, state, "Block", reason="graph.missing")
         intent = command["intent"]
         if intent == "continue":
             return _decision(snapshot, state)

@@ -28,6 +28,23 @@ _HOST_PROFILES = json.loads((_V2 / "host-profiles.json").read_text(encoding="utf
 _PROTOCOL = _PUBLIC_CONTRACT["protocol"]
 _STATE_SCHEMA_ID = _STATE_SCHEMA["properties"]["state_schema"]["const"]
 _PROFILES = {p["profile_id"]: p for p in _HOST_PROFILES["profiles"]}
+_BOOTSTRAP_PREDICATES = ("route.recorded", "graph.selected", "governance.approved",
+                         "investigation.recorded")
+_BOOTSTRAP_OPERATION_IDS = ("route", "graph", "configure_run", "governance.present",
+                             "investigate", "report_convergence")
+_bootstrap = _PUBLIC_CONTRACT["bootstrap"]
+if (tuple(row["predicate"] for row in _bootstrap["requirements"]) != _BOOTSTRAP_PREDICATES
+        or tuple(_bootstrap["operations"]) != _BOOTSTRAP_OPERATION_IDS
+        or any(step["predicate"] not in _BOOTSTRAP_PREDICATES
+               or step["reason"] not in _PUBLIC_CONTRACT["reasons"]
+               for operation in _bootstrap["operations"].values()
+               for step in operation["preconditions"])):
+    raise RuntimeError("unknown or reordered bootstrap contract binding")
+_BOOTSTRAP_REQUIREMENTS = tuple((row["predicate"], row["obligation_id"], row["must"])
+                                for row in _bootstrap["requirements"])
+_BOOTSTRAP_OPERATIONS = tuple((name, tuple((step["predicate"], step["reason"])
+                                           for step in operation["preconditions"]))
+                              for name, operation in _bootstrap["operations"].items())
 _DIGEST = "sha256:" + hashlib.sha256(
     json.dumps(_PUBLIC_CONTRACT, sort_keys=True, separators=(",", ":")).encode(),
 ).hexdigest()

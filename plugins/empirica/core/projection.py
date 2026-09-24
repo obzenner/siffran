@@ -6,16 +6,9 @@ from typing import Any
 
 from . import governance
 
-from .evaluation import (EvaluationSnapshot, active_evidence, audit_attributions, claim_conflicted,
-                         claim_digest, derive_claims, digest, identity_pair, stale_artifact_ids)
-
-
-def _copy(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {k: _copy(v) for k, v in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [_copy(v) for v in value]
-    return value
+from .evaluation import (EvaluationSnapshot, active_evidence, audit_attributions, bootstrap_status,
+                         claim_conflicted, claim_digest, derive_claims, digest, identity_pair,
+                         stale_artifact_ids)
 
 
 def _scope(snapshot: EvaluationSnapshot) -> tuple[list[str], list[str]]:
@@ -52,14 +45,11 @@ def _obligations(snapshot: EvaluationSnapshot,
     late = bool(snapshot.command and snapshot.command.get("type") == "ObserveAction"
                 and snapshot.command["action"].get("kind") == "route"
                 and state.investigation_stamp is not None)
-    active = [{"id": "obligation.route", "must": "Record routing before investigation.",
-               "status": "satisfied" if state.route_stamp is not None else "residual"}]
+    bootstrap = bootstrap_status(snapshot)
+    active = list(bootstrap["active"])
     if late:
         active.append({"id": "obligation.route.late", "must": "Do not reroute after investigation.",
                        "status": "violated"})
-    if state.route_stamp is not None:
-        active.append({"id": "obligation.investigation", "must": "Investigate after routing.",
-                       "status": "satisfied" if state.investigation_stamp is not None else "residual"})
     gating, deferred = _scope(snapshot)
     if snapshot.graph:
         for claim in snapshot.graph["claims"]:
@@ -101,6 +91,7 @@ def _residuals(snapshot: EvaluationSnapshot, states: Mapping[str, str]) -> list[
 
 def project_governance(snapshot: EvaluationSnapshot) -> dict:
     value = governance.plain(snapshot.state.governance)
+    bootstrap = bootstrap_status(snapshot)
     value.update(interactions_remaining=governance.interactions_remaining(snapshot.state.governance),
                  prompt_error=governance.context_error(snapshot.state.governance) or
                               governance.interaction_error(snapshot.state.governance))
@@ -110,14 +101,15 @@ def project_governance(snapshot: EvaluationSnapshot) -> dict:
                  remaining={ceiling: snapshot.state.budgets[ceiling] - snapshot.state.budgets[used]
                             for ceiling, used in governance.CEILINGS.items()},
                  inventory_status=governance.inventory_status(value["context"]["inventory"]),
-                 next_action="investigation.record" if not governance.admission(snapshot.state.governance)
-                             else "governance.propose")
+                 request_ready=bootstrap["request_ready"], display_ready=bootstrap["display_ready"],
+                 next_action=bootstrap["next_actions"][-1] if bootstrap["next_actions"] else "run.inspect")
     return value
 
 
 def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] | None = None) -> dict[str, Any]:
     changes, _ = _freshness(snapshot)
     states = derive_claims(snapshot).states
+    bootstrap = bootstrap_status(snapshot)
     children = []
     for child in snapshot.state.children:
         row = {"child_id": child["child_id"], "purpose": child["purpose"],
@@ -138,7 +130,7 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
         "obligations": _obligations(snapshot, states),
         "residuals": _residuals(snapshot, states),
         "freshness": {"changes": changes}, "children": children,
-        "next_actions": [],
+        "next_actions": bootstrap["next_actions"],
         "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
                                  "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
         "host": {"profile_id": snapshot.profile_id, "tier": snapshot.host_tier,
@@ -170,7 +162,7 @@ def _audit(snapshot: EvaluationSnapshot) -> dict[str, Any]:
             "reviewed_goal_digest": verdict.get("goal_digest"),
             "reviewed_frozen_scope_digest": verdict.get("frozen_scope_digest"),
             "reviewed_deferred_scope_digest": verdict.get("deferred_scope_digest"),
-            "reviewed_claims": _copy(verdict.get("reviewed_claims", []))}
+            "reviewed_claims": governance.plain(verdict.get("reviewed_claims", []))}
 
 
 def project_argument(snapshot: EvaluationSnapshot) -> dict[str, Any]:
@@ -221,7 +213,7 @@ def project_argument(snapshot: EvaluationSnapshot) -> dict[str, Any]:
         artifacts.append(common)
     frozen_digest = None if snapshot.state.frozen_claim_ids is None else digest(gating)
     argument_digest = digest({"graph": snapshot.graph, "evidence": [a["artifact_id"] for a in artifacts]})
-    return _copy({
+    return governance.plain({
         "root_claim_id": snapshot.graph["root"], "argument_digest": argument_digest,
         "goal_digest": digest(snapshot.state.goal), "frozen_scope_digest": frozen_digest,
         "deferred_scope_digest": digest(deferred),

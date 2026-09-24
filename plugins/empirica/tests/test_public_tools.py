@@ -53,6 +53,26 @@ class PublicToolContractTests(unittest.TestCase):
         self.assertTrue(definitions[0]["annotations"]["readOnlyHint"])
         self.assertFalse(definitions[1]["annotations"]["readOnlyHint"])
 
+    def test_generated_guidance_and_examples_are_canonical(self):
+        from adapters import public_tools
+        from application import protocol
+
+        artifact = json.loads(public_tools._PUBLIC_TOOL_ARTIFACT.read_text())
+        self.assertEqual(artifact["definitions"], protocol._PUBLIC_CONTRACT["bootstrap"]["tools"])
+        self.assertEqual(artifact["bootstrap_actions"],
+                         protocol._PUBLIC_CONTRACT["bootstrap"]["actions"])
+        observe = public_tools._PUBLIC_SCHEMAS["model"]["empirica_observe"]
+        variants = {row["properties"]["kind"]["const"]: row
+                    for row in observe["properties"]["action"]["oneOf"]}
+        for kind, row in artifact["bootstrap_actions"].items():
+            self.assertEqual(row["operation"], kind)
+            self.assertEqual(row["example"]["kind"], kind)
+            self.assertEqual(variants[kind]["description"], row["description"])
+            self.assertEqual(variants[kind]["examples"], [row["example"]])
+            jsonschema.validate({"run_id": "r", "action": row["example"]}, observe)
+        self.assertIn("requires a selected graph",
+                      artifact["definitions"]["empirica_observe"]["description"])
+
     def test_definitions_satisfy_claude_code_schema_admission(self):
         definitions = self._tools().definitions()
         property_name = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")

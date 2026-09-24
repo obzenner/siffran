@@ -5,80 +5,318 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "id", "version", "protocol", "commands", "decisions", "statuses",
-    "actions", "child_lifecycle", "host_tiers", "audit_execution_modes",
-    "claim_states", "claim_kinds", "audit_states", "independence_states", "freshness_states",
-    "artifact_kinds", "artifact_outcomes", "spike_gates",
-    "attribution_subject_kinds", "attribution_observers", "audit_verdicts", "scope_reviews",
-    "mode_fields", "operation_contexts", "untrusted_delimiters", "presentation_selector",
-    "next_actions", "reasons", "sections"
+    "id",
+    "version",
+    "protocol",
+    "commands",
+    "decisions",
+    "statuses",
+    "actions",
+    "child_lifecycle",
+    "host_tiers",
+    "audit_execution_modes",
+    "claim_states",
+    "claim_kinds",
+    "audit_states",
+    "independence_states",
+    "freshness_states",
+    "artifact_kinds",
+    "artifact_outcomes",
+    "spike_gates",
+    "attribution_subject_kinds",
+    "attribution_observers",
+    "audit_verdicts",
+    "scope_reviews",
+    "mode_fields",
+    "operation_contexts",
+    "untrusted_delimiters",
+    "presentation_selector",
+    "next_actions",
+    "reasons",
+    "sections",
+    "bootstrap"
   ],
   "properties": {
-    "id": {"const": "empirica/public"},
-    "version": {"const": "2.1.0"},
-    "protocol": {"const": "empirica/v2"},
-    "commands": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
-    "decisions": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
-    "statuses": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "id": {
+      "const": "empirica/public"
+    },
+    "version": {
+      "const": "2.1.0"
+    },
+    "protocol": {
+      "const": "empirica/v2"
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "statuses": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
     "actions": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["author", "host", "trusted"],
+      "required": [
+        "author",
+        "host",
+        "trusted"
+      ],
       "properties": {
-        "author": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
-        "host": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
-        "trusted": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true}
-      }
-    },
-    "child_lifecycle": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["states", "terminal_states", "transitions"],
-      "properties": {
-        "states": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
-        "terminal_states": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
-        "transitions": {
+        "author": {
           "type": "array",
           "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["from", "to"],
-            "properties": {"from": {"type": "string", "minLength": 1}, "to": {"type": "string", "minLength": 1}}
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "host": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "trusted": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
           },
           "uniqueItems": true
         }
       }
     },
-    "host_tiers": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
-    "audit_execution_modes": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
-    "claim_states": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
-    "claim_kinds": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "minItems": 1},
-    "audit_states": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
-    "independence_states": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
-    "freshness_states": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
-    "artifact_kinds": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "minItems": 1},
-    "artifact_outcomes": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "minItems": 1},
-    "spike_gates": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "minItems": 1},
-    "attribution_subject_kinds": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "minItems": 1},
-    "attribution_observers": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "minItems": 1},
-    "audit_verdicts": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "minItems": 1},
-    "scope_reviews": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "minItems": 1},
-    "mode_fields": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
-    "operation_contexts": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "child_lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "states",
+        "terminal_states",
+        "transitions"
+      ],
+      "properties": {
+        "states": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "terminal_states": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "transitions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "from",
+              "to"
+            ],
+            "properties": {
+              "from": {
+                "type": "string",
+                "minLength": 1
+              },
+              "to": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "host_tiers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "audit_execution_modes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "claim_states": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "claim_kinds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true,
+      "minItems": 1
+    },
+    "audit_states": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "independence_states": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "freshness_states": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "artifact_kinds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true,
+      "minItems": 1
+    },
+    "artifact_outcomes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true,
+      "minItems": 1
+    },
+    "spike_gates": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true,
+      "minItems": 1
+    },
+    "attribution_subject_kinds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true,
+      "minItems": 1
+    },
+    "attribution_observers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true,
+      "minItems": 1
+    },
+    "audit_verdicts": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true,
+      "minItems": 1
+    },
+    "scope_reviews": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true,
+      "minItems": 1
+    },
+    "mode_fields": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "operation_contexts": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
     "untrusted_delimiters": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["open", "close"],
+      "required": [
+        "open",
+        "close"
+      ],
       "properties": {
-        "open": {"type": "string", "minLength": 1},
-        "close": {"type": "string", "minLength": 1}
+        "open": {
+          "type": "string",
+          "minLength": 1
+        },
+        "close": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "presentation_selector": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["context_sections", "terminal_sections", "unknown_reason_sections"],
-      "description": "Canonical ordered presentation selector registry (D1 §12). The JSON registry is the executable SSOT; exact operation-context key parity and section resolution are enforced procedurally (no Python selector mapping).",
+      "required": [
+        "context_sections",
+        "terminal_sections",
+        "unknown_reason_sections"
+      ],
+      "description": "Canonical ordered presentation selector registry (D1 \u00a712). The JSON registry is the executable SSOT; exact operation-context key parity and section resolution are enforced procedurally (no Python selector mapping).",
       "properties": {
         "context_sections": {
           "type": "object",
@@ -86,22 +324,152 @@
           "patternProperties": {
             "^[a-z][a-z0-9_.-]*$": {
               "type": "array",
-              "items": {"type": "string", "minLength": 1},
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
               "uniqueItems": true
             }
           }
         },
         "terminal_sections": {
           "type": "array",
-          "items": {"type": "string", "minLength": 1},
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
           "uniqueItems": true,
           "minItems": 1
         },
         "unknown_reason_sections": {
           "type": "array",
-          "items": {"type": "string", "minLength": 1},
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
           "uniqueItems": true,
           "minItems": 1
+        }
+      }
+    },
+    "bootstrap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requirements",
+        "operations",
+        "actions",
+        "tools"
+      ],
+      "properties": {
+        "requirements": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "predicate",
+              "obligation_id",
+              "must"
+            ],
+            "properties": {
+              "predicate": {
+                "enum": [
+                  "route.recorded",
+                  "graph.selected",
+                  "governance.approved",
+                  "investigation.recorded"
+                ]
+              },
+              "obligation_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "must": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "actions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "route",
+            "graph",
+            "configure_run",
+            "investigate"
+          ],
+          "properties": {
+            "route": {
+              "$ref": "#/$defs/bootstrapAction"
+            },
+            "graph": {
+              "$ref": "#/$defs/bootstrapAction"
+            },
+            "configure_run": {
+              "$ref": "#/$defs/bootstrapAction"
+            },
+            "investigate": {
+              "$ref": "#/$defs/bootstrapAction"
+            }
+          }
+        },
+        "tools": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "empirica_read",
+            "empirica_observe",
+            "report_convergence"
+          ],
+          "properties": {
+            "empirica_read": {
+              "$ref": "#/$defs/toolGuidance"
+            },
+            "empirica_observe": {
+              "$ref": "#/$defs/toolGuidance"
+            },
+            "report_convergence": {
+              "$ref": "#/$defs/toolGuidance"
+            }
+          }
+        },
+        "operations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "route",
+            "graph",
+            "configure_run",
+            "governance.present",
+            "investigate",
+            "report_convergence"
+          ],
+          "properties": {
+            "route": {
+              "$ref": "#/$defs/bootstrapOperation"
+            },
+            "graph": {
+              "$ref": "#/$defs/bootstrapOperation"
+            },
+            "configure_run": {
+              "$ref": "#/$defs/bootstrapOperation"
+            },
+            "governance.present": {
+              "$ref": "#/$defs/bootstrapOperation"
+            },
+            "investigate": {
+              "$ref": "#/$defs/bootstrapOperation"
+            },
+            "report_convergence": {
+              "$ref": "#/$defs/bootstrapOperation"
+            }
+          }
         }
       }
     },
@@ -112,10 +480,18 @@
         "^[a-z][a-z0-9_.-]*$": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["description", "params"],
+          "required": [
+            "description",
+            "params"
+          ],
           "properties": {
-            "description": {"type": "string", "minLength": 1},
-            "params": {"type": "object"}
+            "description": {
+              "type": "string",
+              "minLength": 1
+            },
+            "params": {
+              "type": "object"
+            }
           }
         }
       }
@@ -127,12 +503,35 @@
         "^[a-z][a-z0-9_.-]*$": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["params", "next_actions", "sections", "message"],
+          "required": [
+            "params",
+            "next_actions",
+            "sections",
+            "message"
+          ],
           "properties": {
-            "params": {"type": "object"},
-            "next_actions": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
-            "sections": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
-            "message": {"type": "string"}
+            "params": {
+              "type": "object"
+            },
+            "next_actions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "sections": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "message": {
+              "type": "string"
+            }
           }
         }
       }
@@ -144,19 +543,121 @@
         "^[a-z][a-z0-9_/.-]*$": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["title", "summary", "clauses"],
+          "required": [
+            "title",
+            "summary",
+            "clauses"
+          ],
           "properties": {
-            "title": {"type": "string", "minLength": 1},
-            "summary": {"type": "string"},
+            "title": {
+              "type": "string",
+              "minLength": 1
+            },
+            "summary": {
+              "type": "string"
+            },
             "clauses": {
               "type": "array",
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["id", "text"],
-                "properties": {"id": {"type": "string", "minLength": 1}, "text": {"type": "string", "minLength": 1}}
+                "required": [
+                  "id",
+                  "text"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
               },
               "uniqueItems": true
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "bootstrapAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation",
+        "description",
+        "example"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "example": {
+          "type": "object"
+        },
+        "operation": {
+          "enum": [
+            "route",
+            "graph",
+            "configure_run",
+            "investigate"
+          ]
+        }
+      }
+    },
+    "toolGuidance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "description"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "bootstrapOperation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "preconditions"
+      ],
+      "properties": {
+        "preconditions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "predicate",
+              "reason"
+            ],
+            "properties": {
+              "predicate": {
+                "enum": [
+                  "route.recorded",
+                  "graph.selected",
+                  "governance.approved",
+                  "investigation.recorded"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           }
         }

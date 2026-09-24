@@ -59,6 +59,24 @@ function dismissed(h: ReturnType<typeof harness>) {
   assert.deepEqual(h.decisions.map(d => d.outcome), ["present", "dismiss"]);
 }
 
+test("bootstrap prompt errors keep complete typed recovery without UI", async () => {
+  for (const code of ["governance.author_unknown", "governance.identity_mismatch",
+                      "governance.interaction_limit"]) {
+    const h = harness();
+    Object.assign(h.g, { prompt_error: code });
+    const response = await h.invoke();
+    assert.equal(response.result.type, "Block");
+    assert.ok("reasons" in response.result);
+    const reason = response.result.reasons[0];
+    assert.equal(reason.code, code);
+    assert.ok(typeof reason.message === "string" && reason.message.length > 0);
+    assert.deepEqual(reason.sections, ["governance"]);
+    assert.ok(Array.isArray(reason.next_actions) && reason.next_actions.length > 0);
+    assert.deepEqual(h.calls, []);
+    assert.deepEqual(h.decisions, []);
+  }
+});
+
 test("timeout override remains finite and bounded", () => {
   const prior = process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS;
   try {

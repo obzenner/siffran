@@ -69,7 +69,6 @@ function readAuditSession(file: string): string | null {
   } catch { return null; }
 }
 
-// plugins/empirica/adapters/pi/src/index.ts -> plugins/empirica/skills
 export const DEFAULT_SKILLS_DIR = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -96,9 +95,11 @@ function sameCanonicalAgentFile(candidate: string, expected: string): boolean {
 const PUBLIC_TOOLS_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "..",
   "contracts", "empirica", "v2", "public-tools.json");
-const PUBLIC_TOOL_SCHEMAS = (JSON.parse(readFileSync(PUBLIC_TOOLS_PATH, "utf8")) as {
+const PUBLIC_TOOLS = JSON.parse(readFileSync(PUBLIC_TOOLS_PATH, "utf8")) as {
+  definitions: Record<string, { title: string; description: string }>;
   schemas: { host_handle: Record<string, Record<string, unknown>> };
-}).schemas.host_handle;
+};
+const PUBLIC_TOOL_SCHEMAS = PUBLIC_TOOLS.schemas.host_handle;
 const actionChoices = ((PUBLIC_TOOL_SCHEMAS.empirica_observe.properties as {
   action: { oneOf: Array<{ properties: { kind: { const: string } } }> };
 }).action.oneOf);
@@ -208,7 +209,6 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
   const resolveAuditContract = deps.resolveAuditContract ?? defaultAuditContractResolver;
 
   return function empiricaExtension(pi: ExtensionAPI): void {
-    // The active run's opaque handle, held only in memory for this session.
     let runHandle: string | null = null;
     type AuditCorrelation = {
       runHandle: string;
@@ -245,11 +245,8 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     const trusted = async (request: Parameters<PrivateIngress>[0]): Promise<Record<string, unknown>> =>
       privateIngress(request);
 
-    // (resources) Contribute the shared Empirica skill so Pi discovers the
-    // workflow instructions — the same resource Claude Code ships, no per-host fork.
     pi.on("resources_discover", () => ({ skillPaths: [skillsDir] }));
 
-    // (session_start) Restore the run handle from persisted entries.
     pi.on("session_start", async (_event, ctx) => {
       const entries = ctx.sessionManager?.getEntries() ?? [];
       const terminalRuns = new Set(entries.filter((entry) => entry.customType === "empirica.run.done")
@@ -329,7 +326,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       }
     });
 
-    // Public schemas are a checked mechanical artifact projected from request.schema.json.
+    // Public schemas and behavior guidance are checked mechanical contract projections.
     const EMPTY_PARAMS = PUBLIC_TOOL_SCHEMAS.report_convergence;
     const OBSERVE_PARAMS = PUBLIC_TOOL_SCHEMAS.empirica_observe;
     const READ_PARAMS = PUBLIC_TOOL_SCHEMAS.empirica_read;
@@ -339,7 +336,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       pi.registerTool({
         name: REPORT_CONVERGENCE_TOOL,
         label: "Report convergence",
-        description: "Ask Empirica for guarded convergence or an honest residual stop.",
+        description: PUBLIC_TOOLS.definitions.report_convergence.description,
         parameters: EMPTY_PARAMS,
         async execute(id, raw) {
           if (!runHandle && !reportEvaluations.has(id))
@@ -362,7 +359,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       pi.registerTool({
         name: "empirica_read",
         label: "Read Empirica",
-        description: "Read the current run, audit argument, or public contract.",
+        description: PUBLIC_TOOLS.definitions.empirica_read.description,
         parameters: READ_PARAMS,
         async execute(_id, raw, _signal, _onUpdate, ctx) {
           const params = raw as { operation?: unknown; target?: unknown; section_id?: unknown };
@@ -398,7 +395,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       pi.registerTool({
         name: "empirica_observe",
         label: "Observe Empirica action",
-        description: "Submit one public Empirica author action for the active run.",
+        description: PUBLIC_TOOLS.definitions.empirica_observe.description,
         parameters: OBSERVE_PARAMS,
         async execute(_id, raw, signal, _onUpdate, ctx) {
           if (!runHandle)
@@ -711,10 +708,8 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
   };
 }
 
-// Default export: the shape Pi loads. It contributes the Empirica skill and
-// wires the production JSON stdio bridge transport — so a fresh install gates
-// convergence against the shared core out of the box. A host may instead
-// import `createEmpiricaExtension({ dispatch })` and inject its own transport.
+// Default export is Pi's production shape. It contributes the shared skill and
+// wires the JSON stdio bridge; tests may inject a transport through createEmpiricaExtension.
 const defaultExtension = createEmpiricaExtension({
   dispatch: createStdioBridgeDispatch(defaultBridgeConfig()),
 });

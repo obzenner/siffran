@@ -1192,6 +1192,8 @@
                 "budgets",
                 "remaining",
                 "inventory_status",
+                "request_ready",
+                "display_ready",
                 "next_action",
                 "interactions_remaining",
                 "prompt_error",
@@ -1581,6 +1583,12 @@
                     "multiple",
                     "partial"
                   ]
+                },
+                "request_ready": {
+                  "type": "boolean"
+                },
+                "display_ready": {
+                  "type": "boolean"
                 },
                 "next_action": {
                   "type": "string",
@@ -2820,6 +2828,7 @@
         "operation_contexts",
         "untrusted_delimiters",
         "presentation_selector",
+        "bootstrap",
         "next_actions",
         "reasons",
         "sections"
@@ -3139,6 +3148,10 @@
               "minItems": 1
             }
           }
+        },
+        "bootstrap": {
+          "type": "object",
+          "required": ["requirements", "actions", "tools"]
         },
         "next_actions": {
           "type": "object",

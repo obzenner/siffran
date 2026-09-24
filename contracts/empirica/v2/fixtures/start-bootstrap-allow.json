@@ -40,7 +40,7 @@
             "roles",
             "hosts/capabilities"
           ],
-          "digest": "sha256:00296db1322730dda4731aedfc45f7bd23b484a3deed806d4e2b223fa5e3dff1"
+          "digest": "sha256:9f9eb2cb931480d238c593c958203cc576dd66b7aa9cf880f2a452d9ff1c0bd7"
         },
         "obligations": {
           "active": [
@@ -116,6 +116,8 @@
             "max_audit_spawns": 0
           },
           "inventory_status": "unknown",
+          "request_ready": false,
+          "display_ready": false,
           "interactions_remaining": {
             "proposal": 3,
             "total": 128

@@ -59,6 +59,82 @@ class GovernanceServiceTests(unittest.TestCase):
         result = self.service.trusted_governance_context(run_id=self.run_id, payload=copy.deepcopy(CONTEXT))
         self.assertEqual(result["result"]["type"], "Allow", result)
 
+    def test_graphless_configure_and_private_present_are_effect_free_blocks(self):
+        initial = self.view()
+        self.assertEqual([row["id"] for row in initial["obligations"]["active"]],
+                         ["obligation.route", "obligation.graph"])
+        self.assertEqual(initial["next_actions"], ["route.record", "graph.record"])
+        self.assertFalse(initial["governance"]["request_ready"])
+        self.assertFalse(initial["governance"]["display_ready"])
+        before = copy.deepcopy(self.runs.data)
+        proposed = self.action("configure_run", auditor=AUDITOR)
+        self.assertEqual(proposed["type"], "Block")
+        self.assertEqual(proposed["reasons"][0]["code"], "graph.missing")
+        self.assertEqual(proposed["reasons"][0]["next_actions"], ["graph.record"])
+        self.assertEqual(self.runs.data, before)
+
+        g = self.view()["governance"]
+        presented = {"run_id": self.run_id, "receipt_id": "graphless-present",
+                     "proposal_digest": g["proposal_digest"],
+                     "plan_revision": g["plan_revision"], "approval_kind": "host_ui",
+                     "outcome": "present"}
+        before = copy.deepcopy(self.runs.data)
+        blocked = self.admit(presented)
+        self.assertEqual(blocked["type"], "Block")
+        self.assertEqual(blocked["reasons"][0]["code"], "graph.missing")
+        self.assertEqual(self.runs.data, before)
+        self.assertEqual(self.view()["governance"]["interactions_remaining"],
+                         {"proposal": 3, "total": 128})
+
+    def test_bootstrap_contract_examples_have_real_postconditions(self):
+        from application import protocol
+        examples = protocol._PUBLIC_CONTRACT["bootstrap"]["actions"]
+        self.assertEqual(self.action(**examples["route"]["example"])["type"], "Allow")
+        self.assertIsNotNone(self.view()["obligations"]["active"][0]["status"])
+        self.assertEqual(self.action(**examples["graph"]["example"])["type"], "Allow")
+        self.assertEqual(self.view()["governance"]["scope"]["root"], "C0")
+        before = self.view()["governance"]["budgets"]["max_passes"]
+        self.assertEqual(self.action(**examples["configure_run"]["example"])["type"], "Allow")
+        governed = self.view()["governance"]
+        self.assertEqual(governed["proposal"]["budgets"]["max_passes"], 5)
+        self.assertEqual(governed["budgets"]["max_passes"], before)
+        self.service.trusted_governance_context(run_id=self.run_id, payload=copy.deepcopy(CONTEXT))
+        self.action("configure_run", auditor=AUDITOR)
+        self.assertEqual(self.admit(self.decision())["type"], "Allow")
+        self.assertEqual(self.action(**examples["investigate"]["example"])["type"], "Allow")
+        self.assertEqual(self.view()["obligations"]["active"][3]["status"], "satisfied")
+
+    def test_bootstrap_graphless_convergence_is_preparation_not_human_wait(self):
+        self.action("route", reason="supplied context")
+        result = self.request({"type": "EvaluateRun", "run_id": self.run_id,
+                               "intent": "report_convergence"})
+        self.assertEqual(result["type"], "Block")
+        self.assertEqual(result["reasons"][0]["code"], "graph.missing")
+
+    def test_bootstrap_approved_before_route_does_not_advertise_investigation(self):
+        self.assertEqual(self.action("graph", payload=copy.deepcopy(GRAPH))["type"], "Allow")
+        self.action("configure_run", auditor=AUDITOR)
+        self.service.trusted_governance_context(run_id=self.run_id, payload=copy.deepcopy(CONTEXT))
+        self.assertEqual(self.admit(self.decision())["type"], "Allow")
+        self.assertEqual(self.view()["next_actions"], ["route.record"])
+        self.assertEqual(self.action("investigate")["reasons"][0]["code"], "route.required")
+
+    def test_bootstrap_refresh_and_capacity_have_distinct_recovery(self):
+        self.action("graph", payload=copy.deepcopy(GRAPH))
+        self.action("configure_run", auditor=AUDITOR)
+        self.assertEqual(self.view()["next_actions"], ["route.record", "governance.propose"])
+        unusable = copy.deepcopy(CONTEXT)
+        unusable["inventory"]["members"] = []
+        self.service.trusted_governance_context(run_id=self.run_id, payload=unusable)
+        self.assertEqual(self.view()["next_actions"], ["route.record", "host.repair_context"])
+
+    def test_bootstrap_terminal_run_has_no_preparation_actions(self):
+        result = self.request({"type": "EvaluateRun", "run_id": self.run_id, "intent": "stop"})
+        self.assertEqual(result["run"]["status"], "stopped_residual")
+        self.assertEqual(result["run"]["next_actions"], [])
+        self.assertFalse(result["run"]["governance"]["request_ready"])
+        self.assertFalse(result["run"]["governance"]["display_ready"])
+
     def test_real_pending_approval_investigation_then_revision_revokes_all_paths(self):
         self.assertEqual(self.view()["governance"]["state"], "pending")
         self.prepare()
@@ -78,7 +154,27 @@ class GovernanceServiceTests(unittest.TestCase):
             self.assertEqual(result["type"], "Block", result)
             self.assertEqual(result["reasons"][0]["code"], "governance.revision_required")
         self.assertEqual(self.view()["governance"]["budgets"], counters)
+        decision = self.request({"type": "EvaluateRun", "run_id": self.run_id,
+                                 "intent": "report_convergence"})
+        self.assertEqual(decision["reasons"][0]["code"], "governance.revision_required")
         self.assertEqual(self.request({"type": "EvaluateRun", "run_id": self.run_id, "intent": "stop"})["type"], "Allow")
+
+    def test_historical_graphless_final_receipt_remains_exactly_replayable(self):
+        from dataclasses import replace
+        from core import governance
+        self.prepare()
+        decision = self.decision("historical")
+        self.assertEqual(self.admit(decision)["type"], "Allow")
+        key = next(iter(self.runs.data))
+        entry = self.runs.data[key]
+        state = classify_and_decode(entry.value).state
+        snapshot = self.service._coordinator._assemble(
+            key, state, {"type": "GetRun", "run_id": self.run_id}, require_graph=False)
+        governed = governance.revise(state.goal, None, state.governance)
+        historical = replace(state, selected_graph_artifact_id=None, governance=governed)
+        self.service._coordinator._commit(key, entry.revision, snapshot, historical, ())
+        self.assertIsNone(self.view()["governance"]["scope"])
+        self.assertEqual(self.admit(decision)["type"], "Inert")
 
     def test_private_exact_replay_conflict_stale_cross_run_and_cas(self):
         self.prepare()
@@ -478,6 +574,7 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertEqual(g["revisions_used"], 0)
         self.assertEqual(g["interactions_remaining"], {"proposal": 3, "total": 0})
         self.assertEqual(g["prompt_error"], "governance.interaction_limit")
+        self.assertEqual(self.view()["next_actions"], ["residual.accept"])
         self.assertEqual(self.admit(self.decision("overflow", "dismiss"))["reasons"][0]["code"], "governance.interaction_limit")
         self.assertEqual(self.admit(first)["type"], "Inert")
         before = copy.deepcopy(self.runs.data)

@@ -196,6 +196,8 @@ def assemble(state: OperationalState, stored: Any, workspace: Any, *, run_id: st
         observation_digest=observation.digest, run_id=run_id,
         contract_id=_proto._PUBLIC_CONTRACT["id"],
         contract_version=_proto._PUBLIC_CONTRACT["version"], contract_digest=_proto._DIGEST,
+        bootstrap_requirements=_proto._BOOTSTRAP_REQUIREMENTS,
+        bootstrap_operations=_proto._BOOTSTRAP_OPERATIONS,
         profile_id=profile_id, host_tier=profile["current_tier"],
         host_audit_execution=profile["audit_execution"], command=command,
     )
