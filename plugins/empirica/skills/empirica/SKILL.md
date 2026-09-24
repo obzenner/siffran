@@ -87,8 +87,8 @@ Do this before reading files, searching, browsing, or running commands.
    have no inventory until a host lifecycle refresh or `configure_run` reads operator configuration.
    Once populated, propose an auditor from `run.governance.context.inventory.members` together with
    budgets/modes in `configure_run` for one-dialog approval. Otherwise the first dialog selects
-   the auditor and amends the proposal. Claude opens a host-owned final confirmation in the
-   same call; Pi obtains fresh final consent on re-review. Never resend original configuration
+   the auditor and amends the proposal. Claude and Pi open a host-owned locked final confirmation
+   in the same call. Never resend original configuration
    fields to reopen review: omitted fields retain the human's current proposal.
    Do not read project files or skill references to prepare this proposal.
    Default deliberative mode requires host UI; explicit `--auto` prepares a deterministic known
@@ -102,8 +102,10 @@ Do this before reading files, searching, browsing, or running commands.
    graph/configuration revision, and call `configure_run` for fresh review. The request is guidance,
    never consent or evidence. Do not repeat approval prompts instead of addressing the request.
    Wait for `run.governance.state == "approved"` bound to the exact displayed proposal. Amendments
-   need a second review. Claude owns that confirmation for configuration-only edits; no author
-   action intervenes. Human numeric/mode/auditor edits need no prose rationale and are not
+   need a second review. Both supported hosts own that confirmation; no author action intervenes.
+   Approval and change-request text use separate controls. The locked confirmation offers only
+   Confirm or Decline; decline keeps edits pending, and feedback remains available on the next
+   ordinary review. Human numeric/mode/auditor edits need no prose rationale and are not
    corruption. Preserve them when revising scope. If re-review is needed, call `configure_run`
    with only `kind`, not stale budgets/modes. After cancellation/timeout, wait for the human;
    Claude can settle the turn nonterminally while investigation and convergence remain blocked.

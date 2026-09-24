@@ -17,10 +17,9 @@ import jsonschema
 from adapters import bridge
 from application import protocol
 from core.governance import CEILINGS, inventory_status, plain
+from core.projection import safe_text as safe
 
 MAX_CONFIG_BYTES = 128 * 1024
-LIMITS = {"max_passes": 1024, "max_spawns": 128, "max_audit_spawns": 128}
-_INVISIBLE = re.compile(r"[\\\x00-\x1f\x7f-\x9f\u00ad\u061c\u200b-\u200f\u2028-\u202e\u2060\u2066-\u2069\ufeff]")
 
 
 def governance_timeout() -> float:
@@ -62,73 +61,31 @@ def unavailable(result: dict, code: str = "governance.approval_unavailable", *, 
             "next_actions": row["next_actions"]}]}
 
 
-def safe(value: object) -> str:
-    def escape(match):
-        code = ord(match.group())
-        return "\\\\" if code == 92 else (f"\\x{code:02x}" if code <= 255 else f"\\u{code:04x}")
-    return _INVISIBLE.sub(escape, str(value))
-
-
-def readable(run: dict) -> str:
-    g, lines = run["governance"], []
-    graph, proposal, context = g["scope"], g["proposal"], g["context"]
-    inventory, author = context["inventory"], context["author"]
-
-    def fence(value):
-        lines.append("| " + safe(value))
-
-    lines += [f"EMPIRICA SCOPE DECISION — proposal revision {g['plan_revision']}, at most {g['revision_limit']} revisions, mode {g['control_mode']}",
-              "Approve the CURRENT displayed proposal; edits are submitted for another review and are NOT approved yet.",
-              "Every line beginning '| ' is UNTRUSTED quoted data. Controls, bidi characters, and backslashes are visibly escaped.", "", "GOAL"]
-    fence(run["goal"])
-    lines += ["", f"CLAIM GRAPH — root {safe(graph['root'])}, {len(graph['claims'])} claims, {len(graph['edges'])} dependencies"]
-    for claim in graph["claims"]:
-        fence(f"[{claim['id']}] {'gating' if claim['gating'] else 'non-gating'} {claim['kind']} {claim['text']}")
-    lines.append("DEPENDENCIES")
-    for edge in graph["edges"]:
-        fence(f"{edge['from']} {edge['type']} {edge['to']}")
-    budgets, modes = proposal["budgets"], proposal["modes"]
-    lines += ["", "CONFIGURATION"]
-    for key, label in (("max_passes", "Investigation passes"), ("max_spawns", "Child spawns"), ("max_audit_spawns", "Audit spawns")):
-        lines.append(f"  {label}: proposed {budgets[key]}, already used {g['budgets'][CEILINGS[key]]}")
-    lines += [f"  multi_provider (cross-provider actors): {modes['multi_provider']}",
-              f"  cli_exec (external model/actor CLI use): {modes['cli_exec']}",
-              f"  Auditor: {safe(proposal['auditor']['provider_id'] + '/' + proposal['auditor']['model_id']) if proposal['auditor'] else 'not selected'}",
-              f"  Same-model lowered-independence consent: {proposal['allow_same_model']}",
-              f"  Inventory: source={safe(inventory['source'])}, complete={inventory['complete']}, authorized={inventory['authorized']}",
-              f"  Author (host-observed): {safe(author['provider_id'] + '/' + author['model_id']) if author else 'unknown'}", "WHO MAY AUDIT"]
-    for member in inventory["members"]:
-        fence(member["provider_id"] + "/" + member["model_id"])
-    lines += ["", f"STATE — {g['state']}; dialogs left {g['interactions_remaining']['proposal']} this revision, {g['interactions_remaining']['total']} total", "OPEN CHANGE REQUEST"]
-    request = g.get("change_request")
-    if request:
-        lines.append(f"  requested at revision {request['plan_revision']} for {request['proposal_digest']}")
-        fence(request["text"])
-    else:
-        lines.append("  none")
-    lines += ["", "TECHNICAL DETAIL (secondary)", f"  proposal digest {g['proposal_digest']}",
-              f"  ingress {context['ingress']} · plan revision {g['plan_revision']} · revision limit {g['revision_limit']}"]
-    return "\n".join(lines)
-
-
 def form(run: dict, *, confirmation: bool = False) -> tuple[str, dict]:
     g, proposed = run["governance"], run["governance"]["proposal"]
+    controls = protocol._GOVERNANCE_CONTROLS
     members = g["context"]["inventory"]["members"]
-    props = {"decision": {"type": "string", "enum": ["approve", "request_changes", "reject"], "title": "Your decision"},
-             "inventory_confirmed": {"type": "boolean", "title": "Inventory is complete and authorized"},
-             "change_request": {"type": "string", "maxLength": 4096, "title": "What must change? (plain language; approves nothing)"}}
-    for key, label in (("max_passes", "Investigation passes"), ("max_spawns", "Child spawns"), ("max_audit_spawns", "Audit spawns")):
-        props[key] = {"type": "integer", "minimum": max(1 if key == "max_passes" else 0, g["budgets"][CEILINGS[key]]),
-                      "maximum": LIMITS[key], "default": proposed["budgets"][key], "title": label}
-    props.update(multi_provider={"type": "boolean", "default": proposed["modes"]["multi_provider"], "title": "Cross-provider actors"},
-                 cli_exec={"type": "boolean", "default": proposed["modes"]["cli_exec"], "title": "External model/actor CLI use"},
-                 auditor={"type": "string", "enum": [safe(m["provider_id"] + "/" + m["model_id"]) for m in members], "title": "Independent auditor"})
+    actions = controls["confirmation"]["actions"] if confirmation else list(controls["actions"])
+    props = {"decision": {"type": "string", "enum": actions, "title": "Your decision"},
+             "inventory_confirmed": {"type": "boolean", "title": controls["controls"]["inventory"]}}
+    if not confirmation:
+        for key, row in controls["controls"]["budgets"].items():
+            props[key] = {"type": "integer", "minimum": max(1 if key == "max_passes" else 0, g["budgets"][CEILINGS[key]]),
+                          "maximum": row["maximum"], "default": proposed["budgets"][key], "title": row["label"]}
+        props.update({key: {"type": "boolean", "default": proposed["modes"][key], "title": label}
+                      for key, label in controls["controls"]["modes"].items()})
+        props["auditor"] = {"type": "string", "enum": [safe(m["provider_id"] + "/" + m["model_id"]) for m in members],
+                            "title": controls["controls"]["auditor"]}
     if inventory_status(g["context"]["inventory"]) == "singleton":
-        props["allow_same_model"] = {"type": "boolean", "default": False, "title": "SAME MODEL / LOWERED INDEPENDENCE consent"}
-    if confirmation:
-        props = {k: v for k, v in props.items() if k in {"decision", "inventory_confirmed", "change_request", "allow_same_model"}}
-    message = ("FINAL CONFIRMATION — Your edits are saved, NOT approved. Confirm the exact values below; configuration is read-only.\n" if confirmation else "")
-    return message + readable(run), {"type": "object", "properties": props, "required": ["decision"]}
+        props["allow_same_model"] = {"type": "boolean", "default": False, "title": "SAME MODEL: checked proposes exception on Edit; consents on Approve"}
+    message = controls["confirmation"]["title"] + "\n" if confirmation else ""
+    return message + g["review_text"], {"type": "object", "properties": props, "required": ["decision"]}
+
+
+def feedback_form() -> tuple[str, dict]:
+    title = protocol._GOVERNANCE_CONTROLS["controls"]["feedback"]
+    return title, {"type": "object", "properties": {"feedback": {"type": "string", "maxLength": 4096, "title": title}},
+                   "required": ["feedback"], "additionalProperties": False}
 
 
 class HostGovernance:
@@ -158,14 +115,14 @@ class HostGovernance:
             return unavailable(result, "governance.stale_proposal")
         if g["prompt_error"]:
             return unavailable(result, g["prompt_error"])
-        decision = {"run_id": run["id"], "receipt_id": uuid4().hex, "proposal_digest": g["proposal_digest"],
-                    "plan_revision": g["plan_revision"], "approval_kind": "auto" if auto else "host_ui", "outcome": "approve"}
+        envelope = {"run_id": run["id"], "receipt_id": uuid4().hex, "proposal_digest": g["proposal_digest"],
+                    "plan_revision": g["plan_revision"], "approval_kind": "auto" if auto else "host_ui"}
         def dismiss(message=None):
-            rejected = {k: v for k, v in {**decision, "outcome": "dismiss"}.items() if k not in {"amendment", "change_request"}}
-            stored = self.decision_ingress(self.profile, run["id"], rejected)["result"]
+            stored = self.decision_ingress(self.profile, run["id"], {**envelope, "outcome": "dismiss"})["result"]
             return unavailable(stored, message=message) if stored.get("type") in {"Allow", "Inert"} else stored
+        action = "approve"
         if not auto:
-            presented = self.decision_ingress(self.profile, run["id"], {**decision, "outcome": "present"})["result"]
+            presented = self.decision_ingress(self.profile, run["id"], {**envelope, "outcome": "present"})["result"]
             if presented.get("type") != "Allow":
                 return presented
             message, schema = form(presented["run"], confirmation=confirmation)
@@ -174,44 +131,43 @@ class HostGovernance:
                 if not isinstance(answer, dict) or answer.get("action") != "accept" or not isinstance(answer.get("content"), dict):
                     return dismiss()
                 content = dict(answer["content"])
-                for key in LIMITS:
+                for key in protocol._GOVERNANCE_CONTROLS["controls"]["budgets"]:
                     if isinstance(content.get(key), str) and re.fullmatch(r"\d{1,4}", content[key]):
                         content[key] = int(content[key])
                 jsonschema.validate(content, {**schema, "additionalProperties": False})
                 action = content["decision"]
-                if action == "reject":
-                    decision["outcome"] = "reject"
-                else:
-                    proposal = plain(g["proposal"])
-                    proposal["budgets"].update({k: content.get(k, proposal["budgets"][k]) for k in LIMITS})
+                if confirmation and action == "decline":
+                    return dismiss()
+                proposal = plain(g["proposal"])
+                if not confirmation:
+                    proposal["budgets"].update({k: content.get(k, proposal["budgets"][k])
+                                                for k in protocol._GOVERNANCE_CONTROLS["controls"]["budgets"]})
                     proposal["modes"].update({k: content.get(k, proposal["modes"][k]) for k in ("multi_provider", "cli_exec")})
                     if "auditor" in content:
                         proposal["auditor"] = next(m for m in context["inventory"]["members"] if safe(m["provider_id"] + "/" + m["model_id"]) == content["auditor"])
-                    proposal["allow_same_model"] = proposal["allow_same_model"] if confirmation else content.get("allow_same_model", False if g["inventory_status"] == "singleton" else proposal["allow_same_model"])
-                    changed = proposal != plain(g["proposal"])
-                    # Exact human text is stored; trimming only decides whether feedback exists.
-                    text = content.get("change_request", "")
-                    if not text.strip():
-                        text = ""
-                    if action == "approve" and text:
-                        action = "request_changes"
-                    if action == "approve" and content.get("inventory_confirmed") is not True:
-                        return dismiss("Confirm that the inventory is complete and authorized before approving. Nothing was approved; wait for human input rather than retrying.")
-                    if confirmation and action == "approve" and g["inventory_status"] == "singleton" and content.get("allow_same_model") is not True:
-                        return dismiss("Same-model approval requires renewed explicit consent in final confirmation.")
-                    if action == "approve" and changed:
-                        action = "amend"
-                    if action == "request_changes" and not text:
-                        if not changed:
-                            return dismiss()
-                        action = "amend"
-                    decision["outcome"] = action
-                    if changed:
-                        decision["amendment"] = {"graph": g["scope"], "configuration": proposal}
-                    if action == "request_changes":
-                        decision["change_request"] = text
+                    if content.get("allow_same_model") is True:
+                        proposal["allow_same_model"] = True
+                feedback = ""
+                if action == "request_changes":
+                    envelope = {**envelope, "receipt_id": uuid4().hex}
+                    reserved = self.decision_ingress(self.profile, run["id"], {**envelope, "outcome": "present"})["result"]
+                    if reserved.get("type") != "Allow":
+                        return reserved
+                    feedback_answer = self.elicit(*feedback_form())
+                    if not isinstance(feedback_answer, dict) or feedback_answer.get("action") != "accept" or not isinstance(feedback_answer.get("content"), dict):
+                        return dismiss()
+                    jsonschema.validate(feedback_answer["content"], feedback_form()[1])
+                    feedback = feedback_answer["content"]["feedback"]
+                submission = {"action": action, "configuration": proposal,
+                              "inventory_confirmed": content.get("inventory_confirmed", False),
+                              "allow_same_model": content.get("allow_same_model", False)}
+                if action == "request_changes":
+                    submission["feedback"] = feedback
+                decision = {**envelope, "submission": submission}
             except (ValueError, TypeError, StopIteration, jsonschema.ValidationError):
                 return dismiss()
+        else:
+            decision = {**envelope, "outcome": "approve"}
         admitted = self.decision_ingress(self.profile, run["id"], decision)["result"]
         if not auto and admitted.get("type") in {"Fault", "Block"}:
             stored = dismiss()
@@ -219,9 +175,12 @@ class HostGovernance:
                 admitted["run"] = stored["run"]
                 return admitted
             return stored
-        if not confirmation and decision["outcome"] == "amend" and admitted.get("type") == "Allow":
-            # Exactly one host-owned, snapshot-bound confirmation; never hand edits back for the author to reset.
+        revised = (admitted.get("run", {}).get("governance", {}).get("plan_revision") != g["plan_revision"])
+        if not confirmation and action in {"approve", "edit"} and admitted.get("type") == "Allow" and revised:
+            # Follow the authoritative amendment result with exactly one locked confirmation.
             return self(admitted, confirmation=True)
-        if decision["outcome"] == "request_changes" and admitted.get("type") in {"Allow", "Inert"}:
+        if action == "request_changes" and admitted.get("type") in {"Allow", "Inert"}:
             return unavailable(admitted, "governance.changes_requested")
+        if action == "edit" and admitted.get("type") in {"Allow", "Inert"} and not revised:
+            return unavailable(admitted)
         return admitted

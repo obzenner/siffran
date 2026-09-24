@@ -40,7 +40,7 @@
             "roles",
             "hosts/capabilities"
           ],
-          "digest": "sha256:9f9eb2cb931480d238c593c958203cc576dd66b7aa9cf880f2a452d9ff1c0bd7"
+          "digest": "sha256:2a01a8f1be23240c3f6adbff7555a3ce43ee4cff523f05a8aaa9b4a252dd3bfb"
         },
         "obligations": {
           "active": [
@@ -124,7 +124,8 @@
           },
           "prompt_error": "governance.inventory_unknown",
           "next_action": "governance.propose",
-          "change_request": null
+          "change_request": null,
+          "review_text": "EMPIRICA SCOPE DECISION \u2014 proposal revision 0, at most 64 revisions, mode deliberative\nApprove the CURRENT displayed proposal; edits are submitted for another review and are NOT approved yet.\nEvery line beginning '| ' is UNTRUSTED quoted data. Controls, bidi characters, and backslashes are visibly escaped.\n\nGOAL\n| Prove the public contract is internally consistent.\n\nCLAIM GRAPH\n  no claim graph selected\n\nCONFIGURATION\n  Investigation passes: proposed 10, already used 3\n  Child spawns: proposed 5, already used 0\n  Audit spawns: proposed 1, already used 1\n  multi_provider (cross-provider actors): False\n  cli_exec (external model/actor CLI use): False\n  Auditor: not selected\n  Same-model lowered-independence consent: False\n  Inventory: source=unknown, complete=False, authorized=False\n  Author (host-observed): unknown\nWHO MAY AUDIT\n\nSTATE \u2014 pending; dialogs left 3 this revision, 128 total\nOPEN CHANGE REQUEST\n  none\n\nTECHNICAL DETAIL (secondary)\n  proposal digest sha256:5e64f0b05d749be8af867c490a9e30c6c5c83aa0396bde6935d6f49ac87984d2\n  ingress unavailable \u00b7 plan revision 0 \u00b7 revision limit 64"
         }
       }
     }

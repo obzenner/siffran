@@ -48,7 +48,7 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:9f9eb2cb931480d238c593c958203cc576dd66b7aa9cf880f2a452d9ff1c0bd7"
+REVIEWED_REGISTRY_DIGEST = "sha256:2a01a8f1be23240c3f6adbff7555a3ce43ee4cff523f05a8aaa9b4a252dd3bfb"
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:41ef8b89da3f880fb5d256202d9ee5b6e28301b75e52490a41e65d16e09b8caa"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
@@ -2091,6 +2091,12 @@ def main() -> int:
         requirements = registry.get("bootstrap", {}).get("requirements", [])
         if [row.get("predicate") for row in requirements] != expected_predicates:
             errors.append("public-contract: bootstrap predicates must be the finite ordered bindings")
+        decisions = registry.get("governance_decisions", {}).get("actions", {})
+        if list(decisions) != ["approve", "edit", "request_changes", "reject"]:
+            errors.append("public-contract: governance decisions must be the finite ordered bindings")
+        for action, row in decisions.items():
+            if row.get("feedback") not in {"required", "forbidden"}:
+                errors.append(f"public-contract: governance decision {action} has unknown feedback policy")
         for kind, row in registry.get("bootstrap", {}).get("actions", {}).items():
             validate_schema_instance({"protocol": "empirica/v2", "request_id": "bootstrap-example",
                 "command": {"type": "ObserveAction", "run_id": "run-example",

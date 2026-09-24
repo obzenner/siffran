@@ -206,6 +206,32 @@ def configuration_error(state, proposed: Mapping) -> str | None:
     return None
 
 
+def resolve_submission(governance: Mapping, submission: Mapping,
+                       actions: tuple[tuple[str, Mapping], ...]) -> tuple[dict | None, str | None]:
+    """Resolve one raw human choice using the finite application-supplied policy."""
+    row = dict(actions).get(submission.get("action"))
+    if row is None:
+        return None, "governance.decision_conflict"
+    feedback = submission.get("feedback", "")
+    if not isinstance(feedback, str) or ((row["feedback"] == "required") != bool(feedback.strip())):
+        return None, "governance.decision_conflict"
+    action = submission["action"]
+    if row["requires_inventory"] and submission.get("inventory_confirmed") is not True:
+        return None, "governance.inventory_unconfirmed"
+    if action == "approve" and inventory_status(governance["context"]["inventory"]) == "singleton" \
+            and submission.get("allow_same_model") is not True:
+        return None, "governance.same_model_unconfirmed"
+    configuration = plain(submission["configuration"])
+    changed = configuration != plain(governance["proposal"])
+    outcome = row["changed_outcome"] if changed else row["unchanged_outcome"]
+    resolved = {"outcome": outcome}
+    if changed:
+        resolved["configuration"] = configuration
+    if outcome == "request_changes":
+        resolved["change_request"] = feedback
+    return resolved, None
+
+
 def decision_error(run_id: str, governance: Mapping, decision: Mapping) -> str | None:
     fingerprint = canonical_digest(decision)
     prior = next((r for r in governance["receipts"] if r["id"] == decision["receipt_id"]), None)
@@ -213,9 +239,9 @@ def decision_error(run_id: str, governance: Mapping, decision: Mapping) -> str |
         if fingerprint in {prior["fingerprint"], prior["presentation_fingerprint"]}:
             return "inert"
         presentation = {k: v for k, v in decision.items()
-                        if k not in {"amendment", "change_request"}}
+                        if k not in {"amendment", "change_request", "submission"}}
         presentation["outcome"] = "present"
-        if (prior["outcome"] != "present" or decision["outcome"] == "present" or
+        if (prior["outcome"] != "present" or decision.get("outcome") == "present" or
                 canonical_digest(presentation) != prior["presentation_fingerprint"]):
             return "governance.receipt_replay"
     if (decision["run_id"] != run_id or decision["proposal_digest"] != governance["proposal_digest"]
@@ -229,10 +255,15 @@ def decision_error(run_id: str, governance: Mapping, decision: Mapping) -> str |
         return "governance.approval_unavailable"
     if governance["state"] == "approved":
         return "governance.receipt_replay"
-    if decision["outcome"] == "request_changes" and expected == "auto":
+    outcome = decision.get("outcome")
+    if "submission" in decision and expected != "host_ui":
+        return "governance.approval_unavailable"
+    if expected == "host_ui" and "submission" not in decision and outcome not in {"present", "dismiss"}:
+        return "governance.decision_conflict"
+    if outcome == "request_changes" and expected == "auto":
         # Guidance is deliberative host_ui feedback; auto has no human to author it.
         return "governance.approval_unavailable"
-    if decision["outcome"] == "present":
+    if outcome == "present":
         return context_error(governance) if expected == "host_ui" else "governance.approval_unavailable"
     if expected == "host_ui" and prior is None:
         return context_error(governance) or "governance.receipt_replay"

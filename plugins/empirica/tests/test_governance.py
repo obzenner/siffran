@@ -42,9 +42,21 @@ class GovernanceServiceTests(unittest.TestCase):
         """Explicit simulated-host reservation before constructing a final UI decision."""
         g = self.view()["governance"]
         payload = {"run_id": self.run_id, "receipt_id": receipt + "-" + str(g["plan_revision"]), "proposal_digest": g["proposal_digest"],
-                   "plan_revision": g["plan_revision"], "approval_kind": "host_ui", "outcome": outcome, **kwargs}
+                   "plan_revision": g["plan_revision"], "approval_kind": kwargs.pop("approval_kind", "host_ui")}
+        if payload["approval_kind"] == "auto" or outcome in {"present", "dismiss"}:
+            payload.update(outcome=outcome, **kwargs)
+        else:
+            proposal = copy.deepcopy(kwargs.get("amendment", {}).get("configuration", g["proposal"]))
+            action = "approve" if outcome in {"approve", "amend"} else outcome
+            submission = {"action": action, "configuration": proposal}
+            if action == "approve":
+                submission.update(inventory_confirmed=True,
+                                  allow_same_model=g["inventory_status"] == "singleton")
+            if action == "request_changes":
+                submission["feedback"] = kwargs["change_request"]
+            payload["submission"] = submission
         if reserve and outcome != "present" and payload["approval_kind"] == "host_ui" and g["state"] != "approved" and not g["prompt_error"]:
-            present = {k: v for k, v in payload.items() if k not in {"amendment", "change_request"}}
+            present = {k: v for k, v in payload.items() if k not in {"amendment", "change_request", "submission"}}
             present["outcome"] = "present"
             self.assertIn(self.admit(present)["type"], {"Allow", "Inert"})
         return payload
@@ -188,7 +200,9 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertEqual(self.admit(decision)["type"], "Allow")
         after = copy.deepcopy(self.runs.data)
         self.assertEqual(self.admit(decision)["type"], "Inert")
-        self.assertEqual(self.admit({**decision, "outcome": "reject"})["type"], "Block")
+        conflicting = copy.deepcopy(decision)
+        conflicting["submission"]["action"] = "reject"
+        self.assertEqual(self.admit(conflicting)["type"], "Block")
         self.assertEqual(self.runs.data, after)
         key = next(iter(self.runs.data))
         decoded = classify_and_decode(self.runs.data[key].value)
@@ -207,7 +221,8 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertEqual(self.admit(feedback)["type"], "Allow")
         accepted = copy.deepcopy(self.runs.data)
         self.assertEqual(self.admit(feedback)["type"], "Inert")
-        self.assertEqual(self.admit({**feedback, "change_request": "overwrite"})["type"], "Block")
+        malformed = {**feedback, "change_request": "overwrite"}
+        self.assertEqual(self.admit(malformed)["type"], "Fault")
         self.assertEqual(self.runs.data, accepted)
         stale = self.decision("stale-feedback", "request_changes", change_request="Do not store me.")
         graph = copy.deepcopy(GRAPH)
@@ -217,7 +232,8 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertEqual(self.admit(stale)["reasons"][0]["code"], "governance.stale_proposal")
         self.assertEqual(self.action("configure_run", change_request="forged")["type"], "Fault")
         self.assertEqual(self.runs.data, revised)
-        self.assertEqual(self.view()["governance"]["change_request"]["text"], feedback["change_request"])
+        self.assertEqual(self.view()["governance"]["change_request"]["text"],
+                         feedback["submission"]["feedback"])
 
     def test_configuration_is_proposal_only_and_freeze_preserves_approval(self):
         self.prepare()
@@ -251,6 +267,12 @@ class GovernanceServiceTests(unittest.TestCase):
         self.run_id = self.request({"type": "StartRun", "goal": "auto task", "control_mode": "auto",
                                     "selector": {"project": "p", "session": "auto"}})["run"]["id"]
         self.prepare()
+        g = self.view()["governance"]
+        raw = {"run_id": self.run_id, "receipt_id": "human-in-auto", "proposal_digest": g["proposal_digest"],
+               "plan_revision": g["plan_revision"], "approval_kind": "auto",
+               "submission": {"action": "approve", "configuration": g["proposal"],
+                              "inventory_confirmed": True}}
+        self.assertEqual(self.admit(raw)["reasons"][0]["code"], "governance.approval_unavailable")
         self.assertEqual(self.admit(self.decision(approval_kind="auto"))["type"], "Allow")
         self.assertEqual(self.action("configure_run", budgets={"max_audit_spawns": 2})["reasons"][0]["code"], "governance.auto_ceiling")
         for i in range(8):
@@ -266,7 +288,7 @@ class GovernanceServiceTests(unittest.TestCase):
         g = self.view()["governance"]
         displayed = (g["plan_revision"], g["proposal_digest"])
         # Whitespace-only guidance is malformed, not a stored request.
-        self.assertEqual(self.admit(self.decision("blank", "request_changes", change_request="  \n "))["type"], "Fault")
+        self.assertEqual(self.admit(self.decision("blank", "request_changes", change_request="  \n "))["type"], "Block")
         self.assertIsNone(self.view()["governance"]["change_request"])
         # Exact text is stored against the displayed revision; the run stays pending and grants nothing.
         self.assertEqual(self.admit(self.decision("ask", "request_changes",
@@ -533,7 +555,9 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertEqual(self.admit(presents[3])["reasons"][0]["code"], "governance.interaction_limit")
         self.assertEqual(self.admit(presents[2])["type"], "Inert")
         self.assertEqual(self.runs.data, before)
-        final = {**presents[2], "outcome": "approve"}
+        final = {k: v for k, v in presents[2].items() if k != "outcome"}
+        final["submission"] = {"action": "approve", "configuration": self.view()["governance"]["proposal"],
+                               "inventory_confirmed": True}
         for changed in ({"run_id": "other"}, {"plan_revision": 1000}, {"proposal_digest": "sha256:" + "a" * 64}, {"approval_kind": "auto"}):
             self.assertEqual(self.admit({**final, **changed})["type"], "Block")
             self.assertEqual(self.runs.data, before)
@@ -541,7 +565,9 @@ class GovernanceServiceTests(unittest.TestCase):
         before = copy.deepcopy(self.runs.data)
         self.assertEqual(self.admit(final)["type"], "Inert")
         self.assertEqual(self.admit(presents[2])["type"], "Inert")
-        self.assertEqual(self.admit({**final, "outcome": "reject"})["type"], "Block")
+        conflicting = copy.deepcopy(final)
+        conflicting["submission"]["action"] = "reject"
+        self.assertEqual(self.admit(conflicting)["type"], "Block")
         self.assertEqual(self.runs.data, before)
         raw = copy.deepcopy(next(iter(self.runs.data.values())).value)
         raw["governance"]["receipts"][0].pop("presentation_fingerprint")
@@ -582,9 +608,63 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertEqual(self.admit(presented)["type"], "Inert")
         self.assertEqual(self.runs.data, before)
 
+    def test_legacy_semantic_receipt_remains_exactly_replayable(self):
+        from dataclasses import replace
+        from core import governance
+        self.prepare()
+        g = self.view()["governance"]
+        payload = {"run_id": self.run_id, "receipt_id": "legacy-feedback",
+                   "proposal_digest": g["proposal_digest"], "plan_revision": g["plan_revision"],
+                   "approval_kind": "host_ui", "outcome": "request_changes",
+                   "change_request": "historical guidance"}
+        presented = {k: v for k, v in payload.items() if k != "change_request"}
+        presented["outcome"] = "present"
+        key = next(iter(self.runs.data))
+        entry = self.runs.data[key]
+        state = classify_and_decode(entry.value).state
+        snapshot = self.service._coordinator._assemble(
+            key, state, {"type": "GetRun", "run_id": self.run_id}, require_graph=False)
+        governed = governance.plain(state.governance)
+        governed["receipts"].append({"id": payload["receipt_id"],
+            "fingerprint": governance.canonical_digest(payload),
+            "presentation_fingerprint": governance.canonical_digest(presented),
+            "outcome": "request_changes", "plan_revision": g["plan_revision"]})
+        self.service._coordinator._commit(key, entry.revision, snapshot,
+                                          replace(state, governance=governed), ())
+        self.assertEqual(self.admit(payload)["type"], "Inert")
+
+    def test_raw_submission_conflict_and_amendment_replay(self):
+        self.prepare()
+        g = self.view()["governance"]
+        envelope = {"run_id": self.run_id, "receipt_id": "raw", "proposal_digest": g["proposal_digest"],
+                    "plan_revision": g["plan_revision"], "approval_kind": "host_ui"}
+        self.assertEqual(self.admit({**envelope, "outcome": "present"})["type"], "Allow")
+        conflict = {**envelope, "submission": {"action": "approve", "feedback": "approved",
+            "inventory_confirmed": True, "configuration": g["proposal"]}}
+        blocked = self.admit(conflict)
+        self.assertEqual(blocked["type"], "Block")
+        self.assertEqual(blocked["reasons"][0]["code"], "governance.decision_conflict")
+        self.assertIsNone(self.view()["governance"]["approved_digest"])
+
+        envelope["receipt_id"] = "raw-amend"
+        self.assertEqual(self.admit({**envelope, "outcome": "present"})["type"], "Allow")
+        proposal = copy.deepcopy(g["proposal"])
+        proposal["budgets"]["max_passes"] = 6
+        raw = {**envelope, "submission": {"action": "approve", "inventory_confirmed": True,
+                                           "configuration": proposal}}
+        amended = self.admit(raw)
+        self.assertEqual(amended["type"], "Allow")
+        self.assertEqual(amended["run"]["governance"]["proposal"]["budgets"]["max_passes"], 6)
+        self.assertEqual(self.admit(raw)["type"], "Inert")
+        self.assertIsNone(self.view()["governance"]["approved_digest"])
+
+    def test_graphless_review_text_is_total(self):
+        text = self.view()["governance"]["review_text"]
+        self.assertIn("no claim graph selected", text)
+        self.assertIn("governed task", text)
+
     def test_maximal_escaped_graph_amendment_round_trip(self):
         import json
-        from adapters.governance import readable
         from core.evaluation import valid_graph
         self.prepare()
         ids = [chr(0x10000 + n) * 128 for n in range(32)]
@@ -594,13 +674,12 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertTrue(valid_graph(graph))
         raw = json.dumps(graph, ensure_ascii=True)
         self.assertGreater(len(raw), 1000000)
-        self.assertEqual(self.admit(self.decision("max", "amend", amendment={
-            "graph": json.loads(raw), "configuration": self.view()["governance"]["proposal"]}))["type"], "Allow")
+        self.assertEqual(self.action("graph", payload=json.loads(raw))["type"], "Allow")
         self.assertEqual(self.view()["governance"]["scope"], graph)
         for text in ('"' * 2048, "\\" * 2048, "\u0000" * 2048):
             graph["claims"][0]["text"] = text
             self.action("graph", payload=graph)
-            rendered = readable(self.view())
+            rendered = self.view()["governance"]["review_text"]
             self.assertIn("| ", rendered)
             self.assertNotIn("\u0000", rendered)
 

@@ -849,6 +849,51 @@
               "$ref": "#/$defs/emptyParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.decision_conflict"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.inventory_unconfirmed"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.same_model_unconfirmed"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
         }
       ]
     },
@@ -1654,6 +1699,10 @@
                       "type": "null"
                     }
                   ]
+                },
+                "review_text": {
+                  "type": "string",
+                  "minLength": 1
                 }
               }
             },
@@ -2831,7 +2880,8 @@
         "bootstrap",
         "next_actions",
         "reasons",
-        "sections"
+        "sections",
+        "governance_decisions"
       ],
       "properties": {
         "id": {
@@ -3151,7 +3201,11 @@
         },
         "bootstrap": {
           "type": "object",
-          "required": ["requirements", "actions", "tools"]
+          "required": [
+            "requirements",
+            "actions",
+            "tools"
+          ]
         },
         "next_actions": {
           "type": "object",
@@ -3261,9 +3315,221 @@
               }
             }
           }
+        },
+        "governance_decisions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "actions",
+            "controls",
+            "confirmation"
+          ],
+          "properties": {
+            "actions": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "approve",
+                "edit",
+                "request_changes",
+                "reject"
+              ],
+              "properties": {
+                "approve": {
+                  "$ref": "#/$defs/governanceDecisionAction"
+                },
+                "edit": {
+                  "$ref": "#/$defs/governanceDecisionAction"
+                },
+                "request_changes": {
+                  "$ref": "#/$defs/governanceDecisionAction"
+                },
+                "reject": {
+                  "$ref": "#/$defs/governanceDecisionAction"
+                }
+              }
+            },
+            "controls": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "actions",
+                "budgets",
+                "modes",
+                "inventory",
+                "auditor",
+                "feedback"
+              ],
+              "properties": {
+                "actions": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "approve",
+                    "edit",
+                    "request_changes",
+                    "reject"
+                  ],
+                  "properties": {
+                    "approve": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "edit": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "request_changes": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "reject": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "budgets": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "max_passes",
+                    "max_spawns",
+                    "max_audit_spawns"
+                  ],
+                  "properties": {
+                    "max_passes": {
+                      "$ref": "#/$defs/governanceBudgetControl"
+                    },
+                    "max_spawns": {
+                      "$ref": "#/$defs/governanceBudgetControl"
+                    },
+                    "max_audit_spawns": {
+                      "$ref": "#/$defs/governanceBudgetControl"
+                    }
+                  }
+                },
+                "modes": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "multi_provider",
+                    "cli_exec"
+                  ],
+                  "properties": {
+                    "multi_provider": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "cli_exec": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "inventory": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "auditor": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "feedback": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "confirmation": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "title",
+                "actions"
+              ],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "actions": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "const": "approve"
+                    },
+                    {
+                      "const": "decline"
+                    }
+                  ],
+                  "items": false,
+                  "minItems": 2,
+                  "maxItems": 2
+                }
+              }
+            }
+          }
         }
       }
     },
-    "publicContractDefs": {}
+    "publicContractDefs": {},
+    "governanceDecisionAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "feedback",
+        "requires_inventory",
+        "unchanged_outcome",
+        "changed_outcome"
+      ],
+      "properties": {
+        "feedback": {
+          "enum": [
+            "forbidden",
+            "required"
+          ]
+        },
+        "requires_inventory": {
+          "type": "boolean"
+        },
+        "unchanged_outcome": {
+          "enum": [
+            "approve",
+            "amend",
+            "request_changes",
+            "reject",
+            "dismiss"
+          ]
+        },
+        "changed_outcome": {
+          "enum": [
+            "approve",
+            "amend",
+            "request_changes",
+            "reject",
+            "dismiss"
+          ]
+        }
+      }
+    },
+    "governanceBudgetControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "maximum"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "maximum": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
   }
 }

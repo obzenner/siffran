@@ -9,6 +9,7 @@ from core.records import Corrupt
 from .location import decode_handle
 from .run_state import classify_and_decode
 from .snapshot import HistoryCorrupt
+from . import protocol as _proto
 
 
 def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) -> dict:
@@ -49,16 +50,23 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
             else:
                 reason = policy.decision_error(run_id, governed, payload)
                 if reason == "inert":
-                    # Historical graphless presentations remain exactly replayable.
+                    # Historical and raw-submission receipts replay before current admission rules.
                     return c._inert_with_run(rid, snapshot)
                 if missing := bootstrap_precondition(snapshot, "governance.present"):
                     return c._block_from_snapshot(snapshot, rid, missing[1])
                 if reason:
                     return c._block_from_snapshot(snapshot, rid, reason)
-                outcome = payload["outcome"]
-                if outcome == "request_changes" and not payload["change_request"].strip():
-                    # Whitespace-only feedback is not a meaningful request; treat as malformed.
-                    return c._fault(rid, "invalid_request")
+                decision = payload
+                if "submission" in payload:
+                    resolved, reason = policy.resolve_submission(
+                        governed, payload["submission"], _proto._GOVERNANCE_DECISIONS)
+                    if reason:
+                        return c._block_from_snapshot(snapshot, rid, reason)
+                    decision = {**payload, **resolved}
+                    if "configuration" in decision:
+                        decision["amendment"] = {"graph": snapshot.graph,
+                                                   "configuration": decision.pop("configuration")}
+                outcome = decision["outcome"]
                 if outcome == "approve":
                     reason = policy.configuration_error(state, governed["proposal"]) or policy.selection_error(governed)
                     if reason:
@@ -67,8 +75,8 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                                     approval_kind=payload["approval_kind"], change_request=None)
                     next_state = replace(state, modes=governed["proposal"]["modes"],
                                          budgets={**state.budgets, **governed["proposal"]["budgets"]})
-                elif outcome in {"amend", "request_changes"} and "amendment" in payload:
-                    amendment = payload["amendment"]
+                elif outcome in {"amend", "request_changes"} and "amendment" in decision:
+                    amendment = decision["amendment"]
                     graph = amendment["graph"]
                     proposed = amendment["configuration"]
                     if not valid_graph(graph) or frozen_scope_invalid(state, graph):
@@ -80,9 +88,9 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                     domain = (art,)
                     next_state = replace(state, selected_graph_artifact_id=art["artifact_id"])
                 if outcome == "request_changes":
-                    governed["change_request"] = {"text": payload["change_request"],
-                        "plan_revision": payload["plan_revision"],
-                        "proposal_digest": payload["proposal_digest"]}
+                    governed["change_request"] = {"text": decision["change_request"],
+                        "plan_revision": decision["plan_revision"],
+                        "proposal_digest": decision["proposal_digest"]}
                 elif outcome == "reject":
                     governed.update(state="rejected", change_request=None)
                 prior = next((r for r in governed["receipts"] if r["id"] == payload["receipt_id"]), None)

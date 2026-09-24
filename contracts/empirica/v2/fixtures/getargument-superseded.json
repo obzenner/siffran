@@ -28,7 +28,7 @@
             "evidence/spike",
             "evidence/freshness"
           ],
-          "digest": "sha256:9f9eb2cb931480d238c593c958203cc576dd66b7aa9cf880f2a452d9ff1c0bd7"
+          "digest": "sha256:2a01a8f1be23240c3f6adbff7555a3ce43ee4cff523f05a8aaa9b4a252dd3bfb"
         },
         "obligations": {
           "active": [],

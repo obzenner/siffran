@@ -45,6 +45,14 @@ _BOOTSTRAP_REQUIREMENTS = tuple((row["predicate"], row["obligation_id"], row["mu
 _BOOTSTRAP_OPERATIONS = tuple((name, tuple((step["predicate"], step["reason"])
                                            for step in operation["preconditions"]))
                               for name, operation in _bootstrap["operations"].items())
+_decisions = _PUBLIC_CONTRACT["governance_decisions"]
+if (tuple(_decisions["actions"]) != ("approve", "edit", "request_changes", "reject")
+        or any(row["feedback"] not in {"forbidden", "required"}
+               for row in _decisions["actions"].values())):
+    raise RuntimeError("unknown or reordered governance decision binding")
+_GOVERNANCE_DECISIONS = tuple((name, copy.deepcopy(row))
+                              for name, row in _decisions["actions"].items())
+_GOVERNANCE_CONTROLS = copy.deepcopy(_decisions)
 _DIGEST = "sha256:" + hashlib.sha256(
     json.dumps(_PUBLIC_CONTRACT, sort_keys=True, separators=(",", ":")).encode(),
 ).hexdigest()

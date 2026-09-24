@@ -1361,8 +1361,7 @@
         "receipt_id",
         "proposal_digest",
         "plan_revision",
-        "approval_kind",
-        "outcome"
+        "approval_kind"
       ],
       "properties": {
         "run_id": {
@@ -1578,6 +1577,37 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 4096
+        },
+        "submission": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "action",
+            "configuration"
+          ],
+          "properties": {
+            "action": {
+              "enum": [
+                "approve",
+                "edit",
+                "request_changes",
+                "reject"
+              ]
+            },
+            "feedback": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "inventory_confirmed": {
+              "type": "boolean"
+            },
+            "allow_same_model": {
+              "type": "boolean"
+            },
+            "configuration": {
+              "$ref": "#/$defs/governanceDecisionPayload/properties/amendment/properties/configuration"
+            }
+          }
         }
       },
       "allOf": [
@@ -1587,7 +1617,10 @@
               "outcome": {
                 "const": "amend"
               }
-            }
+            },
+            "required": [
+              "outcome"
+            ]
           },
           "then": {
             "required": [
@@ -1617,7 +1650,10 @@
               "outcome": {
                 "const": "request_changes"
               }
-            }
+            },
+            "required": [
+              "outcome"
+            ]
           },
           "then": {
             "required": [
@@ -1630,6 +1666,42 @@
                 "change_request"
               ]
             }
+          }
+        }
+      ],
+      "oneOf": [
+        {
+          "required": [
+            "outcome"
+          ],
+          "not": {
+            "required": [
+              "submission"
+            ]
+          }
+        },
+        {
+          "required": [
+            "submission"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "outcome"
+                ]
+              },
+              {
+                "required": [
+                  "amendment"
+                ]
+              },
+              {
+                "required": [
+                  "change_request"
+                ]
+              }
+            ]
           }
         }
       ]

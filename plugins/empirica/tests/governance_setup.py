@@ -33,10 +33,13 @@ def approve_current(coordinator, run_id, *, author=None, auditor=None, singleton
     assert response["result"]["type"] in {"Allow", "Inert"}, response
     g = response["result"]["run"]["governance"]
     decision = {"run_id": run_id, "receipt_id": uuid4().hex, "proposal_digest": g["proposal_digest"],
-                "plan_revision": g["plan_revision"], "approval_kind": "auto" if g["control_mode"] == "auto" else "host_ui",
-                "outcome": "approve"}
+                "plan_revision": g["plan_revision"], "approval_kind": "auto" if g["control_mode"] == "auto" else "host_ui"}
     if decision["approval_kind"] == "host_ui":
         presented = transact(c, run_id, {**decision, "outcome": "present"})
         assert presented["result"]["type"] == "Allow", presented
+        decision["submission"] = {"action": "approve", "configuration": g["proposal"],
+                                  "inventory_confirmed": True, "allow_same_model": singleton}
+    else:
+        decision["outcome"] = "approve"
     approved = transact(c, run_id, decision)
     assert approved["result"]["type"] == "Allow", approved

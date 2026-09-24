@@ -106,7 +106,9 @@ check-core: ## Fast host-neutral contracts, malformed input, state, bridge, and 
 		test_governance.GovernanceServiceTests.test_bootstrap_graphless_convergence_is_preparation_not_human_wait \
 		test_governance.GovernanceServiceTests.test_bootstrap_contract_examples_have_real_postconditions \
 		test_governance.GovernanceServiceTests.test_bootstrap_terminal_run_has_no_preparation_actions \
-		test_governance.GovernanceServiceTests.test_real_pending_approval_investigation_then_revision_revokes_all_paths
+		test_governance.GovernanceServiceTests.test_real_pending_approval_investigation_then_revision_revokes_all_paths \
+		test_governance.GovernanceServiceTests.test_raw_submission_conflict_and_amendment_replay \
+		test_governance.GovernanceServiceTests.test_legacy_semantic_receipt_remains_exactly_replayable
 
 check-claude: ## Fast Claude payload, lifecycle translation, and fail-closed adapter tests
 	@printf '$(BOLD)==> claude suite$(RESET)\n'
@@ -263,6 +265,10 @@ pi-bundle-check: node_modules ## Validate repository-root Pi package composition
 empirica-pi-check: node_modules ## Validate the Empirica Pi adapter package (static + bridge smoke always; typecheck + tests if node present)
 	@printf '$(BOLD)==> empirica Pi adapter$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py plugins/empirica/adapters/pi
+
+.PHONY: empirica-governance-bridge-check
+empirica-governance-bridge-check: node_modules ## Check Pi governance through the real private Python service (scripted UI, no native host)
+	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py plugins/empirica/adapters/pi --test-file live-bridge.test.ts
 
 .PHONY: empirica-governance-ui-check empirica-pi-typecheck pi-validator-unit-check
 empirica-governance-ui-check: node_modules ## Typecheck and run fast governance dialog edge-case regressions
