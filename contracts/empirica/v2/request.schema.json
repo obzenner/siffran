@@ -1395,7 +1395,8 @@
             "amend",
             "reject",
             "dismiss",
-            "present"
+            "present",
+            "request_changes"
           ]
         },
         "amendment": {
@@ -1572,6 +1573,11 @@
               }
             }
           }
+        },
+        "change_request": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
         }
       },
       "allOf": [
@@ -1589,9 +1595,39 @@
             ]
           },
           "else": {
+            "if": {
+              "properties": {
+                "outcome": {
+                  "const": "request_changes"
+                }
+              }
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "amendment"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "request_changes"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "change_request"
+            ]
+          },
+          "else": {
             "not": {
               "required": [
-                "amendment"
+                "change_request"
               ]
             }
           }

@@ -29,7 +29,7 @@
             "evidence/spike",
             "evidence/order"
           ],
-          "digest": "sha256:f656d9988ee3fa0b750f2e165cf5b822bc5d630512a26320f860cc5a8df5de98"
+          "digest": "sha256:00296db1322730dda4731aedfc45f7bd23b484a3deed806d4e2b223fa5e3dff1"
         },
         "obligations": {
           "active": [],

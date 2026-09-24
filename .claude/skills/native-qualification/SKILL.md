@@ -1,0 +1,71 @@
+---
+name: native-qualification
+description: "Qualify this checkout in an operator-present Claude Code or Pi session. Use for native acceptance after adapter/UI changes, not routine unit checks. Preserve failures and require real human consent."
+allowed-tools: [Read, Glob, Grep, Bash, Write]
+---
+
+# Native qualification
+
+One deliberately prepared **real host session**, not a simulated successful journey. The repository root is `../../..` from this skill directory; run lifecycle commands there through Make. `make native-qualification` only prints this entrypoint.
+
+Never answer a human consent prompt, seed handles, invent research, reopen a terminal `stopped_*` run, copy credentials, replace global packages, or change permissions/auth/user settings. Launch only after the operator explicitly says go. One launch attempt: on uncertain terminal creation/input delivery, inspect the existing terminal/session rather than retry. When using Orca, load its CLI skill and use its managed terminal APIs. No automatic relaunch loops.
+
+## 1. Prepare before opening a host
+
+Read the [host registry](../../../contracts/empirica/v2/host-profiles.json) and [governance guide](../../../plugins/empirica/skills/empirica/references/governance.md). They are authoritative, not model recollection. Claude currently admits `>=2.1.278,<2.2.0`; Pi admits `>=0.84.1,<0.85.0` with exact `pi-subagents@0.50.0`. Use an already prepared side-by-side supported executable; an out-of-range installation is **BLOCKED**, not permission to upgrade global tools. Codex Empirica is unsupported for convergence.
+
+Agree with the human: host, exact candidate checkout, small falsifiable goal/claims, initial limits `8/0/1`, modes, authorized auditor inventory, deadline and fresh evidence directory **outside the source checkout**. Omit Empirica `--auto` in the primary scenario. The host's auto-permission footer is unrelated. Choose a non-destructive spike against an existing file (for example, checking a Make help entry); no source edits are needed. Git worktrees share durable Git shadow refs: separate `EMPIRICA_HOME` isolates operational files, not Git storage. Use a separately prepared task repository if complete Git isolation is required; do not improvise a new loader during the run.
+
+Before launch:
+- Record HEAD, exact host/plugin/subagents versions and expected load paths. A release qualification requires a clean committed candidate; receipts bind HEAD/version, not dirty bytes.
+- For exploratory dirty candidates, retain `git status --porcelain=v1 --untracked-files=all`, both `git diff --binary HEAD` and `git diff --cached --binary`, and a SHA-256 manifest of actual tracked **and untracked candidate file contents**, with explicit artifact exclusions and deleted paths. Never stage files to obtain a fingerprint. Label the result non-release; if complete source identity cannot be captured, mark provenance BLOCKED.
+- Create a new evidence directory exclusively; an existing directory/launch marker requires reconciliation, not deletion. Record the chosen command and a launch-requested marker before sending it. Preserve normal HOME, theme, provider/auth configuration, other plugins and permissions.
+- Claude needs the operator-declared authorized inventory from the governance guide. The assistant may transcribe the operator's declared inventory, but must not invent authorization or approve the proposal. Set `EMPIRICA_GOVERNANCE_CONFIG` to that file; never put credentials in it. Confirm native MCP elicitation availability.
+- Set `EMPIRICA_HOME` to the new evidence directory's `state` child. Use the checkout's complete Pi package (including bundled auditor and subagents), not its internal adapter directory. Pi's committed `.pi/settings.json` provides the checkout override while preserving unrelated user packages. Do not replace normal settings with an isolated home.
+
+After explicit go, launch interactively through **`make claude-dev CLAUDE=/absolute/supported/claude`** or **`make pi-dev PI=/absolute/supported/pi`**, inheriting the prepared environment. For retained Claude admission logs, pass `ARGS="--debug-file /absolute/evidence/claude.debug.log"`. These are directory-plugin/project overrides, not global installs. Capture the actual loaded paths, parent session ID and native transcripts; a successful terminal API response alone proves neither activation nor loading. Stop on any setup mismatch.
+
+## 2. Primary Empirica scenario
+
+Use these as instructions to the author plus human checkpoints, not a fixed script that fabricates tool results. Each row receives `PASS`, `FAIL`, `BLOCKED`, or `NOT_REACHED` with evidence. Read state through public tools and retain snapshots; never edit operational state.
+
+1. **Activation:** the human invokes Claude's `/empirica:empirica <goal>` or Pi's `/empirica <goal>`. Verify native user-command expansion and fresh run binding before proceeding. A model-invoked Skill/read call is not activation. Stop if the command was pasted as ordinary chat.
+2. **Proposal:** from supplied context only, route and propose the complete readable scope, budgets, modes and concrete auditor. Verify pending state and zero investigation usage. The human reviews the actual form/dialogs.
+3. **Request/edit:** the human requests a plain-language scope correction and changes passes `8 → 6` using labeled controls (Claude may combine feedback and edits; Pi uses successive request/edit decisions). The author reads `run.governance.change_request`, revises scope as requested and presents the new proposal. Retain the exact feedback and pending snapshots: effective limit stays `8` until approval; neither edits nor feedback count as consent.
+4. **First approval:** the human explicitly approves the current displayed proposal. Verify effective limit `6`, exact current digest/revision and human approval provenance.
+5. **Revocation:** enter investigation and obtain actual cited research. Make one agreed material scope revision. Verify approval is revoked. **Do not approve the replacement yet.**
+6. **Blocked sentinel:** while that replacement is still unapproved, attempt a benign uniquely named side effect in the evidence directory. Confirm the host blocks it **before execution** and the file remains absent, using operator-side inspection. Unexpected execution is FAIL: preserve it and stop. Do not run destructive or secret-bearing commands.
+7. **Reapproval/work:** now the human approves the fresh proposal. Perform admitted cited research and one deterministic spike. Retain command, input bindings, exit status and result; do not invent citations or output.
+8. **Audit:** request exactly one canonical auditor through the profile's managed mechanism. Claude uses managed **async** audit/Stop settlement/handback; Pi uses **foreground** audit. Follow `audit_execution`, not the `foreground_only` tier name. Verify observed resolved author/auditor identities, approved selection, exact child/session/operation binding and current-snapshot verdict. Prefer a known distinct authorized model for this primary run.
+9. **Completion:** call the guarded completion path; require the actual `Allow(converged=true)` and matching durable terminal state. A prose success, child pass alone or `Allow(converged=false)` is not convergence. Stop honestly on blockers; never force a passing verdict.
+
+For Claude MCP admission use `make empirica-claude-mcp-log-check LOG=...` where applicable. After a complete one-child converged trace, use `make empirica-host-receipt` with its required transcript/state/child/version/command/output arguments from `make help`; `make empirica-host-live-check` checks both supported hosts' receipts. Receipt verification does **not** prove every UI checkpoint, cannot record partial failures, and does not qualify dirty source. Do not weaken it to accept the wrong trace.
+
+## 3. Small Methodologist sanity
+
+After Empirica is terminal, use Claude's `/methodologist:think` or Pi's `/think`, choose a named methodology as the human and verify the six-phase plan comes from this checkout. Where MCP selection is exposed, retain one normal `methodologist_select` result. On Codex use `$think`/implicit native simple mode, not a slash command; request structured bridge mode separately if testing MCP. Codex Empirica can establish only its expected fail-closed refusal, never convergence qualification.
+
+Cancellation, large-scope viewport accessibility, explicit auto and singleton consent are **separate optional runs**, not contradictory branches squeezed into the primary scenario. Auto is not human approval; an authorized singleton is not evidence of a distinct independent model.
+
+## 4. Retain one compact result
+
+```text
+candidate: <HEAD>; source_manifest: <path|clean>; release_candidate: <yes|no>
+host/profile/version: <exact>; subagents/plugin: <exact>; loaded_paths: <paths>
+session/child/operation: <ids>; command: <command>; deadline: <value>
+checkpoint | PASS / FAIL / BLOCKED / NOT_REACHED | artifact pointer
+activation | ... | ...
+proposal | ... | ...
+request_edit_pending | ... | ...
+approval_at_6 | ... | ...
+revision_revokes | ... | ...
+sentinel_blocked_before_execution | ... | ...
+reapproval_research_spike | ... | ...
+independent_audit | ... | ...
+snapshot_completion | ... | ...
+methodologist | ... | ...
+result: <PASS only if all required checkpoints passed; otherwise FAIL/BLOCKED>
+limitations: <including optional scenarios not run; no secrets>
+```
+
+Stop on a required blocker, mark later rows NOT_REACHED and preserve failed artifacts. A single host pass does not qualify the other host or optional branches. `make check` is local regression evidence; release qualification additionally requires the deliberate integration and installed-host gates in `make release-check`.

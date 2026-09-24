@@ -59,8 +59,7 @@ class ClaudeReachabilityTests(unittest.TestCase):
                     lifecycle._governance_context(payload, run_id)
                     mediator = HostGovernance("claude-code@2.1.278", elicit=lambda _m, _s: {
                         "action": "accept", "content": {"decision": "approve",
-                        "inventory_confirmed": True, "auditor": "anthropic/claude-opus-4-8",
-                        "allow_same_model": False}})
+                        "inventory_confirmed": True, "auditor": "anthropic/claude-opus-4-8"}})
                     tools = PublicTools("claude-code@2.1.278", govern=mediator)
 
                     def observe(action: dict) -> dict:

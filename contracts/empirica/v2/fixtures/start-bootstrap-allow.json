@@ -40,7 +40,7 @@
             "roles",
             "hosts/capabilities"
           ],
-          "digest": "sha256:f656d9988ee3fa0b750f2e165cf5b822bc5d630512a26320f860cc5a8df5de98"
+          "digest": "sha256:00296db1322730dda4731aedfc45f7bd23b484a3deed806d4e2b223fa5e3dff1"
         },
         "obligations": {
           "active": [
@@ -116,9 +116,13 @@
             "max_audit_spawns": 0
           },
           "inventory_status": "unknown",
-          "interactions_remaining": {"proposal": 3, "total": 128},
+          "interactions_remaining": {
+            "proposal": 3,
+            "total": 128
+          },
           "prompt_error": "governance.inventory_unknown",
-          "next_action": "governance.propose"
+          "next_action": "governance.propose",
+          "change_request": null
         }
       }
     }

@@ -56,6 +56,7 @@
       "author": null,
       "ingress": "unavailable"
     },
-    "proposal_digest": "sha256:8f800abd17c3c63c63718731098d637971909a5a5e2b4904f69caf577a66ee4a"
+    "proposal_digest": "sha256:8f800abd17c3c63c63718731098d637971909a5a5e2b4904f69caf577a66ee4a",
+    "change_request": null
   }
 }

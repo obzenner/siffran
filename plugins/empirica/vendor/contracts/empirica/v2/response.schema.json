@@ -834,6 +834,21 @@
               "$ref": "#/$defs/emptyParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.changes_requested"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
         }
       ]
     },
@@ -1179,7 +1194,8 @@
                 "inventory_status",
                 "next_action",
                 "interactions_remaining",
-                "prompt_error"
+                "prompt_error",
+                "change_request"
               ],
               "properties": {
                 "state": {
@@ -1598,6 +1614,37 @@
                     "governance.author_unknown",
                     "governance.identity_mismatch",
                     "governance.interaction_limit"
+                  ]
+                },
+                "change_request": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "text",
+                        "plan_revision",
+                        "proposal_digest"
+                      ],
+                      "properties": {
+                        "text": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096
+                        },
+                        "plan_revision": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "proposal_digest": {
+                          "type": "string",
+                          "pattern": "^sha256:[0-9a-f]{64}$"
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
                   ]
                 }
               }

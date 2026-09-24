@@ -20,8 +20,9 @@ comes from the configured authenticated model registry and is revalidated before
 `configure_run` opens the dialog, and amendments need a second proposal review. Explicit
 `--auto` is bounded automatic acceptance, not a human decision. See
 [governance](../../skills/empirica/references/governance.md) for limits, singleton exceptions,
-and fresh-run-only compatibility. These new UI flows have simulated-host integration coverage;
-the historical profile receipt does not certify native human approval for 3.2.0.
+and fresh-run-only compatibility. These UI flows have fast simulated-control coverage and real-service governance coverage; the
+historical profile receipt does not certify native human approval for 3.2.0. Follow the
+operator-led procedure printed by `make native-qualification` for that boundary.
 
 ## Surface
 
@@ -63,5 +64,7 @@ convergence claim. A turn can otherwise finish without a terminal decision.
 
 ## Validation
 
-Run `make check-pi` for deterministic adapter coverage. Profile promotion additionally requires
-`make empirica-host-live-check` with a retained installed-Pi receipt.
+Run `make check-pi` for fast deterministic adapter coverage. Run the targeted diagnostics in
+`doc/testing.md` when changing persistence or full host-flow boundaries. Profile qualification is
+operator-led via `make native-qualification`; release promotion additionally requires
+`make empirica-host-live-check` with an honestly applicable retained installed-Pi receipt.

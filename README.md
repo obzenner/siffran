@@ -143,18 +143,16 @@ promotion remains separate and unsupported.
 The project lifecycle lives in the `Makefile` — run `make help` to see every operation:
 
 ```
-make check      # lint + tests + manifest validation + ADR health (run before committing)
+make check      # fast deterministic contributor gate (run before committing)
 make status     # plugin versions, ADR count, working-tree state
 make bump PLUGIN=<name> PART=minor
 make methodologist-codex-check  # deterministic package + MCP validation
-make methodologist-codex-smoke  # real codex-cli 0.146.0 online smoke
-make codex-live-check CODEX='npx -y @openai/codex@0.146.0'
+make native-qualification       # print the operator-led native skill entrypoint; launches nothing
 ```
 
-The online smoke creates isolated temporary `HOME` and `CODEX_HOME` trees,
-installs the local marketplace and plugin, and proves both implicit skill and
-MCP tool invocation. It requires `npx`, network access, and either an existing
-Codex login (copied only into the throwaway home) or `OPENAI_API_KEY`; the
-deterministic check is part of `make check` and has none of those requirements.
+The fast gate never launches online/native sessions. Expensive persistence and simulated-host
+matrices are explicit integration diagnostics, while installed-host qualification is a separate
+operator-led procedure. See [doc/testing.md](./doc/testing.md) for the coverage/cost map and
+native limitations.
 
 See [CLAUDE.md](./CLAUDE.md) for repo structure, conventions, and how to add a plugin or methodology. Run `make check` and the `checkup` skill before committing.

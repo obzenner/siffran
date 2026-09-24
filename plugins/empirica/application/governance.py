@@ -53,6 +53,9 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                 if reason:
                     return c._block_from_snapshot(snapshot, rid, reason)
                 outcome = payload["outcome"]
+                if outcome == "request_changes" and not payload["change_request"].strip():
+                    # Whitespace-only feedback is not a meaningful request; treat as malformed.
+                    return c._fault(rid, "invalid_request")
                 if outcome == "approve":
                     if snapshot.graph is None:
                         return c._block_from_snapshot(snapshot, rid, "graph.missing")
@@ -60,10 +63,10 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                     if reason:
                         return c._block_from_snapshot(snapshot, rid, reason)
                     governed.update(state="approved", approved_digest=governed["proposal_digest"],
-                                    approval_kind=payload["approval_kind"])
+                                    approval_kind=payload["approval_kind"], change_request=None)
                     next_state = replace(state, modes=governed["proposal"]["modes"],
                                          budgets={**state.budgets, **governed["proposal"]["budgets"]})
-                elif outcome == "amend":
+                elif outcome in {"amend", "request_changes"} and "amendment" in payload:
                     amendment = payload["amendment"]
                     graph = amendment["graph"]
                     proposed = amendment["configuration"]
@@ -75,8 +78,12 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                     art = artifact("graph", {"graph": policy.canonical_graph(graph)})
                     domain = (art,)
                     next_state = replace(state, selected_graph_artifact_id=art["artifact_id"])
+                if outcome == "request_changes":
+                    governed["change_request"] = {"text": payload["change_request"],
+                        "plan_revision": payload["plan_revision"],
+                        "proposal_digest": payload["proposal_digest"]}
                 elif outcome == "reject":
-                    governed["state"] = "rejected"
+                    governed.update(state="rejected", change_request=None)
                 prior = next((r for r in governed["receipts"] if r["id"] == payload["receipt_id"]), None)
                 fingerprint = policy.canonical_digest(payload)
                 if prior is None:

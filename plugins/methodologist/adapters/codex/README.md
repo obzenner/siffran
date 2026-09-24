@@ -29,18 +29,16 @@ This adapter intentionally provides no slash command, task widget, persistence,
 or hooks. Catalog presentation and human choice happen in the shared skill;
 `methodologist_select` validates only the name already chosen by the user.
 
-Run the deterministic and real-host checks from the repository root:
+Run the deterministic check from the repository root:
 
 ```sh
 make methodologist-codex-check
-make methodologist-codex-smoke  # existing Codex login or OPENAI_API_KEY
 ```
 
-The smoke pins `@openai/codex@0.146.0`, creates isolated temporary `HOME` and
-`CODEX_HOME` directories, installs this repository as a marketplace, and
-verifies marketplace, skill, and MCP invocation. Methodologist itself bundles
-no lifecycle hooks; Empirica is a separate marketplace entry whose hooks must
-be installed and trusted independently.
+Installed-host skill/MCP sanity is operator-led through the procedure printed by
+`make native-qualification`; it uses the operator's normal environment and copies no credentials.
+Methodologist itself bundles no lifecycle hooks; Empirica is a separate marketplace entry whose
+hooks must be installed and trusted independently.
 
 [plugins]: https://developers.openai.com/plugins/build/plugins
 [skills]: https://developers.openai.com/codex/skills

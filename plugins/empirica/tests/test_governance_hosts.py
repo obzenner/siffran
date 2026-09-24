@@ -58,10 +58,12 @@ class GovernanceHostTests(unittest.TestCase):
             return
         if self.reply_action == "timeout":
             return
+        content = {"decision": "approve", "inventory_confirmed": True,
+                   "auditor": AUDITOR["provider_id"] + "/" + AUDITOR["model_id"]}
+        if "allow_same_model" in message["params"]["requestedSchema"].get("properties", {}):
+            content["allow_same_model"] = False
         self.incoming.put({"jsonrpc": "2.0", "id": "wrong" if self.wrong_id else message["id"],
-                           "result": {"action": self.reply_action,
-                           "content": {"decision": "approve", "inventory_confirmed": True, "allow_same_model": False,
-                                       "auditor": AUDITOR["provider_id"] + "/" + AUDITOR["model_id"]}}})
+                           "result": {"action": self.reply_action, "content": content}})
 
     def initialize(self, caps):
         return self.session.process({"jsonrpc": "2.0", "id": "init", "method": "initialize",
@@ -72,6 +74,47 @@ class GovernanceHostTests(unittest.TestCase):
             return self.session.process({"jsonrpc": "2.0", "id": "call", "method": "tools/call",
                 "params": {"name": "empirica_observe", "arguments": {"run_id": self.run,
                             "action": {"kind": "configure_run", "auditor": AUDITOR}}}})
+
+    def test_change_request_combines_feedback_and_numeric_edit_then_reapproves(self):
+        self.initialize({"elicitation": {"form": {}}})
+        original = self.dispatch({"type": "GetRun", "run_id": self.run})["result"]["run"]["governance"]
+        self.mediator.elicit = lambda *_: {"action": "accept", "content": {
+            "decision": "approve", "inventory_confirmed": True,
+            "auditor": "anthropic/claude-opus-4-6", "max_passes": "6",
+            "change_request": "  clarify restore behavior  "}}
+        with patch("adapters.governance.operator_inventory", return_value=self.inventory):
+            requested = self.mediator(self.dispatch({"type": "ObserveAction", "run_id": self.run,
+                "action": {"kind": "configure_run", "auditor": AUDITOR}})["result"])
+            self.assertEqual(requested["reasons"][0]["code"], "governance.changes_requested")
+            g = requested["run"]["governance"]
+            # Exact human text is kept; guidance points at the displayed revision, not the one it created.
+            self.assertEqual(g["change_request"], {"text": "  clarify restore behavior  ",
+                "plan_revision": g["plan_revision"] - 1,
+                "proposal_digest": g["change_request"]["proposal_digest"]})
+            self.assertGreater(g["plan_revision"] - 1, original["plan_revision"] - 1)
+            self.assertNotEqual(g["change_request"]["proposal_digest"], g["proposal_digest"])
+            self.assertEqual(g["proposal"]["budgets"]["max_passes"], 6)
+            self.assertEqual(g["budgets"]["max_passes"], 8)
+            self.assertEqual(g["budgets"]["passes_used"], 0)
+            self.mediator.elicit = lambda *_: {"action": "accept", "content": {
+                "decision": "approve", "inventory_confirmed": True,
+                "auditor": "anthropic/claude-opus-4-6"}}
+            approved = self.mediator(self.dispatch({"type": "ObserveAction", "run_id": self.run,
+                "action": {"kind": "configure_run"}})["result"])
+            self.assertEqual(approved["run"]["governance"]["state"], "approved")
+            self.assertIsNone(approved["run"]["governance"]["change_request"])
+            self.assertEqual(approved["run"]["governance"]["budgets"]["max_passes"], 6)
+
+    def test_reject_needs_no_auditor_or_inventory_affirmation_and_safe_rendering_is_reversible(self):
+        self.initialize({"elicitation": {}})
+        self.mediator.elicit = lambda *_: {"action": "accept", "content": {"decision": "reject"}}
+        with patch("adapters.governance.operator_inventory", return_value=self.inventory):
+            rejected = self.mediator(self.dispatch({"type": "ObserveAction", "run_id": self.run,
+                "action": {"kind": "configure_run", "auditor": AUDITOR}})["result"])
+        self.assertEqual(rejected["run"]["governance"]["state"], "rejected")
+        from adapters.governance import safe
+        self.assertEqual(safe("actual\x1b literal \\x1b \u202e emoji 😀 中"),
+                         "actual\\x1b literal \\\\x1b \\u202e emoji 😀 中")
 
     def test_documented_timeout_default_and_validated_host_override(self):
         from adapters.governance import governance_timeout
@@ -271,7 +314,7 @@ class GovernanceHostTests(unittest.TestCase):
                     dialog = receive()
                     self.assertEqual(dialog["method"], "elicitation/create")
                     send({"id": dialog["id"], "result": {"action": "accept", "content": {
-                        "decision": "approve", "inventory_confirmed": True, "allow_same_model": False,
+                        "decision": "approve", "inventory_confirmed": True,
                         "auditor": "anthropic/claude-opus-4-6"}}})
                     response = receive()
                     self.assertEqual(response["id"], "proposal")
@@ -282,7 +325,7 @@ class GovernanceHostTests(unittest.TestCase):
                     dialog = receive()
                     self.assertEqual(dialog["method"], "elicitation/create")
                     send({"id": dialog["id"], "result": {"action": "accept", "content": {
-                        "decision": "approve", "inventory_confirmed": True, "allow_same_model": False,
+                        "decision": "approve", "inventory_confirmed": True,
                         "auditor": "anthropic/claude-opus-4-6"}}})
                     response = receive()
                     self.assertEqual(response["id"], "approval")
@@ -299,11 +342,58 @@ class GovernanceHostTests(unittest.TestCase):
         self.initialize({"elicitation": {}})
         self.propose()
         self.assertIn(GRAPH["claims"][0]["text"], self.sent[0]["params"]["message"])
-        self.assertIn(json.dumps(AUTHOR["model_id"]), self.sent[0]["params"]["message"])
+        self.assertIn(AUTHOR["model_id"], self.sent[0]["params"]["message"])
         self.assertEqual(len(self.session.tools.definitions()), 3)
         self.assertNotIn("governance_decision", repr(self.session.tools.definitions()))
         view = self.dispatch({"type": "GetRun", "run_id": self.run})["result"]["run"]
         self.assertIn(view["governance"]["proposal_digest"], form(view)[0])
+
+
+class GovernancePresentationTests(unittest.TestCase):
+    """Pure presentation checks; real host/service transitions are tested above."""
+
+    def view(self):
+        from core.governance import initial
+        budgets = {"max_passes": 8, "max_spawns": 0, "max_audit_spawns": 1}
+        g = initial("Exact goal", budgets, {"cli_exec": False, "multi_provider": False})
+        g.update(scope=copy.deepcopy(GRAPH), context=copy.deepcopy(CONTEXT),
+                 budgets={**budgets, "passes_used": 2, "spawns_used": 0, "audit_spawns_used": 0},
+                 inventory_status="multiple", interactions_remaining={"proposal": 3, "total": 128})
+        return {"goal": "Exact goal", "governance": g}
+
+    def test_safe_choices_bidi_and_nonzero_budget_floor(self):
+        from adapters.governance import safe
+        view = self.view()
+        view["governance"]["context"]["inventory"]["members"].append(
+            {"provider_id": "unknown", "model_id": "private\x1b[2J\u061c"})
+        message, schema = form(view)
+        self.assertEqual(safe("\u061c"), "\\u061c")
+        self.assertNotEqual(safe("\u061c"), safe("\\u061c"))
+        self.assertNotIn("\u061c", message)
+        self.assertEqual(schema["properties"]["max_passes"]["minimum"], 2)
+        self.assertEqual(schema["properties"]["max_passes"]["default"], 8)
+        self.assertIn("Investigation passes: proposed 8, already used 2", message)
+        choices = schema["properties"]["auditor"]["enum"]
+        self.assertIn("unknown/private\\x1b[2J\\u061c", choices)
+        self.assertTrue(all("\x1b" not in choice and "\u061c" not in choice for choice in choices))
+
+    def test_maximal_scope_is_complete_without_relying_on_native_rendering(self):
+        from adapters.governance import readable, safe
+        view = self.view()
+        graph = view["governance"]["scope"]
+        graph["claims"] = [{"id": f"C{i}", "text": f"claim-{i} " + "中" * 2038,
+                            "kind": "needs-experiment", "gating": i % 2 == 0} for i in range(32)]
+        graph["root"] = "C0"
+        graph["edges"] = [{"from": f"C{i}", "to": f"C{j}", "type": "SupportedBy"}
+                          for i in range(32) for j in range(i + 1, 32)][:128]
+        text = readable(view)
+        for claim in graph["claims"]:
+            self.assertIn(safe(claim["text"]), text)
+        for edge in graph["edges"]:
+            self.assertIn(f"{edge['from']} SupportedBy {edge['to']}", text)
+        for value in ("Exact goal", "C0", "deliberative", "64", "complete=True", "authorized=True",
+                      view["governance"]["proposal_digest"], AUTHOR["model_id"], AUDITOR["model_id"]):
+            self.assertIn(value, text)
 
 
 if __name__ == "__main__":

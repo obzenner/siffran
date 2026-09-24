@@ -65,7 +65,7 @@ ordering claim is inferred from that sensor gap.
 
 ```sh
 make check-codex
-make empirica-host-adapter-check   # deterministic adapter conformance only
-make empirica-host-live-check      # retained installed-host promotion receipts
-make codex-live-check CODEX='npx -y @openai/codex@0.146.0'
+make empirica-host-integration  # expensive simulated conformance, no installed host
+make native-qualification       # operator-led sanity/refusal procedure; launches nothing
+make empirica-host-live-check   # supported-host receipts; Codex is excluded
 ```

@@ -93,7 +93,7 @@ def initial(goal: str, budgets: Mapping, modes: Mapping, control_mode: str = "de
     value = {"state": "pending", "control_mode": control_mode,
              "revision_limit": AUTO_REVISION_LIMIT if control_mode == "auto" else MAX_REVISIONS,
              "plan_revision": 0, "revisions_used": 0, "approved_digest": None,
-             "approval_kind": None, "receipts": [],
+             "approval_kind": None, "receipts": [], "change_request": None,
              "proposal": {"budgets": {k: budgets[k] for k in CEILINGS},
                           "modes": dict(modes), "auditor": None, "allow_same_model": False},
              "context": {"inventory": {"members": [], "source": "unknown",
@@ -212,7 +212,8 @@ def decision_error(run_id: str, governance: Mapping, decision: Mapping) -> str |
     if prior:
         if fingerprint in {prior["fingerprint"], prior["presentation_fingerprint"]}:
             return "inert"
-        presentation = {k: v for k, v in decision.items() if k != "amendment"}
+        presentation = {k: v for k, v in decision.items()
+                        if k not in {"amendment", "change_request"}}
         presentation["outcome"] = "present"
         if (prior["outcome"] != "present" or decision["outcome"] == "present" or
                 canonical_digest(presentation) != prior["presentation_fingerprint"]):
@@ -228,11 +229,24 @@ def decision_error(run_id: str, governance: Mapping, decision: Mapping) -> str |
         return "governance.approval_unavailable"
     if governance["state"] == "approved":
         return "governance.receipt_replay"
+    if decision["outcome"] == "request_changes" and expected == "auto":
+        # Guidance is deliberative host_ui feedback; auto has no human to author it.
+        return "governance.approval_unavailable"
     if decision["outcome"] == "present":
         return context_error(governance) if expected == "host_ui" else "governance.approval_unavailable"
     if expected == "host_ui" and prior is None:
         return context_error(governance) or "governance.receipt_replay"
     return None
+
+
+def change_request_valid(governance: Mapping) -> bool:
+    """Stored guidance refers to a displayed (past or current) revision and is never blank."""
+    request = governance["change_request"]
+    if request is None:
+        return True
+    return (bool(request["text"].strip())
+            and 0 <= request["plan_revision"] <= governance["plan_revision"]
+            and governance["control_mode"] != "auto")
 
 
 def invariant(doc: Mapping) -> bool:
@@ -254,8 +268,11 @@ def invariant(doc: Mapping) -> bool:
         return False
     if value["approval_kind"] not in {None, "auto" if value["control_mode"] == "auto" else "host_ui"}:
         return False
+    if not change_request_valid(value):
+        return False
     if value["state"] == "approved":
-        return (value["approved_digest"] == value["proposal_digest"] and bool(receipts)
+        return (value["change_request"] is None
+                and value["approved_digest"] == value["proposal_digest"] and bool(receipts)
                 and selection_error(value) is None
                 and value["proposal"]["modes"] == doc["modes"]
                 and all(value["proposal"]["budgets"][k] == doc["budgets"][k] for k in CEILINGS))

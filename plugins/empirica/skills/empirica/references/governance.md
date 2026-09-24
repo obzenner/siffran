@@ -21,9 +21,20 @@ Once populated, read `run.governance.context.inventory.members` and propose an a
 `configure_run` for a one-dialog approval. Otherwise choose in the first dialog: that choice
 amends the null-auditor proposal, and a second `configure_run` must obtain fresh final consent.
 
-The host dialog can approve, amend, reject, decline, or cancel. An amendment produces a new proposal
-that needs a second approval (`configure_run` again, even with no changes). Cancel, timeout, missing
-UI, unknown inventory, or conflicting/stale replies never grant authority. Public reads, route,
+The host dialog shows the whole proposal in plain language (goal, every claim and dependency,
+numeric ceilings next to what is already used, labeled modes, auditor, inventory). Untrusted author
+text is fenced on `| ` lines with controls, bidi characters and backslashes visibly escaped. The
+human can approve the CURRENT displayed proposal, edit configuration with primitive fields (numbers,
+Enabled/Disabled modes, an auditor choice — never user-authored JSON), request changes in plain
+language, reject, decline, or cancel. Edits are submitted for another review and are NOT approved
+yet: an amendment produces a new proposal that needs a second approval (`configure_run` again).
+A plain-language request is stored durably as `run.governance.change_request`
+`{text, plan_revision, proposal_digest}` naming the displayed proposal, returned with the public
+reason `governance.changes_requested`, and preserved through graph/configuration/context revisions
+until a committed approve or reject clears it. It is guidance for the author, never consent or
+evidence; the digest excludes it and no public action can set or clear it. Nonblank feedback on an
+approve submission becomes a change request rather than being dropped. Cancel, timeout, missing
+UI, unknown inventory, unrecognized choices, or conflicting/stale replies never grant authority. Public reads, route,
 graph/configuration corrections, and explicit `report_convergence(intent="stop")` remain available
 while pending. Do not loop on a declined proposal. The host reserves an interaction through CAS
 **before** opening UI: at most 3 per material proposal/revision and 128 total per run, including
@@ -116,11 +127,11 @@ the same OS principal who can modify plugin/configuration files.
 The proposal is bounded, not silently truncated: goal 4096 characters, 32 claims (2048 characters
 per claim text), 128 edges, and 32 inventory members. IDs are at most 128 characters. Oversized
 input is rejected; split the goal into independently governed runs rather than hiding scope.
-Claude's `scope_json` amendment field admits **1,241,316 characters**: at most 12 escaped ASCII
-characters per Unicode scalar (including astral surrogate pairs), covering root, 32 claim IDs/texts,
-128 edge endpoints, and conservative JSON syntax. Quotes, backslashes and Unicode are not stripped;
-all scope text remains exact UNTRUSTED data. This bounds complete standard JSON serialization,
-not arbitrary whitespace padding. Private receipt history is bounded to 128 slots. Reservations
+Change-request text is bounded to 4096 characters and kept exactly (whitespace-only is not a
+request). Numeric edits are bounded 1..4 digits and validated against the canonical maxima
+(1024/128/128) and the counters already used; floats, signs, exponents and unknown keys are refused.
+Scope text is never edited through the dialog; all scope text remains exact UNTRUSTED data.
+Private receipt history is bounded to 128 slots. Reservations
 and their final outcomes share a slot, so the third authorized prompt can still complete at the
 limit; explicit auto records non-human receipts without a presentation. Effective budgets remain
 the sole work-accounting source; proposed ceilings do not install until approval.

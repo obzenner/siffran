@@ -110,6 +110,7 @@
       "author": null,
       "ingress": "unavailable"
     },
-    "proposal_digest": "sha256:9d142ea3de710d94e2622bb67fc71c1ae00b70aa5dc1b673f253515d6ca45895"
+    "proposal_digest": "sha256:9d142ea3de710d94e2622bb67fc71c1ae00b70aa5dc1b673f253515d6ca45895",
+    "change_request": null
   }
 }

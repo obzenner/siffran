@@ -96,7 +96,10 @@ Do this before reading files, searching, browsing, or running commands.
    The host-owned human deadline is 900s, with `EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS` in 1..1500s;
    at most 3 presentations per revision and 128 per run are durably reserved before UI. Timeout
    is dismissal, not human rejection. Do not loop on refusal or exhaustion.
-6. Wait for `run.governance.state == "approved"` bound to the exact displayed proposal. Amendments
+6. On `governance.changes_requested`, read `run.governance.change_request`, draft the requested
+   graph/configuration revision, and call `configure_run` for fresh review. The request is guidance,
+   never consent or evidence. Do not repeat approval prompts instead of addressing the request.
+   Wait for `run.governance.state == "approved"` bound to the exact displayed proposal. Amendments
    need a second review. Then record `{"kind":"investigate"}` before any native read, search,
    command, evidence submission, or child launch. Approval does not supply either witness.
 7. Read [references/governance.md](references/governance.md) and

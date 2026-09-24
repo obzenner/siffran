@@ -44,7 +44,7 @@ class GovernanceServiceTests(unittest.TestCase):
         payload = {"run_id": self.run_id, "receipt_id": receipt + "-" + str(g["plan_revision"]), "proposal_digest": g["proposal_digest"],
                    "plan_revision": g["plan_revision"], "approval_kind": "host_ui", "outcome": outcome, **kwargs}
         if reserve and outcome != "present" and payload["approval_kind"] == "host_ui" and g["state"] != "approved" and not g["prompt_error"]:
-            present = {k: v for k, v in payload.items() if k != "amendment"}
+            present = {k: v for k, v in payload.items() if k not in {"amendment", "change_request"}}
             present["outcome"] = "present"
             self.assertIn(self.admit(present)["type"], {"Allow", "Inert"})
         return payload
@@ -99,6 +99,30 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertEqual(decoded.kind, "valid")
         traverse_history(decoded.state, self.artifacts.read(key))
 
+    def test_feedback_replay_conflict_cross_run_and_staleness_never_overwrite_guidance(self):
+        self.prepare()
+        feedback = self.decision("feedback", "request_changes", change_request="  Retain this request.\n")
+        before = copy.deepcopy(self.runs.data)
+        for changed in ({"run_id": "other"}, {"plan_revision": 900},
+                        {"proposal_digest": "sha256:" + "a" * 64}):
+            self.assertEqual(self.admit({**feedback, **changed})["type"], "Block")
+            self.assertEqual(self.runs.data, before)
+        self.runs.conflicts = 1
+        self.assertEqual(self.admit(feedback)["type"], "Allow")
+        accepted = copy.deepcopy(self.runs.data)
+        self.assertEqual(self.admit(feedback)["type"], "Inert")
+        self.assertEqual(self.admit({**feedback, "change_request": "overwrite"})["type"], "Block")
+        self.assertEqual(self.runs.data, accepted)
+        stale = self.decision("stale-feedback", "request_changes", change_request="Do not store me.")
+        graph = copy.deepcopy(GRAPH)
+        graph["claims"][0]["text"] = "new proposal while the form is open"
+        self.assertEqual(self.action("graph", payload=graph)["type"], "Allow")
+        revised = copy.deepcopy(self.runs.data)
+        self.assertEqual(self.admit(stale)["reasons"][0]["code"], "governance.stale_proposal")
+        self.assertEqual(self.action("configure_run", change_request="forged")["type"], "Fault")
+        self.assertEqual(self.runs.data, revised)
+        self.assertEqual(self.view()["governance"]["change_request"]["text"], feedback["change_request"])
+
     def test_configuration_is_proposal_only_and_freeze_preserves_approval(self):
         self.prepare()
         self.admit(self.decision())
@@ -140,6 +164,82 @@ class GovernanceServiceTests(unittest.TestCase):
             self.assertEqual(self.admit(self.decision(str(i), approval_kind="auto"))["type"], "Allow")
         graph["claims"][0]["text"] = "ninth"
         self.assertEqual(self.action("graph", payload=graph)["reasons"][0]["code"], "governance.revision_limit")
+
+    def test_change_request_lifecycle_persists_grants_nothing_and_fails_closed(self):
+        self.prepare()
+        g = self.view()["governance"]
+        displayed = (g["plan_revision"], g["proposal_digest"])
+        # Whitespace-only guidance is malformed, not a stored request.
+        self.assertEqual(self.admit(self.decision("blank", "request_changes", change_request="  \n "))["type"], "Fault")
+        self.assertIsNone(self.view()["governance"]["change_request"])
+        # Exact text is stored against the displayed revision; the run stays pending and grants nothing.
+        self.assertEqual(self.admit(self.decision("ask", "request_changes",
+                                                  change_request="  split C0 into restore/replay  "))["type"], "Allow")
+        g = self.view()["governance"]
+        self.assertEqual(g["state"], "pending")
+        self.assertEqual(g["change_request"], {"text": "  split C0 into restore/replay  ",
+                                               "plan_revision": displayed[0], "proposal_digest": displayed[1]})
+        self.assertEqual(self.action("investigate")["reasons"][0]["code"], "governance.approval_required")
+        # Author graph and context revisions preserve the guidance; it survives a real restore.
+        revised = copy.deepcopy(GRAPH)
+        revised["claims"][0]["text"] = "restore/replay split"
+        self.assertEqual(self.action("graph", payload=revised)["type"], "Allow")
+        context = copy.deepcopy(CONTEXT)
+        context["inventory"]["members"].append({"provider_id": "private", "model_id": "unknown"})
+        self.service.trusted_governance_context(run_id=self.run_id, payload=context)
+        g = self.view()["governance"]
+        self.assertEqual(g["change_request"]["text"], "  split C0 into restore/replay  ")
+        self.assertEqual(g["change_request"]["plan_revision"], displayed[0])
+        self.assertGreater(g["plan_revision"], displayed[0])
+        restored = self.request({"type": "RestoreRun", "run_id": self.run_id})
+        self.assertEqual(restored["run"]["governance"]["change_request"], g["change_request"])
+        # Combined feedback + numeric edit records guidance against the displayed digest, not the created one.
+        proposal = copy.deepcopy(g["proposal"])
+        proposal["budgets"]["max_passes"] = 6
+        self.assertEqual(self.admit(self.decision("both", "request_changes", change_request="lower passes too",
+            amendment={"graph": revised, "configuration": proposal}))["type"], "Allow")
+        after = self.view()["governance"]
+        self.assertEqual(after["proposal"]["budgets"]["max_passes"], 6)
+        self.assertEqual(after["change_request"]["plan_revision"], g["plan_revision"])
+        self.assertEqual(after["change_request"]["proposal_digest"], g["proposal_digest"])
+        self.assertNotEqual(after["proposal_digest"], g["proposal_digest"])
+        self.assertEqual(self.view()["governance"]["budgets"]["max_passes"], 8)
+        # Reject clears guidance; a later approval of a fresh proposal stores none.
+        self.assertEqual(self.admit(self.decision("no", "reject"))["type"], "Allow")
+        self.assertIsNone(self.view()["governance"]["change_request"])
+        self.assertEqual(self.view()["status"], "active")
+        self.assertEqual(self.admit(self.decision("again", "request_changes", change_request="one more"))["type"], "Allow")
+        self.assertEqual(self.admit(self.decision("yes"))["type"], "Allow")
+        approved = self.view()["governance"]
+        self.assertEqual(approved["state"], "approved")
+        self.assertIsNone(approved["change_request"])
+        self.assertEqual(self.view()["governance"]["budgets"]["max_passes"], 6)
+        # Stored guidance claiming a future revision, blank text, or an approved state fails closed.
+        raw = copy.deepcopy(next(iter(self.runs.data.values())).value)
+        for corrupt in ({"text": "x", "plan_revision": raw["governance"]["plan_revision"] + 1,
+                         "proposal_digest": approved["proposal_digest"]},
+                        {"text": " ", "plan_revision": 0, "proposal_digest": approved["proposal_digest"]},
+                        {"text": "x", "plan_revision": 0, "proposal_digest": approved["proposal_digest"]}):
+            broken = copy.deepcopy(raw)
+            broken["governance"]["change_request"] = corrupt
+            self.assertEqual(classify_and_decode(broken).kind, "current_corrupt", corrupt)
+        del raw["governance"]["change_request"]
+        self.assertEqual(classify_and_decode(raw).kind, "current_corrupt")
+
+    def test_auto_mode_never_stores_human_guidance(self):
+        run = self.request({"type": "StartRun", "goal": "auto", "selector": {"project": "p", "session": "auto"},
+                            "control_mode": "auto"})["run"]
+        self.run_id = run["id"]
+        self.assertEqual(self.action("graph", payload=copy.deepcopy(GRAPH))["type"], "Allow")
+        self.service.trusted_governance_context(run_id=self.run_id, payload=copy.deepcopy(CONTEXT))
+        g = self.view()["governance"]
+        payload = {"run_id": self.run_id, "receipt_id": "auto-ask", "proposal_digest": g["proposal_digest"],
+                   "plan_revision": g["plan_revision"], "approval_kind": "auto", "outcome": "request_changes",
+                   "change_request": "not from a human"}
+        result = self.admit(payload)
+        self.assertEqual(result["type"], "Block")
+        self.assertEqual(result["reasons"][0]["code"], "governance.approval_unavailable")
+        self.assertIsNone(self.view()["governance"]["change_request"])
 
     def test_honest_stop_without_graph_and_strict_old_state(self):
         self.assertEqual(self.request({"type": "EvaluateRun", "run_id": self.run_id, "intent": "stop"})["type"], "Allow")
@@ -387,7 +487,7 @@ class GovernanceServiceTests(unittest.TestCase):
 
     def test_maximal_escaped_graph_amendment_round_trip(self):
         import json
-        from adapters.governance import MAX_SCOPE_JSON
+        from adapters.governance import readable
         from core.evaluation import valid_graph
         self.prepare()
         ids = [chr(0x10000 + n) * 128 for n in range(32)]
@@ -397,13 +497,15 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertTrue(valid_graph(graph))
         raw = json.dumps(graph, ensure_ascii=True)
         self.assertGreater(len(raw), 1000000)
-        self.assertLessEqual(len(raw), MAX_SCOPE_JSON)
         self.assertEqual(self.admit(self.decision("max", "amend", amendment={
             "graph": json.loads(raw), "configuration": self.view()["governance"]["proposal"]}))["type"], "Allow")
         self.assertEqual(self.view()["governance"]["scope"], graph)
         for text in ('"' * 2048, "\\" * 2048, "\u0000" * 2048):
             graph["claims"][0]["text"] = text
-            self.assertLessEqual(len(json.dumps(graph)), MAX_SCOPE_JSON)
+            self.action("graph", payload=graph)
+            rendered = readable(self.view())
+            self.assertIn("| ", rendered)
+            self.assertNotIn("\u0000", rendered)
 
     def test_exact_model_normalization_unknown_never_decorrelates(self):
         def host(row):
