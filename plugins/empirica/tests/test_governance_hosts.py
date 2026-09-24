@@ -62,6 +62,8 @@ class GovernanceHostTests(unittest.TestCase):
                    "auditor": AUDITOR["provider_id"] + "/" + AUDITOR["model_id"]}
         if "allow_same_model" in message["params"]["requestedSchema"].get("properties", {}):
             content["allow_same_model"] = False
+        if "auditor" not in message["params"]["requestedSchema"].get("properties", {}):
+            content.pop("auditor")
         self.incoming.put({"jsonrpc": "2.0", "id": "wrong" if self.wrong_id else message["id"],
                            "result": {"action": self.reply_action, "content": content}})
 
@@ -74,6 +76,161 @@ class GovernanceHostTests(unittest.TestCase):
             return self.session.process({"jsonrpc": "2.0", "id": "call", "method": "tools/call",
                 "params": {"name": "empirica_observe", "arguments": {"run_id": self.run,
                             "action": {"kind": "configure_run", "auditor": AUDITOR}}}})
+
+    def test_host_owned_confirmation_preserves_submitted_values(self):
+        self.initialize({"elicitation": {"form": {}}})
+        seen = []
+        def answer(message, schema):
+            seen.append((message, schema))
+            if len(seen) == 1:
+                return {"action": "accept", "content": {"decision": "approve",
+                    "inventory_confirmed": True, "max_passes": 8, "max_spawns": 2,
+                    "max_audit_spawns": 3, "cli_exec": True, "multi_provider": True}}
+            self.assertEqual(len(seen), 2)
+            self.assertIn("FINAL CONFIRMATION", message)
+            self.assertIn("Child spawns: proposed 2", message)
+            self.assertIn("Audit spawns: proposed 3", message)
+            self.assertNotIn("max_spawns", schema["properties"])
+            self.assertNotIn("cli_exec", schema["properties"])
+            current = self.dispatch({"type": "GetRun", "run_id": self.run})["result"]["run"]
+            self.assertEqual(current["governance"]["state"], "pending")
+            self.assertEqual(current["governance"]["budgets"]["max_audit_spawns"], 1)
+            return {"action": "accept", "content": {"decision": "approve", "inventory_confirmed": True}}
+        self.mediator.elicit = answer
+        result = self.propose()["result"]["structuredContent"]
+        self.assertEqual(len(seen), 2)
+        g = result["run"]["governance"]
+        self.assertEqual(g["state"], "approved")
+        self.assertEqual(g["approved_digest"], g["proposal_digest"])
+        self.assertEqual(g["budgets"]["max_spawns"], 2)
+        self.assertEqual(g["budgets"]["max_audit_spawns"], 3)
+        self.assertEqual(result["run"]["modes"], {"cli_exec": True, "multi_provider": True})
+
+    def test_host_owned_confirmation_cancel_preserves_pending_edit(self):
+        self.initialize({"elicitation": {}})
+        replies = iter([{"action": "accept", "content": {"decision": "approve",
+            "inventory_confirmed": True, "max_passes": 6}}, {"action": "cancel"}])
+        self.mediator.elicit = lambda *_: next(replies)
+        result = self.propose()["result"]["structuredContent"]
+        self.assertEqual(result["type"], "Block")
+        g = result["run"]["governance"]
+        self.assertEqual(g["state"], "pending")
+        self.assertEqual(g["proposal"]["budgets"]["max_passes"], 6)
+        self.assertEqual(g["budgets"]["max_passes"], 8)
+        self.assertIsNone(g["approved_digest"])
+
+    def test_host_owned_confirmation_cannot_accept_stale_or_edited_reply(self):
+        for scenario in ("edited_reply", "stale_reply", "missing_confirmation", "timeout", "reject"):
+            with self.subTest(scenario=scenario):
+                self.setUp()
+                self.initialize({"elicitation": {}})
+                count = 0
+                def answer(_message, _schema):
+                    nonlocal count
+                    count += 1
+                    if count == 1:
+                        return {"action": "accept", "content": {"decision": "approve",
+                            "inventory_confirmed": True, "max_passes": 6}}
+                    self.assertEqual(count, 2)
+                    content = {"decision": "approve", "inventory_confirmed": True}
+                    if scenario == "edited_reply":
+                        content["max_passes"] = 7
+                    elif scenario == "stale_reply":
+                        graph = copy.deepcopy(GRAPH)
+                        graph["claims"][0]["text"] = "changed during final confirmation"
+                        self.dispatch({"type": "ObserveAction", "run_id": self.run,
+                            "action": {"kind": "graph", "payload": graph}})
+                    elif scenario == "missing_confirmation":
+                        content.pop("inventory_confirmed")
+                    elif scenario == "timeout":
+                        return None
+                    elif scenario == "reject":
+                        content = {"decision": "reject"}
+                    return {"action": "accept", "content": content}
+                self.mediator.elicit = answer
+                result = self.propose()["result"]["structuredContent"]
+                self.assertEqual(count, 2)
+                g = result["run"]["governance"]
+                self.assertNotEqual(g["state"], "approved")
+                self.assertEqual(g["proposal"]["budgets"]["max_passes"], 6)
+                self.assertEqual(g["budgets"]["max_passes"], 8)
+                self.assertIsNone(g["approved_digest"])
+                if scenario == "missing_confirmation":
+                    self.assertIn("inventory", result["reasons"][0]["message"])
+
+    def test_host_owned_confirmation_checks_revision_even_if_digest_returns(self):
+        self.initialize({"elicitation": {}})
+        refresh = self.mediator.context_ingress
+        refreshes = 0
+        def context_ingress(profile, run, context):
+            nonlocal refreshes
+            refreshes += 1
+            if refreshes == 2:
+                graph = copy.deepcopy(GRAPH)
+                graph["claims"][0]["text"] = "concurrent edit then revert"
+                for value in (graph, GRAPH):
+                    self.dispatch({"type": "ObserveAction", "run_id": run,
+                        "action": {"kind": "graph", "payload": value}})
+            return refresh(profile, run, context)
+        self.mediator.context_ingress = context_ingress
+        seen = []
+        def answer(message, _schema):
+            seen.append(message)
+            self.assertEqual(len(seen), 1)
+            return {"action": "accept", "content": {"decision": "approve",
+                "inventory_confirmed": True, "max_passes": 6}}
+        self.mediator.elicit = answer
+        result = self.propose()["result"]["structuredContent"]
+        self.assertEqual(refreshes, 2)
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(result["reasons"][0]["code"], "governance.stale_proposal")
+        self.assertIsNone(result["run"]["governance"]["approved_digest"])
+
+    def test_host_owned_human_wait_does_not_admit_work_or_convergence(self):
+        from adapters.claude.completion import stop_result
+        self.initialize({"elicitation": {}})
+        self.reply_action = "cancel"
+        self.propose()
+        self.dispatch({"type": "ObserveAction", "run_id": self.run,
+            "action": {"kind": "route", "reason": "supplied context"}})
+        stopped = self.dispatch({"type": "EvaluateRun", "run_id": self.run, "intent": "report_convergence"})
+        self.assertEqual(stopped["result"]["type"], "Block")
+        self.assertEqual(stop_result(stopped).exit_code, 0)
+        for command in ({"type": "ObserveAction", "action": {"kind": "investigate"}},
+                        {"type": "ObserveAction", "action": {"kind": "child_reserve", "purpose": "test",
+                         "role_profile": "worker", "execution": "foreground", "resource_class": "investigation"}},
+                        {"type": "EvaluateRun", "intent": "report_convergence"}):
+            blocked = self.dispatch({**command, "run_id": self.run})["result"]
+            self.assertEqual(blocked["type"], "Block")
+            self.assertEqual(blocked["run"]["status"], "active")
+            self.assertIsNone(blocked["run"]["governance"]["approved_digest"])
+
+    def test_host_owned_singleton_final_feedback_needs_no_consent(self):
+        for final_decision, feedback in (("request_changes", True), ("approve", True), ("approve", False)):
+            with self.subTest(final_decision=final_decision, feedback=feedback):
+                self.setUp()
+                self.initialize({"elicitation": {}})
+                self.inventory["members"] = [AUTHOR]
+                replies = iter([
+                    {"action": "accept", "content": {"decision": "approve", "inventory_confirmed": True,
+                     "allow_same_model": True}},
+                    {"action": "accept", "content": {"decision": final_decision, "allow_same_model": False,
+                     **({"change_request": "  revise the scope instead  "} if feedback else {"inventory_confirmed": True})}},
+                ])
+                self.mediator.elicit = lambda *_: next(replies)
+                with patch("adapters.governance.operator_inventory", return_value=self.inventory):
+                    result = self.mediator(self.dispatch({"type": "ObserveAction", "run_id": self.run,
+                        "action": {"kind": "configure_run", "auditor": AUTHOR}})["result"])
+                g = result["run"]["governance"]
+                if feedback:
+                    self.assertEqual(result["reasons"][0]["code"], "governance.changes_requested")
+                    self.assertEqual(g["change_request"]["text"], "  revise the scope instead  ")
+                else:
+                    self.assertIn("Same-model", result["reasons"][0]["message"])
+                    self.assertIsNone(g["change_request"])
+                self.assertTrue(g["proposal"]["allow_same_model"])
+                self.assertEqual(g["state"], "pending")
+                self.assertIsNone(g["approved_digest"])
 
     def test_change_request_combines_feedback_and_numeric_edit_then_reapproves(self):
         self.initialize({"elicitation": {"form": {}}})
@@ -187,10 +344,9 @@ class GovernanceHostTests(unittest.TestCase):
                 result = self.dispatch({"type": "ObserveAction", "run_id": self.run,
                     "action": {"kind": "configure_run"}})["result"]
                 return self.mediator(result)
-            first = propose()
-            self.assertNotEqual(first["run"]["governance"]["state"], "approved")
-            self.assertEqual(first["run"]["governance"]["proposal"]["auditor"], AUDITOR)
-            self.assertEqual(propose()["run"]["governance"]["state"], "approved")
+            approved = propose()
+            self.assertEqual(approved["run"]["governance"]["state"], "approved")
+            self.assertEqual(approved["run"]["governance"]["proposal"]["auditor"], AUDITOR)
             self.assertEqual(len(self.sent), 2)
 
     def test_singleton_control_refusal_acceptance_and_fresh_consent(self):
@@ -201,8 +357,10 @@ class GovernanceHostTests(unittest.TestCase):
         consent = False
         def answer(_message, schema):
             self.assertFalse(schema["properties"]["allow_same_model"]["default"])
-            return {"action": "accept", "content": {"decision": "approve", "inventory_confirmed": True,
-                "auditor": "anthropic/" + AUTHOR["model_id"], "allow_same_model": consent}}
+            content = {"decision": "approve", "inventory_confirmed": True, "allow_same_model": consent}
+            if "auditor" in schema["properties"]:
+                content["auditor"] = "anthropic/" + AUTHOR["model_id"]
+            return {"action": "accept", "content": content}
         self.mediator.elicit = answer
         with patch("adapters.governance.operator_inventory", return_value=self.inventory):
             def propose():
@@ -212,8 +370,6 @@ class GovernanceHostTests(unittest.TestCase):
             self.assertFalse(refused["run"]["governance"]["proposal"]["allow_same_model"])
             self.assertNotEqual(refused["run"]["governance"]["state"], "approved")
             consent = True
-            amended = propose()
-            self.assertNotEqual(amended["run"]["governance"]["state"], "approved")
             self.assertEqual(propose()["run"]["governance"]["state"], "approved")
 
     def test_invalid_ui_content_dismisses_but_private_invalid_input_never_writes(self):
@@ -316,24 +472,24 @@ class GovernanceHostTests(unittest.TestCase):
                     send({"id": dialog["id"], "result": {"action": "accept", "content": {
                         "decision": "approve", "inventory_confirmed": True,
                         "auditor": "anthropic/claude-opus-4-6"}}})
+                    confirmation = receive()
+                    self.assertEqual(confirmation["method"], "elicitation/create")
+                    self.assertNotEqual(confirmation["id"], dialog["id"])
+                    self.assertIn("FINAL CONFIRMATION", confirmation["params"]["message"])
+                    self.assertNotIn("auditor", confirmation["params"]["requestedSchema"]["properties"])
+                    send({"id": confirmation["id"], "result": {"action": "accept", "content": {
+                        "decision": "approve", "inventory_confirmed": True}}})
                     response = receive()
                     self.assertEqual(response["id"], "proposal")
-                    self.assertNotEqual(response["result"]["structuredContent"]["run"]["governance"]["state"], "approved")
-                    send({"id": "approval", "method": "tools/call", "params": {
-                        "name": "empirica_observe", "arguments": {"run_id": run,
-                        "action": {"kind": "configure_run"}}}})
-                    dialog = receive()
-                    self.assertEqual(dialog["method"], "elicitation/create")
-                    send({"id": dialog["id"], "result": {"action": "accept", "content": {
-                        "decision": "approve", "inventory_confirmed": True,
-                        "auditor": "anthropic/claude-opus-4-6"}}})
-                    response = receive()
-                    self.assertEqual(response["id"], "approval")
                     self.assertEqual(response["result"]["structuredContent"]["run"]["governance"]["state"], "approved")
                     self.assertEqual(call({"type": "GetRun", "run_id": run})["run"]["governance"]["approval_kind"], "host_ui")
                 finally:
                     process.stdin.close()
-                    process.wait(timeout=10)
+                    try:
+                        process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=10)
                     process.stdout.close()
                     process.stderr.close()
                 self.assertEqual(process.returncode, 0)

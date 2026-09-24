@@ -19,7 +19,9 @@ Bootstrap inventory is host-populated, not an author assertion: an initial Claud
 have no inventory until a lifecycle/context refresh or `configure_run` reads the operator file.
 Once populated, read `run.governance.context.inventory.members` and propose an auditor in
 `configure_run` for a one-dialog approval. Otherwise choose in the first dialog: that choice
-amends the null-auditor proposal, and a second `configure_run` must obtain fresh final consent.
+amends the null-auditor proposal. Claude immediately opens a host-owned final confirmation;
+Pi needs re-review. When calling `configure_run` only to review, omit configuration fields so
+the current human-edited proposal is preserved rather than overwritten.
 
 The host dialog shows the whole proposal in plain language (goal, every claim and dependency,
 numeric ceilings next to what is already used, labeled modes, auditor, inventory). Untrusted author
@@ -27,7 +29,15 @@ text is fenced on `| ` lines with controls, bidi characters and backslashes visi
 human can approve the CURRENT displayed proposal, edit configuration with primitive fields (numbers,
 Enabled/Disabled modes, an auditor choice — never user-authored JSON), request changes in plain
 language, reject, decline, or cancel. Edits are submitted for another review and are NOT approved
-yet: an amendment produces a new proposal that needs a second approval (`configure_run` again).
+yet. On Claude, a configuration-only amendment opens a **FINAL CONFIRMATION** inside the same
+host call: the complete amended proposal is read-only, inventory confirmation remains explicit,
+and singleton consent must be reaffirmed. No author action runs between the two presentations.
+Approval of the unchanged final proposal installs the edited values. Reject, request changes,
+cancel, invalid/expired input or a concurrent revision never silently approves it. Each call opens
+at most two forms, each with its own reserved receipt and deadline; even an edit-and-revert
+between them invalidates the captured revision. Pi retains its existing re-review flow.
+Numeric/mode/auditor edits do not require a prose rationale; an empty `change_request` does not
+make those edits suspicious. Do not restore original values when seeking reapproval.
 A plain-language request is stored durably as `run.governance.change_request`
 `{text, plan_revision, proposal_digest}` naming the displayed proposal, returned with the public
 reason `governance.changes_requested`, and preserved through graph/configuration/context revisions
@@ -36,7 +46,10 @@ evidence; the digest excludes it and no public action can set or clear it. Nonbl
 approve submission becomes a change request rather than being dropped. Cancel, timeout, missing
 UI, unknown inventory, unrecognized choices, or conflicting/stale replies never grant authority. Public reads, route,
 graph/configuration corrections, and explicit `report_convergence(intent="stop")` remain available
-while pending. Do not loop on a declined proposal. The host reserves an interaction through CAS
+while pending. Do not loop on a declined proposal. Claude Stop may settle a deliberative human
+approval wait with a visible **not converged** notice; this ends only the assistant turn, leaves
+run status active, and grants no investigative or convergence authority. Auto runs, unrelated
+blocks, malformed state and transport failures retain fail-closed Stop behavior. The host reserves an interaction through CAS
 **before** opening UI: at most 3 per material proposal/revision and 128 total per run, including
 pre-approval revisions. Cancel, decline, timeout, invalid UI content, and explicit rejection do
 not restore capacity. A private `present` receipt becomes at most one exact-bound final receipt;

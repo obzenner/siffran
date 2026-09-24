@@ -55,10 +55,10 @@ def operator_inventory() -> dict:
         return unknown
 
 
-def unavailable(result: dict, code: str = "governance.approval_unavailable") -> dict:
+def unavailable(result: dict, code: str = "governance.approval_unavailable", *, message: str | None = None) -> dict:
     row = protocol._PUBLIC_CONTRACT["reasons"][code]
     return {"type": "Block", "run": result["run"], "reasons": [{"code": code,
-            "parameters": {}, "message": row["message"], "sections": row["sections"],
+            "parameters": {}, "message": message or row["message"], "sections": row["sections"],
             "next_actions": row["next_actions"]}]}
 
 
@@ -111,7 +111,7 @@ def readable(run: dict) -> str:
     return "\n".join(lines)
 
 
-def form(run: dict) -> tuple[str, dict]:
+def form(run: dict, *, confirmation: bool = False) -> tuple[str, dict]:
     g, proposed = run["governance"], run["governance"]["proposal"]
     members = g["context"]["inventory"]["members"]
     props = {"decision": {"type": "string", "enum": ["approve", "request_changes", "reject"], "title": "Your decision"},
@@ -125,7 +125,10 @@ def form(run: dict) -> tuple[str, dict]:
                  auditor={"type": "string", "enum": [safe(m["provider_id"] + "/" + m["model_id"]) for m in members], "title": "Independent auditor"})
     if inventory_status(g["context"]["inventory"]) == "singleton":
         props["allow_same_model"] = {"type": "boolean", "default": False, "title": "SAME MODEL / LOWERED INDEPENDENCE consent"}
-    return readable(run), {"type": "object", "properties": props, "required": ["decision"]}
+    if confirmation:
+        props = {k: v for k, v in props.items() if k in {"decision", "inventory_confirmed", "change_request", "allow_same_model"}}
+    message = ("FINAL CONFIRMATION — Your edits are saved, NOT approved. Confirm the exact values below; configuration is read-only.\n" if confirmation else "")
+    return message + readable(run), {"type": "object", "properties": props, "required": ["decision"]}
 
 
 class HostGovernance:
@@ -134,11 +137,12 @@ class HostGovernance:
         self.profile, self.elicit = profile, elicit
         self.context_ingress, self.decision_ingress = context_ingress, decision_ingress
 
-    def __call__(self, result: dict) -> dict:
+    def __call__(self, result: dict, *, confirmation: bool = False) -> dict:
         run = result.get("run")
         if result.get("type") != "Allow" or not isinstance(run, dict) or not run.get("governance"):
             return result
         g = run["governance"]
+        expected = (g["plan_revision"], g["proposal_digest"])
         if run["status"] != "active" or g["state"] == "approved":
             return result
         auto = g["control_mode"] == "auto"
@@ -150,19 +154,21 @@ class HostGovernance:
         if result.get("type") not in {"Allow", "Inert"} or not result.get("run"):
             return result
         run, g = result["run"], result["run"]["governance"]
+        if confirmation and expected != (g["plan_revision"], g["proposal_digest"]):
+            return unavailable(result, "governance.stale_proposal")
         if g["prompt_error"]:
             return unavailable(result, g["prompt_error"])
         decision = {"run_id": run["id"], "receipt_id": uuid4().hex, "proposal_digest": g["proposal_digest"],
                     "plan_revision": g["plan_revision"], "approval_kind": "auto" if auto else "host_ui", "outcome": "approve"}
-        def dismiss():
+        def dismiss(message=None):
             rejected = {k: v for k, v in {**decision, "outcome": "dismiss"}.items() if k not in {"amendment", "change_request"}}
             stored = self.decision_ingress(self.profile, run["id"], rejected)["result"]
-            return unavailable(stored) if stored.get("type") in {"Allow", "Inert"} else stored
+            return unavailable(stored, message=message) if stored.get("type") in {"Allow", "Inert"} else stored
         if not auto:
             presented = self.decision_ingress(self.profile, run["id"], {**decision, "outcome": "present"})["result"]
             if presented.get("type") != "Allow":
                 return presented
-            message, schema = form(presented["run"])
+            message, schema = form(presented["run"], confirmation=confirmation)
             try:
                 answer = self.elicit(message, schema)
                 if not isinstance(answer, dict) or answer.get("action") != "accept" or not isinstance(answer.get("content"), dict):
@@ -181,7 +187,7 @@ class HostGovernance:
                     proposal["modes"].update({k: content.get(k, proposal["modes"][k]) for k in ("multi_provider", "cli_exec")})
                     if "auditor" in content:
                         proposal["auditor"] = next(m for m in context["inventory"]["members"] if safe(m["provider_id"] + "/" + m["model_id"]) == content["auditor"])
-                    proposal["allow_same_model"] = content.get("allow_same_model", False if g["inventory_status"] == "singleton" else proposal["allow_same_model"])
+                    proposal["allow_same_model"] = proposal["allow_same_model"] if confirmation else content.get("allow_same_model", False if g["inventory_status"] == "singleton" else proposal["allow_same_model"])
                     changed = proposal != plain(g["proposal"])
                     # Exact human text is stored; trimming only decides whether feedback exists.
                     text = content.get("change_request", "")
@@ -190,7 +196,9 @@ class HostGovernance:
                     if action == "approve" and text:
                         action = "request_changes"
                     if action == "approve" and content.get("inventory_confirmed") is not True:
-                        return dismiss()
+                        return dismiss("Confirm that the inventory is complete and authorized before approving. Nothing was approved; wait for human input rather than retrying.")
+                    if confirmation and action == "approve" and g["inventory_status"] == "singleton" and content.get("allow_same_model") is not True:
+                        return dismiss("Same-model approval requires renewed explicit consent in final confirmation.")
                     if action == "approve" and changed:
                         action = "amend"
                     if action == "request_changes" and not text:
@@ -211,6 +219,9 @@ class HostGovernance:
                 admitted["run"] = stored["run"]
                 return admitted
             return stored
+        if not confirmation and decision["outcome"] == "amend" and admitted.get("type") == "Allow":
+            # Exactly one host-owned, snapshot-bound confirmation; never hand edits back for the author to reset.
+            return self(admitted, confirmation=True)
         if decision["outcome"] == "request_changes" and admitted.get("type") in {"Allow", "Inert"}:
             return unavailable(admitted, "governance.changes_requested")
         return admitted

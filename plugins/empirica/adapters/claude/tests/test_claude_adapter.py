@@ -410,6 +410,40 @@ class ChildReserveTests(unittest.TestCase):
 class ResponseMappingTests(unittest.TestCase):
     """Honest native fail-closed response mapping for the gate events."""
 
+    def test_human_governance_wait_settles_turn_without_convergence(self) -> None:
+        def result(state="pending", code="governance.approval_required"):
+            return {"type": "Block", "run": {"status": "active", "governance": {
+                "state": state, "control_mode": "deliberative",
+                "context": {"ingress": "mcp_elicitation"}}},
+                "reasons": [{"code": code, "message": "approval required"}]}
+        for state, code in (("pending", "governance.approval_required"),
+                            ("revision_pending", "governance.revision_required"),
+                            ("rejected", "governance.approval_required")):
+            mapped = stop_result({"result": result(state, code)})
+            self.assertEqual(mapped.exit_code, 0)
+            notice = json.loads(mapped.stdout)
+            self.assertIn("not converged", notice["systemMessage"])
+            self.assertNotIn("converged", notice)
+            self.assertNotIn("decision", notice)
+        for changed in ("auto", "approved", "missing_context", "mixed", "fault", "terminal", "mismatched_reason"):
+            blocked = result()
+            if changed == "auto":
+                blocked["run"]["governance"]["control_mode"] = "auto"
+            elif changed == "approved":
+                blocked["run"]["governance"]["state"] = "approved"
+            elif changed == "missing_context":
+                blocked["run"]["governance"]["context"] = {}
+            elif changed == "mixed":
+                blocked["reasons"].append({"code": "run.corrupt"})
+            elif changed == "fault":
+                blocked["type"] = "Fault"
+            elif changed == "terminal":
+                blocked["run"]["status"] = "converged"
+            elif changed == "mismatched_reason":
+                blocked["reasons"][0]["code"] = "governance.revision_required"
+            with self.subTest(changed=changed):
+                self.assertEqual(stop_result({"result": blocked}).exit_code, 2)
+
     def test_stop_result_inert_allow_block_and_faults(self) -> None:
         self.assertEqual(stop_result({"result": {"type": "Inert", "reason": "no_run"}}).exit_code, 0)
         allow = stop_result({"result": {"type": "Allow", "converged": True,

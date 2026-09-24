@@ -106,6 +106,7 @@ check-core: ## Fast host-neutral contracts, malformed input, state, bridge, and 
 check-claude: ## Fast Claude payload, lifecycle translation, and fail-closed adapter tests
 	@printf '$(BOLD)==> claude suite$(RESET)\n'
 	@$(PYTHON) $(EMPIRICA_CLAUDE_ADAPTER_TESTS)
+	@$(MAKE) --no-print-directory empirica-governance-host-check ARGS='-k host_owned'
 
 check-codex: methodologist-codex-check empirica-codex-check ## Fast Codex package, hook, payload, and MCP tests
 	@cd $(PLUGINS_DIR)/empirica/adapters/codex/tests && $(PYTHON) -m unittest -q \
@@ -124,7 +125,10 @@ check-codex: methodologist-codex-check empirica-codex-check ## Fast Codex packag
 check-pi: pi-bundle-check methodologist-pi-check empirica-pi-check ## Fast Pi package, type, unit, guard, and bounded bridge tests — needs Node
 	@printf '$(BOLD)==> pi suite ok$(RESET)\n'
 
-.PHONY: empirica-governance-check empirica-core-integration empirica-host-integration
+.PHONY: empirica-governance-check empirica-core-integration empirica-host-integration empirica-governance-host-check
+empirica-governance-host-check: ## Check real-service Claude form mediation (ARGS="-k test_name" selects cases)
+	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_governance_hosts $(ARGS)
+
 empirica-governance-check: ## Diagnose full real-service governance CAS, replay, consent, and host flows
 	@$(PYTHON) $(EMPIRICA_GOVERNANCE_TESTS)
 	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/test_governance_hosts.py
