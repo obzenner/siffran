@@ -39,6 +39,14 @@ This deliberately reduces TS-to-real-Python whole-journey coverage: the remainin
 
 Contracts and vendor schemas were not deletion candidates. The shared v2 driver/SUT adapter remain because the live behavioral modules import them; removing that seam would be a test architecture rewrite rather than redundant-runner subtraction.
 
+## Inspecting run state
+
+`make empirica-runs` is the read-only census of operational run state (`scripts/empirica_run_census.py`). It enumerates only the documented store layout `<home>/projects/*/runs/*/gen-*/run.json` under `EMPIRICA_HOME` (default `~/.empirica-plugin`), and qualification homes only at `<root>/<candidate>/<cell>/state` via `ARGS="--qualification-root <dir>"`. Use `--runs`, `--status`, `--host`, `--run <id-prefix>` and `--json` through `ARGS`. Host attribution is inferred from the audit role profile and native id and is labelled as such. Do not search for run state with recursive walks over `$HOME`, `/tmp` or worktrees: they traverse `node_modules` and `.git` and take minutes. `make empirica-run-census-unit-check` (part of `check-static`) guards the fixed layout and the no-write property.
+
+`make claude-subagent-models` reports requested versus served models for Claude Code `Agent` launches (`scripts/claude_subagent_models.py`). It joins each parent session under `~/.claude/projects/<project>/<session>.jsonl` with its `subagents/agent-<id>` transcript at fixed depth. Use `ARGS="--agent empirica:empirica-auditor"`, `--requested-only`, explicit session paths or `--json`. The served model is the only identity evidence; a requested alias or configured pin is not. `make claude-subagent-models-unit-check` is part of `check-static`.
+
+`make empirica-pi-auditor-resolution [DIR=<project>] [STRICT=1]` reports which auditor file the pinned pi-subagents actually resolves for a project, in each agent scope (`scripts/pi_auditor_resolution.mjs`). pi-subagents keys package agents by name and a later user-level package (for example a globally installed siffran) replaces a project package of the same name, which the Pi adapter then blocks as a shadowed auditor. Run it with `STRICT=1` before any Pi qualification. `make pi-auditor-resolution-unit-check` (part of `check-pi`) runs it in an isolated HOME, including a shadowing negative control.
+
 ## Native qualification
 
 `make native-qualification` prints the path to `.claude/skills/native-qualification/SKILL.md`; it launches nothing. The skill specifies `make claude-dev` (directory plugins) and `make pi-dev` (project package override); neither changes the global installation. Follow the skill in an explicitly authorized, operator-present session using a supported Claude or Pi environment; the human supplies every consent response. Codex Empirica can establish only its expected refusal. Partial and failed evidence belongs in the skill's checkpoint ledger; existing converged receipt tools cannot honestly represent every governance checkpoint.

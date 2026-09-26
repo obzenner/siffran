@@ -29,6 +29,8 @@ EMPIRICA_EXECUTION_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/tests/test_execution
 EMPIRICA_PROTOCOL_ISOLATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_protocol_isolation.py
 EMPIRICA_LIVE_RECEIPT_TESTS := $(SCRIPTS)/tests/test_empirica_live_receipts.py
 EMPIRICA_CLAUDE_MCP_LOG_TESTS := $(SCRIPTS)/tests/test_check_claude_mcp_log.py
+EMPIRICA_RUN_CENSUS_TESTS := $(SCRIPTS)/tests/test_empirica_run_census.py
+CLAUDE_SUBAGENT_MODEL_TESTS := $(SCRIPTS)/tests/test_claude_subagent_models.py
 PI_CANARY_CONFIG_TESTS := $(SCRIPTS)/tests/test_configure_pi_canary.py
 EMPIRICA_D6_STRICT_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d6_strict_v2.py
 EMPIRICA_LOCATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_location.py
@@ -85,7 +87,7 @@ check-ci: check-static check-core check-claude check-codex ## Fast contributor g
 	@if [ "$(PI_CHECKS)" = "1" ]; then $(MAKE) check-pi; else printf '$(DIM)Pi suite skipped in CI (PI_CHECKS=1 to include)$(RESET)\n'; fi
 	@printf '\n$(BOLD)CI checks passed.$(RESET)\n'
 
-check-static: lint validate docs-check adr-check empirica-architecture-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check empirica-claude-mcp-log-unit-check pi-canary-unit-check pi-validator-unit-check ## Lint, manifests, docs, ADRs, contracts, vendor copies, activation, receipts, canary config
+check-static: lint validate docs-check adr-check empirica-architecture-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check claude-subagent-models-unit-check pi-canary-unit-check pi-validator-unit-check ## Lint, manifests, docs, ADRs, contracts, vendor copies, activation, receipts, canary config
 	@printf '$(BOLD)==> static suite ok$(RESET)\n'
 
 check-core: ## Fast host-neutral contracts, malformed input, state, bridge, and governance boundaries
@@ -133,7 +135,7 @@ check-codex: methodologist-codex-check empirica-codex-check ## Fast Codex packag
 		test_codex_adapter.StoreIsolationTests
 	@printf '$(BOLD)==> codex suite ok$(RESET)\n'
 
-check-pi: pi-bundle-check methodologist-pi-check empirica-pi-check ## Fast Pi package, type, unit, guard, and bounded bridge tests — needs Node
+check-pi: pi-bundle-check methodologist-pi-check empirica-pi-check pi-auditor-resolution-unit-check ## Fast Pi package, type, unit, guard, and bounded bridge tests — needs Node
 	@printf '$(BOLD)==> pi suite ok$(RESET)\n'
 
 .PHONY: empirica-governance-check empirica-core-integration empirica-host-integration empirica-governance-host-check empirica-governance-service-check
@@ -291,6 +293,16 @@ empirica-pi-typecheck: node_modules ## Validate and typecheck the Empirica Pi ad
 pi-validator-unit-check: ## Test Pi validator test selection and bounded async test invocation
 	@$(PYTHON) $(SCRIPTS)/tests/test_validate_pi_adapter.py
 
+# Which auditor file does the pinned pi-subagents resolve for a project? pi-subagents lets a later
+# (user-level) package shadow a project package of the same agent name, which makes the adapter
+# block audits as "package identity was shadowed". Read-only; run before any Pi qualification.
+.PHONY: empirica-pi-auditor-resolution pi-auditor-resolution-unit-check
+empirica-pi-auditor-resolution: node_modules ## Report the effective Pi auditor file for DIR (default: here); STRICT=1 fails when shadowed
+	@node $(SCRIPTS)/pi_auditor_resolution.mjs --project "$(or $(DIR),$(CURDIR))" $(if $(filter 1,$(STRICT)),--require-candidate)
+
+pi-auditor-resolution-unit-check: node_modules ## Test the Pi auditor-resolution probe in an isolated HOME (includes a shadowing negative control)
+	@node --test $(SCRIPTS)/tests/pi_auditor_resolution.test.mjs
+
 .PHONY: empirica-codex-check
 empirica-codex-check: ## Validate the Empirica Codex manifest, hooks, and package layout (no host execution)
 	@printf '$(BOLD)==> empirica Codex adapter$(RESET)\n'
@@ -310,6 +322,14 @@ empirica-architecture-check: ## validate Empirica 2.0 target ownership, dependen
 empirica-claude-mcp-log-unit-check: ## Test native Claude MCP admission-log verification
 	@printf '$(BOLD)==> Claude MCP admission-log unit checks$(RESET)\n'
 	@$(PYTHON) $(EMPIRICA_CLAUDE_MCP_LOG_TESTS)
+
+.PHONY: empirica-run-census-unit-check
+empirica-run-census-unit-check: ## Test the read-only Empirica run-state census (fixed layout, no writes)
+	@$(PYTHON) $(EMPIRICA_RUN_CENSUS_TESTS)
+
+.PHONY: claude-subagent-models-unit-check
+claude-subagent-models-unit-check: ## Test the requested-vs-served Claude subagent model report (fixed layout, no writes)
+	@$(PYTHON) $(CLAUDE_SUBAGENT_MODEL_TESTS)
 
 .PHONY: empirica-claude-mcp-log-check
 empirica-claude-mcp-log-check: ## Verify one native Claude MCP log: LOG=... [ARGS="--expected-version ... --require-call ..."]
@@ -362,6 +382,22 @@ status: ## Show plugin versions, ADR count, and working-tree state
 	else \
 		printf '  working tree clean\n'; \
 	fi
+
+# Read-only census of operational run state. Enumerates only the documented fixed-depth store
+# layout (never a recursive walk of $$HOME, /tmp, or worktrees). Honors EMPIRICA_HOME; pass further
+# options through ARGS, e.g. ARGS="--runs --status converged", ARGS="--run <id-prefix>",
+# ARGS="--file <snapshot>/run.json" for one snapshot, ARGS="--qualification-root <dir>" for every
+# <dir>/<candidate>/<cell>/state home, or ARGS="--json".
+.PHONY: empirica-runs
+empirica-runs: ## Read-only census of local Empirica run state: make empirica-runs [ARGS="--runs --status converged"]
+	@$(PYTHON) $(SCRIPTS)/empirica_run_census.py $(ARGS)
+
+# Requested vs served models for Claude Code Agent launches, joined from the parent session and
+# its subagents/agent-<id> transcripts at fixed depth under ~/.claude/projects. Read-only.
+# ARGS examples: "--agent empirica:empirica-auditor", "--requested-only", "<session>.jsonl", "--json".
+.PHONY: claude-subagent-models
+claude-subagent-models: ## Report requested vs served Claude subagent models: make claude-subagent-models [ARGS="--requested-only"]
+	@$(PYTHON) $(SCRIPTS)/claude_subagent_models.py $(ARGS)
 
 .PHONY: adr-list
 adr-list: ## List all ADRs with their status
