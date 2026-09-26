@@ -44,6 +44,7 @@ class AuditLaunchPlan:
     role_profile: str
     argument: dict
     operation_id: str = ""
+    auditor: dict | None = None
 
     @property
     def evidence_ids(self) -> list[str]:
@@ -128,7 +129,7 @@ class AuditProtocol:
                     or durable_role != role_profile):
                 raise AuditProtocolError("durable audit operation unavailable")
             return AuditLaunchPlan(
-                self.profile_id, run_id, child_id, durable_role, argument, operation_id)
+                self.profile_id, run_id, child_id, durable_role, argument, operation_id, operation.get("auditor"))
         except Exception as exc:
             try:
                 self._terminal(child_id, run_id, "launch_rejected", None)

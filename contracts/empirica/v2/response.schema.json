@@ -49,7 +49,7 @@
           "const": "empirica/public"
         },
         "version": {
-          "const": "2.0.0"
+          "const": "3.0.0"
         },
         "digest": {
           "type": "string",
@@ -624,6 +624,231 @@
               "$ref": "#/$defs/freezeDeferredParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.approval_required"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.revision_required"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.approval_unavailable"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.identity_mismatch"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.revision_limit"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.auto_ceiling"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.budget_invalid"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.stale_proposal"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.receipt_replay"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.author_unknown"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.auditor_unknown"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.auditor_required"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.interaction_limit"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.changes_requested"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.decision_conflict"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
         }
       ]
     },
@@ -885,7 +1110,8 @@
         "children",
         "host",
         "next_actions",
-        "untrusted_delimiters"
+        "untrusted_delimiters",
+        "governance"
       ],
       "description": "Public run view. converged lives only on Allow, never duplicated here.",
       "properties": {
@@ -945,6 +1171,434 @@
         },
         "untrusted_delimiters": {
           "$ref": "#/$defs/untrustedDelimiters"
+        },
+        "governance": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "control_mode",
+                "revision_limit",
+                "plan_revision",
+                "revisions_used",
+                "approved_digest",
+                "approval_kind",
+                "proposal_digest",
+                "proposal",
+                "context",
+                "scope",
+                "budgets",
+                "remaining",
+                "request_ready",
+                "display_ready",
+                "next_action",
+                "interactions_remaining",
+                "prompt_error",
+                "change_request"
+              ],
+              "properties": {
+                "state": {
+                  "enum": [
+                    "pending",
+                    "approved",
+                    "revision_pending",
+                    "rejected"
+                  ]
+                },
+                "control_mode": {
+                  "enum": [
+                    "deliberative",
+                    "auto"
+                  ]
+                },
+                "revision_limit": {
+                  "enum": [
+                    8,
+                    64
+                  ]
+                },
+                "plan_revision": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "revisions_used": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 64
+                },
+                "approved_digest": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "approval_kind": {
+                  "enum": [
+                    null,
+                    "host_ui",
+                    "auto"
+                  ]
+                },
+                "proposal_digest": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "proposal": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "budgets",
+                    "modes",
+                    "auditor"
+                  ],
+                  "properties": {
+                    "budgets": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "max_passes",
+                        "max_spawns",
+                        "max_audit_spawns"
+                      ],
+                      "properties": {
+                        "max_passes": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 1024
+                        },
+                        "max_spawns": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 128
+                        },
+                        "max_audit_spawns": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 128
+                        }
+                      }
+                    },
+                    "modes": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "multi_provider",
+                        "cli_exec"
+                      ],
+                      "properties": {
+                        "multi_provider": {
+                          "type": "boolean"
+                        },
+                        "cli_exec": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    "auditor": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "provider_id",
+                            "model_id"
+                          ],
+                          "properties": {
+                            "provider_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128
+                            },
+                            "model_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "context": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "author",
+                    "ingress"
+                  ],
+                  "properties": {
+                    "author": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "provider_id",
+                            "model_id"
+                          ],
+                          "properties": {
+                            "provider_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128
+                            },
+                            "model_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "ingress": {
+                      "enum": [
+                        "unavailable",
+                        "mcp_elicitation",
+                        "pi_ui"
+                      ]
+                    }
+                  }
+                },
+                "scope": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "root",
+                        "claims",
+                        "edges"
+                      ],
+                      "properties": {
+                        "root": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "claims": {
+                          "type": "array",
+                          "minItems": 1,
+                          "maxItems": 32,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "id",
+                              "text",
+                              "kind",
+                              "gating"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128
+                              },
+                              "text": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 2048
+                              },
+                              "kind": {
+                                "enum": [
+                                  "ordinary",
+                                  "needs-experiment",
+                                  "needs-decision"
+                                ]
+                              },
+                              "gating": {
+                                "type": "boolean"
+                              }
+                            }
+                          }
+                        },
+                        "edges": {
+                          "type": "array",
+                          "maxItems": 128,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "from",
+                              "to",
+                              "type"
+                            ],
+                            "properties": {
+                              "from": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128
+                              },
+                              "to": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128
+                              },
+                              "type": {
+                                "const": "SupportedBy"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "budgets": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "max_passes",
+                    "passes_used",
+                    "max_spawns",
+                    "spawns_used",
+                    "max_audit_spawns",
+                    "audit_spawns_used"
+                  ],
+                  "properties": {
+                    "max_passes": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "passes_used": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "max_spawns": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "spawns_used": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "max_audit_spawns": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "audit_spawns_used": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "remaining": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "max_passes",
+                    "max_spawns",
+                    "max_audit_spawns"
+                  ],
+                  "properties": {
+                    "max_passes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "max_spawns": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "max_audit_spawns": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "request_ready": {
+                  "type": "boolean"
+                },
+                "display_ready": {
+                  "type": "boolean"
+                },
+                "next_action": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "interactions_remaining": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "proposal",
+                    "total"
+                  ],
+                  "properties": {
+                    "proposal": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 3
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 128
+                    }
+                  }
+                },
+                "prompt_error": {
+                  "enum": [
+                    null,
+                    "governance.author_unknown",
+                    "governance.identity_mismatch",
+                    "governance.interaction_limit"
+                  ]
+                },
+                "change_request": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "text",
+                        "plan_revision",
+                        "proposal_digest"
+                      ],
+                      "properties": {
+                        "text": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096
+                        },
+                        "plan_revision": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "proposal_digest": {
+                          "type": "string",
+                          "pattern": "^sha256:[0-9a-f]{64}$"
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "review_text": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -1308,7 +1962,7 @@
           "const": "empirica/public"
         },
         "version": {
-          "const": "2.0.0"
+          "const": "3.0.0"
         },
         "sections": {
           "type": "array",
@@ -2112,16 +2766,18 @@
         "operation_contexts",
         "untrusted_delimiters",
         "presentation_selector",
+        "bootstrap",
         "next_actions",
         "reasons",
-        "sections"
+        "sections",
+        "governance_decisions"
       ],
       "properties": {
         "id": {
           "const": "empirica/public"
         },
         "version": {
-          "const": "2.0.0"
+          "const": "3.0.0"
         },
         "protocol": {
           "const": "empirica/v2"
@@ -2396,7 +3052,7 @@
             "terminal_sections",
             "unknown_reason_sections"
           ],
-          "description": "Canonical ordered presentation selector registry (D1 §12). The JSON registry is the executable SSOT; exact operation-context key parity and section resolution are enforced procedurally (no Python selector mapping).",
+          "description": "Canonical ordered presentation selector registry (D1 \u00a712). The JSON registry is the executable SSOT; exact operation-context key parity and section resolution are enforced procedurally (no Python selector mapping).",
           "properties": {
             "context_sections": {
               "type": "object",
@@ -2431,6 +3087,14 @@
               "minItems": 1
             }
           }
+        },
+        "bootstrap": {
+          "type": "object",
+          "required": [
+            "requirements",
+            "actions",
+            "tools"
+          ]
         },
         "next_actions": {
           "type": "object",
@@ -2540,9 +3204,212 @@
               }
             }
           }
+        },
+        "governance_decisions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "actions",
+            "controls",
+            "confirmation"
+          ],
+          "properties": {
+            "actions": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "approve",
+                "edit",
+                "request_changes",
+                "reject"
+              ],
+              "properties": {
+                "approve": {
+                  "$ref": "#/$defs/governanceDecisionAction"
+                },
+                "edit": {
+                  "$ref": "#/$defs/governanceDecisionAction"
+                },
+                "request_changes": {
+                  "$ref": "#/$defs/governanceDecisionAction"
+                },
+                "reject": {
+                  "$ref": "#/$defs/governanceDecisionAction"
+                }
+              }
+            },
+            "controls": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "actions",
+                "budgets",
+                "modes",
+                "auditor",
+                "feedback"
+              ],
+              "properties": {
+                "actions": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "approve",
+                    "edit",
+                    "request_changes",
+                    "reject"
+                  ],
+                  "properties": {
+                    "approve": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "edit": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "request_changes": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "reject": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "budgets": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "max_passes",
+                    "max_spawns",
+                    "max_audit_spawns"
+                  ],
+                  "properties": {
+                    "max_passes": {
+                      "$ref": "#/$defs/governanceBudgetControl"
+                    },
+                    "max_spawns": {
+                      "$ref": "#/$defs/governanceBudgetControl"
+                    },
+                    "max_audit_spawns": {
+                      "$ref": "#/$defs/governanceBudgetControl"
+                    }
+                  }
+                },
+                "modes": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "multi_provider",
+                    "cli_exec"
+                  ],
+                  "properties": {
+                    "multi_provider": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "cli_exec": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "auditor": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "feedback": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "confirmation": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "title",
+                "actions"
+              ],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "actions": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "const": "approve"
+                    },
+                    {
+                      "const": "decline"
+                    }
+                  ],
+                  "items": false,
+                  "minItems": 2,
+                  "maxItems": 2
+                }
+              }
+            }
+          }
         }
       }
     },
-    "publicContractDefs": {}
+    "publicContractDefs": {},
+    "governanceDecisionAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "feedback",
+        "unchanged_outcome",
+        "changed_outcome"
+      ],
+      "properties": {
+        "feedback": {
+          "enum": [
+            "forbidden",
+            "required"
+          ]
+        },
+        "unchanged_outcome": {
+          "enum": [
+            "approve",
+            "amend",
+            "request_changes",
+            "reject",
+            "dismiss"
+          ]
+        },
+        "changed_outcome": {
+          "enum": [
+            "approve",
+            "amend",
+            "request_changes",
+            "reject",
+            "dismiss"
+          ]
+        }
+      }
+    },
+    "governanceBudgetControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "maximum"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "maximum": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
   }
 }

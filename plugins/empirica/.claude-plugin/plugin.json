@@ -1,7 +1,7 @@
 {
   "name": "empirica",
-  "description": "Host-neutral empirical-convergence workflow \u2014 routes uncertainty into a claim graph, requires cited research before deterministic spikes, derives claim state, and binds convergence to a current independent audit. Full execution is hook-enforced only on profiles with author-action and bound-audit capabilities; unsupported profiles fail explicitly before starting.",
-  "version": "3.1.5",
+  "description": "Host-neutral empirical-convergence workflow \u2014 binds exact claim scope, budgets and auditor to host-mediated approval (or explicit bounded auto), requires cited research before spikes, and gates convergence on a current independent audit. Unsupported approval and identity capabilities fail closed.",
+  "version": "4.0.0",
   "author": {
     "name": "obzenner"
   }

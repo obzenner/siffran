@@ -23,6 +23,7 @@ ENTRYPOINTS = {
 FORBIDDEN = re.compile(r"(?:^|[/'\"`])\.(?:claude|pi)(?:/|[\"'`])")
 SKILL = ROOT / "skills/empirica/SKILL.md"
 REQUIRED_SKILL_REFERENCES = {
+    "governance.md",
     "host-capabilities.md",
     "claim-graph.md",
     "evidence.md",
@@ -80,7 +81,7 @@ def main() -> int:
     hooks = json.loads((HOOKS / "hooks.json").read_text(encoding="utf-8"))
     # Validate the invariant (only registered thin entrypoints), rather than freezing hook config.
     if set(hooks["hooks"]) != {"UserPromptExpansion", "PreToolUse", "PostToolUseFailure",
-                                  "Stop", "SubagentStart", "SubagentStop", "SessionStart"}:
+                                  "Stop", "SubagentStart", "SubagentStop", "SessionStart", "PostModelSwitch"}:
         fail("hooks.json lifecycle events changed")
     for groups in hooks["hooks"].values():
         for group in groups:

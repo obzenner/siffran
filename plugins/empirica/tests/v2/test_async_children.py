@@ -77,6 +77,7 @@ class AsyncChildrenTests(ConformanceCase):
         self.dispatch(drv, observe_action(
             run_id=run_id,
             action={"kind": "configure_run", "budgets": {"max_audit_spawns": 2}}))
+        self.require_governance_approved(drv, run_id)
         request = observe_action(run_id=run_id, action=action_child_reserve(
             purpose="audit", resource_class="audit",
             role_profile=self.DEFAULT_PROFILE, execution="foreground"))
@@ -440,7 +441,7 @@ class AsyncChildrenTests(ConformanceCase):
                     "Foreground-only/observational hosts return typed unsupported capability "
                     "reasons rather than silent fallback; current tiers match D1-H/D2 profiles",
                     profile_id=pid)
-                run_id = self.start_run(drv, goal=self.GOAL)
+                run_id = self.start_run(drv, goal=self.GOAL, control_mode="auto")
                 self.require_route_admitted(drv, run_id)
                 self.require_investigate_admitted(drv, run_id)
                 resp = self.dispatch(drv, observe_action(run_id=run_id, action=action_child_reserve(

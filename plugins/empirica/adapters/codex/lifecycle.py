@@ -23,6 +23,8 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from adapters.state import project_id, run_id
+from adapters import bridge as application_bridge
+from .transport import CODEX_PROFILE_ID
 
 from .correlation import PROTOCOL, request_id as new_request_id
 from .transport import BridgeTransport, Transport
@@ -156,6 +158,13 @@ def build_start_run_request(
         "selector": selector_from_payload(payload),
         "goal": _goal(args, "empirica run (goal unspecified)"),
     }
+    leading = []
+    for token in args.split():
+        if not token.startswith("--"):
+            break
+        leading.append(token)
+    if "--auto" in leading:
+        command["control_mode"] = "auto"
     modes = _resolve_modes(args, env)
     if modes:
         command["modes"] = modes
@@ -193,7 +202,7 @@ def _dispatch(payload: Mapping[str, object], request: dict,
     return (transport if transport is not None else BridgeTransport()).dispatch(request)
 
 
-def _resolve_run(payload: Mapping[str, object], transport: Transport | None = None) -> str | None:
+def _resolve_run(payload: Mapping[str, object], transport: Transport | None = None, *, strict=False) -> str | None:
     """``ResolveRun`` through the strict bridge shell; return a run handle only when resolved.
 
     At D6 the no-location run port reports every opaque ID unresolved, so this always
@@ -202,11 +211,15 @@ def _resolve_run(payload: Mapping[str, object], transport: Transport | None = No
     """
     try:
         response = _dispatch(payload, build_resolve_request(payload), transport)
-    except Exception:  # noqa: BLE001 - never wedge a host event on transport failure
+    except Exception:
+        if strict:
+            raise
         return None
     result = response.get("result") if isinstance(response, dict) else None
     run = result.get("run") if isinstance(result, dict) else None
     handle = run.get("id") if isinstance(run, dict) else None
+    if strict and not handle and not (isinstance(result, dict) and result.get("type") == "Inert" and result.get("reason") == "no_run"):
+        raise RuntimeError("run resolution unavailable")
     return handle if isinstance(handle, str) and handle else None
 
 
@@ -227,6 +240,8 @@ def _start(payload: dict) -> dict | None:
         return {"systemMessage": f"empirica activation failed: {text}"}
     run = result.get("run", {}) if isinstance(result, dict) else {}
     handle = run.get("id", "unresolved")
+    if handle != "unresolved":
+        _refresh_governance(payload, handle)
     context = (
         f"Empirica v2 is active. Opaque run handle: {handle}. "
         "Use empirica_observe for route/graph/research/spike/freeze actions, "
@@ -237,10 +252,37 @@ def _start(payload: dict) -> dict | None:
     return _context_output("UserPromptSubmit", context)
 
 
+def _refresh_governance(payload: dict, handle: str) -> dict:
+    model = payload.get("model")
+    return application_bridge.trusted_governance_context(CODEX_PROFILE_ID, handle, {
+        "author": {"provider_id": "openai", "model_id": model}
+        if isinstance(model, str) and model else None, "ingress": "unavailable"})
+
+
 def _pre_tool_use(payload: dict) -> dict | None:
-    """PreToolUse: ``ResolveRun`` through the strict shell; inert when unresolved."""
-    _resolve_run(payload)
-    return None  # D6: no active run → no cap or stamp to enforce (D7-D10 own these)
+    """Only exact absence is inert. Unknown storage/approval denies native investigation."""
+    try:
+        handle = _resolve_run(payload, strict=True)
+        if handle is None:
+            return None
+        refreshed = _refresh_governance(payload, handle)
+        if refreshed.get("result", {}).get("type") not in {"Allow", "Inert"}:
+            raise RuntimeError("governance context unavailable")
+        name = payload.get("tool_name", "")
+        if name in {prefix + tool for prefix in ("", "mcp__empirica__")
+                    for tool in ("empirica_read", "empirica_observe", "report_convergence")}:
+            return None
+        result = _dispatch(payload, {"protocol": PROTOCOL, "request_id": new_request_id(payload, "investigate"),
+            "command": {"type": "ObserveAction", "run_id": handle, "action": {"kind": "investigate"}}})["result"]
+        if result.get("type") == "Allow":
+            return None
+        reason = result.get("reasons", [{}])[0].get("message", "Empirica investigation denied")
+    except SelectorError:
+        return None
+    except Exception:
+        reason = "Empirica run/approval unavailable; investigation denied"
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                    "permissionDecisionReason": reason}}
 
 
 def build_evaluate_request(payload: Mapping[str, object], run_id: str) -> dict:
@@ -260,10 +302,11 @@ def _audit_required(result: Mapping[str, object]) -> bool:
 
 def _stop(payload: dict) -> dict | None:
     """Stop: enforce convergence and run one adapter-owned bound audit when it is due."""
-    handle = _resolve_run(payload)
-    if handle is None:
-        return None
     try:
+        handle = _resolve_run(payload, strict=True)
+        if handle is None:
+            return None
+        _refresh_governance(payload, handle)
         response = _dispatch(payload, build_evaluate_request(payload, handle))
         result = response.get("result", {}) if isinstance(response, dict) else {}
         if isinstance(result, Mapping) and _audit_required(result):

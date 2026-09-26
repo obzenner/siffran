@@ -5,7 +5,8 @@ preflight confirms a bound audit lifecycle.
 
 ## Preconditions
 
-- The selected graph is valid and current.
+- The selected graph is valid, current, and covered by current governance approval.
+- The selected reviewer is known, distinct from the host-observed main model, and covered by current governance approval.
 - Every in-scope gating claim is approved from real evidence.
 - Every experiment claim has a current passing spike.
 - Freeze scope, if any, is already committed.
@@ -35,12 +36,29 @@ Ordinary conversation with another model is not a substitute.
 6. Reread the run. Any changed graph, evidence, or scope invalidates stale audit
    coverage and requires a new bound audit.
 
+## Pi invocation shape
+
+Check `subagent({"action":"list"})` for the executable packaged auditor, then submit exactly
+this object to the structured `subagent` tool:
+
+```json
+{"agent":"empirica.empirica-auditor","task":"Audit the host-provided dossier."}
+```
+
+The string `task` is required but is replaced by the host-owned bound dossier; it is not
+an author-supplied audit argument. Only `agent` and `task` are allowed. Omit `async` (even
+`false`), model/context/acceptance/tool overrides, and workflow wrappers. The host injects
+the approved reviewer and `async=false` after admission. A bare agent-only call is invalid.
+A missing/non-string task reports that a string task is required; extra fields report
+that only agent and task are accepted. Stop on rejection rather than trying alternate
+shapes. A stopped run stays stopped; corrected guidance does not authorize reopening it.
+
 ## Stale pending retry
 
 A new canonical audit request can replace a stale **pending** audit only when audit capacity remains.
 The host atomically cancels the obsolete child and reserves a fresh dossier; the old attempt stays
 charged to `audit_spawns_used`. No capacity is borrowed or increased automatically. On
-`budget.exhausted` for `audit_spawn`, explicitly configure capacity or accept an honest residual stop;
+`budget.exhausted` for `audit_spawn`, propose capacity and obtain host approval (deliberative only), or accept an honest residual stop;
 do not repeatedly retry unchanged state. Current pending, reserved, and launching operations are not
 replaced by this path. Cancellation is logical, not proof that native execution stopped.
 
@@ -69,3 +87,6 @@ models alone.
 The first child terminal event wins. An identical replay is inert; a conflicting
 replay faults. A terminal run cannot be reopened by late child output and cannot
 later become converged.
+
+Observed `same_model` always blocks. Unknown aliases and selected/observed substitution never pass.
+No provider difference is required; the host-observed selected reviewer must still match the actual reviewer.

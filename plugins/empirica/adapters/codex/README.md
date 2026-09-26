@@ -19,8 +19,16 @@ and convergence blocks. Async execution is also unsupported. Codex is excluded f
 installed-host release receipt set until a native resolved-model observation can be bound to the
 managed process and the candidate foreground probe passes.
 
-For adapter development, the managed auditor defaults to `gpt-5.1-codex-mini` and may be pinned
-with `EMPIRICA_CODEX_AUDITOR_MODEL`; that configuration never counts as observed identity.
+There is no default auditor model or `EMPIRICA_CODEX_AUDITOR_MODEL` override. The managed
+launcher uses the exact visible approved proposal target. Deliberative approval is explicitly
+unavailable on this profile. Explicit `$empirica --auto <goal>` requires an author-proposed concrete
+known-distinct reviewer and a mapped observed main model. It does not read host model configuration.
+Real active slugs such as
+`gpt-5.1-codex` are currently unmapped and block with `governance.author_unknown`, not a claimed
+identity mismatch. The three dated OpenAI snapshots used in simulated conformance do not prove
+installed Codex support. Bounded automatic acceptance is not human approval and cannot prove
+the actual auditor model. Unknown observation revokes approval and fails the child closed.
+See [governance](../../skills/empirica/references/governance.md) for configuration and limitations.
 
 ## Surface
 
@@ -58,7 +66,7 @@ ordering claim is inferred from that sensor gap.
 
 ```sh
 make check-codex
-make empirica-host-adapter-check   # deterministic adapter conformance only
-make empirica-host-live-check      # retained installed-host promotion receipts
-make codex-live-check CODEX='npx -y @openai/codex@0.146.0'
+make empirica-host-integration  # expensive simulated conformance, no installed host
+make native-qualification       # operator-led sanity/refusal procedure; launches nothing
+make empirica-host-live-check   # supported-host receipts; Codex is excluded
 ```

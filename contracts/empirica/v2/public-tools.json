@@ -1,586 +1,887 @@
 {
   "protocol": "empirica/v2",
-  "schemas": {
-    "host_handle": {
-      "empirica_observe": {
-        "additionalProperties": false,
-        "properties": {
-          "action": {
-            "description": "One schema-validated public author action for this run.",
-            "oneOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "kind": {
-                    "const": "graph"
-                  },
-                  "payload": {
-                    "description": "Extensible deep graph/evidence/actor domain data; only this object may carry D6-validated payload. The control object itself is closed.",
-                    "type": "object"
-                  }
-                },
-                "required": [
-                  "kind"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "claim_id": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "kind": {
-                    "const": "research"
-                  },
-                  "payload": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "citation": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "observed_content_digest": {
-                        "pattern": "^sha256:[0-9a-f]{64}$",
-                        "type": "string"
-                      },
-                      "source_ref": {
-                        "minLength": 1,
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "source_ref",
-                      "citation"
-                    ],
-                    "type": "object"
-                  },
-                  "result": {
-                    "enum": [
-                      "supports",
-                      "refutes"
-                    ]
-                  },
-                  "source_kind": {
-                    "enum": [
-                      "docs",
-                      "code",
-                      "runtime",
-                      "web"
-                    ]
-                  }
-                },
-                "required": [
-                  "kind",
-                  "claim_id",
-                  "source_kind",
-                  "result",
-                  "payload"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "claim_id": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "command": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "dependent_files": {
-                    "items": {
-                      "minLength": 1,
-                      "pattern": "^[^/].*$",
-                      "type": "string"
-                    },
-                    "minItems": 1,
-                    "type": "array",
-                    "uniqueItems": true
-                  },
-                  "kind": {
-                    "const": "spike_request"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "claim_id",
-                  "command",
-                  "dependent_files"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "anyOf": [
-                  {
-                    "required": [
-                      "budgets"
-                    ]
-                  },
-                  {
-                    "required": [
-                      "modes"
-                    ]
-                  }
-                ],
-                "properties": {
-                  "budgets": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "max_audit_spawns": {
-                        "minimum": 0,
-                        "type": "integer"
-                      },
-                      "max_passes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "max_spawns": {
-                        "minimum": 0,
-                        "type": "integer"
-                      }
-                    },
-                    "type": "object"
-                  },
-                  "kind": {
-                    "const": "configure_run"
-                  },
-                  "modes": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "cli_exec": {
-                        "type": "boolean"
-                      },
-                      "multi_provider": {
-                        "type": "boolean"
-                      }
-                    },
-                    "type": "object"
-                  }
-                },
-                "required": [
-                  "kind"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "kind": {
-                    "const": "route"
-                  },
-                  "reason": {
-                    "minLength": 1,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "reason"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "kind": {
-                    "const": "investigate"
-                  }
-                },
-                "required": [
-                  "kind"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "kind": {
-                    "const": "freeze"
-                  }
-                },
-                "required": [
-                  "kind"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "claim_id": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "kind": {
-                    "const": "dispatch"
-                  },
-                  "target": {
-                    "minLength": 1,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "target"
-                ],
-                "type": "object"
-              }
-            ]
-          }
-        },
-        "required": [
-          "action"
-        ],
-        "type": "object"
+  "definitions": {
+    "empirica_read": {
+      "title": "Read Empirica state",
+      "description": "Read public state owned by Empirica. Get the current run, audit argument, public contract, or restored run. Inspect state after an uncertain configure_run outcome. Do not blindly reopen host UI."
+    },
+    "empirica_observe": {
+      "title": "Record an Empirica author action",
+      "description": "Submit exactly one public author action. Normal bootstrap is route, graph, configure_run, then investigate after approval. Graph may precede route and needs no prior investigation. configure_run requires a selected graph and requests host mediation without self-approval. Host-owned lifecycle facts are not author actions."
+    },
+    "report_convergence": {
+      "title": "Request an Empirica decision",
+      "description": "Request guarded convergence or an honest residual stop. Current obligations and audit gates remain authoritative. Human waiting is neither investigation nor convergence. Typed blocks identify current recovery."
+    }
+  },
+  "bootstrap_actions": {
+    "route": {
+      "description": "Record the chosen reasoning route before investigation; graph declaration may occur first.",
+      "example": {
+        "kind": "route",
+        "reason": "Primary empirical route for the supplied goal."
       },
+      "operation": "route"
+    },
+    "graph": {
+      "description": "Propose claims and unknowns from supplied context. No repository investigation or evidence is required.",
+      "example": {
+        "kind": "graph",
+        "payload": {
+          "root": "C0",
+          "claims": [
+            {
+              "id": "C0",
+              "text": "The supplied goal can be achieved safely.",
+              "gating": true,
+              "kind": "ordinary"
+            }
+          ],
+          "edges": []
+        }
+      },
+      "operation": "graph"
+    },
+    "configure_run": {
+      "description": "After a graph exists, propose bounded configuration and request host mediation. It never self-approves or changes effective budgets before consent.",
+      "example": {
+        "kind": "configure_run",
+        "budgets": {
+          "max_passes": 5
+        }
+      },
+      "operation": "configure_run"
+    },
+    "investigate": {
+      "description": "Record the first investigation witness only after route and exact current host approval.",
+      "example": {
+        "kind": "investigate"
+      },
+      "operation": "investigate"
+    }
+  },
+  "governance_decisions": {
+    "actions": {
+      "approve": {
+        "feedback": "forbidden",
+        "unchanged_outcome": "approve",
+        "changed_outcome": "amend"
+      },
+      "edit": {
+        "feedback": "forbidden",
+        "unchanged_outcome": "dismiss",
+        "changed_outcome": "amend"
+      },
+      "request_changes": {
+        "feedback": "required",
+        "unchanged_outcome": "request_changes",
+        "changed_outcome": "request_changes"
+      },
+      "reject": {
+        "feedback": "forbidden",
+        "unchanged_outcome": "reject",
+        "changed_outcome": "reject"
+      }
+    },
+    "controls": {
+      "actions": {
+        "approve": "Approve current displayed proposal",
+        "edit": "Edit configuration for another review",
+        "request_changes": "Request changes in plain language",
+        "reject": "Reject proposal"
+      },
+      "budgets": {
+        "max_passes": {
+          "label": "Investigation passes",
+          "maximum": 1024
+        },
+        "max_spawns": {
+          "label": "Child spawns",
+          "maximum": 128
+        },
+        "max_audit_spawns": {
+          "label": "Audit spawns",
+          "maximum": 128
+        }
+      },
+      "modes": {
+        "multi_provider": "Cross-provider actors",
+        "cli_exec": "External model/actor CLI use"
+      },
+      "auditor": "Independent auditor",
+      "feedback": "What must change? Plain language; this approves nothing."
+    },
+    "confirmation": {
+      "title": "FINAL CONFIRMATION \u2014 Your edits are saved, NOT approved. Confirm the exact values below; configuration is read-only.",
+      "actions": [
+        "approve",
+        "decline"
+      ]
+    }
+  },
+  "recovery": {
+    "graph.missing": {
+      "message": "No selected argument graph. Propose one from supplied context before configure_run; investigation and evidence are not prerequisites.",
+      "sections": [
+        "claims/graph"
+      ],
+      "next_actions": [
+        "graph.record"
+      ]
+    },
+    "governance.approval_unavailable": {
+      "message": "Host approval UI unavailable/cancelled. Keep pending; use supported UI or start an explicitly auto fresh run.",
+      "sections": [
+        "governance"
+      ],
+      "next_actions": [
+        "host.repair_context",
+        "residual.accept"
+      ]
+    },
+    "governance.author_unknown": {
+      "message": "The host-observed author has no supported concrete identity mapping.",
+      "sections": [
+        "governance"
+      ],
+      "next_actions": [
+        "governance.propose",
+        "residual.accept"
+      ]
+    },
+    "governance.identity_mismatch": {
+      "message": "Observed author/auditor identity does not match the approved concrete model. Re-negotiate; do not substitute.",
+      "sections": [
+        "governance"
+      ],
+      "next_actions": [
+        "governance.propose",
+        "residual.accept"
+      ]
+    },
+    "governance.interaction_limit": {
+      "message": "The durable proposal (3) or total (128) interaction limit is exhausted. Stop honestly or start a fresh run.",
+      "sections": [
+        "governance"
+      ],
+      "next_actions": [
+        "governance.propose",
+        "residual.accept"
+      ]
+    },
+    "governance.changes_requested": {
+      "message": "A human requested changes in plain language and approved nothing. Read run.governance.change_request, draft a revised graph/configuration, and request approval again. The request is guidance, not consent and not evidence.",
+      "sections": [
+        "governance"
+      ],
+      "next_actions": [
+        "governance.propose",
+        "residual.accept"
+      ]
+    },
+    "governance.decision_conflict": {
+      "message": "The submitted control and fields conflict. Nothing was approved; use one explicit decision path.",
+      "sections": [
+        "governance"
+      ],
+      "next_actions": [
+        "governance.propose"
+      ]
+    },
+    "governance.stale_proposal": {
+      "message": "Decision is bound to a different run/revision/digest. Inspect current proposal and request a new decision.",
+      "sections": [
+        "governance"
+      ],
+      "next_actions": [
+        "governance.propose",
+        "residual.accept"
+      ]
+    }
+  },
+  "schemas": {
+    "model": {
       "empirica_read": {
+        "type": "object",
         "additionalProperties": false,
+        "required": [
+          "operation"
+        ],
         "properties": {
           "operation": {
-            "description": "Read the public run view, obtain the current audit argument, inspect the public contract, or restore a persisted run.",
             "enum": [
               "GetRun",
               "GetArgument",
               "GetContract",
               "RestoreRun"
-            ]
+            ],
+            "description": "Read the public run view, obtain the current audit argument, inspect the public contract, or restore a persisted run."
           },
-          "section_id": {
-            "description": "Public contract section identifier when target is section.",
+          "run_id": {
+            "type": "string",
             "minLength": 1,
-            "type": "string"
+            "description": "Opaque identifier of the active Empirica run."
           },
           "target": {
-            "description": "Contract projection for GetContract. Use section with section_id.",
             "enum": [
               "index",
               "section",
               "full"
-            ]
-          }
-        },
-        "required": [
-          "operation"
-        ],
-        "type": "object"
-      },
-      "report_convergence": {
-        "additionalProperties": false,
-        "properties": {
-          "intent": {
-            "description": "Request convergence by default, or request an honest non-converged stop.",
-            "enum": [
-              "report_convergence",
-              "stop"
-            ]
-          }
-        },
-        "required": [],
-        "type": "object"
-      }
-    },
-    "model": {
-      "empirica_observe": {
-        "additionalProperties": false,
-        "properties": {
-          "action": {
-            "description": "One schema-validated public author action for this run.",
-            "oneOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "kind": {
-                    "const": "graph"
-                  },
-                  "payload": {
-                    "description": "Extensible deep graph/evidence/actor domain data; only this object may carry D6-validated payload. The control object itself is closed.",
-                    "type": "object"
-                  }
-                },
-                "required": [
-                  "kind"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "claim_id": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "kind": {
-                    "const": "research"
-                  },
-                  "payload": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "citation": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "observed_content_digest": {
-                        "pattern": "^sha256:[0-9a-f]{64}$",
-                        "type": "string"
-                      },
-                      "source_ref": {
-                        "minLength": 1,
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "source_ref",
-                      "citation"
-                    ],
-                    "type": "object"
-                  },
-                  "result": {
-                    "enum": [
-                      "supports",
-                      "refutes"
-                    ]
-                  },
-                  "source_kind": {
-                    "enum": [
-                      "docs",
-                      "code",
-                      "runtime",
-                      "web"
-                    ]
-                  }
-                },
-                "required": [
-                  "kind",
-                  "claim_id",
-                  "source_kind",
-                  "result",
-                  "payload"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "claim_id": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "command": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "dependent_files": {
-                    "items": {
-                      "minLength": 1,
-                      "pattern": "^[^/].*$",
-                      "type": "string"
-                    },
-                    "minItems": 1,
-                    "type": "array",
-                    "uniqueItems": true
-                  },
-                  "kind": {
-                    "const": "spike_request"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "claim_id",
-                  "command",
-                  "dependent_files"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "anyOf": [
-                  {
-                    "required": [
-                      "budgets"
-                    ]
-                  },
-                  {
-                    "required": [
-                      "modes"
-                    ]
-                  }
-                ],
-                "properties": {
-                  "budgets": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "max_audit_spawns": {
-                        "minimum": 0,
-                        "type": "integer"
-                      },
-                      "max_passes": {
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "max_spawns": {
-                        "minimum": 0,
-                        "type": "integer"
-                      }
-                    },
-                    "type": "object"
-                  },
-                  "kind": {
-                    "const": "configure_run"
-                  },
-                  "modes": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "cli_exec": {
-                        "type": "boolean"
-                      },
-                      "multi_provider": {
-                        "type": "boolean"
-                      }
-                    },
-                    "type": "object"
-                  }
-                },
-                "required": [
-                  "kind"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "kind": {
-                    "const": "route"
-                  },
-                  "reason": {
-                    "minLength": 1,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "reason"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "kind": {
-                    "const": "investigate"
-                  }
-                },
-                "required": [
-                  "kind"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "kind": {
-                    "const": "freeze"
-                  }
-                },
-                "required": [
-                  "kind"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "claim_id": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "kind": {
-                    "const": "dispatch"
-                  },
-                  "target": {
-                    "minLength": 1,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "target"
-                ],
-                "type": "object"
-              }
-            ]
+            ],
+            "description": "Contract projection for GetContract. Use section with section_id."
           },
-          "run_id": {
-            "description": "Opaque identifier of the active Empirica run.",
+          "section_id": {
+            "type": "string",
             "minLength": 1,
-            "type": "string"
+            "description": "Public contract section identifier when target is section."
           }
-        },
+        }
+      },
+      "empirica_observe": {
+        "type": "object",
+        "additionalProperties": false,
         "required": [
           "run_id",
           "action"
         ],
-        "type": "object"
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Opaque identifier of the active Empirica run."
+          },
+          "action": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "graph"
+                  },
+                  "payload": {
+                    "type": "object",
+                    "description": "Extensible deep graph/evidence/actor domain data; only this object may carry D6-validated payload. The control object itself is closed."
+                  }
+                },
+                "description": "Propose claims and unknowns from supplied context. No repository investigation or evidence is required.",
+                "examples": [
+                  {
+                    "kind": "graph",
+                    "payload": {
+                      "root": "C0",
+                      "claims": [
+                        {
+                          "id": "C0",
+                          "text": "The supplied goal can be achieved safely.",
+                          "gating": true,
+                          "kind": "ordinary"
+                        }
+                      ],
+                      "edges": []
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "claim_id",
+                  "source_kind",
+                  "result",
+                  "payload"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "research"
+                  },
+                  "claim_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "source_kind": {
+                    "enum": [
+                      "docs",
+                      "code",
+                      "runtime",
+                      "web"
+                    ]
+                  },
+                  "result": {
+                    "enum": [
+                      "supports",
+                      "refutes"
+                    ]
+                  },
+                  "payload": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "source_ref",
+                      "citation"
+                    ],
+                    "properties": {
+                      "source_ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "citation": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "observed_content_digest": {
+                        "type": "string",
+                        "pattern": "^sha256:[0-9a-f]{64}$"
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "claim_id",
+                  "command",
+                  "dependent_files"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "spike_request"
+                  },
+                  "claim_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "command": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "dependent_files": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[^/].*$"
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "configure_run"
+                  },
+                  "budgets": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "max_passes": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1024
+                      },
+                      "max_spawns": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 128
+                      },
+                      "max_audit_spawns": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 128
+                      }
+                    }
+                  },
+                  "modes": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "multi_provider": {
+                        "type": "boolean"
+                      },
+                      "cli_exec": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "auditor": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "provider_id",
+                      "model_id"
+                    ],
+                    "properties": {
+                      "provider_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "model_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      }
+                    }
+                  }
+                },
+                "description": "After a graph exists, propose bounded configuration and request host mediation. It never self-approves or changes effective budgets before consent.",
+                "examples": [
+                  {
+                    "kind": "configure_run",
+                    "budgets": {
+                      "max_passes": 5
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "reason"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "route"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "description": "Record the chosen reasoning route before investigation; graph declaration may occur first.",
+                "examples": [
+                  {
+                    "kind": "route",
+                    "reason": "Primary empirical route for the supplied goal."
+                  }
+                ]
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "investigate"
+                  }
+                },
+                "description": "Record the first investigation witness only after route and exact current host approval.",
+                "examples": [
+                  {
+                    "kind": "investigate"
+                  }
+                ]
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "freeze"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "dispatch"
+                  },
+                  "target": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "claim_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            ],
+            "description": "One schema-validated public author action for this run."
+          }
+        }
       },
-      "empirica_read": {
+      "report_convergence": {
+        "type": "object",
         "additionalProperties": false,
+        "required": [
+          "run_id"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Opaque identifier of the active Empirica run."
+          },
+          "intent": {
+            "enum": [
+              "report_convergence",
+              "stop"
+            ],
+            "description": "Request convergence by default, or request an honest non-converged stop."
+          }
+        }
+      }
+    },
+    "host_handle": {
+      "empirica_read": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation"
+        ],
         "properties": {
           "operation": {
-            "description": "Read the public run view, obtain the current audit argument, inspect the public contract, or restore a persisted run.",
             "enum": [
               "GetRun",
               "GetArgument",
               "GetContract",
               "RestoreRun"
-            ]
-          },
-          "run_id": {
-            "description": "Opaque identifier of the active Empirica run.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "section_id": {
-            "description": "Public contract section identifier when target is section.",
-            "minLength": 1,
-            "type": "string"
+            ],
+            "description": "Read the public run view, obtain the current audit argument, inspect the public contract, or restore a persisted run."
           },
           "target": {
-            "description": "Contract projection for GetContract. Use section with section_id.",
             "enum": [
               "index",
               "section",
               "full"
-            ]
+            ],
+            "description": "Contract projection for GetContract. Use section with section_id."
+          },
+          "section_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Public contract section identifier when target is section."
           }
-        },
+        }
+      },
+      "empirica_observe": {
+        "type": "object",
+        "additionalProperties": false,
         "required": [
-          "operation"
+          "action"
         ],
-        "type": "object"
+        "properties": {
+          "action": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "graph"
+                  },
+                  "payload": {
+                    "type": "object",
+                    "description": "Extensible deep graph/evidence/actor domain data; only this object may carry D6-validated payload. The control object itself is closed."
+                  }
+                },
+                "description": "Propose claims and unknowns from supplied context. No repository investigation or evidence is required.",
+                "examples": [
+                  {
+                    "kind": "graph",
+                    "payload": {
+                      "root": "C0",
+                      "claims": [
+                        {
+                          "id": "C0",
+                          "text": "The supplied goal can be achieved safely.",
+                          "gating": true,
+                          "kind": "ordinary"
+                        }
+                      ],
+                      "edges": []
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "claim_id",
+                  "source_kind",
+                  "result",
+                  "payload"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "research"
+                  },
+                  "claim_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "source_kind": {
+                    "enum": [
+                      "docs",
+                      "code",
+                      "runtime",
+                      "web"
+                    ]
+                  },
+                  "result": {
+                    "enum": [
+                      "supports",
+                      "refutes"
+                    ]
+                  },
+                  "payload": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "source_ref",
+                      "citation"
+                    ],
+                    "properties": {
+                      "source_ref": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "citation": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "observed_content_digest": {
+                        "type": "string",
+                        "pattern": "^sha256:[0-9a-f]{64}$"
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "claim_id",
+                  "command",
+                  "dependent_files"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "spike_request"
+                  },
+                  "claim_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "command": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "dependent_files": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[^/].*$"
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "configure_run"
+                  },
+                  "budgets": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "max_passes": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1024
+                      },
+                      "max_spawns": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 128
+                      },
+                      "max_audit_spawns": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 128
+                      }
+                    }
+                  },
+                  "modes": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "multi_provider": {
+                        "type": "boolean"
+                      },
+                      "cli_exec": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "auditor": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "provider_id",
+                      "model_id"
+                    ],
+                    "properties": {
+                      "provider_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "model_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      }
+                    }
+                  }
+                },
+                "description": "After a graph exists, propose bounded configuration and request host mediation. It never self-approves or changes effective budgets before consent.",
+                "examples": [
+                  {
+                    "kind": "configure_run",
+                    "budgets": {
+                      "max_passes": 5
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "reason"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "route"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "description": "Record the chosen reasoning route before investigation; graph declaration may occur first.",
+                "examples": [
+                  {
+                    "kind": "route",
+                    "reason": "Primary empirical route for the supplied goal."
+                  }
+                ]
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "investigate"
+                  }
+                },
+                "description": "Record the first investigation witness only after route and exact current host approval.",
+                "examples": [
+                  {
+                    "kind": "investigate"
+                  }
+                ]
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "freeze"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "dispatch"
+                  },
+                  "target": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "claim_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            ],
+            "description": "One schema-validated public author action for this run."
+          }
+        }
       },
       "report_convergence": {
+        "type": "object",
         "additionalProperties": false,
+        "required": [],
         "properties": {
           "intent": {
-            "description": "Request convergence by default, or request an honest non-converged stop.",
             "enum": [
               "report_convergence",
               "stop"
-            ]
-          },
-          "run_id": {
-            "description": "Opaque identifier of the active Empirica run.",
-            "minLength": 1,
-            "type": "string"
+            ],
+            "description": "Request convergence by default, or request an honest non-converged stop."
           }
-        },
-        "required": [
-          "run_id"
-        ],
-        "type": "object"
+        }
       }
     }
   }

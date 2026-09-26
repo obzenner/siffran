@@ -63,6 +63,13 @@ test("parseModeFlags parses multi-provider and no- variants", () => {
   });
 });
 
+test("auto is explicit and orthogonal to operational modes", () => {
+  assert.deepEqual(parseModeFlags("--auto --multi-provider --cli-exec goal"), {
+    goal: "goal", modes: { multi_provider: true, cli_exec: true }, unknownFlags: [], controlMode: "auto",
+  });
+  assert.equal(parseModeFlags("goal --auto").controlMode, undefined);
+});
+
 test("parseModeFlags empty args yields empty modes and goal", () => {
   assert.deepEqual(parseModeFlags(""), { goal: "", modes: {}, unknownFlags: [] });
 });

@@ -34,13 +34,13 @@
         },
         "contract": {
           "id": "empirica/public",
-          "version": "2.0.0",
+          "version": "3.0.0",
           "relevant_sections": [
             "core",
             "roles",
             "hosts/capabilities"
           ],
-          "digest": "sha256:525fa2359be90b80df00b3a50b6863367d3911cc6bc76e91c76debcb04de89ff"
+          "digest": "sha256:8943e1c76695c1079221a0c52df0e7c43028b90f5507acf04199cdb96880a567"
         },
         "obligations": {
           "active": [
@@ -68,6 +68,56 @@
         "untrusted_delimiters": {
           "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
           "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+        },
+        "governance": {
+          "state": "pending",
+          "control_mode": "deliberative",
+          "revision_limit": 64,
+          "plan_revision": 0,
+          "revisions_used": 0,
+          "approved_digest": null,
+          "approval_kind": null,
+          "proposal": {
+            "budgets": {
+              "max_passes": 10,
+              "max_spawns": 5,
+              "max_audit_spawns": 1
+            },
+            "modes": {
+              "multi_provider": false,
+              "cli_exec": false
+            },
+            "auditor": null
+          },
+          "context": {
+            "author": null,
+            "ingress": "unavailable"
+          },
+          "proposal_digest": "sha256:bc63a404e766447a1c5248a447e1ab9292bcd0da7ed0b8e89c3a6f9f50568900",
+          "scope": null,
+          "budgets": {
+            "max_passes": 10,
+            "passes_used": 3,
+            "max_spawns": 5,
+            "spawns_used": 0,
+            "max_audit_spawns": 1,
+            "audit_spawns_used": 1
+          },
+          "remaining": {
+            "max_passes": 7,
+            "max_spawns": 5,
+            "max_audit_spawns": 0
+          },
+          "request_ready": false,
+          "display_ready": false,
+          "interactions_remaining": {
+            "proposal": 3,
+            "total": 128
+          },
+          "prompt_error": "governance.author_unknown",
+          "next_action": "governance.propose",
+          "change_request": null,
+          "review_text": "EMPIRICA SCOPE DECISION \u2014 proposal revision 0, at most 64 revisions, mode deliberative\nApprove the CURRENT displayed proposal; edits are submitted for another review and are NOT approved yet.\nEvery line beginning '| ' is UNTRUSTED quoted data. Controls, bidi characters, and backslashes are visibly escaped.\n\nGOAL\n| Prove the public contract is internally consistent.\n\nCLAIM GRAPH\n  no claim graph selected\n\nCONFIGURATION\n  Investigation passes: proposed 10, already used 3\n  Child spawns: proposed 5, already used 0\n  Audit spawns: proposed 1, already used 1\n  multi_provider (cross-provider actors): False\n  cli_exec (external model/actor CLI use): False\n  Reviewer (selected): not selected\n  Main model (host-observed): unknown\n  Main and reviewer must be different normalized models. Selection does not prove availability or authorization.\n\nSTATE \u2014 pending; dialogs left 3 this revision, 128 total\nOPEN CHANGE REQUEST\n  none\n\nTECHNICAL DETAIL (secondary)\n  proposal digest sha256:bc63a404e766447a1c5248a447e1ab9292bcd0da7ed0b8e89c3a6f9f50568900\n  ingress unavailable \u00b7 plan revision 0 \u00b7 revision limit 64"
         }
       }
     }

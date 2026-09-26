@@ -73,8 +73,20 @@ def _async_audit_wait(result: Mapping[str, object]) -> bool:
             and bool(c.get("child_id")) for c in children) == 1)
 
 
+def _human_approval_wait(result: Mapping[str, object]) -> bool:
+    reasons, run = result.get("reasons"), result.get("run")
+    g = run.get("governance") if isinstance(run, Mapping) else None
+    expected = {"pending": "governance.approval_required", "rejected": "governance.approval_required",
+                "revision_pending": "governance.revision_required"}
+    return (isinstance(g, Mapping) and run.get("status") == "active"
+        and g.get("state") in expected and g.get("control_mode") == "deliberative"
+        and isinstance(g.get("context"), Mapping) and g["context"].get("ingress") == "mcp_elicitation"
+        and isinstance(reasons, list) and len(reasons) == 1 and isinstance(reasons[0], Mapping)
+        and reasons[0].get("code") == expected[g["state"]])
+
+
 def stop_result(response: object) -> StopResult:
-    """Map wire results to Stop: only one current async audit wait may settle nonterminally."""
+    """Settle human/async waits nonterminally; never convert their service Block to convergence."""
     if not isinstance(response, dict) or not isinstance(response.get("result"), dict):
         return StopResult(2, stderr="empirica completion gate returned a malformed response\n")
     result = response["result"]
@@ -84,6 +96,9 @@ def stop_result(response: object) -> StopResult:
     if kind == "Allow":
         return StopResult(0, stdout=_json_line(result))
     if kind == "Block":
+        if _human_approval_wait(result):
+            return StopResult(0, stdout=_json_line({"systemMessage":
+                "Empirica is paused for human governance input, not converged. Investigation remains blocked; no approval was granted by this pause."}))
         if _async_audit_wait(result):
             return StopResult(0, stdout=_json_line(result))
         reasons = result.get("reasons")

@@ -1,19 +1,15 @@
 #!/usr/bin/env python3
-"""Validate the Empirica Codex bundle and optionally smoke the pinned live loader."""
+"""Validate the deterministic Empirica Codex bundle."""
 from __future__ import annotations
 
+import argparse
 import json
-import os
 import re
-import shlex
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "empirica"
-CODEX_VERSION = "codex-cli 0.146.0"
 EVENTS = {"UserPromptSubmit", "PreToolUse", "Stop", "SessionStart"}
 
 
@@ -67,52 +63,12 @@ def static_validate() -> None:
         if "tests" not in path.parts and forbidden.search(path.read_text()):
             fail(f"normal adapter code names a repository-local Codex state path: {path}")
 
-    test = subprocess.run(
-        [sys.executable, str(PLUGIN / "adapters" / "codex" / "tests" /
-                             "test_codex_adapter.py")],
-        cwd=ROOT,
-    )
-    if test.returncode != 0:
-        fail("payload/lifecycle tests failed")
-    print("  ok: Codex manifest, hook schema, payloads, and isolated lifecycle")
-
-
-def live_validate(command: str) -> None:
-    argv = shlex.split(command)
-    if not argv:
-        fail("CODEX command is empty")
-    version = subprocess.run(
-        [*argv, "--version"], check=True, capture_output=True, text=True,
-    ).stdout.strip()
-    if version != CODEX_VERSION:
-        fail(f"expected {CODEX_VERSION!r}, got {version!r}")
-
-    with tempfile.TemporaryDirectory(prefix="empirica-codex-home-") as tmp:
-        env = {**os.environ, "CODEX_HOME": tmp}
-        added = subprocess.run(
-            [*argv, "plugin", "marketplace", "add", str(ROOT), "--json"],
-            check=True, capture_output=True, text=True, env=env,
-        )
-        if "siffran" not in added.stdout:
-            fail(f"live marketplace add returned an unexpected receipt: {added.stdout.strip()}")
-        subprocess.run(
-            [*argv, "plugin", "add", "empirica@siffran", "--json"],
-            check=True, capture_output=True, text=True, env=env,
-        )
-        listed = subprocess.run(
-            [*argv, "plugin", "list", "--json"],
-            check=True, capture_output=True, text=True, env=env,
-        )
-        listing = json.loads(listed.stdout)
-        if "empirica" not in json.dumps(listing):
-            fail("live Codex loader did not list the installed Empirica bundle")
-    print(f"  ok: {CODEX_VERSION} loaded the isolated Empirica marketplace and plugin")
+    print("  ok: Codex manifest, hook schema, and isolated package layout")
 
 
 def main() -> int:
+    argparse.ArgumentParser(description=__doc__).parse_args()
     static_validate()
-    if "--live" in sys.argv[1:]:
-        live_validate(os.environ.get("CODEX", "codex"))
     return 0
 
 

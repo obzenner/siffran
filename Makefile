@@ -31,20 +31,20 @@ EMPIRICA_LIVE_RECEIPT_TESTS := $(SCRIPTS)/tests/test_empirica_live_receipts.py
 EMPIRICA_CLAUDE_MCP_LOG_TESTS := $(SCRIPTS)/tests/test_check_claude_mcp_log.py
 PI_CANARY_CONFIG_TESTS := $(SCRIPTS)/tests/test_configure_pi_canary.py
 EMPIRICA_D6_STRICT_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d6_strict_v2.py
-EMPIRICA_D7_LOCATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_location.py
-EMPIRICA_D7_TRANSACTION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_transactions.py
+EMPIRICA_LOCATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_location.py
+EMPIRICA_TRANSACTION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_transactions.py
 EMPIRICA_BRIDGE_V2_TESTS := $(PLUGINS_DIR)/empirica/tests/test_bridge_v2.py
 EMPIRICA_PUBLIC_TOOLS_TESTS := $(PLUGINS_DIR)/empirica/tests/test_public_tools.py
 EMPIRICA_AUDIT_PROTOCOL_TESTS := $(PLUGINS_DIR)/empirica/tests/test_audit_protocol.py
 EMPIRICA_STATE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_state_adapter.py
 EMPIRICA_GIT_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/git/tests/test_git_artifact_repo.py
+EMPIRICA_GIT_IO_BOOTSTRAP_TESTS := $(PLUGINS_DIR)/empirica/adapters/git/tests/test_git_io_bootstrap.py
+EMPIRICA_GOVERNANCE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_governance.py
 EMPIRICA_CLAUDE_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/claude/tests/test_claude_adapter.py
 EMPIRICA_CLAUDE_ADAPTER_CONFORMANCE_TESTS := $(PLUGINS_DIR)/empirica/adapters/claude/tests/test_claude_adapter_conformance.py
 EMPIRICA_CODEX_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/codex/tests/test_codex_adapter.py
 EMPIRICA_CODEX_ADAPTER_CONFORMANCE_TESTS := $(PLUGINS_DIR)/empirica/adapters/codex/tests/test_codex_adapter_conformance.py
-EMPIRICA_PI_ADAPTER_CONFORMANCE_TESTS := $(PLUGINS_DIR)/empirica/adapters/pi/test/adapter-conformance.test.ts
 METHODOLOGIST_CORE_TESTS := $(PLUGINS_DIR)/methodologist/tests/test_core.py
-METHODOLOGIST_CODEX_TESTS := $(PLUGINS_DIR)/methodologist/adapters/codex/tests/test_mcp_server.py
 MARKETPLACE := .claude-plugin/marketplace.json
 
 # All plugin manifests, discovered rather than listed — a new plugin is picked up automatically.
@@ -74,58 +74,110 @@ help: ## Show this help (generated from target descriptions)
 
 ## --- Verify
 
-# `check` is composed of subject-matter suites so a contributor can run the one that matters for
-# their change and CI can pick what its runners support. Each suite is self-contained and prints
-# its own banner; `check` is simply all of them, `check-ci` is all of them minus the Pi suite
-# (CI runners do not carry Node/Pi — set PI_CHECKS=1 there to opt in). Measured locally: static ~3s,
-# core ~2s, claude ~30s, codex ~30s, pi ~30s.
+# `check` is the fast deterministic contributor gate. Expensive filesystem/host-journey matrices
+# live under the explicit integration targets below; installed-host qualification is operator-led
+# and never runs automatically. `check-ci` omits Pi unless the runner explicitly opts in.
 .PHONY: check check-ci check-static check-core check-claude check-codex check-pi
-check: check-static check-core check-claude check-codex check-pi ## Run every suite (local pre-commit gate)
-	@printf '\n$(BOLD)All checks passed.$(RESET)\n'
+check: check-static check-core check-claude check-codex check-pi ## Fast contributor gate (not integration/native certification)
+	@printf '\n$(BOLD)Fast contributor checks passed.$(RESET)\n'
 
-check-ci: check-static check-core check-claude check-codex ## Every suite except Pi (add PI_CHECKS=1 to include it)
+check-ci: check-static check-core check-claude check-codex ## Fast contributor gate except Pi (PI_CHECKS=1 includes it)
 	@if [ "$(PI_CHECKS)" = "1" ]; then $(MAKE) check-pi; else printf '$(DIM)Pi suite skipped in CI (PI_CHECKS=1 to include)$(RESET)\n'; fi
 	@printf '\n$(BOLD)CI checks passed.$(RESET)\n'
 
-check-static: lint validate docs-check adr-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check empirica-claude-mcp-log-unit-check pi-canary-unit-check ## Lint, manifests, docs, ADRs, contracts, vendor copies, activation, receipts, canary config
+check-static: lint validate docs-check adr-check empirica-architecture-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check empirica-claude-mcp-log-unit-check pi-canary-unit-check pi-validator-unit-check ## Lint, manifests, docs, ADRs, contracts, vendor copies, activation, receipts, canary config
 	@printf '$(BOLD)==> static suite ok$(RESET)\n'
 
-check-core: ## Host-neutral core: obligations lib, Empirica core/application/state/git store, Methodologist core
+check-core: ## Fast host-neutral contracts, malformed input, state, bridge, and governance boundaries
 	@printf '$(BOLD)==> core suite$(RESET)\n'
 	@$(PYTHON) lib/obligations/tests/test_obligations.py
 	@$(PYTHON) $(EMPIRICA_FRESHNESS_TESTS)
 	@$(PYTHON) $(EMPIRICA_OBSERVATION_TESTS)
 	@$(PYTHON) $(EMPIRICA_EXECUTION_ADAPTER_TESTS)
 	@$(PYTHON) $(EMPIRICA_PROTOCOL_ISOLATION_TESTS)
-	@$(PYTHON) $(EMPIRICA_D6_STRICT_TESTS)
-	@$(PYTHON) $(EMPIRICA_D7_LOCATION_TESTS)
-	@$(PYTHON) $(EMPIRICA_D7_TRANSACTION_TESTS)
-	@$(PYTHON) $(EMPIRICA_BRIDGE_V2_TESTS)
+	@$(PYTHON) $(EMPIRICA_LOCATION_TESTS)
 	@$(PYTHON) $(EMPIRICA_PUBLIC_TOOLS_TESTS)
 	@$(PYTHON) $(EMPIRICA_AUDIT_PROTOCOL_TESTS)
-	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/test_stale_audit_retry.py
-	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/v2/__main__.py
 	@$(PYTHON) $(EMPIRICA_STATE_TESTS)
-	@$(PYTHON) $(EMPIRICA_GIT_ADAPTER_TESTS)
 	@$(PYTHON) $(METHODOLOGIST_CORE_TESTS)
+	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q \
+		test_governance.GovernanceServiceTests.test_private_exact_replay_conflict_stale_cross_run_and_cas \
+		test_governance.GovernanceServiceTests.test_pair_only_selection_blocks_unknown_same_and_null_reviewer \
+		test_governance.GovernanceServiceTests.test_auto_explicit_no_ceiling_increase_and_bounded_revisions \
+		test_governance.GovernanceServiceTests.test_observed_main_mismatch_revokes_and_blocks_bound_verdict \
+		test_governance.GovernanceServiceTests.test_graphless_configure_and_private_present_are_effect_free_blocks \
+		test_governance.GovernanceServiceTests.test_bootstrap_graphless_convergence_is_preparation_not_human_wait \
+		test_governance.GovernanceServiceTests.test_bootstrap_contract_examples_have_real_postconditions \
+		test_governance.GovernanceServiceTests.test_bootstrap_terminal_run_has_no_preparation_actions \
+		test_governance.GovernanceServiceTests.test_real_pending_approval_investigation_then_revision_revokes_all_paths \
+		test_governance.GovernanceServiceTests.test_raw_submission_conflict_and_amendment_replay \
+		test_governance.GovernanceServiceTests.test_legacy_semantic_receipt_remains_exactly_replayable
 
-check-claude: ## Claude Code host: activation lifecycle + Claude adapter tests
+check-claude: ## Fast Claude payload, lifecycle translation, and fail-closed adapter tests
 	@printf '$(BOLD)==> claude suite$(RESET)\n'
-	@$(PYTHON) $(EMPIRICA_ACTIVATION_TESTS)
 	@$(PYTHON) $(EMPIRICA_CLAUDE_ADAPTER_TESTS)
-	@$(PYTHON) $(EMPIRICA_CLAUDE_ADAPTER_CONFORMANCE_TESTS)
+	@$(MAKE) --no-print-directory empirica-governance-host-check ARGS='-k host_owned'
+	@$(MAKE) --no-print-directory empirica-activation-lifecycle-check ARGS='-k test_post_model_switch_subprocess_revokes_approved_author'
 
-check-codex: methodologist-codex-check empirica-codex-check ## Codex host: adapter tests + package/hook validation for both plugins
-	@printf '$(BOLD)==> codex suite$(RESET)\n'
-	@$(PYTHON) $(EMPIRICA_CODEX_ADAPTER_TESTS)
-	@$(PYTHON) $(EMPIRICA_CODEX_ADAPTER_CONFORMANCE_TESTS)
-	@$(PYTHON) $(METHODOLOGIST_CODEX_TESTS)
+check-codex: methodologist-codex-check empirica-codex-check ## Fast Codex package, hook, payload, and MCP tests
+	@cd $(PLUGINS_DIR)/empirica/adapters/codex/tests && $(PYTHON) -m unittest -q \
+		test_codex_adapter.ExactV2ProfileTests.test_profile_id_is_the_exact_codex_registry_profile \
+		test_codex_adapter.ExactV2ProfileTests.test_stop_hook_deadline_exceeds_managed_audit_deadline \
+		test_codex_adapter.ExactV2ProfileTests.test_transport_dispatches_via_bridge_handle_with_profile_and_no_cwd \
+		test_codex_adapter.CorrelationTests \
+		test_codex_adapter.OfficialShapeTests \
+		test_codex_adapter.StartRunTests \
+		test_codex_adapter.ResolveRunTests \
+		test_codex_adapter.RemovedAndTrustedSurfacesTests \
+		test_codex_adapter.UnsupportedLifecycleTests.test_stop_fails_closed_when_evaluation_transport_breaks_after_resolution \
+		test_codex_adapter.StoreIsolationTests
+	@printf '$(BOLD)==> codex suite ok$(RESET)\n'
 
-check-pi: pi-bundle-check methodologist-pi-check empirica-pi-check ## Pi host: bundle + both adapters (static, typecheck, tests, live bridge) — needs Node
+check-pi: pi-bundle-check methodologist-pi-check empirica-pi-check ## Fast Pi package, type, unit, guard, and bounded bridge tests — needs Node
 	@printf '$(BOLD)==> pi suite ok$(RESET)\n'
 
+.PHONY: empirica-governance-check empirica-core-integration empirica-host-integration empirica-governance-host-check empirica-governance-service-check
+empirica-governance-service-check: ## Check real-service governance transitions (ARGS="-k test_name" selects cases)
+	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_governance $(ARGS)
+
+empirica-governance-host-check: ## Check real-service Claude form mediation (ARGS="-k test_name" selects cases)
+	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_governance_hosts $(ARGS)
+
+empirica-governance-check: ## Diagnose full real-service governance CAS, replay, consent, and host flows
+	@$(PYTHON) $(EMPIRICA_GOVERNANCE_TESTS)
+	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/test_governance_hosts.py
+
+.PHONY: empirica-transaction-check empirica-git-check
+empirica-git-check: ## Check Git artifact integrity, concurrency, and bounded bootstrap process counts
+	@$(PYTHON) $(EMPIRICA_GIT_ADAPTER_TESTS)
+	@$(PYTHON) $(EMPIRICA_GIT_IO_BOOTSTRAP_TESTS)
+
+empirica-transaction-check: ## Check transaction/projection invariants (ARGS="-k test_name" selects cases)
+	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_d7_transactions $(ARGS)
+
+empirica-core-integration: ## Diagnose expensive persistence, transaction, retry, and v2 behavior
+	@$(PYTHON) $(EMPIRICA_D6_STRICT_TESTS)
+	@$(MAKE) --no-print-directory empirica-transaction-check
+	@$(MAKE) --no-print-directory empirica-git-check
+	@$(PYTHON) $(EMPIRICA_BRIDGE_V2_TESTS)
+	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/test_stale_audit_retry.py
+	@$(MAKE) empirica-v2-check
+
+.PHONY: empirica-v2-check
+empirica-v2-check: ## Diagnose v2 behavior with unittest discovery (ARGS="-k test_name" selects a regression)
+	@cd $(PLUGINS_DIR)/empirica/tests/v2 && PYTHONPATH=..:../.. $(PYTHON) -m unittest discover -v -p 'test_*.py' $(ARGS)
+
+.PHONY: empirica-activation-lifecycle-check
+empirica-activation-lifecycle-check: ## Check isolated Claude hook lifecycle (ARGS="-k test_name" selects cases)
+	@$(PYTHON) $(EMPIRICA_ACTIVATION_TESTS) $(ARGS)
+
+empirica-host-integration: empirica-activation-lifecycle-check ## Diagnose expensive simulated Claude/Codex lifecycle conformance
+	@$(PYTHON) $(EMPIRICA_CODEX_ADAPTER_TESTS)
+	@$(PYTHON) $(EMPIRICA_CLAUDE_ADAPTER_CONFORMANCE_TESTS)
+	@$(PYTHON) $(EMPIRICA_CODEX_ADAPTER_CONFORMANCE_TESTS)
+
 .PHONY: test
-test: check-core check-claude check-codex ## Run every test suite (core + claude + codex; Pi tests live in check-pi)
+test: check ## Alias for the complete fast contributor gate, including validator unit tests
 
 .PHONY: lint
 lint: ## Lint Python hooks, tests, and scripts (ruff, if installed)
@@ -194,7 +246,8 @@ activation-check: ## Verify Empirica runtime isolation and thin Claude hook acti
 
 # devDependencies (typescript, @types/node) that turn the Pi adapter typecheck
 # from a skipped note into an enforced gate. Rebuilt when the lockfile changes;
-# graceful when npm is absent — the validator then skips the typecheck itself.
+# Missing npm does not imply a successful typecheck: the validator fails without tsc unless
+# EMPIRICA_ALLOW_SKIP=1 explicitly acknowledges a partial check.
 node_modules: package-lock.json
 	@if command -v npm >/dev/null 2>&1; then \
 		printf '$(BOLD)==> installing pi devDependencies (npm ci)$(RESET)\n'; \
@@ -214,52 +267,44 @@ methodologist-codex-check: ## Deterministically validate the Methodologist Codex
 	@printf '$(BOLD)==> methodologist Codex package$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_codex_plugin.py
 
-.PHONY: methodologist-codex-smoke
-methodologist-codex-smoke: ## Run online discovery/invocation smoke tests with codex-cli 0.146.0
-	@printf '$(BOLD)==> methodologist Codex 0.146.0 smoke$(RESET)\n'
-	@$(PYTHON) $(SCRIPTS)/smoke_codex_plugin.py
-
 .PHONY: pi-bundle-check
-pi-bundle-check: node_modules ## Validate the repository-root Pi package used by `pi install git:...`
+pi-bundle-check: node_modules ## Validate repository-root Pi package composition without rerunning adapter tests
 	@printf '$(BOLD)==> Pi bundle$(RESET)\n'
-	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py .
+	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py . --package-only
 
 .PHONY: empirica-pi-check
 empirica-pi-check: node_modules ## Validate the Empirica Pi adapter package (static + bridge smoke always; typecheck + tests if node present)
 	@printf '$(BOLD)==> empirica Pi adapter$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py plugins/empirica/adapters/pi
 
+.PHONY: empirica-governance-bridge-check
+empirica-governance-bridge-check: node_modules ## Check Pi governance through the real private Python service (scripted UI, no native host)
+	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py plugins/empirica/adapters/pi --test-file live-bridge.test.ts
+
+.PHONY: empirica-governance-ui-check empirica-pi-typecheck pi-validator-unit-check
+empirica-governance-ui-check: node_modules ## Typecheck and run fast governance dialog edge-case regressions
+	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py plugins/empirica/adapters/pi --test-file governance-ui-unit.test.ts
+
+empirica-pi-typecheck: node_modules ## Validate and typecheck the Empirica Pi adapter without running tests
+	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py plugins/empirica/adapters/pi --typecheck-only
+
+pi-validator-unit-check: ## Test Pi validator test selection and bounded async test invocation
+	@$(PYTHON) $(SCRIPTS)/tests/test_validate_pi_adapter.py
+
 .PHONY: empirica-codex-check
-empirica-codex-check: ## Validate the Empirica Codex package, hook payloads, and isolated lifecycle
+empirica-codex-check: ## Validate the Empirica Codex manifest, hooks, and package layout (no host execution)
 	@printf '$(BOLD)==> empirica Codex adapter$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_codex_adapter.py
 
-.PHONY: codex-live-check
-codex-live-check: ## Smoke Codex 0.146.0 marketplace/plugin loading (set CODEX=... if needed)
-	@printf '$(BOLD)==> Codex 0.146.0 live plugin smoke$(RESET)\n'
-	@CODEX="$${CODEX:-codex}" $(PYTHON) $(SCRIPTS)/validate_codex_adapter.py --live
-
 # Empirica 2.0 target-state architecture validator (D3). Structural-only: ownership/dependency
 # direction, subtraction (forbidden files/symbols/fields/actions/protocols), effective runtime budget,
-# thin hooks, public-contract/profile alignment, and Make lifecycle. Intentionally NOT composed into
-# check-static/check/check-ci in D3 — the current pre-D6/D7 tree is expected to be RED; the reported
-# violations are the red acceptance list for D6/D7. D3-M composes the target once the state is green.
+# thin hooks, public-contract/profile alignment, and Make lifecycle. ADR 0053 re-establishes
+# the measured finite ceiling and composes this target into check-static/check/check-ci.
 # Pass ARGS=--self-test to run the committed synthetic suite (GREEN) instead of validating the repo.
 .PHONY: empirica-architecture-check
 empirica-architecture-check: ## validate Empirica 2.0 target ownership, dependencies, subtraction, and code budget
 	@printf '$(BOLD)==> empirica architecture$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_empirica_architecture.py $(ARGS)
-
-# Deterministic adapter conformance. These tests do not launch installed native hosts.
-.PHONY: empirica-host-adapter-check
-empirica-host-adapter-check: ## validate public tools and three host adapter translations
-	@printf '$(BOLD)==> empirica host-adapter conformance$(RESET)\n'
-	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_PUBLIC_TOOLS_TESTS)
-	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_CLAUDE_ADAPTER_CONFORMANCE_TESTS)
-	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_CODEX_ADAPTER_CONFORMANCE_TESTS)
-	@node --experimental-strip-types --test $(EMPIRICA_PI_ADAPTER_CONFORMANCE_TESTS)
-	@cd $(PLUGINS_DIR)/empirica/tests/v2 && PYTHONPATH=../.. $(PYTHON) -m unittest -v \
-		test_public_host_path.PublicHostPathTests
 
 .PHONY: empirica-claude-mcp-log-unit-check
 empirica-claude-mcp-log-unit-check: ## Test native Claude MCP admission-log verification
@@ -292,44 +337,12 @@ empirica-host-live-check: ## require retained installed-host Allow(converged=tru
 	@printf '$(BOLD)==> empirica installed-host receipts$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/verify_empirica_live_receipts.py
 
-# Empirica 2.0 host-neutral behavioral conformance suite.
-.PHONY: empirica-v2-conformance
-empirica-v2-conformance: ## run Empirica 2.0 host-neutral behavioral conformance
-	@printf '$(BOLD)==> empirica v2 conformance$(RESET)\n'
-	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/v2/__main__.py $(ARGS)
+## --- Qualify
 
-# Empirica 2.0 D7-B location codec tests. storage_id / encode_handle / decode_handle contract
-# against the production application/location module. Composed into check-core (green target).
-.PHONY: empirica-d7-conformance
-empirica-d7-conformance: ## run D7-owned D4 cases plus strict D6 state cases
-	@printf '$(BOLD)==> empirica d7 conformance$(RESET)\n'
-	@cd $(PLUGINS_DIR)/empirica/tests/v2 && PYTHONPATH=../.. $(PYTHON) -m unittest -v \
-		test_activation_route_graph.ActivationRouteGraphTests.test_investigate_before_route_blocks_with_routing_reason \
-		test_activation_route_graph.ActivationRouteGraphTests.test_route_then_investigate_proceeds_late_route_blocks \
-		test_activation_route_graph.ActivationRouteGraphTests.test_claim_state_derived_committed_scope_gates \
-		test_activation_route_graph.ActivationRouteGraphTests.test_malformed_missing_selected_graph_fails_closed \
-		test_budget_freeze_terminal.BudgetFreezeTerminalTests.test_derivation_and_spawn_limits_block \
-		test_budget_freeze_terminal.BudgetFreezeTerminalTests.test_freeze_first_write_wins \
-		test_budget_freeze_terminal.BudgetFreezeTerminalTests.test_committed_frozen_scope_only_gating_scope \
-		test_budget_freeze_terminal.BudgetFreezeTerminalTests.test_terminal_nonconverged_runs_honest \
-		test_protocol_host.ProtocolHostTests.test_v2_identity_checked_before_decoding \
-		test_protocol_host.ProtocolHostTests.test_noncurrent_wire_and_persisted_state_are_rejected \
-		test_protocol_host.ProtocolHostTests.test_unknown_fields_actions_fail_closed
-
-.PHONY: empirica-d7-transactions
-empirica-d7-transactions: ## run Empirica 2.0 D7-W transaction and history tests
-	@printf '$(BOLD)==> empirica d7 transactions$(RESET)\n'
-	@$(PYTHON) $(EMPIRICA_D7_TRANSACTION_TESTS)
-
-.PHONY: empirica-stale-audit-check
-empirica-stale-audit-check: ## Test bounded stale pending-audit recovery and the shared host protocol
-	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/test_stale_audit_retry.py
-	@$(PYTHON) $(EMPIRICA_AUDIT_PROTOCOL_TESTS)
-
-.PHONY: empirica-d7-location
-empirica-d7-location: ## run Empirica 2.0 D7-B location codec tests
-	@printf '$(BOLD)==> empirica d7 location (D7-B)$(RESET)\n'
-	@$(PYTHON) $(EMPIRICA_D7_LOCATION_TESTS)
+.PHONY: native-qualification
+native-qualification: ## Print the operator-led native qualification skill entrypoint (never launches a host)
+	@printf 'Read and follow %s in a supported native host. This target launches nothing.\n' \
+		'.claude/skills/native-qualification/SKILL.md'
 
 ## --- Inspect
 
@@ -363,6 +376,12 @@ doctor: ## empirica preflight: actors reachable; pass ARGS="--multi-provider" to
 # globally installed siffran resources and the separately installed pi-subagents extension. The
 # checkout-bundled exact pi-subagents profile remains active; providers and unrelated packages are
 # unchanged. Local edits hot-reload with /reload. Pi asks to trust the folder once.
+CLAUDE ?= claude
+.PHONY: claude-dev
+claude-dev: ## Run interactive Claude with both plugins from THIS checkout; normal user configuration is inherited
+	@command -v "$(CLAUDE)" >/dev/null 2>&1 || { printf 'claude-dev: executable not found (set CLAUDE=/path/to/claude)\n' >&2; exit 2; }
+	@$(CLAUDE) --plugin-dir "$(CURDIR)/plugins/empirica" --plugin-dir "$(CURDIR)/plugins/methodologist" $(ARGS)
+
 PI ?= pi
 .PHONY: pi-dev
 pi-dev: ## Run Pi with siffran overridden by THIS checkout (dogfood; other packages unchanged): make pi-dev [ARGS="..."]
@@ -420,7 +439,7 @@ docs-check: ## Verify the generated plugin tables match the manifests
 	@$(PYTHON) $(SCRIPTS)/check_generated_docs.py
 
 .PHONY: release-check
-release-check: check empirica-architecture-check empirica-host-live-check ## Pre-release gate: deterministic checks plus installed-host receipts
+release-check: check empirica-core-integration empirica-governance-check empirica-host-integration empirica-host-live-check ## Deliberate pre-release gate: fast checks, integration diagnostics, installed-host receipts
 	@printf '\n$(BOLD)Ready to release.$(RESET) Remaining steps are yours:\n'
 	@printf '  1. confirm the version bump is in plugin.json (make status)\n'
 	@printf '  2. commit and push\n'
@@ -455,3 +474,8 @@ clean-runs: ## Remove machine-local empirica operational runs (never legacy .cla
 	else \
 		printf '  no operational runs to remove\n'; \
 	fi
+
+.PHONY: empirica-public-tools-sync
+empirica-public-tools-sync: vendor-contracts ## Regenerate public tool schemas after canonical request edits, then sync vendor copies
+	$(PYTHON) scripts/sync_empirica_public_tools.py
+	$(MAKE) vendor-contracts

@@ -302,6 +302,17 @@ class RouteAndInvestigateTests(unittest.TestCase):
         self.assertEqual(build_investigation_request(own, "run")["command"]["action"],
                          {"kind": "investigate"})
 
+    def test_unknown_mcp_research_and_writers_require_admission_but_public_preparation_does_not(self):
+        for name in ("mcp__web__search", "Write", "Edit", "custom_tool",
+                     "mcp__other__empirica_read"):
+            with self.subTest(tool=name):
+                request = build_investigation_request(_payload(tool_name=name), "run")
+                self.assertEqual(request["command"]["action"], {"kind": "investigate"})
+        for name in ("mcp__plugin_empirica_empirica__empirica_read",
+                     "mcp__plugin_empirica_empirica__empirica_observe",
+                     "mcp__plugin_empirica_empirica__report_convergence", "ToolSearch", "AskUserQuestion"):
+            self.assertIsNone(build_investigation_request(_payload(tool_name=name), "run"))
+
     def test_route_announcement_is_exact_v2(self) -> None:
         request = build_route_announcement_request(
             _payload(tool_name="Bash", tool_input={"command": "announce"}),
@@ -336,6 +347,12 @@ class DispatchTests(unittest.TestCase):
 
 class ConfigureRunTests(unittest.TestCase):
     def test_mode_becomes_exact_configure_run(self) -> None:
+        automatic = parse_invocation(
+            {"command_args": "--auto --cli-exec --multi-provider prove X"}, environ={}, fallback_goal="g",
+        )
+        self.assertEqual(automatic.control_mode, "auto")
+        self.assertTrue(automatic.modes["cli_exec"])
+        self.assertTrue(automatic.modes["multi_provider"])
         invocation = parse_invocation(
             {"command_args": "--cli-exec --multi-provider prove X"}, environ={}, fallback_goal="g",
         )
@@ -392,6 +409,40 @@ class ChildReserveTests(unittest.TestCase):
 
 class ResponseMappingTests(unittest.TestCase):
     """Honest native fail-closed response mapping for the gate events."""
+
+    def test_human_governance_wait_settles_turn_without_convergence(self) -> None:
+        def result(state="pending", code="governance.approval_required"):
+            return {"type": "Block", "run": {"status": "active", "governance": {
+                "state": state, "control_mode": "deliberative",
+                "context": {"ingress": "mcp_elicitation"}}},
+                "reasons": [{"code": code, "message": "approval required"}]}
+        for state, code in (("pending", "governance.approval_required"),
+                            ("revision_pending", "governance.revision_required"),
+                            ("rejected", "governance.approval_required")):
+            mapped = stop_result({"result": result(state, code)})
+            self.assertEqual(mapped.exit_code, 0)
+            notice = json.loads(mapped.stdout)
+            self.assertIn("not converged", notice["systemMessage"])
+            self.assertNotIn("converged", notice)
+            self.assertNotIn("decision", notice)
+        for changed in ("auto", "approved", "missing_context", "mixed", "fault", "terminal", "mismatched_reason"):
+            blocked = result()
+            if changed == "auto":
+                blocked["run"]["governance"]["control_mode"] = "auto"
+            elif changed == "approved":
+                blocked["run"]["governance"]["state"] = "approved"
+            elif changed == "missing_context":
+                blocked["run"]["governance"]["context"] = {}
+            elif changed == "mixed":
+                blocked["reasons"].append({"code": "run.corrupt"})
+            elif changed == "fault":
+                blocked["type"] = "Fault"
+            elif changed == "terminal":
+                blocked["run"]["status"] = "converged"
+            elif changed == "mismatched_reason":
+                blocked["reasons"][0]["code"] = "governance.revision_required"
+            with self.subTest(changed=changed):
+                self.assertEqual(stop_result({"result": blocked}).exit_code, 2)
 
     def test_stop_result_inert_allow_block_and_faults(self) -> None:
         self.assertEqual(stop_result({"result": {"type": "Inert", "reason": "no_run"}}).exit_code, 0)
@@ -552,7 +603,8 @@ class SpawnLifecycleTests(unittest.TestCase):
         from adapters.claude.lifecycle import spawn_main
         argument = {"argument_digest": "sha256:" + "1" * 64, "claims": []}
         plan = AuditLaunchPlan("claude-code@2.1.278", "active-run", "ch-audit",
-                               "empirica:empirica-auditor", argument)
+                               "empirica:empirica-auditor", argument,
+                               auditor={"provider_id": "anthropic", "model_id": "claude-opus-4-6"})
         payload = self._stdin({"subagent_type": "empirica:empirica-auditor",
                                "prompt": "author-controlled prompt"})
         out = StringIO()
@@ -563,6 +615,7 @@ class SpawnLifecycleTests(unittest.TestCase):
              patch("adapters.claude.lifecycle.dispatch_investigation",
                    return_value=investigation), \
              patch("adapters.claude.lifecycle.AuditProtocol.prepare", return_value=plan), \
+             patch("adapters.claude.lifecycle._governance_context"), \
              patch("sys.stdin", new=payload), patch("sys.stdout", new=out):
             self.assertEqual(spawn_main(), 0)
         updated = json.loads(out.getvalue())["hookSpecificOutput"]["updatedInput"]
@@ -572,7 +625,8 @@ class SpawnLifecycleTests(unittest.TestCase):
         self.assertIs(updated["run_in_background"], True)
         self.assertEqual(updated["max_turns"], 8)
         self.assertEqual(set(updated), {"subagent_type", "description", "prompt",
-                                        "run_in_background", "max_turns"})
+                                        "run_in_background", "max_turns", "model"})
+        self.assertEqual(updated["model"], "claude-opus-4-6")
 
     def test_durable_plan_rejects_missing_operation_or_wrong_role(self) -> None:
         from adapters.claude.lifecycle import _durable_plan

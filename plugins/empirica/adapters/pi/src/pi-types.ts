@@ -6,13 +6,18 @@ export type NotifyType = "info" | "warning" | "error";
 
 export interface UiContext {
   notify(message: string, type?: NotifyType): void;
+  select?(title: string, options: string[], opts?: { timeout?: number; signal?: AbortSignal }): Promise<string | undefined>;
+  confirm?(title: string, message: string, opts?: { timeout?: number; signal?: AbortSignal }): Promise<boolean>;
+  input?(title: string, placeholder?: string, opts?: { timeout?: number; signal?: AbortSignal }): Promise<string | undefined>;
 }
 
 export interface ExtensionContext {
   ui: UiContext;
+  hasUI?: boolean;
   cwd?: string;
   model?: { id: string; provider: string };
   modelRegistry?: {
+    getError?(): string | undefined;
     getAvailable(): Array<{ id: string; provider: string; fullId?: string; reasoning?: boolean }>;
   };
   sessionManager?: {

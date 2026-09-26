@@ -23,5 +23,33 @@
   "stamp_seq": 3,
   "last_derivation_digest": null,
   "children": [],
-  "committed_artifact_head_id": null
+  "committed_artifact_head_id": null,
+  "governance": {
+    "state": "pending",
+    "control_mode": "deliberative",
+    "revision_limit": 64,
+    "plan_revision": 0,
+    "revisions_used": 0,
+    "approved_digest": null,
+    "approval_kind": null,
+    "receipts": [],
+    "proposal": {
+      "budgets": {
+        "max_passes": 1,
+        "max_spawns": 0,
+        "max_audit_spawns": 1
+      },
+      "modes": {
+        "multi_provider": false,
+        "cli_exec": false
+      },
+      "auditor": null
+    },
+    "context": {
+      "author": null,
+      "ingress": "unavailable"
+    },
+    "proposal_digest": "sha256:d3bb5217b72c253dd84bf497fe8045e29e5b9586351842006cf28d0a55486331",
+    "change_request": null
+  }
 }

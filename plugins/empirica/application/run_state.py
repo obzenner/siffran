@@ -14,6 +14,7 @@ import jsonschema
 
 from core.evaluation import SPAWN_BUDGET
 from core.run import OperationalState
+from core.governance import invariant
 from . import protocol as _proto
 
 _STATE_SCHEMA = _proto._STATE_SCHEMA
@@ -36,6 +37,7 @@ def decode_state(doc: dict[str, Any]) -> OperationalState:
     return OperationalState(
         protocol=doc["protocol"], state_schema=doc["state_schema"], goal=doc["goal"],
         status=doc["status"], modes=doc["modes"], budgets=doc["budgets"],
+        governance=doc["governance"],
         selected_graph_artifact_id=doc["selected_graph_artifact_id"],
         frozen_claim_ids=None if doc["frozen_claim_ids"] is None else tuple(doc["frozen_claim_ids"]),
         frozen_semantic_digest=doc["frozen_semantic_digest"],
@@ -49,6 +51,7 @@ def encode_state(state: OperationalState) -> dict[str, Any]:
     return {
         "protocol": state.protocol, "state_schema": state.state_schema, "goal": state.goal,
         "status": state.status, "modes": _thaw(state.modes), "budgets": _thaw(state.budgets),
+        "governance": _thaw(state.governance),
         "selected_graph_artifact_id": state.selected_graph_artifact_id,
         "frozen_claim_ids": None if state.frozen_claim_ids is None else list(state.frozen_claim_ids),
         "frozen_semantic_digest": state.frozen_semantic_digest,
@@ -69,6 +72,8 @@ class Classification:
 
 def _procedural_ok(doc: dict) -> bool:
     """Check unique child IDs, counter bounds, stamp bounds, and finite deadlines."""
+    if not invariant(doc):
+        return False
     seen: set[str] = set()
     charged = {"investigation": 0, "audit": 0}
     for ch in doc.get("children", []):
@@ -81,10 +86,11 @@ def _procedural_ok(doc: dict) -> bool:
             if (ch.get("purpose") != "audit" or not isinstance(ch.get("audit_operation_id"), str)
                     or not isinstance(ch.get("audit_argument"), dict)
                     or not _AUDIT_DOSSIER.is_valid(ch["audit_argument"])
-                    or not isinstance(ch.get("audit_role_profile"), str)):
+                    or not isinstance(ch.get("audit_role_profile"), str)
+                    or not isinstance(ch.get("audit_auditor"), dict)):
                 return False
         elif (ch.get("audit_operation_id") is not None or ch.get("audit_argument") is not None
-              or ch.get("audit_role_profile") is not None):
+              or ch.get("audit_role_profile") is not None or ch.get("audit_auditor") is not None):
             return False
         if not ch.get("refunded"):
             charged[resource_class] += 1

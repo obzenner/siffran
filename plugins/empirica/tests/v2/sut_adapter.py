@@ -118,6 +118,10 @@ class LiveDriver:
     def request(self, envelope: dict) -> dict:
         return self._service.dispatch(envelope)
 
+    def approve_governance(self, run_id: str) -> None:
+        from governance_setup import approve_current
+        approve_current(self._service._coordinator, run_id)
+
     def workspace_write(self, path: str, content: bytes) -> None:
         self._workspace.write(path, content)
 

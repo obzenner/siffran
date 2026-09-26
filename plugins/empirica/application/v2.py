@@ -74,6 +74,18 @@ class _Service:
     def _valid_trusted(name: str, payload: object) -> bool:
         return _proto.validate_trusted_payload(name, payload)
 
+    def trusted_governance_context(self, *, run_id, payload) -> dict:
+        from .governance import transact
+        if not self._valid_trusted("governanceContextPayload", payload):
+            return Coordinator._fault("trusted-governance", "invalid_request")
+        return transact(self._coordinator, run_id, payload, context=True)
+
+    def trusted_governance_decision(self, *, run_id, payload) -> dict:
+        from .governance import transact
+        if not self._valid_trusted("governanceDecisionPayload", payload):
+            return Coordinator._fault("trusted-governance", "invalid_request")
+        return transact(self._coordinator, run_id, payload)
+
     def trusted_resolve_child(self, *, run_id, native_id) -> str | None:
         """Resolve one native execution through private host correlation only."""
         key = decode_handle(run_id)

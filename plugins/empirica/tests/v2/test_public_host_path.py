@@ -32,10 +32,11 @@ class PublicHostPathTests(ConformanceCase):
             return out["structuredContent"]
 
         observe(action_route(reason="route before investigation"))
-        observe(action_investigate())
         graph = canonical_graph(n_claims=1)
         root_id = graph["root"]
         observe(action_graph(graph))
+        self.require_governance_approved(drv, run_id)
+        observe(action_investigate())
         observe(action_research(
             claim_id=root_id, source_kind="code", result="supports",
             payload={"source_ref": "plugins/empirica/core/evaluation.py"}))

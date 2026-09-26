@@ -5,8 +5,12 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { createStdioBridgeDispatch, HOST_PROFILE_ID } from "../src/stdio-transport.ts";
+import { createPrivateIngress } from "../src/private-transport.ts";
 import { resolveRunRequest } from "../src/translate.ts";
 import { GuardError } from "../src/guard.ts";
 
@@ -101,6 +105,21 @@ test("rejects when the bridge command cannot be spawned", async () => {
     async () => dispatch(resolveRunRequest({ project: "p", session: "s" }, "r")),
     /failed to start/,
   );
+});
+
+test("private ingress kills and rejects a bridge that exceeds its deadline", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "empirica-private-timeout-"));
+  const script = join(directory, "hang.py");
+  writeFileSync(script, "import time\ntime.sleep(60)\n", "utf8");
+  try {
+    const ingress = createPrivateIngress(25, script);
+    await assert.rejects(
+      ingress({ operation: "audit_failure", run_id: "run", child_id: "child" }),
+      /private bridge timed out after 25ms/,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("HOST_PROFILE_ID is the exact pi profile with no default", () => {

@@ -5,6 +5,9 @@ bounded scope.
 
 ## Budget
 
+`configure_run` changes the proposal only. A host approval installs the exact proposed ceilings
+without resetting counters; auto cannot raise them. See [governance.md](governance.md).
+
 Empirica is bounded by configured pass, investigation-spawn, and mandatory-audit-spawn
 ceilings. Passes are charged only when the current derivation changes; repeated identical
 evaluation does not spend another pass. Do not invent a scope-derived formula in the skill
@@ -55,8 +58,8 @@ Freeze is an explicit scope commitment, not convergence.
 - Deferred claims remain visible in the terminal handoff.
 - A frozen result is never relabeled `converged:true`.
 
+Freeze requires a current approved graph and preserves proposal consent.
 Before submitting `ObserveAction(kind="freeze")`, show the user the committed and
 expected deferred scope. After acceptance, do not mutate the commitment by
-rewriting prose or resubmitting freeze. There is no author-controlled scope
-revision: changing committed meaning requires a fresh run until a trusted
-human-origin revision protocol is supported.
+rewriting prose or resubmitting freeze. Pre-freeze changes require new proposal approval. Changing committed frozen meaning still
+requires a fresh run; even host amendments cannot rewrite that commitment.

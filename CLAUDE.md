@@ -16,7 +16,7 @@ Why this is a rule and not a preference: a command that lives only in a chat mes
 | dogfooding the Pi adapters from this checkout | `make pi-dev` (this tree overrides the installed siffran; nothing else changes) |
 | dogfooding a pushed PR branch inside a real project | `make pi-canary REF=<branch> DIR=<project>` |
 | hand-checking the Codex package | `make methodologist-codex-check` |
-| ad-hoc Codex installation/invocation tests | `make methodologist-codex-smoke` |
+| native qualification | `make native-qualification` (prints the operator-led skill path; launches nothing) |
 | `adrs --ng doctor` | `make adr-check` |
 | **everything, before you commit** | **`make check`** |
 | only the suite you touched | `make check-static` / `check-core` / `check-claude` / `check-codex` / `check-pi` |
@@ -26,7 +26,7 @@ Why this is a rule and not a preference: a command that lives only in a chat mes
 
 Rules that follow from this:
 
-- **`make check` must be green before you commit.** It is the composition of five subject-matter suites — `check-static` (lint, manifests, docs, ADRs, contracts, vendor copy, activation), `check-core` (host-neutral lib/core/application), `check-claude`, `check-codex`, `check-pi` — so run the one suite that matters while iterating and the whole thing before committing. `check-ci` is everything except Pi, because CI runners carry no Node/Pi.
+- **`make check` must be green before you commit.** It is the seconds-fast composition of five subject-matter suites — `check-static`, `check-core`, `check-claude`, `check-codex`, `check-pi`. `check-ci` omits Pi unless `PI_CHECKS=1`; `make test` includes all fast deterministic tests. Expensive persistence and simulated-host matrices are explicit integration diagnostics documented in `doc/testing.md`; native qualification is operator-led and never automatic.
 - **Add new lifecycle operations as targets**, with a `## description` so they appear in `make help`. If you find yourself explaining a multi-step command in prose, that command belongs in the Makefile.
 - **No target commits, pushes, or rewrites history**, by design. `make release-check` verifies and then tells you what is left; publishing stays a human decision.
 - **Non-obvious exception:** the generated plugin tables in `CLAUDE.md`/`README.md` are rewritten by the `checkup` skill, which needs a Claude session. `make docs-check` can *detect* drift but not fix it; `make docs` tells you what to run.
@@ -44,7 +44,7 @@ Rules that follow from this:
 - `plugins/<name>/hooks/` — Python lifecycle hooks + `hooks.json` wiring them to events
 - `plugins/empirica/adapters/codex/` — Codex 0.146.0 payload translation and native hook results
 - `plugins/<name>/agents/` — subagent definitions. **Spawn these by their plugin-scoped name** (`empirica:empirica-auditor`); the bare name does not resolve.
-- `plugins/<name>/tests/` — committed regression suites, run by `make test`
+- `plugins/<name>/tests/` — committed regressions; fast selections run by `make test`, expensive boundary matrices by the integration targets in `doc/testing.md`
 - `plugins/methodologist/adapters/codex/` — stateless MCP translation into the host-neutral bridge
 - `doc/adr/` — architecture decision records (MADR, via the `adrs` CLI)
 
@@ -84,9 +84,11 @@ All methodologies must be rooted in computer science, mathematics, or establishe
 ## Validation
 
 ```
-make check          # every suite — run before every commit
-make check-ci       # every suite except Pi (what CI runs); PI_CHECKS=1 opts the Pi suite in
+make check          # fast static + core + Claude + Codex + Pi contributor gate
+make check-ci       # fast gate without Pi; PI_CHECKS=1 opts Pi in
 make check-<suite>  # static | core | claude | codex | pi — the one you are working in
+make test           # all fast deterministic tests, including Pi
+make native-qualification  # operator procedure entrypoint; launches nothing
 make validate       # manifests only
 /plugin validate .  # Claude Code's own manifest check, complementary to make validate
 ```
@@ -99,7 +101,7 @@ The table below and the `## Plugins` table in `README.md` are **generated** — 
 | Plugin | Version | Description |
 |--------|---------|-------------|
 | `methodologist` | 0.9.0 | Formal reasoning catalog — lets users choose and execute evidence-backed CS/math methodologies with traced phases and structured output. |
-| `empirica` | 3.1.5 | Host-neutral empirical-convergence workflow — routes uncertainty into a claim graph, requires cited research before deterministic spikes, derives claim state, and binds convergence to a current independent audit. Full execution is hook-enforced only on profiles with author-action and bound-audit capabilities; unsupported profiles fail explicitly before starting. |
+| `empirica` | 4.0.0 | Host-neutral empirical-convergence workflow — binds exact claim scope, budgets and auditor to host-mediated approval (or explicit bounded auto), requires cited research before spikes, and gates convergence on a current independent audit. Unsupported approval and identity capabilities fail closed. |
 <!-- END GENERATED: plugins -->
 
 ## README

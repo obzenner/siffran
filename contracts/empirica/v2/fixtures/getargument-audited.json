@@ -23,13 +23,13 @@
         },
         "contract": {
           "id": "empirica/public",
-          "version": "2.0.0",
+          "version": "3.0.0",
           "relevant_sections": [
             "terminal",
             "audit",
             "audit/independence"
           ],
-          "digest": "sha256:525fa2359be90b80df00b3a50b6863367d3911cc6bc76e91c76debcb04de89ff"
+          "digest": "sha256:8943e1c76695c1079221a0c52df0e7c43028b90f5507acf04199cdb96880a567"
         },
         "obligations": {
           "active": [],
@@ -58,7 +58,8 @@
         "untrusted_delimiters": {
           "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
           "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
-        }
+        },
+        "governance": null
       },
       "argument": {
         "root_claim_id": "G0",

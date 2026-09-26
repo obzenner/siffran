@@ -13,6 +13,7 @@ from adapters.audit import child_event
 from adapters.audit_protocol import AuditProtocol, AuditProtocolError, IdentityObservation
 from core.evaluation import audit_binding
 from core.records import Corrupt, Present, Revision
+from governance_setup import approve_current
 
 PROFILE = "pi@0.84.1+pi-subagents@0.50.0"
 
@@ -26,10 +27,11 @@ class StaleAuditRetryTests(unittest.TestCase):
             "budgets": {"max_spawns": 1, "max_audit_spawns": 2}}, "start")["result"]
         self.run_id = result["run"]["id"]
         self.key = next(iter(self.runs.data))
-        activate_investigation(self.coordinator, self.run_id)
         self.graph = {"root": "G0", "claims": [{"id": "G0", "text": "tested",
             "gating": True, "kind": "ordinary"}], "edges": []}
         self.action({"kind": "graph", "payload": self.graph})
+        approve_current(self.coordinator, self.run_id)
+        activate_investigation(self.coordinator, self.run_id)
         self.action({"kind": "research", "claim_id": "G0", "source_kind": "code",
                      "result": "supports", "payload": {"source_ref": "source.py",
                                                            "citation": "tested"}})
@@ -66,11 +68,12 @@ class StaleAuditRetryTests(unittest.TestCase):
         graph = copy.deepcopy(self.graph)
         graph["claims"][0]["text"] = "changed argument"
         self.assertEqual(self.action({"kind": "graph", "payload": graph})["type"], "Allow")
+        approve_current(self.coordinator, self.run_id)
 
-    def identities(self, plan, auditor_model="reviewer-v1"):
+    def identities(self, plan, auditor_model="claude-opus-4-6"):
         self.protocol.observe_identities(plan, "native:" + plan.child_id,
-            author=IdentityObservation("author-provider", "author-v1", "host", "session"),
-            auditor=IdentityObservation("review-provider", auditor_model, "host", "session"))
+            author=IdentityObservation("anthropic", "claude-sonnet-4-6", "host", "session"),
+            auditor=IdentityObservation("anthropic", auditor_model, "host", "session"))
 
     def verdict(self):
         self.coordinator.handle({"type": "GetArgument", "run_id": self.run_id}, "argument")
@@ -122,6 +125,7 @@ class StaleAuditRetryTests(unittest.TestCase):
 
     def test_exhaustion_never_retires_refunds_or_raises_budget(self):
         self.action({"kind": "configure_run", "budgets": {"max_audit_spawns": 1}})
+        approve_current(self.coordinator, self.run_id)
         self.pending()
         self.change_argument()
         before, writes = self.runs.data[self.key], self.artifacts.append_calls
@@ -140,6 +144,7 @@ class StaleAuditRetryTests(unittest.TestCase):
         self.assertEqual(self.runs.data[self.key], before)
         self.assertEqual(self.artifacts.append_calls, writes)
         self.action({"kind": "configure_run", "budgets": {"max_audit_spawns": 2}})
+        approve_current(self.coordinator, self.run_id)
         self.prepare()
         self.assertEqual(self.state().budgets["audit_spawns_used"], 2)
 
@@ -183,6 +188,7 @@ class StaleAuditRetryTests(unittest.TestCase):
         graph["claims"].append({"id": "G1", "text": "deferred", "gating": False, "kind": "ordinary"})
         graph["edges"].append({"from": "G0", "to": "G1", "type": "SupportedBy"})
         self.action({"kind": "graph", "payload": graph})
+        approve_current(self.coordinator, self.run_id)
         fresh = self.pending()
         self.assertEqual(old.evidence_ids, fresh.evidence_ids)
         self.identities(fresh)
@@ -191,6 +197,7 @@ class StaleAuditRetryTests(unittest.TestCase):
     def test_file_freshness_alone_invalidates_pending_coverage(self):
         self.graph["claims"][0]["kind"] = "needs-experiment"
         self.action({"kind": "graph", "payload": self.graph})
+        approve_current(self.coordinator, self.run_id)
         self.action({"kind": "research", "claim_id": "G0", "source_kind": "code",
             "result": "supports", "payload": {"source_ref": "source.py", "citation": "tested"}})
         self.workspace.write("source.py", b"original")
@@ -306,14 +313,14 @@ class StaleAuditRetryTests(unittest.TestCase):
         self.identities(old)
         self.action({"kind": "freeze"})
         fresh = self.pending()
-        self.protocol.observe_identities(fresh, "native:" + fresh.child_id,
-            author=IdentityObservation("author-provider", "author-v1", "host", "session"),
-            auditor=IdentityObservation(None, None, "unverified", "missing-session"))
-        self.assertTrue(self.protocol.observe_verdict(fresh, "native:" + fresh.child_id, self.verdict()))
+        with self.assertRaises(AuditProtocolError):
+            self.protocol.observe_identities(fresh, "native:" + fresh.child_id,
+                author=IdentityObservation("anthropic", "claude-sonnet-4-6", "host", "session"),
+                auditor=IdentityObservation(None, None, "unverified", "missing-session"))
         result = self.coordinator.handle({"type": "EvaluateRun", "run_id": self.run_id,
                                          "intent": "report_convergence"}, "gate")["result"]
         self.assertEqual(result["type"], "Block")
-        self.assertEqual(result["reasons"][0]["code"], "audit.independence_unverified")
+        self.assertEqual(result["reasons"][0]["code"], "governance.revision_required")
 
     def test_corrupt_and_terminal_runs_never_recover(self):
         self.pending()

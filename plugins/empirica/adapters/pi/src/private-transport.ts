@@ -9,6 +9,7 @@ export interface AuditPlanData {
   role_profile: string;
   argument: Record<string, unknown>;
   operation_id: string;
+  auditor: { provider_id: string; model_id: string };
 }
 
 export interface PrivateIngressRequest {

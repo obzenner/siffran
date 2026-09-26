@@ -2,18 +2,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import re
 from typing import Any
 
-from .evaluation import (EvaluationSnapshot, active_evidence, audit_attributions, claim_conflicted,
-                         claim_digest, derive_claims, digest, identity_pair, stale_artifact_ids)
+from . import governance
 
-
-def _copy(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {k: _copy(v) for k, v in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [_copy(v) for v in value]
-    return value
+from .evaluation import (EvaluationSnapshot, active_evidence, audit_attributions, bootstrap_status,
+                         claim_conflicted, claim_digest, derive_claims, digest, identity_pair,
+                         stale_artifact_ids)
 
 
 def _scope(snapshot: EvaluationSnapshot) -> tuple[list[str], list[str]]:
@@ -50,14 +46,11 @@ def _obligations(snapshot: EvaluationSnapshot,
     late = bool(snapshot.command and snapshot.command.get("type") == "ObserveAction"
                 and snapshot.command["action"].get("kind") == "route"
                 and state.investigation_stamp is not None)
-    active = [{"id": "obligation.route", "must": "Record routing before investigation.",
-               "status": "satisfied" if state.route_stamp is not None else "residual"}]
+    bootstrap = bootstrap_status(snapshot)
+    active = list(bootstrap["active"])
     if late:
         active.append({"id": "obligation.route.late", "must": "Do not reroute after investigation.",
                        "status": "violated"})
-    if state.route_stamp is not None:
-        active.append({"id": "obligation.investigation", "must": "Investigate after routing.",
-                       "status": "satisfied" if state.investigation_stamp is not None else "residual"})
     gating, deferred = _scope(snapshot)
     if snapshot.graph:
         for claim in snapshot.graph["claims"]:
@@ -97,9 +90,74 @@ def _residuals(snapshot: EvaluationSnapshot, states: Mapping[str, str]) -> list[
     return []
 
 
+_HIDDEN = re.compile(r"[\\\x00-\x1f\x7f-\x9f\u00ad\u061c\u200b-\u200f\u2028-\u202e\u2060\u2066-\u2069\ufeff]")
+
+
+def safe_text(item: object) -> str:
+    def escape(match):
+        code = ord(match.group())
+        return "\\\\" if code == 92 else (f"\\x{code:02x}" if code <= 255 else f"\\u{code:04x}")
+    return _HIDDEN.sub(escape, str(item))
+
+
+def review_text(goal: str, graph: Mapping | None, value: Mapping) -> str:
+    def fence(item):
+        lines.append("| " + safe_text(item))
+    proposal, context = value["proposal"], value["context"]
+    author = context["author"]
+    lines = [f"EMPIRICA SCOPE DECISION — proposal revision {value['plan_revision']}, at most {value['revision_limit']} revisions, mode {value['control_mode']}",
+             "Approve the CURRENT displayed proposal; edits are submitted for another review and are NOT approved yet.",
+             "Every line beginning '| ' is UNTRUSTED quoted data. Controls, bidi characters, and backslashes are visibly escaped.", "", "GOAL"]
+    fence(goal)
+    if graph is None:
+        lines += ["", "CLAIM GRAPH", "  no claim graph selected"]
+    else:
+        lines += ["", f"CLAIM GRAPH — root {safe_text(graph['root'])}, {len(graph['claims'])} claims, {len(graph['edges'])} dependencies"]
+        for claim in graph["claims"]:
+            fence(f"[{claim['id']}] {'gating' if claim['gating'] else 'non-gating'} {claim['kind']} {claim['text']}")
+        lines.append("DEPENDENCIES")
+        for edge in graph["edges"]:
+            fence(f"{edge['from']} {edge['type']} {edge['to']}")
+    lines += ["", "CONFIGURATION"]
+    for key, label in (("max_passes", "Investigation passes"), ("max_spawns", "Child spawns"), ("max_audit_spawns", "Audit spawns")):
+        lines.append(f"  {label}: proposed {proposal['budgets'][key]}, already used {value['budgets'][governance.CEILINGS[key]]}")
+    modes, auditor = proposal["modes"], proposal["auditor"]
+    lines += [f"  multi_provider (cross-provider actors): {modes['multi_provider']}", f"  cli_exec (external model/actor CLI use): {modes['cli_exec']}",
+              f"  Reviewer (selected): {safe_text(auditor['provider_id'] + '/' + auditor['model_id']) if auditor else 'not selected'}",
+              f"  Main model (host-observed): {safe_text(author['provider_id'] + '/' + author['model_id']) if author else 'unknown'}",
+              "  Main and reviewer must be different normalized models. Selection does not prove availability or authorization."]
+    lines += ["", f"STATE — {value['state']}; dialogs left {value['interactions_remaining']['proposal']} this revision, {value['interactions_remaining']['total']} total", "OPEN CHANGE REQUEST"]
+    request = value.get("change_request")
+    if request:
+        lines.append(f"  requested at revision {request['plan_revision']} for {request['proposal_digest']}")
+        fence(request["text"])
+    else:
+        lines.append("  none")
+    lines += ["", "TECHNICAL DETAIL (secondary)", f"  proposal digest {value['proposal_digest']}", f"  ingress {context['ingress']} · plan revision {value['plan_revision']} · revision limit {value['revision_limit']}"]
+    return "\n".join(lines)
+
+
+def project_governance(snapshot: EvaluationSnapshot) -> dict:
+    value = governance.plain(snapshot.state.governance)
+    bootstrap = bootstrap_status(snapshot)
+    value.update(interactions_remaining=governance.interactions_remaining(snapshot.state.governance),
+                 prompt_error=governance.context_error(snapshot.state.governance) or
+                              governance.interaction_error(snapshot.state.governance))
+    value.pop("receipts")
+    value.update(scope=governance.canonical_graph(snapshot.graph),
+                 budgets=dict(snapshot.state.budgets),
+                 remaining={ceiling: snapshot.state.budgets[ceiling] - snapshot.state.budgets[used]
+                            for ceiling, used in governance.CEILINGS.items()},
+                 request_ready=bootstrap["request_ready"], display_ready=bootstrap["display_ready"],
+                 next_action=bootstrap["next_actions"][-1] if bootstrap["next_actions"] else "run.inspect")
+    value["review_text"] = review_text(snapshot.state.goal, snapshot.graph, value)
+    return value
+
+
 def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] | None = None) -> dict[str, Any]:
     changes, _ = _freshness(snapshot)
     states = derive_claims(snapshot).states
+    bootstrap = bootstrap_status(snapshot)
     children = []
     for child in snapshot.state.children:
         row = {"child_id": child["child_id"], "purpose": child["purpose"],
@@ -112,6 +170,7 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
     return {
         "id": snapshot.run_id, "goal": snapshot.state.goal, "status": snapshot.state.status,
         "modes": dict(snapshot.state.modes),
+        "governance": project_governance(snapshot),
         "contract": {"id": snapshot.contract_id, "version": snapshot.contract_version,
                      "digest": snapshot.contract_digest,
                      "relevant_sections": list(["protocol"] if relevant_sections is None
@@ -119,7 +178,7 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
         "obligations": _obligations(snapshot, states),
         "residuals": _residuals(snapshot, states),
         "freshness": {"changes": changes}, "children": children,
-        "next_actions": [],
+        "next_actions": bootstrap["next_actions"],
         "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
                                  "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
         "host": {"profile_id": snapshot.profile_id, "tier": snapshot.host_tier,
@@ -151,7 +210,7 @@ def _audit(snapshot: EvaluationSnapshot) -> dict[str, Any]:
             "reviewed_goal_digest": verdict.get("goal_digest"),
             "reviewed_frozen_scope_digest": verdict.get("frozen_scope_digest"),
             "reviewed_deferred_scope_digest": verdict.get("deferred_scope_digest"),
-            "reviewed_claims": _copy(verdict.get("reviewed_claims", []))}
+            "reviewed_claims": governance.plain(verdict.get("reviewed_claims", []))}
 
 
 def project_argument(snapshot: EvaluationSnapshot) -> dict[str, Any]:
@@ -202,7 +261,7 @@ def project_argument(snapshot: EvaluationSnapshot) -> dict[str, Any]:
         artifacts.append(common)
     frozen_digest = None if snapshot.state.frozen_claim_ids is None else digest(gating)
     argument_digest = digest({"graph": snapshot.graph, "evidence": [a["artifact_id"] for a in artifacts]})
-    return _copy({
+    return governance.plain({
         "root_claim_id": snapshot.graph["root"], "argument_digest": argument_digest,
         "goal_digest": digest(snapshot.state.goal), "frozen_scope_digest": frozen_digest,
         "deferred_scope_digest": digest(deferred),

@@ -48,11 +48,11 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:525fa2359be90b80df00b3a50b6863367d3911cc6bc76e91c76debcb04de89ff"
+REVIEWED_REGISTRY_DIGEST = "sha256:8943e1c76695c1079221a0c52df0e7c43028b90f5507acf04199cdb96880a567"
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:41ef8b89da3f880fb5d256202d9ee5b6e28301b75e52490a41e65d16e09b8caa"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
-REGISTRY_VERSION = "2.0.0"
+REGISTRY_VERSION = "3.0.0"
 PROTOCOL = "empirica/v2"
 # Structural D1 constants that have no canonical-JSON vocabulary of their own: edge
 # types and research source kinds. Artifact kind/outcome/spike-gate vocabularies ARE
@@ -1341,6 +1341,7 @@ def _minimal_valid_state() -> dict:
     return {
         "protocol": "empirica/v2",
         "state_schema": "empirica.run/2",
+        "governance": json.loads((V2 / "state-fixtures/valid-active.json").read_text())["governance"],
         "goal": "g",
         "status": "active",
         "modes": {"multi_provider": False, "cli_exec": False},
@@ -1364,7 +1365,8 @@ def _valid_child_for_state(state: str, d64: str, reg_terminal: set) -> dict:
     base = {"child_id": f"c-{state}", "purpose": "audit", "resource_class": "audit",
             "state": state, "deadline": None, "capability_ref": "cap-1",
             "audit_operation_id": d64, "audit_argument": {"argument_digest": d64},
-            "audit_role_profile": "empirica:empirica-auditor"}
+            "audit_role_profile": "empirica:empirica-auditor",
+            "audit_auditor": {"provider_id": "anthropic", "model_id": "claude-opus-4-6"}}
     if state == "reserved":
         base.update(spent=False, refunded=False, native_id=None,
                      first_terminal_fingerprint=None)
@@ -2083,6 +2085,22 @@ def main() -> int:
         check_clauses(registry, errors, "public-contract")
         check_child_lifecycle(registry, errors, "public-contract")
         check_presentation_selector(registry, errors, "public-contract")
+        expected_predicates = ["route.recorded", "graph.selected", "governance.approved",
+                               "investigation.recorded"]
+        requirements = registry.get("bootstrap", {}).get("requirements", [])
+        if [row.get("predicate") for row in requirements] != expected_predicates:
+            errors.append("public-contract: bootstrap predicates must be the finite ordered bindings")
+        decisions = registry.get("governance_decisions", {}).get("actions", {})
+        if list(decisions) != ["approve", "edit", "request_changes", "reject"]:
+            errors.append("public-contract: governance decisions must be the finite ordered bindings")
+        for action, row in decisions.items():
+            if row.get("feedback") not in {"required", "forbidden"}:
+                errors.append(f"public-contract: governance decision {action} has unknown feedback policy")
+        for kind, row in registry.get("bootstrap", {}).get("actions", {}).items():
+            validate_schema_instance({"protocol": "empirica/v2", "request_id": "bootstrap-example",
+                "command": {"type": "ObserveAction", "run_id": "run-example",
+                            "action": row.get("example")}},
+                "empirica/v2", "request", f"public-contract:bootstrap.actions.{kind}.example")
         try:
             sys.path.insert(0, str(ROOT / "plugins" / "empirica"))
             from core.context_selector import select_sections
@@ -2372,11 +2390,11 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     # Allow.converged / RunView.converged duplication.
     expect(lambda e: check_allow_cross_field(
         {"type": "Allow", "converged": True, "run": {"id": "r", "goal": "g", "status": "active",
-         "contract": {"id": "empirica/public", "version": "2.0.0", "digest": d64, "relevant_sections": []}}},
+         "contract": {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []}}},
         e, "neg"), "Allow.converged=True must equal", "converged/status contradiction")
     expect(lambda e: check_allow_cross_field(
         {"type": "Allow", "converged": False, "run": {"id": "r", "goal": "g", "status": "active",
-         "converged": False, "contract": {"id": "empirica/public", "version": "2.0.0",
+         "converged": False, "contract": {"id": "empirica/public", "version": REGISTRY_VERSION,
          "digest": d64, "relevant_sections": []}}},
         e, "neg"), "RunView must not duplicate converged", "RunView converged duplication")
 
@@ -2384,7 +2402,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     expect(lambda e: check_banned_fields(
         {"protocol": "empirica/v2", "request_id": "x", "result": {"type": "Allow", "converged": False,
          "run": {"id": "r", "goal": "g", "status": "active", "contract": {"id": "empirica/public",
-         "version": "2.0.0", "digest": d64, "relevant_sections": []},
+         "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
          "nonce": "abc", "phase": "investigate"}}},
         e, "neg"), "banned field", "banned v1 fields in response")
 
@@ -2408,18 +2426,18 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     # Run-view digest mismatch + residual params + child recovery action.
     expect(lambda e: check_response_run_view(
         {"type": "Allow", "converged": False, "run": {"id": "r", "goal": "g", "status": "active",
-         "contract": {"id": "empirica/public", "version": "2.0.0", "digest": "sha256:" + "0"*64,
+         "contract": {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": "sha256:" + "0"*64,
          "relevant_sections": []}}},
         registry, {}, d64, e, "neg"), "run.contract.digest", "run view digest mismatch")
     expect(lambda e: check_response_run_view(
         {"type": "Block", "run": {"id": "r", "goal": "g", "status": "active",
-         "contract": {"id": "empirica/public", "version": "2.0.0", "digest": d64, "relevant_sections": []},
+         "contract": {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
          "children": [{"child_id": "c", "purpose": "audit", "state": "completed",
          "recovery_action": "bogus.action"}]}},
         registry, {}, d64, e, "neg"), "recovery_action", "child recovery action unknown")
     expect(lambda e: check_response_run_view(
         {"type": "Block", "run": {"id": "r", "goal": "g", "status": "active",
-         "contract": {"id": "empirica/public", "version": "2.0.0", "digest": d64, "relevant_sections": []},
+         "contract": {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
          "residuals": [{"code": "budget.exhausted", "parameters": {}}]}},
         registry, {}, d64, e, "neg"), "parameters invalid", "residual params not validated")
 
@@ -2431,7 +2449,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         produced = errors[before:]
         del errors[before:]
         return bool(produced)
-    ci = {"id": "empirica/public", "version": "2.0.0", "digest": d64, "relevant_sections": []}
+    ci = {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []}
     conv_true_active = {"protocol": "empirica/v2", "request_id": "x",
                         "result": {"type": "Allow", "converged": True,
                                    "run": {"id": "r", "goal": "g", "status": "active", "contract": ci}}}
@@ -2456,7 +2474,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     # Direct schema negatives: GetContract response closed branches reject sibling target payloads.
     # Each sibling case carries a well-formed digest so the only mutation is the sibling payload;
     # this preserves the sibling-target rejection semantics after the D2B required-digest change.
-    idx = {"id": "empirica/public", "version": "2.0.0", "sections": [], "reasons": [], "next_actions": []}
+    idx = {"id": "empirica/public", "version": REGISTRY_VERSION, "sections": [], "reasons": [], "next_actions": []}
     sec = {"id": "core", "title": "t", "summary": "", "clauses": []}
     res_index_full = {"protocol": "empirica/v2", "request_id": "x",
                       "result": {"type": "Allow", "contract_result": {"target": "index", "digest": d64,
@@ -2506,8 +2524,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         "contract_result.digest", "GetContract wrong-but-well-formed digest")
 
     # D2A §8/§9 negatives: one mutation each with its own expected diagnostic substring.
-    full_rv = {"id": "r", "goal": "g", "status": "active", "modes": {"multi_provider": False, "cli_exec": False},
-               "contract": {"id": "empirica/public", "version": "2.0.0", "digest": d64, "relevant_sections": []},
+    full_rv = {"governance": None, "id": "r", "goal": "g", "status": "active", "modes": {"multi_provider": False, "cli_exec": False},
+               "contract": {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
                "obligations": {"active": [], "deferred": []}, "residuals": [],
                "freshness": {"changes": []}, "children": [], "next_actions": [],
                "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
@@ -3460,7 +3478,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     def _run_view(status="active", sections=None, children=None) -> dict:
         return {"id": "run-fx", "goal": "g", "status": status,
                 "modes": {"multi_provider": False, "cli_exec": False},
-                "contract": {"id": "empirica/public", "version": "2.0.0",
+                "contract": {"id": "empirica/public", "version": REGISTRY_VERSION,
                               "digest": d64, "relevant_sections": sections or ["audit"]},
                 "obligations": {"active": [], "deferred": []}, "residuals": [],
                 "freshness": {"changes": []}, "children": children or [],
