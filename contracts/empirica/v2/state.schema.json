@@ -224,8 +224,7 @@
           "required": [
             "budgets",
             "modes",
-            "auditor",
-            "allow_same_model"
+            "auditor"
           ],
           "properties": {
             "budgets": {
@@ -296,9 +295,6 @@
                   "type": "null"
                 }
               ]
-            },
-            "allow_same_model": {
-              "type": "boolean"
             }
           }
         },
@@ -306,61 +302,10 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "inventory",
             "author",
             "ingress"
           ],
           "properties": {
-            "inventory": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "members",
-                "source",
-                "complete",
-                "authorized"
-              ],
-              "properties": {
-                "members": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "provider_id",
-                      "model_id"
-                    ],
-                    "properties": {
-                      "provider_id": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 128
-                      },
-                      "model_id": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 128
-                      }
-                    }
-                  },
-                  "maxItems": 32,
-                  "uniqueItems": true
-                },
-                "source": {
-                  "enum": [
-                    "unknown",
-                    "operator_declared",
-                    "pi_registry"
-                  ]
-                },
-                "complete": {
-                  "type": "boolean"
-                },
-                "authorized": {
-                  "type": "boolean"
-                }
-              }
-            },
             "author": {
               "anyOf": [
                 {
@@ -500,8 +445,7 @@
         "audit_operation_id",
         "audit_argument",
         "audit_role_profile",
-        "audit_auditor",
-        "audit_inventory_digest"
+        "audit_auditor"
       ],
       "properties": {
         "child_id": {
@@ -610,13 +554,6 @@
               "type": "null"
             }
           ]
-        },
-        "audit_inventory_digest": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "pattern": "^sha256:[0-9a-f]{64}$"
         }
       },
       "allOf": [

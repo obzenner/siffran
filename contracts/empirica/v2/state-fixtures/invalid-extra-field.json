@@ -44,16 +44,9 @@
         "multi_provider": false,
         "cli_exec": false
       },
-      "auditor": null,
-      "allow_same_model": false
+      "auditor": null
     },
     "context": {
-      "inventory": {
-        "members": [],
-        "source": "unknown",
-        "complete": false,
-        "authorized": false
-      },
       "author": null,
       "ingress": "unavailable"
     },

@@ -6,7 +6,7 @@ preflight confirms a bound audit lifecycle.
 ## Preconditions
 
 - The selected graph is valid, current, and covered by current governance approval.
-- Approved inventory is revalidated and the host launches the selected visible auditor model.
+- The selected reviewer is known, distinct from the host-observed main model, and covered by current governance approval.
 - Every in-scope gating claim is approved from real evidence.
 - Every experiment claim has a current passing spike.
 - Freeze scope, if any, is already committed.
@@ -71,6 +71,5 @@ The first child terminal event wins. An identical replay is inert; a conflicting
 replay faults. A terminal run cannot be reopened by late child output and cannot
 later become converged.
 
-A positive authorized-singleton exception may permit observed `same_model` only under the exact
-approved policy described in [governance.md](governance.md). Unknown aliases and selected/observed
-substitution never pass. No provider difference is required.
+Observed `same_model` always blocks. Unknown aliases and selected/observed substitution never pass.
+No provider difference is required; the host-observed selected reviewer must still match the actual reviewer.

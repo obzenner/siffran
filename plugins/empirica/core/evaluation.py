@@ -320,7 +320,7 @@ def bootstrap_status(snapshot: EvaluationSnapshot) -> dict[str, Any]:
             context_error = governance.context_error(governed)
             if governance.interaction_error(governed):
                 actions.append("residual.accept")
-            elif context_error and governed["context"]["inventory"]["source"] != "unknown":
+            elif context_error and governed["context"]["author"] is not None:
                 actions.append("host.repair_context")
             else:
                 actions.append("governance.propose")
@@ -598,9 +598,8 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             proposed = governance.plain(state.governance["proposal"])
             proposed["modes"].update(action.get("modes", {}))
             proposed["budgets"].update(action.get("budgets", {}))
-            for key in ("auditor", "allow_same_model"):
-                if key in action:
-                    proposed[key] = governance.plain(action[key])
+            if "auditor" in action:
+                proposed["auditor"] = governance.plain(action["auditor"])
             if reason := governance.configuration_error(state, proposed):
                 if reason == "governance.budget_invalid":
                     ceiling = next(k for k, used in governance.CEILINGS.items() if proposed["budgets"][k] < state.budgets[used])
@@ -652,7 +651,7 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                      "first_terminal_fingerprint": None,
                      "capability_ref": digest({"capability": seed}),
                      "audit_operation_id": None, "audit_argument": None,
-                     "audit_role_profile": None, "audit_auditor": None, "audit_inventory_digest": None}
+                     "audit_role_profile": None, "audit_auditor": None}
             budgets = dict(state.budgets)
             budgets[used_key] += 1
             return _decision(snapshot, replace(state, budgets=budgets,
@@ -739,7 +738,7 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             return _decision(snapshot, state, "Block", reason="audit.independence_unverified")
         if governance.model_key(auditor) != governance.model_key(state.governance["proposal"]["auditor"]) or governance.model_key(covered) != governance.model_key(state.governance["context"]["author"]):
             return _decision(snapshot, state, "Block", reason="governance.identity_mismatch")
-        if auditor_pair == covered_pair and (governance.selection_error(state.governance) or not state.governance["proposal"]["allow_same_model"]):
+        if auditor_pair == covered_pair:
             return _decision(snapshot, state, "Block", reason="audit.same_model")
         return _decision(snapshot, replace(state, status="converged"))
 

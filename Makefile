@@ -101,7 +101,9 @@ check-core: ## Fast host-neutral contracts, malformed input, state, bridge, and 
 	@$(PYTHON) $(METHODOLOGIST_CORE_TESTS)
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q \
 		test_governance.GovernanceServiceTests.test_private_exact_replay_conflict_stale_cross_run_and_cas \
-		test_governance.GovernanceServiceTests.test_cancel_unknown_inventory_singleton_and_no_public_approval \
+		test_governance.GovernanceServiceTests.test_pair_only_selection_blocks_unknown_same_and_null_reviewer \
+		test_governance.GovernanceServiceTests.test_auto_explicit_no_ceiling_increase_and_bounded_revisions \
+		test_governance.GovernanceServiceTests.test_observed_main_mismatch_revokes_and_blocks_bound_verdict \
 		test_governance.GovernanceServiceTests.test_graphless_configure_and_private_present_are_effect_free_blocks \
 		test_governance.GovernanceServiceTests.test_bootstrap_graphless_convergence_is_preparation_not_human_wait \
 		test_governance.GovernanceServiceTests.test_bootstrap_contract_examples_have_real_postconditions \
@@ -114,6 +116,7 @@ check-claude: ## Fast Claude payload, lifecycle translation, and fail-closed ada
 	@printf '$(BOLD)==> claude suite$(RESET)\n'
 	@$(PYTHON) $(EMPIRICA_CLAUDE_ADAPTER_TESTS)
 	@$(MAKE) --no-print-directory empirica-governance-host-check ARGS='-k host_owned'
+	@$(MAKE) --no-print-directory empirica-activation-lifecycle-check ARGS='-k test_post_model_switch_subprocess_revokes_approved_author'
 
 check-codex: methodologist-codex-check empirica-codex-check ## Fast Codex package, hook, payload, and MCP tests
 	@cd $(PLUGINS_DIR)/empirica/adapters/codex/tests && $(PYTHON) -m unittest -q \
@@ -159,8 +162,11 @@ empirica-core-integration: ## Diagnose expensive persistence, transaction, retry
 empirica-v2-check: ## Diagnose v2 behavior with unittest discovery (ARGS="-k test_name" selects a regression)
 	@cd $(PLUGINS_DIR)/empirica/tests/v2 && PYTHONPATH=..:../.. $(PYTHON) -m unittest discover -v -p 'test_*.py' $(ARGS)
 
-empirica-host-integration: ## Diagnose expensive simulated Claude/Codex lifecycle conformance
-	@$(PYTHON) $(EMPIRICA_ACTIVATION_TESTS)
+.PHONY: empirica-activation-lifecycle-check
+empirica-activation-lifecycle-check: ## Check isolated Claude hook lifecycle (ARGS="-k test_name" selects cases)
+	@$(PYTHON) $(EMPIRICA_ACTIVATION_TESTS) $(ARGS)
+
+empirica-host-integration: empirica-activation-lifecycle-check ## Diagnose expensive simulated Claude/Codex lifecycle conformance
 	@$(PYTHON) $(EMPIRICA_CODEX_ADAPTER_TESTS)
 	@$(PYTHON) $(EMPIRICA_CLAUDE_ADAPTER_CONFORMANCE_TESTS)
 	@$(PYTHON) $(EMPIRICA_CODEX_ADAPTER_CONFORMANCE_TESTS)

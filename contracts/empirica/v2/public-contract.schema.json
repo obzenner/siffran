@@ -42,7 +42,7 @@
       "const": "empirica/public"
     },
     "version": {
-      "const": "2.1.0"
+      "const": "3.0.0"
     },
     "protocol": {
       "const": "empirica/v2"
@@ -623,7 +623,6 @@
             "actions",
             "budgets",
             "modes",
-            "inventory",
             "auditor",
             "feedback"
           ],
@@ -693,10 +692,6 @@
                   "minLength": 1
                 }
               }
-            },
-            "inventory": {
-              "type": "string",
-              "minLength": 1
             },
             "auditor": {
               "type": "string",
@@ -824,7 +819,6 @@
       "additionalProperties": false,
       "required": [
         "feedback",
-        "requires_inventory",
         "unchanged_outcome",
         "changed_outcome"
       ],
@@ -834,9 +828,6 @@
             "forbidden",
             "required"
           ]
-        },
-        "requires_inventory": {
-          "type": "boolean"
         },
         "unchanged_outcome": {
           "enum": [

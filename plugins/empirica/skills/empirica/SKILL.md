@@ -83,18 +83,17 @@ Do this before reading files, searching, browsing, or running commands.
    discovery uncertainty. Inline shape: `{"root":"G0","claims":[{"id":"G0","text":"<uncertainty>",
    "kind":"ordinary","gating":true}],"edges":[]}`. Larger graphs must be root-connected DAGs
    with edges `{"from":"G0","to":"C1","type":"SupportedBy"}`.
-5. Read `empirica_read(operation="GetRun")` and its governance inventory. Initial Claude reads may
-   have no inventory until a host lifecycle refresh or `configure_run` reads operator configuration.
-   Once populated, propose an auditor from `run.governance.context.inventory.members` together with
-   budgets/modes in `configure_run` for one-dialog approval. Otherwise the first dialog selects
-   the auditor and amends the proposal. Claude and Pi open a host-owned locked final confirmation
-   in the same call. Never resend original configuration
-   fields to reopen review: omitted fields retain the human's current proposal.
-   Do not read project files or skill references to prepare this proposal.
-   Default deliberative mode requires host UI; explicit `--auto` prepares a deterministic known
-   eligible auditor when null and is labeled automatic acceptance, not human consent. Unknown/no
-   inventory is not a singleton. Complete authorized partial inventory permits known different
-   author/auditor pairs, but unmapped members prevent singleton proof.
+5. Read `empirica_read(operation="GetRun")`. Propose a concrete reviewer with
+   `configure_run` when one is not already selected. Empirica never reads or displays a configured
+   model catalog: the core only checks that the host-observed main model and reviewer are known,
+   normalized, and different. Unknown or same-model pairs block without an exception or fallback.
+   Reviewer selection is not proof of availability, separate authorization, or execution; the host
+   must later observe the actual reviewer matching the approved selection. Claude and Pi use bounded
+   scalar reviewer fields and open a host-owned read-only locked final confirmation after edits.
+   Never resend stale configuration fields to reopen review; omitted fields retain the human's
+   current proposal. Explicit `--auto` accepts only an author-proposed known-distinct reviewer within
+   existing budgets, modes, and revision limits. Do not read project files or skill references to
+   prepare the proposal.
    The host-owned human deadline is 900s, with `EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS` in 1..1500s;
    at most 3 presentations per revision and 128 per run are durably reserved before UI. Timeout
    is dismissal, not human rejection. Do not loop on refusal or exhaustion.

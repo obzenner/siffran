@@ -772,9 +772,6 @@
               "maxLength": 128
             }
           }
-        },
-        "allow_same_model": {
-          "type": "boolean"
         }
       }
     },
@@ -1262,61 +1259,10 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "inventory",
         "author",
         "ingress"
       ],
       "properties": {
-        "inventory": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "members",
-            "source",
-            "complete",
-            "authorized"
-          ],
-          "properties": {
-            "members": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "provider_id",
-                  "model_id"
-                ],
-                "properties": {
-                  "provider_id": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 128
-                  },
-                  "model_id": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 128
-                  }
-                }
-              },
-              "maxItems": 32,
-              "uniqueItems": true
-            },
-            "source": {
-              "enum": [
-                "unknown",
-                "operator_declared",
-                "pi_registry"
-              ]
-            },
-            "complete": {
-              "type": "boolean"
-            },
-            "authorized": {
-              "type": "boolean"
-            }
-          }
-        },
         "author": {
           "anyOf": [
             {
@@ -1493,8 +1439,7 @@
               "required": [
                 "budgets",
                 "modes",
-                "auditor",
-                "allow_same_model"
+                "auditor"
               ],
               "properties": {
                 "budgets": {
@@ -1565,9 +1510,6 @@
                       "type": "null"
                     }
                   ]
-                },
-                "allow_same_model": {
-                  "type": "boolean"
                 }
               }
             }
@@ -1597,12 +1539,6 @@
             "feedback": {
               "type": "string",
               "maxLength": 4096
-            },
-            "inventory_confirmed": {
-              "type": "boolean"
-            },
-            "allow_same_model": {
-              "type": "boolean"
             },
             "configuration": {
               "$ref": "#/$defs/governanceDecisionPayload/properties/amendment/properties/configuration"

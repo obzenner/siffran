@@ -14,14 +14,14 @@ Asynchronous audit execution is not supported and is never silently downgraded.
 
 ## Governed initialization
 
-3.2.0 adds required exact proposal consent before investigation. Deliberative mode uses
-`ctx.hasUI` and documented select/input/confirm dialogs; cancel/no UI fails closed. Inventory
-comes from the configured authenticated model registry and is revalidated before admission.
-`configure_run` opens the dialog, and amendments need a second proposal review. Explicit
-`--auto` is bounded automatic acceptance, not a human decision. See
-[governance](../../skills/empirica/references/governance.md) for limits, singleton exceptions,
-and fresh-run-only compatibility. These UI flows have fast simulated-control coverage and real-service governance coverage; the
-historical profile receipt does not certify native human approval for 3.2.0. Follow the
+4.0.0 adds required exact proposal consent before investigation. Deliberative mode uses
+`ctx.hasUI` and documented select/input/confirm dialogs; cancel/no UI fails closed. Governance
+receives no configured model registry: it checks only a known-distinct main/reviewer pair.
+`configure_run` opens the dialog, and amendments need a second read-only proposal confirmation. Explicit
+`--auto` is bounded automatic acceptance of an author-proposed known-distinct reviewer, not a human decision. See
+[governance](../../skills/empirica/references/governance.md) for limits, pair identity,
+and fresh-generation compatibility. These UI flows have fast simulated-control coverage and real-service governance coverage; the
+historical profile receipt does not certify native human approval for 4.0.0. Follow the
 operator-led procedure printed by `make native-qualification` for that boundary.
 
 ## Surface

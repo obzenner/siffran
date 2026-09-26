@@ -49,12 +49,12 @@
         },
         "contract": {
           "id": "empirica/public",
-          "version": "2.1.0",
+          "version": "3.0.0",
           "relevant_sections": [
             "evidence/spike",
             "evidence/order"
           ],
-          "digest": "sha256:2a01a8f1be23240c3f6adbff7555a3ce43ee4cff523f05a8aaa9b4a252dd3bfb"
+          "digest": "sha256:8943e1c76695c1079221a0c52df0e7c43028b90f5507acf04199cdb96880a567"
         },
         "obligations": {
           "active": [],

@@ -260,22 +260,22 @@ class IsolatedHookResolutionTests(unittest.TestCase):
             bridge.handle({"protocol": "empirica/v2", "request_id": "graph",
                 "command": {"type": "ObserveAction", "run_id": handle,
                             "action": {"kind": "graph", "payload": GRAPH}}}, CLAUDE_PROFILE_ID)
-            context = {"inventory": {"members": [{"provider_id": "anthropic", "model_id": m} for m in ("claude-sonnet-4-6", "claude-opus-4-6")],
-                "source": "operator_declared", "complete": True, "authorized": True},
-                "author": {"provider_id": "anthropic", "model_id": "claude-sonnet-4-6"}, "ingress": "mcp_elicitation"}
+            reviewer = {"provider_id": "anthropic", "model_id": "claude-opus-4-6"}
+            context = {"author": {"provider_id": "anthropic", "model_id": "claude-sonnet-4-6"},
+                "ingress": "mcp_elicitation"}
             bridge.handle({"protocol": "empirica/v2", "request_id": "config", "command": {
-                "type": "ObserveAction", "run_id": handle, "action": {"kind": "configure_run", "auditor": context["inventory"]["members"][1]}}}, CLAUDE_PROFILE_ID)
+                "type": "ObserveAction", "run_id": handle, "action": {"kind": "configure_run", "auditor": reviewer}}}, CLAUDE_PROFILE_ID)
             g = bridge.trusted_governance_context(CLAUDE_PROFILE_ID, handle, context)["result"]["run"]["governance"]
             decision = {"run_id": handle, "receipt_id": "test-ui", "proposal_digest": g["proposal_digest"],
-                "plan_revision": g["plan_revision"], "approval_kind": "host_ui", "outcome": "approve"}
+                "plan_revision": g["plan_revision"], "approval_kind": "host_ui"}
             presented = bridge.trusted_governance_decision(CLAUDE_PROFILE_ID, handle, {**decision, "outcome": "present"})
             self.assertEqual(presented["result"]["type"], "Allow")
-            approved = bridge.trusted_governance_decision(CLAUDE_PROFILE_ID, handle, decision)
+            approved = bridge.trusted_governance_decision(CLAUDE_PROFILE_ID, handle, {**decision,
+                "submission": {"action": "approve", "configuration": g["proposal"]}})
+            self.assertEqual(approved["result"]["type"], "Allow")
             self.assertEqual(approved["result"]["run"]["governance"]["state"], "approved")
-            config = self.root / "operator.json"
-            config.write_text(json.dumps({"version": 1, "inventory": context["inventory"]}))
             event = self._event("session-a", str(self.repo), hook_event_name="PostModelSwitch", to_model="claude-opus-4-6")
-            self.assertEqual(self._run("route_stamp.py", event, self.repo, {**env, "EMPIRICA_GOVERNANCE_CONFIG": str(config)})[0], 0)
+            self.assertEqual(self._run("route_stamp.py", event, self.repo, env)[0], 0)
             result = bridge.handle({"protocol": "empirica/v2", "request_id": "read",
                 "command": {"type": "GetRun", "run_id": handle}}, CLAUDE_PROFILE_ID)["result"]["run"]["governance"]
             self.assertEqual(result["state"], "revision_pending")

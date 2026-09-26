@@ -24,7 +24,6 @@ from pathlib import Path
 
 from adapters.state import project_id, run_id
 from adapters import bridge as application_bridge
-from adapters.governance import operator_inventory
 from .transport import CODEX_PROFILE_ID
 
 from .correlation import PROTOCOL, request_id as new_request_id
@@ -256,7 +255,7 @@ def _start(payload: dict) -> dict | None:
 def _refresh_governance(payload: dict, handle: str) -> dict:
     model = payload.get("model")
     return application_bridge.trusted_governance_context(CODEX_PROFILE_ID, handle, {
-        "inventory": operator_inventory(), "author": {"provider_id": "openai", "model_id": model}
+        "author": {"provider_id": "openai", "model_id": model}
         if isinstance(model, str) and model else None, "ingress": "unavailable"})
 
 

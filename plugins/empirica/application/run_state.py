@@ -87,12 +87,10 @@ def _procedural_ok(doc: dict) -> bool:
                     or not isinstance(ch.get("audit_argument"), dict)
                     or not _AUDIT_DOSSIER.is_valid(ch["audit_argument"])
                     or not isinstance(ch.get("audit_role_profile"), str)
-                    or not isinstance(ch.get("audit_auditor"), dict)
-                    or ch.get("audit_inventory_digest") is None):
+                    or not isinstance(ch.get("audit_auditor"), dict)):
                 return False
         elif (ch.get("audit_operation_id") is not None or ch.get("audit_argument") is not None
-              or ch.get("audit_role_profile") is not None or ch.get("audit_auditor") is not None
-              or ch.get("audit_inventory_digest") is not None):
+              or ch.get("audit_role_profile") is not None or ch.get("audit_auditor") is not None):
             return False
         if not ch.get("refunded"):
             charged[resource_class] += 1

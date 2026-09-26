@@ -104,7 +104,7 @@ def review_text(goal: str, graph: Mapping | None, value: Mapping) -> str:
     def fence(item):
         lines.append("| " + safe_text(item))
     proposal, context = value["proposal"], value["context"]
-    inventory, author = context["inventory"], context["author"]
+    author = context["author"]
     lines = [f"EMPIRICA SCOPE DECISION — proposal revision {value['plan_revision']}, at most {value['revision_limit']} revisions, mode {value['control_mode']}",
              "Approve the CURRENT displayed proposal; edits are submitted for another review and are NOT approved yet.",
              "Every line beginning '| ' is UNTRUSTED quoted data. Controls, bidi characters, and backslashes are visibly escaped.", "", "GOAL"]
@@ -123,11 +123,9 @@ def review_text(goal: str, graph: Mapping | None, value: Mapping) -> str:
         lines.append(f"  {label}: proposed {proposal['budgets'][key]}, already used {value['budgets'][governance.CEILINGS[key]]}")
     modes, auditor = proposal["modes"], proposal["auditor"]
     lines += [f"  multi_provider (cross-provider actors): {modes['multi_provider']}", f"  cli_exec (external model/actor CLI use): {modes['cli_exec']}",
-              f"  Auditor: {safe_text(auditor['provider_id'] + '/' + auditor['model_id']) if auditor else 'not selected'}", f"  Same-model lowered-independence consent: {proposal['allow_same_model']}",
-              f"  Inventory: source={safe_text(inventory['source'])}, complete={inventory['complete']}, authorized={inventory['authorized']}",
-              f"  Author (host-observed): {safe_text(author['provider_id'] + '/' + author['model_id']) if author else 'unknown'}", "WHO MAY AUDIT"]
-    for member in inventory["members"]:
-        fence(member["provider_id"] + "/" + member["model_id"])
+              f"  Reviewer (selected): {safe_text(auditor['provider_id'] + '/' + auditor['model_id']) if auditor else 'not selected'}",
+              f"  Main model (host-observed): {safe_text(author['provider_id'] + '/' + author['model_id']) if author else 'unknown'}",
+              "  Main and reviewer must be different normalized models. Selection does not prove availability or authorization."]
     lines += ["", f"STATE — {value['state']}; dialogs left {value['interactions_remaining']['proposal']} this revision, {value['interactions_remaining']['total']} total", "OPEN CHANGE REQUEST"]
     request = value.get("change_request")
     if request:
@@ -150,7 +148,6 @@ def project_governance(snapshot: EvaluationSnapshot) -> dict:
                  budgets=dict(snapshot.state.budgets),
                  remaining={ceiling: snapshot.state.budgets[ceiling] - snapshot.state.budgets[used]
                             for ceiling, used in governance.CEILINGS.items()},
-                 inventory_status=governance.inventory_status(value["context"]["inventory"]),
                  request_ready=bootstrap["request_ready"], display_ready=bootstrap["display_ready"],
                  next_action=bootstrap["next_actions"][-1] if bootstrap["next_actions"] else "run.inspect")
     value["review_text"] = review_text(snapshot.state.goal, snapshot.graph, value)

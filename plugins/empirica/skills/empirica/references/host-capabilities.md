@@ -5,10 +5,10 @@ profile, its qualified compatibility range, and the live adapter surface—not g
 documentation or exact equality with one qualification build. Installed-host receipts retain the
 exact observed version as provenance.
 
-Governance 3.2.0 adds a separate capability gate: Claude requires client-advertised MCP form
-elicitation and operator inventory; Pi requires UI plus authenticated configured registry.
-Codex deliberative approval is unavailable; auto also blocks for currently unmapped real active
-slugs such as `gpt-5.1-codex`. Dated-snapshot simulated tests do not establish installed support;
+Governance 4.0.0 requires client-advertised MCP form elicitation on Claude and UI on Pi.
+Neither path reads or transports a configured model catalog. Codex deliberative approval is
+unavailable; auto also blocks for currently unmapped active slugs such as `gpt-5.1-codex`.
+Dated-snapshot simulated tests do not establish installed support;
 even a mapped author cannot fix the separate unobservable auditor identity limit.
 See [governance.md](governance.md). These new UI flows have deterministic simulated-host
 coverage, not installed/native human approval qualification.
@@ -34,7 +34,7 @@ audit is pending, the Stop hook lets the parent turn settle without terminalizin
 suggesting another spawn; Claude's native task notification resumes the parent after completion.
 The generic child tier remains `foreground_only`; the registered audit execution mode is `async`.
 `PostModelSwitch` refreshes observed author identity through the lifecycle hook and revokes current
-approval on a material change. Operator inventory/deadline environment must reach the Claude
+approval on a material change. The decision deadline environment must reach the Claude
 process and inherited MCP server. This mechanism is tested via lifecycle subprocesses, not native
 model switching or proof that Claude honors every Bedrock-prefixed `Agent.model` override.
 

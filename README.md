@@ -8,17 +8,18 @@ and evidence in Git shadow refs, leaving project worktrees clean.
 
 ## Governed Empirica starts
 
-Empirica 3.2.0 defaults to host-mediated approval of the exact claim graph, budgets, modes, and
+Empirica 4.0.0 defaults to host-mediated approval of the exact claim graph, budgets, modes, and
 visible auditor **before investigation**. Prepare from supplied context, record route, propose
 scope, and submit `configure_run` to open approval. Material revisions need new approval.
 Explicit `/empirica --auto <goal>` is bounded automatic acceptance, not human consent: no budget
 increases and at most eight material revisions after first approval.
 
-Claude needs MCP form elicitation and operator-declared authorized inventory; Pi uses its UI and
-configured authenticated model registry. Missing UI/inventory fails closed. See the
-[governance guide](plugins/empirica/skills/empirica/references/governance.md) for operator configuration,
-singleton exceptions, scope limits, and recovery. This release requires fresh run generations;
-old runs are not silently migrated/approved. New approval flows have deterministic integration
+Claude needs MCP form elicitation and Pi uses its UI. Empirica receives no configured model catalog:
+it only requires known, distinct host-observed main and selected reviewer models, then verifies the
+actual observed reviewer matches. See the
+[governance guide](plugins/empirica/skills/empirica/references/governance.md) for pair identity,
+scalar reviewer editing, auto consequences, scope limits, and recovery. Inventory-shaped old runs
+fail closed and require fresh generations; they are never silently migrated or approved. New approval flows have deterministic integration
 coverage, not operator-present native approval qualification.
 
 ## Install for Claude Code
@@ -135,7 +136,7 @@ promotion remains separate and unsupported.
 | Plugin | Version | Description |
 |--------|---------|-------------|
 | `methodologist` | 0.9.0 | Formal reasoning catalog — lets users choose and execute evidence-backed CS/math methodologies with traced phases and structured output. |
-| `empirica` | 3.2.0 | Host-neutral empirical-convergence workflow — binds exact claim scope, budgets and auditor to host-mediated approval (or explicit bounded auto), requires cited research before spikes, and gates convergence on a current independent audit. Unsupported approval and identity capabilities fail closed. |
+| `empirica` | 4.0.0 | Host-neutral empirical-convergence workflow — binds exact claim scope, budgets and auditor to host-mediated approval (or explicit bounded auto), requires cited research before spikes, and gates convergence on a current independent audit. Unsupported approval and identity capabilities fail closed. |
 <!-- END GENERATED: plugins -->
 
 ## Development

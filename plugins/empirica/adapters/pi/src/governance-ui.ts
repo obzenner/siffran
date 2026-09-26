@@ -15,7 +15,7 @@ const PUBLIC_TOOLS_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.ur
 interface DecisionControls {
   actions: Record<string, string>;
   budgets: Record<string, { label: string; maximum: number }>;
-  modes: Record<string, string>; inventory: string; auditor: string; feedback: string;
+  modes: Record<string, string>; auditor: string; feedback: string;
 }
 const PUBLIC_TOOLS = JSON.parse(readFileSync(PUBLIC_TOOLS_PATH, "utf8")) as {
   recovery: Record<string, { message: string; sections: string[]; next_actions: string[] }>;
@@ -27,13 +27,12 @@ const DECISIONS = PUBLIC_TOOLS.governance_decisions;
 interface Model { provider_id: string; model_id: string }
 interface Proposal {
   budgets: Record<string, number>; modes: Record<string, boolean>;
-  auditor: Model | null; allow_same_model: boolean;
+  auditor: Model | null;
 }
 interface Governance {
   state: string; control_mode: string; proposal_digest: string; plan_revision: number; revision_limit: number;
-  proposal: Proposal; inventory_status: string; prompt_error: string | null; budgets: Record<string, number>;
-  review_text: string; context: { inventory: { members: Model[]; source: string; complete: boolean; authorized: boolean };
-             author: Model | null; ingress: string };
+  proposal: Proposal; prompt_error: string | null; budgets: Record<string, number>;
+  review_text: string; context: { author: Model | null; ingress: string };
 }
 
 const USED_COUNTER: Record<string, string> = {
@@ -56,23 +55,8 @@ export function safeGovernanceText(value: unknown): string {
   });
 }
 
-function modelName(model: Model): string {
-  return `${model.provider_id}/${model.model_id}`;
-}
-
 export function piGovernanceContext(ctx: ExtensionContext): Record<string, unknown> {
-  let members: Model[] = [];
-  let complete = false;
-  try {
-    const models = ctx.modelRegistry?.getAvailable();
-    if (models && !ctx.modelRegistry?.getError?.()) {
-      members = models.map(m => ({ provider_id: m.provider, model_id: m.id }));
-      complete = true;
-    }
-  } catch { /* unknown is never a fabricated singleton */ }
-  return { inventory: { members, source: complete ? "pi_registry" : "unknown",
-                        complete, authorized: complete },
-           author: ctx.model ? { provider_id: ctx.model.provider, model_id: ctx.model.id } : null,
+  return { author: ctx.model ? { provider_id: ctx.model.provider, model_id: ctx.model.id } : null,
            ingress: ctx.hasUI ? "pi_ui" : "unavailable" };
 }
 
@@ -180,27 +164,16 @@ export async function govern(runId: string, ctx: ExtensionContext, trusted: Priv
         }
       }
       if (["approve", "edit"].includes(action) && (!proposal.auditor || action === "edit")) {
-        const names = g.context.inventory.members.map(m => safeGovernanceText(modelName(m)));
-        const selected = await ctx.ui.select(DECISIONS.controls.auditor, names, options());
-        if (cancelled(selected) || !names.includes(selected!)) return dismiss();
-        proposal.auditor = g.context.inventory.members[names.indexOf(selected!)];
+        const provider = await ctx.ui.input(
+          `Reviewer provider — current ${safeGovernanceText(proposal.auditor?.provider_id ?? "not selected")}. Empty keeps current.`, "", options());
+        if (cancelled(provider) || provider!.length > 128) return dismiss();
+        const model = await ctx.ui.input(
+          `Reviewer model id — current ${safeGovernanceText(proposal.auditor?.model_id ?? "not selected")}. Empty keeps current.`, "", options());
+        if (cancelled(model) || model!.length > 128 || Boolean(provider) !== Boolean(model)) return dismiss();
+        if (provider && model) proposal.auditor = { provider_id: provider, model_id: model };
       }
     }
-    const inventoryConfirmed = action === "approve" ? await ctx.ui.confirm(DECISIONS.controls.inventory,
-      "Confirm that the displayed model inventory is complete and authorized for this run.", options()) : false;
-    if (action === "approve" && (cancelled(inventoryConfirmed) || inventoryConfirmed !== true)) return dismiss();
-    let sameModel = false;
-    if (["approve", "edit"].includes(action) && g.inventory_status === "singleton") {
-      const editing = action === "edit";
-      const consent = await ctx.ui.confirm(editing ? "SAME MODEL — proposal only" : "SAME MODEL — LOWERED INDEPENDENCE",
-        editing ? "Propose this exception for locked review? Nothing is approved." :
-          "Explicitly consent to this verified authorized singleton exception? This is not independent-model review.", options());
-      if (cancelled(consent) || (!editing && consent !== true)) return dismiss();
-      if (!confirmation) proposal.allow_same_model = consent === true;
-      sameModel = !editing && consent === true;
-    }
-    const submission: Record<string, unknown> = { action, configuration: proposal,
-      inventory_confirmed: inventoryConfirmed, allow_same_model: sameModel };
+    const submission: Record<string, unknown> = { action, configuration: proposal };
     if (action === "request_changes") submission.feedback = feedback;
     const admitted = await trusted({ operation: "governance_decision", run_id: runId,
       payload: { ...envelope, submission } });

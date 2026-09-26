@@ -49,7 +49,7 @@
           "const": "empirica/public"
         },
         "version": {
-          "const": "2.1.0"
+          "const": "3.0.0"
         },
         "digest": {
           "type": "string",
@@ -678,21 +678,6 @@
           ],
           "properties": {
             "code": {
-              "const": "governance.inventory_unknown"
-            },
-            "parameters": {
-              "$ref": "#/$defs/emptyParams"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "code",
-            "parameters"
-          ],
-          "properties": {
-            "code": {
               "const": "governance.identity_mismatch"
             },
             "parameters": {
@@ -859,36 +844,6 @@
           "properties": {
             "code": {
               "const": "governance.decision_conflict"
-            },
-            "parameters": {
-              "$ref": "#/$defs/emptyParams"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "code",
-            "parameters"
-          ],
-          "properties": {
-            "code": {
-              "const": "governance.inventory_unconfirmed"
-            },
-            "parameters": {
-              "$ref": "#/$defs/emptyParams"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "code",
-            "parameters"
-          ],
-          "properties": {
-            "code": {
-              "const": "governance.same_model_unconfirmed"
             },
             "parameters": {
               "$ref": "#/$defs/emptyParams"
@@ -1236,7 +1191,6 @@
                 "scope",
                 "budgets",
                 "remaining",
-                "inventory_status",
                 "request_ready",
                 "display_ready",
                 "next_action",
@@ -1298,8 +1252,7 @@
                   "required": [
                     "budgets",
                     "modes",
-                    "auditor",
-                    "allow_same_model"
+                    "auditor"
                   ],
                   "properties": {
                     "budgets": {
@@ -1370,9 +1323,6 @@
                           "type": "null"
                         }
                       ]
-                    },
-                    "allow_same_model": {
-                      "type": "boolean"
                     }
                   }
                 },
@@ -1380,61 +1330,10 @@
                   "type": "object",
                   "additionalProperties": false,
                   "required": [
-                    "inventory",
                     "author",
                     "ingress"
                   ],
                   "properties": {
-                    "inventory": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": [
-                        "members",
-                        "source",
-                        "complete",
-                        "authorized"
-                      ],
-                      "properties": {
-                        "members": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": [
-                              "provider_id",
-                              "model_id"
-                            ],
-                            "properties": {
-                              "provider_id": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 128
-                              },
-                              "model_id": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 128
-                              }
-                            }
-                          },
-                          "maxItems": 32,
-                          "uniqueItems": true
-                        },
-                        "source": {
-                          "enum": [
-                            "unknown",
-                            "operator_declared",
-                            "pi_registry"
-                          ]
-                        },
-                        "complete": {
-                          "type": "boolean"
-                        },
-                        "authorized": {
-                          "type": "boolean"
-                        }
-                      }
-                    },
                     "author": {
                       "anyOf": [
                         {
@@ -1620,15 +1519,6 @@
                     }
                   }
                 },
-                "inventory_status": {
-                  "enum": [
-                    "unknown",
-                    "zero",
-                    "singleton",
-                    "multiple",
-                    "partial"
-                  ]
-                },
                 "request_ready": {
                   "type": "boolean"
                 },
@@ -1663,7 +1553,6 @@
                 "prompt_error": {
                   "enum": [
                     null,
-                    "governance.inventory_unknown",
                     "governance.author_unknown",
                     "governance.identity_mismatch",
                     "governance.interaction_limit"
@@ -2073,7 +1962,7 @@
           "const": "empirica/public"
         },
         "version": {
-          "const": "2.1.0"
+          "const": "3.0.0"
         },
         "sections": {
           "type": "array",
@@ -2888,7 +2777,7 @@
           "const": "empirica/public"
         },
         "version": {
-          "const": "2.1.0"
+          "const": "3.0.0"
         },
         "protocol": {
           "const": "empirica/v2"
@@ -3356,7 +3245,6 @@
                 "actions",
                 "budgets",
                 "modes",
-                "inventory",
                 "auditor",
                 "feedback"
               ],
@@ -3427,10 +3315,6 @@
                     }
                   }
                 },
-                "inventory": {
-                  "type": "string",
-                  "minLength": 1
-                },
                 "auditor": {
                   "type": "string",
                   "minLength": 1
@@ -3479,7 +3363,6 @@
       "additionalProperties": false,
       "required": [
         "feedback",
-        "requires_inventory",
         "unchanged_outcome",
         "changed_outcome"
       ],
@@ -3489,9 +3372,6 @@
             "forbidden",
             "required"
           ]
-        },
-        "requires_inventory": {
-          "type": "boolean"
         },
         "unchanged_outcome": {
           "enum": [

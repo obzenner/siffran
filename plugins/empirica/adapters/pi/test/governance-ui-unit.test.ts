@@ -2,7 +2,7 @@
 // Python service tests own decision resolution, CAS, replay, and consent authority.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { govern, governanceTimeout, safeGovernanceText } from "../src/governance-ui.ts";
+import { govern, governanceTimeout, piGovernanceContext, safeGovernanceText } from "../src/governance-ui.ts";
 import type { PrivateIngress } from "../src/private-transport.ts";
 import { fakeCtx } from "./fakes.ts";
 
@@ -16,13 +16,12 @@ const auditor = { provider_id: "anthropic", model_id: "claude-opus-4-6" };
 function harness(choice = APPROVE) {
   const g = {
     state: "pending", control_mode: "deliberative", proposal_digest: "sha256:" + "a".repeat(64),
-    plan_revision: 2, revision_limit: 64, inventory_status: "multiple", prompt_error: null as string | null,
+    plan_revision: 2, revision_limit: 64, prompt_error: null as string | null,
     proposal: { budgets: { max_passes: 8, max_spawns: 0, max_audit_spawns: 1 },
-      modes: { multi_provider: false, cli_exec: false }, auditor, allow_same_model: false },
+      modes: { multi_provider: false, cli_exec: false }, auditor },
     budgets: { passes_used: 2, spawns_used: 0, audit_spawns_used: 0 },
     review_text: "CANONICAL REVIEW TEXT",
-    context: { inventory: { members: [author, auditor], source: "pi_registry", complete: true, authorized: true },
-      author, ingress: "pi_ui" },
+    context: { author, ingress: "pi_ui" },
   };
   const run = { id: "ui-unit-run", status: "active", goal: "goal", governance: g };
   const calls: string[] = [], decisions: Array<Record<string, unknown>> = [];
@@ -86,13 +85,36 @@ test("already-cancelled review consumes no presentation capacity", async () => {
   assert.deepEqual(h.calls, []);
 });
 
-test("approval requires an actual inventory affirmation", async () => {
-  const h = harness(); h.settings.cancelAt = "Inventory is complete and authorized";
-  const result = (await h.invoke()).result;
-  assert.ok(h.calls.includes(h.settings.cancelAt));
-  assert.equal(result.type, "Block");
-  dismissed(h);
-  assert.equal(h.g.state, "pending");
+test("governance context never enumerates configured models", () => {
+  const ctx = fakeCtx(); ctx.hasUI = true; ctx.model = { provider: "anthropic", id: "claude-sonnet-4-6" } as never;
+  let calls = 0; ctx.modelRegistry = { getAvailable: () => { calls++; throw new Error("must not read"); },
+    getError: () => { calls++; return "configured error"; } } as never;
+  assert.deepEqual(piGovernanceContext(ctx), { author, ingress: "pi_ui" });
+  assert.equal(calls, 0);
+});
+
+test("reviewer edit uses two bounded scalar inputs and no catalog", async () => {
+  const h = harness(EDIT); const inputs: string[] = [];
+  h.ctx.ui.input = async title => {
+    inputs.push(title);
+    if (title.startsWith("Reviewer provider")) return "openai";
+    if (title.startsWith("Reviewer model id")) return "gpt-4.1-mini-2025-04-14";
+    return "";
+  };
+  await h.invoke();
+  const proposal = (h.decisions[1].submission as { configuration: typeof h.g.proposal }).configuration;
+  assert.deepEqual(proposal.auditor, { provider_id: "openai", model_id: "gpt-4.1-mini-2025-04-14" });
+  assert.equal(inputs.filter(x => x.startsWith("Reviewer ")).length, 2);
+  assert.ok(!h.calls.includes("Independent auditor"));
+});
+
+test("partial or overlong reviewer input dismisses", async () => {
+  for (const [provider, model] of [["openai", ""], ["x".repeat(129), "model"]]) {
+    const h = harness(EDIT);
+    h.ctx.ui.input = async title => title.startsWith("Reviewer provider") ? provider :
+      title.startsWith("Reviewer model id") ? model : "";
+    await h.invoke(); dismissed(h);
+  }
 });
 
 test("confirmation refresh cannot silently replace the amended revision or digest", async () => {
@@ -173,30 +195,6 @@ test("reject is a raw choice and never asks for auditor", async () => {
   const h = harness(REJECT); await h.invoke();
   assert.equal((h.decisions[1].submission as { action: string }).action, "reject");
   assert.ok(!h.calls.includes("Independent auditor"));
-});
-
-test("singleton Edit proposes an exception without asserting approval consent", async () => {
-  const h = harness(EDIT);
-  h.g.context.inventory.members = [author]; h.g.inventory_status = "singleton"; h.g.proposal.auditor = author;
-  h.ctx.ui.confirm = async title => { h.calls.push(title); return !title.startsWith("FINAL CONFIRMATION"); };
-  await h.invoke();
-  const submission = h.decisions[1].submission as { action: string; allow_same_model: boolean; configuration: { allow_same_model: boolean } };
-  assert.equal(submission.action, "edit");
-  assert.equal(submission.allow_same_model, false);
-  assert.equal(submission.configuration.allow_same_model, true);
-  assert.equal(h.g.state, "pending");
-  assert.ok(h.calls.includes("SAME MODEL — proposal only"));
-  assert.ok(!h.calls.includes("SAME MODEL — LOWERED INDEPENDENCE"));
-});
-
-test("singleton requires fresh positive consent even when the exception was proposed", async () => {
-  for (const proposed of [false, true]) {
-    const h = harness(); h.g.context.inventory.members = [author]; h.g.inventory_status = "singleton"; h.g.proposal.auditor = author;
-    h.g.proposal.allow_same_model = proposed;
-    h.ctx.ui.confirm = async title => !title.includes("SAME MODEL");
-    await h.invoke(); dismissed(h);
-    assert.equal(h.g.proposal.allow_same_model, proposed);
-  }
 });
 
 test("prompt errors and expiry keep typed failure without consent", async () => {

@@ -70,7 +70,7 @@ test("Pi raw edit and locked approval cross the actual private Python service", 
   runOf(await dispatch(observeActionRequest(run.id, { kind: "configure_run", auditor,
     budgets: { max_passes: 8, max_spawns: 0, max_audit_spawns: 1 } }, "decision-proposal")));
   const ctx = fakeCtx(testRepo); ctx.hasUI = true; ctx.model = author;
-  ctx.modelRegistry = { getAvailable: () => [author, { provider: auditor.provider_id, id: auditor.model_id }] };
+  ctx.modelRegistry = { getAvailable: () => { throw new Error("governance must not enumerate models"); } };
   const ui: string[] = [], payloads: Array<Record<string, unknown>> = [];
   ctx.ui.confirm = async (title, message) => {
     ui.push(title);
@@ -108,7 +108,7 @@ test("Pi raw edit and locked approval cross the actual private Python service", 
     assert.deepEqual(payloads.map(p => p.outcome ?? (p.submission as { action: string })?.action),
       ["present", "edit", "present", "approve"]);
     assert.equal(ui.filter(title => title.startsWith("FINAL CONFIRMATION")).length, 1);
-    assert.ok(ui.includes("Inventory is complete and authorized"));
+    assert.ok(!ui.includes("Inventory is complete and authorized"));
   } finally {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value;

@@ -64,25 +64,21 @@
     "actions": {
       "approve": {
         "feedback": "forbidden",
-        "requires_inventory": true,
         "unchanged_outcome": "approve",
         "changed_outcome": "amend"
       },
       "edit": {
         "feedback": "forbidden",
-        "requires_inventory": false,
         "unchanged_outcome": "dismiss",
         "changed_outcome": "amend"
       },
       "request_changes": {
         "feedback": "required",
-        "requires_inventory": false,
         "unchanged_outcome": "request_changes",
         "changed_outcome": "request_changes"
       },
       "reject": {
         "feedback": "forbidden",
-        "requires_inventory": false,
         "unchanged_outcome": "reject",
         "changed_outcome": "reject"
       }
@@ -112,7 +108,6 @@
         "multi_provider": "Cross-provider actors",
         "cli_exec": "External model/actor CLI use"
       },
-      "inventory": "Inventory is complete and authorized",
       "auditor": "Independent auditor",
       "feedback": "What must change? Plain language; this approves nothing."
     },
@@ -136,16 +131,6 @@
     },
     "governance.approval_unavailable": {
       "message": "Host approval UI unavailable/cancelled. Keep pending; use supported UI or start an explicitly auto fresh run.",
-      "sections": [
-        "governance"
-      ],
-      "next_actions": [
-        "host.repair_context",
-        "residual.accept"
-      ]
-    },
-    "governance.inventory_unknown": {
-      "message": "Authorized inventory is unknown, empty, incomplete or cannot verify selection. Ask the operator to supply a complete inventory.",
       "sections": [
         "governance"
       ],
@@ -196,24 +181,6 @@
     },
     "governance.decision_conflict": {
       "message": "The submitted control and fields conflict. Nothing was approved; use one explicit decision path.",
-      "sections": [
-        "governance"
-      ],
-      "next_actions": [
-        "governance.propose"
-      ]
-    },
-    "governance.inventory_unconfirmed": {
-      "message": "Approval requires fresh confirmation that the displayed inventory is complete and authorized.",
-      "sections": [
-        "governance"
-      ],
-      "next_actions": [
-        "governance.propose"
-      ]
-    },
-    "governance.same_model_unconfirmed": {
-      "message": "Same-model approval requires fresh explicit lowered-independence consent.",
       "sections": [
         "governance"
       ],
@@ -470,9 +437,6 @@
                         "maxLength": 128
                       }
                     }
-                  },
-                  "allow_same_model": {
-                    "type": "boolean"
                   }
                 },
                 "description": "After a graph exists, propose bounded configuration and request host mediation. It never self-approves or changes effective budgets before consent.",
@@ -813,9 +777,6 @@
                         "maxLength": 128
                       }
                     }
-                  },
-                  "allow_same_model": {
-                    "type": "boolean"
                   }
                 },
                 "description": "After a graph exists, propose bounded configuration and request host mediation. It never self-approves or changes effective budgets before consent.",

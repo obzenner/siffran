@@ -41,10 +41,7 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                 if payload["ingress"] == "pi_ui" and not c.profile_id.startswith("pi@"):
                     return c._block_from_snapshot(snapshot, rid, "governance.approval_unavailable")
                 payload = policy.plain(payload)
-                payload["inventory"]["members"].sort(key=lambda m: (m["provider_id"], m["model_id"]))
-                prepared = {**governed, "context": payload}
-                governed = policy.revise(state.goal, snapshot.graph, governed, context=payload,
-                                          proposal=policy.auto_proposal(prepared))
+                governed = policy.revise(state.goal, snapshot.graph, governed, context=payload)
                 if governed == policy.plain(state.governance):
                     return c._inert_with_run(rid, snapshot)
             else:

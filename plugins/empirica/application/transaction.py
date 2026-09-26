@@ -233,7 +233,6 @@ class Coordinator:
                 child["audit_argument"] = dossier
                 child["audit_role_profile"] = command["action"]["role_profile"]
                 child["audit_auditor"] = _plain(state.governance["proposal"]["auditor"])
-                child["audit_inventory_digest"] = governance.canonical_digest(state.governance["context"]["inventory"])
                 child["audit_operation_id"] = digest({
                     "run_id": snapshot.run_id, "child_id": child["child_id"],
                     "argument_digest": dossier["argument_digest"],
@@ -285,7 +284,6 @@ class Coordinator:
             "role_profile": child["audit_role_profile"],
             "argument": _plain(child["audit_argument"]),
             "auditor": _plain(child["audit_auditor"]),
-            "inventory_digest": child["audit_inventory_digest"],
         }
 
     def trusted_attribution(self, run_id: str, payload: dict[str, Any],

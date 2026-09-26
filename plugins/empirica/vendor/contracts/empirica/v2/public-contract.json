@@ -1,6 +1,6 @@
 {
   "id": "empirica/public",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "protocol": "empirica/v2",
   "commands": [
     "StartRun",
@@ -720,7 +720,7 @@
       }
     },
     "host.repair_context": {
-      "description": "Host or operator must refresh or repair unavailable governance inventory; do not retry configure_run blindly.",
+      "description": "Host must refresh or repair the observed main-model identity; do not retry configure_run blindly.",
       "params": {
         "type": "object",
         "additionalProperties": false,
@@ -1279,21 +1279,6 @@
       ],
       "message": "Host approval UI unavailable/cancelled. Keep pending; use supported UI or start an explicitly auto fresh run."
     },
-    "governance.inventory_unknown": {
-      "params": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {}
-      },
-      "next_actions": [
-        "host.repair_context",
-        "residual.accept"
-      ],
-      "sections": [
-        "governance"
-      ],
-      "message": "Authorized inventory is unknown, empty, incomplete or cannot verify selection. Ask the operator to supply a complete inventory."
-    },
     "governance.identity_mismatch": {
       "params": {
         "type": "object",
@@ -1427,7 +1412,7 @@
       "sections": [
         "governance"
       ],
-      "message": "Select a provably eligible auditor from the authorized inventory; none is currently selected."
+      "message": "Select a concrete known reviewer different from the host-observed main model; none is currently selected."
     },
     "governance.interaction_limit": {
       "params": {
@@ -1472,34 +1457,6 @@
         "governance"
       ],
       "message": "The submitted control and fields conflict. Nothing was approved; use one explicit decision path."
-    },
-    "governance.inventory_unconfirmed": {
-      "params": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {}
-      },
-      "next_actions": [
-        "governance.propose"
-      ],
-      "sections": [
-        "governance"
-      ],
-      "message": "Approval requires fresh confirmation that the displayed inventory is complete and authorized."
-    },
-    "governance.same_model_unconfirmed": {
-      "params": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {}
-      },
-      "next_actions": [
-        "governance.propose"
-      ],
-      "sections": [
-        "governance"
-      ],
-      "message": "Same-model approval requires fresh explicit lowered-independence consent."
     }
   },
   "sections": {
@@ -1739,7 +1696,7 @@
         },
         {
           "id": "audit/independence/required",
-          "text": "Concrete normalized observed author/auditor must match the approved identities. Different providers are not required. A same-model audit is admissible only with an explicitly approved exception over an unchanged positively attested authorized singleton inventory, and exact observed normalized equality; it remains labeled same_model, not decorrelated. Unknown equivalence/inventory never waives independence."
+          "text": "Concrete normalized host-observed main and reviewer identities must match the approved pair and must differ. Same or unknown equivalence always blocks."
         }
       ]
     },
@@ -1969,19 +1926,19 @@
         },
         {
           "id": "governance/binding",
-          "text": "Host-private decisions bind run, exact canonical proposal digest and revision. Every claim id/text/kind/gating, root and SupportedBy edge, goal, proposed ceilings/modes/auditor/exception, author and authorized inventory, and control policy are covered. Material revisions revoke permission, including after investigation witnesses; ordering alone does not. Freeze preserves approval and remains fresh-run-only."
+          "text": "Host-private decisions bind run, exact canonical proposal digest and revision. Every claim id/text/kind/gating, root and SupportedBy edge, goal, proposed ceilings/modes/reviewer, host-observed main model, and control policy are covered. Material revisions revoke permission, including after investigation witnesses; ordering alone does not. Freeze preserves approval and remains fresh-run-only."
         },
         {
           "id": "governance/auto",
-          "text": "Only explicit StartRun control_mode=auto or invocation --auto chooses autonomous policy; permission modes and environment never do. Auto is labeled auto, permits at most eight postapproval material revisions, and never increases any effective ceiling including audit retries. Deliberative revisions are bounded to 64; receipts to 128. Exhaustion requires honest stop/fresh run."
+          "text": "Explicit auto accepts only an author-proposed concrete known-distinct reviewer within existing budgets, modes and finite revision bounds. It does not claim availability or separate authorization and never selects a fallback. Actual host-observed reviewer identity must match."
         },
         {
           "id": "governance/limits",
-          "text": "Complete proposals are bounded to 4096 goal characters, 32 claims of 2048 characters, 128 edges, 32 authorized model inventory entries of 128 characters per identifier. Excess is rejected, never silently truncated. Operational counters have one source; proposal ceilings are not spent counters."
+          "text": "Complete proposals are bounded to 4096 goal characters, 32 claims of 2048 characters and 128 edges. Model identifiers are bounded to 128 characters. Excess is rejected, never silently truncated. Operational counters have one source; proposal ceilings are not spent counters."
         },
         {
           "id": "governance/hosts",
-          "text": "Claude uses negotiated MCP form elicitation and host-read operator inventory; Pi uses hasUI/select/input/confirm and its authenticated registry. Codex deliberative approval is unavailable. Operator hooks/RPC may answer; physical human identity and same-OS-principal isolation are not claimed. input_private remains unverified until native qualification. Old state without governance requires a fresh generation."
+          "text": "Claude uses negotiated MCP form elicitation; Pi uses hasUI/select/input/confirm. Codex deliberative approval is unavailable. Hosts observe the main and actual reviewer identities; reviewer selection is not proof of availability, separate authorization or execution. Operator hooks/RPC may answer; physical human identity and same-OS-principal isolation are not claimed. input_private remains unverified until native qualification. Incompatible older governance state requires a fresh generation without migration."
         },
         {
           "id": "governance/human_decisions",
@@ -1994,25 +1951,21 @@
     "actions": {
       "approve": {
         "feedback": "forbidden",
-        "requires_inventory": true,
         "unchanged_outcome": "approve",
         "changed_outcome": "amend"
       },
       "edit": {
         "feedback": "forbidden",
-        "requires_inventory": false,
         "unchanged_outcome": "dismiss",
         "changed_outcome": "amend"
       },
       "request_changes": {
         "feedback": "required",
-        "requires_inventory": false,
         "unchanged_outcome": "request_changes",
         "changed_outcome": "request_changes"
       },
       "reject": {
         "feedback": "forbidden",
-        "requires_inventory": false,
         "unchanged_outcome": "reject",
         "changed_outcome": "reject"
       }
@@ -2042,7 +1995,6 @@
         "multi_provider": "Cross-provider actors",
         "cli_exec": "External model/actor CLI use"
       },
-      "inventory": "Inventory is complete and authorized",
       "auditor": "Independent auditor",
       "feedback": "What must change? Plain language; this approves nothing."
     },

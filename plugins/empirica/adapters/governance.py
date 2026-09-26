@@ -1,26 +1,16 @@
-"""Host mediation for public proposal calls; never a public approval tool.
-
-The operator config path is supplied to the host process, not accepted from tool
-arguments. The same OS principal can edit it; no stronger isolation is claimed.
-"""
+"""Host mediation for public proposal calls; never a public approval tool."""
 from __future__ import annotations
 
-import json
 import math
 import os
 import re
-from pathlib import Path
 from uuid import uuid4
 
 import jsonschema
 
 from adapters import bridge
 from application import protocol
-from core.governance import CEILINGS, inventory_status, plain
-from core.projection import safe_text as safe
-
-MAX_CONFIG_BYTES = 128 * 1024
-
+from core.governance import CEILINGS, plain
 
 def governance_timeout() -> float:
     try:
@@ -28,30 +18,6 @@ def governance_timeout() -> float:
         return value if math.isfinite(value) and 1 <= value <= 1500 else 900
     except ValueError:
         return 900
-
-
-def operator_inventory() -> dict:
-    unknown = {"members": [], "source": "unknown", "complete": False, "authorized": False}
-    name = os.environ.get("EMPIRICA_GOVERNANCE_CONFIG")
-    if not name:
-        return unknown
-    try:
-        with Path(name).open("rb") as stream:
-            raw = stream.read(MAX_CONFIG_BYTES + 1)
-        if len(raw) > MAX_CONFIG_BYTES:
-            return unknown
-        config = json.loads(raw)
-        if set(config) != {"version", "inventory"} or config["version"] != 1:
-            return unknown
-        value = config["inventory"]
-        candidate = {"inventory": value, "author": None, "ingress": "unavailable"}
-        if not protocol.validate_trusted_payload("governanceContextPayload", candidate):
-            return unknown
-        if value["source"] != "operator_declared":
-            return unknown
-        return value
-    except (OSError, ValueError, TypeError):
-        return unknown
 
 
 def unavailable(result: dict, code: str = "governance.approval_unavailable", *, message: str | None = None) -> dict:
@@ -64,20 +30,19 @@ def unavailable(result: dict, code: str = "governance.approval_unavailable", *, 
 def form(run: dict, *, confirmation: bool = False) -> tuple[str, dict]:
     g, proposed = run["governance"], run["governance"]["proposal"]
     controls = protocol._GOVERNANCE_CONTROLS
-    members = g["context"]["inventory"]["members"]
     actions = controls["confirmation"]["actions"] if confirmation else list(controls["actions"])
-    props = {"decision": {"type": "string", "enum": actions, "title": "Your decision"},
-             "inventory_confirmed": {"type": "boolean", "title": controls["controls"]["inventory"]}}
+    props = {"decision": {"type": "string", "enum": actions, "title": "Your decision"}}
     if not confirmation:
         for key, row in controls["controls"]["budgets"].items():
             props[key] = {"type": "integer", "minimum": max(1 if key == "max_passes" else 0, g["budgets"][CEILINGS[key]]),
                           "maximum": row["maximum"], "default": proposed["budgets"][key], "title": row["label"]}
         props.update({key: {"type": "boolean", "default": proposed["modes"][key], "title": label}
                       for key, label in controls["controls"]["modes"].items()})
-        props["auditor"] = {"type": "string", "enum": [safe(m["provider_id"] + "/" + m["model_id"]) for m in members],
-                            "title": controls["controls"]["auditor"]}
-    if inventory_status(g["context"]["inventory"]) == "singleton":
-        props["allow_same_model"] = {"type": "boolean", "default": False, "title": "SAME MODEL: checked proposes exception on Edit; consents on Approve"}
+        auditor = proposed["auditor"] or {}
+        props["auditor_provider"] = {"type": "string", "maxLength": 128,
+            "default": auditor.get("provider_id", ""), "title": "Reviewer provider (different model from main; empty keeps current)"}
+        props["auditor_model"] = {"type": "string", "maxLength": 128,
+            "default": auditor.get("model_id", ""), "title": "Reviewer model id (exact id, not an availability claim; empty keeps current)"}
     message = controls["confirmation"]["title"] + "\n" if confirmation else ""
     return message + g["review_text"], {"type": "object", "properties": props, "required": ["decision"]}
 
@@ -105,7 +70,7 @@ class HostGovernance:
         auto = g["control_mode"] == "auto"
         if not auto and (not self.profile.startswith("claude-code@") or self.elicit is None):
             return unavailable(result)
-        context = {"inventory": operator_inventory(), "author": g["context"]["author"],
+        context = {"author": g["context"]["author"],
                    "ingress": "mcp_elicitation" if self.profile.startswith("claude-code@") else "unavailable"}
         result = self.context_ingress(self.profile, run["id"], context).get("result", {})
         if result.get("type") not in {"Allow", "Inert"} or not result.get("run"):
@@ -143,10 +108,12 @@ class HostGovernance:
                     proposal["budgets"].update({k: content.get(k, proposal["budgets"][k])
                                                 for k in protocol._GOVERNANCE_CONTROLS["controls"]["budgets"]})
                     proposal["modes"].update({k: content.get(k, proposal["modes"][k]) for k in ("multi_provider", "cli_exec")})
-                    if "auditor" in content:
-                        proposal["auditor"] = next(m for m in context["inventory"]["members"] if safe(m["provider_id"] + "/" + m["model_id"]) == content["auditor"])
-                    if content.get("allow_same_model") is True:
-                        proposal["allow_same_model"] = True
+                    provider = content.get("auditor_provider", "")
+                    model = content.get("auditor_model", "")
+                    if bool(provider) != bool(model):
+                        return dismiss()
+                    if provider and model:
+                        proposal["auditor"] = {"provider_id": provider, "model_id": model}
                 feedback = ""
                 if action == "request_changes":
                     envelope = {**envelope, "receipt_id": uuid4().hex}
@@ -158,9 +125,7 @@ class HostGovernance:
                         return dismiss()
                     jsonschema.validate(feedback_answer["content"], feedback_form()[1])
                     feedback = feedback_answer["content"]["feedback"]
-                submission = {"action": action, "configuration": proposal,
-                              "inventory_confirmed": content.get("inventory_confirmed", False),
-                              "allow_same_model": content.get("allow_same_model", False)}
+                submission = {"action": action, "configuration": proposal}
                 if action == "request_changes":
                     submission["feedback"] = feedback
                 decision = {**envelope, "submission": submission}

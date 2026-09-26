@@ -34,13 +34,13 @@
         },
         "contract": {
           "id": "empirica/public",
-          "version": "2.1.0",
+          "version": "3.0.0",
           "relevant_sections": [
             "core",
             "roles",
             "hosts/capabilities"
           ],
-          "digest": "sha256:2a01a8f1be23240c3f6adbff7555a3ce43ee4cff523f05a8aaa9b4a252dd3bfb"
+          "digest": "sha256:8943e1c76695c1079221a0c52df0e7c43028b90f5507acf04199cdb96880a567"
         },
         "obligations": {
           "active": [
@@ -87,20 +87,13 @@
               "multi_provider": false,
               "cli_exec": false
             },
-            "auditor": null,
-            "allow_same_model": false
+            "auditor": null
           },
           "context": {
-            "inventory": {
-              "members": [],
-              "source": "unknown",
-              "complete": false,
-              "authorized": false
-            },
             "author": null,
             "ingress": "unavailable"
           },
-          "proposal_digest": "sha256:5e64f0b05d749be8af867c490a9e30c6c5c83aa0396bde6935d6f49ac87984d2",
+          "proposal_digest": "sha256:bc63a404e766447a1c5248a447e1ab9292bcd0da7ed0b8e89c3a6f9f50568900",
           "scope": null,
           "budgets": {
             "max_passes": 10,
@@ -115,17 +108,16 @@
             "max_spawns": 5,
             "max_audit_spawns": 0
           },
-          "inventory_status": "unknown",
           "request_ready": false,
           "display_ready": false,
           "interactions_remaining": {
             "proposal": 3,
             "total": 128
           },
-          "prompt_error": "governance.inventory_unknown",
+          "prompt_error": "governance.author_unknown",
           "next_action": "governance.propose",
           "change_request": null,
-          "review_text": "EMPIRICA SCOPE DECISION \u2014 proposal revision 0, at most 64 revisions, mode deliberative\nApprove the CURRENT displayed proposal; edits are submitted for another review and are NOT approved yet.\nEvery line beginning '| ' is UNTRUSTED quoted data. Controls, bidi characters, and backslashes are visibly escaped.\n\nGOAL\n| Prove the public contract is internally consistent.\n\nCLAIM GRAPH\n  no claim graph selected\n\nCONFIGURATION\n  Investigation passes: proposed 10, already used 3\n  Child spawns: proposed 5, already used 0\n  Audit spawns: proposed 1, already used 1\n  multi_provider (cross-provider actors): False\n  cli_exec (external model/actor CLI use): False\n  Auditor: not selected\n  Same-model lowered-independence consent: False\n  Inventory: source=unknown, complete=False, authorized=False\n  Author (host-observed): unknown\nWHO MAY AUDIT\n\nSTATE \u2014 pending; dialogs left 3 this revision, 128 total\nOPEN CHANGE REQUEST\n  none\n\nTECHNICAL DETAIL (secondary)\n  proposal digest sha256:5e64f0b05d749be8af867c490a9e30c6c5c83aa0396bde6935d6f49ac87984d2\n  ingress unavailable \u00b7 plan revision 0 \u00b7 revision limit 64"
+          "review_text": "EMPIRICA SCOPE DECISION \u2014 proposal revision 0, at most 64 revisions, mode deliberative\nApprove the CURRENT displayed proposal; edits are submitted for another review and are NOT approved yet.\nEvery line beginning '| ' is UNTRUSTED quoted data. Controls, bidi characters, and backslashes are visibly escaped.\n\nGOAL\n| Prove the public contract is internally consistent.\n\nCLAIM GRAPH\n  no claim graph selected\n\nCONFIGURATION\n  Investigation passes: proposed 10, already used 3\n  Child spawns: proposed 5, already used 0\n  Audit spawns: proposed 1, already used 1\n  multi_provider (cross-provider actors): False\n  cli_exec (external model/actor CLI use): False\n  Reviewer (selected): not selected\n  Main model (host-observed): unknown\n  Main and reviewer must be different normalized models. Selection does not prove availability or authorization.\n\nSTATE \u2014 pending; dialogs left 3 this revision, 128 total\nOPEN CHANGE REQUEST\n  none\n\nTECHNICAL DETAIL (secondary)\n  proposal digest sha256:bc63a404e766447a1c5248a447e1ab9292bcd0da7ed0b8e89c3a6f9f50568900\n  ingress unavailable \u00b7 plan revision 0 \u00b7 revision limit 64"
         }
       }
     }

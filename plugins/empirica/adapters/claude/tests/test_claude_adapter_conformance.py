@@ -32,13 +32,7 @@ class ClaudeReachabilityTests(unittest.TestCase):
             parent_transcript = root / "parent.jsonl"
             parent_transcript.write_text(json.dumps({"message": {"role": "assistant",
                 "model": "claude-sonnet-5", "content": "author"}}) + "\n")
-            config = root / "operator.json"
-            config.write_text(json.dumps({"version": 1, "inventory": {
-                "members": [{"provider_id": "anthropic", "model_id": model}
-                            for model in ("claude-sonnet-5", "claude-opus-4-8")],
-                "source": "operator_declared", "complete": True, "authorized": True}}))
             env = {
-                "EMPIRICA_GOVERNANCE_CONFIG": str(config),
                 "EMPIRICA_HOME": str(root / "state"),
                 "EMPIRICA_REPO_DIR": str(root),
             }
@@ -59,7 +53,7 @@ class ClaudeReachabilityTests(unittest.TestCase):
                     lifecycle._governance_context(payload, run_id)
                     mediator = HostGovernance("claude-code@2.1.278", elicit=lambda _m, _s: {
                         "action": "accept", "content": {"decision": "approve",
-                        "inventory_confirmed": True, "auditor": "anthropic/claude-opus-4-8"}})
+                        "auditor_provider": "anthropic", "auditor_model": "claude-opus-4-8"}})
                     tools = PublicTools("claude-code@2.1.278", govern=mediator)
 
                     def observe(action: dict) -> dict:

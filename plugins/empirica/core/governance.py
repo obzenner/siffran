@@ -65,14 +65,6 @@ def model_key(row: Mapping[str, Any] | None) -> str | None:
     return normalized_model_identity(row.get("provider_id"), row.get("model_id")) if row else None
 
 
-def identity_relation(author: Mapping[str, Any] | None, auditor: Mapping[str, Any] | None) -> str:
-    if not author or not auditor or any(r.get("observed_by") != "host" for r in (author, auditor)):
-        return "unknown_equivalence"
-    left, right = model_key(author), model_key(auditor)
-    return ("unknown_equivalence" if left is None or right is None else
-            "same_model" if left == right else "different_model")
-
-
 def canonical_graph(graph: Mapping[str, Any] | None) -> dict | None:
     if graph is None:
         return None
@@ -95,10 +87,8 @@ def initial(goal: str, budgets: Mapping, modes: Mapping, control_mode: str = "de
              "plan_revision": 0, "revisions_used": 0, "approved_digest": None,
              "approval_kind": None, "receipts": [], "change_request": None,
              "proposal": {"budgets": {k: budgets[k] for k in CEILINGS},
-                          "modes": dict(modes), "auditor": None, "allow_same_model": False},
-             "context": {"inventory": {"members": [], "source": "unknown",
-                          "complete": False, "authorized": False}, "author": None,
-                         "ingress": "unavailable"}}
+                          "modes": dict(modes), "auditor": None},
+             "context": {"author": None, "ingress": "unavailable"}}
     value["proposal_digest"] = canonical_digest(proposal_body(goal, None, value))
     return value
 
@@ -130,58 +120,24 @@ def admission(governance: Mapping) -> str | None:
             "governance.approval_required")
 
 
-def inventory_status(inventory: Mapping) -> str:
-    if not inventory["complete"] or not inventory["authorized"] or inventory["source"] == "unknown":
-        return "unknown"
-    keys = {model_key(m) for m in inventory["members"]}
-    if None in keys:
-        return "partial"
-    return "zero" if not keys else "singleton" if len(keys) == 1 else "multiple"
-
-
 def context_error(governance: Mapping) -> str | None:
-    context = governance["context"]
-    inventory, author = context["inventory"], context["author"]
-    if inventory_status(inventory) in {"unknown", "zero"}:
-        return "governance.inventory_unknown"
-    if model_key(author) is None:
+    if model_key(governance["context"]["author"]) is None:
         return "governance.author_unknown"
-    if model_key(author) not in {model_key(m) for m in inventory["members"]}:
-        return "governance.identity_mismatch"
     return None
 
 
 def selection_error(governance: Mapping) -> str | None:
     if reason := context_error(governance):
         return reason
-    context, proposed = governance["context"], governance["proposal"]
-    inventory, author, selected = context["inventory"], context["author"], proposed["auditor"]
+    author = governance["context"]["author"]
+    selected = governance["proposal"]["auditor"]
     if selected is None:
         return "governance.auditor_required"
     if model_key(selected) is None:
         return "governance.auditor_unknown"
-    if selected not in inventory["members"]:
-        return "governance.identity_mismatch"
     if model_key(author) == model_key(selected):
-        if inventory_status(inventory) != "singleton" or not proposed["allow_same_model"]:
-            return "audit.same_model"
-    elif proposed["allow_same_model"]:
-        return "governance.identity_mismatch"
+        return "audit.same_model"
     return None
-
-
-def auto_proposal(governance: Mapping) -> dict:
-    proposed = plain(governance["proposal"])
-    if governance["control_mode"] != "auto" or proposed["auditor"] is not None or context_error(governance):
-        return proposed
-    inventory = governance["context"]["inventory"]
-    author = model_key(governance["context"]["author"])
-    members = sorted(inventory["members"], key=lambda m: (m["provider_id"], m["model_id"]))
-    eligible = [m for m in members if model_key(m) is not None and model_key(m) != author]
-    singleton = inventory_status(inventory) == "singleton"
-    if eligible or singleton:
-        proposed.update(auditor=plain(eligible[0] if eligible else members[0]), allow_same_model=singleton)
-    return proposed
 
 
 def interactions_remaining(governance: Mapping) -> dict:
@@ -215,12 +171,6 @@ def resolve_submission(governance: Mapping, submission: Mapping,
     feedback = submission.get("feedback", "")
     if not isinstance(feedback, str) or ((row["feedback"] == "required") != bool(feedback.strip())):
         return None, "governance.decision_conflict"
-    action = submission["action"]
-    if row["requires_inventory"] and submission.get("inventory_confirmed") is not True:
-        return None, "governance.inventory_unconfirmed"
-    if action == "approve" and inventory_status(governance["context"]["inventory"]) == "singleton" \
-            and submission.get("allow_same_model") is not True:
-        return None, "governance.same_model_unconfirmed"
     configuration = plain(submission["configuration"])
     changed = configuration != plain(governance["proposal"])
     outcome = row["changed_outcome"] if changed else row["unchanged_outcome"]

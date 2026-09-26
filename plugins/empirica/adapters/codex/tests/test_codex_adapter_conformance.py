@@ -26,15 +26,9 @@ class CodexAdapterConformanceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             subprocess.run(["git", "init", "-q", str(repo)], check=True)
-            config = repo / "operator.json"
-            config.write_text(json.dumps({"version": 1, "inventory": {"members": [
-                {"provider_id": "openai", "model_id": "gpt-5.1-codex"},
-                {"provider_id": "openai", "model_id": "gpt-4.1-2025-04-14"}],
-                "source": "operator_declared", "complete": True, "authorized": True}}))
             payload = {"cwd": str(repo), "session_id": "real-slug", "model": "gpt-5.1-codex",
                 "prompt": "$empirica --auto known limits", "hook_event_name": "UserPromptSubmit"}
-            with patch.dict(os.environ, {"EMPIRICA_HOME": str(repo / "state"), "EMPIRICA_REPO_DIR": str(repo),
-                                        "EMPIRICA_GOVERNANCE_CONFIG": str(config)}):
+            with patch.dict(os.environ, {"EMPIRICA_HOME": str(repo / "state"), "EMPIRICA_REPO_DIR": str(repo)}):
                 started = _start(payload)
                 handle = re.search(r"er2:[^ ]+", started["hookSpecificOutput"]["additionalContext"]).group(0).rstrip(".)")
                 for name in ("mcp__evil__empirica_read", "evil_report_convergence"):
@@ -44,6 +38,9 @@ class CodexAdapterConformanceTests(unittest.TestCase):
                     for tool in ("empirica_read", "empirica_observe", "report_convergence"):
                         self.assertIsNone(_pre_tool_use({**payload, "tool_name": prefix + tool}))
                 tools = PublicTools("codex-cli@0.146.0", govern=HostGovernance("codex-cli@0.146.0"))
+                tools.call("empirica_observe", {"run_id": handle, "action": {"kind": "route", "reason": "route first"}})
+                tools.call("empirica_observe", {"run_id": handle, "action": {"kind": "graph", "payload": {
+                    "root": "G0", "claims": [{"id": "G0", "text": "identity", "gating": True, "kind": "ordinary"}], "edges": []}}})
                 result = tools.call("empirica_observe", {"run_id": handle, "action": {"kind": "configure_run"}})["structuredContent"]
                 self.assertEqual(result["reasons"][0]["code"], "governance.author_unknown")
 
@@ -59,17 +56,11 @@ class CodexAdapterConformanceTests(unittest.TestCase):
                 "model": "gpt-4.1-2025-04-14", "prompt": "$empirica --auto prove Codex reachability",
                 "hook_event_name": "UserPromptSubmit", "turn_id": "turn-1",
             }
-            config = root / "operator.json"
-            config.write_text(json.dumps({"version": 1, "inventory": {
-                "members": [{"provider_id": "openai", "model_id": model}
-                            for model in ("gpt-4.1-2025-04-14", "gpt-4.1-mini-2025-04-14")],
-                "source": "operator_declared", "complete": True, "authorized": True}}))
             previous_cwd = Path.cwd()
             self.addCleanup(os.chdir, previous_cwd)
             os.chdir(repo)
             with patch.dict(os.environ, {
                 "EMPIRICA_HOME": str(home), "EMPIRICA_REPO_DIR": str(repo),
-                "EMPIRICA_GOVERNANCE_CONFIG": str(config),
             }, clear=False):
                 started = _start(payload)
                 context = started["hookSpecificOutput"]["additionalContext"]

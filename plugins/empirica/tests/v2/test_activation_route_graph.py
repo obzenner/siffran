@@ -256,16 +256,15 @@ class ActivationRouteGraphTests(ConformanceCase):
 
     # 5 — Malformed/missing selected graph fails closed with a structured reason
     def test_malformed_missing_selected_graph_fails_closed(self):
-        # Independent fresh variants for missing selected graph and malformed selected graph.
-        # The missing variant Evaluate/GetRun without submitting any graph; the malformed variant
-        # submits a malformed graph. Each fails closed with exact graph.invalid, no generic
-        # exception/fallback.
+        # Evaluate a fresh graphless run separately from submitting a malformed graph.
+        # Both fail closed, but missing scope is preparation (graph.missing), not a
+        # human-approval wait; malformed input retains graph.invalid.
         for label in ("missing", "malformed"):
             with self.subTest(variant=label):
                 drv = self.bind_driver(
                     "D7", "case-5",
-                    "Independent fresh variants for missing and malformed selected graph each "
-                    "fail closed with exact graph.invalid, no generic exception/fallback")
+                    "Missing scope fails as graph.missing before approval; malformed scope "
+                    "fails as graph.invalid. Neither case admits work or supplies a reviewable graph.")
                 run_id = self.start_run(drv)
                 if label == "missing":
                     # Missing variant: Evaluate without submitting any graph.
@@ -275,8 +274,10 @@ class ActivationRouteGraphTests(ConformanceCase):
                     # Malformed variant: submit a malformed graph.
                     resp = self.dispatch(drv, observe_action(
                         run_id=run_id, action=action_graph(payload={"malformed": True})))
-                self.assert_block_only(resp, ["governance.approval_required" if label == "missing"
-                                               else "graph.invalid"])
+                result = self.assert_block_only(resp, ["graph.missing" if label == "missing"
+                                                       else "graph.invalid"])
+                self.assertEqual(result["run"]["governance"]["state"], "pending")
+                self.assertIsNone(result["run"]["governance"]["scope"])
 
     def test_structurally_invalid_dependency_graphs_are_rejected_without_replacement(self):
         """Seam 4A: the selected argument is one strict root-connected dependency DAG."""

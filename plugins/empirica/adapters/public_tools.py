@@ -136,10 +136,9 @@ def _project_public_tools() -> dict:
             "recovery": {code: {key: copy.deepcopy(recovery[code][key])
                        for key in ("message", "sections", "next_actions")}
                        for code in ("graph.missing", "governance.approval_unavailable",
-                                    "governance.inventory_unknown", "governance.author_unknown",
-                                    "governance.identity_mismatch", "governance.interaction_limit",
-                                    "governance.changes_requested", "governance.decision_conflict",
-                                    "governance.inventory_unconfirmed", "governance.same_model_unconfirmed", "governance.stale_proposal")},
+                                    "governance.author_unknown", "governance.identity_mismatch",
+                                    "governance.interaction_limit", "governance.changes_requested",
+                                    "governance.decision_conflict", "governance.stale_proposal")},
             "schemas": {"model": _project_schemas(),
                         "host_handle": _host_handle_schemas(_project_schemas())}}
 

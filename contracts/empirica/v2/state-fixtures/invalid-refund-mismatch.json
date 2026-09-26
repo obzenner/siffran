@@ -73,8 +73,7 @@
       "audit_auditor": {
         "provider_id": "anthropic",
         "model_id": "claude-opus-4-6"
-      },
-      "audit_inventory_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
     }
   ],
   "committed_artifact_head_id": null,
@@ -97,16 +96,9 @@
         "multi_provider": false,
         "cli_exec": false
       },
-      "auditor": null,
-      "allow_same_model": false
+      "auditor": null
     },
     "context": {
-      "inventory": {
-        "members": [],
-        "source": "unknown",
-        "complete": false,
-        "authorized": false
-      },
       "author": null,
       "ingress": "unavailable"
     },

@@ -48,11 +48,11 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:2a01a8f1be23240c3f6adbff7555a3ce43ee4cff523f05a8aaa9b4a252dd3bfb"
+REVIEWED_REGISTRY_DIGEST = "sha256:8943e1c76695c1079221a0c52df0e7c43028b90f5507acf04199cdb96880a567"
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:41ef8b89da3f880fb5d256202d9ee5b6e28301b75e52490a41e65d16e09b8caa"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
-REGISTRY_VERSION = "2.1.0"
+REGISTRY_VERSION = "3.0.0"
 PROTOCOL = "empirica/v2"
 # Structural D1 constants that have no canonical-JSON vocabulary of their own: edge
 # types and research source kinds. Artifact kind/outcome/spike-gate vocabularies ARE
@@ -1366,8 +1366,7 @@ def _valid_child_for_state(state: str, d64: str, reg_terminal: set) -> dict:
             "state": state, "deadline": None, "capability_ref": "cap-1",
             "audit_operation_id": d64, "audit_argument": {"argument_digest": d64},
             "audit_role_profile": "empirica:empirica-auditor",
-            "audit_auditor": {"provider_id": "anthropic", "model_id": "claude-opus-4-6"},
-            "audit_inventory_digest": d64}
+            "audit_auditor": {"provider_id": "anthropic", "model_id": "claude-opus-4-6"}}
     if state == "reserved":
         base.update(spent=False, refunded=False, native_id=None,
                      first_terminal_fingerprint=None)

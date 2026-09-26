@@ -643,7 +643,7 @@ class D6StrictRunStateTests(unittest.TestCase):
         investigation["budgets"].update(spawns_used=1, audit_spawns_used=0)
         investigation["children"][0].update(resource_class="investigation",
             audit_operation_id=None, audit_argument=None, audit_role_profile=None,
-            audit_auditor=None, audit_inventory_digest=None)
+            audit_auditor=None)
         self.assertEqual(mod.classify_and_decode(investigation).kind, "valid")
         uncharged = json.loads(json.dumps(investigation))
         uncharged["budgets"]["spawns_used"] = 0

@@ -20,7 +20,6 @@ import sys
 from collections.abc import Mapping
 
 from adapters import bridge as application_bridge
-from adapters.governance import operator_inventory
 from adapters.audit import child_prompt, verdict_from_final_output
 from adapters.audit_protocol import (AuditLaunchPlan, AuditProtocol, AuditProtocolError,
                                      IdentityObservation)
@@ -119,8 +118,7 @@ def _governance_context(payload, handle):
     if payload.get("hook_event_name") == "PostModelSwitch":
         model = payload.get("to_model")
     response = application_bridge.trusted_governance_context(CLAUDE_PROFILE_ID, handle, {
-        "inventory": operator_inventory(), "author": _model_observation(model),
-        "ingress": "mcp_elicitation"})
+        "author": _model_observation(model), "ingress": "mcp_elicitation"})
     if response.get("result", {}).get("type") not in {"Allow", "Inert"}:
         raise RuntimeError("governance context unavailable")
 
