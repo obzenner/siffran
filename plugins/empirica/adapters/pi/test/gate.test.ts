@@ -30,6 +30,7 @@ interface Wired {
   pi: FakePi;
   requests: Request[];
   privateRequests: PrivateIngressRequest[];
+  auditResolutions: Record<string, unknown>[];
 }
 
 function wire(
@@ -38,6 +39,7 @@ function wire(
 ): Wired {
   const requests: Request[] = [];
   const privateRequests: PrivateIngressRequest[] = [];
+  const auditResolutions: Record<string, unknown>[] = [];
   const pi = new FakePi();
   const dispatch = (req: Request): Response => {
     requests.push(req);
@@ -64,12 +66,13 @@ function wire(
         return { type: "audit_verdict", admitted: true };
       return { type: "ok" };
     },
-    resolveAuditContract: async () => ({
-      agentFilePath: resolve(DEFAULT_SKILLS_DIR, "..", "agents", "pi", "empirica-auditor.md"),
-      model: "bedrock/auditor-model",
-    }),
+    resolveAuditContract: async (input) => {
+      auditResolutions.push({ ...input });
+      return { agentFilePath: resolve(DEFAULT_SKILLS_DIR, "..", "agents", "pi", "empirica-auditor.md"),
+        model: "bedrock/auditor-model" };
+    },
   })(pi);
-  return { pi, requests, privateRequests };
+  return { pi, requests, privateRequests, auditResolutions };
 }
 
 function toolEvent(toolName: string): ToolCallEvent {
@@ -102,6 +105,8 @@ test("/empirica dispatches StartRun and persists the opaque handle", async () =>
   assert.match(w.pi.userMessages[0], /The user invocation is `build the thing`/);
   assert.match(w.pi.userMessages[0], /"kind":"route","reason":/);
   assert.match(w.pi.userMessages[0], /operation="GetRun"/);
+  assert.ok(w.pi.userMessages[0].includes(
+    '{"agent":"empirica.empirica-auditor","task":"Audit the host-provided dossier."}'));
   assert.doesNotMatch(w.pi.userMessages[0], /\$ARGUMENTS/);
 });
 
@@ -289,6 +294,56 @@ test("gate: a well-formed Inert is denied (run gone but handle exists)", async (
 
 // --- bound foreground auditor lifecycle -------------------------------------
 
+test("canonical audit guidance uses the same two-field example on every surface", () => {
+  const example = '{"agent":"empirica.empirica-auditor","task":"Audit the host-provided dossier."}';
+  for (const file of ["empirica/SKILL.md", "empirica/references/audit.md", "../adapters/pi/README.md",
+    "../../../.claude/skills/native-qualification/SKILL.md"]) {
+    assert.ok(readFileSync(resolve(DEFAULT_SKILLS_DIR, file), "utf8").includes(example), file);
+  }
+});
+
+test("subagent: canonical input errors are specific and have no audit side effects", async (t) => {
+  const missingTask = "empirica auditor launch requires the canonical agent and a string task; the host replaces task with its dossier";
+  const overrides = "empirica auditor launch accepts only agent and task; omit async, model, context, tools, and other overrides";
+  const cases: { label: string; fields: Record<string, unknown>; reason: string }[] = [
+    { label: "native bare call", fields: {}, reason: missingTask },
+    { label: "native foreground flag without task", fields: { async: false }, reason: missingTask },
+    ...[null, 0, false, [], {}].map((task) => ({ label: `task ${JSON.stringify(task)}`,
+      fields: { task }, reason: missingTask })),
+    ...["async", "model", "context", "tools", "acceptance", "toolBudget", "unknown\nkey"].map((key) => ({
+      label: `forbidden ${JSON.stringify(key)}`, fields: { task: "audit", [key]: false }, reason: overrides })),
+  ];
+  for (const row of cases) await t.test(row.label, async () => {
+    const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+    await startRun(w);
+    const input = { agent: "empirica.empirica-auditor", ...row.fields };
+    const before = structuredClone(input);
+    const requests = w.requests.length, entries = w.pi.entries.length;
+    const decision = await w.pi.toolCall()(
+      { toolName: SUBAGENT_TOOL, toolCallId: "bad-audit", input }, fakeCtx());
+    assert.deepEqual(decision, { block: true, reason: row.reason });
+    assert.deepEqual(input, before);
+    // Shared governance/investigation admission still precedes input validation.
+    assert.deepEqual(w.requests.slice(requests).map((request) => [request.command.type,
+      request.command.type === "ObserveAction" ? request.command.action.kind : null]),
+    [["ObserveAction", "investigate"]]);
+    assert.equal(w.pi.entries.length, entries);
+    assert.equal(w.auditResolutions.length, 0);
+    assert.equal(w.privateRequests.length, 0);
+  });
+});
+
+test("subagent: empty string task retains its existing accepted meaning", async () => {
+  const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+  await startRun(w);
+  const input: Record<string, unknown> = { agent: "empirica.empirica-auditor", task: "" };
+  assert.equal(await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "empty-task", input }, fakeCtx()), undefined);
+  assert.equal(input.async, false);
+  assert.match(String(input.task), /AUDIT DOSSIER/);
+  assert.equal(w.auditResolutions.length, 1);
+  assert.deepEqual(w.privateRequests.map((request) => request.operation), ["audit_prepare"]);
+});
+
 test("subagent: canonical auditor is reserved, bound, attributed, and prompt-injected", async () => {
   const child = { child_id: "ch-1", purpose: "audit", resource_class: "audit", state: "reserved" };
   const w = wire((req) => {
@@ -303,7 +358,7 @@ test("subagent: canonical auditor is reserved, bound, attributed, and prompt-inj
   });
   await startRun(w);
   const input: Record<string, unknown> = {
-    agent: "empirica.empirica-auditor", task: "audit",
+    agent: "empirica.empirica-auditor", task: "AUTHOR_TASK_IS_NOT_AUTHORITY",
   };
   const decision = await w.pi.toolCall()(
     { toolName: SUBAGENT_TOOL, toolCallId: "tc-sub", input }, fakeCtx(),
@@ -316,6 +371,8 @@ test("subagent: canonical auditor is reserved, bound, attributed, and prompt-inj
   assert.deepEqual(input.turnBudget, { maxTurns: 8, graceTurns: 1 });
   assert.deepEqual(input.toolBudget, { soft: 20, hard: 30, block: ["write", "edit"] });
   assert.match(String(input.task), /AUDIT DOSSIER/);
+  assert.doesNotMatch(String(input.task), /AUTHOR_TASK_IS_NOT_AUTHORITY/);
+  assert.equal(input.model, "bedrock/auditor-model");
   assert.deepEqual(w.privateRequests.map((item) => item.operation), ["audit_prepare"]);
   assert.equal(w.pi.entries.at(-1)?.customType, "empirica.audit");
 });

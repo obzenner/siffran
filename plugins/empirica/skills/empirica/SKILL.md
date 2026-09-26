@@ -185,9 +185,19 @@ When every in-scope gating claim is approved, read
 The author never grades its own convergence. On Claude, invoke the exact
 `empirica:empirica-auditor` once and let the parent turn settle while that bound async child is
 pending; Claude's native completion notification resumes the workflow after `SubagentStop`
-admits the terminal result. On Pi, invoke the exact packaged
-`empirica.empirica-auditor`. The host protocol—not `empirica_observe`—owns concrete
-reservation, dossier replacement, correlation, identity observation, and terminal admission.
+admits the terminal result. On Pi, check `subagent({"action":"list"})` for the executable
+packaged auditor, then invoke the structured `subagent` tool with exactly:
+
+```json
+{"agent":"empirica.empirica-auditor","task":"Audit the host-provided dossier."}
+```
+
+`task` must be a string even though the host replaces it with the bound dossier. Send only
+`agent` and `task`: omit `async` (even `false`), `model`, `context`, `acceptance`, tool controls,
+and workflow wrappers. The host sets foreground execution and the approved reviewer; a bare
+agent-only call is invalid. Stop on a rejected launch; do not guess alternate shapes or retry.
+The host protocol—not `empirica_observe`—owns concrete reservation, dossier replacement,
+correlation, identity observation, and terminal admission.
 On Codex, do not launch an ordinary child: finish the turn only when all non-audit
 obligations are closed so the trusted Stop hook can run its bounded managed auditor.
 In every case the host—not the author—binds the dossier, observes the final output,

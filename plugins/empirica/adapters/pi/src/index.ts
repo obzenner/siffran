@@ -467,10 +467,12 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           .replace(/^---[\s\S]*?---\s*/, "").trim();
       } catch { return "Review the supplied Empirica argument and return one verdict block."; }
     };
-    const isCanonicalAuditorInput = (input: Record<string, unknown>): boolean => {
+    const canonicalAuditorInputError = (input: Record<string, unknown>): string | undefined => {
       if (input.agent !== "empirica.empirica-auditor" || typeof input.task !== "string")
-        return false;
-      return Object.keys(input).every((key) => key === "agent" || key === "task");
+        return "empirica auditor launch requires the canonical agent and a string task; the host replaces task with its dossier";
+      if (!Object.keys(input).every((key) => key === "agent" || key === "task"))
+        return "empirica auditor launch accepts only agent and task; omit async, model, context, tools, and other overrides";
+      return undefined;
     };
     const modelPair = (value: unknown, fallbackProvider: string): [string | null, string | null] => {
       if (typeof value !== "string" || !value) return [null, null];
@@ -610,8 +612,8 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           pi.appendEntry?.("empirica.child", { toolCallId: event.toolCallId, ...correlation });
           return;
         }
-        if (!isCanonicalAuditorInput(event.input))
-          return { block: true, reason: "empirica auditor launch forbids model/context/tool overrides" };
+        const inputError = canonicalAuditorInputError(event.input);
+        if (inputError) return { block: true, reason: inputError };
         try {
           const current = await dispatch(getRunRequest(runHandle, randomUUID()));
           if (current.result.type !== "Allow") throw new Error("approved scope unavailable");

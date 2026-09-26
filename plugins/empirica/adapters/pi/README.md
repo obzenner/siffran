@@ -53,6 +53,20 @@ The adapter-private Python subprocess exposes no Pi tool. It is the imperative i
 host-observed attribution, child events, and audit verdicts. Public tools cannot express these
 payloads.
 
+## Canonical audit call
+
+After current evidence and approval, check `subagent({"action":"list"})`, then submit only:
+
+```json
+{"agent":"empirica.empirica-auditor","task":"Audit the host-provided dossier."}
+```
+
+The `task` string is required and replaced with the host's bound dossier. Do not send
+`async` (even `false`), `model`, `context`, `acceptance`, tool controls or workflow wrappers.
+The host injects the approved model and foreground execution after validating the two-field
+input. Missing/non-string task and forbidden fields have distinct errors, both before audit
+resolution/reservation. Rejection is not an audit; do not retry a stopped qualification run.
+
 ## Hard gate
 
 With a non-null run handle, `report_convergence` permits only a centrally guarded `Allow`.

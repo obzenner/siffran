@@ -36,6 +36,23 @@ Ordinary conversation with another model is not a substitute.
 6. Reread the run. Any changed graph, evidence, or scope invalidates stale audit
    coverage and requires a new bound audit.
 
+## Pi invocation shape
+
+Check `subagent({"action":"list"})` for the executable packaged auditor, then submit exactly
+this object to the structured `subagent` tool:
+
+```json
+{"agent":"empirica.empirica-auditor","task":"Audit the host-provided dossier."}
+```
+
+The string `task` is required but is replaced by the host-owned bound dossier; it is not
+an author-supplied audit argument. Only `agent` and `task` are allowed. Omit `async` (even
+`false`), model/context/acceptance/tool overrides, and workflow wrappers. The host injects
+the approved reviewer and `async=false` after admission. A bare agent-only call is invalid.
+A missing/non-string task reports that a string task is required; extra fields report
+that only agent and task are accepted. Stop on rejection rather than trying alternate
+shapes. A stopped run stays stopped; corrected guidance does not authorize reopening it.
+
 ## Stale pending retry
 
 A new canonical audit request can replace a stale **pending** audit only when audit capacity remains.
