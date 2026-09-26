@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """Real-temp-git integration + concurrency suite for the Git artifact adapter (ADR-31).
 
-Run: python3 plugins/empirica/adapters/git/tests/test_git_artifact_repo.py   (stdlib only).
+Run: make empirica-git-check (stdlib + Git).
 Exit 0 = all pass; 1 = at least one failed.
 
-Every test drives a real ``git`` process against a throwaway repository under ``tempfile`` — there
-are no mocks of the store, because the whole point is to prove the plumbing behaves. The suite
-covers the confirmations ADR-31 requires: concurrent CAS, append commutativity/idempotency,
+Tests use throwaway Git repositories under ``tempfile``. Integrity, concurrency and isolation
+checks drive real Git; malformed batch frames are injected at the byte-transport seam to verify
+refusal. The suite covers the confirmations ADR-31 requires: concurrent CAS, append commutativity/idempotency,
 generation isolation, no-remote operation, distinct absent-vs-corrupt reads, id/body collision, and
 a byte-identical user HEAD/index/worktree across an artifact write.
 """
 import hashlib
+import json
 import subprocess
 import sys
 import tempfile
@@ -22,7 +23,12 @@ HERE = Path(__file__).resolve()
 PLUGIN = HERE.parents[3]  # plugins/empirica — makes `core` and `adapters` importable
 sys.path.insert(0, str(PLUGIN))
 
-from adapters.git.artifact_repo import ArtifactCollision, GitArtifactRepository  # noqa: E402
+from adapters.git.artifact_repo import (  # noqa: E402
+    ArtifactCollision,
+    GitArtifactRepository,
+    GitError,
+    _CorruptTree,
+)
 from core.records import ABSENT, Artifact, Corrupt, Present, RunKey  # noqa: E402
 
 
@@ -84,6 +90,143 @@ class GitArtifactRepositoryTest(unittest.TestCase):
         self.repo.append(self.key, a)
         self.assertEqual(self.repo.read(self.key).value, frozenset({a}))
 
+    def test_nonempty_read_uses_one_batch_process_independent_of_artifact_count(self):
+        class CountingRepository(GitArtifactRepository):
+            def __init__(self, root):
+                super().__init__(root)
+                self.commands = []
+
+            def _git(self, *args, **kwargs):
+                self.commands.append(args)
+                return super()._git(*args, **kwargs)
+
+            def _git_bytes(self, *args, **kwargs):
+                self.commands.append(args)
+                return super()._git_bytes(*args, **kwargs)
+
+        counted = CountingRepository(self.root)
+        artifacts = [_art(f"batch-{index}") for index in range(6)]
+        for value in artifacts:
+            counted.append(self.key, value)
+        counted.commands.clear()
+        result = counted.read(self.key)
+        self.assertEqual(result.value, frozenset(artifacts))
+        self.assertEqual(len(counted.commands), 5)
+        self.assertEqual(
+            [command for command in counted.commands if command[0] == "cat-file"],
+            [("cat-file", "--batch")],
+        )
+
+    def test_empty_tree_does_not_start_batch_process(self):
+        class CountingRepository(GitArtifactRepository):
+            def __init__(self, root):
+                super().__init__(root)
+                self.batch_calls = 0
+
+            def _git_bytes(self, *args, **kwargs):
+                self.batch_calls += 1
+                return super()._git_bytes(*args, **kwargs)
+
+        counted = CountingRepository(self.root)
+        tree = _run(self.root, "mktree", stdin="").stdout.strip()
+        commit = _run(self.root, "commit-tree", tree, stdin="empty").stdout.strip()
+        _run(self.root, "update-ref", counted.ref_for(self.key), commit)
+        result = counted.read(self.key)
+        self.assertEqual(result.value, frozenset())
+        self.assertEqual(counted.batch_calls, 0)
+
+    def test_batch_parser_preserves_raw_crlf_utf8_and_multiple_blobs(self):
+        artifacts = [Artifact("utf8-id", "π line"), Artifact("second-id", "second")]
+        encoded = [
+            json.dumps(
+                {"id": artifact.artifact_id, "body": artifact.body},
+                sort_keys=True, ensure_ascii=False, indent=2,
+            ).replace("\n", "\r\n")
+            for artifact in artifacts
+        ]
+        self.assertTrue(all("\r\n" in body for body in encoded))
+        oids = [
+            _run(self.root, "hash-object", "-w", "--stdin", stdin=body).stdout.strip()
+            for body in encoded
+        ]
+        descriptors = [(artifact.artifact_id, oid)
+                       for artifact, oid in zip(artifacts, oids, strict=True)]
+
+        entries = self.repo._batch_read_entries(descriptors)
+        self.assertEqual([entries[value.artifact_id].body for value in artifacts],
+                         [value.body for value in artifacts])
+
+    def test_batch_parser_rejects_oversized_decimal_size_header(self):
+        oid = "a" * 40
+        output = f"{oid} blob {'9' * 4301}\n".encode("ascii")
+
+        class FramedRepository(GitArtifactRepository):
+            def _git_bytes(self, *args, **kwargs):
+                return subprocess.CompletedProcess(args, 0, output, b"")
+
+        with self.assertRaises(_CorruptTree):
+            FramedRepository(self.root)._batch_read_entries([("a", oid)])
+
+    def test_batch_parser_rejects_failure_after_valid_first_frame(self):
+        first_oid, second_oid = "a" * 40, "b" * 40
+        first_body = b'{"body":"first","id":"first"}'
+        second_body = b'{"body":"second","id":"second"}'
+        first = f"{first_oid} blob {len(first_body)}\n".encode("ascii") + first_body + b"\n"
+        second = (f"{second_oid} blob {len(second_body)}\n".encode("ascii")
+                  + second_body + b"\n")
+        failures = {
+            "reordered second oid": first + second.replace(second_oid.encode(), b"c" * 40, 1),
+            "missing second frame": first,
+            "malformed second header": first + b"malformed\n",
+            "truncated second body": first + second[:-5],
+        }
+        descriptors = [("first", first_oid), ("second", second_oid)]
+        for label, output in failures.items():
+            with self.subTest(label=label):
+                class FramedRepository(GitArtifactRepository):
+                    def _git_bytes(self, *args, **kwargs):
+                        return subprocess.CompletedProcess(args, 0, output, b"")
+
+                with self.assertRaises(_CorruptTree):
+                    FramedRepository(self.root)._batch_read_entries(descriptors)
+
+    def test_batch_parser_rejects_malformed_or_incomplete_output(self):
+        oid = "a" * 40
+        body = b'{"body":"x","id":"a"}'
+        valid = f"{oid} blob {len(body)}\n".encode("ascii") + body + b"\n"
+        failures = {
+            "empty output": b"",
+            "wrong oid": valid.replace(oid.encode("ascii"), b"b" * 40, 1),
+            "wrong type": valid.replace(b" blob ", b" tree ", 1),
+            "bad size": valid.replace(str(len(body)).encode("ascii"), b"nope", 1),
+            "huge size": valid.replace(str(len(body)).encode("ascii"), b"999999999999", 1),
+            "missing header newline": valid.replace(b"\n", b"", 1),
+            "truncated body": valid[:-2] + b"\n",
+            "missing delimiter": valid[:-1],
+            "wrong delimiter": valid[:-1] + b"x",
+            "trailing data": valid + b"extra",
+            "missing object": f"{oid} missing\n".encode("ascii"),
+        }
+
+        for label, output in failures.items():
+            with self.subTest(label=label):
+                class FramedRepository(GitArtifactRepository):
+                    def _git_bytes(self, *args, **kwargs):
+                        return subprocess.CompletedProcess(args, 0, output, b"")
+
+                with self.assertRaisesRegex(_CorruptTree, ".+"):
+                    FramedRepository(self.root)._batch_read_entries([("a", oid)])
+
+    def test_batch_process_failure_is_corrupt(self):
+        oid = "a" * 40
+
+        class FailedRepository(GitArtifactRepository):
+            def _git_bytes(self, *args, **kwargs):
+                return subprocess.CompletedProcess(args, 1, b"", b"failed")
+
+        with self.assertRaisesRegex(_CorruptTree, "batch-read"):
+            FailedRepository(self.root)._batch_read_entries([("a", oid)])
+
     def test_ref_lives_under_refs_empirica(self):
         self.repo.append(self.key, _art("x"))
         ref = self.repo.ref_for(self.key)
@@ -143,6 +286,14 @@ class GitArtifactRepositoryTest(unittest.TestCase):
             self.repo.append(self.key, Artifact("shared-id", "body-two"))
         # The original survives, untouched.
         self.assertEqual(self.repo.read(self.key).value, frozenset({good}))
+
+    def test_append_refuses_existing_corrupt_tree_without_moving_ref(self):
+        self._plant_tree({"aaa": "not json at all"})
+        ref = self.repo.ref_for(self.key)
+        before = _run(self.root, "rev-parse", ref).stdout.strip()
+        with self.assertRaisesRegex(GitError, "cannot append onto corrupt store"):
+            self.repo.append(self.key, _art("must-not-append"))
+        self.assertEqual(_run(self.root, "rev-parse", ref).stdout.strip(), before)
 
     # --- absent vs corrupt ----------------------------------------------------
 

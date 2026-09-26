@@ -38,6 +38,7 @@ EMPIRICA_PUBLIC_TOOLS_TESTS := $(PLUGINS_DIR)/empirica/tests/test_public_tools.p
 EMPIRICA_AUDIT_PROTOCOL_TESTS := $(PLUGINS_DIR)/empirica/tests/test_audit_protocol.py
 EMPIRICA_STATE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_state_adapter.py
 EMPIRICA_GIT_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/git/tests/test_git_artifact_repo.py
+EMPIRICA_GIT_IO_BOOTSTRAP_TESTS := $(PLUGINS_DIR)/empirica/adapters/git/tests/test_git_io_bootstrap.py
 EMPIRICA_GOVERNANCE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_governance.py
 EMPIRICA_CLAUDE_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/claude/tests/test_claude_adapter.py
 EMPIRICA_CLAUDE_ADAPTER_CONFORMANCE_TESTS := $(PLUGINS_DIR)/empirica/adapters/claude/tests/test_claude_adapter_conformance.py
@@ -146,14 +147,18 @@ empirica-governance-check: ## Diagnose full real-service governance CAS, replay,
 	@$(PYTHON) $(EMPIRICA_GOVERNANCE_TESTS)
 	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/test_governance_hosts.py
 
-.PHONY: empirica-transaction-check
+.PHONY: empirica-transaction-check empirica-git-check
+empirica-git-check: ## Check Git artifact integrity, concurrency, and bounded bootstrap process counts
+	@$(PYTHON) $(EMPIRICA_GIT_ADAPTER_TESTS)
+	@$(PYTHON) $(EMPIRICA_GIT_IO_BOOTSTRAP_TESTS)
+
 empirica-transaction-check: ## Check transaction/projection invariants (ARGS="-k test_name" selects cases)
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_d7_transactions $(ARGS)
 
 empirica-core-integration: ## Diagnose expensive persistence, transaction, retry, and v2 behavior
 	@$(PYTHON) $(EMPIRICA_D6_STRICT_TESTS)
 	@$(MAKE) --no-print-directory empirica-transaction-check
-	@$(PYTHON) $(EMPIRICA_GIT_ADAPTER_TESTS)
+	@$(MAKE) --no-print-directory empirica-git-check
 	@$(PYTHON) $(EMPIRICA_BRIDGE_V2_TESTS)
 	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/test_stale_audit_retry.py
 	@$(MAKE) empirica-v2-check

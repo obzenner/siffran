@@ -26,6 +26,7 @@ worktrees share one artifact namespace because ``refs/empirica/*`` lives in the 
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import re
@@ -176,14 +177,9 @@ class GitArtifactRepository:
 
     # --- git plumbing --------------------------------------------------------
 
-    def _git(self, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
-        """Run a Git plumbing command against the common dir, isolated from user config.
-
-        ``GIT_DIR`` points at the resolved common directory and no work tree or index file is set,
-        so nothing here can read or write the user's checkout. System/global config is disabled to
-        keep commit objects deterministic regardless of the user's git settings (e.g. gpg signing).
-        """
-        env = {
+    def _git_env(self) -> dict[str, str]:
+        """Environment shared by text and byte-exact Git plumbing transports."""
+        return {
             **_COMMIT_IDENTITY,
             "GIT_DIR": str(self._common_dir),
             "GIT_CONFIG_GLOBAL": "/dev/null",
@@ -196,7 +192,10 @@ class GitArtifactRepository:
             "LANG": "C",
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         }
-        # encoding is pinned to UTF-8 (not the ambient locale) so artifact bodies round-trip
+
+    def _git(self, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+        """Run text Git plumbing against the common dir, isolated from user configuration."""
+        # Encoding is pinned to UTF-8 (not the ambient locale) so artifact bodies round-trip
         # byte-for-byte regardless of the host's LANG — a determinism requirement (ADR-31).
         return subprocess.run(
             ["git", *args],
@@ -204,7 +203,15 @@ class GitArtifactRepository:
             capture_output=True,
             text=True,
             encoding="utf-8",
-            env=env,
+            env=self._git_env(),
+        )
+
+    def _git_bytes(
+        self, *args: str, stdin: bytes | None = None
+    ) -> subprocess.CompletedProcess[bytes]:
+        """Run byte-exact Git plumbing for protocols whose frames are sized in bytes."""
+        return subprocess.run(
+            ["git", *args], input=stdin, capture_output=True, env=self._git_env()
         )
 
     def _resolve_common_dir(self, repo_dir: Path) -> Path:
@@ -308,32 +315,65 @@ class GitArtifactRepository:
         if proc.returncode != 0:
             raise _CorruptTree(f"cannot list tree of {commit}: {proc.stderr.strip()}")
 
-        entries: dict[str, _Entry] = {}
+        descriptors: list[tuple[str, str]] = []
         for line in proc.stdout.splitlines():
             if not line:
                 continue
-            meta, _, path = line.partition("\t")
+            meta, separator, path = line.partition("\t")
             fields = meta.split()
-            if len(fields) != 3:
+            if not separator or len(fields) != 3:
                 raise _CorruptTree(f"malformed tree entry: {line!r}")
             _mode, obj_type, oid = fields
             if obj_type != "blob":
                 raise _CorruptTree(f"unexpected {obj_type} entry at {path!r}; artifacts are blobs")
+            descriptors.append((path, oid))
+        return self._batch_read_entries(descriptors)
 
+    def _batch_read_entries(self, descriptors: list[tuple[str, str]]) -> dict[str, _Entry]:
+        """Read blob bodies in one ``cat-file --batch`` process and validate exact byte frames."""
+        if not descriptors:
+            return {}
+        request = b"".join(oid.encode("ascii") + b"\n" for _, oid in descriptors)
+        proc = self._git_bytes("cat-file", "--batch", stdin=request)
+        if proc.returncode != 0:
+            raise _CorruptTree("cannot batch-read artifact blobs")
+
+        stream = io.BytesIO(proc.stdout)
+        entries: dict[str, _Entry] = {}
+        for path, oid in descriptors:
+            header = stream.readline()
+            fields = header.split()
+            if (
+                not header.endswith(b"\n")
+                or len(fields) != 3
+                or fields[0] != oid.encode("ascii")
+                or fields[1] != b"blob"
+                or not fields[2].isdigit()
+            ):
+                raise _CorruptTree(f"invalid cat-file batch header for blob {oid} at {path!r}")
             try:
-                body_proc = self._git("cat-file", "blob", oid)
+                size = int(fields[2])
+            except ValueError as exc:
+                raise _CorruptTree(
+                    f"invalid cat-file batch size for blob {oid} at {path!r}"
+                ) from exc
+            if size > len(proc.stdout) - stream.tell() - 1:
+                raise _CorruptTree(f"truncated cat-file batch body for blob {oid} at {path!r}")
+            encoded = stream.read(size)
+            if len(encoded) != size or stream.read(1) != b"\n":
+                raise _CorruptTree(f"invalid cat-file batch delimiter for blob {oid} at {path!r}")
+            try:
+                blob = encoded.decode("utf-8")
             except UnicodeDecodeError as exc:
-                # A well-formed artifact body is always valid UTF-8 (we wrote it as such); a blob
-                # that is not is tampered/corrupt. read() must surface this as Corrupt, not raise.
                 raise _CorruptTree(f"blob {oid} at {path!r} is not valid UTF-8") from exc
-            if body_proc.returncode != 0:
-                raise _CorruptTree(f"cannot read blob {oid} at {path!r}")
-            artifact_id, body = _decode_body(body_proc.stdout, path)
+            artifact_id, body = _decode_body(blob, path)
             if _tree_path(artifact_id) != path:
                 raise _CorruptTree(
                     f"artifact id/path mismatch at {path!r}: blob records id {artifact_id!r}"
                 )
             entries[path] = _Entry(path=path, artifact_id=artifact_id, body=body, blob_oid=oid)
+        if stream.read(1):
+            raise _CorruptTree("unexpected trailing output from cat-file batch")
         return entries
 
 

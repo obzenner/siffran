@@ -88,9 +88,8 @@ class Coordinator:
         )
 
     def _append_once(self, key: RunKey, value: Any) -> None:
-        existing = self._read_artifacts(key)
-        if any(a.artifact_id == value.artifact_id for a in existing):
-            return
+        # ArtifactRepository.append owns idempotency and collision refusal. A coordinator pre-read
+        # would duplicate the adapter's required CAS-refresh read and could mask a bad collision.
         self.artifacts.append(key, value)
 
     def _manifest(self, key: RunKey, state: OperationalState, parent: str | None,

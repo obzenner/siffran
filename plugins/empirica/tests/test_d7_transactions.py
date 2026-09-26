@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from adapters.audit import child_event  # noqa: E402
+from adapters.git.artifact_repo import ArtifactCollision  # noqa: E402
 from application import protocol  # noqa: E402
 from application.snapshot import (HistoryCorrupt, graph_from_history, make_artifact,  # noqa: E402
                                   state_digest, traverse_history)
@@ -87,6 +88,7 @@ class Artifacts:
     def __init__(self):
         self.values = {}
         self.append_calls = 0
+        self.read_calls = 0
 
     def append(self, key, value):
         self.append_calls += 1
@@ -96,6 +98,7 @@ class Artifacts:
         prior[value.artifact_id] = value
 
     def read(self, key):
+        self.read_calls += 1
         values = self.values.get(key)
         return ABSENT if values is None else Present(frozenset(values.values()), Revision("a"))
 
@@ -222,6 +225,62 @@ class D7TransactionTests(unittest.TestCase):
         self.assertEqual(decoded, "empirica.run/2")
         self.assertEqual(runs.data[key].value["route_stamp"], 1)
         traverse_history(decode_state(runs.data[key].value), stored)
+
+    def test_append_once_delegates_idempotency_without_repository_preread(self):
+        artifacts_repo = Artifacts()
+        coordinator = Coordinator(Workspace(), Harness(), Runs(), artifacts_repo,
+                                  "pi@0.84.1+pi-subagents@0.50.0", {})
+        key = RunKey("p", "s", 1)
+        value = make_artifact({"kind": "graph", "root": "C0", "claims": [], "edges": []})
+        coordinator._append_once(key, value)
+        coordinator._append_once(key, value)
+        self.assertEqual(artifacts_repo.read_calls, 0)
+        self.assertEqual(artifacts_repo.append_calls, 2)
+        self.assertEqual(artifacts_repo.values[key], {value.artifact_id: value})
+
+    def test_append_once_surfaces_orphan_collision_without_repository_preread(self):
+        artifacts_repo = Artifacts()
+        coordinator = Coordinator(Workspace(), Harness(), Runs(), artifacts_repo,
+                                  "pi@0.84.1+pi-subagents@0.50.0", {})
+        key = RunKey("p", "s", 1)
+        artifacts_repo.append(key, Artifact("orphan-id", "original"))
+        with self.assertRaisesRegex(ValueError, "collision"):
+            coordinator._append_once(key, Artifact("orphan-id", "different"))
+        self.assertEqual(artifacts_repo.read_calls, 0)
+        self.assertEqual(artifacts_repo.values[key]["orphan-id"].body, "original")
+
+    def test_append_collision_during_dispatch_is_closed_without_logical_publication(self):
+        class CollisionArtifacts(Artifacts):
+            fail = False
+
+            def append(self, key, value):
+                if self.fail:
+                    raise ArtifactCollision(key, value.artifact_id)
+                super().append(key, value)
+
+        runs, artifacts_repo = Runs(), CollisionArtifacts()
+        coordinator = Coordinator(Workspace(), Harness(), runs, artifacts_repo,
+                                  "pi@0.84.1+pi-subagents@0.50.0", {})
+        started = coordinator.handle({
+            "type": "StartRun", "selector": {"project": "p", "session": "s"}, "goal": "g",
+        }, "start")
+        run_id = started["result"]["run"]["id"]
+        key = next(iter(runs.data))
+        before_state = runs.data[key]
+        before_artifacts = dict(artifacts_repo.values[key])
+        artifacts_repo.fail = True
+
+        response = coordinator.handle({
+            "type": "ObserveAction", "run_id": run_id,
+            "action": {"kind": "route", "reason": "r"},
+        }, "route")
+
+        self.assertEqual(response["result"], {
+            "type": "Fault", "code": "unavailable", "fail_direction": "closed",
+        })
+        self.assertEqual(runs.data[key], before_state)
+        self.assertEqual(artifacts_repo.values[key], before_artifacts)
+        self.assertEqual(runs.cas_calls, 0)
 
     def test_repeated_domain_artifacts_are_idempotent_not_corrupting(self):
         runs, artifacts_repo, workspace = Runs(), Artifacts(), Workspace()
