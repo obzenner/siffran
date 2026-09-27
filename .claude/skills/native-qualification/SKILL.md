@@ -71,9 +71,12 @@ through public tools and never edit operational state. Execute rows in table ord
 | `locked_approval_at_6` | After sentinel | Human edits passes `8 → 6` and confirms the host-owned locked summary. | One FINAL CONFIRMATION occurs in the same call, read-only, with no author action between forms. Effective limit is 6 and digest, configuration epoch, and human provenance match. Host decision timeout is read-only, not a total run deadline. | Dialog transcript and RunView |
 | `graph_change_keeps_configuration_approval` | After approval | Amend the claim graph from supplied context. | Configuration approval remains current and no configuration dialog opens. | RunView before/after |
 | `research_and_spike` | After investigation admission | Record investigation, cited research, and one deterministic spike. | Source, command, input bindings, exit status, result, and lossless obligations are retained; nothing is invented. | RunView and evidence |
+| `current_author_after_model_switch` | Between research and spike | Human switches the main model A→B, allows one turn that records no evidence, switches back to A, then the spike is recorded. | Every artifact's producer is the model that served it (A); nothing is attributed to B; the reviewer is derived from the current author A, not from B or the earliest model. | RunView attribution and host model-switch signal |
 | `served_reviewer_and_producers_distinct` | When audit is owed | Request one canonical auditor through the host profile. | Package path/scope is canonical; the verdict-bearing served model is observed separately from requested configuration; independence classification follows the [audit guide](../../../plugins/empirica/skills/empirica/references/audit.md#independence-reporting). | Child transcript and RunView |
 | `audit_stales_after_graph_change` | Optional, after a passing audit | Amend the graph, then re-evaluate. | Prior audit coverage becomes stale while configuration approval remains current; a fresh bound audit is required. | RunView before/after |
-| `snapshot_completion` | After current passing audit | Call the guarded completion path. | Exact `Allow(converged=true)` and matching durable terminal state. Prose, child pass alone, or `Allow(converged=false)` is not convergence. | Decision and terminal RunView |
+| `restore_after_compaction` | After a current passing audit, before completion | Human triggers host compaction (`/compact`). | The restored run has the same status, obligations, usage, and audit coverage; blocked actions remain blocked; no progress is fabricated. | RunView before/after compaction |
+| `snapshot_completion` | After restore | Call the guarded completion path. | Exact `Allow(converged=true)` and matching durable terminal state. The terminal RunView keeps Required/Observed/Missing and offers only `run.inspect` guidance, no mutation actions. Prose, child pass alone, or `Allow(converged=false)` is not convergence. | Decision and terminal RunView |
+| `installed_transport_latency` | Throughout | Operator records the slowest Empirica tool/hook round trip from the retained log. | No host transport timeout, retry, or dropped tool result occurred. | Debug/host log timings |
 
 For the Pi audit row, invoke the packaged auditor once through the structured `subagent` tool
 with exactly `{"agent":"empirica.empirica-auditor","task":"Audit the host-provided dossier."}`;
@@ -97,9 +100,18 @@ fresh run.
 | `empty_goal_refusal` | Invoke without a goal and, where the host permits it, with whitespace-only goal input. | Visible structural `Block` and no run/handle creation. | Host output and run census |
 | `noninteractive_auto_refusal` | Invoke auto through a non-interactive surface without the configured delegation environment variable. | Claude records `sdk-cli` from env or transcript. Pi records provenance signal `ctx.mode=print\|json` with `interactive=false`. Both return a visible structural `Block`, create no run, and name interactive invocation or delegation as remedies. | Hook log or RunView refusal |
 | `delegated_auto_admission` | Optional: only when the operator explicitly prepared `EMPIRICA_AUTO_DELEGATION=1`, repeat non-interactive auto. | Provenance records delegation and StartRun is admitted. This does not qualify audit or convergence. | RunView |
+| `cancellation_and_timeout_nonterminal` | Human cancels the first configuration dialog; at the next presentation lets it expire. Launch this run with a short `EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS` (for example `60`) prepared by the operator. | Each settles as dismissal, not rejection: the run stays active and non-terminal, configuration is not approved, investigation remains blocked, and the presentation count is visible. End with an honest stop. | Dialog transcript and RunView |
+| `mixed_producers_block` | Human switches the main model after research so the spike is served by a second model, then the author requests the audit and the guarded completion. | The audit may launch and complete, but the verdict is classified `mixed` and completion is refused with `audit.producers_mixed`; never `Allow(converged=true)`. End with an honest stop. | RunView independence/blockers and decision |
+| `reviewer_preflight_refusal` | Pi required; Claude optional. Author runs on the model the host would choose as reviewer (Pi: the effective `subagents.defaultModel`), records evidence, then requests the audit. | Refused before launch as same identity class or unavailable; no child is reserved and audit usage is unchanged. End with an honest stop. | RunView and host denial |
+| `codex_negative` | Optional: invoke `$empirica <goal>` in Codex. | Visible unsupported/refusal result; no convergence claim. | Codex transcript |
 
-Cancellation and large-scope viewport accessibility are optional separate runs. Cancellation must
-settle as not converged without changing an active run to terminal or permitting investigation.
+On Claude, `reviewer_preflight_refusal` cannot be induced without changing user settings while any
+other Claude family is pinned; record it `NOT_REACHED` with that reason. A failure *after* reservation
+(refunded `launch_rejected`, then a relaunch in the same run) is not induced natively; it is covered
+by the real-service regressions in `make empirica-host-integration`. Record that pointer in the
+result rather than a native PASS.
+
+Large-scope viewport accessibility is an optional separate run.
 
 ## 4. Small Methodologist sanity
 
