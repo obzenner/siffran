@@ -21,7 +21,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type { Dispatch, Request, Response, RunSelector } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
-import { govern, refreshGovernance } from "./governance-ui.ts";
+import { govern, piGovernanceContext, refreshGovernance } from "./governance-ui.ts";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -36,7 +36,8 @@ import {
 import {
   identityFromSessionJsonl, sessionFileFromDetails,
 } from "./audit-identity.ts";
-import { createStdioBridgeDispatch, defaultBridgeConfig } from "./stdio-transport.ts";
+import { createStdioBridgeDispatch, defaultBridgeConfig, HOST_PROFILE_ID } from "./stdio-transport.ts";
+import { PUBLIC_TOOLS } from "./public-tools.ts";
 import {
   REPORT_CONVERGENCE_INTENT,
   REPORT_CONVERGENCE_TOOL,
@@ -83,14 +84,10 @@ function canonicalPath(value: string): string {
   }
 }
 
-const PUBLIC_TOOLS_PATH = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "..",
-  "contracts", "empirica", "v2", "public-tools.json");
-const PUBLIC_TOOLS = JSON.parse(readFileSync(PUBLIC_TOOLS_PATH, "utf8")) as {
-  definitions: Record<string, { title: string; description: string }>;
-  schemas: { host_handle: Record<string, Record<string, unknown>> };
-};
 const PUBLIC_TOOL_SCHEMAS = PUBLIC_TOOLS.schemas.host_handle;
+const INTERACTIVE_BY_MODE: Record<string, boolean> = {
+  tui: true, rpc: true, print: false, json: false,
+};
 const actionChoices = ((PUBLIC_TOOL_SCHEMAS.empirica_observe.properties as {
   action: { oneOf: Array<{ properties: { kind: { const: string } } }> };
 }).action.oneOf);
@@ -463,18 +460,16 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           // package is incomplete, fail without leaving an active orphan.
           const kickoff = skillInvocation(skillsDir, args);
           const invocation = {
-            host: "pi", interactive: ctx.mode === "tui" || ctx.mode === "rpc"
-              ? true : ctx.mode === "print" || ctx.mode === "json" ? false : null,
+            host: "pi", interactive: INTERACTIVE_BY_MODE[ctx.mode ?? ""] ?? null,
             signal: `ctx.mode=${ctx.mode ?? "unknown"}`,
-            delegation: process.env.EMPIRICA_AUTO_DELEGATION === "1",
+            delegation: process.env[PUBLIC_TOOLS.host_profiles[HOST_PROFILE_ID].delegation_env] === "1",
           };
           const response = await dispatch(startRunRequest(selectorOf(ctx), goal, randomUUID(), invocation, {
             ...startOptions, modes, controlMode: parsed.controlMode,
           }));
           const result = response.result;
-          const refused = result.type === "Block" && result.reasons.some((reason) =>
-            reason.code === "run.goal_required" || reason.code === "governance.auto_invocation_required");
-          if ((result.type === "Allow" || result.type === "Block") && !refused) {
+          if ((result.type === "Allow" || result.type === "Block")
+              && result.run !== undefined) {
             runHandle = result.run.id;
             await refreshGovernance(runHandle, ctx, trusted);
             pi.appendEntry?.("empirica.run", { runHandle });
@@ -568,7 +563,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           native_id: correlation.nativeId, plan: correlation.plan,
           auditor: identity ?? {
             provider_id: null, model_id: null,
-            observed_by: "host", source: "pi-child-session-unverified",
+            source: "pi-child-session-unverified",
           },
         });
         if (!verdict) {
@@ -662,12 +657,10 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           const plan = prepared.plan as unknown as AuditPlanData;
           const [auditorProvider, auditorModel] = modelPair(resolvedAudit.model, "pi-subagents");
           const nativeId = event.toolCallId;
-          const [authorProvider, authorModel] = modelPair(ctx.model
-            ? `${ctx.model.provider}/${ctx.model.id}` : null, "pi");
-          const authorIdentity = await trusted({ operation: "classify_identity", run_id: runHandle,
-            payload: { provider_id: ctx.model?.provider ?? null, model_id: ctx.model?.id ?? null,
-              source: "pi-context" } });
-          const reviewerIdentity = await trusted({ operation: "classify_identity", run_id: runHandle,
+          const author = piGovernanceContext(ctx).author as Record<string, unknown> | null;
+          const authorIdentity = await trusted({ operation: "classify_identity",
+            payload: author ?? { provider_id: null, model_id: null, source: "pi-context" } });
+          const reviewerIdentity = await trusted({ operation: "classify_identity",
             payload: { provider_id: auditorProvider, model_id: auditorModel,
               source: "pi-subagents-preflight" } });
           if (!authorIdentity || typeof authorIdentity.identity !== "string"

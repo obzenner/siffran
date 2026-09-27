@@ -24,6 +24,8 @@ from adapters import bridge as application_bridge
 from adapters.audit import child_prompt, verdict_from_final_output
 from adapters.audit_protocol import (AuditLaunchPlan, AuditProtocol, AuditProtocolError,
                                      IdentityObservation)
+from adapters.identity import REVIEWER_FAMILIES, claude_observation, family
+from adapters.public_tools import EVIDENCE_ACTIONS, OBSERVE_TOOL
 from .completion import dispatch_stop, stop_result
 from .dispatch import bash_command, dispatched_harness
 from .restore import dispatch_restore, restore_context
@@ -105,11 +107,12 @@ def _agent_identity(tool_input: Mapping[str, object]) -> tuple[str | None, str |
 
 
 def _model_observation(raw, *, source="claude-transcript"):
-    from adapters.identity import observe
-    if not isinstance(raw, str) or not raw:
-        return None
-    provider = "bedrock" if "." in raw else "anthropic"
-    return observe(provider, raw, source=source)
+    return claude_observation(raw, source=source)
+
+
+def _main_model(payload: Mapping[str, object]) -> str | None:
+    models, _ = _transcript_contents(payload.get("transcript_path"))
+    return models[-1] if models else None
 
 
 def _auditor_alias(payload: Mapping[str, object], environ: Mapping[str, str]) -> str | None:
@@ -117,18 +120,17 @@ def _auditor_alias(payload: Mapping[str, object], environ: Mapping[str, str]) ->
     configured = environ.get("CLAUDE_CODE_SUBAGENT_MODEL")
     if configured and configured != "inherit":
         return None
-    main_model, _ = _transcript_observation(payload.get("transcript_path"))
-    main = next((family for family in ("fable", "opus", "sonnet", "haiku")
-                 if isinstance(main_model, str) and family in main_model.lower()), None)
+    main_model = _main_model(payload)
+    main = family(main_model)
     if main is None:
         raise AuditProtocolError(
             "main model family is unobservable; set CLAUDE_CODE_SUBAGENT_MODEL or "
             "ANTHROPIC_DEFAULT_<FAMILY>_MODEL")
     third_party = any(environ.get(key) for key in (
         "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"))
-    for family in ("fable", "opus", "sonnet", "haiku"):
-        if family != main and (not third_party or environ.get(f"ANTHROPIC_DEFAULT_{family.upper()}_MODEL")):
-            return family
+    for reviewer_family in REVIEWER_FAMILIES:
+        if reviewer_family != main and (not third_party or environ.get(f"ANTHROPIC_DEFAULT_{reviewer_family.upper()}_MODEL")):
+            return reviewer_family
     raise AuditProtocolError(
         "no distinct reviewer alias is resolvable; set CLAUDE_CODE_SUBAGENT_MODEL or pin "
         "ANTHROPIC_DEFAULT_FABLE_MODEL, ANTHROPIC_DEFAULT_OPUS_MODEL, "
@@ -136,7 +138,7 @@ def _auditor_alias(payload: Mapping[str, object], environ: Mapping[str, str]) ->
 
 
 def _governance_context(payload, handle):
-    model, _ = _transcript_observation(payload.get("transcript_path"))
+    model = _main_model(payload)
     # to_model is host-native PostModelSwitch input, never author tool content.
     if payload.get("hook_event_name") == "PostModelSwitch":
         model = payload.get("to_model")
@@ -147,22 +149,26 @@ def _governance_context(payload, handle):
         raise RuntimeError("governance context unavailable")
 
 
+def _emit_start_block(reason: str) -> None:
+    json.dump({"decision": "block", "reason": f"Empirica did not start: {reason}"}, sys.stdout)
+    sys.stdout.write("\n")
+
+
 def run_start_main() -> int:
     """UserPromptExpansion: activate and inject the opaque handle/public tool contract."""
-    payload = _payload()
     try:
+        payload = _payload()
         response = dispatch_start_run(payload)
         result = response.get("result", {}) if isinstance(response, dict) else {}
         run = result.get("run", {}) if isinstance(result, Mapping) else {}
-        reasons = result.get("reasons", []) if isinstance(result, Mapping) else []
-        refused = (result.get("type") == "Block" and reasons and reasons[0].get("code") in
-                   {"run.goal_required", "governance.auto_invocation_required"})
-        handle = None if refused else (run.get("id") if isinstance(run, Mapping) else None)
-        if refused:
-            # A refused start blocks the expansion; Claude Code shows `reason` to the user.
-            json.dump({"decision": "block",
-                       "reason": f"Empirica did not start: {reasons[0]['message']}"}, sys.stdout)
-            sys.stdout.write("\n")
+        refusal = application_bridge.start_refusal(result)
+        handle = run.get("id") if isinstance(run, Mapping) else None
+        fault = result.get("type") == "Fault" if isinstance(result, Mapping) else False
+        if fault:
+            code = result.get("code")
+            _emit_start_block(code if isinstance(code, str) and code else "unknown failure")
+        elif refusal is not None:
+            _emit_start_block(refusal)
         elif isinstance(handle, str) and handle:
             _governance_context(payload, handle)
             context = (
@@ -174,8 +180,10 @@ def run_start_main() -> int:
             json.dump({"hookSpecificOutput": {"hookEventName": "UserPromptExpansion",
                                               "additionalContext": context}}, sys.stdout)
             sys.stdout.write("\n")
+        else:
+            _emit_start_block("internal error")
     except Exception:  # noqa: BLE001 - this event must never wedge prompt expansion
-        pass
+        _emit_start_block("internal error")
     return 0
 
 
@@ -254,8 +262,8 @@ def route_main() -> int:
         tool_name = payload.get("tool_name")
         action = tool_input.get("action")
         kind = action.get("kind") if isinstance(action, Mapping) else None
-        if (isinstance(tool_name, str) and tool_name.endswith("empirica_observe")
-                and kind in {"research", "spike_request"}):
+        if (isinstance(tool_name, str) and tool_name.endswith(OBSERVE_TOOL)
+                and kind in EVIDENCE_ACTIONS):
             return _deny(
                 "empirica evidence admission denied: subagent producer is not the main author")
     try:
@@ -331,14 +339,10 @@ def restore_main() -> int:
     return 0
 
 
-def _transcript_observation(path: object, *, require_single: bool = False) -> tuple[str | None, str | None]:
-    """Return a served assistant model and textual final message.
-
-    Synthetic error rows are not service observations. Reviewer transcripts
-    additionally require exactly one distinct served model.
-    """
+def _transcript_contents(path: object) -> tuple[list[str], str | None]:
+    """Return distinct served assistant models and the textual final message."""
     if not isinstance(path, str) or not path:
-        return None, None
+        return [], None
     models: list[str] = []
     final = None
     try:
@@ -362,10 +366,8 @@ def _transcript_observation(path: object, *, require_single: bool = False) -> tu
                     if text:
                         final = "\n".join(text)
     except (OSError, ValueError, TypeError):
-        return None, None
-    model = models[0] if require_single and len(models) == 1 else (
-        None if require_single or not models else models[-1])
-    return model, final
+        return [], None
+    return models, final
 
 
 def _transcript_handbacks(path: object) -> tuple[bool, list[str]]:
@@ -495,8 +497,8 @@ def subagent_stop_main() -> int:
         if child is None or plan is None:
             return 0
         child_path = payload.get("agent_transcript_path")
-        auditor_model, transcript_final = _transcript_observation(
-            child_path, require_single=True)
+        auditor_models, transcript_final = _transcript_contents(child_path)
+        auditor_model = auditor_models[0] if len(auditor_models) == 1 else None
         handback_scan_ok, handbacks = _transcript_handbacks(child_path)
         if not handback_scan_ok:
             verdict = None

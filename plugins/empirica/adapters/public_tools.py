@@ -132,18 +132,27 @@ def _project_public_tools() -> dict:
     return {"protocol": _protocol._PROTOCOL,
             "definitions": copy.deepcopy(bootstrap["tools"]),
             "bootstrap_actions": copy.deepcopy(bootstrap["actions"]),
+            "evidence_actions": sorted(
+                kind for kind, metadata in _protocol._PUBLIC_CONTRACT["actions"]["metadata"].items()
+                if metadata["evidence"]),
             "governance_decisions": copy.deepcopy(_protocol._PUBLIC_CONTRACT["governance_decisions"]),
-            "recovery": {code: {key: copy.deepcopy(recovery[code][key])
+            "host_profiles": {profile_id: {
+                "delegation_env": _protocol.host_profile(profile_id)["delegation_env"],
+            } for profile_id in _protocol.profile_ids()},
+            "start_refusal_codes": sorted(
+                code for code, row in recovery.items()
+                if row.get("disposition") == "start_refused"),
+            "recovery": {code: {key: copy.deepcopy(row[key])
                        for key in ("message", "sections", "next_actions")}
-                       for code in ("graph.missing", "governance.approval_unavailable",
-                                    "governance.interaction_limit", "governance.decision_conflict",
-                                    "governance.stale_proposal")},
+                       for code, row in recovery.items()
+                       if row.get("disposition") == "host_recovery"},
             "schemas": {"model": _project_schemas(),
                         "host_handle": _host_handle_schemas(_project_schemas())}}
 
 
 _projected = _project_public_tools()
 _PUBLIC_SCHEMAS = _projected["schemas"]
+EVIDENCE_ACTIONS = frozenset(_projected["evidence_actions"])
 
 
 def _load_artifact() -> dict:

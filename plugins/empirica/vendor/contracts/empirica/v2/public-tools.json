@@ -60,20 +60,21 @@
       "operation": "investigate"
     }
   },
+  "evidence_actions": [
+    "research",
+    "spike_request"
+  ],
   "governance_decisions": {
     "actions": {
       "approve": {
-        "feedback": "forbidden",
         "unchanged_outcome": "approve",
         "changed_outcome": "amend"
       },
       "edit": {
-        "feedback": "forbidden",
         "unchanged_outcome": "dismiss",
         "changed_outcome": "amend"
       },
       "reject": {
-        "feedback": "forbidden",
         "unchanged_outcome": "reject",
         "changed_outcome": "reject"
       }
@@ -111,6 +112,21 @@
       ]
     }
   },
+  "host_profiles": {
+    "claude-code@2.1.278": {
+      "delegation_env": "EMPIRICA_AUTO_DELEGATION"
+    },
+    "codex-cli@0.146.0": {
+      "delegation_env": "EMPIRICA_AUTO_DELEGATION"
+    },
+    "pi@0.84.1+pi-subagents@0.50.0": {
+      "delegation_env": "EMPIRICA_AUTO_DELEGATION"
+    }
+  },
+  "start_refusal_codes": [
+    "governance.auto_invocation_required",
+    "run.goal_required"
+  ],
   "recovery": {
     "graph.missing": {
       "message": "No selected argument graph. Propose one from supplied context before configure_run; investigation and evidence are not prerequisites.",
@@ -131,6 +147,16 @@
         "residual.accept"
       ]
     },
+    "governance.stale_proposal": {
+      "message": "Decision is bound to a different run/revision/digest. Inspect current proposal and request a new decision.",
+      "sections": [
+        "governance"
+      ],
+      "next_actions": [
+        "governance.propose",
+        "residual.accept"
+      ]
+    },
     "governance.interaction_limit": {
       "message": "The durable proposal (3) or total (128) interaction limit is exhausted. Stop honestly or start a fresh run.",
       "sections": [
@@ -148,16 +174,6 @@
       ],
       "next_actions": [
         "governance.propose"
-      ]
-    },
-    "governance.stale_proposal": {
-      "message": "Decision is bound to a different run/revision/digest. Inspect current proposal and request a new decision.",
-      "sections": [
-        "governance"
-      ],
-      "next_actions": [
-        "governance.propose",
-        "residual.accept"
       ]
     }
   },

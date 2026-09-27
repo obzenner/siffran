@@ -11,10 +11,15 @@ import os
 from collections.abc import Mapping
 from typing import Any
 
+from adapters.invocation import provenance
+
 from .correlation import PROTOCOL, request_id as new_request_id
 from .invocation import parse_invocation
 from .selector import context_from_payload, selector_from_payload
-from .transport import BridgeTransport, Transport
+from .transport import CLAUDE_PROFILE_ID, BridgeTransport, Transport
+
+
+_ENTRYPOINT_INTERACTIVE = {"cli": True, "sdk-cli": False}
 
 
 def invocation_provenance(payload: Mapping[str, object], environ: Mapping[str, str]) -> dict[str, object]:
@@ -30,9 +35,8 @@ def invocation_provenance(payload: Mapping[str, object], environ: Mapping[str, s
                         break
         except (OSError, ValueError):
             pass
-    interactive = True if entrypoint == "cli" else False if entrypoint == "sdk-cli" else None
-    return {"host": "claude", "interactive": interactive, "signal": signal,
-            "delegation": environ.get("EMPIRICA_AUTO_DELEGATION") == "1"}
+    return provenance("claude", _ENTRYPOINT_INTERACTIVE.get(entrypoint), signal, environ,
+                      profile_id=CLAUDE_PROFILE_ID)
 
 
 def _budget(environ: Mapping[str, str], name: str, minimum: int) -> int | None:

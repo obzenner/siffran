@@ -6,13 +6,14 @@ must first select their exact graph, then call this helper as a host operator.
 from uuid import uuid4
 
 from application.governance import transact
+from adapters.identity import observe
 
-AUTHOR = {"identity": "anthropic/claude-sonnet-4-6", "provider_id": "anthropic",
-          "model_id": "claude-sonnet-4-6", "policy_version": "model-identity/1",
-          "source": "test-host", "observed_by": "host"}
-AUDITOR = {"identity": "anthropic/claude-opus-4-6", "provider_id": "anthropic",
-           "model_id": "claude-opus-4-6", "policy_version": "model-identity/1",
-           "source": "test-host", "observed_by": "host"}
+TEST_INVOCATION = {"host": "test", "interactive": True,
+                   "signal": "test", "delegation": False}
+AUTHOR = {**observe("anthropic", "claude-sonnet-4-6", source="test-host"),
+          "observed_by": "host"}
+AUDITOR = {**observe("anthropic", "claude-opus-4-6", source="test-host"),
+           "observed_by": "host"}
 
 
 def approve_current(coordinator, run_id, *, author=None, auditor=None):

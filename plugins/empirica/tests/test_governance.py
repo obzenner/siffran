@@ -11,17 +11,34 @@ from application.v2 import compose
 from application.run_state import classify_and_decode
 from application.snapshot import traverse_history
 from test_d7_transactions import Runs, Artifacts, Workspace, Harness
+from governance_setup import AUTHOR, AUDITOR, TEST_INVOCATION
+from core.run import start_admission
 
 PROFILE = "pi@0.84.1+pi-subagents@0.50.0"
-AUTHOR = {"identity": "anthropic/claude-sonnet-4-6", "provider_id": "anthropic",
-          "model_id": "claude-sonnet-4-6", "policy_version": "model-identity/1",
-          "source": "test-host", "observed_by": "host"}
-AUDITOR = {"identity": "anthropic/claude-opus-4-6", "provider_id": "anthropic",
-           "model_id": "claude-opus-4-6", "policy_version": "model-identity/1",
-           "source": "test-host", "observed_by": "host"}
 GRAPH = {"root": "C0", "claims": [{"id": "C0", "text": "supplied uncertainty", "gating": True,
                                    "kind": "ordinary"}], "edges": []}
 CONTEXT = {"author": AUTHOR, "ingress": "pi_ui"}
+
+
+class StartAdmissionTests(unittest.TestCase):
+    def test_start_admission_table(self):
+        cases = [
+            ({"goal": "", "control_mode": "deliberative", "invocation": TEST_INVOCATION},
+             "run.goal_required"),
+            ({"goal": "goal", "control_mode": "auto"},
+             "governance.auto_invocation_required"),
+            ({"goal": "goal", "control_mode": "auto", "invocation": {}},
+             "governance.auto_invocation_required"),
+            ({"goal": "goal", "control_mode": "auto",
+              "invocation": {**TEST_INVOCATION, "interactive": False, "delegation": False}},
+             "governance.auto_invocation_required"),
+            ({"goal": "goal", "control_mode": "auto", "invocation": TEST_INVOCATION}, None),
+            ({"goal": "goal", "control_mode": "deliberative",
+              "invocation": {**TEST_INVOCATION, "interactive": False}}, None),
+        ]
+        for command, expected in cases:
+            with self.subTest(command=command):
+                self.assertEqual(start_admission(command), expected)
 
 
 class GovernanceServiceTests(unittest.TestCase):
@@ -32,6 +49,8 @@ class GovernanceServiceTests(unittest.TestCase):
                                     "selector": {"project": "p", "session": "s"}})["run"]["id"]
 
     def request(self, command):
+        if command.get("type") == "StartRun":
+            command = {"invocation": dict(TEST_INVOCATION), **command}
         return self.service.dispatch({"protocol": "empirica/v2", "request_id": "test", "command": command})["result"]
 
     def action(self, kind, **kwargs):
@@ -177,7 +196,7 @@ class GovernanceServiceTests(unittest.TestCase):
         state = classify_and_decode(entry.value).state
         snapshot = self.service._coordinator._assemble(
             key, state, {"type": "GetRun", "run_id": self.run_id}, require_graph=False)
-        governed = governance.revise(state.goal, None, state.governance)
+        governed = governance.revise(state.goal, state.governance)
         historical = replace(state, selected_graph_artifact_id=None, governance=governed)
         self.service._coordinator._commit(key, entry.revision, snapshot, historical, ())
         self.assertIsNone(self.view()["governance"]["scope"])
@@ -244,8 +263,7 @@ class GovernanceServiceTests(unittest.TestCase):
 
     def test_auto_explicit_cannot_raise_ceiling_and_graph_does_not_change_digest(self):
         self.run_id = self.request({"type": "StartRun", "goal": "auto task", "control_mode": "auto",
-                                    "invocation": {"host": "test", "interactive": True,
-                                                   "signal": "test operator", "delegation": False},
+                                    "invocation": {**TEST_INVOCATION, "signal": "test operator"},
                                     "selector": {"project": "p", "session": "auto"}})["run"]["id"]
         self.prepare()
         g = self.view()["governance"]
@@ -356,7 +374,7 @@ class GovernanceServiceTests(unittest.TestCase):
         result = self.finish_audit(protocol, fresh, "xai", "grok-4-20260101")
         argument = self.request({"type": "GetArgument", "run_id": self.run_id})
         self.assertEqual(argument["type"], "Allow")
-        self.assertEqual(argument["argument"]["audit"]["independence"], "unverified")
+        self.assertEqual(argument["argument"]["audit"]["independence"], "mixed")
         self.assertEqual(result["reasons"][0]["code"], "audit.producers_mixed")
 
 

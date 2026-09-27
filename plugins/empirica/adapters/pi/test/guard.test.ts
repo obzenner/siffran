@@ -61,7 +61,6 @@ expectThrow("Allow converged=false with status=converged", ok({ type: "Allow", c
 
 // --- Block mutations ---------------------------------------------------------
 
-expectThrow("Block missing run", ok({ type: "Block", reasons: [{ code: "x" }] } as never));
 expectThrow("Block run.id missing", ok({ type: "Block", run: { status: "active" }, reasons: [{ code: "x" }] } as never));
 expectThrow("Block run.status invalid", ok({ type: "Block", run: { id: "r", status: "bad" }, reasons: [{ code: "x" }] } as never));
 expectThrow("Block missing reasons", ok({ type: "Block", run: run() } as never));
@@ -72,6 +71,7 @@ expectThrow("Block reason empty object", ok({ type: "Block", run: run(), reasons
 expectThrow("Block reason numeric code", ok({ type: "Block", run: run(), reasons: [{ code: 42 }] } as never));
 expectThrow("Block reason empty code", ok({ type: "Block", run: run(), reasons: [{ code: "" }] } as never));
 expectThrow("Block reason numeric message", ok({ type: "Block", run: run(), reasons: [{ code: "x", message: 42 }] } as never));
+expectThrow("Block without run and non-refusal code", ok({ type: "Block", reasons: [{ code: "audit.required" }] } as never));
 
 // --- Inert mutations ---------------------------------------------------------
 

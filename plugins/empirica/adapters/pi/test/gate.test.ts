@@ -209,7 +209,7 @@ test("/empirica preserves replacement tokens in the literal goal", async () => {
 });
 
 test("/empirica empty goal reports the core refusal without starting", async () => {
-  const w = wire(() => envelope({ type: "Block", run: run(), reasons: [
+  const w = wire(() => envelope({ type: "Block", reasons: [
     { code: "run.goal_required", message: "A non-empty goal is required" },
   ] }));
   const ui = new FakeUi();

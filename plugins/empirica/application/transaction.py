@@ -14,7 +14,7 @@ from core.evaluation import (READ_COMMANDS, SPAWN_BUDGET, Decision, EvaluationSn
                              plan_spike_result, valid_attribution)
 from core.projection import project_argument, project_runview
 from core.records import Conflict, Corrupt, RunKey
-from core.run import OperationalState
+from core.run import OperationalState, start_admission
 from . import protocol as _proto
 from . import run_state
 from .history_records import MANIFEST_KEYS, MANIFEST_KIND, MANIFEST_VERSION
@@ -84,10 +84,7 @@ class Coordinator:
         budgets.update({k: v for k, v in supplied_limits.items()
                         if k in {"max_passes", "max_spawns", "max_audit_spawns"}})
         budgets.update(command.get("budgets", {}))
-        invocation = command.get("invocation", {
-            "host": "unknown", "interactive": None,
-            "signal": "host invocation signal unavailable", "delegation": False,
-        })
+        invocation = command["invocation"]
         return OperationalState(
             protocol=_proto._PROTOCOL, state_schema=_proto._STATE_SCHEMA_ID,
             goal=command["goal"], invocation=invocation, status="active", modes=modes, budgets=budgets,
@@ -129,20 +126,14 @@ class Coordinator:
     def start(self, command: dict[str, Any], request_id: str) -> dict[str, Any]:
         if self.artifacts is None:
             return self._fault(request_id, "unsupported")
+        rejected = start_admission(command)
+        if rejected:
+            return {"protocol": _proto._PROTOCOL, "request_id": request_id,
+                    "result": {"type": "Block", "reasons": [self._reason(rejected)]}}
         selector = command["selector"]
         empty = build_observation_snapshot((), self.workspace)
         basis_artifact = self._observation_basis_artifact(empty)
         state = self._initial_state(command, basis_artifact["artifact_id"])
-        rejected = ("run.goal_required" if not isinstance(command.get("goal"), str)
-                    or not command["goal"].strip() else None)
-        invocation = command.get("invocation", {})
-        if (not rejected and command.get("control_mode") == "auto"
-                and invocation.get("interactive") is not True
-                and invocation.get("delegation") is not True):
-            rejected = "governance.auto_invocation_required"
-        if rejected:
-            key = RunKey(storage_id(selector["project"]), storage_id(selector["session"]), 1)
-            return self._block_from_state(key, state, command, request_id, rejected)
         latest = self._latest_key(selector)
         if latest is not None:
             current = self.runs.read(latest)
@@ -721,12 +712,9 @@ class Coordinator:
                           request_id: str, code: str):
         profile = _proto._PROFILES[self.profile_id]
         run_id = encode_handle(key) if isinstance(key, RunKey) else str(key)
-        snapshot = EvaluationSnapshot(state, (), None, run_id=run_id,
+        snapshot = EvaluationSnapshot(state, (), None, _proto.CONTRACT_VIEW, run_id=run_id,
             contract_id=_proto._PUBLIC_CONTRACT["id"], contract_version=_proto._PUBLIC_CONTRACT["version"],
             contract_digest=_proto._DIGEST,
-            bootstrap_requirements=_proto._BOOTSTRAP_REQUIREMENTS,
-            bootstrap_operations=_proto._BOOTSTRAP_OPERATIONS,
-            reason_metadata=_proto._REASON_METADATA,
             profile_id=self.profile_id,
             host_tier=profile["current_tier"],
             host_audit_execution=profile["audit_execution"], command=command)

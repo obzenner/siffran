@@ -2,25 +2,12 @@
 // Pinned 0.84.1 and native rendering still require separate qualification.
 // No UI response is accepted as a public author action. Core revalidates every binding.
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import * as path from "node:path";
 import type { ExtensionContext } from "./pi-types.ts";
 import type { PrivateIngress } from "./private-transport.ts";
 import type { Response } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
+import { PUBLIC_TOOLS } from "./public-tools.ts";
 
-const PUBLIC_TOOLS_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
-  "..", "..", "..", "..", "..", "contracts", "empirica", "v2", "public-tools.json");
-interface DecisionControls {
-  actions: Record<string, string>;
-  budgets: Record<string, { label: string; maximum: number }>;
-  modes: Record<string, string>;
-}
-const PUBLIC_TOOLS = JSON.parse(readFileSync(PUBLIC_TOOLS_PATH, "utf8")) as {
-  recovery: Record<string, { message: string; sections: string[]; next_actions: string[] }>;
-  governance_decisions: { controls: DecisionControls; confirmation: { title: string; actions: string[] } };
-};
 const RECOVERY = PUBLIC_TOOLS.recovery;
 const DECISIONS = PUBLIC_TOOLS.governance_decisions;
 

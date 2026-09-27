@@ -44,7 +44,7 @@ export interface StartRunCommand {
   control_mode?: "auto" | "deliberative";
   selector: RunSelector;
   goal: string;
-  invocation?: InvocationProvenance;
+  invocation: InvocationProvenance;
   budgets?: Budgets;
   modes?: Modes;
 }
@@ -155,7 +155,7 @@ export interface BlockReason {
 
 export interface Block {
   type: "Block";
-  run: RunSnapshot;
+  run?: RunSnapshot;
   reasons: BlockReason[];
   [key: string]: unknown;
 }

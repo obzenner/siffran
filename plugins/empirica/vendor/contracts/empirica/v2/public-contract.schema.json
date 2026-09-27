@@ -77,7 +77,8 @@
       "required": [
         "author",
         "host",
-        "trusted"
+        "trusted",
+        "metadata"
       ],
       "properties": {
         "author": {
@@ -103,6 +104,15 @@
             "minLength": 1
           },
           "uniqueItems": true
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["evidence"],
+            "properties": {"evidence": {"type": "boolean"}}
+          }
         }
       }
     },
@@ -360,9 +370,11 @@
         "requirements",
         "operations",
         "actions",
-        "tools"
+        "tools",
+        "late_route_must"
       ],
       "properties": {
+        "late_route_must": {"type": "string", "minLength": 1},
         "requirements": {
           "type": "array",
           "minItems": 4,
@@ -532,6 +544,12 @@
             },
             "message": {
               "type": "string"
+            },
+            "disposition": {
+              "enum": [
+                "start_refused",
+                "host_recovery"
+              ]
             }
           }
         }
@@ -799,17 +817,10 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "feedback",
         "unchanged_outcome",
         "changed_outcome"
       ],
       "properties": {
-        "feedback": {
-          "enum": [
-            "forbidden",
-            "required"
-          ]
-        },
         "unchanged_outcome": {
           "enum": [
             "approve",

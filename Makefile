@@ -105,6 +105,7 @@ check-core: ## Fast host-neutral contracts, malformed input, state, bridge, and 
 	@$(PYTHON) $(EMPIRICA_STATE_TESTS)
 	@$(PYTHON) $(METHODOLOGIST_CORE_TESTS)
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q \
+		test_governance.StartAdmissionTests \
 		test_governance.GovernanceServiceTests.test_private_exact_replay_conflict_stale_cross_run_and_cas \
 		test_governance.GovernanceServiceTests.test_configuration_amendment_makes_prior_decision_stale \
 		test_governance.GovernanceServiceTests.test_host_ui_final_outcome_without_submission_conflicts \
@@ -131,7 +132,7 @@ check-claude: ## Fast Claude payload, lifecycle translation, and fail-closed ada
 check-codex: methodologist-codex-check empirica-codex-check ## Fast Codex package, hook, payload, and MCP tests
 	@cd $(PLUGINS_DIR)/empirica/adapters/codex/tests && $(PYTHON) -m unittest -q \
 		test_codex_adapter.ExactV2ProfileTests.test_profile_id_is_the_exact_codex_registry_profile \
-		test_codex_adapter.ExactV2ProfileTests.test_stop_hook_deadline_exceeds_managed_audit_deadline \
+		test_codex_adapter.ExactV2ProfileTests.test_stop_hook_deadline_is_pinned_for_bounded_stop_reconciliation \
 		test_codex_adapter.ExactV2ProfileTests.test_transport_dispatches_via_bridge_handle_with_profile_and_no_cwd \
 		test_codex_adapter.CorrelationTests \
 		test_codex_adapter.OfficialShapeTests \
@@ -164,7 +165,8 @@ empirica-git-check: ## Check Git artifact integrity, concurrency, and bounded bo
 empirica-transaction-check: ## Check transaction/projection invariants (ARGS="-k test_name" selects cases)
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_d7_transactions $(ARGS)
 
-empirica-core-integration: ## Diagnose expensive persistence, transaction, retry, and v2 behavior
+empirica-core-integration: ## Diagnose governance, persistence, transaction, retry, and v2 behavior
+	@$(MAKE) --no-print-directory empirica-governance-check
 	@$(PYTHON) $(EMPIRICA_D6_STRICT_TESTS)
 	@$(MAKE) --no-print-directory empirica-transaction-check
 	@$(MAKE) --no-print-directory empirica-git-check
@@ -180,7 +182,7 @@ empirica-v2-check: ## Diagnose v2 behavior with unittest discovery (ARGS="-k tes
 empirica-activation-lifecycle-check: ## Check isolated Claude hook lifecycle (ARGS="-k test_name" selects cases)
 	@$(PYTHON) $(EMPIRICA_ACTIVATION_TESTS) $(ARGS)
 
-empirica-host-integration: empirica-activation-lifecycle-check ## Diagnose expensive simulated Claude/Codex lifecycle conformance
+empirica-host-integration: empirica-activation-lifecycle-check empirica-governance-bridge-check ## Diagnose simulated Claude/Codex/Pi lifecycle conformance
 	@$(PYTHON) $(EMPIRICA_CODEX_ADAPTER_TESTS)
 	@$(PYTHON) $(EMPIRICA_CLAUDE_ADAPTER_CONFORMANCE_TESTS)
 	@$(PYTHON) $(EMPIRICA_CODEX_ADAPTER_CONFORMANCE_TESTS)
@@ -224,9 +226,21 @@ adr-check: ## Check ADR link health and numbering (adrs doctor)
 		printf '$(DIM)adrs not installed — skipping$(RESET)\n'; \
 	fi
 
-.PHONY: contract-check
-contract-check: ## Validate host-neutral API schemas and conformance fixtures
+.PHONY: contract-check contract-fixtures contract-schemas contract-schema-generator-unit-check
+contract-fixtures: ## Regenerate runtime-derived Empirica contract fixture fields
+	@$(PYTHON) $(SCRIPTS)/regen_contract_fixtures.py
+
+contract-schemas: ## Regenerate shared Empirica schema definitions and local embeddings
+	@$(PYTHON) $(SCRIPTS)/sync_schema_defs.py
+
+contract-schema-generator-unit-check: ## Check shared-schema drift, near-match, collision, and stale-definition handling
+	@$(PYTHON) -m unittest -q $(SCRIPTS)/tests/test_sync_schema_defs.py
+
+contract-check: ## Validate schemas, generated shared definitions, and conformance fixtures
 	@printf '$(BOLD)==> contracts$(RESET)\n'
+	@$(PYTHON) $(SCRIPTS)/sync_schema_defs.py --check
+	@$(MAKE) --no-print-directory contract-schema-generator-unit-check
+	@$(PYTHON) $(SCRIPTS)/regen_contract_fixtures.py --check
 	@$(PYTHON) $(SCRIPTS)/validate_contracts.py
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) -c 'import adapters.public_tools'
 
@@ -491,7 +505,7 @@ release-check: check empirica-core-integration empirica-governance-check empiric
 ## --- Maintain
 
 .PHONY: vendor-contracts
-vendor-contracts: ## Regenerate Empirica's shipped runtime contracts from the repository SSOT
+vendor-contracts: contract-schemas ## Regenerate shared schemas, then ship runtime contracts from the repository SSOT
 	@$(PYTHON) $(SCRIPTS)/sync_contract_vendor.py
 
 .PHONY: pi-lock

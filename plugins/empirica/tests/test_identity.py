@@ -1,13 +1,32 @@
 """Table regressions for adapter-side opaque model identity classes."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
 import unittest
 
-from adapters.identity import observe
+from adapters.identity import POLICY_VERSION, observe
 from core.evaluation import identity_pair
 
 
 class IdentityPolicyTests(unittest.TestCase):
+    def test_policy_version_matches_every_contract_schema_const(self):
+        root = Path(__file__).resolve().parents[3] / "contracts/empirica/v2"
+        found = []
+        def walk(value):
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    if key == "policy_version" and isinstance(child, dict) and "const" in child:
+                        found.append(child["const"])
+                    walk(child)
+            elif isinstance(value, list):
+                for child in value:
+                    walk(child)
+        for name in ("request.schema.json", "response.schema.json", "state.schema.json"):
+            walk(json.loads((root / name).read_text()))
+        self.assertTrue(found)
+        self.assertEqual(set(found), {POLICY_VERSION})
+
     def test_equivalent_deployment_spellings_share_classes(self):
         rows = [
             (("anthropic", "claude-opus-4-8"), "anthropic/claude-opus-4-8"),

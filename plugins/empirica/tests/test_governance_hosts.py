@@ -12,8 +12,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from adapters.governance import HostGovernance, form
 from adapters.mcp_server import McpSession
 from adapters.public_tools import PublicTools
+from application import protocol as _proto
 from application.v2 import compose
 from test_governance import CONTEXT, GRAPH, AUTHOR
+from governance_setup import TEST_INVOCATION
 from test_d7_transactions import Runs, Artifacts, Workspace, Harness
 
 
@@ -43,6 +45,8 @@ class GovernanceHostTests(unittest.TestCase):
         self.wrong_id = False
 
     def dispatch(self, command):
+        if command.get("type") == "StartRun":
+            command = {"invocation": dict(TEST_INVOCATION), **command}
         self.sequence += 1
         return self.service.dispatch({"protocol": "empirica/v2", "request_id": str(self.sequence), "command": command})
 
@@ -368,6 +372,7 @@ class GovernanceHostTests(unittest.TestCase):
                     return bridge.handle({"protocol": "empirica/v2", "request_id": "setup",
                                           "command": command}, self.profile)["result"]
                 run = call({"type": "StartRun", "goal": "subprocess approval",
+                            "invocation": dict(TEST_INVOCATION),
                             "selector": {"project": "p", "session": "stdio"}})["run"]["id"]
                 call({"type": "ObserveAction", "run_id": run, "action": {"kind": "graph", "payload": GRAPH}})
                 bridge.trusted_governance_context(self.profile, run, {
@@ -431,7 +436,7 @@ class GovernancePresentationTests(unittest.TestCase):
                  budgets={**budgets, "passes_used": 2, "spawns_used": 0, "audit_spawns_used": 0},
                  interactions_remaining={"proposal": 3, "total": 128})
         from core.projection import review_text
-        g["review_text"] = review_text("Exact goal", g["scope"], g)
+        g["review_text"] = review_text("Exact goal", g, _proto._PROJECTION_CONTROLS)
         return {"goal": "Exact goal", "governance": g}
 
 
@@ -440,7 +445,7 @@ class GovernancePresentationTests(unittest.TestCase):
         view = self.view()
         graph = view["governance"]["scope"]
         graph["claims"][0]["text"] = "work graph is not approvable"
-        text = review_text(view["goal"], graph, view["governance"])
+        text = review_text(view["goal"], view["governance"], _proto._PROJECTION_CONTROLS)
         self.assertIn("GOAL (READ-ONLY)", text)
         self.assertIn("Exact goal", text)
         self.assertIn(view["governance"]["proposal_digest"], text)

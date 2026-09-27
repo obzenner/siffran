@@ -20,6 +20,7 @@ import hmac
 import json
 import re
 
+from core.canonical import canonical_json
 from core.records import RunKey
 
 # --- Grammar ---------------------------------------------------------------
@@ -37,10 +38,7 @@ def _b64url_nopad(data: bytes) -> str:
 
 def _canonical_payload_bytes(p: str, s: str, g: int) -> bytes:
     """Produce the canonical compact sorted-key JSON payload bytes."""
-    return json.dumps(
-        {"g": g, "p": p, "s": s}, sort_keys=True, separators=(",", ":"),
-        ensure_ascii=True,
-    ).encode("utf-8")
+    return canonical_json({"g": g, "p": p, "s": s}).encode("utf-8")
 
 
 def _valid_fields(p: str, s: str, g: int) -> bool:

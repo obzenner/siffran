@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createStdioBridgeDispatch, HOST_PROFILE_ID } from "../src/stdio-transport.ts";
-import { startRunRequest, resolveRunRequest, evaluateRunRequest, observeActionRequest, getRunRequest } from "../src/translate.ts";
+import { startRunRequest, startRunNotice, resolveRunRequest, evaluateRunRequest, observeActionRequest, getRunRequest } from "../src/translate.ts";
 import { govern } from "../src/governance-ui.ts";
 import { createPrivateIngress } from "../src/private-transport.ts";
 import { fakeCtx } from "./fakes.ts";
@@ -45,6 +45,15 @@ const bridge = createStdioBridgeDispatch({
   env: { ...process.env, EMPIRICA_HOME: testHome },
   timeoutMs: 15_000,
 });
+
+test("Pi surfaces the real service blank-goal refusal", async () => {
+  const response = await bridge(startRunRequest(
+    { project: "live-pi", session: "blank" }, "   ", "blank-start", INVOCATION));
+  assert.equal(response.result.type, "Block");
+  assert.equal("run" in response.result, false);
+  assert.match(startRunNotice(response.result).text, /non-empty goal is required/i);
+});
+
 
 test("Pi raw edit and locked approval cross the actual private Python service", async () => {
   // Scripted UI is not native qualification. Only the dialogs are faked here;

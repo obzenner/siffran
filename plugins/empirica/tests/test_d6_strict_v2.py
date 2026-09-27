@@ -45,6 +45,7 @@ if _REPO_ROOT is None:
 
 _PLUGIN_ROOT = _REPO_ROOT / "plugins" / "empirica"
 sys.path.insert(0, str(_PLUGIN_ROOT))
+from governance_setup import TEST_INVOCATION  # noqa: E402
 
 _V2 = _REPO_ROOT / "contracts" / "empirica" / "v2"
 _PUBLIC_CONTRACT = json.loads((_V2 / "public-contract.json").read_text(encoding="utf-8"))
@@ -278,7 +279,8 @@ class D6ProtocolPrevalidation(unittest.TestCase):
 
 def _raw_command_of(cmd_type: str, run_id: str = "r1") -> dict:
     if cmd_type == "StartRun":
-        return {"type": "StartRun", "selector": {"project": "p", "session": "s"}, "goal": "g"}
+        return {"type": "StartRun", "selector": {"project": "p", "session": "s"}, "goal": "g",
+                "invocation": dict(TEST_INVOCATION)}
     if cmd_type == "ResolveRun":
         return {"type": "ResolveRun", "selector": {"project": "p", "session": "s"}}
     if cmd_type == "GetRun":
@@ -799,7 +801,8 @@ class D6MinimalServiceTests(unittest.TestCase):
         """StartRun returns exact schema-valid unsupported/closed (owner stage D7)."""
         service, _ = self._compose()
         resp = service.dispatch(_valid_request(
-            {"type": "StartRun", "selector": {"project": "p", "session": "s"}, "goal": "g"}))
+            {"type": "StartRun", "selector": {"project": "p", "session": "s"}, "goal": "g",
+             "invocation": dict(TEST_INVOCATION)}))
         jsonschema.validate(instance=resp, schema=_RESPONSE_SCHEMA)
         result = resp["result"]
         self.assertEqual(result["type"], "Fault")

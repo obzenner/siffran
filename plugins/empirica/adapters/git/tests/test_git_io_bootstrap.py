@@ -14,6 +14,9 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[5]
 PI = ROOT / "plugins/empirica/adapters/pi"
+sys.path.insert(0, str(ROOT / "plugins/empirica"))
+sys.path.insert(0, str(ROOT / "plugins/empirica/tests"))
+from governance_setup import TEST_INVOCATION  # noqa: E402
 PROFILE = "pi@0.84.1+pi-subagents@0.50.0"
 
 
@@ -66,6 +69,7 @@ class GitIoBootstrapTest(unittest.TestCase):
         started = self.call({
             "type": "StartRun", "selector": {"project": "io", "session": "bootstrap"},
             "goal": "Verify deterministic output.",
+            "invocation": dict(TEST_INVOCATION),
         })
         run_id = started["run"]["id"]
         context = {

@@ -39,7 +39,7 @@ class BlockerProjectionTests(ConformanceCase):
         for kind in ("ordinary", "needs-experiment"):
             for frozen in (False, True):
                 with self.subTest(kind=kind, frozen=frozen):
-                    drv = self.bind_driver("M3", "approved-stop", "Approved evidence stays lossless")
+                    drv = self.bind_driver("blocker-projection", "approved-stop", "Approved evidence stays lossless")
                     run_id = self.start_run(drv, budgets={"max_passes": 8})
                     graph = self.require_graph_admitted(
                         drv, run_id, canonical_graph(n_claims=1, kind=kind))
@@ -79,12 +79,12 @@ class BlockerProjectionTests(ConformanceCase):
             ("pass", "same_model", "audit.same_model"),
         ):
             with self.subTest(expected=expected):
-                drv = self.bind_driver("M3", expected, "Stopped residual preserves audit blocker")
+                drv = self.bind_driver("blocker-projection", expected, "Stopped residual preserves audit blocker")
                 run_id = self.start_run(drv)
-                scope = self.require_audit_scope(drv, run_id)
+                self.require_audit_scope(drv, run_id)
                 child_id = self.require_pending_audit_child(drv, run_id)
                 self.require_trusted_audit_attribution(
-                    drv, run_id, child_id, scope["c0_artifact_id"], variant=identity_variant)
+                    drv, run_id, child_id, variant=identity_variant)
                 payload = self.build_audit_verdict_payload(
                     drv, run_id, verdict=verdict, scope_review="pass")
                 admitted = drv.trusted_audit_verdict(run_id, child_id, payload)
@@ -100,12 +100,12 @@ class BlockerProjectionTests(ConformanceCase):
     def test_gate_and_terminal_projection_share_every_claim_reason(self):
         cases = []
 
-        drv = self.bind_driver("M3", "missing", "Missing research")
+        drv = self.bind_driver("blocker-projection", "missing", "Missing research")
         run_id = self.start_run(drv)
         self.require_graph_admitted(drv, run_id, canonical_graph(n_claims=1, kind="ordinary"))
         cases.append((drv, run_id, "claim.research_missing"))
 
-        drv = self.bind_driver("M3", "unbound", "Unbound research")
+        drv = self.bind_driver("blocker-projection", "unbound", "Unbound research")
         run_id = self.start_run(drv)
         graph = self.require_graph_admitted(drv, run_id, canonical_graph(n_claims=1, kind="ordinary"))
         self.require_research_recorded(drv, run_id, graph["root"])
@@ -115,13 +115,13 @@ class BlockerProjectionTests(ConformanceCase):
             run_id=run_id, action=action_graph(payload=revised))), converged=False)
         cases.append((drv, run_id, "claim.research_unbound"))
 
-        drv = self.bind_driver("M3", "spike-missing", "Missing spike")
+        drv = self.bind_driver("blocker-projection", "spike-missing", "Missing spike")
         run_id = self.start_run(drv)
         graph = self.require_graph_admitted(drv, run_id, canonical_graph(n_claims=1))
         self.require_research_recorded(drv, run_id, graph["root"])
         cases.append((drv, run_id, "claim.spike_missing"))
 
-        drv = self.bind_driver("M3", "spike-stale", "Stale spike")
+        drv = self.bind_driver("blocker-projection", "spike-stale", "Stale spike")
         run_id = self.start_run(drv)
         graph = self.require_graph_admitted(drv, run_id, canonical_graph(n_claims=1))
         self.require_research_recorded(drv, run_id, graph["root"])
@@ -129,14 +129,14 @@ class BlockerProjectionTests(ConformanceCase):
         drv.workspace_write("src/stale.py", b"new")
         cases.append((drv, run_id, "claim.spike_stale"))
 
-        drv = self.bind_driver("M3", "refuted", "Refuted claim")
+        drv = self.bind_driver("blocker-projection", "refuted", "Refuted claim")
         run_id = self.start_run(drv)
         graph = self.require_graph_admitted(drv, run_id, canonical_graph(n_claims=1, kind="ordinary"))
         self.dispatch(drv, observe_action(run_id=run_id, action=action_research(
             claim_id=graph["root"], source_kind="code", result="refutes")))
         cases.append((drv, run_id, "claim.refuted"))
 
-        drv = self.bind_driver("M3", "conflict", "Conflicted claim")
+        drv = self.bind_driver("blocker-projection", "conflict", "Conflicted claim")
         run_id = self.start_run(drv)
         graph = self.require_graph_admitted(drv, run_id, canonical_graph(n_claims=1, kind="ordinary"))
         for source, result in (("code", "supports"), ("docs", "refutes")):
@@ -144,7 +144,7 @@ class BlockerProjectionTests(ConformanceCase):
                 claim_id=graph["root"], source_kind=source, result=result)))
         cases.append((drv, run_id, "evidence.conflict"))
 
-        drv = self.bind_driver("M3", "decision", "Human decision")
+        drv = self.bind_driver("blocker-projection", "decision", "Human decision")
         run_id = self.start_run(drv)
         self.require_graph_admitted(drv, run_id, canonical_graph(n_claims=1, kind="needs-decision"))
         cases.append((drv, run_id, "claim.human_decision"))
@@ -154,7 +154,7 @@ class BlockerProjectionTests(ConformanceCase):
                 self._stop_and_assert_parity(case_drv, case_run, reason)
 
     def test_obligations_are_lossless_redirected_and_report_all_blockers(self):
-        drv = self.bind_driver("M3", "obligations", "Lossless obligations")
+        drv = self.bind_driver("blocker-projection", "obligations", "Lossless obligations")
         run_id = self.start_run(drv)
         graph = {
             "root": "P",

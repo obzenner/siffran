@@ -6,7 +6,7 @@ import copy
 import unittest
 from dataclasses import replace
 
-from test_d7_transactions import (Artifacts, Coordinator, Harness, Runs, Workspace,
+from test_d7_transactions import (Artifacts, CoordinatorWithTestInvocation, Harness, Runs, Workspace,
                                   activate_investigation, chain, decode_state, encode_state,
                                   traverse_history)
 from adapters.audit import child_event
@@ -22,7 +22,7 @@ PROFILE = "pi@0.84.1+pi-subagents@0.50.0"
 class StaleAuditRetryTests(unittest.TestCase):
     def setUp(self):
         self.runs, self.artifacts, self.workspace = Runs(), Artifacts(), Workspace()
-        self.coordinator = Coordinator(self.workspace, Harness(), self.runs, self.artifacts, PROFILE)
+        self.coordinator = CoordinatorWithTestInvocation(self.workspace, Harness(), self.runs, self.artifacts, PROFILE)
         result = self.coordinator.handle({"type": "StartRun", "selector": {
             "project": "stale", "session": "retry"}, "goal": "stale audit retry",
             "budgets": {"max_spawns": 1, "max_audit_spawns": 2}}, "start")["result"]
@@ -50,7 +50,7 @@ class StaleAuditRetryTests(unittest.TestCase):
             run, {**payload, **identity, "observed_by": "host"})
 
     def restore(self):
-        self.coordinator = Coordinator(self.workspace, Harness(), self.runs, self.artifacts, PROFILE)
+        self.coordinator = CoordinatorWithTestInvocation(self.workspace, Harness(), self.runs, self.artifacts, PROFILE)
         self.protocol = AuditProtocol(PROFILE,
             dispatch=lambda request, _profile: self.coordinator.handle(request["command"], "protocol"),
             child_event_ingress=lambda _p, run, child, event:

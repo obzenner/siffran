@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://siffran.local/empirica/v2/shared-defs.json",
+  "$defs": {
+    "invocationProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host",
+        "interactive",
+        "signal",
+        "delegation"
+      ],
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "interactive": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "signal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "delegation": {
+          "type": "boolean"
+        }
+      }
+    },
+    "identityObservation": {
+      "type": "object",
+      "required": [
+        "identity",
+        "provider_id",
+        "model_id",
+        "policy_version",
+        "source",
+        "observed_by"
+      ],
+      "properties": {
+        "identity": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "provider_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "model_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "policy_version": {
+          "const": "model-identity/1"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "observed_by": {
+          "const": "host"
+        }
+      },
+      "description": "Open only for allOf extension; every direct $ref use must set unevaluatedProperties: false."
+    }
+  }
+}

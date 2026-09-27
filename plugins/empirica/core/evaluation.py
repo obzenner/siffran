@@ -13,8 +13,10 @@ from .freshness import ActiveSpikeHead, FileBinding, evaluate_freshness
 from .run import OperationalState
 from . import governance
 
-SPAWN_BUDGET = {"investigation": ("max_spawns", "spawns_used", "spawn"),
-                "audit": ("max_audit_spawns", "audit_spawns_used", "audit_spawn")}
+SPAWN_BUDGET = {"investigation": ("max_spawns", *governance.BUDGETS["max_spawns"]),
+                "audit": ("max_audit_spawns", *governance.BUDGETS["max_audit_spawns"])}
+HOST_TIER_UNSUPPORTED = {"foreground_only": "host.async_unsupported",
+                         "observational": "host.audit_output_unobservable"}
 READ_COMMANDS = frozenset({"GetRun", "GetArgument", "RestoreRun"})
 
 
@@ -50,10 +52,25 @@ def _producer(state: OperationalState) -> dict[str, Any] | None:
 
 
 @dataclass(frozen=True)
+class ContractView:
+    reason_metadata: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...]
+    bootstrap_requirements: tuple[tuple[str, str, str], ...]
+    bootstrap_operations: tuple[tuple[str, tuple[tuple[str, str], ...]], ...]
+    governance_controls: Mapping[str, Any]
+    late_route_must: str
+    untrusted_delimiters: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "governance_controls", _freeze(self.governance_controls))
+        object.__setattr__(self, "untrusted_delimiters", _freeze(self.untrusted_delimiters))
+
+
+@dataclass(frozen=True)
 class EvaluationSnapshot:
     state: OperationalState
     history: tuple[dict[str, Any], ...]
     graph: dict[str, Any] | None
+    contract: ContractView
     observations: tuple[Any, ...] = ()
     observation_basis_id: str = ""
     observation_digest: str = ""
@@ -61,9 +78,6 @@ class EvaluationSnapshot:
     contract_id: str = "empirica-public-contract"
     contract_version: str = "2.0.0"
     contract_digest: str = ""
-    bootstrap_requirements: tuple[tuple[str, str, str], ...] = ()
-    bootstrap_operations: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = ()
-    reason_metadata: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = ()
     profile_id: str = ""
     host_tier: str = "observational"
     host_audit_execution: str = "unavailable"
@@ -73,6 +87,30 @@ class EvaluationSnapshot:
         object.__setattr__(self, "history", _freeze(self.history))
         object.__setattr__(self, "graph", _freeze(self.graph))
         object.__setattr__(self, "command", _freeze(self.command))
+
+    @property
+    def bootstrap_requirements(self):
+        return self.contract.bootstrap_requirements
+
+    @property
+    def bootstrap_operations(self):
+        return self.contract.bootstrap_operations
+
+    @property
+    def reason_metadata(self):
+        return self.contract.reason_metadata
+
+    @property
+    def governance_controls(self):
+        return self.contract.governance_controls
+
+    @property
+    def late_route_must(self):
+        return self.contract.late_route_must
+
+    @property
+    def untrusted_delimiters(self):
+        return self.contract.untrusted_delimiters
 
 
 @dataclass(frozen=True)
@@ -86,6 +124,8 @@ class ClaimDerivation:
     states: Mapping[str, str]
     blockers: Mapping[str, str]
     scope: tuple[str, ...]
+    stale_heads: Mapping[str, ActiveSpikeHead]
+    freshness_heads: Mapping[str, ActiveSpikeHead]
 
 
 @dataclass(frozen=True)
@@ -218,10 +258,12 @@ def claim_freshness_relevant(snapshot: EvaluationSnapshot) -> bool:
         _freshness_sensitive(snapshot, claim) for claim in snapshot.graph["claims"])
 
 
-def stale_artifact_ids(snapshot: EvaluationSnapshot) -> set[str]:
+def evaluate_stale_heads(snapshot: EvaluationSnapshot) -> Mapping[str, ActiveSpikeHead]:
+    """Evaluate bound-file freshness independently of claim gate relevance."""
     if not snapshot.observations:
-        return set()
-    return {head.artifact_id for head in evaluate_freshness(active_spike_heads(snapshot), snapshot.observations).stale_heads}
+        return MappingProxyType({})
+    freshness = evaluate_freshness(active_spike_heads(snapshot), snapshot.observations)
+    return MappingProxyType({head.artifact_id: head for head in freshness.stale_heads})
 
 
 def claim_conflicted(snapshot: EvaluationSnapshot, claim: dict[str, Any]) -> bool:
@@ -237,7 +279,7 @@ def effective_scope_ids(snapshot: EvaluationSnapshot) -> tuple[str, ...]:
 
 
 def local_claim_state(snapshot: EvaluationSnapshot, claim: dict[str, Any],
-                      stale: set[str] | None = None) -> str:
+                      stale: set[str]) -> str:
     evidence = active_evidence(snapshot, claim)
     research = [a for a in evidence if a["kind"] == "research"]
     supporting = any(a["outcome"] == "supporting" for a in research)
@@ -245,8 +287,7 @@ def local_claim_state(snapshot: EvaluationSnapshot, claim: dict[str, Any],
     spikes = [a for a in evidence if a["kind"] == "spike"]
     spike_failed = bool(spikes and spikes[-1]["outcome"] == "fail")
     sensitive = _freshness_sensitive(snapshot, claim)
-    spike_ok = bool(sensitive and spikes[-1]["artifact_id"] not in (
-        stale_artifact_ids(snapshot) if stale is None else stale))
+    spike_ok = bool(sensitive and spikes[-1]["artifact_id"] not in stale)
     if supporting and refuting and not spike_failed:
         return "open"
     if spike_failed or refuting:
@@ -275,7 +316,6 @@ def claim_blockers(snapshot: EvaluationSnapshot,
     if not unresolved:
         return ()
     claims = {claim["id"]: claim for claim in snapshot.graph["claims"]}
-    freshness_index = None
     blockers: list[dict[str, Any]] = []
     for claim_id in unresolved:
         target_id = derivation.blockers.get(claim_id, claim_id)
@@ -294,12 +334,8 @@ def claim_blockers(snapshot: EvaluationSnapshot,
         elif (any(item["outcome"] == "supporting" for item in research)
               and claim["kind"] == "needs-experiment"):
             sensitive = _freshness_sensitive(snapshot, claim)
-            if sensitive and freshness_index is None:
-                freshness = evaluate_freshness(active_spike_heads(snapshot), snapshot.observations)
-                stale_heads = {head.artifact_id: head for head in freshness.stale_heads}
-                freshness_index = (set(stale_heads), stale_heads)
-            stale_head = (freshness_index[1].get(spikes[-1]["artifact_id"])
-                          if sensitive and freshness_index is not None else None)
+            stale_head = (derivation.stale_heads.get(spikes[-1]["artifact_id"])
+                          if sensitive else None)
             if stale_head is not None:
                 parameters = {"changes": [{"path": change.path, "state": change.state.value}
                                            for change in stale_head.changes]}
@@ -315,10 +351,11 @@ def claim_blockers(snapshot: EvaluationSnapshot,
     return tuple(blockers)
 
 
-def derive_claims(snapshot: EvaluationSnapshot,
-                  stale: set[str] | None = None) -> ClaimDerivation:
+def _derive_claims(snapshot: EvaluationSnapshot,
+                   freshness_heads: Mapping[str, ActiveSpikeHead]) -> ClaimDerivation:
     if snapshot.graph is None:
-        return ClaimDerivation(MappingProxyType({}), MappingProxyType({}), ())
+        empty = MappingProxyType({})
+        return ClaimDerivation(empty, empty, (), empty, empty)
     claims = snapshot.graph["claims"]
     ids = [claim["id"] for claim in claims]
     index = {claim_id: position for position, claim_id in enumerate(ids)}
@@ -336,9 +373,10 @@ def derive_claims(snapshot: EvaluationSnapshot,
             indegree[child] -= 1
             if indegree[child] == 0:
                 ready.append(child)
-    if stale is None:
-        # Avoid freshness work when no claim state can depend on it.
-        stale = (stale_artifact_ids(snapshot) if claim_freshness_relevant(snapshot) else set())
+    # Freshness changes are always carried when requested for projection; only relevant claims
+    # consume them when deriving gate state.
+    stale_heads = freshness_heads if claim_freshness_relevant(snapshot) else MappingProxyType({})
+    stale = set(stale_heads)
     local = {claim["id"]: local_claim_state(snapshot, claim, stale) for claim in claims}
     scoped = effective_scope_ids(snapshot)
     scope = set(scoped)
@@ -358,7 +396,20 @@ def derive_claims(snapshot: EvaluationSnapshot,
         else:
             states[claim_id] = "open"
             blockers[claim_id] = blockers.get(failed, failed)
-    return ClaimDerivation(MappingProxyType(states), MappingProxyType(blockers), scoped)
+    return ClaimDerivation(MappingProxyType(states), MappingProxyType(blockers), scoped,
+                           stale_heads, freshness_heads)
+
+
+def derive_claims(snapshot: EvaluationSnapshot) -> ClaimDerivation:
+    """Derive gate state, consulting freshness only when claim state depends on it."""
+    heads = (evaluate_stale_heads(snapshot) if claim_freshness_relevant(snapshot)
+             else MappingProxyType({}))
+    return _derive_claims(snapshot, heads)
+
+
+def derive_claims_for_projection(snapshot: EvaluationSnapshot) -> ClaimDerivation:
+    """Derive claims while always carrying observable freshness for an honest RunView."""
+    return _derive_claims(snapshot, evaluate_stale_heads(snapshot))
 
 
 def _bootstrap_facts(snapshot: EvaluationSnapshot) -> dict[str, bool]:
@@ -573,13 +624,45 @@ def audit_passes(snapshot: EvaluationSnapshot, verdict: Mapping[str, Any]) -> bo
             all(_plain(verdict.get(key)) == value for key, value in expected.items()))
 
 
-def post_claim_blocker(snapshot: EvaluationSnapshot, derivation: ClaimDerivation,
-                       derivation_digest: str) -> dict[str, Any] | None:
-    """Derive the first convergence blocker after every scoped claim is approved."""
+INDEPENDENCE_REASONS = {
+    "unverified": "audit.independence_unverified",
+    "mixed": "audit.producers_mixed",
+    "same_model": "audit.same_model",
+}
+
+
+def independence(snapshot: EvaluationSnapshot, verdict: Mapping[str, Any]) -> str:
+    """Classify reviewer/producer independence from opaque host identities."""
+    auditor, producers = audit_attributions(snapshot, verdict)
+    auditor_class = identity_pair(auditor)
+    producer_classes = [identity_pair(producer) for producer in producers]
+    if auditor_class is None or not producer_classes or any(value is None for value in producer_classes):
+        return "unverified"
+    if len(set(producer_classes)) != 1:
+        return "mixed"
+    return "same_model" if auditor_class == producer_classes[0] else "distinct"
+
+
+def derivation_digest(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> str:
+    """Identify the current claim derivation for pass charging and residuals."""
+    return digest({"graph": snapshot.graph,
+                   "claims": [(claim["id"], derivation.states[claim["id"]],
+                               [item["artifact_id"] for item in active_evidence(snapshot, claim)])
+                              for claim in snapshot.graph["claims"]],
+                   "frozen": snapshot.state.frozen_claim_ids})
+
+
+def pass_budget_blocker(snapshot: EvaluationSnapshot, digest_value: str) -> dict[str, Any] | None:
     state = snapshot.state
-    if (derivation_digest != state.last_derivation_digest
+    if (digest_value != state.last_derivation_digest
             and state.budgets["passes_used"] >= state.budgets["max_passes"]):
         return {"reason": "budget.exhausted", "parameters": {"resource": "pass"}}
+    return None
+
+
+def audit_blocker(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> dict[str, Any] | None:
+    """Derive the first audit blocker after every scoped claim is approved."""
+    state = snapshot.state
     if any(child["resource_class"] == "audit"
            and child["state"] in {"reserved", "launching", "pending"}
            and audit_operation_current(snapshot, child) for child in state.children):
@@ -593,16 +676,9 @@ def post_claim_blocker(snapshot: EvaluationSnapshot, derivation: ClaimDerivation
     if any(claim_id not in set(derivation.scope)
            for claim_id in (claim["id"] for claim in snapshot.graph["claims"])):
         return None
-    auditor, producers = audit_attributions(snapshot, audit)
-    auditor_class = identity_pair(auditor)
-    producer_classes = [identity_pair(producer) for producer in producers]
-    if auditor_class is None or not producer_classes or any(value is None for value in producer_classes):
-        return {"reason": "audit.independence_unverified", "parameters": {}}
-    if len(set(producer_classes)) != 1:
-        return {"reason": "audit.producers_mixed", "parameters": {}}
-    if auditor_class == producer_classes[0]:
-        return {"reason": "audit.same_model", "parameters": {}}
-    return None
+    classification = independence(snapshot, audit)
+    reason = INDEPENDENCE_REASONS.get(classification)
+    return None if reason is None else {"reason": reason, "parameters": {}}
 
 
 def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> Decision:
@@ -700,11 +776,11 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             if reason := governance.configuration_error(state, proposed):
                 if reason == "governance.budget_invalid":
                     ceiling = next(k for k, used in governance.CEILINGS.items() if proposed["budgets"][k] < state.budgets[used])
-                    resource = {"max_passes": "pass", "max_spawns": "spawn", "max_audit_spawns": "audit_spawn"}[ceiling]
+                    resource = governance.BUDGETS[ceiling].resource
                     return _decision(snapshot, state, "Block", reason="budget.exhausted", parameters={"resource": resource})
                 return _decision(snapshot, state, "Block", reason=reason)
             try:
-                governed = governance.revise(state.goal, snapshot.graph, state.governance, proposal=proposed)
+                governed = governance.revise(state.goal, state.governance, proposal=proposed)
             except ValueError as exc:
                 return _decision(snapshot, state, "Block", reason=str(exc))
             return _decision(snapshot, replace(state, governance=governed))
@@ -717,8 +793,7 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             if (execution == "async" and snapshot.host_tier != "full_async"
                     and not (resource_class == "audit"
                              and snapshot.host_audit_execution == "async")):
-                reason = ("host.audit_output_unobservable" if snapshot.host_tier == "observational"
-                          else "host.async_unsupported")
+                reason = HOST_TIER_UNSUPPORTED.get(snapshot.host_tier, "host.async_unsupported")
                 return _decision(snapshot, state, "Block", reason=reason)
             if resource_class == "audit":
                 children = list(state.children)
@@ -765,8 +840,7 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                 return blocked
         observations_consulted = claim_freshness_relevant(snapshot)
         decide = partial(_decision, snapshot, observations_consulted=observations_consulted)
-        stale = stale_artifact_ids(snapshot) if observations_consulted else set()
-        derivation = derive_claims(snapshot, stale)
+        derivation = derive_claims(snapshot)
         states = [(c, derivation.states[c["id"]]) for c in snapshot.graph["claims"]]
         gating = set(derivation.scope)
         if intent == "stop":
@@ -781,19 +855,16 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             return decide(state, "Block", reason=blocker["reason"],
                           parameters=blocker["parameters"],
                           affected="claim:" + blocker["target_claim_id"])
-        derivation_digest = digest({"graph": snapshot.graph,
-                                    "claims": [(c["id"], derivation.states[c["id"]],
-                                                [a["artifact_id"] for a in active_evidence(snapshot, c)])
-                                               for c in snapshot.graph["claims"]],
-                                    "frozen": state.frozen_claim_ids})
-        blocker = post_claim_blocker(snapshot, derivation, derivation_digest)
-        if blocker and blocker["reason"] == "budget.exhausted":
+        current_digest = derivation_digest(snapshot, derivation)
+        blocker = pass_budget_blocker(snapshot, current_digest)
+        if blocker:
             return decide(state, "Block", reason=blocker["reason"],
                           parameters=blocker["parameters"])
-        if derivation_digest != state.last_derivation_digest:
+        if current_digest != state.last_derivation_digest:
             budgets = dict(state.budgets)
             budgets["passes_used"] += 1
-            state = replace(state, budgets=budgets, last_derivation_digest=derivation_digest)
+            state = replace(state, budgets=budgets, last_derivation_digest=current_digest)
+        blocker = audit_blocker(snapshot, derivation)
         if blocker:
             return decide(state, "Block", reason=blocker["reason"],
                           parameters=blocker["parameters"])

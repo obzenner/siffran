@@ -81,6 +81,16 @@ def _assert_fault(result: dict, code: str) -> None:
 class BridgeV2Tests(unittest.TestCase):
     """The D6-C §4 bridge composition boundary."""
 
+    def test_start_refusal_uses_message_code_and_final_fallback(self) -> None:
+        self.assertEqual(bridge.start_refusal({"type": "Block", "reasons": [
+            {"code": "run.goal_required", "message": "supply goal"}]}), "supply goal")
+        self.assertEqual(bridge.start_refusal({"type": "Block", "reasons": [
+            {"code": "run.goal_required"}]}), "run.goal_required")
+        self.assertEqual(bridge.start_refusal({"type": "Block", "reasons": [{}]}),
+                         "start refused")
+        self.assertIsNone(bridge.start_refusal({"type": "Block", "run": {},
+                                                "reasons": [{"code": "other"}]}))
+
     # --- helpers ---------------------------------------------------------------
 
     def _stdio(self, input_bytes: bytes, profile_id: str | None = None) -> dict:

@@ -228,7 +228,7 @@ class AuditTests(ConformanceCase):
         scope2 = self.require_audit_scope(drv2, run2)
         child2 = self.require_pending_audit_child(drv2, run2)
         self.require_trusted_audit_attribution(
-            drv2, run2, child2, scope2["c0_artifact_id"], variant="distinct")
+            drv2, run2, child2, variant="distinct")
         verdict2 = self.build_audit_verdict_payload(drv2, run2, verdict="pass", scope_review="pass")
         self.assertEqual(drv2.trusted_audit_verdict(run2, child2, verdict2)["result"]["type"], "Allow")
         self.dispatch(drv2, observe_action(run_id=run2, action=action_research(
@@ -241,10 +241,10 @@ class AuditTests(ConformanceCase):
         drv = self.bind_driver("D7", "seam-4b",
                                "Deferred dependency changes argument currency, not commitment")
         run_id = self.start_run(drv, goal=self.GOAL)
-        scope = self.require_audit_scope(drv, run_id)
+        self.require_audit_scope(drv, run_id)
         child_id = self.require_pending_audit_child(drv, run_id)
         self.require_trusted_audit_attribution(
-            drv, run_id, child_id, scope["c0_artifact_id"], variant="distinct")
+            drv, run_id, child_id, variant="distinct")
         verdict = self.build_audit_verdict_payload(
             drv, run_id, verdict="pass", scope_review="pass")
         self.assertEqual(drv.trusted_audit_verdict(
@@ -277,13 +277,12 @@ class AuditTests(ConformanceCase):
                     "same_model | independence_unverified honestly (never distinct by a no-op)")
                 run_id = self.start_run(drv, goal=self.GOAL)
                 # otherwise approvable frozen scope.
-                scope = self.require_audit_scope(drv, run_id)
-                c0_artifact_id = scope["c0_artifact_id"]
+                self.require_audit_scope(drv, run_id)
                 child_id = self.require_pending_audit_child(drv, run_id)
                 # Establish both covered-actor and auditor normalized identities through
                 # trusted ingress (same_model: equal pairs; unverified: one pair null).
                 self.require_trusted_audit_attribution(
-                    drv, run_id, child_id, c0_artifact_id, variant=variant)
+                    drv, run_id, child_id, variant=variant)
                 # exact audit verdict.
                 payload = self.build_audit_verdict_payload(drv, run_id, verdict="pass",
                                                             scope_review="pass")
@@ -313,13 +312,12 @@ class AuditTests(ConformanceCase):
                     "Same-model/unverified independence can Block according to public reasons but "
                     "is never upgraded to passing by author input")
                 run_id = self.start_run(drv, goal=self.GOAL)
-                scope = self.require_audit_scope(drv, run_id)
-                c0_artifact_id = scope["c0_artifact_id"]
+                self.require_audit_scope(drv, run_id)
                 child_id = self.require_pending_audit_child(drv, run_id)
                 # Establish trusted same_model or unverified through both covered-actor and
                 # auditor trusted ingress.
                 self.require_trusted_audit_attribution(
-                    drv, run_id, child_id, c0_artifact_id, variant=variant)
+                    drv, run_id, child_id, variant=variant)
                 payload = self.build_audit_verdict_payload(drv, run_id, verdict="pass",
                                                             scope_review="pass")
                 resp_v = drv.trusted_audit_verdict(run_id, child_id, payload)
@@ -368,13 +366,13 @@ class AuditTests(ConformanceCase):
             "D11", "audit-operation-binding",
             "A verdict uses only its own child identity; a later bound re-audit may replace it")
         run_id = self.start_run(drv, goal=self.GOAL)
-        scope = self.require_audit_scope(drv, run_id)
+        self.require_audit_scope(drv, run_id)
         self.dispatch(drv, observe_action(
             run_id=run_id, action=action_configure_run(budgets={"max_audit_spawns": 2})))
 
         child_a = self.require_pending_audit_child(drv, run_id)
         self.require_trusted_audit_attribution(
-            drv, run_id, child_a, scope["c0_artifact_id"], variant="distinct")
+            drv, run_id, child_a, variant="distinct")
         verdict_a = self.build_audit_verdict_payload(
             drv, run_id, verdict="fail", scope_review="pass")
         self.assertEqual(
@@ -383,7 +381,7 @@ class AuditTests(ConformanceCase):
         # A later child's identity cannot retroactively pass child A's failed verdict.
         child_b = self.require_pending_audit_child(drv, run_id)
         self.require_trusted_audit_attribution(
-            drv, run_id, child_b, scope["c0_artifact_id"], variant="distinct")
+            drv, run_id, child_b, variant="distinct")
         # While child B is current and pending, its managed execution takes precedence over the
         # prior failed verdict so Claude can settle the parent turn without respawning.
         blocked = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
@@ -409,12 +407,11 @@ class AuditTests(ConformanceCase):
         scope = self.require_audit_scope(drv, run_id, deferred_kind="ordinary")
         root_id = scope["root_id"]
         c1_id = scope["c1_id"]
-        c0_artifact_id = scope["c0_artifact_id"]
         # admitted pending audit child (reserved→launching→pending via private ingress).
         child_id = self.require_pending_audit_child(drv, run_id)
         # trusted distinct identities (both covered-actor and auditor through ingress).
         self.require_trusted_audit_attribution(
-            drv, run_id, child_id, c0_artifact_id, variant="distinct")
+            drv, run_id, child_id, variant="distinct")
         # Capture typed dossier.
         self.assert_argument_view(
             self.dispatch(drv, get_argument(run_id=run_id))["result"])

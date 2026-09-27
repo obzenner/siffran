@@ -30,6 +30,8 @@ from pathlib import Path
 
 import jsonschema
 
+from governance_setup import TEST_INVOCATION
+
 from adapters.identity import observe
 from core.canonical import canonical_digest
 from driver import V2SeamAbsent, new_driver
@@ -241,8 +243,7 @@ def start_run(*, goal: str, project: str = "demo", session: str = "s1",
     cmd: dict = {"type": "StartRun",
                  "selector": {"project": project, "session": session},
                  "goal": goal, "control_mode": control_mode,
-                 "invocation": invocation or {"host": "test", "interactive": True,
-                                              "signal": "v2 harness", "delegation": False}}
+                 "invocation": invocation or {**TEST_INVOCATION, "signal": "v2 harness"}}
     if budgets is not None:
         cmd["budgets"] = budgets
     if modes is not None:
@@ -493,7 +494,7 @@ def build_attribution_payload(*, subject_kind: str, subject_id: str,
         "model_id": model_id,
         "policy_version": "model-identity/1",
         "source": "conformance-host",
-        "observed_by": "host",
+        "observed_by": observed_by,
         "covered_artifact_ids": list(covered_artifact_ids or []),
     }
 
@@ -1255,8 +1256,7 @@ class ConformanceCase(unittest.TestCase):
         self.require_child_state(drv, run_id, child_id, "pending")
         return child_id
 
-    def require_trusted_audit_attribution(self, drv, run_id: str, child_id: str,
-                                          c0_artifact_id: str | list[str], *,
+    def require_trusted_audit_attribution(self, drv, run_id: str, child_id: str, *,
                                           variant: str) -> None:
         """Submit the trusted reviewer attribution through private ingress.
 
@@ -1264,20 +1264,17 @@ class ConformanceCase(unittest.TestCase):
         producer's normalized class; distinct uses a distinct class; alias,
         configuration, and missing observations remain unverified.
         """
-        auditor_observer = "host"
-        if variant == "same_model":
-            auditor_provider, auditor_model = "anthropic", "claude-sonnet-4-6"
-        elif variant == "distinct":
-            auditor_provider, auditor_model = "anthropic", "claude-opus-4-6"
-        elif variant == "unverified":
-            auditor_provider, auditor_model = None, None
-        elif variant == "alias":
-            auditor_provider, auditor_model = "anthropic", "opus"
-        elif variant == "configuration":
-            auditor_provider, auditor_model = "anthropic", "claude-opus-4-6"
-            auditor_observer = "configuration"
-        else:
-            raise HarnessDefect(f"unknown attribution variant {variant!r}")
+        variants = {
+            "same_model": ("anthropic", "claude-sonnet-4-6", "host"),
+            "distinct": ("anthropic", "claude-opus-4-6", "host"),
+            "unverified": (None, None, "host"),
+            "alias": ("anthropic", "opus", "host"),
+            "configuration": ("anthropic", "claude-opus-4-6", "configuration"),
+        }
+        try:
+            auditor_provider, auditor_model, auditor_observer = variants[variant]
+        except KeyError as exc:
+            raise HarnessDefect(f"unknown attribution variant {variant!r}") from exc
         # Producer identities were captured on evidence admission. Only the
         # observed reviewer is admitted at audit completion.
         auditor_payload = build_attribution_payload(

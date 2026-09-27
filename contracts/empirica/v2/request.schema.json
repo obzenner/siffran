@@ -101,12 +101,30 @@
     "invocationProvenance": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["host", "interactive", "signal", "delegation"],
+      "required": [
+        "host",
+        "interactive",
+        "signal",
+        "delegation"
+      ],
       "properties": {
-        "host": {"type": "string", "minLength": 1},
-        "interactive": {"type": ["boolean", "null"]},
-        "signal": {"type": "string", "minLength": 1},
-        "delegation": {"type": "boolean"}
+        "host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "interactive": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "signal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "delegation": {
+          "type": "boolean"
+        }
       }
     },
     "trustedEnvelope": {
@@ -354,79 +372,44 @@
       ]
     },
     "attributionPayload": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "subject_kind",
-        "subject_id",
-        "child_id",
-        "identity",
-        "provider_id",
-        "model_id",
-        "policy_version",
-        "source",
-        "observed_by",
-        "covered_artifact_ids"
-      ],
-      "description": "Closed trusted reviewer attribution carrying an opaque identity class plus raw provenance.",
-      "properties": {
-        "subject_kind": {
-          "enum": [
-            "auditor"
-          ]
+      "allOf": [
+        {
+          "$ref": "#/$defs/identityObservation"
         },
-        "subject_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "child_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "identity": {
-          "type": [
-            "string",
-            "null"
+        {
+          "type": "object",
+          "required": [
+            "subject_kind",
+            "subject_id",
+            "child_id",
+            "covered_artifact_ids"
           ],
-          "minLength": 1
-        },
-        "provider_id": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "model_id": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "minLength": 1,
-          "maxLength": 512
-        },
-        "policy_version": {
-          "const": "model-identity/1"
-        },
-        "source": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
-        },
-        "observed_by": {
-          "enum": [
-            "host"
-          ]
-        },
-        "covered_artifact_ids": {
-          "type": "array",
-          "maxItems": 0,
-          "items": {
-            "$ref": "#/$defs/digest256"
+          "properties": {
+            "subject_kind": {
+              "enum": [
+                "auditor"
+              ]
+            },
+            "subject_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "child_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "covered_artifact_ids": {
+              "type": "array",
+              "maxItems": 0,
+              "items": {
+                "$ref": "#/$defs/digest256"
+              }
+            }
           }
         }
-      }
+      ],
+      "unevaluatedProperties": false,
+      "description": "Closed trusted reviewer attribution carrying an opaque identity class plus raw provenance."
     },
     "auditVerdictPayload": {
       "type": "object",
@@ -942,7 +925,8 @@
       "required": [
         "type",
         "selector",
-        "goal"
+        "goal",
+        "invocation"
       ],
       "properties": {
         "type": {
@@ -953,7 +937,8 @@
         },
         "goal": {
           "type": "string",
-          "maxLength": 4096
+          "maxLength": 4096,
+          "description": "Blank goals are refused with run.goal_required."
         },
         "invocation": {
           "$ref": "#/$defs/invocationProvenance"
@@ -1174,52 +1159,8 @@
         "author": {
           "anyOf": [
             {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "identity",
-                "provider_id",
-                "model_id",
-                "policy_version",
-                "source",
-                "observed_by"
-              ],
-              "properties": {
-                "identity": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "minLength": 1
-                },
-                "provider_id": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "minLength": 1,
-                  "maxLength": 256
-                },
-                "model_id": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "minLength": 1,
-                  "maxLength": 512
-                },
-                "policy_version": {
-                  "const": "model-identity/1"
-                },
-                "source": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128
-                },
-                "observed_by": {
-                  "const": "host"
-                }
-              }
+              "$ref": "#/$defs/identityObservation",
+              "unevaluatedProperties": false
             },
             {
               "type": "null"
@@ -1409,6 +1350,54 @@
           }
         }
       ]
+    },
+    "identityObservation": {
+      "type": "object",
+      "required": [
+        "identity",
+        "provider_id",
+        "model_id",
+        "policy_version",
+        "source",
+        "observed_by"
+      ],
+      "properties": {
+        "identity": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "provider_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "model_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "policy_version": {
+          "const": "model-identity/1"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "observed_by": {
+          "const": "host"
+        }
+      },
+      "description": "Open only for allOf extension; every direct $ref use must set unevaluatedProperties: false."
     }
   }
 }

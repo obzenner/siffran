@@ -279,6 +279,32 @@ class EvidenceFreshnessTests(ConformanceCase):
                     self.assertIn("claim.refuted", {r["code"] for r in stopped["residuals"]},
                                   "honest stop must preserve failed-spike dominance")
 
+    def test_non_relevant_claims_still_project_stale_spikes_and_changes(self):
+        for variant in ("failing_spike", "conflicted_research"):
+            with self.subTest(variant=variant):
+                drv = self.bind_driver("CQ-1b", variant,
+                    "RunView freshness remains honest when freshness cannot change claim state")
+                run_id = self.start_run(drv, goal=self.GOAL)
+                graph = self.require_graph_admitted(
+                    drv, run_id, canonical_graph(n_claims=1, kind="needs-experiment"))
+                claim_id = graph["root"]
+                self.require_research_recorded(drv, run_id, claim_id)
+                drv.workspace_write(_BOUND, b"v1")
+                drv.harness_complete(_COMMAND, 1 if variant == "failing_spike" else 0)
+                self.dispatch(drv, observe_action(run_id=run_id, action=action_spike_request(
+                    claim_id=claim_id, command=_COMMAND, dependent_files=[_BOUND])))
+                if variant == "conflicted_research":
+                    self.dispatch(drv, observe_action(run_id=run_id, action=action_research(
+                        claim_id=claim_id, source_kind="docs", result="refutes")))
+                drv.workspace_write(_BOUND, b"v2")
+                run = self.dispatch(drv, get_run(run_id=run_id))["result"]["run"]
+                self.assertEqual(run["freshness"]["changes"],
+                                 [{"path": _BOUND, "state": "present"}])
+                obligation = next(row for row in run["obligations"]["active"]
+                                  if row["id"] == "claim:" + claim_id)
+                spike = next(row for row in obligation["observed"] if row["kind"] == "spike")
+                self.assertTrue(spike["stale"])
+
     # 12 — Every state-bearing request freshly observes every active bound file (per path)
     def test_state_bearing_requests_freshly_observe_bound_files(self):
         drv = self.bind_driver(

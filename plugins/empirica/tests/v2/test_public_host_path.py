@@ -72,14 +72,8 @@ class PublicHostPathTests(ConformanceCase):
             "Allow",
         )
 
-        argument_result = tools.call(
-            "empirica_read", {"run_id": run_id, "operation": "GetArgument"}
-        )["structuredContent"]
-        argument = argument_result["argument"]
-        evidence_ids = [artifact_id for claim in argument["claims"] if claim["gating"]
-                        for artifact_id in claim["active_evidence_ids"]]
         self.require_trusted_audit_attribution(
-            drv, run_id, child_id, evidence_ids, variant="distinct")
+            drv, run_id, child_id, variant="distinct")
         verdict = self.build_audit_verdict_payload(
             drv, run_id, verdict="pass", scope_review="pass")
         admitted = drv.trusted_audit_verdict(run_id, child_id, verdict)

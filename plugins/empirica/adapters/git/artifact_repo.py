@@ -37,8 +37,10 @@ from pathlib import Path
 # Import the domain records by shape. This module is loaded both as a package
 # (`empirica.adapters.git.artifact_repo`) and by direct path in the tests, so support both.
 try:  # package import
+    from ...core.canonical import canonical_json
     from ...core.records import ABSENT, Artifact, Corrupt, Present, Read, Revision, RunKey
 except ImportError:  # pragma: no cover - direct path-load fallback (see tests)
+    from core.canonical import canonical_json  # type: ignore
     from core.records import ABSENT, Artifact, Corrupt, Present, Read, Revision, RunKey  # type: ignore
 
 # CAS create sentinel: `update-ref <ref> <new> ""` (empty old-value) succeeds only if the ref does
@@ -391,12 +393,7 @@ def _encode_body(artifact: Artifact) -> str:
     recorded id (the read-side collision guard). ``sort_keys`` + fixed separators make the encoding
     canonical, which is what lets identical artifacts hash to identical blobs (idempotency).
     """
-    return json.dumps(
-        {"id": artifact.artifact_id, "body": artifact.body},
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    )
+    return canonical_json({"id": artifact.artifact_id, "body": artifact.body})
 
 
 def _decode_body(blob: str, path: str) -> tuple[str, str]:

@@ -30,16 +30,25 @@ export interface ParsedModeFlags {
   controlMode?: "auto";
 }
 
+export function splitLeadingFlags(args: string): { flags: string[]; goal: string } {
+  const matches = [...args.matchAll(/\S+/g)];
+  let index = 0;
+  while (index < matches.length && matches[index][0].startsWith("--")) index += 1;
+  return {
+    flags: matches.slice(0, index).map((match) => match[0]),
+    goal: index === 0 ? args : (index < matches.length ? args.slice(matches[index].index) : ""),
+  };
+}
+
 /** Consume only leading recognized flags; unknown flags are surfaced, never enabled. */
 export function parseModeFlags(args: string): ParsedModeFlags {
-  const matches = [...args.matchAll(/\S+/g)];
-  const tokens = matches.map((match) => match[0]);
+  const { flags, goal } = splitLeadingFlags(args);
   const modes: Modes = {};
   const unknownFlags: string[] = [];
   let controlMode: "auto" | undefined;
   let i = 0;
-  while (i < tokens.length && tokens[i].startsWith("--")) {
-    const flag = tokens[i++];
+  while (i < flags.length) {
+    const flag = flags[i++];
     if (flag === "--auto") controlMode = "auto";
     else if (flag === "--cli-exec") modes.cli_exec = true;
     else if (flag === "--no-cli-exec") modes.cli_exec = false;
@@ -47,7 +56,6 @@ export function parseModeFlags(args: string): ParsedModeFlags {
     else if (flag === "--no-multi-provider") modes.multi_provider = false;
     else unknownFlags.push(flag);
   }
-  const goal = i === 0 ? args : (i < matches.length ? args.slice(matches[i].index) : "");
   return { goal, modes, unknownFlags, ...(controlMode ? { controlMode } : {}) };
 }
 
@@ -249,6 +257,7 @@ export function statusNotice(result: Result): Notice {
     case "Allow":
     case "Block": {
       const run = result.run;
+      if (!run) return { type: "warning", text: "empirica: run unavailable." };
       const converged = result.type === "Allow" && result.converged;
       return {
         type: "info",

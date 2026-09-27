@@ -58,6 +58,26 @@ from adapters.state.located import LocatedRunRepository  # noqa: E402
 
 _PROTOCOL = _proto._PROTOCOL
 _PROFILES = _proto._PROFILES
+_HOST_OBSERVER = "host"
+
+
+def _unobserved(value: dict, source: object) -> dict:
+    return {"identity": None, "provider_id": value.get("provider_id"),
+            "model_id": value.get("model_id"), "policy_version": POLICY_VERSION,
+            "source": source, "observed_by": _HOST_OBSERVER}
+
+
+def start_refusal(result: object) -> str | None:
+    """Return a StartRun refusal message, identified structurally by an absent run."""
+    if not isinstance(result, dict) or result.get("type") != "Block" or "run" in result:
+        return None
+    reasons = result.get("reasons")
+    if not isinstance(reasons, list) or not reasons or not isinstance(reasons[0], dict):
+        return None
+    message = reasons[0].get("message")
+    code = reasons[0].get("code")
+    return (message if isinstance(message, str) and message else
+            code if isinstance(code, str) and code else "start refused")
 
 
 def _fault(code: str, request_id: str) -> dict:
@@ -118,9 +138,8 @@ def _identity(value: object) -> dict | None:
         return None
     observed = observe(provider, model, source=source)
     if observed is not None:
-        return {**observed, "observed_by": "host"}
-    return {"identity": None, "provider_id": provider, "model_id": model,
-            "policy_version": POLICY_VERSION, "source": source, "observed_by": "host"}
+        return {**observed, "observed_by": _HOST_OBSERVER}
+    return _unobserved(value, source)
 
 
 def trusted_governance_context(profile_id: str, run_id: str, payload: dict) -> dict:
@@ -159,9 +178,10 @@ def trusted_audit_verdict(profile_id: str, run_id: str, child_id: str, payload: 
 
 
 def trusted_attribution(profile_id: str, run_id: str, payload: dict) -> dict:
-    normalized = {**payload, **(_identity(payload) or {
-        "identity": None, "policy_version": POLICY_VERSION, "observed_by": "host",
-    })}
+    observed = _identity(payload)
+    normalized_identity = observed if observed is not None else _unobserved(
+        payload, payload.get("source"))
+    normalized = {**payload, **normalized_identity}
     return build_service(profile_id).trusted_attribution(run_id=run_id, payload=normalized)
 
 

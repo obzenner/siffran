@@ -54,7 +54,8 @@ def _payload(**extra: object) -> dict:
 class ClaudeAuditorAliasTests(unittest.TestCase):
     def _alias(self, model, env):
         from adapters.claude import lifecycle
-        with patch.object(lifecycle, "_transcript_observation", return_value=(model, None)):
+        models = [model] if model is not None else []
+        with patch.object(lifecycle, "_transcript_contents", return_value=(models, None)):
             return lifecycle._auditor_alias({"transcript_path": "main.jsonl"}, env)
 
     def test_anthropic_api_chooses_first_distinct_family(self):
@@ -137,6 +138,38 @@ class HookNativeBehaviorTests(unittest.TestCase):
         self.assertIn("empirica_observe", context)
         self.assertIn("empirica_read", context)
         self.assertIn("report_convergence", context)
+
+    def test_start_transport_exception_and_malformed_result_are_operator_visible(self) -> None:
+        from adapters.claude import lifecycle
+        for returned, side_effect in (({"result": []}, None), (None, RuntimeError("bridge down"))):
+            output = io.StringIO()
+            with self.subTest(side_effect=side_effect), \
+                 patch.object(lifecycle, "_payload", return_value={}), \
+                 patch.object(lifecycle, "dispatch_start_run", return_value=returned,
+                              side_effect=side_effect), redirect_stdout(output):
+                self.assertEqual(lifecycle.run_start_main(), 0)
+            value = json.loads(output.getvalue())
+            self.assertEqual(value["decision"], "block")
+            self.assertIn("internal error", value["reason"])
+
+        output = io.StringIO()
+        with patch.object(lifecycle, "_payload", side_effect=RuntimeError("bad payload")), \
+             redirect_stdout(output):
+            self.assertEqual(lifecycle.run_start_main(), 0)
+        self.assertIn("internal error", json.loads(output.getvalue())["reason"])
+
+    def test_faulted_start_blocks_expansion_with_operator_visible_reason(self) -> None:
+        from adapters.claude import lifecycle
+        response = {"protocol": "empirica/v2", "request_id": "r", "result": {
+            "type": "Fault", "code": "invalid_request", "message": "bad request"}}
+        output = io.StringIO()
+        with patch.object(lifecycle, "_payload", return_value={}), \
+             patch.object(lifecycle, "dispatch_start_run", return_value=response), \
+             redirect_stdout(output):
+            self.assertEqual(lifecycle.run_start_main(), 0)
+        value = json.loads(output.getvalue())
+        self.assertEqual(value["decision"], "block")
+        self.assertIn("invalid_request", value["reason"])
 
     def test_refused_start_blocks_expansion_with_operator_visible_reason(self) -> None:
         from adapters.claude import lifecycle

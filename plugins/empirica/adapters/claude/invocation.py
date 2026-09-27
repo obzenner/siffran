@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-import re
+
+from adapters.invocation import env_mode, split_leading_flags
 
 from .correlation import PROTOCOL, request_id as new_request_id
 
@@ -17,8 +18,6 @@ ENV_KEYS = {
     "multi_provider": "EMPIRICA_MODE_MULTI_PROVIDER",
     "cli_exec": "EMPIRICA_MODE_CLI_EXEC",
 }
-_TRUE = frozenset({"1", "true", "on", "enabled"})
-_FALSE = frozenset({"0", "false", "off", "disabled", ""})
 
 
 @dataclass(frozen=True)
@@ -42,18 +41,6 @@ def invocation_args(payload: Mapping[str, object]) -> str:
     return ""
 
 
-def _env_value(environ: Mapping[str, str], mode: str) -> bool | None:
-    raw = environ.get(ENV_KEYS[mode])
-    if raw is None:
-        return None
-    value = raw.strip().lower()
-    if value in _TRUE:
-        return True
-    if value in _FALSE:
-        return False
-    return None
-
-
 def parse_invocation(payload: Mapping[str, object], *, environ: Mapping[str, str]) -> Invocation:
     """Resolve env > leading invocation flag > default and retain unknown leading flags.
 
@@ -61,14 +48,11 @@ def parse_invocation(payload: Mapping[str, object], *, environ: Mapping[str, str
     the closed mode vocabulary, but remain visible to the doctor report instead of disappearing.
     """
     args = invocation_args(payload)
-    matches = list(re.finditer(r"\S+", args))
-    tokens = [match.group() for match in matches]
+    leading, goal = split_leading_flags(args)
     flags: dict[str, bool] = {}
     unknown: list[str] = []
     control_mode = "deliberative"
-    index = 0
-    while index < len(tokens) and tokens[index].startswith("--"):
-        token = tokens[index]
+    for token in leading:
         if token == "--auto":
             control_mode = "auto"
         elif token in FLAGS:
@@ -77,12 +61,11 @@ def parse_invocation(payload: Mapping[str, object], *, environ: Mapping[str, str
             flags[FLAGS[f"--{token[5:]}"]] = False
         else:
             unknown.append(token)
-        index += 1
 
     modes: dict[str, bool] = {}
     sources: dict[str, str] = {}
     for mode in MODES:
-        env = _env_value(environ, mode)
+        env = env_mode(environ, ENV_KEYS[mode])
         if env is not None:
             modes[mode] = env
             sources[mode] = "env"
@@ -91,7 +74,6 @@ def parse_invocation(payload: Mapping[str, object], *, environ: Mapping[str, str
             sources[mode] = "invocation"
         else:
             sources[mode] = "default"
-    goal = args if index == 0 else (args[matches[index].start():] if index < len(matches) else "")
     return Invocation(goal, modes, sources, tuple(unknown), control_mode)
 
 

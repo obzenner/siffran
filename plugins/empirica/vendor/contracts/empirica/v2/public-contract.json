@@ -44,7 +44,33 @@
       "attribution",
       "child_event",
       "audit_verdict"
-    ]
+    ],
+    "metadata": {
+      "graph": {
+        "evidence": false
+      },
+      "research": {
+        "evidence": true
+      },
+      "spike_request": {
+        "evidence": true
+      },
+      "configure_run": {
+        "evidence": false
+      },
+      "route": {
+        "evidence": false
+      },
+      "investigate": {
+        "evidence": false
+      },
+      "dispatch": {
+        "evidence": false
+      },
+      "freeze": {
+        "evidence": false
+      }
+    }
   },
   "child_lifecycle": {
     "states": [
@@ -148,6 +174,7 @@
   ],
   "independence_states": [
     "distinct",
+    "mixed",
     "same_model",
     "unverified"
   ],
@@ -382,7 +409,8 @@
           }
         ]
       }
-    }
+    },
+    "late_route_must": "Do not reroute after investigation."
   },
   "next_actions": {
     "run.start_fresh": {
@@ -765,9 +793,14 @@
         "additionalProperties": false,
         "properties": {}
       },
-      "next_actions": ["run.start_fresh"],
-      "sections": ["run/lifecycle"],
-      "message": "A non-empty goal is required; supply the goal explicitly. No run was created."
+      "next_actions": [
+        "run.start_fresh"
+      ],
+      "sections": [
+        "run/lifecycle"
+      ],
+      "message": "A non-empty goal is required; supply the goal explicitly. No run was created.",
+      "disposition": "start_refused"
     },
     "run.terminal": {
       "params": {
@@ -809,7 +842,8 @@
       "sections": [
         "claims/graph"
       ],
-      "message": "No selected argument graph. Propose one from supplied context before configure_run; investigation and evidence are not prerequisites."
+      "message": "No selected argument graph. Propose one from supplied context before configure_run; investigation and evidence are not prerequisites.",
+      "disposition": "host_recovery"
     },
     "graph.invalid": {
       "params": {
@@ -1248,9 +1282,14 @@
         "additionalProperties": false,
         "properties": {}
       },
-      "next_actions": ["run.start_fresh"],
-      "sections": ["governance"],
-      "message": "Auto mode requires an interactive invocation or EMPIRICA_AUTO_DELEGATION=1 set by the operator. Run interactively or set that delegation and start fresh."
+      "next_actions": [
+        "run.start_fresh"
+      ],
+      "sections": [
+        "governance"
+      ],
+      "message": "Auto mode requires an interactive invocation or EMPIRICA_AUTO_DELEGATION=1 set by the operator. Run interactively or set that delegation and start fresh.",
+      "disposition": "start_refused"
     },
     "governance.approval_required": {
       "params": {
@@ -1295,7 +1334,8 @@
       "sections": [
         "governance"
       ],
-      "message": "Host approval UI unavailable/cancelled. Keep pending; use supported UI or start an explicitly auto fresh run."
+      "message": "Host approval UI unavailable/cancelled. Keep pending; use supported UI or start an explicitly auto fresh run.",
+      "disposition": "host_recovery"
     },
     "governance.auto_ceiling": {
       "params": {
@@ -1340,7 +1380,8 @@
       "sections": [
         "governance"
       ],
-      "message": "Decision is bound to a different run/revision/digest. Inspect current proposal and request a new decision."
+      "message": "Decision is bound to a different run/revision/digest. Inspect current proposal and request a new decision.",
+      "disposition": "host_recovery"
     },
     "governance.receipt_replay": {
       "params": {
@@ -1370,7 +1411,8 @@
       "sections": [
         "governance"
       ],
-      "message": "The durable proposal (3) or total (128) interaction limit is exhausted. Stop honestly or start a fresh run."
+      "message": "The durable proposal (3) or total (128) interaction limit is exhausted. Stop honestly or start a fresh run.",
+      "disposition": "host_recovery"
     },
     "governance.decision_conflict": {
       "params": {
@@ -1384,7 +1426,8 @@
       "sections": [
         "governance"
       ],
-      "message": "The submitted control and fields conflict. Nothing was approved; use one explicit decision path."
+      "message": "The submitted control and fields conflict. Nothing was approved; use one explicit decision path.",
+      "disposition": "host_recovery"
     },
     "audit.producers_mixed": {
       "params": {
@@ -1646,7 +1689,7 @@
       "clauses": [
         {
           "id": "audit/independence/derived",
-          "text": "Independence is derived by the application as distinct, same_model, or unverified from trusted normalized identities; it is never supplied in the verdict."
+          "text": "Independence is derived by the application as distinct, mixed, same_model, or unverified from trusted normalized identities; it is never supplied in the verdict."
         },
         {
           "id": "audit/independence/required",
@@ -1796,7 +1839,7 @@
         },
         {
           "id": "trusted/ingress/replay",
-          "text": "child_event owns the terminal fingerprint, and a complete closed-bound audit_verdict (scope, coverage, and content) is its replay identity; an identical replay of either returns the exact Inert unchanged, and a conflicting terminal or verdict replay returns the exact Fault unchanged; this section statically requires those facts and canonical clauses only and adds no persisted replay machine \u2014 real idempotent and fault replay semantics are exercised by D4 bound-SUT cases, not by independent one-request fixtures, and D4 proves this behavior."
+          "text": "child_event owns the terminal fingerprint, and a complete closed-bound audit_verdict (scope, coverage, and content) is its replay identity; an identical replay of either returns the exact Inert unchanged, and a conflicting terminal or verdict replay returns the exact Fault unchanged; this section statically requires those facts and canonical clauses only and adds no persisted replay machine — real idempotent and fault replay semantics are exercised by D4 bound-SUT cases, not by independent one-request fixtures, and D4 proves this behavior."
         },
         {
           "id": "trusted/ingress/attribution",
@@ -1804,7 +1847,7 @@
         },
         {
           "id": "trusted/ingress/audit_atomic",
-          "text": "An audit_verdict is the trusted host-observed completion bound from a previously pending audit child; it atomically admits the verdict and the terminal child result, its child_id resolves to exactly one audit-purpose completed child, and its reviewed_claims cover exactly the current approved gating claims in canonical ArgumentView order \u2014 deferred claims are never included."
+          "text": "An audit_verdict is the trusted host-observed completion bound from a previously pending audit child; it atomically admits the verdict and the terminal child result, its child_id resolves to exactly one audit-purpose completed child, and its reviewed_claims cover exactly the current approved gating claims in canonical ArgumentView order — deferred claims are never included."
         },
         {
           "id": "trusted/ingress/evidence_sealed",
@@ -1904,17 +1947,14 @@
   "governance_decisions": {
     "actions": {
       "approve": {
-        "feedback": "forbidden",
         "unchanged_outcome": "approve",
         "changed_outcome": "amend"
       },
       "edit": {
-        "feedback": "forbidden",
         "unchanged_outcome": "dismiss",
         "changed_outcome": "amend"
       },
       "reject": {
-        "feedback": "forbidden",
         "unchanged_outcome": "reject",
         "changed_outcome": "reject"
       }
@@ -1945,7 +1985,7 @@
       }
     },
     "confirmation": {
-      "title": "FINAL CONFIRMATION \u2014 Your edits are saved, NOT approved. Confirm the exact values below; configuration is read-only.",
+      "title": "FINAL CONFIRMATION — Your edits are saved, NOT approved. Confirm the exact values below; configuration is read-only.",
       "actions": [
         "approve",
         "decline"

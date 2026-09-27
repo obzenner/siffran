@@ -8,6 +8,8 @@ The Makefile has three deliberately separate layers. None is a substitute for an
 
 The fast gate retains schema/vendor validation; malformed protocol and state input; private authority and identity checks; state and bridge boundaries; focused real-service governance CAS/replay and consent denial; the Claude model-switch revocation subprocess regression; Pi guards, transport failures, and governance UI controls; and Methodologist core/MCP/adapter tests. Pi bundle validation checks package composition only, so it does not execute the adapter suite a second time.
 
+Runtime-derived Empirica wire-fixture fields are generated with `make contract-fixtures`; shared schema definitions and local `$ref` embeddings are generated with `make contract-schemas`. `contracts/empirica/v2/shared-defs.json` is the never-rewritten source for `invocationProvenance` and `identityObservation`; `public-contract.schema.json` is the source for the prefixed public-contract embedding. `make contract-check` and `make check-static` run both generators in check mode (plus the schema-generator unit regressions), so drift fails without rewriting files; regenerate deliberately after projection or shared-schema changes.
+
 ## Targeted integration diagnostics
 
 Run these when changing the named boundary, not on every edit:
@@ -15,10 +17,10 @@ Run these when changing the named boundary, not on every edit:
 | Target | Boundary | Why it is not in the fast gate |
 |---|---|---|
 | `make empirica-governance-check` | full governance service, CAS/replay/consent, simulated host flows | repeated Git/state setup |
-| `make empirica-core-integration` | strict v2 state, transactions, retry, persistence, complete behavioral matrix | broad filesystem/schema scenarios |
+| `make empirica-core-integration` | full governance coverage, strict v2 state, transactions, retry, persistence, complete behavioral matrix | broad filesystem/schema scenarios; includes `empirica-governance-check` so admission/consent negative controls cannot fall outside the milestone gate |
 | `make empirica-v2-check ARGS="-k test_name"` | a selected behavioral regression (omit ARGS for all v2 cases) | ordinary unittest selection, no custom runner |
 | `make empirica-activation-lifecycle-check ARGS="-k test_name"` | isolated Claude hook lifecycle (omit ARGS for all cases) | full subprocess matrix is expensive; the selected model-switch regression is in the fast gate |
-| `make empirica-host-integration` | Claude lifecycle and cross-host simulated conformance | repeated subprocess/full-journey setup |
+| `make empirica-host-integration` | Claude/Codex lifecycle conformance plus Pi's real Python bridge/scripted UI path | requires Node; repeated subprocess/full-journey setup; blank-goal visibility is exercised through each real service adapter path |
 | `make empirica-host-live-check` | retained installed-host release receipts | requires prior operator evidence |
 
 The fast Pi suite also contains one real `govern()` → private Python service round trip with scripted UI: pending edited values, locked confirmation, and exact persisted approval. Run it independently with `make empirica-governance-bridge-check`. This restores targeted cross-language boundary coverage, not a simulated substitute for native human qualification.

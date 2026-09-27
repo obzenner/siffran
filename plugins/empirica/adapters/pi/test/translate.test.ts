@@ -9,9 +9,13 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import * as path from "node:path";
 
 import {
   startRunRequest,
+  splitLeadingFlags,
   parseModeFlags,
   gateFromDecision,
   convergenceNotice,
@@ -28,6 +32,8 @@ const SEL = { project: "p", session: "s" };
 const RID = "rid-1";
 const INVOCATION = { host: "pi", interactive: true, signal: "ctx.mode=tui", delegation: false };
 const RUN = { id: "h", status: "active" as const };
+const SPLIT_CASES = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../../contracts/empirica/v2/invocation-split-cases.json");
 
 // --- request builder semantics (omission/default — schema cannot prove) -----
 
@@ -51,6 +57,14 @@ test("startRunRequest carries budgets and modes only when supplied", () => {
 });
 
 // --- mode flags --------------------------------------------------------------
+
+test("parseModeFlags matches the shared Python host split table", () => {
+  const cases = JSON.parse(readFileSync(SPLIT_CASES, "utf8")) as
+    Array<{ args: string; flags: string[]; goal: string }>;
+  for (const row of cases) {
+    assert.deepEqual(splitLeadingFlags(row.args), { flags: row.flags, goal: row.goal }, row.args);
+  }
+});
 
 test("parseModeFlags surfaces unknown leading flags", () => {
   assert.deepEqual(parseModeFlags("--cli-exec --wat goal words"), {

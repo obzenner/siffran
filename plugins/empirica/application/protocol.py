@@ -7,11 +7,13 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
+from typing import Any, Mapping
 
 import jsonschema
 from referencing import Registry, Resource
 
 from core.canonical import canonical_digest
+from core.evaluation import ContractView
 from .history_records import POLICY_INPUT_KEYS
 
 # Sole internal loader and canonical PublicContract digest.
@@ -49,15 +51,43 @@ _BOOTSTRAP_OPERATIONS = tuple((name, tuple((step["predicate"], step["reason"])
                               for name, operation in _bootstrap["operations"].items())
 _REASON_METADATA = tuple((code, tuple(spec["next_actions"]), tuple(spec["sections"]))
                          for code, spec in _PUBLIC_CONTRACT["reasons"].items())
+_actions = _PUBLIC_CONTRACT["actions"]
+if set(_actions["metadata"]) != set(_actions["author"]):
+    raise RuntimeError("action metadata must cover every author action exactly")
 _decisions = _PUBLIC_CONTRACT["governance_decisions"]
-if (tuple(_decisions["actions"]) != ("approve", "edit", "reject")
-        or any(row["feedback"] != "forbidden"
-               for row in _decisions["actions"].values())):
+if tuple(_decisions["actions"]) != ("approve", "edit", "reject"):
     raise RuntimeError("unknown or reordered governance decision binding")
 _GOVERNANCE_DECISIONS = tuple((name, copy.deepcopy(row))
                               for name, row in _decisions["actions"].items())
 _GOVERNANCE_CONTROLS = copy.deepcopy(_decisions)
+_PROJECTION_CONTROLS = _GOVERNANCE_CONTROLS["controls"]
+_LATE_ROUTE_MUST = _bootstrap["late_route_must"]
+_UNTRUSTED_DELIMITERS = copy.deepcopy(_PUBLIC_CONTRACT["untrusted_delimiters"])
 _DIGEST = canonical_digest(_PUBLIC_CONTRACT)
+CONTRACT_VIEW = ContractView(
+    reason_metadata=_REASON_METADATA,
+    bootstrap_requirements=_BOOTSTRAP_REQUIREMENTS,
+    bootstrap_operations=_BOOTSTRAP_OPERATIONS,
+    governance_controls=_PROJECTION_CONTROLS,
+    late_route_must=_LATE_ROUTE_MUST,
+    untrusted_delimiters=_UNTRUSTED_DELIMITERS,
+)
+
+
+def profile_ids() -> tuple[str, ...]:
+    return tuple(sorted(_PROFILES))
+
+
+def host_profile(profile_id: str) -> Mapping[str, Any]:
+    return copy.deepcopy(_PROFILES[profile_id])
+
+
+def contract_digest() -> str:
+    return _DIGEST
+
+
+def projection_controls() -> dict:
+    return copy.deepcopy(_PROJECTION_CONTROLS)
 
 
 def policy_inputs(profile_id: str) -> dict[str, str]:

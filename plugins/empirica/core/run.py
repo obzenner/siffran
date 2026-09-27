@@ -6,6 +6,20 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 
+def start_admission(command: Mapping[str, Any]) -> str | None:
+    """Return the typed refusal reason for a StartRun command, if any."""
+    goal = command.get("goal")
+    if not isinstance(goal, str) or not goal.strip():
+        return "run.goal_required"
+    invocation = command.get("invocation")
+    if (command.get("control_mode") == "auto"
+            and not (isinstance(invocation, Mapping)
+                     and (invocation.get("interactive") is True
+                          or invocation.get("delegation") is True))):
+        return "governance.auto_invocation_required"
+    return None
+
+
 def _immutable(value: Any) -> Any:
     if isinstance(value, Mapping):
         return MappingProxyType({k: _immutable(v) for k, v in value.items()})

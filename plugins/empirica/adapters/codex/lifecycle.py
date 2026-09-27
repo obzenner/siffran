@@ -24,6 +24,7 @@ from pathlib import Path
 
 from adapters.state import project_id, run_id
 from adapters import bridge as application_bridge
+from adapters.invocation import env_mode, provenance, split_leading_flags
 from .transport import CODEX_PROFILE_ID
 
 from .correlation import PROTOCOL, request_id as new_request_id
@@ -36,8 +37,6 @@ _ACTIVATION = re.compile(
 )
 _MODE_FLAGS = {"--multi-provider": "multi_provider", "--cli-exec": "cli_exec"}
 _MODE_ENV = {"multi_provider": "EMPIRICA_MODE_MULTI_PROVIDER", "cli_exec": "EMPIRICA_MODE_CLI_EXEC"}
-_TRUE = frozenset({"1", "true", "on", "enabled"})
-_FALSE = frozenset({"0", "false", "off", "disabled", ""})
 
 
 class SelectorError(ValueError):
@@ -82,18 +81,6 @@ def explicit_activation(payload: Mapping[str, object]) -> str | None:
     return args[1:] if args[:1].isspace() else args
 
 
-def _env_mode(environ: Mapping[str, str], mode: str) -> bool | None:
-    raw = environ.get(_MODE_ENV[mode])
-    if raw is None:
-        return None
-    value = raw.strip().lower()
-    if value in _TRUE:
-        return True
-    if value in _FALSE:
-        return False
-    return None
-
-
 def _resolve_modes(tokens: list[str], environ: Mapping[str, str]) -> dict[str, bool]:
     """Resolve env > leading invocation flag > default for each known mode."""
     flags: dict[str, bool] = {}
@@ -107,21 +94,12 @@ def _resolve_modes(tokens: list[str], environ: Mapping[str, str]) -> dict[str, b
         index += 1
     modes: dict[str, bool] = {}
     for mode in ("multi_provider", "cli_exec"):
-        env = _env_mode(environ, mode)
+        env = env_mode(environ, _MODE_ENV[mode])
         if env is not None:
             modes[mode] = env
         elif mode in flags:
             modes[mode] = flags[mode]
     return modes
-
-
-def _goal_and_flags(args: str) -> tuple[str, list[str]]:
-    matches = list(re.finditer(r"\S+", args))
-    index = 0
-    while index < len(matches) and matches[index].group().startswith("--"):
-        index += 1
-    goal = args if index == 0 else (args[matches[index].start():] if index < len(matches) else "")
-    return goal, [match.group() for match in matches[:index]]
 
 
 def _positive_env(environ: Mapping[str, str], name: str, *, zero: bool = False) -> int | None:
@@ -151,15 +129,15 @@ def build_start_run_request(
     if args is None:
         return None
     env = os.environ if environ is None else environ
-    goal, leading = _goal_and_flags(args)
+    leading, goal = split_leading_flags(args)
     command: dict = {
         "type": "StartRun",
         "selector": selector_from_payload(payload),
         "goal": goal,
-        "invocation": {
-            "host": "codex", "interactive": None, "signal": "codex hook has no interactive signal",
-            "delegation": env.get("EMPIRICA_AUTO_DELEGATION") == "1",
-        },
+        "invocation": provenance(
+            "codex", None, "codex hook has no interactive signal", env,
+            profile_id=CODEX_PROFILE_ID,
+        ),
     }
     if "--auto" in leading:
         command["control_mode"] = "auto"
@@ -236,11 +214,10 @@ def _start(payload: dict) -> dict | None:
         code = result.get("code")
         text = code if isinstance(code, str) and code else "unknown"
         return {"systemMessage": f"empirica activation failed: {text}"}
-    reasons = result.get("reasons", [])
-    if (result.get("type") == "Block" and reasons and reasons[0].get("code") in
-            {"run.goal_required", "governance.auto_invocation_required"}):
+    refusal = application_bridge.start_refusal(result)
+    if refusal is not None:
         # A refusal is a decision, not an activation failure: block the prompt with the reason.
-        return {"decision": "block", "reason": f"Empirica did not start: {reasons[0]['message']}"}
+        return {"decision": "block", "reason": f"Empirica did not start: {refusal}"}
     run = result.get("run", {}) if isinstance(result, dict) else {}
     handle = run.get("id", "unresolved")
     if handle != "unresolved":
@@ -258,7 +235,8 @@ def _start(payload: dict) -> dict | None:
 def _refresh_governance(payload: dict, handle: str) -> dict:
     model = payload.get("model")
     return application_bridge.trusted_governance_context(CODEX_PROFILE_ID, handle, {
-        "author": {"provider_id": "openai", "model_id": model}
+        "author": {"provider_id": "openai", "model_id": model,
+                   "source": "codex-hook"}
         if isinstance(model, str) and model else None, "ingress": "unavailable"})
 
 
@@ -313,7 +291,7 @@ def _stop(payload: dict) -> dict | None:
         response = _dispatch(payload, build_evaluate_request(payload, handle))
         result = response.get("result", {}) if isinstance(response, dict) else {}
         if isinstance(result, Mapping) and _audit_required(result):
-            execute_audit(payload, handle)
+            execute_audit(handle)
             response = _dispatch(payload, build_evaluate_request(payload, handle))
     except Exception:  # active located run: evaluation/audit failure must deny Stop
         return {"decision": "block", "reason": "Empirica convergence gate unavailable."}

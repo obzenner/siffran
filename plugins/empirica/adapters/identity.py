@@ -23,6 +23,7 @@ _ALIASES = {
     "opus", "sonnet", "haiku", "fable", "best", "default", "inherit", "opusplan",
 }
 _VENDORS = {"anthropic", "openai", "xai"}
+REVIEWER_FAMILIES = ("fable", "opus", "sonnet", "haiku")
 _GEO = re.compile(
     r"^(?:af|ap|apac|asia|au|ca|eu|europe|global|in|jp|kr|me|sa|uk|us)(?:-[a-z0-9]+)?\.",
     re.IGNORECASE,
@@ -31,6 +32,22 @@ _THINKING = re.compile(r":(?:low|medium|high|xhigh)$", re.IGNORECASE)
 _CLAUDE_DURATION = re.compile(r"\s*\[\d+m\]$", re.IGNORECASE)
 _BEDROCK_VERSION = re.compile(r"-v\d+(?::\d+)?$", re.IGNORECASE)
 _CONCRETE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+
+
+def family(model: object) -> str | None:
+    """Return the known host alias family named by a model spelling."""
+    if not isinstance(model, str):
+        return None
+    lowered = model.lower()
+    return next((name for name in REVIEWER_FAMILIES if name in lowered), None)
+
+
+def claude_observation(model: object, *, source: str) -> dict[str, object] | None:
+    """Preserve Claude's raw model provenance for bridge-side normalization."""
+    if not isinstance(model, str) or not model:
+        return None
+    return {"provider_id": "bedrock" if "." in model else "anthropic",
+            "model_id": model, "source": source}
 
 
 def observe(provider_id: object, model_id: object, *, source: str) -> dict[str, Any] | None:
@@ -62,10 +79,8 @@ def observe(provider_id: object, model_id: object, *, source: str) -> dict[str, 
     else:
         # Provider names like amazon-bedrock-eu describe transport and region;
         # without a vendor segment in the model they cannot establish identity.
-        for candidate in _VENDORS:
-            if provider == candidate or provider.startswith(candidate + "-"):
-                vendor = candidate
-                break
+        vendor = next((candidate for candidate in sorted(_VENDORS)
+                       if provider.startswith(candidate + "-")), None)
 
     if (vendor is None or not model or model in _ALIASES or model.endswith("-latest")
             or not _CONCRETE.fullmatch(model)):

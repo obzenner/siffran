@@ -8,9 +8,8 @@ functions. No runtime contract engine is created here.
 Validated:
   * every ``*.schema.json`` under ``contracts/<protocol>/<version>/``;
   * v1 substrate-neutral fixtures under ``contracts/fixtures/``;
-  * the v2 public contract registry, host profiles, and intentionally hand-maintained
-    wire exemplars under ``contracts/empirica/v2/fixtures`` (kept aligned with runtime
-    projection semantics, but not replayed against synthetic persisted state):
+  * the v2 public contract registry, host profiles, and generated wire exemplars
+    under ``contracts/empirica/v2/fixtures`` (checked by ``regen_contract_fixtures.py``):
     referential integrity, closed values, exact key sets, child transitions,
     host profile facts, response reason/residual parameters and exact ordered
     next-action/section lists, child recovery actions, schema↔registry mirror,
@@ -19,6 +18,7 @@ Validated:
   * in-memory negative cases: one mutation each asserting an expected
     diagnostic substring so a case cannot pass for the wrong rejection reason.
 """
+import hashlib
 import json
 import re
 import sys
@@ -34,10 +34,6 @@ except ImportError:  # Structural gates still validate required wire fields.
     Registry = Resource = DRAFT202012 = None
 
 ROOT = Path(__file__).resolve().parents[1]
-PLUGIN = str(ROOT / "plugins" / "empirica")
-if PLUGIN not in sys.path:
-    sys.path.insert(0, PLUGIN)
-from core.canonical import canonical_digest  # noqa: E402
 
 CONTRACTS = ROOT / "contracts"
 V2 = CONTRACTS / "empirica" / "v2"
@@ -54,8 +50,8 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:cc09fccbb0d4251d8e5f7b5a97cf62831116834b31a9616574057c95d5ed963c"
-REVIEWED_HOST_PROFILES_DIGEST = "sha256:9db99c23cfad683c0c314861279d022fefeed4333e1abb6a44a153eadfe879c2"
+REVIEWED_REGISTRY_DIGEST = "sha256:7e262d6fe9b8048f3cfb825ed0d02cb8985680c71a369c13a57c3c96bd99e681"
+REVIEWED_HOST_PROFILES_DIGEST = "sha256:4ebe3bd20992570ff8cfd4d203af675144d2674f6dcec2d72561f2838df1f92b"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
 REGISTRY_VERSION = "3.0.0"
@@ -101,41 +97,14 @@ def _as_set(value: Any, where: str, errors: list[str], name: str) -> set:
     return set(value)
 
 
-def check_projected_governance_fixture(expected: dict, errors: list[str], where: str) -> None:
-    """Keep fixture governance digests and review text equal to the runtime projection."""
-    result = expected.get("result", {})
-    run = result.get("run", {}) if isinstance(result, dict) else {}
-    governed = run.get("governance") if isinstance(run, dict) else None
-    if not isinstance(governed, dict) or "review_text" not in governed:
-        return
-    plugin = str(ROOT / "plugins" / "empirica")
-    added = plugin not in sys.path
-    if added:
-        sys.path.insert(0, plugin)
-    try:
-        from core.governance import proposal_digest
-        from core.projection import review_text
-
-        goal, graph = run.get("goal"), governed.get("scope")
-        if not isinstance(goal, str):
-            errors.append(f"{where}: governance fixture has no string goal")
-            return
-        digest = proposal_digest(goal, graph, governed)
-        if governed.get("proposal_digest") != digest:
-            errors.append(f"{where}: governance proposal_digest differs from runtime projection")
-        projected = review_text(goal, graph, governed, run.get("invocation"))
-        if governed.get("review_text") != projected:
-            errors.append(f"{where}: governance review_text differs from runtime projection")
-    except Exception as exc:
-        errors.append(f"{where}: runtime governance projection unavailable: {exc}")
-    finally:
-        if added:
-            sys.path.remove(plugin)
-
-
 def registry_digest(registry: dict) -> str:
-    """Use the runtime's single canonical JSON identity for every reviewed registry."""
-    return canonical_digest(registry)
+    """Compute canonical JSON identity without importing runtime code.
+
+    Keep this byte algorithm aligned with ``core.canonical.canonical_json``.
+    """
+    payload = json.dumps(registry, sort_keys=True, separators=(",", ":"),
+                         ensure_ascii=False, allow_nan=False).encode("utf-8")
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
 def materialize_contract_result(registry: dict, target: str, section_id: str | None = None) -> dict:
@@ -215,6 +184,14 @@ def check_key_sets(contract: dict, errors: list[str], where: str) -> None:
     for key in ("next_actions", "reasons", "sections"):
         if not isinstance(contract.get(key), dict) or not contract[key]:
             errors.append(f"{where}: {key} must be a non-empty object keyed by ID")
+    actions = contract.get("actions", {})
+    if isinstance(actions, dict) and set(actions.get("metadata", {})) != set(actions.get("author", ())):
+        errors.append(f"{where}: actions.metadata must cover actions.author exactly")
+    dispositions = {row.get("disposition") for row in contract.get("reasons", {}).values()
+                    if isinstance(row, dict)}
+    for disposition in ("start_refused", "host_recovery"):
+        if disposition not in dispositions:
+            errors.append(f"{where}: reason disposition {disposition!r} must be non-empty")
 
 
 def check_referential(contract: dict, errors: list[str], where: str) -> None:
@@ -436,6 +413,13 @@ def check_host_profiles(profiles_doc: dict, contract: dict, known_fixture_ids: s
             errors.append(f"{pwhere}: required_live_probe_ids must be nonempty")
         if "candidate_tier" in profile and not (profile.get("candidate_probe_ids") or []):
             errors.append(f"{pwhere}: candidate_tier requires candidate_probe_ids")
+    delegation_envs = {profile.get("delegation_env") for profile in profiles
+                       if isinstance(profile, dict)}
+    auto_message = contract.get("reasons", {}).get(
+        "governance.auto_invocation_required", {}).get("message", "")
+    for delegation_env in delegation_envs:
+        if not isinstance(delegation_env, str) or delegation_env not in auto_message:
+            errors.append(f"{where}: auto-invocation refusal must mention configured delegation_env {delegation_env!r}")
     # Compact reviewed digest freezes the exact profile inventory and every field value.
     actual = registry_digest(profiles_doc)
     if actual != REVIEWED_HOST_PROFILES_DIGEST:
@@ -1975,14 +1959,21 @@ def check_schema_mirror(request_schema: dict, response_schema: dict, contract: d
     if ce_state != expected_ce_states:
         errors.append(f"{where}: request childEventPayload.state enum {sorted(ce_state)} != "
                       f"registry child_lifecycle.states minus reserved {sorted(expected_ce_states)}")
-    # attribution subject_kind / observed_by enums.
-    ask = set(req_defs.get("attributionPayload", {}).get("properties", {})
-             .get("subject_kind", {}).get("enum", []))
+    # attribution subject_kind / observed_by enums, including generated allOf shared defs.
+    attribution = req_defs.get("attributionPayload", {})
+    attribution_properties = dict(attribution.get("properties", {}))
+    for branch in attribution.get("allOf", []):
+        resolved = (req_defs.get(branch.get("$ref", "").split("/")[-1], {})
+                    if "$ref" in branch else branch)
+        attribution_properties.update(resolved.get("properties", {}))
+    ask = set(attribution_properties.get("subject_kind", {}).get("enum", []))
     if ask != set(contract.get("attribution_subject_kinds", [])):
         errors.append(f"{where}: request attributionPayload.subject_kind enum {sorted(ask)} != "
                       f"registry attribution_subject_kinds {sorted(contract.get('attribution_subject_kinds', []))}")
-    aob = set(req_defs.get("attributionPayload", {}).get("properties", {})
-             .get("observed_by", {}).get("enum", []))
+    observed_schema = attribution_properties.get("observed_by", {})
+    aob = set(observed_schema.get("enum", []))
+    if "const" in observed_schema:
+        aob.add(observed_schema["const"])
     if aob != set(contract.get("attribution_observers", [])):
         errors.append(f"{where}: request attributionPayload.observed_by enum {sorted(aob)} != "
                       f"registry attribution_observers {sorted(contract.get('attribution_observers', []))}")
@@ -2130,11 +2121,17 @@ def main() -> int:
         if [row.get("predicate") for row in requirements] != expected_predicates:
             errors.append("public-contract: bootstrap predicates must be the finite ordered bindings")
         decisions = registry.get("governance_decisions", {}).get("actions", {})
+        public_tools = load(V2 / "public-tools.json")
+        expected_refusals = sorted(code for code, row in registry["reasons"].items()
+                                   if row.get("disposition") == "start_refused")
+        if not expected_refusals or public_tools.get("start_refusal_codes") != expected_refusals:
+            errors.append("public-tools: start_refusal_codes must be the non-empty disposition projection")
+        expected_recovery = {code for code, row in registry["reasons"].items()
+                             if row.get("disposition") == "host_recovery"}
+        if set(public_tools.get("recovery", {})) != expected_recovery:
+            errors.append("public-tools: recovery must match host_recovery dispositions")
         if list(decisions) != ["approve", "edit", "reject"]:
             errors.append("public-contract: governance decisions must be the finite ordered bindings")
-        for action, row in decisions.items():
-            if row.get("feedback") != "forbidden":
-                errors.append(f"public-contract: governance decision {action} has unknown feedback policy")
         for kind, row in registry.get("bootstrap", {}).get("actions", {}).items():
             validate_schema_instance({"protocol": "empirica/v2", "request_id": "bootstrap-example",
                 "command": {"type": "ObserveAction", "run_id": "run-example",
@@ -2287,7 +2284,6 @@ def main() -> int:
         check_run_view_fields(result, registry, errors, f"{where}:expected")
         check_stale_freshness_match(result, errors, f"{where}:expected")
         check_response_run_view(result, registry, host_tiers_by_profile, digest, errors, f"{where}:expected")
-        check_projected_governance_fixture(expected, errors, f"{where}:expected")
         check_argument_view(result, registry, errors, f"{where}:expected")
         check_getargument_exclusivity(request, result, errors, f"{where}:expected")
         command = request.get("command", {})

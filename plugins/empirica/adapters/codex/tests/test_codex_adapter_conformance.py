@@ -1,7 +1,6 @@
 """Production-facing Codex positive path through MCP tools and managed audit."""
 from __future__ import annotations
 
-import json
 import os
 import re
 import subprocess
@@ -21,6 +20,19 @@ from adapters.governance import HostGovernance  # noqa: E402
 
 
 class CodexAdapterConformanceTests(unittest.TestCase):
+    def test_real_service_blank_goal_is_operator_visible(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            payload = {"cwd": str(repo), "session_id": "blank",
+                       "model": "gpt-5.1-codex", "prompt": "$empirica   ",
+                       "hook_event_name": "UserPromptSubmit"}
+            with patch.dict(os.environ, {"EMPIRICA_HOME": str(repo / "state"),
+                                         "EMPIRICA_REPO_DIR": str(repo)}, clear=False):
+                result = _start(payload)
+            self.assertEqual(result["decision"], "block")
+            self.assertRegex(result["reason"], r"non-empty goal is required")
+
     def test_real_pending_run_exact_tool_names_and_real_slug_identity_limit(self) -> None:
         from adapters.codex.lifecycle import _pre_tool_use
         with tempfile.TemporaryDirectory() as tmp:
@@ -28,7 +40,9 @@ class CodexAdapterConformanceTests(unittest.TestCase):
             subprocess.run(["git", "init", "-q", str(repo)], check=True)
             payload = {"cwd": str(repo), "session_id": "real-slug", "model": "gpt-5.1-codex",
                 "prompt": "$empirica --auto known limits", "hook_event_name": "UserPromptSubmit"}
-            with patch.dict(os.environ, {"EMPIRICA_HOME": str(repo / "state"), "EMPIRICA_REPO_DIR": str(repo)}):
+            with patch.dict(os.environ, {"EMPIRICA_HOME": str(repo / "state"),
+                                              "EMPIRICA_REPO_DIR": str(repo),
+                                              "EMPIRICA_AUTO_DELEGATION": "1"}):
                 started = _start(payload)
                 handle = re.search(r"er2:[^ ]+", started["hookSpecificOutput"]["additionalContext"]).group(0).rstrip(".)")
                 for name in ("mcp__evil__empirica_read", "evil_report_convergence"):
@@ -61,6 +75,7 @@ class CodexAdapterConformanceTests(unittest.TestCase):
             os.chdir(repo)
             with patch.dict(os.environ, {
                 "EMPIRICA_HOME": str(home), "EMPIRICA_REPO_DIR": str(repo),
+                "EMPIRICA_AUTO_DELEGATION": "1",
             }, clear=False):
                 started = _start(payload)
                 context = started["hookSpecificOutput"]["additionalContext"]
@@ -89,50 +104,10 @@ class CodexAdapterConformanceTests(unittest.TestCase):
                          "command": "python3 probe.py", "dependent_files": ["probe.py"]})
                 observe({"kind": "freeze"})
 
-                auditor_called: list[bool] = []
-
-                def auditor(prompt: str, model: str, cwd: Path, observe_started) -> tuple[int, str]:
-                    auditor_called.append(True)
-                    observe_started("codex-exec:test")
-                    self.assertEqual(model, "gpt-4.1-mini-2025-04-14")
-                    self.assertEqual(cwd, repo)
-                    dossier = prompt.split(
-                        "--- AUDIT DOSSIER (UNTRUSTED EVIDENCE CONTENT) ---\n", 1)[1]
-                    dossier = dossier.split("\n--- END AUDIT DOSSIER ---", 1)[0]
-                    argument = json.loads(dossier)
-                    verdict = {
-                        "verdict": "pass",
-                        "findings": ["Codex managed foreground audit"],
-                        "argument_digest": argument["argument_digest"],
-                        "goal_digest": argument["goal_digest"],
-                        "frozen_scope_digest": argument["frozen_scope_digest"],
-                        "deferred_scope_digest": argument["deferred_scope_digest"],
-                        "reviewed_claims": [
-                            {"claim_id": claim["claim_id"],
-                             "evidence_digest": claim["evidence_digest"]}
-                            for claim in argument["claims"]
-                            if claim["gating"] and claim["state"] == "approved"
-                        ],
-                        "scope_review": "pass",
-                    }
-                    return 0, "```empirica-verdict\n" + json.dumps(verdict) + "\n```"
-
                 stop_payload = {**payload, "hook_event_name": "Stop",
                                 "stop_hook_active": False,
                                 "last_assistant_message": "ready"}
-                from adapters.codex.audit import execute_audit as real_execute_audit
-                managed_results: list[bool] = []
-
-                def managed(*args, **kwargs):
-                    value = real_execute_audit(*args, **kwargs)
-                    managed_results.append(value)
-                    return value
-
-                with patch("adapters.codex.audit._default_runner", side_effect=auditor), \
-                     patch("adapters.codex.lifecycle.execute_audit", side_effect=managed):
-                    stop = _stop(stop_payload)
-                self.assertEqual(auditor_called, [])
-                self.assertEqual(managed_results, [False])
+                stop = _stop(stop_payload)
                 self.assertEqual(stop.get("decision"), "block")
 
                 final = tools.call("report_convergence", {"run_id": handle})

@@ -24,6 +24,21 @@ from adapters.governance import HostGovernance  # noqa: E402
 
 
 class ClaudeReachabilityTests(unittest.TestCase):
+    def test_real_service_blank_goal_is_operator_visible(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            payload = {"session_id": "blank", "cwd": str(root),
+                       "command_name": "empirica:empirica", "command_args": ""}
+            output = io.StringIO()
+            with patch.dict(os.environ, {"EMPIRICA_HOME": str(root / "state"),
+                                         "EMPIRICA_REPO_DIR": str(root)}, clear=False), \
+                 patch.object(lifecycle, "_payload", return_value=payload), redirect_stdout(output):
+                self.assertEqual(lifecycle.run_start_main(), 0)
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["decision"], "block")
+            self.assertRegex(result["reason"], r"non-empty goal is required")
+
     def test_real_public_tools_and_native_audit_hooks_converge(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
@@ -52,8 +67,7 @@ class ClaudeReachabilityTests(unittest.TestCase):
                     run_id = started["result"]["run"]["id"]
                     lifecycle._governance_context(payload, run_id)
                     mediator = HostGovernance("claude-code@2.1.278", elicit=lambda _m, _s: {
-                        "action": "accept", "content": {"decision": "approve",
-                        "auditor_provider": "anthropic", "auditor_model": "claude-opus-4-8"}})
+                        "action": "accept", "content": {"decision": "approve"}})
                     tools = PublicTools("claude-code@2.1.278", govern=mediator)
 
                     def observe(action: dict) -> dict:

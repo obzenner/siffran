@@ -9,7 +9,12 @@
         "session": "s1"
       },
       "goal": "Prove the public contract is internally consistent.",
-      "invocation": {"host": "test", "interactive": true, "signal": "fixture", "delegation": false},
+      "invocation": {
+        "host": "test",
+        "interactive": true,
+        "signal": "fixture",
+        "delegation": false
+      },
       "budgets": {
         "max_passes": 3,
         "max_spawns": 2
@@ -28,7 +33,12 @@
       "run": {
         "id": "run-fx",
         "goal": "Prove the public contract is internally consistent.",
-        "invocation": {"host": "test", "interactive": true, "signal": "fixture", "delegation": false},
+        "invocation": {
+          "host": "test",
+          "interactive": true,
+          "signal": "fixture",
+          "delegation": false
+        },
         "status": "active",
         "modes": {
           "multi_provider": false,
@@ -42,7 +52,7 @@
             "roles",
             "hosts/capabilities"
           ],
-          "digest": "sha256:cc09fccbb0d4251d8e5f7b5a97cf62831116834b31a9616574057c95d5ed963c"
+          "digest": "sha256:7e262d6fe9b8048f3cfb825ed0d02cb8985680c71a369c13a57c3c96bd99e681"
         },
         "obligations": {
           "active": [
@@ -129,7 +139,7 @@
           },
           "prompt_error": null,
           "next_action": "governance.propose",
-          "review_text": "EMPIRICA RUN CONFIGURATION \u2014 epoch 0, mode deliberative\nApprove the CURRENT displayed configuration; edits are submitted for another review and are NOT approved yet.\nThe goal is read-only context and is not controlled by this decision.\nEvery line beginning '| ' is UNTRUSTED quoted data. Controls, bidi characters, and backslashes are visibly escaped.\n\nGOAL (READ-ONLY)\n| Prove the public contract is internally consistent.\n\nINVOCATION (READ-ONLY)\n  host: test\n  interactive: True\n  signal: fixture\n  delegation: False\n\nCONFIGURATION\n  Investigation passes: proposed 10, already used 3\n  Child spawns: proposed 5, already used 0\n  Audit spawns: proposed 1, already used 1\n  multi_provider (cross-provider actors): False\n  cli_exec (external model/actor CLI use): False\n\nSTATE \u2014 pending; dialogs left 3 this epoch, 128 total\n\nTECHNICAL DETAIL (secondary)\n  proposal digest sha256:3839bdf80e1b820bd34d85e41d310c9f97951e0e043328adb5e5feba3b5c691e\n  ingress unavailable \u00b7 configuration epoch 0"
+          "review_text": "EMPIRICA RUN CONFIGURATION \u2014 epoch 0, mode deliberative\nApprove the CURRENT displayed configuration; edits are submitted for another review and are NOT approved yet.\nThe goal is read-only context and is not controlled by this decision.\nEvery line beginning '| ' is UNTRUSTED quoted data. Controls, bidi characters, and backslashes are visibly escaped.\n\nGOAL (READ-ONLY)\n| Prove the public contract is internally consistent.\n\nINVOCATION (READ-ONLY)\n  host: test\n  interactive: True\n  signal: fixture\n  delegation: False\n\nCONFIGURATION\n  Investigation passes: proposed 10, already used 3\n  Child spawns: proposed 5, already used 0\n  Audit spawns: proposed 1, already used 1\n  multi_provider (Cross-provider actors): False\n  cli_exec (External model/actor CLI use): False\n\nSTATE \u2014 pending; dialogs left 3 this epoch, 128 total\n\nTECHNICAL DETAIL (secondary)\n  proposal digest sha256:3839bdf80e1b820bd34d85e41d310c9f97951e0e043328adb5e5feba3b5c691e\n  ingress unavailable \u00b7 configuration epoch 0"
         }
       }
     }

@@ -6,8 +6,8 @@ import re
 from typing import Any
 
 from core.canonical import canonical_json
-from core.evaluation import (EvaluationSnapshot, claim_digest, digest, frozen_scope_invalid,
-                             valid_graph)
+from core.evaluation import (EvaluationSnapshot, claim_digest, digest,
+                             frozen_scope_invalid, valid_graph)
 from core.freshness import (ActiveSpikeHead, FileBinding, FileObservation, ObservationState,
                             observations_digest)
 from core.records import Artifact
@@ -249,18 +249,15 @@ def assemble(state: OperationalState, stored: Any, workspace: Any, *, run_id: st
     history = traverse_history(state, stored)
     validate_investigation_history(state, history)
     graph = graph_from_history(state, history, required=require_graph)
-    if proposal_digest(state.goal, graph, state.governance) != state.governance["proposal_digest"]:
+    if proposal_digest(state.goal, state.governance) != state.governance["proposal_digest"]:
         raise HistoryCorrupt("proposal digest conflicts with selected graph/context")
     observation = build_observation_snapshot(active_spike_heads(history, graph), workspace)
     profile = _proto._PROFILES[profile_id]
     return EvaluationSnapshot(
-        state=state, history=history, graph=graph,
+        state=state, history=history, graph=graph, contract=_proto.CONTRACT_VIEW,
         observations=observation.observations, observation_basis_id=observation.basis_id,
         observation_digest=observation.digest, run_id=run_id,
         **_proto.policy_inputs(profile_id),
-        bootstrap_requirements=_proto._BOOTSTRAP_REQUIREMENTS,
-        bootstrap_operations=_proto._BOOTSTRAP_OPERATIONS,
-        reason_metadata=_proto._REASON_METADATA,
         host_tier=profile["current_tier"],
         host_audit_execution=profile["audit_execution"], command=command,
     )

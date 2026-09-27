@@ -41,7 +41,7 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                 if payload["ingress"] == "pi_ui" and not c.profile_id.startswith("pi@"):
                     return c._block_from_snapshot(snapshot, rid, "governance.approval_unavailable")
                 payload = policy.plain(payload)
-                governed = policy.revise(state.goal, snapshot.graph, governed, context=payload)
+                governed = policy.revise(state.goal, governed, context=payload)
                 if governed == policy.plain(state.governance):
                     return c._inert_with_run(rid, snapshot)
             else:
@@ -75,7 +75,7 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                     proposed = decision["amendment"]
                     if reason := policy.configuration_error(state, proposed):
                         return c._block_from_snapshot(snapshot, rid, reason)
-                    governed = policy.revise(state.goal, snapshot.graph, governed, proposal=proposed)
+                    governed = policy.revise(state.goal, governed, proposal=proposed)
                 if outcome == "reject":
                     governed.update(state="rejected")
                 prior = next((r for r in governed["receipts"] if r["id"] == payload["receipt_id"]), None)

@@ -47,6 +47,7 @@ from adapters.claude.fail_direction import (  # noqa: E402
     failure_direction,
 )
 from adapters.claude.invocation import parse_invocation  # noqa: E402
+from adapters.invocation import split_leading_flags  # noqa: E402
 from adapters.claude.restore import restore_context  # noqa: E402
 from adapters.claude.selector import SelectorError  # noqa: E402
 from adapters.claude.spawn import spawn_decision  # noqa: E402
@@ -129,12 +130,14 @@ class CorrelationTests(unittest.TestCase):
 class StartRunTests(unittest.TestCase):
     def test_minimal_start_run_is_schema_valid_with_no_actor_or_budgets(self) -> None:
         request = build_start_run_request(
-            _payload(command_name="empirica:empirica"), correlation_id="start-1", environ={},
+            _payload(command_name="empirica:empirica"),
+            correlation_id="start-1", environ={},
         )
         _assert_valid(request)
         self.assertEqual(request["protocol"], PROTOCOL)
         self.assertEqual(request["request_id"], "start-1")
         self.assertEqual(request["command"]["type"], "StartRun")
+        self.assertEqual(request["command"]["goal"], "")
         self.assertNotIn("actor", request["command"])
         self.assertNotIn("budgets", request["command"])
         self.assertNotIn("modes", request["command"])
@@ -194,6 +197,14 @@ class StartRunTests(unittest.TestCase):
                 self.assertEqual(provenance["interactive"], interactive)
                 self.assertEqual(provenance["signal"], "CLAUDE_CODE_ENTRYPOINT")
                 self.assertTrue(provenance["delegation"])
+
+    def test_shared_invocation_split_cases(self) -> None:
+        cases = json.loads((PLUGIN_ROOT.parents[1] / "contracts/empirica/v2/invocation-split-cases.json").read_text())
+        for case in cases:
+            with self.subTest(args=case["args"]):
+                flags, goal = split_leading_flags(case["args"])
+                self.assertEqual({"flags": flags, "goal": goal},
+                                 {"flags": case["flags"], "goal": case["goal"]})
 
     def test_missing_session_is_rejected_before_transport(self) -> None:
         with self.assertRaises(SelectorError):
@@ -789,7 +800,8 @@ class TranscriptIdentityTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "child.jsonl"
             path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
-            return lifecycle._transcript_observation(str(path), require_single=True)
+            models, final = lifecycle._transcript_contents(str(path))
+            return (models[0] if len(models) == 1 else None), final
 
     def test_single_served_model_ignores_synthetic_rows(self):
         rows = [
@@ -814,8 +826,7 @@ class TranscriptIdentityTests(unittest.TestCase):
             path = Path(tmp) / "child.jsonl"
             path.write_text(json.dumps({"message": {"role": "assistant", "model": "model-a"}})
                             + "\n{broken\n")
-            self.assertEqual(lifecycle._transcript_observation(
-                str(path), require_single=True), (None, None))
+            self.assertEqual(lifecycle._transcript_contents(str(path)), ([], None))
 
     def test_subagent_cannot_admit_main_author_evidence(self):
         payload = StringIO(json.dumps({

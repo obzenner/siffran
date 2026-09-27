@@ -6,14 +6,21 @@ in OperationalState.budgets, never in proposal metadata.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, NamedTuple
 
 from .canonical import canonical_digest as _canonical_digest
 
 MAX_INTERACTIONS = 128
 PROPOSAL_INTERACTIONS = 3
-CEILINGS = {"max_passes": "passes_used", "max_spawns": "spawns_used",
-            "max_audit_spawns": "audit_spawns_used"}
+class Budget(NamedTuple):
+    used: str
+    resource: str
+
+
+BUDGETS = {"max_passes": Budget("passes_used", "pass"),
+           "max_spawns": Budget("spawns_used", "spawn"),
+           "max_audit_spawns": Budget("audit_spawns_used", "audit_spawn")}
+CEILINGS = {ceiling: budget.used for ceiling, budget in BUDGETS.items()}
 
 
 def plain(value: Any) -> Any:
@@ -37,15 +44,15 @@ def canonical_graph(graph: Mapping[str, Any] | None) -> dict | None:
             "edges": sorted(plain(graph["edges"]), key=lambda e: (e["from"], e["to"], e["type"]))}
 
 
-def proposal_body(goal: str, graph: Mapping | None, governance: Mapping) -> dict:
+def proposal_body(goal: str, governance: Mapping) -> dict:
     """Bind only the immutable goal context and approvable run configuration."""
     return {"goal": goal, "configuration": plain(governance["proposal"]),
             "control_mode": governance["control_mode"]}
 
 
-def proposal_digest(goal: str, graph: Mapping | None, governance: Mapping) -> str:
+def proposal_digest(goal: str, governance: Mapping) -> str:
     """Own the canonical identity formula for one governance proposal."""
-    return canonical_digest(proposal_body(goal, graph, governance))
+    return canonical_digest(proposal_body(goal, governance))
 
 
 def initial(goal: str, budgets: Mapping, modes: Mapping, control_mode: str = "deliberative") -> dict:
@@ -55,17 +62,17 @@ def initial(goal: str, budgets: Mapping, modes: Mapping, control_mode: str = "de
              "proposal": {"budgets": {k: budgets[k] for k in CEILINGS},
                           "modes": dict(modes)},
              "context": {"author": None, "ingress": "unavailable"}}
-    value["proposal_digest"] = proposal_digest(goal, None, value)
+    value["proposal_digest"] = proposal_digest(goal, value)
     return value
 
 
-def revise(goal: str, graph: Mapping | None, current: Mapping, *, proposal=None, context=None) -> dict:
+def revise(goal: str, current: Mapping, *, proposal=None, context=None) -> dict:
     value = plain(current)
     if proposal is not None:
         value["proposal"] = plain(proposal)
     if context is not None:
         value["context"] = plain(context)
-    observed = proposal_digest(goal, graph, value)
+    observed = proposal_digest(goal, value)
     if observed == current["proposal_digest"]:
         return value
     value.update(proposal_digest=observed, plan_revision=current["plan_revision"] + 1,
@@ -107,9 +114,6 @@ def resolve_submission(governance: Mapping, submission: Mapping,
     """Resolve one raw human choice using the finite application-supplied policy."""
     row = dict(actions).get(submission.get("action"))
     if row is None:
-        return None, "governance.decision_conflict"
-    feedback = submission.get("feedback", "")
-    if not isinstance(feedback, str) or ((row["feedback"] == "required") != bool(feedback.strip())):
         return None, "governance.decision_conflict"
     configuration = plain(submission["configuration"])
     changed = configuration != plain(governance["proposal"])

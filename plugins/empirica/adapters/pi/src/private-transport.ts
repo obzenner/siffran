@@ -13,7 +13,7 @@ export interface AuditPlanData {
 
 export interface PrivateIngressRequest {
   operation: string;
-  run_id: string;
+  run_id?: string;
   child_id?: string;
   role_profile?: string;
   native_id?: string;
