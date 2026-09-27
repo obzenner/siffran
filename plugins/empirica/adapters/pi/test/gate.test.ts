@@ -162,10 +162,12 @@ test("/empirica dispatches StartRun and persists the opaque handle", async () =>
   const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
   const ui = new FakeUi();
 
-  await w.pi.command("empirica").handler("build the thing", { ui });
+  await w.pi.command("empirica").handler("build the thing", { ui, mode: "tui" });
 
   assert.equal(w.requests.length, 1);
   assert.equal(w.requests[0].command.type, "StartRun");
+  if (w.requests[0].command.type === "StartRun") assert.deepEqual(w.requests[0].command.invocation,
+    { host: "pi", interactive: true, signal: "ctx.mode=tui", delegation: false });
   assert.equal(w.pi.entries.length, 1);
   assert.equal(w.pi.entries[0].customType, "empirica.run");
   assert.match(w.pi.modelMessages[0].content, /empirica_observe/);
@@ -180,6 +182,25 @@ test("/empirica dispatches StartRun and persists the opaque handle", async () =>
   assert.doesNotMatch(w.pi.userMessages[0], /\$ARGUMENTS/);
 });
 
+test("/empirica records every Pi mode and operator delegation", async () => {
+  const prior = process.env.EMPIRICA_AUTO_DELEGATION;
+  try {
+    for (const [mode, interactive] of [["tui", true], ["rpc", true], ["print", false], ["json", false]] as const) {
+      for (const delegated of [false, true]) {
+        if (delegated) process.env.EMPIRICA_AUTO_DELEGATION = "1";
+        else delete process.env.EMPIRICA_AUTO_DELEGATION;
+        const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+        await w.pi.command("empirica").handler("goal", { ui: new FakeUi(), mode });
+        if (w.requests[0].command.type === "StartRun") assert.deepEqual(w.requests[0].command.invocation,
+          { host: "pi", interactive, signal: `ctx.mode=${mode}`, delegation: delegated });
+      }
+    }
+  } finally {
+    if (prior === undefined) delete process.env.EMPIRICA_AUTO_DELEGATION;
+    else process.env.EMPIRICA_AUTO_DELEGATION = prior;
+  }
+});
+
 test("/empirica preserves replacement tokens in the literal goal", async () => {
   const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
   await w.pi.command("empirica").handler("keep $& and $$ literal", { ui: new FakeUi() });
@@ -187,12 +208,17 @@ test("/empirica preserves replacement tokens in the literal goal", async () => {
   assert.doesNotMatch(w.pi.userMessages[0], /\$ARGUMENTS/);
 });
 
-test("/empirica renders the canonical skill without synthetic arguments", async () => {
-  const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
-  await w.pi.command("empirica").handler("", { ui: new FakeUi() });
-  assert.equal(w.pi.userMessages.length, 1);
-  assert.match(w.pi.userMessages[0], /^# Empirica/);
-  assert.doesNotMatch(w.pi.userMessages[0], /\$ARGUMENTS/);
+test("/empirica empty goal reports the core refusal without starting", async () => {
+  const w = wire(() => envelope({ type: "Block", run: run(), reasons: [
+    { code: "run.goal_required", message: "A non-empty goal is required" },
+  ] }));
+  const ui = new FakeUi();
+  await w.pi.command("empirica").handler("", { ui, mode: "json" });
+  assert.equal(w.pi.userMessages.length, 0);
+  assert.equal(w.pi.entries.length, 0);
+  assert.match(ui.notifications[0].message, /non-empty goal is required/);
+  if (w.requests[0].command.type === "StartRun")
+    assert.equal(w.requests[0].command.invocation?.interactive, false);
 });
 
 test("/empirica rejects a busy session before creating a run", async () => {

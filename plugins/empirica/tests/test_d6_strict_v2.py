@@ -905,6 +905,17 @@ class D6MinimalServiceTests(unittest.TestCase):
         self.assertEqual(runs.create_calls, 0)
         self.assertEqual(runs.cas_calls, 0)
 
+    def test_missing_invocation_state_is_failure_safe_corrupt(self):
+        """A v2 state without required provenance returns run.corrupt without decoding/crashing."""
+        missing = json.loads((_V2 / "state-fixtures" / "invalid-missing-invocation.json").read_text())
+        runs = RecordingRunRepository()
+        runs.inject("r-missing-invocation", missing)
+        service, runs = self._compose(runs)
+        resp = service.dispatch(_valid_request(
+            {"type": "GetRun", "run_id": "r-missing-invocation"}, request_id="r"))
+        self.assertEqual(resp, _expected_corrupt_block("r-missing-invocation", "Unsupported run state."))
+        self.assertEqual((runs.create_calls, runs.cas_calls), (0, 0))
+
     def test_corrupt_state_restore_run_failure_safe_block(self):
         """Corrupt-state RestoreRun returns exact failure-safe run.corrupt Block; zero writes."""
         runs = RecordingRunRepository()

@@ -2,6 +2,7 @@
   "protocol": "empirica/v2",
   "state_schema": "empirica.run/2",
   "goal": "Prove duplicate child IDs are rejected procedurally.",
+  "invocation": {"host": "test", "interactive": true, "signal": "fixture", "delegation": false},
   "status": "active",
   "modes": {
     "multi_provider": false,

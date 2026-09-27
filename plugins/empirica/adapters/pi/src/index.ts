@@ -1,20 +1,18 @@
 // Empirica adapter for Pi (pi.dev) — v2-only, radically simplified (D6-C C3).
 //
-// The Pi adapter is a *translator* over the empirica/v2 contract: it maps Pi's
-// native events into requests and maps the guarded typed decision back onto
-// Pi's enforcement/UI. It holds no convergence rules — those live in the
-// host-neutral core, reached through the injected `dispatch` seam.
+// The Pi adapter translates native events into empirica/v2 requests and maps guarded
+// typed decisions back onto Pi enforcement/UI. State and convergence policy remain in
+// the host-neutral core reached through the injected dispatch seam.
 //
 // Complete exact-profile surfaces:
-//   * /empirica -> StartRun and durable opaque-handle context
+//   * /empirica -> StartRun with trusted mode/delegation provenance and durable handle
 //   * empirica_observe/read/report_convergence -> canonical public v2 operations
 //   * tool_call/tool_result -> bound foreground pi-subagents auditor, synchronous
 //     redaction, and adapter-private trusted ingress
 //   * session restoration/compaction -> RestoreRun
 //
-// State and convergence policy remain behind the transport. The adapter retains
-// only the session handle and host-native child correlation needed to observe the
-// exact foreground result.
+// The adapter retains only the session handle and host-native child correlation needed
+// to observe the exact foreground result.
 
 import { fileURLToPath } from "node:url";
 import * as path from "node:path";
@@ -456,7 +454,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           return;
         }
         const parsed = parseModeFlags(args);
-        const goal = parsed.goal || "(goal to be refined from the current task)";
+        const goal = parsed.goal;
         const modes = { ...startOptions.modes, ...parsed.modes };
         if (parsed.unknownFlags.length)
           ctx.ui.notify(`empirica: unknown mode flags ignored: ${parsed.unknownFlags.join(" ")}`, "warning");
@@ -464,11 +462,19 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           // Render the canonical installed skill before creating a run. If the
           // package is incomplete, fail without leaving an active orphan.
           const kickoff = skillInvocation(skillsDir, args);
-          const response = await dispatch(startRunRequest(selectorOf(ctx), goal, randomUUID(), {
+          const invocation = {
+            host: "pi", interactive: ctx.mode === "tui" || ctx.mode === "rpc"
+              ? true : ctx.mode === "print" || ctx.mode === "json" ? false : null,
+            signal: `ctx.mode=${ctx.mode ?? "unknown"}`,
+            delegation: process.env.EMPIRICA_AUTO_DELEGATION === "1",
+          };
+          const response = await dispatch(startRunRequest(selectorOf(ctx), goal, randomUUID(), invocation, {
             ...startOptions, modes, controlMode: parsed.controlMode,
           }));
           const result = response.result;
-          if (result.type === "Allow" || result.type === "Block") {
+          const refused = result.type === "Block" && result.reasons.some((reason) =>
+            reason.code === "run.goal_required" || reason.code === "governance.auto_invocation_required");
+          if ((result.type === "Allow" || result.type === "Block") && !refused) {
             runHandle = result.run.id;
             await refreshGovernance(runHandle, ctx, trusted);
             pi.appendEntry?.("empirica.run", { runHandle });

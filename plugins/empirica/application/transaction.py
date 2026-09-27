@@ -77,9 +77,13 @@ class Coordinator:
         budgets.update({k: v for k, v in supplied_limits.items()
                         if k in {"max_passes", "max_spawns", "max_audit_spawns"}})
         budgets.update(command.get("budgets", {}))
+        invocation = command.get("invocation", {
+            "host": "unknown", "interactive": None,
+            "signal": "host invocation signal unavailable", "delegation": False,
+        })
         return OperationalState(
             protocol=_proto._PROTOCOL, state_schema=_proto._STATE_SCHEMA_ID,
-            goal=command["goal"], status="active", modes=modes, budgets=budgets,
+            goal=command["goal"], invocation=invocation, status="active", modes=modes, budgets=budgets,
             governance=governance.initial(command["goal"], budgets, modes, command.get("control_mode", "deliberative")),
             selected_graph_artifact_id=None, frozen_claim_ids=None, frozen_semantic_digest=None,
             route_stamp=None,
@@ -110,6 +114,16 @@ class Coordinator:
         if self.artifacts is None:
             return self._fault(request_id, "unsupported")
         selector = command["selector"]
+        rejected = ("run.goal_required" if not isinstance(command.get("goal"), str)
+                    or not command["goal"].strip() else None)
+        invocation = command.get("invocation", {})
+        if (not rejected and command.get("control_mode") == "auto"
+                and invocation.get("interactive") is not True
+                and invocation.get("delegation") is not True):
+            rejected = "governance.auto_invocation_required"
+        if rejected:
+            key = RunKey(storage_id(selector["project"]), storage_id(selector["session"]), 1)
+            return self._block_from_state(key, self._initial_state(command), command, request_id, rejected)
         latest = self._latest_key(selector)
         if latest is not None:
             current = self.runs.read(latest)

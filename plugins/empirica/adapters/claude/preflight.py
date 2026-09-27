@@ -120,7 +120,7 @@ def main(argv: list[str] | None = None) -> int:
     run would actually use — bare ``make doctor`` is unchanged (all modes default off)."""
     args = list(sys.argv[1:] if argv is None else argv)
     invocation = parse_invocation(
-        {"command_args": " ".join(args)}, environ=os.environ, fallback_goal="")
+        {"command_args": " ".join(args)}, environ=os.environ)
     json.dump(diagnose({}, invocation=invocation), sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")
     return 0

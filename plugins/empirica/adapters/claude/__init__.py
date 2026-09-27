@@ -37,12 +37,10 @@ from .route import (
     observed_at,
 )
 from .run_start import (
-    FALLBACK_GOAL,
     build_resolve_request,
     build_start_run_request,
     dispatch_resolve,
     dispatch_start_run,
-    invocation_details,
 )
 from .selector import PayloadContext, SelectorError, context_from_payload, selector_from_payload
 from .spawn import (
@@ -57,7 +55,6 @@ __all__ = [
     "BridgeTransport",
     "CLAUDE_PROFILE_ID",
     "CorrelationError",
-    "FALLBACK_GOAL",
     "FailureDirection",
     "INVESTIGATIVE_TOOLS",
     "Invocation",
@@ -97,7 +94,6 @@ __all__ = [
     "dispatch_stop",
     "dispatched_harness",
     "failure_direction",
-    "invocation_details",
     "observed_at",
     "parse_invocation",
     "request_id",

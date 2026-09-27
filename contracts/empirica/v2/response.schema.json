@@ -222,6 +222,14 @@
         },
         {
           "type": "object",
+          "required": ["code", "parameters"],
+          "properties": {
+            "code": {"const": "run.goal_required"},
+            "parameters": {"$ref": "#/$defs/emptyParams"}
+          }
+        },
+        {
+          "type": "object",
           "required": [
             "code",
             "parameters"
@@ -702,6 +710,14 @@
         },
         {
           "type": "object",
+          "required": ["code", "parameters"],
+          "properties": {
+            "code": {"const": "governance.auto_invocation_required"},
+            "parameters": {"$ref": "#/$defs/emptyParams"}
+          }
+        },
+        {
+          "type": "object",
           "required": [
             "code",
             "parameters"
@@ -1091,6 +1107,17 @@
         },
         "goal": {
           "type": "string"
+        },
+        "invocation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["host", "interactive", "signal", "delegation"],
+          "properties": {
+            "host": {"type": "string", "minLength": 1},
+            "interactive": {"type": ["boolean", "null"]},
+            "signal": {"type": "string", "minLength": 1},
+            "delegation": {"type": "boolean"}
+          }
         },
         "status": {
           "enum": [

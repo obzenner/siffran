@@ -282,6 +282,18 @@ class StartRunTests(unittest.TestCase):
         _assert_valid(request)
         self.assertEqual(request["command"]["modes"], {"cli_exec": True})
 
+    def test_goal_is_verbatim_and_codex_auto_requires_delegation_signal(self) -> None:
+        command = build_start_run_request(
+            _payload(prompt="$empirica   exact goal  "),
+            environ={"EMPIRICA_AUTO_DELEGATION": "1"},
+        )["command"]
+        self.assertEqual(command["goal"], "  exact goal  ")
+        self.assertEqual(command["invocation"], {
+            "host": "codex", "interactive": None,
+            "signal": "codex hook has no interactive signal", "delegation": True})
+        empty = build_start_run_request(_payload(prompt="$empirica   "), environ={})
+        self.assertEqual(empty["command"]["goal"], "  ")
+
     def test_non_activation_returns_none(self) -> None:
         self.assertIsNone(build_start_run_request(
             _payload(prompt="please discuss empirica"), environ={},
@@ -431,6 +443,15 @@ class UnsupportedLifecycleTests(unittest.TestCase):
         rc, out = self._run("activate", "UserPromptSubmit", prompt="$empirica prove X")
         self.assertEqual(rc, 0)
         assert_official_output(self, "UserPromptSubmit", json.loads(out))
+
+    def test_refused_start_blocks_prompt_with_reason(self) -> None:
+        with patch.dict(os.environ, {"EMPIRICA_AUTO_DELEGATION": ""}):
+            rc, out = self._run("activate", "UserPromptSubmit", prompt="$empirica --auto prove X")
+        self.assertEqual(rc, 0)
+        result = json.loads(out)
+        self.assertEqual(result["decision"], "block")
+        self.assertIn("Empirica did not start", result["reason"])
+        assert_official_output(self, "UserPromptSubmit", result)
 
     def test_pre_tool_use_spawn_is_inert_without_active_run(self) -> None:
         rc, out = self._run("pre-tool-use", "PreToolUse", tool_name="spawn_agent",

@@ -237,12 +237,15 @@ def _envelope(request_id: str, command: dict) -> dict:
 
 def start_run(*, goal: str, project: str = "demo", session: str = "s1",
               request_id: str | None = None, budgets: dict | None = None,
-              modes: dict | None = None, control_mode: str = "deliberative") -> dict:
+              modes: dict | None = None, control_mode: str = "deliberative",
+              invocation: dict | None = None) -> dict:
     """Build a valid StartRun envelope. Host profile selection is a driver-factory fact, never an
     invented StartRun field — there is deliberately no ``profile_id`` parameter (D4 spec §4)."""
     cmd: dict = {"type": "StartRun",
                  "selector": {"project": project, "session": session},
-                 "goal": goal, "control_mode": control_mode}
+                 "goal": goal, "control_mode": control_mode,
+                 "invocation": invocation or {"host": "test", "interactive": True,
+                                              "signal": "v2 harness", "delegation": False}}
     if budgets is not None:
         cmd["budgets"] = budgets
     if modes is not None:

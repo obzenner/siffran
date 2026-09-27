@@ -142,7 +142,8 @@ def safe_text(item: object) -> str:
     return _HIDDEN.sub(escape, str(item))
 
 
-def review_text(goal: str, graph: Mapping | None, value: Mapping) -> str:
+def review_text(goal: str, graph: Mapping | None, value: Mapping,
+                invocation: Mapping | None = None) -> str:
     def fence(item):
         lines.append("| " + safe_text(item))
     proposal, context = value["proposal"], value["context"]
@@ -151,6 +152,10 @@ def review_text(goal: str, graph: Mapping | None, value: Mapping) -> str:
              "The goal is read-only context and is not controlled by this decision.",
              "Every line beginning '| ' is UNTRUSTED quoted data. Controls, bidi characters, and backslashes are visibly escaped.", "", "GOAL (READ-ONLY)"]
     fence(goal)
+    if invocation is not None:
+        lines += ["", "INVOCATION (READ-ONLY)"]
+        for key in ("host", "interactive", "signal", "delegation"):
+            lines.append(f"  {key}: {safe_text(invocation[key])}")
     lines += ["", "CONFIGURATION"]
     for key, label in (("max_passes", "Investigation passes"), ("max_spawns", "Child spawns"), ("max_audit_spawns", "Audit spawns")):
         lines.append(f"  {label}: proposed {proposal['budgets'][key]}, already used {value['budgets'][governance.CEILINGS[key]]}")
@@ -174,7 +179,8 @@ def project_governance(snapshot: EvaluationSnapshot) -> dict:
                             for ceiling, used in governance.CEILINGS.items()},
                  request_ready=bootstrap["request_ready"], display_ready=bootstrap["display_ready"],
                  next_action=bootstrap["next_actions"][-1] if bootstrap["next_actions"] else "run.inspect")
-    value["review_text"] = review_text(snapshot.state.goal, snapshot.graph, value)
+    value["review_text"] = review_text(snapshot.state.goal, snapshot.graph, value,
+                                        snapshot.state.invocation)
     return value
 
 
@@ -196,7 +202,8 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
             row["recovery_action"] = "child.retry"
         children.append(row)
     return {
-        "id": snapshot.run_id, "goal": snapshot.state.goal, "status": snapshot.state.status,
+        "id": snapshot.run_id, "goal": snapshot.state.goal,
+        "invocation": governance.plain(snapshot.state.invocation), "status": snapshot.state.status,
         "modes": dict(snapshot.state.modes),
         "governance": project_governance(snapshot),
         "contract": {"id": snapshot.contract_id, "version": snapshot.contract_version,

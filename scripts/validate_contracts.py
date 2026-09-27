@@ -50,7 +50,7 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:0ad67678dd936e1e5024a0c0210a66cf5dcd07975f4d6a9fca12a5eeaa605268"
+REVIEWED_REGISTRY_DIGEST = "sha256:1e8ae282e796471fe0822cc306dd6d8c0383f2615ea4010f1452d38919d2e0b4"
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:41ef8b89da3f880fb5d256202d9ee5b6e28301b75e52490a41e65d16e09b8caa"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
@@ -119,7 +119,7 @@ def check_projected_governance_fixture(expected: dict, errors: list[str], where:
         digest = canonical_digest(proposal_body(goal, graph, governed))
         if governed.get("proposal_digest") != digest:
             errors.append(f"{where}: governance proposal_digest differs from runtime projection")
-        projected = review_text(goal, graph, governed)
+        projected = review_text(goal, graph, governed, run.get("invocation"))
         if governed.get("review_text") != projected:
             errors.append(f"{where}: governance review_text differs from runtime projection")
     except Exception as exc:
@@ -1377,6 +1377,8 @@ def _minimal_valid_state() -> dict:
         "state_schema": "empirica.run/2",
         "governance": json.loads((V2 / "state-fixtures/valid-active.json").read_text())["governance"],
         "goal": "g",
+        "invocation": {"host": "test", "interactive": True,
+                       "signal": "validator fixture", "delegation": False},
         "status": "active",
         "modes": {"multi_provider": False, "cli_exec": False},
         "budgets": {"max_passes": 1, "passes_used": 0,
@@ -2177,7 +2179,7 @@ def main() -> int:
     state_fixture_paths = sorted(state_fixture_dir.glob("*.json")) if state_fixture_dir.is_dir() else []
     REQUIRED_STATE_FIXTURES = {
         "valid-active", "valid-converged",
-        "invalid-missing-goal", "invalid-extra-field", "invalid-status",
+        "invalid-missing-goal", "invalid-missing-invocation", "invalid-extra-field", "invalid-status",
         "invalid-child-duplicate-id", "invalid-counter", "invalid-stamp",
         "invalid-child-branch", "invalid-deadline-nan", "invalid-refund-mismatch",
         "invalid-budget-reconciliation",
@@ -2190,6 +2192,7 @@ def main() -> int:
         "valid-active": (True, None),
         "valid-converged": (True, None),
         "invalid-missing-goal": (False, "goal"),
+        "invalid-missing-invocation": (False, "invocation"),
         "invalid-extra-field": (False, "Additional properties"),
         "invalid-status": (False, "not_a_status"),
         "invalid-child-duplicate-id": (False, "duplicate child_id"),

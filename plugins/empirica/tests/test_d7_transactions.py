@@ -149,7 +149,9 @@ def activate_investigation(coordinator: Coordinator, run_id: str) -> None:
 
 def initial() -> OperationalState:
     return OperationalState(
-        protocol="empirica/v2", state_schema="empirica.run/2", goal="g", status="active",
+        protocol="empirica/v2", state_schema="empirica.run/2", goal="g",
+        invocation={"host": "test", "interactive": True,
+                    "signal": "transaction fixture", "delegation": False}, status="active",
         modes={"multi_provider": False, "cli_exec": False},
         budgets={"max_passes": 8, "passes_used": 0, "max_spawns": 1, "spawns_used": 0,
                  "max_audit_spawns": 1, "audit_spawns_used": 0},
@@ -499,6 +501,8 @@ class D7TransactionTests(unittest.TestCase):
             started = coordinator.handle({"type": "StartRun",
                 "selector": {"project": "p", "session": session}, "goal": "execution",
                 "control_mode": "auto" if profile.startswith("codex") else "deliberative",
+                "invocation": {"host": "test", "interactive": True,
+                               "signal": "transaction test", "delegation": False},
                 "budgets": {"max_spawns": 1, "max_audit_spawns": 1}}, "start")
             run_id = started["result"]["run"]["id"]
             activate_investigation(coordinator, run_id)

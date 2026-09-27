@@ -159,9 +159,10 @@ test("lexical projection: Budgets and Modes are canonical-optional schema proper
 
 // --- (b) emitted-builder conformance (one builder table) ---------------------
 
+const INVOCATION = { host: "pi", interactive: true, signal: "ctx.mode=tui", delegation: false };
 const BUILDER_TABLE: Array<{ type: string; build: () => Request }> = [
-  { type: "StartRun", build: () => startRunRequest({ project: "p", session: "s" }, "goal", "r1") },
-  { type: "StartRun", build: () => startRunRequest({ project: "p", session: "s" }, "g", "r2", { maxPasses: 3, maxSpawns: 1, modes: { cli_exec: true, multi_provider: false } }) },
+  { type: "StartRun", build: () => startRunRequest({ project: "p", session: "s" }, "goal", "r1", INVOCATION) },
+  { type: "StartRun", build: () => startRunRequest({ project: "p", session: "s" }, "g", "r2", INVOCATION, { maxPasses: 3, maxSpawns: 1, modes: { cli_exec: true, multi_provider: false } }) },
   { type: "ResolveRun", build: () => resolveRunRequest({ project: "p", session: "s" }, "r3") },
   { type: "ObserveAction", build: () => observeActionRequest("h", { kind: "route", reason: "r" }, "r-observe") },
   { type: "GetRun", build: () => getRunRequest("h", "r-get") },

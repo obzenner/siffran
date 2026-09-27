@@ -1,6 +1,6 @@
 """Codex CLI 0.146.0 hook translation for the shared ``empirica/v2`` bridge (D6-C C2b).
 
-This module owns native payload parsing and native JSON hook output only.  Run allocation,
+This module owns native payload parsing and native JSON hook output only. Run allocation,
 ordering, budgets, evidence, audit coverage, and convergence remain in the application/core.
 
 Codex is a complete exact-profile host (``codex-cli@0.146.0``). Public author/read
@@ -76,12 +76,10 @@ def explicit_activation(payload: Mapping[str, object]) -> str | None:
     if not isinstance(prompt, str):
         return None
     match = _ACTIVATION.match(prompt)
-    return match.group("args").strip() if match else None
-
-
-def _activation_args(payload: Mapping[str, object]) -> str:
-    args = explicit_activation(payload)
-    return args if isinstance(args, str) else ""
+    if not match:
+        return None
+    args = match.group("args")
+    return args[1:] if args[:1].isspace() else args
 
 
 def _env_mode(environ: Mapping[str, str], mode: str) -> bool | None:
@@ -96,9 +94,8 @@ def _env_mode(environ: Mapping[str, str], mode: str) -> bool | None:
     return None
 
 
-def _resolve_modes(args: str, environ: Mapping[str, str]) -> dict[str, bool]:
+def _resolve_modes(tokens: list[str], environ: Mapping[str, str]) -> dict[str, bool]:
     """Resolve env > leading invocation flag > default for each known mode."""
-    tokens = args.split()
     flags: dict[str, bool] = {}
     index = 0
     while index < len(tokens) and tokens[index].startswith("--"):
@@ -118,12 +115,13 @@ def _resolve_modes(args: str, environ: Mapping[str, str]) -> dict[str, bool]:
     return modes
 
 
-def _goal(args: str, fallback: str) -> str:
-    tokens = args.split()
+def _goal_and_flags(args: str) -> tuple[str, list[str]]:
+    matches = list(re.finditer(r"\S+", args))
     index = 0
-    while index < len(tokens) and tokens[index].startswith("--"):
+    while index < len(matches) and matches[index].group().startswith("--"):
         index += 1
-    return " ".join(tokens[index:]).strip() or fallback
+    goal = args if index == 0 else (args[matches[index].start():] if index < len(matches) else "")
+    return goal, [match.group() for match in matches[:index]]
 
 
 def _positive_env(environ: Mapping[str, str], name: str, *, zero: bool = False) -> int | None:
@@ -153,19 +151,19 @@ def build_start_run_request(
     if args is None:
         return None
     env = os.environ if environ is None else environ
+    goal, leading = _goal_and_flags(args)
     command: dict = {
         "type": "StartRun",
         "selector": selector_from_payload(payload),
-        "goal": _goal(args, "empirica run (goal unspecified)"),
+        "goal": goal,
+        "invocation": {
+            "host": "codex", "interactive": None, "signal": "codex hook has no interactive signal",
+            "delegation": env.get("EMPIRICA_AUTO_DELEGATION") == "1",
+        },
     }
-    leading = []
-    for token in args.split():
-        if not token.startswith("--"):
-            break
-        leading.append(token)
     if "--auto" in leading:
         command["control_mode"] = "auto"
-    modes = _resolve_modes(args, env)
+    modes = _resolve_modes(leading, env)
     if modes:
         command["modes"] = modes
     budgets: dict[str, int] = {}
@@ -238,6 +236,11 @@ def _start(payload: dict) -> dict | None:
         code = result.get("code")
         text = code if isinstance(code, str) and code else "unknown"
         return {"systemMessage": f"empirica activation failed: {text}"}
+    reasons = result.get("reasons", [])
+    if (result.get("type") == "Block" and reasons and reasons[0].get("code") in
+            {"run.goal_required", "governance.auto_invocation_required"}):
+        # A refusal is a decision, not an activation failure: block the prompt with the reason.
+        return {"decision": "block", "reason": f"Empirica did not start: {reasons[0]['message']}"}
     run = result.get("run", {}) if isinstance(result, dict) else {}
     handle = run.get("id", "unresolved")
     if handle != "unresolved":

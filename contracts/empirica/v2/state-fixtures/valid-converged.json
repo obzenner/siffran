@@ -2,6 +2,7 @@
   "protocol": "empirica/v2",
   "state_schema": "empirica.run/2",
   "goal": "Prove strict v2 state codec roundtrip with terminal children.",
+  "invocation": {"host": "test", "interactive": true, "signal": "fixture", "delegation": false},
   "status": "converged",
   "modes": {
     "multi_provider": true,

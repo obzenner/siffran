@@ -759,6 +759,16 @@
       ],
       "message": "No active run for this selector; start a fresh run."
     },
+    "run.goal_required": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": ["run.start_fresh"],
+      "sections": ["run/lifecycle"],
+      "message": "A non-empty goal is required; supply the goal explicitly. No run was created."
+    },
     "run.terminal": {
       "params": {
         "type": "object",
@@ -1231,6 +1241,16 @@
         "freeze"
       ],
       "message": "Deferred claims are residual; accept."
+    },
+    "governance.auto_invocation_required": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": ["run.start_fresh"],
+      "sections": ["governance"],
+      "message": "Auto mode requires an interactive invocation or EMPIRICA_AUTO_DELEGATION=1 set by the operator. Run interactively or set that delegation and start fresh."
     },
     "governance.approval_required": {
       "params": {

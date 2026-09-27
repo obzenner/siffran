@@ -11,6 +11,7 @@ import {
   type Budgets,
   type EvaluateIntent,
   type FaultCode,
+  type InvocationProvenance,
   type Modes,
   type Request,
   type Result,
@@ -31,7 +32,8 @@ export interface ParsedModeFlags {
 
 /** Consume only leading recognized flags; unknown flags are surfaced, never enabled. */
 export function parseModeFlags(args: string): ParsedModeFlags {
-  const tokens = args.trim().split(/\s+/).filter(Boolean);
+  const matches = [...args.matchAll(/\S+/g)];
+  const tokens = matches.map((match) => match[0]);
   const modes: Modes = {};
   const unknownFlags: string[] = [];
   let controlMode: "auto" | undefined;
@@ -45,7 +47,8 @@ export function parseModeFlags(args: string): ParsedModeFlags {
     else if (flag === "--no-multi-provider") modes.multi_provider = false;
     else unknownFlags.push(flag);
   }
-  return { goal: tokens.slice(i).join(" "), modes, unknownFlags, ...(controlMode ? { controlMode } : {}) };
+  const goal = i === 0 ? args : (i < matches.length ? args.slice(matches[i].index) : "");
+  return { goal, modes, unknownFlags, ...(controlMode ? { controlMode } : {}) };
 }
 
 // --- Pi invocation -> Request -----------------------------------------------
@@ -62,12 +65,14 @@ export function startRunRequest(
   selector: RunSelector,
   goal: string,
   requestId: string,
+  invocation: InvocationProvenance,
   options: StartRunOptions = {},
 ): Request {
   const command: Extract<Request["command"], { type: "StartRun" }> = {
     type: "StartRun",
     selector,
     goal,
+    invocation,
   };
   if (options.maxPasses !== undefined || options.maxSpawns !== undefined
       || options.maxAuditSpawns !== undefined) {

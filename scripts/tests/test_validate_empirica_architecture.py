@@ -255,45 +255,19 @@ class ArchitectureValidatorTests(unittest.TestCase):
         self.assertIn(va.RULE_THIN_HOOK, self._ids(diags))
         self.assertTrue(any("core.convergence" in d.message or "domain" in d.message for d in diags), diags)
 
-    # --- §5 case 12: code moved to generated/vendor still counts --------------
-
-    def test_12_vendor_code_counts_in_budget(self):
-        cfg = base_config()
-        cfg["effective_runtime"]["maximum"] = 5
-        cfg["effective_runtime"]["baseline"] = 0
-        self._write("vendor/obligations/model.py", "x = 0\n" * 6)
-        files = va.discover_runtime_files(cfg, self.repo_root)
-        diags = va.check_effective_runtime(cfg, self.pkg, files)
-        self.assertIn(va.RULE_BUDGET, self._ids(diags), diags)
-
-    # --- §5 case 13: test files excluded --------------------------------------
+    # --- §5 case 13: test files excluded from the scanned runtime surface ------
 
     def test_13_test_files_excluded(self):
         cfg = base_config()
-        cfg["effective_runtime"]["maximum"] = 5
-        cfg["effective_runtime"]["baseline"] = 0
         self._write("core/pure.py", "x = 0\n")
+        self._write("vendor/obligations/model.py", "x = 0\n")
         self._write("tests/test_huge.py", "x = 0\n" * 1000)
         self._write("adapters/pi/test/fakes.ts", "x = 0\n" * 1000)
         files = va.discover_runtime_files(cfg, self.repo_root)
-        diags = va.check_effective_runtime(cfg, self.pkg, files)
-        self.assertNotIn(va.RULE_BUDGET, self._ids(diags), diags)
         rels = [va.rel_posix(f, self.pkg) for f in files]
+        self.assertIn("vendor/obligations/model.py", rels)
         self.assertFalse(any(r.startswith("tests/") for r in rels), rels)
         self.assertFalse(any("/test/" in r for r in rels), rels)
-
-    # --- §5 case 14: total exactly max passes; max+1 fails --------------------
-
-    def test_14_budget_boundary(self):
-        cfg = base_config()
-        cfg["effective_runtime"]["maximum"] = 3
-        cfg["effective_runtime"]["baseline"] = 3
-        self._write("core/a.py", "x = 0\n" * 3)
-        files = va.discover_runtime_files(cfg, self.repo_root)
-        self.assertEqual(self._ids(va.check_effective_runtime(cfg, self.pkg, files)), set())
-        self._write("core/b.py", "y = 1\n")
-        files = va.discover_runtime_files(cfg, self.repo_root)
-        self.assertIn(va.RULE_BUDGET, self._ids(va.check_effective_runtime(cfg, self.pkg, files)))
 
     # --- §5 case 15: unresolved required PublicContract/profile reference -----
 

@@ -9,6 +9,7 @@
     "protocol",
     "state_schema",
     "goal",
+    "invocation",
     "status",
     "modes",
     "budgets",
@@ -34,6 +35,17 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 4096
+    },
+    "invocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "interactive", "signal", "delegation"],
+      "properties": {
+        "host": {"type": "string", "minLength": 1},
+        "interactive": {"type": ["boolean", "null"]},
+        "signal": {"type": "string", "minLength": 1},
+        "delegation": {"type": "boolean"}
+      }
     },
     "status": {
       "enum": [

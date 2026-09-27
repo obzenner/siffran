@@ -244,6 +244,8 @@ class GovernanceServiceTests(unittest.TestCase):
 
     def test_auto_explicit_cannot_raise_ceiling_and_graph_does_not_change_digest(self):
         self.run_id = self.request({"type": "StartRun", "goal": "auto task", "control_mode": "auto",
+                                    "invocation": {"host": "test", "interactive": True,
+                                                   "signal": "test operator", "delegation": False},
                                     "selector": {"project": "p", "session": "auto"}})["run"]["id"]
         self.prepare()
         g = self.view()["governance"]
@@ -483,10 +485,36 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertEqual(self.admit(raw)["type"], "Inert")
         self.assertIsNone(self.view()["governance"]["approved_digest"])
 
+    def test_start_requires_goal_and_attested_auto_authority(self):
+        base = {"type": "StartRun", "selector": {"project": "p", "session": "provenance"},
+                "invocation": {"host": "test", "interactive": False,
+                               "signal": "test noninteractive", "delegation": False}}
+        for goal in ("", "   "):
+            result = self.request({**base, "goal": goal})
+            self.assertEqual(result["reasons"][0]["code"], "run.goal_required")
+        denied = self.request({**base, "goal": "auto", "control_mode": "auto"})
+        self.assertEqual(denied["reasons"][0]["code"], "governance.auto_invocation_required")
+        for suffix, interactive in (("noninteractive", False), ("unknown", None)):
+            invocation = {**base["invocation"], "interactive": interactive}
+            allowed = self.request({**base, "selector": {"project": "p", "session": suffix},
+                                    "goal": "deliberative", "invocation": invocation})
+            self.assertEqual(allowed["type"], "Allow")
+            self.assertEqual(allowed["run"]["invocation"], invocation)
+        for suffix, invocation in (("interactive", {**base["invocation"], "interactive": True}),
+                                   ("delegated", {**base["invocation"], "delegation": True})):
+            command = {**base, "selector": {"project": "p", "session": suffix},
+                       "goal": "  verbatim goal  ", "control_mode": "auto", "invocation": invocation}
+            allowed = self.request(command)
+            self.assertEqual(allowed["run"]["goal"], "  verbatim goal  ")
+            self.assertEqual(allowed["run"]["invocation"], invocation)
+
     def test_graphless_review_text_shows_read_only_goal(self):
         text = self.view()["governance"]["review_text"]
         self.assertIn("GOAL (READ-ONLY)", text)
         self.assertIn("governed task", text)
+        self.assertIn("INVOCATION (READ-ONLY)", text)
+        self.assertIn("  host: ", text)
+        self.assertIn("  delegation: ", text)
         self.assertNotIn("CLAIM GRAPH", text)
 
     def test_maximal_escaped_graph_amendment_round_trip(self):

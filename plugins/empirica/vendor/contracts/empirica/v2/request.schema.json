@@ -98,6 +98,17 @@
         }
       }
     },
+    "invocationProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "interactive", "signal", "delegation"],
+      "properties": {
+        "host": {"type": "string", "minLength": 1},
+        "interactive": {"type": ["boolean", "null"]},
+        "signal": {"type": "string", "minLength": 1},
+        "delegation": {"type": "boolean"}
+      }
+    },
     "trustedEnvelope": {
       "type": "object",
       "additionalProperties": false,
@@ -942,8 +953,10 @@
         },
         "goal": {
           "type": "string",
-          "minLength": 1,
           "maxLength": 4096
+        },
+        "invocation": {
+          "$ref": "#/$defs/invocationProvenance"
         },
         "budgets": {
           "$ref": "#/$defs/budgets"

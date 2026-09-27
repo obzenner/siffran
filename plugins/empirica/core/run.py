@@ -19,6 +19,7 @@ class OperationalState:
     protocol: str
     state_schema: str
     goal: str
+    invocation: Mapping[str, Any]
     status: str
     modes: Mapping[str, bool]
     budgets: Mapping[str, int]
@@ -34,6 +35,7 @@ class OperationalState:
     committed_artifact_head_id: str | None
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "invocation", _immutable(self.invocation))
         object.__setattr__(self, "modes", _immutable(self.modes))
         object.__setattr__(self, "budgets", _immutable(self.budgets))
         object.__setattr__(self, "governance", _immutable(self.governance))

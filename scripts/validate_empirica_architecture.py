@@ -3,14 +3,13 @@
 
 A dependency-free static guard that makes the v2 ownership/subtraction rules machine-checkable.
 It detects architecture drift *without* becoming a runtime framework or freezing incidental file
-layout. The validator is structural: it parses AST import edges, counts effective runtime inventory,
-and scans scoped runtime/Make surfaces for forbidden files, symbols, fields, actions, and protocol
+layout. The validator is structural: it parses AST import edges and scans scoped runtime/Make surfaces for forbidden files, symbols, fields, actions, and protocol
 literals. It owns no domain reason tables; the accepted D2 PublicContract/host-profiles registry is
 loaded only to assert the configured required identity references resolve.
 
-ADR 0053 composes this target into ``check-static`` after re-establishing a measured finite
-runtime ceiling. The historical baseline remains visible; growth beyond the accepted ceiling,
-forbidden authority patterns, and dependency violations still fail closed.
+ADR 0053 composes this target into ``check-static``. Line count is not an architecture rule (the
+former effective-runtime ceiling is removed); forbidden authority patterns and dependency
+violations fail closed.
 
 Stdlib only. No plugin/runtime import or execution. The check functions are pure: each takes explicit
 inputs (config values, file lists, roots) and returns a list of :class:`Diagnostic`. ``main`` is the
@@ -31,7 +30,6 @@ from pathlib import Path
 
 # --- rule IDs (stable, sorted output) -----------------------------------------
 
-RULE_BUDGET = "ARCH-BUDGET"
 RULE_DEP_PY = "ARCH-DEP-PY"
 RULE_DEP_TS = "ARCH-DEP-TS"
 RULE_THIN_HOOK = "ARCH-THIN-HOOK"
@@ -44,7 +42,6 @@ RULE_MAKE_LIFECYCLE = "ARCH-MAKE-LIFECYCLE"
 RULE_PARSE = "ARCH-PARSE"
 
 ALL_RULES = (
-    RULE_BUDGET,
     RULE_DEP_PY,
     RULE_DEP_TS,
     RULE_THIN_HOOK,
@@ -104,7 +101,7 @@ def matches_test_pattern(rel: str, patterns: list) -> bool:
 def discover_runtime_files(config: dict, repo_root: Path) -> list:
     """Every ``.py``/``.ts`` file under the package root, excluding test paths."""
     pkg_root = Path(repo_root) / config["runtime_roots"]["package_root"]
-    exts = tuple(config["effective_runtime"]["extensions"])
+    exts = tuple(config["runtime_extensions"])
     patterns = config["excluded_test_patterns"]
     files = []
     for path in sorted(pkg_root.rglob("*")):
@@ -115,22 +112,6 @@ def discover_runtime_files(config: dict, repo_root: Path) -> list:
             continue
         files.append(path)
     return files
-
-
-def count_lines(path: Path) -> int:
-    with open(path, encoding="utf-8", errors="replace") as handle:
-        return sum(1 for _ in handle)
-
-
-def inventory(config: dict, repo_root: Path) -> tuple:
-    """Return (total, baseline, maximum, delta, file_count, baseline_ref) for the summary."""
-    files = discover_runtime_files(config, repo_root)
-    er = config["effective_runtime"]
-    exts = set(er["extensions"])
-    total = sum(count_lines(f) for f in files if f.suffix in exts)
-    baseline = er["baseline"]
-    maximum = er["maximum"]
-    return (total, baseline, maximum, total - baseline, len(files), er.get("baseline_ref", ""))
 
 
 # --- layer mapping + import resolution ----------------------------------------
@@ -263,24 +244,6 @@ def docstring_node_ids(tree: ast.AST) -> set:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             mark_first(node.body)
     return ids
-
-
-# --- check 1: effective runtime inventory -------------------------------------
-
-def check_effective_runtime(config: dict, pkg_root: Path, all_files: list) -> list:
-    er = config["effective_runtime"]
-    exts = set(er["extensions"])
-    baseline = er["baseline"]
-    maximum = er["maximum"]
-    total = sum(count_lines(f) for f in all_files if f.suffix in exts)
-    delta = total - baseline
-    if total > maximum:
-        return [Diagnostic(
-            RULE_BUDGET, config["runtime_roots"]["package_root"], 1,
-            f"effective runtime {total} lines exceeds maximum {maximum} "
-            f"(baseline {baseline} at {er.get('baseline_ref', '?')}, delta {delta:+d}); "
-            f"net deletion required, generated/vendor counted")]
-    return []
 
 
 # --- check 2: python dependency direction -------------------------------------
@@ -1398,7 +1361,6 @@ def run_all(config: dict, repo_root: Path) -> list:
     py_files = [f for f in all_files if f.suffix == ".py"]
     ts_files = [f for f in all_files if f.suffix == ".ts"]
     diags = []
-    diags += check_effective_runtime(config, pkg_root, all_files)
     diags += check_parse_integrity(config, pkg_root, py_files)
     diags += check_python_dependencies(config, pkg_root, py_files)
     diags += check_typescript_dependencies(config, pkg_root, ts_files)
@@ -1415,13 +1377,8 @@ def run_all(config: dict, repo_root: Path) -> list:
     return sorted(set(diags), key=lambda d: d.sort_key())
 
 
-def render(diagnostics: list, inv: tuple | None = None) -> str:
+def render(diagnostics: list) -> str:
     lines = []
-    if inv is not None:
-        total, baseline, maximum, delta, nfiles, ref = inv
-        lines.append(
-            f"effective runtime: {total} lines across {nfiles} files "
-            f"(baseline {baseline} at {ref}, maximum {maximum}, delta {delta:+d})")
     if not diagnostics:
         lines.append("architecture: ok — no target-state violations")
         return "\n".join(lines)
@@ -1457,7 +1414,7 @@ def main(argv=None) -> int:
         return run_self_test()
     config = load_config(Path(args.root) / args.config if not Path(args.config).is_absolute() else Path(args.config))
     diagnostics = run_all(config, Path(args.root))
-    print(render(diagnostics, inventory(config, Path(args.root))))
+    print(render(diagnostics))
     return 1 if diagnostics else 0
 
 

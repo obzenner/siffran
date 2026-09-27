@@ -154,8 +154,16 @@ def run_start_main() -> int:
         response = dispatch_start_run(payload)
         result = response.get("result", {}) if isinstance(response, dict) else {}
         run = result.get("run", {}) if isinstance(result, Mapping) else {}
-        handle = run.get("id") if isinstance(run, Mapping) else None
-        if isinstance(handle, str) and handle:
+        reasons = result.get("reasons", []) if isinstance(result, Mapping) else []
+        refused = (result.get("type") == "Block" and reasons and reasons[0].get("code") in
+                   {"run.goal_required", "governance.auto_invocation_required"})
+        handle = None if refused else (run.get("id") if isinstance(run, Mapping) else None)
+        if refused:
+            # A refused start blocks the expansion; Claude Code shows `reason` to the user.
+            json.dump({"decision": "block",
+                       "reason": f"Empirica did not start: {reasons[0]['message']}"}, sys.stdout)
+            sys.stdout.write("\n")
+        elif isinstance(handle, str) and handle:
             _governance_context(payload, handle)
             context = (
                 f"Empirica v2 is active. Opaque run handle: {handle}. "

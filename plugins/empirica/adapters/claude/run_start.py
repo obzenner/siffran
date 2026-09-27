@@ -1,32 +1,38 @@
 """Pure Claude run-start/resume translation plus an injectable bridge dispatch.
 
-``StartRun`` removes the actor wire field, nests explicit max values under ``budgets`` and omits
-absent values; ``ResolveRun`` resolves a run from its selector.  Both produce exact v2 envelopes
-(D6-C spec §3/C2).  This module is deliberately inactive: no hook imports it directly.
+``StartRun`` requires an explicit goal, carries trusted invocation provenance, nests explicit max
+values under ``budgets``, and omits absent values. ``ResolveRun`` resolves a run from its selector.
+Both produce exact v2 envelopes (D6-C spec §3/C2).
 """
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Mapping
 from typing import Any
 
 from .correlation import PROTOCOL, request_id as new_request_id
-from .invocation import Invocation, parse_invocation
+from .invocation import parse_invocation
 from .selector import context_from_payload, selector_from_payload
 from .transport import BridgeTransport, Transport
 
-FALLBACK_GOAL = "empirica run (goal unspecified)"
 
-
-def invocation_details(
-    payload: Mapping[str, object], *, environ: Mapping[str, str] | None = None,
-) -> Invocation:
-    """Return the complete, reviewable mode resolution used by StartRun and the doctor."""
-    return parse_invocation(
-        payload,
-        environ=os.environ if environ is None else environ,
-        fallback_goal=FALLBACK_GOAL,
-    )
+def invocation_provenance(payload: Mapping[str, object], environ: Mapping[str, str]) -> dict[str, object]:
+    entrypoint = environ.get("CLAUDE_CODE_ENTRYPOINT")
+    signal = "CLAUDE_CODE_ENTRYPOINT" if entrypoint is not None else "transcript.entrypoint unavailable"
+    if entrypoint is None and isinstance(payload.get("transcript_path"), str):
+        try:
+            with open(payload["transcript_path"], encoding="utf-8") as stream:
+                for line in stream:
+                    row = json.loads(line)
+                    if isinstance(row.get("entrypoint"), str):
+                        entrypoint, signal = row["entrypoint"], "transcript.entrypoint"
+                        break
+        except (OSError, ValueError):
+            pass
+    interactive = True if entrypoint == "cli" else False if entrypoint == "sdk-cli" else None
+    return {"host": "claude", "interactive": interactive, "signal": signal,
+            "delegation": environ.get("EMPIRICA_AUTO_DELEGATION") == "1"}
 
 
 def _budget(environ: Mapping[str, str], name: str, minimum: int) -> int | None:
@@ -43,23 +49,20 @@ def build_start_run_request(
     correlation_id: str | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Translate one validated Claude payload into an exact v2 ``StartRun`` envelope.
-
-    No ``actor`` field is emitted.  Explicit max values are nested under ``budgets`` and omitted
-    when absent; resolved modes are emitted only when non-empty.
-    """
+    """Build exact v2 StartRun with no actor and only supplied budgets/resolved modes."""
     context_from_payload(payload)  # validate cwd/session together before deriving the selector
-    invocation = invocation_details(payload, environ=environ)
+    env = os.environ if environ is None else environ
+    invocation = parse_invocation(payload, environ=env)
     command: dict[str, Any] = {
         "type": "StartRun",
         "selector": selector_from_payload(payload),
         "goal": invocation.goal,
+        "invocation": invocation_provenance(payload, env),
     }
     if invocation.control_mode == "auto":
         command["control_mode"] = "auto"
     if invocation.modes:
         command["modes"] = invocation.modes
-    env = os.environ if environ is None else environ
     budgets: dict[str, int] = {}
     for field, env_name, minimum in (
         ("max_passes", "EMPIRICA_MAX_PASSES", 1),

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+import re
 
 from .correlation import PROTOCOL, request_id as new_request_id
 
@@ -53,15 +54,15 @@ def _env_value(environ: Mapping[str, str], mode: str) -> bool | None:
     return None
 
 
-def parse_invocation(
-    payload: Mapping[str, object], *, environ: Mapping[str, str], fallback_goal: str,
-) -> Invocation:
+def parse_invocation(payload: Mapping[str, object], *, environ: Mapping[str, str]) -> Invocation:
     """Resolve env > leading invocation flag > default and retain unknown leading flags.
 
     Unknown environment values do not override a valid invocation flag.  Unknown flags never enter
     the closed mode vocabulary, but remain visible to the doctor report instead of disappearing.
     """
-    tokens = invocation_args(payload).split()
+    args = invocation_args(payload)
+    matches = list(re.finditer(r"\S+", args))
+    tokens = [match.group() for match in matches]
     flags: dict[str, bool] = {}
     unknown: list[str] = []
     control_mode = "deliberative"
@@ -90,7 +91,7 @@ def parse_invocation(
             sources[mode] = "invocation"
         else:
             sources[mode] = "default"
-    goal = " ".join(tokens[index:]).strip() or fallback_goal
+    goal = args if index == 0 else (args[matches[index].start():] if index < len(matches) else "")
     return Invocation(goal, modes, sources, tuple(unknown), control_mode)
 
 

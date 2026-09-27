@@ -32,11 +32,19 @@ export interface Modes {
   cli_exec?: boolean;
 }
 
+export interface InvocationProvenance {
+  host: string;
+  interactive: boolean | null;
+  signal: string;
+  delegation: boolean;
+}
+
 export interface StartRunCommand {
   type: "StartRun";
   control_mode?: "auto" | "deliberative";
   selector: RunSelector;
   goal: string;
+  invocation?: InvocationProvenance;
   budgets?: Budgets;
   modes?: Modes;
 }

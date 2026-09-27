@@ -26,12 +26,13 @@ import { type Result } from "../src/contract.ts";
 
 const SEL = { project: "p", session: "s" };
 const RID = "rid-1";
+const INVOCATION = { host: "pi", interactive: true, signal: "ctx.mode=tui", delegation: false };
 const RUN = { id: "h", status: "active" as const };
 
 // --- request builder semantics (omission/default — schema cannot prove) -----
 
 test("startRunRequest omits budgets and modes when not supplied (omission semantics)", () => {
-  const req = startRunRequest(SEL, "g", RID);
+  const req = startRunRequest(SEL, "g", RID, INVOCATION);
   if (req.command.type === "StartRun") {
     assert.equal("budgets" in req.command, false, "budgets must be absent, not undefined");
     assert.equal("modes" in req.command, false, "modes must be absent, not undefined");
@@ -39,7 +40,7 @@ test("startRunRequest omits budgets and modes when not supplied (omission semant
 });
 
 test("startRunRequest carries budgets and modes only when supplied", () => {
-  const req = startRunRequest(SEL, "g", RID, {
+  const req = startRunRequest(SEL, "g", RID, INVOCATION, {
     maxPasses: 3, maxSpawns: 1, maxAuditSpawns: 2, modes: { cli_exec: true },
   });
   if (req.command.type === "StartRun") {
@@ -72,6 +73,10 @@ test("auto is explicit and orthogonal to operational modes", () => {
 
 test("parseModeFlags empty args yields empty modes and goal", () => {
   assert.deepEqual(parseModeFlags(""), { goal: "", modes: {}, unknownFlags: [] });
+});
+
+test("parseModeFlags preserves goal whitespace verbatim", () => {
+  assert.equal(parseModeFlags("  exact goal  ").goal, "  exact goal  ");
 });
 
 // --- gateFromDecision (table-driven) -----------------------------------------

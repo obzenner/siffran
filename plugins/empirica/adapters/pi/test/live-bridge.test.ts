@@ -32,6 +32,7 @@ try {
 }
 
 const SEL = { project: "live-pi", session: "smoke" };
+const INVOCATION = { host: "pi", interactive: true, signal: "ctx.mode=tui", delegation: false };
 const bridgeScript = join(process.cwd(), "bridge.py");
 const testRepo = mkdtempSync(join(tmpdir(), "empirica-pi-live-"));
 const testHome = join(testRepo, "home");
@@ -62,7 +63,7 @@ test("Pi raw edit and locked approval cross the actual private Python service", 
     };
   };
   const author = { provider: "anthropic", id: "claude-sonnet-4-6" };
-  const run = runOf(await dispatch(startRunRequest({ project: "pi-decisions", session: "real-private" }, "governed bridge test", "decision-start")));
+  const run = runOf(await dispatch(startRunRequest({ project: "pi-decisions", session: "real-private" }, "governed bridge test", "decision-start", INVOCATION)));
   runOf(await dispatch(observeActionRequest(run.id, { kind: "graph", payload: {
     root: "C0", claims: [{ id: "C0", text: "The supplied goal is achievable.", gating: true, kind: "ordinary" }], edges: [],
   } }, "decision-graph")));
@@ -118,7 +119,7 @@ test(
   "live bridge: StartRun with the exact profile creates a located v2 run",
   { skip: !pythonAvailable ? "python3 is missing" : false },
   async () => {
-    const response = await bridge(startRunRequest(SEL, "live bridge smoke", "live-1"));
+    const response = await bridge(startRunRequest(SEL, "live bridge smoke", "live-1", INVOCATION));
     assert.equal(response.protocol, "empirica/v2");
     assert.equal(response.request_id, "live-1");
     assert.equal(response.result.type, "Allow");

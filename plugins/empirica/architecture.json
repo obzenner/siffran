@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "description": "Empirica 2.0 target-state architecture policy. Inert internal config consumed by scripts/validate_empirica_architecture.py. Not a public contract. ADR 0053 re-establishes a measured finite runtime ceiling; composed into check-static.",
+  "description": "Empirica 2.0 target-state architecture policy. Inert internal config consumed by scripts/validate_empirica_architecture.py. Not a public contract. Composed into check-static by ADR 0053; line count is not a rule.",
   "runtime_roots": {
     "package_root": "plugins/empirica",
     "python_extension": ".py",
@@ -129,12 +129,7 @@
       "audit_ticket"
     ]
   },
-  "effective_runtime": {
-    "baseline": 9458,
-    "baseline_ref": "4257c8d",
-    "maximum": 10959,
-    "extensions": [".py", ".ts"]
-  },
+  "runtime_extensions": [".py", ".ts"],
   "thin_hooks": {
     "root": "hooks",
     "max_statements": 12,

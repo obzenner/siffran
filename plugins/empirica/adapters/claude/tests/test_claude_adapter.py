@@ -174,6 +174,27 @@ class StartRunTests(unittest.TestCase):
         _assert_valid(request)
         self.assertEqual(request["command"]["modes"], {"cli_exec": True})
 
+    def test_goal_is_verbatim_and_provenance_uses_env_then_transcript(self) -> None:
+        with TemporaryDirectory() as td:
+            transcript = Path(td) / "session.jsonl"
+            payload = _payload(command_args="  exact goal  ", transcript_path=str(transcript))
+            for entrypoint, interactive in (("cli", True), ("sdk-cli", False)):
+                transcript.write_text(json.dumps({"entrypoint": entrypoint}) + "\n", encoding="utf-8")
+                command = build_start_run_request(payload, environ={})["command"]
+                self.assertEqual(command["goal"], "  exact goal  ")
+                self.assertEqual(command["invocation"], {
+                    "host": "claude", "interactive": interactive,
+                    "signal": "transcript.entrypoint", "delegation": False})
+            unknown = build_start_run_request(_payload(command_args="goal"), environ={})["command"]
+            self.assertIsNone(unknown["invocation"]["interactive"])
+            self.assertEqual(unknown["invocation"]["signal"], "transcript.entrypoint unavailable")
+            for entrypoint, interactive in (("cli", True), ("sdk-cli", False), ("other", None)):
+                env = {"CLAUDE_CODE_ENTRYPOINT": entrypoint, "EMPIRICA_AUTO_DELEGATION": "1"}
+                provenance = build_start_run_request(payload, environ=env)["command"]["invocation"]
+                self.assertEqual(provenance["interactive"], interactive)
+                self.assertEqual(provenance["signal"], "CLAUDE_CODE_ENTRYPOINT")
+                self.assertTrue(provenance["delegation"])
+
     def test_missing_session_is_rejected_before_transport(self) -> None:
         with self.assertRaises(SelectorError):
             build_start_run_request({"cwd": "."}, correlation_id="bad", environ={})
@@ -348,13 +369,13 @@ class DispatchTests(unittest.TestCase):
 class ConfigureRunTests(unittest.TestCase):
     def test_mode_becomes_exact_configure_run(self) -> None:
         automatic = parse_invocation(
-            {"command_args": "--auto --cli-exec --multi-provider prove X"}, environ={}, fallback_goal="g",
+            {"command_args": "--auto --cli-exec --multi-provider prove X"}, environ={},
         )
         self.assertEqual(automatic.control_mode, "auto")
         self.assertTrue(automatic.modes["cli_exec"])
         self.assertTrue(automatic.modes["multi_provider"])
         invocation = parse_invocation(
-            {"command_args": "--cli-exec --multi-provider prove X"}, environ={}, fallback_goal="g",
+            {"command_args": "--cli-exec --multi-provider prove X"}, environ={},
         )
         request = build_configure_run_request("opaque-run", invocation.modes,
                                                correlation_id="configure-1")

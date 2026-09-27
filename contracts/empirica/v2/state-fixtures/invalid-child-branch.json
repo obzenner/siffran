@@ -2,6 +2,7 @@
   "protocol": "empirica/v2",
   "state_schema": "empirica.run/2",
   "goal": "Prove child branch shape is rejected by schema.",
+  "invocation": {"host": "test", "interactive": true, "signal": "fixture", "delegation": false},
   "status": "active",
   "modes": {
     "multi_provider": false,

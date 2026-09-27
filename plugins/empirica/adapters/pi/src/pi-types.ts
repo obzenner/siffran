@@ -14,6 +14,7 @@ export interface UiContext {
 export interface ExtensionContext {
   ui: UiContext;
   hasUI?: boolean;
+  mode?: "tui" | "rpc" | "print" | "json";
   cwd?: string;
   model?: { id: string; provider: string };
   modelRegistry?: {

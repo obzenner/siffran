@@ -138,6 +138,27 @@ class HookNativeBehaviorTests(unittest.TestCase):
         self.assertIn("empirica_read", context)
         self.assertIn("report_convergence", context)
 
+    def test_refused_start_blocks_expansion_with_operator_visible_reason(self) -> None:
+        from adapters.claude import lifecycle
+
+        for code_value in ("run.goal_required", "governance.auto_invocation_required"):
+            response = {"protocol": "empirica/v2", "request_id": "r", "result": {
+                "type": "Block", "converged": False,
+                "reasons": [{"code": code_value, "message": "remedy text"}],
+            }}
+            output = io.StringIO()
+            with self.subTest(code=code_value), \
+                 patch.object(lifecycle, "_payload", return_value={}), \
+                 patch.object(lifecycle, "dispatch_start_run", return_value=response), \
+                 patch.object(lifecycle, "_governance_context") as governance, \
+                 redirect_stdout(output):
+                self.assertEqual(lifecycle.run_start_main(), 0)
+                value = json.loads(output.getvalue())
+                self.assertEqual(value["decision"], "block")
+                self.assertIn("remedy text", value["reason"])
+                self.assertNotIn("hookSpecificOutput", value)
+                governance.assert_not_called()
+
     def test_spawn_non_launch_is_inert(self) -> None:
         code, out, err = _run("spawn_gate.py",
                               _payload(tool_name="Agent", tool_input={"action": "list"}),
@@ -235,7 +256,8 @@ class IsolatedHookResolutionTests(unittest.TestCase):
 
     def _start_active(self, session: str = "session-a") -> None:
         code, _out, err = self._run(
-            "run_start.py", self._event(session, str(self.repo), command_name="empirica:empirica"),
+            "run_start.py", self._event(session, str(self.repo), command_name="empirica:empirica",
+                                         command_args="test lifecycle"),
             self.repo)
         self.assertEqual((code, err), (0, ""))
 
