@@ -96,7 +96,7 @@ def _fill_child(launch: Launch, session: Path) -> None:
             if row is None:
                 launch.malformed_child_lines += 1
                 continue
-            if (model := _model(row)) and model not in models:
+            if (model := _model(row)) and model != "<synthetic>" and model not in models:
                 models.append(model)
             if any(isinstance(item, dict) and item.get("type") == "tool_use"
                    and item.get("name") == "SubagentHandback" for item in _content(row)):

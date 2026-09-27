@@ -324,13 +324,9 @@ class Coordinator:
                 return self._block_from_snapshot(snapshot, request_id, "investigation.required")
             same_key = [a for a in snapshot.history if a.get("kind") == kind and (
                 (kind == "audit_verdict" and a.get("child_id") == child_id) or
-                (kind == "attribution" and (
-                    (payload.get("subject_kind") == "auditor"
-                     and a.get("subject_kind") == "auditor"
-                     and a.get("child_id") == payload.get("child_id")) or
-                    (payload.get("subject_kind") == "covered_actor"
-                     and a.get("subject_kind") == "covered_actor"
-                     and a.get("covered_artifact_ids") == payload.get("covered_artifact_ids")))))]
+                (kind == "attribution" and payload.get("subject_kind") == "auditor"
+                 and a.get("subject_kind") == "auditor"
+                 and a.get("child_id") == payload.get("child_id")))]
             if same_key:
                 if same_key[-1]["artifact_id"] == planned_artifact["artifact_id"]:
                     return self._inert_with_run(request_id, snapshot)

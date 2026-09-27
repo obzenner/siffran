@@ -22,29 +22,6 @@ from assertions import (  # noqa: E402
 class AuditTests(ConformanceCase):
     GOAL = "Prove audit independence and coverage."
 
-    def test_covered_actor_attribution_requires_complete_active_evidence_set(self):
-        drv = self.bind_driver(
-            "D11", "attribution-complete-coverage",
-            "Covered actor identity must bind every current approved evidence artifact")
-        run_id = self.start_run(drv, goal=self.GOAL)
-        scope = self.require_audit_scope(drv, run_id)
-        second = self.dispatch(drv, observe_action(
-            run_id=run_id, action=action_research(
-                claim_id=scope["root_id"], source_kind="web", result="supports",
-                payload={"source_ref": "https://example.test/second"})))
-        artifacts = second["result"]["run"]
-        self.assertIsInstance(artifacts, dict)
-        child_id = self.require_pending_audit_child(drv, run_id)
-        partial = build_attribution_payload(
-            subject_kind="covered_actor", subject_id="author", child_id=None,
-            provider_id="p1", model_id="m1", observed_by="host",
-            covered_artifact_ids=[scope["c0_artifact_id"]])
-        response = drv.trusted_attribution(run_id, partial)
-        self.assertEqual(response["result"]["type"], "Fault")
-        self.assertEqual(response["result"]["code"], "conflict")
-        # The pending audit remains open; malformed coverage cannot establish independence.
-        self.assert_child_summary(response["result"]["run"], child_id, state="pending")
-
     def test_malformed_private_attribution_fails_closed_without_persistence(self):
         drv = self.bind_driver(
             "D11", "trusted-attribution-schema",
@@ -285,9 +262,6 @@ class AuditTests(ConformanceCase):
         rows = {claim["claim_id"]: claim for claim in after["claims"]}
         self.assertEqual(rows[expanded["root"]]["state"], "approved")
         self.assertFalse(rows["C1"]["gating"])
-        pending = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
-        self.assert_block_only(pending, ["governance.revision_required"])
-        self.require_governance_approved(drv, run_id)
         stale = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
         self.assert_block_only(stale, ["audit.failed"])
 
@@ -315,17 +289,17 @@ class AuditTests(ConformanceCase):
                                                             scope_review="pass")
                 resp_v = drv.trusted_audit_verdict(run_id, child_id, payload)
                 self.assert_valid_response(resp_v)
-                self.assert_block_only(resp_v, ["governance.revision_required"])
-                self.assert_child_summary(resp_v["result"]["run"], child_id, state="pending")
-                # Rejected identity cannot become an admitted independence witness.
+                self.assertEqual(resp_v["result"]["type"], "Allow")
+                self.assert_child_summary(resp_v["result"]["run"], child_id, state="completed")
+                expected_reason = ("audit.same_model" if variant == "same_model"
+                                   else "audit.independence_unverified")
+                expected_independence = "same_model" if variant == "same_model" else "unverified"
                 arg = self.assert_argument_view(
                     self.dispatch(drv, get_argument(run_id=run_id))["result"])
-                self.assert_audit_view(arg, independence="unverified")
-                self.assertEqual(arg["audit"]["state"], "pending")
-                # Evaluate exact sole matching public reason (no set-of-reasons
-                # shortcut); failed independence leaves the run active.
+                self.assert_audit_view(arg, independence=expected_independence)
+                self.assertEqual(arg["audit"]["state"], "passed")
                 ev = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
-                result = self.assert_block_only(ev, ["governance.revision_required"])
+                result = self.assert_block_only(ev, [expected_reason])
                 self.assert_status(result["run"], "active")
 
     # 34 — Same-model/unverified can Block per public reasons; never upgraded by author input
@@ -350,8 +324,14 @@ class AuditTests(ConformanceCase):
                                                             scope_review="pass")
                 resp_v = drv.trusted_audit_verdict(run_id, child_id, payload)
                 self.assert_valid_response(resp_v)
-                self.assert_block_only(resp_v, ["governance.revision_required"])
-                self.assert_child_summary(resp_v["result"]["run"], child_id, state="pending")
+                self.assertEqual(resp_v["result"]["type"], "Allow")
+                self.assert_child_summary(resp_v["result"]["run"], child_id, state="completed")
+                expected_reason = ("audit.same_model" if variant == "same_model"
+                                   else "audit.independence_unverified")
+                expected_independence = "same_model" if variant == "same_model" else "unverified"
+                before_gate = self.dispatch(
+                    drv, evaluate(run_id=run_id, intent="report_convergence"))
+                self.assert_block_only(before_gate, [expected_reason])
                 # Snapshot before author attempt.
                 snap_before = self.snapshot_run_state(drv, run_id)
                 arg_before = self.assert_argument_view(
@@ -377,11 +357,11 @@ class AuditTests(ConformanceCase):
                                  "ArgumentView must be unchanged after author attempt")
                 # Exact subsequent audit projection: independence remains the original value,
                 # never upgraded to decorrelated.
-                self.assert_audit_view(arg_after, independence="unverified")
-                self.assertEqual(arg_after["audit"]["state"], "pending")
-                # Governance remains revoked after the author forgery attempt.
+                self.assert_audit_view(arg_after, independence=expected_independence)
+                self.assertEqual(arg_after["audit"]["state"], "passed")
+                # The exact independence failure persists after the forgery attempt.
                 ev = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
-                self.assert_block_only(ev, ["governance.revision_required"])
+                self.assert_block_only(ev, [expected_reason])
 
     def test_independence_is_bound_to_verdict_child_and_reaudit_can_replace_it(self):
         drv = self.bind_driver(

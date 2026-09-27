@@ -174,12 +174,10 @@
     "fail"
   ],
   "attribution_subject_kinds": [
-    "covered_actor",
     "auditor"
   ],
   "attribution_observers": [
-    "host",
-    "configuration"
+    "host"
   ],
   "audit_verdicts": [
     "pass",
@@ -1367,6 +1365,20 @@
         "governance"
       ],
       "message": "The submitted control and fields conflict. Nothing was approved; use one explicit decision path."
+    },
+    "audit.producers_mixed": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "child.spawn_auditor"
+      ],
+      "sections": [
+        "audit/independence"
+      ],
+      "message": "Covered evidence has mixed producer identities; audit independence fails closed."
     }
   },
   "sections": {
@@ -1752,7 +1764,7 @@
         },
         {
           "id": "trusted/ingress/replay",
-          "text": "child_event owns the terminal fingerprint, and a complete closed-bound audit_verdict (scope, coverage, and content) is its replay identity; an identical replay of either returns the exact Inert unchanged, and a conflicting terminal or verdict replay returns the exact Fault unchanged; this section statically requires those facts and canonical clauses only and adds no persisted replay machine — real idempotent and fault replay semantics are exercised by D4 bound-SUT cases, not by independent one-request fixtures, and D4 proves this behavior."
+          "text": "child_event owns the terminal fingerprint, and a complete closed-bound audit_verdict (scope, coverage, and content) is its replay identity; an identical replay of either returns the exact Inert unchanged, and a conflicting terminal or verdict replay returns the exact Fault unchanged; this section statically requires those facts and canonical clauses only and adds no persisted replay machine \u2014 real idempotent and fault replay semantics are exercised by D4 bound-SUT cases, not by independent one-request fixtures, and D4 proves this behavior."
         },
         {
           "id": "trusted/ingress/attribution",
@@ -1760,7 +1772,7 @@
         },
         {
           "id": "trusted/ingress/audit_atomic",
-          "text": "An audit_verdict is the trusted host-observed completion bound from a previously pending audit child; it atomically admits the verdict and the terminal child result, its child_id resolves to exactly one audit-purpose completed child, and its reviewed_claims cover exactly the current approved gating claims in canonical ArgumentView order — deferred claims are never included."
+          "text": "An audit_verdict is the trusted host-observed completion bound from a previously pending audit child; it atomically admits the verdict and the terminal child result, its child_id resolves to exactly one audit-purpose completed child, and its reviewed_claims cover exactly the current approved gating claims in canonical ArgumentView order \u2014 deferred claims are never included."
         },
         {
           "id": "trusted/ingress/evidence_sealed",
@@ -1901,7 +1913,7 @@
       }
     },
     "confirmation": {
-      "title": "FINAL CONFIRMATION — Your edits are saved, NOT approved. Confirm the exact values below; configuration is read-only.",
+      "title": "FINAL CONFIRMATION \u2014 Your edits are saved, NOT approved. Confirm the exact values below; configuration is read-only.",
       "actions": [
         "approve",
         "decline"

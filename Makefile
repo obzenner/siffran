@@ -42,6 +42,7 @@ EMPIRICA_STATE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_state_adapter.py
 EMPIRICA_GIT_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/git/tests/test_git_artifact_repo.py
 EMPIRICA_GIT_IO_BOOTSTRAP_TESTS := $(PLUGINS_DIR)/empirica/adapters/git/tests/test_git_io_bootstrap.py
 EMPIRICA_GOVERNANCE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_governance.py
+EMPIRICA_IDENTITY_TESTS := $(PLUGINS_DIR)/empirica/tests/test_identity.py
 EMPIRICA_CLAUDE_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/claude/tests/test_claude_adapter.py
 EMPIRICA_CLAUDE_ADAPTER_CONFORMANCE_TESTS := $(PLUGINS_DIR)/empirica/adapters/claude/tests/test_claude_adapter_conformance.py
 EMPIRICA_CODEX_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/codex/tests/test_codex_adapter.py
@@ -100,6 +101,7 @@ check-core: ## Fast host-neutral contracts, malformed input, state, bridge, and 
 	@$(PYTHON) $(EMPIRICA_LOCATION_TESTS)
 	@$(PYTHON) $(EMPIRICA_PUBLIC_TOOLS_TESTS)
 	@$(PYTHON) $(EMPIRICA_AUDIT_PROTOCOL_TESTS)
+	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_IDENTITY_TESTS)
 	@$(PYTHON) $(EMPIRICA_STATE_TESTS)
 	@$(PYTHON) $(METHODOLOGIST_CORE_TESTS)
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q \
@@ -109,6 +111,8 @@ check-core: ## Fast host-neutral contracts, malformed input, state, bridge, and 
 		test_governance.GovernanceServiceTests.test_configure_run_schema_rejects_reviewer_field \
 		test_governance.GovernanceServiceTests.test_auto_explicit_cannot_raise_ceiling_and_graph_does_not_change_digest \
 		test_governance.GovernanceServiceTests.test_distinct_bound_audit_converges_with_raw_alias_provenance \
+		test_governance.GovernanceServiceTests.test_same_class_reviewer_across_bedrock_spelling_is_blocked \
+		test_governance.GovernanceServiceTests.test_mixed_covered_producers_are_blocked \
 		test_governance.GovernanceServiceTests.test_graphless_configure_and_private_present_are_effect_free_blocks \
 		test_governance.GovernanceServiceTests.test_bootstrap_graphless_convergence_is_preparation_not_human_wait \
 		test_governance.GovernanceServiceTests.test_bootstrap_contract_examples_have_real_postconditions \

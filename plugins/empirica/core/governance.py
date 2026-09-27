@@ -15,18 +15,6 @@ PROPOSAL_INTERACTIONS = 3
 CEILINGS = {"max_passes": "passes_used", "max_spawns": "spawns_used",
             "max_audit_spawns": "audit_spawns_used"}
 
-# Selected concrete spellings from Anthropic model pages and their Bedrock column. No family/latest aliases or inference-profile ARN guessing.
-# https://platform.claude.com/docs/en/about-claude/models/overview
-_MODEL_IDS = {
-    "claude-opus-4-8": "claude-opus-4-8",
-    "claude-fable-5-1": "claude-fable-5-1",
-    "claude-opus-5-5": "claude-opus-5-5",
-    "claude-sonnet-5": "claude-sonnet-5",
-    "claude-haiku-4-5-20251001": "claude-haiku-4-5-20251001-v1:0",
-    "claude-sonnet-4-6": "claude-sonnet-4-6",
-    "claude-opus-4-6": "claude-opus-4-6-v1",
-}
-
 
 def plain(value: Any) -> Any:
     if isinstance(value, Mapping):
@@ -40,27 +28,6 @@ def canonical_digest(value: object) -> str:
     return "sha256:" + hashlib.sha256(json.dumps(
         plain(value), sort_keys=True, separators=(",", ":"), ensure_ascii=True,
     ).encode()).hexdigest()
-
-
-def normalized_model_identity(provider_id: object, model_id: object) -> str | None:
-    if not isinstance(provider_id, str) or not isinstance(model_id, str):
-        return None
-    if provider_id == "anthropic" and model_id in _MODEL_IDS:
-        return model_id
-    if provider_id in {"bedrock", "amazon-bedrock", "amazon-bedrock-eu",
-                       "amazon-bedrock-us", "amazon-bedrock-global"}:
-        for canonical, wire in _MODEL_IDS.items():
-            if model_id in {prefix + "anthropic." + wire for prefix in ("", "us.", "eu.", "global.", "apac.")}:
-                return canonical
-    # Concrete dated OpenAI snapshots only; exact IDs, never moving aliases.
-    if provider_id == "openai" and model_id in {
-            "gpt-4.1-2025-04-14", "gpt-4.1-mini-2025-04-14", "gpt-4o-2024-08-06"}:
-        return "openai/" + model_id
-    return None
-
-
-def model_key(row: Mapping[str, Any] | None) -> str | None:
-    return normalized_model_identity(row.get("provider_id"), row.get("model_id")) if row else None
 
 
 def canonical_graph(graph: Mapping[str, Any] | None) -> dict | None:

@@ -10,12 +10,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from application.v2 import compose
 from application.run_state import classify_and_decode
 from application.snapshot import traverse_history
-from core.governance import model_key
 from test_d7_transactions import Runs, Artifacts, Workspace, Harness
 
 PROFILE = "pi@0.84.1+pi-subagents@0.50.0"
-AUTHOR = {"provider_id": "anthropic", "model_id": "claude-sonnet-4-6"}
-AUDITOR = {"provider_id": "anthropic", "model_id": "claude-opus-4-6"}
+AUTHOR = {"identity": "anthropic/claude-sonnet-4-6", "provider_id": "anthropic",
+          "model_id": "claude-sonnet-4-6", "policy_version": "model-identity/1",
+          "source": "test-host", "observed_by": "host"}
+AUDITOR = {"identity": "anthropic/claude-opus-4-6", "provider_id": "anthropic",
+           "model_id": "claude-opus-4-6", "policy_version": "model-identity/1",
+           "source": "test-host", "observed_by": "host"}
 GRAPH = {"root": "C0", "claims": [{"id": "C0", "text": "supplied uncertainty", "gating": True,
                                    "kind": "ordinary"}], "edges": []}
 CONTEXT = {"author": AUTHOR, "ingress": "pi_ui"}
@@ -273,6 +276,7 @@ class GovernanceServiceTests(unittest.TestCase):
     def audit_ready(self):
         from governance_setup import approve_current
         from adapters.audit_protocol import AuditProtocol
+        from adapters.identity import observe
         self.prepare()
         approve_current(self.service._coordinator, self.run_id)
         self.assertEqual(self.action("investigate")["type"], "Allow")
@@ -281,31 +285,77 @@ class GovernanceServiceTests(unittest.TestCase):
         c = self.service._coordinator
         protocol = AuditProtocol(PROFILE, dispatch=lambda r, _p: self.service.dispatch(r),
             child_event_ingress=lambda _p, r, ch, v: c.trusted_child_event(r, ch, v),
-            attribution_ingress=lambda _p, r, v: c.trusted_attribution(r, v),
+            attribution_ingress=lambda _p, r, v: c.trusted_attribution(
+                r, {**v, **observe(v.get("provider_id"), v.get("model_id"), source=v["source"]),
+                    "observed_by": "host"}),
             verdict_ingress=lambda _p, r, ch, v: c.trusted_audit_verdict(r, ch, v),
             plan_ingress=lambda _p, r, ch: c.trusted_audit_plan(r, ch))
         plan = protocol.prepare(self.run_id, role_profile="empirica:empirica-auditor")
         protocol.observe_started(plan, "native-test")
         return protocol, plan
 
-    def test_distinct_bound_audit_converges_with_raw_alias_provenance(self):
+    def finish_audit(self, protocol, plan, provider, model):
         from adapters.audit_protocol import IdentityObservation
         from core.evaluation import audit_binding
-        protocol, plan = self.audit_ready()
-        protocol.observe_identities(plan, "native-test",
-            author=IdentityObservation("anthropic", AUTHOR["model_id"], "host", "test-host"),
-            auditor=IdentityObservation("bedrock", "eu.anthropic.claude-opus-4-6-v1", "host", "test-host"))
+        protocol.observe_reviewer(plan, "native-test",
+            auditor=IdentityObservation(provider, model, "test-host"))
         c = self.service._coordinator
         key = next(iter(self.runs.data))
         state = classify_and_decode(self.runs.data[key].value).state
         snapshot = c._assemble(key, state, {"type": "GetArgument", "run_id": self.run_id}, require_graph=True)
-        verdict = {"verdict": "pass", "findings": ["bound distinct-model audit"], **audit_binding(snapshot)}
+        verdict = {"verdict": "pass", "findings": ["bound audit"], **audit_binding(snapshot)}
         self.assertTrue(protocol.observe_verdict(plan, "native-test", verdict))
-        result = self.request({"type": "EvaluateRun", "run_id": self.run_id, "intent": "report_convergence"})
+        return self.request({"type": "EvaluateRun", "run_id": self.run_id,
+                             "intent": "report_convergence"})
+
+    def test_distinct_bound_audit_converges_with_raw_alias_provenance(self):
+        protocol, plan = self.audit_ready()
+        result = self.finish_audit(
+            protocol, plan, "bedrock", "eu.anthropic.claude-opus-4-6-v1")
         self.assertTrue(result["converged"], result)
+        key = next(iter(self.runs.data))
         history = traverse_history(classify_and_decode(self.runs.data[key].value).state,
                                    self.artifacts.read(key))
         self.assertTrue(any(a.get("model_id") == "eu.anthropic.claude-opus-4-6-v1" for a in history))
+        research = next(a for a in history if a.get("kind") == "research")
+        self.assertEqual(research["producer"]["identity"], AUTHOR["identity"])
+
+    def test_same_class_reviewer_across_bedrock_spelling_is_blocked(self):
+        protocol, plan = self.audit_ready()
+        result = self.finish_audit(
+            protocol, plan, "bedrock", "eu.anthropic.claude-sonnet-4-6")
+        self.assertEqual(result["type"], "Block")
+        self.assertEqual(result["reasons"][0]["code"], "audit.same_model")
+
+    def test_mixed_covered_producers_are_blocked(self):
+        from governance_setup import approve_current
+        from adapters.audit_protocol import AuditProtocol
+        from adapters.identity import observe
+        self.prepare()
+        approve_current(self.service._coordinator, self.run_id)
+        self.assertEqual(self.action("investigate")["type"], "Allow")
+        self.assertEqual(self.action("research", claim_id="C0", source_kind="code", result="supports",
+                                    payload={"source_ref": "first", "citation": "first observer"})["type"], "Allow")
+        context = {"author": AUDITOR, "ingress": "pi_ui"}
+        self.assertIn(self.service.trusted_governance_context(
+            run_id=self.run_id, payload=context)["result"]["type"], {"Allow", "Inert"})
+        self.assertEqual(self.action("research", claim_id="C0", source_kind="code", result="supports",
+                                    payload={"source_ref": "second", "citation": "second observer"})["type"], "Allow")
+        c = self.service._coordinator
+        protocol = AuditProtocol(PROFILE, dispatch=lambda r, _p: self.service.dispatch(r),
+            child_event_ingress=lambda _p, r, ch, v: c.trusted_child_event(r, ch, v),
+            attribution_ingress=lambda _p, r, v: c.trusted_attribution(
+                r, {**v, **observe(v.get("provider_id"), v.get("model_id"), source=v["source"]),
+                    "observed_by": "host"}),
+            verdict_ingress=lambda _p, r, ch, v: c.trusted_audit_verdict(r, ch, v),
+            plan_ingress=lambda _p, r, ch: c.trusted_audit_plan(r, ch))
+        fresh = protocol.prepare(self.run_id, role_profile="empirica:empirica-auditor")
+        protocol.observe_started(fresh, "native-test-2")
+        result = self.finish_audit(protocol, fresh, "xai", "grok-4-20260101")
+        argument = self.request({"type": "GetArgument", "run_id": self.run_id})
+        self.assertEqual(argument["type"], "Allow")
+        self.assertEqual(argument["argument"]["audit"]["independence"], "unverified")
+        self.assertEqual(result["reasons"][0]["code"], "audit.producers_mixed")
 
 
 
@@ -458,11 +508,6 @@ class GovernanceServiceTests(unittest.TestCase):
             rendered = self.view()["governance"]["review_text"]
             self.assertIn("| ", rendered)
             self.assertNotIn("\u0000", rendered)
-
-    def test_exact_model_normalization_unknown_never_decorrelates(self):
-        self.assertEqual(model_key(AUTHOR), model_key({"provider_id": "bedrock", "model_id": "eu.anthropic.claude-sonnet-4-6"}))
-        self.assertNotEqual(model_key(AUTHOR), model_key(AUDITOR))
-        self.assertIsNone(model_key({"provider_id": "other", "model_id": "latest"}))
 
 
 if __name__ == "__main__":

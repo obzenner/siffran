@@ -49,6 +49,7 @@ export function identityFromSessionJsonl(
   expectedVerdict: Record<string, unknown>,
 ): ObservedChildIdentity | null {
   const assistantMessages: Array<Record<string, unknown>> = [];
+  const served = new Set<string>();
   const verdictMessages: Array<{
     message: Record<string, unknown>;
     verdict: Record<string, unknown>;
@@ -70,11 +71,15 @@ export function identityFromSessionJsonl(
     const message = candidate as Record<string, unknown>;
     if (message.role !== "assistant") continue;
     assistantMessages.push(message);
+    if (typeof message.provider === "string" && message.provider.trim()
+        && typeof message.model === "string" && message.model.trim()
+        && message.model !== "<synthetic>")
+      served.add(`${message.provider}\u0000${message.model}`);
     const verdict = verdictFromText(messageText(message.content));
     if (verdict) verdictMessages.push({ message, verdict });
   }
 
-  if (assistantMessages.length === 0 || verdictMessages.length !== 1) return null;
+  if (assistantMessages.length === 0 || verdictMessages.length !== 1 || served.size !== 1) return null;
   const observed = verdictMessages[0];
   if (observed.message !== assistantMessages.at(-1)) return null;
   if (!isDeepStrictEqual(observed.verdict, expectedVerdict)) return null;

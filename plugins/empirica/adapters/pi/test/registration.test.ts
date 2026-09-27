@@ -39,10 +39,11 @@ test("does NOT register removed commands", () => {
   assert.equal(pi.commands.get("report-convergence"), undefined);
 });
 
-test("registers tool_call and tool_result for gating and bound audit", () => {
+test("registers tool, reviewer, and model observation lifecycle hooks", () => {
   const pi = register();
   assert.equal(typeof pi.handlers.get("tool_call"), "function");
   assert.equal(typeof pi.handlers.get("tool_result"), "function");
+  assert.equal(typeof pi.handlers.get("model_select"), "function");
   assert.equal(pi.handlers.get("agent_settled"), undefined);
 });
 

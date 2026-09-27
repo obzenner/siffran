@@ -101,6 +101,14 @@ test("fails closed when more than one assistant message contains a verdict", () 
   assert.equal(identityFromSessionJsonl(transcript, VERDICT), null);
 });
 
+test("fails closed when fallback attempts served more than one model", () => {
+  const transcript = [
+    assistant("first attempt", "provider", "model-a"),
+    assistant(BLOCK, "provider", "model-b"),
+  ].join("\n");
+  assert.equal(identityFromSessionJsonl(transcript, VERDICT), null);
+});
+
 test("fails closed without native provider and model facts", () => {
   assert.equal(identityFromSessionJsonl(assistant(BLOCK, null), VERDICT), null);
   assert.equal(identityFromSessionJsonl(assistant(BLOCK, "provider", ""), VERDICT), null);

@@ -66,6 +66,11 @@ class SubagentModelTests(unittest.TestCase):
                                                _assistant("m1", [])])})
         self.assertEqual(tool.launches(session)[0].served_models, ["m1", "m2"])
 
+    def test_synthetic_child_model_is_not_reported(self) -> None:
+        session = self._session("synthetic", [_assistant("main", [_agent_call("t1", "x")])],
+                                {"a1": ("t1", [_assistant("<synthetic>", [])])})
+        self.assertEqual(tool.launches(session)[0].served_models, [])
+
     def test_filters_and_fixed_depth_scan(self) -> None:
         self._session("s3", [_assistant("m", [_agent_call("t1", "empirica:empirica-auditor"),
                                                 _agent_call("t2", "other", "haiku")])], {})

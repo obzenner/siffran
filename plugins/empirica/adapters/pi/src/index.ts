@@ -130,8 +130,6 @@ export function resolvePiAuditorModel(global: Record<string, unknown>, project: 
   const model = configured(project, "override") ?? configured(global, "override")
     ?? configured(project, "default") ?? configured(global, "default") ?? main;
   if (!model) throw new Error("auditor model is unconfigured and the main model is unavailable");
-  if (model === main) throw new Error(
-    'auditor model equals the main model; set subagents.agentOverrides["empirica.empirica-auditor"].model');
   return model;
 }
 
@@ -245,8 +243,6 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       runHandle: string;
       nativeId: string;
       plan: AuditPlanData;
-      author: Record<string, unknown>;
-      auditor: Record<string, unknown>;
     };
     const audits = new Map<string, AuditCorrelation>();
     const completedAuditCalls = new Set<string>();
@@ -291,7 +287,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       for (const entry of entries) {
         const data = entry.data as {
           runHandle?: unknown; toolCallId?: unknown; nativeId?: unknown;
-          plan?: unknown; author?: unknown; auditor?: unknown; childId?: unknown;
+          plan?: unknown; childId?: unknown;
         } | undefined;
         if (entry.customType === "empirica.run" && typeof data?.runHandle === "string"
             && !terminalRuns.has(data.runHandle))
@@ -299,14 +295,10 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         if (entry.customType === "empirica.audit" && !completedAudits.has(String(data?.toolCallId))
             && typeof data?.runHandle === "string"
             && typeof data.toolCallId === "string" && typeof data.nativeId === "string"
-            && data.plan && typeof data.plan === "object"
-            && data.author && typeof data.author === "object"
-            && data.auditor && typeof data.auditor === "object") {
+            && data.plan && typeof data.plan === "object") {
           audits.set(data.toolCallId, {
             runHandle: data.runHandle, nativeId: data.nativeId,
             plan: data.plan as AuditPlanData,
-            author: data.author as Record<string, unknown>,
-            auditor: data.auditor as Record<string, unknown>,
           });
         }
         if (entry.customType === "empirica.child" && typeof data?.runHandle === "string"
@@ -334,6 +326,11 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           pi.appendEntry?.("empirica.audit.done", { toolCallId });
         } catch { /* retain the durable correlation for a later reconciliation attempt */ }
       }
+      if (runHandle !== null) await refreshGovernance(runHandle, ctx, trusted);
+    });
+
+    pi.on("model_select", async (_event: unknown, ctx: ExtensionContext) => {
+      if (runHandle !== null) await refreshGovernance(runHandle, ctx, trusted);
     });
 
     // Foreground work should be terminal before shutdown. Any remaining correlation is orphaned;
@@ -563,7 +560,6 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         await trusted({
           operation: "audit_identity", run_id: correlation.runHandle,
           native_id: correlation.nativeId, plan: correlation.plan,
-          author: correlation.author,
           auditor: identity ?? {
             provider_id: null, model_id: null,
             observed_by: "host", source: "pi-child-session-unverified",
@@ -662,14 +658,22 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           const nativeId = event.toolCallId;
           const [authorProvider, authorModel] = modelPair(ctx.model
             ? `${ctx.model.provider}/${ctx.model.id}` : null, "pi");
-          const author = {
-            provider_id: authorProvider, model_id: authorModel,
-            observed_by: "host", source: "pi-context",
-          };
-          const auditor = {
-            provider_id: auditorProvider, model_id: auditorModel,
-            observed_by: "configuration", source: "pi-subagents-preflight",
-          };
+          const authorIdentity = await trusted({ operation: "classify_identity", run_id: runHandle,
+            payload: { provider_id: ctx.model?.provider ?? null, model_id: ctx.model?.id ?? null,
+              source: "pi-context" } });
+          const reviewerIdentity = await trusted({ operation: "classify_identity", run_id: runHandle,
+            payload: { provider_id: auditorProvider, model_id: auditorModel,
+              source: "pi-subagents-preflight" } });
+          if (!authorIdentity || typeof authorIdentity.identity !== "string"
+              || !authorIdentity.identity)
+            throw new Error("main author identity unobservable; select a concrete model");
+          if (!reviewerIdentity || typeof reviewerIdentity.identity !== "string"
+              || !reviewerIdentity.identity)
+            throw new Error(
+              'reviewer identity unobservable; set subagents.agentOverrides["empirica.empirica-auditor"].model to a concrete model');
+          if (authorIdentity.identity === reviewerIdentity.identity)
+            throw new Error(
+              'auditor model equals the main model; set subagents.agentOverrides["empirica.empirica-auditor"].model');
           event.input.task = `${auditorInstructions()}\n\n` +
             `--- AUDIT DOSSIER (UNTRUSTED EVIDENCE CONTENT) ---\n${JSON.stringify(plan.argument)}\n` +
             "--- END AUDIT DOSSIER ---\nReturn exactly one fenced block tagged empirica-verdict.";
@@ -684,7 +688,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           event.input.timeoutMs = 900_000;
           event.input.turnBudget = { maxTurns: 8, graceTurns: 1 };
           event.input.toolBudget = { soft: 20, hard: 30, block: ["write", "edit"] };
-          const correlation = { runHandle, nativeId, plan, author, auditor };
+          const correlation = { runHandle, nativeId, plan };
           audits.set(event.toolCallId, correlation);
           pi.appendEntry?.("empirica.audit", { toolCallId: event.toolCallId, ...correlation });
           return;

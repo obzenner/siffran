@@ -20,7 +20,7 @@ import type { PrivateIngressRequest } from "../src/private-transport.ts";
 
 const HANDLE = "run-handle-1";
 
-test("Pi auditor model follows host settings precedence and blocks the main model", () => {
+test("Pi auditor model follows host settings precedence; identity policy owns equivalence", () => {
   const global = { subagents: { agentOverrides: {
     "empirica.empirica-auditor": { model: "global/override" } }, defaultModel: "global/default" } };
   const project = { subagents: { agentOverrides: {
@@ -30,8 +30,7 @@ test("Pi auditor model follows host settings precedence and blocks the main mode
     "global/override");
   assert.equal(resolvePiAuditorModel({}, { subagents: { defaultModel: "project/default" } }, "main/model"),
     "project/default");
-  assert.throws(() => resolvePiAuditorModel({}, {}, "main/model"),
-    /subagents\.agentOverrides\["empirica\.empirica-auditor"\]\.model/);
+  assert.equal(resolvePiAuditorModel({}, {}, "main/model"), "main/model");
 });
 
 test("production Pi auditor resolver tries project then user scope", async () => {
@@ -101,6 +100,8 @@ interface Wired {
 function wire(
   responder: (req: Request) => Response,
   echoRequestId = true,
+  classify: (provider: unknown, model: unknown) => string | null =
+    (provider, model) => `${String(provider)}/${String(model)}`,
 ): Wired {
   const requests: Request[] = [];
   const privateRequests: PrivateIngressRequest[] = [];
@@ -120,6 +121,11 @@ function wire(
       if (request.operation === "governance_context") return { protocol: PROTOCOL,
         request_id: "trusted-governance", result: { type: "Inert", reason: "unsupported_host_event", run: run() } };
       privateRequests.push(request);
+      if (request.operation === "classify_identity") {
+        const payload = request.payload as { provider_id?: unknown; model_id?: unknown } | undefined;
+        const identity = classify(payload?.provider_id, payload?.model_id);
+        return identity === null ? null as unknown as Record<string, unknown> : { identity };
+      }
       if (request.operation === "audit_prepare") return {
         type: "audit_plan",
         plan: { child_id: "ch-1", role_profile: "empirica.empirica-auditor",
@@ -405,7 +411,8 @@ test("subagent: empty string task retains its existing accepted meaning", async 
   assert.equal(input.async, false);
   assert.match(String(input.task), /AUDIT DOSSIER/);
   assert.equal(w.auditResolutions.length, 1);
-  assert.deepEqual(w.privateRequests.map((request) => request.operation), ["audit_prepare"]);
+  assert.deepEqual(w.privateRequests.map((request) => request.operation),
+    ["audit_prepare", "classify_identity", "classify_identity"]);
 });
 
 test("subagent: canonical auditor is reserved, bound, attributed, and prompt-injected", async () => {
@@ -438,8 +445,32 @@ test("subagent: canonical auditor is reserved, bound, attributed, and prompt-inj
   assert.doesNotMatch(String(input.task), /AUTHOR_TASK_IS_NOT_AUTHORITY/);
   assert.equal(input.model, "bedrock/auditor-model");
   assert.equal(input.agentScope, "project");
-  assert.deepEqual(w.privateRequests.map((item) => item.operation), ["audit_prepare"]);
+  assert.deepEqual(w.privateRequests.map((item) => item.operation),
+    ["audit_prepare", "classify_identity", "classify_identity"]);
   assert.equal(w.pi.entries.at(-1)?.customType, "empirica.audit");
+});
+
+test("canonical auditor blocks equal normalized identity classes", async () => {
+  const child = { child_id: "ch-1", purpose: "audit", resource_class: "audit", state: "reserved" };
+  const w = wire(() => envelope({ type: "Allow", converged: false,
+    run: { ...run(), children: [child] } }), true, () => "same-class");
+  await startRun(w);
+  const decision = await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "same-class",
+    input: { agent: "empirica.empirica-auditor", task: "audit" } }, fakeCtx());
+  assert.equal(decision?.block, true);
+  assert.match(decision?.reason ?? "", /agentOverrides/);
+});
+
+test("canonical auditor clearly blocks a null reviewer identity classification", async () => {
+  const child = { child_id: "ch-1", purpose: "audit", resource_class: "audit", state: "reserved" };
+  const w = wire(() => envelope({ type: "Allow", converged: false,
+    run: { ...run(), children: [child] } }), true,
+    (_provider, model) => String(model).includes("auditor") ? null : "author-class");
+  await startRun(w);
+  const decision = await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "null-class",
+    input: { agent: "empirica.empirica-auditor", task: "audit" } }, fakeCtx());
+  assert.equal(decision?.block, true);
+  assert.match(decision?.reason ?? "", /reviewer identity unobservable/);
 });
 
 test("tool_result redacts before privately admitting the correlated verdict", async () => {
@@ -682,6 +713,8 @@ test("canonical auditor identity follows filesystem symlinks", async (t) => {
           role_profile: "empirica.empirica-auditor",
           operation_id: `sha256:${"b".repeat(64)}`,
           argument: { argument_digest: `sha256:${"a".repeat(64)}`, claims: [] } } }
+      : request.operation === "classify_identity"
+      ? { identity: String((request.payload as { model_id?: unknown })?.model_id) }
       : { type: "ok" },
     resolveAuditContract: async () => ({ agentFilePath: realAgent,
                                          model: "bedrock/auditor-model", agentScope: "project" }),

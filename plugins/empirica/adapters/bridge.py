@@ -53,6 +53,7 @@ from application import protocol as _proto  # noqa: E402
 from application import v2 as _v2  # noqa: E402
 from adapters.execution import FilesystemWorkspace, SubprocessSpikeHarness  # noqa: E402
 from adapters.git.artifact_repo import GitArtifactRepository  # noqa: E402
+from adapters.identity import POLICY_VERSION, observe  # noqa: E402
 from adapters.state.located import LocatedRunRepository  # noqa: E402
 
 _PROTOCOL = _proto._PROTOCOL
@@ -108,8 +109,23 @@ def build_service(profile_id: str):
     )
 
 
+def _identity(value: object) -> dict | None:
+    """Normalize one raw host observation at the common trusted ingress."""
+    if not isinstance(value, dict):
+        return None
+    provider, model, source = value.get("provider_id"), value.get("model_id"), value.get("source")
+    if not isinstance(source, str) or not source:
+        return None
+    observed = observe(provider, model, source=source)
+    if observed is not None:
+        return {**observed, "observed_by": "host"}
+    return {"identity": None, "provider_id": provider, "model_id": model,
+            "policy_version": POLICY_VERSION, "source": source, "observed_by": "host"}
+
+
 def trusted_governance_context(profile_id: str, run_id: str, payload: dict) -> dict:
-    return build_service(profile_id).trusted_governance_context(run_id=run_id, payload=payload)
+    normalized = {**payload, "author": _identity(payload.get("author"))}
+    return build_service(profile_id).trusted_governance_context(run_id=run_id, payload=normalized)
 
 
 def trusted_governance_decision(profile_id: str, run_id: str, payload: dict) -> dict:
@@ -143,7 +159,10 @@ def trusted_audit_verdict(profile_id: str, run_id: str, child_id: str, payload: 
 
 
 def trusted_attribution(profile_id: str, run_id: str, payload: dict) -> dict:
-    return build_service(profile_id).trusted_attribution(run_id=run_id, payload=payload)
+    normalized = {**payload, **(_identity(payload) or {
+        "identity": None, "policy_version": POLICY_VERSION, "observed_by": "host",
+    })}
+    return build_service(profile_id).trusted_attribution(run_id=run_id, payload=normalized)
 
 
 def handle(request: object, profile_id: str) -> dict:

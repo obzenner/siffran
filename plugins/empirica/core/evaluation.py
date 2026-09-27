@@ -43,6 +43,12 @@ def artifact(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
     return {"artifact_id": digest(body), "body": body}
 
 
+def _producer(state: OperationalState) -> dict[str, Any] | None:
+    """Copy the trusted current author observation without interpreting identity."""
+    author = state.governance.get("context", {}).get("author")
+    return _plain(author) if isinstance(author, Mapping) else None
+
+
 @dataclass(frozen=True)
 class EvaluationSnapshot:
     state: OperationalState
@@ -365,6 +371,7 @@ def plan_spike_request(snapshot: EvaluationSnapshot, action: Mapping[str, Any]) 
         "command": action["command"], "command_digest": digest(action["command"]),
         "dependent_files": sorted(action["dependent_files"]),
         "prerequisite_research_ids": [a["artifact_id"] for a in research],
+        "producer": _producer(state),
         "route_stamp": state.route_stamp, "investigation_stamp": state.investigation_stamp,
     })
     return _decision(snapshot, state, artifacts=(sealed,))
@@ -392,6 +399,7 @@ def plan_spike_result(snapshot: EvaluationSnapshot, request_body: Mapping[str, A
         "exit_code": facts.exit_code, "spike_gate": facts.gate.value,
         "outcome": "pass" if facts.exit_code == 0 else "fail",
         "supersedes": prior[-1]["artifact_id"] if prior else None,
+        "producer": _producer(state),
         "route_stamp": state.route_stamp, "investigation_stamp": state.investigation_stamp,
     })
     return _decision(snapshot, state, artifacts=(result,))
@@ -409,47 +417,34 @@ def covered_artifact_ids(snapshot: EvaluationSnapshot) -> list[str]:
 
 
 def valid_attribution(snapshot: EvaluationSnapshot, payload: Mapping[str, Any]) -> bool:
-    """Validate trusted identity facts against the exact current audit operation."""
-    subject = payload.get("subject_kind")
-    if subject == "covered_actor":
-        covered = list(payload.get("covered_artifact_ids", []))
-        active = set(covered_artifact_ids(snapshot))
-        return (payload.get("child_id") is None and bool(covered)
-                and len(covered) == len(set(covered)) and set(covered) == active)
-    if subject == "auditor":
-        child_id = payload.get("child_id")
-        return (payload.get("covered_artifact_ids") == []
-                and isinstance(child_id, str)
-                and any(child["child_id"] == child_id and child["resource_class"] == "audit"
-                        and child["state"] == "pending" for child in snapshot.state.children))
-    return False
+    """Validate the trusted reviewer identity against the exact audit operation."""
+    if payload.get("subject_kind") != "auditor":
+        return False
+    child_id = payload.get("child_id")
+    return (payload.get("covered_artifact_ids") == []
+            and isinstance(child_id, str)
+            and any(child["child_id"] == child_id and child["resource_class"] == "audit"
+                    and child["state"] == "pending" for child in snapshot.state.children))
 
 
-def identity_pair(value: Mapping[str, Any] | None) -> tuple[str, str] | None:
-    """Return a concrete dispatcher identity; tier/latest aliases are never identities."""
-    if not value or value.get("observed_by") != "host":
-        return None
-    normalized = governance.model_key(value)
-    return ("concrete-model/1", normalized) if normalized else None
+def identity_pair(value: Mapping[str, Any] | None) -> str | None:
+    """Return an opaque host-observed identity class without interpreting it."""
+    identity = value.get("identity") if value and value.get("observed_by") == "host" else None
+    return identity if isinstance(identity, str) and identity else None
 
 
 def audit_attributions(
     snapshot: EvaluationSnapshot, verdict: Mapping[str, Any],
-) -> tuple[Mapping[str, Any] | None, Mapping[str, Any] | None]:
-    """Select only identities bound to this verdict child and current evidence set."""
+) -> tuple[Mapping[str, Any] | None, list[Mapping[str, Any] | None]]:
+    """Select the reviewer and per-artifact producers covered by this verdict."""
     attrs = [item for item in snapshot.history if item.get("kind") == "attribution"]
     auditor = next((item for item in reversed(attrs)
                     if item.get("subject_kind") == "auditor"
                     and item.get("child_id") == verdict.get("child_id")), None)
-    active = set(covered_artifact_ids(snapshot))
-    covered = next((item for item in reversed(attrs)
-                    if item.get("subject_kind") == "covered_actor"
-                    and item.get("child_id") is None
-                    and bool(item.get("covered_artifact_ids"))
-                    and len(item.get("covered_artifact_ids", []))
-                    == len(set(item.get("covered_artifact_ids", [])))
-                    and set(item.get("covered_artifact_ids", [])) == active), None)
-    return auditor, covered
+    by_id = {item.get("artifact_id"): item for item in snapshot.history}
+    producers = [by_id.get(artifact_id, {}).get("producer")
+                 for artifact_id in covered_artifact_ids(snapshot)]
+    return auditor, producers
 
 
 def audit_binding(snapshot: EvaluationSnapshot) -> dict[str, Any]:
@@ -575,6 +570,7 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                 "citation": payload["citation"],
                 "route_stamp": state.route_stamp,
                 "investigation_stamp": state.investigation_stamp,
+                "producer": _producer(state),
                 **({"observed_content_digest": payload["observed_content_digest"]} if
                    "observed_content_digest" in payload else {}),
             })
@@ -722,11 +718,14 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
         deferred = [c for c, _ in states if c["id"] not in gating]
         if deferred:
             return _decision(snapshot, replace(state, status="stopped_frozen"))
-        auditor, covered = audit_attributions(snapshot, audit)
-        auditor_pair, covered_pair = identity_pair(auditor), identity_pair(covered)
-        if auditor_pair is None or covered_pair is None:
+        auditor, producers = audit_attributions(snapshot, audit)
+        auditor_class = identity_pair(auditor)
+        producer_classes = [identity_pair(producer) for producer in producers]
+        if auditor_class is None or not producer_classes or any(value is None for value in producer_classes):
             return _decision(snapshot, state, "Block", reason="audit.independence_unverified")
-        if auditor_pair == covered_pair:
+        if len(set(producer_classes)) != 1:
+            return _decision(snapshot, state, "Block", reason="audit.producers_mixed")
+        if auditor_class == producer_classes[0]:
             return _decision(snapshot, state, "Block", reason="audit.same_model")
         return _decision(snapshot, replace(state, status="converged"))
 

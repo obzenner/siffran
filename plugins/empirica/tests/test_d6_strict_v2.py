@@ -71,7 +71,7 @@ _DEFAULT_PROFILE = "claude-code@2.1.278"
 
 # --- Accepted observe fixture requests for the four trusted actions ---
 _TRUSTED_FIXTURE_REQUESTS: list[dict] = []
-for _fx_name in ("observe-evidence-leaf", "observe-attribution-covered-actor",
+for _fx_name in ("observe-evidence-leaf", "observe-attribution-auditor",
                  "observe-child-event-redacted", "observe-audit-verdict"):
     _fx = json.loads((_V2 / "fixtures" / f"{_fx_name}.json").read_text(encoding="utf-8"))
     _TRUSTED_FIXTURE_REQUESTS.append(_fx["request"])

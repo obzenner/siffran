@@ -40,7 +40,7 @@
             "roles",
             "hosts/capabilities"
           ],
-          "digest": "sha256:088d5f290954036361ba655c2cea07b44c928422e273d08142b3f92a36ef868d"
+          "digest": "sha256:6be16ea20983601efae26f4246eb6401a8da0a15e1aa93a2527127be18671eec"
         },
         "obligations": {
           "active": [
@@ -113,7 +113,7 @@
           },
           "prompt_error": null,
           "next_action": "governance.propose",
-          "review_text": "EMPIRICA RUN CONFIGURATION — epoch 0, mode deliberative\nApprove the CURRENT displayed configuration; edits are submitted for another review and are NOT approved yet.\nThe goal is read-only context and is not controlled by this decision.\nEvery line beginning '| ' is UNTRUSTED quoted data. Controls, bidi characters, and backslashes are visibly escaped.\n\nGOAL (READ-ONLY)\n| Prove the public contract is internally consistent.\n\nCONFIGURATION\n  Investigation passes: proposed 10, already used 3\n  Child spawns: proposed 5, already used 0\n  Audit spawns: proposed 1, already used 1\n  multi_provider (cross-provider actors): False\n  cli_exec (external model/actor CLI use): False\n\nSTATE — pending; dialogs left 3 this epoch, 128 total\n\nTECHNICAL DETAIL (secondary)\n  proposal digest sha256:3839bdf80e1b820bd34d85e41d310c9f97951e0e043328adb5e5feba3b5c691e\n  ingress unavailable · configuration epoch 0"
+          "review_text": "EMPIRICA RUN CONFIGURATION \u2014 epoch 0, mode deliberative\nApprove the CURRENT displayed configuration; edits are submitted for another review and are NOT approved yet.\nThe goal is read-only context and is not controlled by this decision.\nEvery line beginning '| ' is UNTRUSTED quoted data. Controls, bidi characters, and backslashes are visibly escaped.\n\nGOAL (READ-ONLY)\n| Prove the public contract is internally consistent.\n\nCONFIGURATION\n  Investigation passes: proposed 10, already used 3\n  Child spawns: proposed 5, already used 0\n  Audit spawns: proposed 1, already used 1\n  multi_provider (cross-provider actors): False\n  cli_exec (external model/actor CLI use): False\n\nSTATE \u2014 pending; dialogs left 3 this epoch, 128 total\n\nTECHNICAL DETAIL (secondary)\n  proposal digest sha256:3839bdf80e1b820bd34d85e41d310c9f97951e0e043328adb5e5feba3b5c691e\n  ingress unavailable \u00b7 configuration epoch 0"
         }
       }
     }

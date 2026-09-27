@@ -179,11 +179,14 @@ def _audit(snapshot: EvaluationSnapshot) -> dict[str, Any]:
              "pending" if any(c["state"] in {"reserved", "launching", "pending"}
                               for c in audit_children) else "required")
     verdict = audits[-1] if audits else {}
-    auditor, covered = audit_attributions(snapshot, verdict)
-    auditor_pair, covered_pair = identity_pair(auditor), identity_pair(covered)
-    if auditor_pair is None or covered_pair is None:
+    auditor, producers = audit_attributions(snapshot, verdict)
+    auditor_class = identity_pair(auditor)
+    producer_classes = [identity_pair(producer) for producer in producers]
+    if auditor_class is None or not producer_classes or any(value is None for value in producer_classes):
         independence = "unverified"
-    elif auditor_pair == covered_pair:
+    elif len(set(producer_classes)) != 1:
+        independence = "unverified"
+    elif auditor_class == producer_classes[0]:
         independence = "same_model"
     else:
         independence = "decorrelated"

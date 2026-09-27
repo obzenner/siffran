@@ -667,7 +667,7 @@ class SpawnLifecycleTests(unittest.TestCase):
                                      "argument": argument}), \
                  patch("adapters.claude.lifecycle.application_bridge.trusted_resolve_child",
                        return_value="ch-audit"), \
-                 patch("adapters.claude.lifecycle.AuditProtocol.observe_identities"), \
+                 patch("adapters.claude.lifecycle.AuditProtocol.observe_reviewer"), \
                  patch("adapters.claude.lifecycle.AuditProtocol.observe_verdict",
                        return_value=True) as deliver, \
                  patch("sys.stdin", new=payload):
@@ -761,6 +761,50 @@ class SpawnLifecycleTests(unittest.TestCase):
         }))
         with patch("sys.stdin", new=payload):
             self.assertEqual(spawn_main(), 0)
+
+
+class TranscriptIdentityTests(unittest.TestCase):
+    def _observe(self, rows):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "child.jsonl"
+            path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+            return lifecycle._transcript_observation(str(path), require_single=True)
+
+    def test_single_served_model_ignores_synthetic_rows(self):
+        rows = [
+            {"message": {"role": "assistant", "model": "<synthetic>", "content": "retry"}},
+            {"message": {"role": "assistant", "model": "eu.anthropic.claude-opus-4-8",
+                         "content": "verdict"}},
+        ]
+        self.assertEqual(self._observe(rows), ("eu.anthropic.claude-opus-4-8", "verdict"))
+
+    def test_synthetic_only_and_mid_transcript_switch_are_unobservable(self):
+        synthetic = [{"message": {"role": "assistant", "model": "<synthetic>",
+                                    "content": "error"}}]
+        self.assertEqual(self._observe(synthetic), (None, "error"))
+        switched = [
+            {"message": {"role": "assistant", "model": "model-a", "content": "a"}},
+            {"message": {"role": "assistant", "model": "model-b", "content": "b"}},
+        ]
+        self.assertEqual(self._observe(switched), (None, "b"))
+
+    def test_malformed_transcript_discards_partial_observation(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "child.jsonl"
+            path.write_text(json.dumps({"message": {"role": "assistant", "model": "model-a"}})
+                            + "\n{broken\n")
+            self.assertEqual(lifecycle._transcript_observation(
+                str(path), require_single=True), (None, None))
+
+    def test_subagent_cannot_admit_main_author_evidence(self):
+        payload = StringIO(json.dumps({
+            "agent_id": "child-1", "tool_name": "mcp__empirica__empirica_observe",
+            "tool_input": {"action": {"kind": "research"}},
+        }))
+        stderr = StringIO()
+        with patch("sys.stdin", new=payload), patch("sys.stderr", new=stderr):
+            self.assertEqual(lifecycle.route_main(), 2)
+        self.assertIn("subagent producer is not the main author", stderr.getvalue())
 
 
 if __name__ == "__main__":

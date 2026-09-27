@@ -9,7 +9,7 @@ import { fakeCtx } from "./fakes.ts";
 const APPROVE = "Approve current displayed proposal";
 const EDIT = "Edit configuration for another review";
 const REJECT = "Reject proposal";
-const author = { provider_id: "anthropic", model_id: "claude-sonnet-4-6" };
+const author = { provider_id: "anthropic", model_id: "claude-sonnet-4-6", source: "pi-context" };
 
 function harness(choice = APPROVE) {
   const g = {

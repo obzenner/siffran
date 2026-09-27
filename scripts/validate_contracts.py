@@ -48,7 +48,7 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:088d5f290954036361ba655c2cea07b44c928422e273d08142b3f92a36ef868d"
+REVIEWED_REGISTRY_DIGEST = "sha256:6be16ea20983601efae26f4246eb6401a8da0a15e1aa93a2527127be18671eec"
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:41ef8b89da3f880fb5d256202d9ee5b6e28301b75e52490a41e65d16e09b8caa"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
@@ -2234,10 +2234,7 @@ def main() -> int:
         "block-child-cancelled", "block-child-timeout", "block-child-orphaned",
         # D2C added GetArgument provenance fixtures.
         "getargument-spike-approved", "getargument-superseded",
-        # D2D added closed trusted-ingress payload fixtures.
-        "observe-attribution-covered-actor",
-        "observe-attribution-covered-actor-same-model",
-        "observe-attribution-covered-actor-unverified",
+        # Trusted reviewer ingress; covered producers live on evidence artifacts.
         "observe-attribution-auditor",
         "observe-audit-verdict", "observe-audit-verdict-frozen",
         "observe-evidence-leaf",

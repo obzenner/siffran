@@ -28,7 +28,6 @@ class AuditProtocolError(RuntimeError):
 class IdentityObservation:
     provider_id: str | None
     model_id: str | None
-    observed_by: str
     source: str
 
     @property
@@ -172,27 +171,17 @@ class AuditProtocol:
                            None if terminal == "launch_rejected" else native_id)
             raise
 
-    def observe_identities(
-        self, plan: AuditLaunchPlan, native_id: str, *,
-        author: IdentityObservation, auditor: IdentityObservation,
+    def observe_reviewer(
+        self, plan: AuditLaunchPlan, native_id: str, *, auditor: IdentityObservation,
     ) -> None:
-        """Admit identities observed for the exact pending audit operation."""
+        """Admit the observed reviewer for the exact pending audit operation."""
         try:
-            self._require(self._attribution(self.profile_id, plan.run_id, {
-                "subject_kind": "covered_actor",
-                "subject_id": f"author:{plan.argument.get('argument_digest', plan.child_id)}",
-                "child_id": None,
-                "provider_id": author.provider_id,
-                "model_id": author.model_id,
-                "observed_by": author.observed_by,
-                "covered_artifact_ids": plan.evidence_ids,
-            }))
             self._require(self._attribution(self.profile_id, plan.run_id, {
                 "subject_kind": "auditor", "subject_id": f"auditor:{plan.child_id}",
                 "child_id": plan.child_id,
                 "provider_id": auditor.provider_id,
                 "model_id": auditor.model_id,
-                "observed_by": auditor.observed_by,
+                "source": auditor.source,
                 "covered_artifact_ids": [],
             }))
         except Exception:

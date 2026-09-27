@@ -30,6 +30,7 @@ from pathlib import Path
 
 import jsonschema
 
+from adapters.identity import observe
 from driver import V2SeamAbsent, new_driver
 
 # ---------------------------------------------------------------------------
@@ -482,19 +483,19 @@ def build_attribution_payload(*, subject_kind: str, subject_id: str,
                               model_id: str | None = None,
                               observed_by: str = "host",
                               covered_artifact_ids: list[str] | None = None) -> dict:
-    """Construct a valid D2D ``attribution`` closed payload.
-
-    - ``auditor`` requires non-null ``child_id`` and empty ``covered_artifact_ids``;
-    - ``covered_actor`` requires ``child_id`` null and nonempty ``covered_artifact_ids``;
-    - ``provider_id``/``model_id`` are both non-null or both null.
-    """
+    """Construct a closed reviewer attribution through the production identity policy."""
+    normalized = observe(provider_id, model_id, source="conformance-host")
+    identity = normalized["identity"] if normalized is not None and observed_by == "host" else None
     return {
         "subject_kind": subject_kind,
         "subject_id": subject_id,
         "child_id": child_id,
+        "identity": identity,
         "provider_id": provider_id,
         "model_id": model_id,
-        "observed_by": observed_by,
+        "policy_version": "model-identity/1",
+        "source": "conformance-host",
+        "observed_by": "host",
         "covered_artifact_ids": list(covered_artifact_ids or []),
     }
 
@@ -1259,43 +1260,28 @@ class ConformanceCase(unittest.TestCase):
     def require_trusted_audit_attribution(self, drv, run_id: str, child_id: str,
                                           c0_artifact_id: str | list[str], *,
                                           variant: str) -> None:
-        """Submit trusted covered-actor and auditor attribution through private ingress
-        (D4-S3a-R).
+        """Submit the trusted reviewer attribution through private ingress.
 
-        Covered-actor attribution is bound to exact active approved C0 artifact IDs.
-        Auditor attribution is bound to the pending SUT-admitted audit child. Same-model
-        uses equal normalized provider/model pairs; decorrelated uses distinct pairs;
-        unverified makes one pair null. Every trusted response is validated/asserted.
-        Raises HarnessDefect if any response is not valid."""
-        covered_observer = auditor_observer = "host"
+        Evidence producers are already bound at admission. Same-model uses the
+        producer's normalized class; decorrelated uses a distinct class; alias,
+        configuration, and missing observations remain unverified.
+        """
+        auditor_observer = "host"
         if variant == "same_model":
-            covered_provider, covered_model = "anthropic", "claude-sonnet-4-6"
             auditor_provider, auditor_model = "anthropic", "claude-sonnet-4-6"
         elif variant == "decorrelated":
-            covered_provider, covered_model = "anthropic", "claude-sonnet-4-6"
             auditor_provider, auditor_model = "anthropic", "claude-opus-4-6"
         elif variant == "unverified":
-            covered_provider, covered_model = "anthropic", "claude-sonnet-4-6"
             auditor_provider, auditor_model = None, None
         elif variant == "alias":
-            covered_provider, covered_model = "anthropic", "claude-sonnet-4-6"
-            auditor_provider, auditor_model = "p2", "opus"
+            auditor_provider, auditor_model = "anthropic", "opus"
         elif variant == "configuration":
-            covered_provider, covered_model = "anthropic", "claude-sonnet-4-6"
             auditor_provider, auditor_model = "anthropic", "claude-opus-4-6"
             auditor_observer = "configuration"
         else:
             raise HarnessDefect(f"unknown attribution variant {variant!r}")
-        # Covered-actor attribution: bound to exact active approved C0 artifact IDs.
-        covered_ids = ([c0_artifact_id] if isinstance(c0_artifact_id, str)
-                       else list(c0_artifact_id))
-        covered_payload = build_attribution_payload(
-            subject_kind="covered_actor", subject_id="covered-actor-1",
-            child_id=None, provider_id=covered_provider, model_id=covered_model,
-            observed_by=covered_observer, covered_artifact_ids=covered_ids)
-        resp_covered = drv.trusted_attribution(run_id, covered_payload)
-        self.assert_valid_response(resp_covered)
-        # Auditor attribution: bound to pending SUT-admitted audit child.
+        # Producer identities were captured on evidence admission. Only the
+        # observed reviewer is admitted at audit completion.
         auditor_payload = build_attribution_payload(
             subject_kind="auditor", subject_id="auditor-1",
             child_id=child_id, provider_id=auditor_provider, model_id=auditor_model,

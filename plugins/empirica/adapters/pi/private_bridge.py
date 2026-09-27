@@ -56,22 +56,22 @@ def main() -> int:
             result = {"type": "audit_started"}
         elif operation == "audit_identity":
             plan = _plan(profile, raw)
-            author = raw["author"]
             auditor = raw["auditor"]
-            AuditProtocol(profile).observe_identities(
+            AuditProtocol(profile).observe_reviewer(
                 plan, raw["native_id"],
-                author=IdentityObservation(
-                    author.get("provider_id"), author.get("model_id"),
-                    author["observed_by"], author["source"]),
                 auditor=IdentityObservation(
                     auditor.get("provider_id"), auditor.get("model_id"),
-                    auditor["observed_by"], auditor["source"]),
+                    auditor["source"]),
             )
             result = {"type": "audit_identity"}
         elif operation == "audit_failure":
             AuditProtocol(profile).observe_failure(
                 _plan(profile, raw), raw["native_id"], raw.get("state", "failed"))
             result = {"type": "audit_terminal"}
+        elif operation == "classify_identity":
+            from adapters.identity import observe
+            result = observe(payload.get("provider_id"), payload.get("model_id"),
+                             source=payload.get("source", "pi-model"))
         elif operation == "audit_verdict":
             admitted = AuditProtocol(profile).observe_verdict(
                 _plan(profile, raw), raw["native_id"], payload)

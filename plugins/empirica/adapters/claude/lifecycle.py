@@ -104,13 +104,12 @@ def _agent_identity(tool_input: Mapping[str, object]) -> tuple[str | None, str |
     return purpose, role_profile
 
 
-def _model_observation(raw):
-    from core.governance import normalized_model_identity
+def _model_observation(raw, *, source="claude-transcript"):
+    from adapters.identity import observe
     if not isinstance(raw, str) or not raw:
         return None
-    provider = "bedrock" if raw.startswith(("anthropic.", "eu.anthropic.", "us.anthropic.", "global.anthropic.", "apac.anthropic.")) else (
-        "anthropic" if normalized_model_identity("anthropic", raw) else "unknown")
-    return {"provider_id": provider, "model_id": raw}
+    provider = "bedrock" if "." in raw else "anthropic"
+    return observe(provider, raw, source=source)
 
 
 def _auditor_alias(payload: Mapping[str, object], environ: Mapping[str, str]) -> str | None:
@@ -142,7 +141,8 @@ def _governance_context(payload, handle):
     if payload.get("hook_event_name") == "PostModelSwitch":
         model = payload.get("to_model")
     response = application_bridge.trusted_governance_context(CLAUDE_PROFILE_ID, handle, {
-        "author": _model_observation(model), "ingress": "mcp_elicitation"})
+        "author": _model_observation(model, source="claude-main-transcript"),
+        "ingress": "mcp_elicitation"})
     if response.get("result", {}).get("type") not in {"Allow", "Inert"}:
         raise RuntimeError("governance context unavailable")
 
@@ -241,6 +241,15 @@ def spawn_main() -> int:
 def route_main() -> int:
     """PreToolUse: deny active-run investigation until the core admits its witness."""
     payload = _payload()
+    tool_input = payload.get("tool_input")
+    if payload.get("agent_id") and isinstance(tool_input, Mapping):
+        tool_name = payload.get("tool_name")
+        action = tool_input.get("action")
+        kind = action.get("kind") if isinstance(action, Mapping) else None
+        if (isinstance(tool_name, str) and tool_name.endswith("empirica_observe")
+                and kind in {"research", "spike_request"}):
+            return _deny(
+                "empirica evidence admission denied: subagent producer is not the main author")
     try:
         handle, _ = _resolve(payload, strict=True)
         if handle is None:
@@ -314,11 +323,16 @@ def restore_main() -> int:
     return 0
 
 
-def _transcript_observation(path: object) -> tuple[str | None, str | None]:
-    """Return the last concrete assistant model and textual final message."""
+def _transcript_observation(path: object, *, require_single: bool = False) -> tuple[str | None, str | None]:
+    """Return a served assistant model and textual final message.
+
+    Synthetic error rows are not service observations. Reviewer transcripts
+    additionally require exactly one distinct served model.
+    """
     if not isinstance(path, str) or not path:
         return None, None
-    model = final = None
+    models: list[str] = []
+    final = None
     try:
         with open(path, encoding="utf-8") as stream:
             for line in stream:
@@ -327,8 +341,9 @@ def _transcript_observation(path: object) -> tuple[str | None, str | None]:
                 if message.get("role") != "assistant":
                     continue
                 candidate = message.get("model")
-                if isinstance(candidate, str) and candidate:
-                    model = candidate
+                if (isinstance(candidate, str) and candidate and candidate != "<synthetic>"
+                        and candidate not in models):
+                    models.append(candidate)
                 content = message.get("content")
                 if isinstance(content, str):
                     final = content
@@ -339,7 +354,9 @@ def _transcript_observation(path: object) -> tuple[str | None, str | None]:
                     if text:
                         final = "\n".join(text)
     except (OSError, ValueError, TypeError):
-        return model, final
+        return None, None
+    model = models[0] if require_single and len(models) == 1 else (
+        None if require_single or not models else models[-1])
     return model, final
 
 
@@ -470,8 +487,8 @@ def subagent_stop_main() -> int:
         if child is None or plan is None:
             return 0
         child_path = payload.get("agent_transcript_path")
-        auditor_model, transcript_final = _transcript_observation(child_path)
-        author_model, _ = _transcript_observation(payload.get("transcript_path"))
+        auditor_model, transcript_final = _transcript_observation(
+            child_path, require_single=True)
         handback_scan_ok, handbacks = _transcript_handbacks(child_path)
         if not handback_scan_ok:
             verdict = None
@@ -483,18 +500,16 @@ def subagent_stop_main() -> int:
             output = payload.get("last_assistant_message") or transcript_final
             verdict = verdict_from_final_output(output)
         protocol = AuditProtocol(CLAUDE_PROFILE_ID)
-        if verdict is None:
+        if verdict is None or auditor_model is None:
             protocol.observe_failure(plan, native_id, "failed")
-            print("empirica: auditor returned no valid verdict; audit failed.", file=sys.stderr)
+            reason = "no valid verdict" if verdict is None else "served model is unobservable or mixed"
+            print(f"empirica: auditor {reason}; audit failed.", file=sys.stderr)
             return 0
-        protocol.observe_identities(
+        protocol.observe_reviewer(
             plan, native_id,
-            author=IdentityObservation(
-                (_model_observation(author_model) or {}).get("provider_id"), author_model, "host",
-                "claude-parent-transcript"),
             auditor=IdentityObservation(
-                (_model_observation(auditor_model) or {}).get("provider_id"), auditor_model, "host",
-                "claude-child-transcript"),
+                (_model_observation(auditor_model) or {}).get("provider_id"), auditor_model,
+                "claude-subagent-transcript"),
         )
         if not protocol.observe_verdict(plan, native_id, verdict):
             print("empirica: auditor verdict rejected; audit failed.", file=sys.stderr)

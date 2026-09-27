@@ -54,7 +54,8 @@ export function safeGovernanceText(value: unknown): string {
 }
 
 export function piGovernanceContext(ctx: ExtensionContext): Record<string, unknown> {
-  return { author: ctx.model ? { provider_id: ctx.model.provider, model_id: ctx.model.id } : null,
+  return { author: ctx.model ? { provider_id: ctx.model.provider, model_id: ctx.model.id,
+                                 source: "pi-context" } : null,
            ingress: ctx.hasUI ? "pi_ui" : "unavailable" };
 }
 

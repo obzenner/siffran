@@ -349,16 +349,18 @@
         "subject_kind",
         "subject_id",
         "child_id",
+        "identity",
         "provider_id",
         "model_id",
+        "policy_version",
+        "source",
         "observed_by",
         "covered_artifact_ids"
       ],
-      "description": "Closed trusted attribution payload carrying normalized identity facts only; never independence, decorrelated, tier, or verdict. provider/model are both non-null or both null.",
+      "description": "Closed trusted reviewer attribution carrying an opaque identity class plus raw provenance.",
       "properties": {
         "subject_kind": {
           "enum": [
-            "covered_actor",
             "auditor"
           ]
         },
@@ -367,6 +369,10 @@
           "minLength": 1
         },
         "child_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "identity": {
           "type": [
             "string",
             "null"
@@ -378,129 +384,38 @@
             "string",
             "null"
           ],
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 256
         },
         "model_id": {
           "type": [
             "string",
             "null"
           ],
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "policy_version": {
+          "const": "model-identity/1"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
         },
         "observed_by": {
           "enum": [
-            "host",
-            "configuration"
+            "host"
           ]
         },
         "covered_artifact_ids": {
           "type": "array",
-          "uniqueItems": true,
+          "maxItems": 0,
           "items": {
             "$ref": "#/$defs/digest256"
           }
         }
-      },
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "subject_kind": {
-                "const": "auditor"
-              }
-            },
-            "required": [
-              "subject_kind"
-            ]
-          },
-          "then": {
-            "properties": {
-              "child_id": {
-                "type": "string",
-                "minLength": 1
-              },
-              "covered_artifact_ids": {
-                "maxItems": 0
-              }
-            },
-            "required": [
-              "child_id",
-              "covered_artifact_ids"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "subject_kind": {
-                "const": "covered_actor"
-              }
-            },
-            "required": [
-              "subject_kind"
-            ]
-          },
-          "then": {
-            "properties": {
-              "child_id": {
-                "type": "null"
-              },
-              "covered_artifact_ids": {
-                "minItems": 1
-              }
-            },
-            "required": [
-              "child_id",
-              "covered_artifact_ids"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "provider_id": {
-                "type": "null"
-              }
-            },
-            "required": [
-              "provider_id"
-            ]
-          },
-          "then": {
-            "properties": {
-              "model_id": {
-                "type": "null"
-              }
-            },
-            "required": [
-              "model_id"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "provider_id": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "provider_id"
-            ]
-          },
-          "then": {
-            "properties": {
-              "model_id": {
-                "type": "string",
-                "minLength": 1
-              }
-            },
-            "required": [
-              "model_id"
-            ]
-          }
-        }
-      ]
+      }
     },
     "auditVerdictPayload": {
       "type": "object",
@@ -1249,19 +1164,47 @@
               "type": "object",
               "additionalProperties": false,
               "required": [
+                "identity",
                 "provider_id",
-                "model_id"
+                "model_id",
+                "policy_version",
+                "source",
+                "observed_by"
               ],
               "properties": {
+                "identity": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1
+                },
                 "provider_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "model_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "policy_version": {
+                  "const": "model-identity/1"
+                },
+                "source": {
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 128
                 },
-                "model_id": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128
+                "observed_by": {
+                  "const": "host"
                 }
               }
             },

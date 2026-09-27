@@ -558,6 +558,21 @@
           ],
           "properties": {
             "code": {
+              "const": "audit.producers_mixed"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
               "const": "audit.independence_unverified"
             },
             "parameters": {
@@ -1208,19 +1223,47 @@
                           "type": "object",
                           "additionalProperties": false,
                           "required": [
+                            "identity",
                             "provider_id",
-                            "model_id"
+                            "model_id",
+                            "policy_version",
+                            "source",
+                            "observed_by"
                           ],
                           "properties": {
+                            "identity": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "minLength": 1
+                            },
                             "provider_id": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "minLength": 1,
+                              "maxLength": 256
+                            },
+                            "model_id": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "minLength": 1,
+                              "maxLength": 512
+                            },
+                            "policy_version": {
+                              "const": "model-identity/1"
+                            },
+                            "source": {
                               "type": "string",
                               "minLength": 1,
                               "maxLength": 128
                             },
-                            "model_id": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 128
+                            "observed_by": {
+                              "const": "host"
                             }
                           }
                         },
@@ -2887,7 +2930,7 @@
             "terminal_sections",
             "unknown_reason_sections"
           ],
-          "description": "Canonical ordered presentation selector registry (D1 §12). The JSON registry is the executable SSOT; exact operation-context key parity and section resolution are enforced procedurally (no Python selector mapping).",
+          "description": "Canonical ordered presentation selector registry (D1 \u00a712). The JSON registry is the executable SSOT; exact operation-context key parity and section resolution are enforced procedurally (no Python selector mapping).",
           "properties": {
             "context_sections": {
               "type": "object",

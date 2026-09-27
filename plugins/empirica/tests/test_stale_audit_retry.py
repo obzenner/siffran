@@ -11,6 +11,7 @@ from test_d7_transactions import (Artifacts, Coordinator, Harness, Runs, Workspa
                                   traverse_history)
 from adapters.audit import child_event
 from adapters.audit_protocol import AuditProtocol, AuditProtocolError, IdentityObservation
+from adapters.identity import POLICY_VERSION, observe
 from core.evaluation import audit_binding
 from core.records import Corrupt, Present, Revision
 from governance_setup import approve_current
@@ -37,6 +38,17 @@ class StaleAuditRetryTests(unittest.TestCase):
                                                            "citation": "tested"}})
         self.restore()
 
+    def _attribution(self, run, payload):
+        normalized = observe(payload.get("provider_id"), payload.get("model_id"),
+                             source=payload["source"])
+        identity = normalized or {
+            "identity": None, "provider_id": payload.get("provider_id"),
+            "model_id": payload.get("model_id"), "policy_version": POLICY_VERSION,
+            "source": payload["source"],
+        }
+        return self.coordinator.trusted_attribution(
+            run, {**payload, **identity, "observed_by": "host"})
+
     def restore(self):
         self.coordinator = Coordinator(self.workspace, Harness(), self.runs, self.artifacts, PROFILE)
         self.protocol = AuditProtocol(PROFILE,
@@ -44,7 +56,7 @@ class StaleAuditRetryTests(unittest.TestCase):
             child_event_ingress=lambda _p, run, child, event:
                 self.coordinator.trusted_child_event(run, child, event),
             attribution_ingress=lambda _p, run, payload:
-                self.coordinator.trusted_attribution(run, payload),
+                self._attribution(run, payload),
             verdict_ingress=lambda _p, run, child, payload:
                 self.coordinator.trusted_audit_verdict(run, child, payload),
             plan_ingress=lambda _p, run, child: self.coordinator.trusted_audit_plan(run, child))
@@ -71,9 +83,8 @@ class StaleAuditRetryTests(unittest.TestCase):
         approve_current(self.coordinator, self.run_id)
 
     def identities(self, plan, auditor_model="claude-opus-4-6"):
-        self.protocol.observe_identities(plan, "native:" + plan.child_id,
-            author=IdentityObservation("anthropic", "claude-sonnet-4-6", "host", "session"),
-            auditor=IdentityObservation("anthropic", auditor_model, "host", "session"))
+        self.protocol.observe_reviewer(plan, "native:" + plan.child_id,
+            auditor=IdentityObservation("anthropic", auditor_model, "session"))
 
     def verdict(self):
         self.coordinator.handle({"type": "GetArgument", "run_id": self.run_id}, "argument")
@@ -313,14 +324,14 @@ class StaleAuditRetryTests(unittest.TestCase):
         self.identities(old)
         self.action({"kind": "freeze"})
         fresh = self.pending()
-        with self.assertRaises(AuditProtocolError):
-            self.protocol.observe_identities(fresh, "native:" + fresh.child_id,
-                author=IdentityObservation("anthropic", "claude-sonnet-4-6", "host", "session"),
-                auditor=IdentityObservation(None, None, "unverified", "missing-session"))
+        self.protocol.observe_reviewer(fresh, "native:" + fresh.child_id,
+            auditor=IdentityObservation(None, None, "missing-session"))
+        self.assertTrue(self.protocol.observe_verdict(
+            fresh, "native:" + fresh.child_id, self.verdict()))
         result = self.coordinator.handle({"type": "EvaluateRun", "run_id": self.run_id,
                                          "intent": "report_convergence"}, "gate")["result"]
         self.assertEqual(result["type"], "Block")
-        self.assertEqual(result["reasons"][0]["code"], "governance.revision_required")
+        self.assertEqual(result["reasons"][0]["code"], "audit.independence_unverified")
 
     def test_corrupt_and_terminal_runs_never_recover(self):
         self.pending()
