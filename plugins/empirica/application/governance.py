@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from core import governance as policy
-from core.evaluation import artifact, bootstrap_precondition, valid_graph, frozen_scope_invalid
+from core.evaluation import bootstrap_precondition
 from core.records import Corrupt
 from .location import decode_handle
 from .run_state import classify_and_decode
@@ -61,35 +61,23 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                         return c._block_from_snapshot(snapshot, rid, reason)
                     decision = {**payload, **resolved}
                     if "configuration" in decision:
-                        decision["amendment"] = {"graph": snapshot.graph,
-                                                   "configuration": decision.pop("configuration")}
+                        decision["amendment"] = decision.pop("configuration")
                 outcome = decision["outcome"]
                 if outcome == "approve":
-                    reason = policy.configuration_error(state, governed["proposal"]) or policy.selection_error(governed)
+                    reason = policy.configuration_error(state, governed["proposal"])
                     if reason:
                         return c._block_from_snapshot(snapshot, rid, reason)
                     governed.update(state="approved", approved_digest=governed["proposal_digest"],
-                                    approval_kind=payload["approval_kind"], change_request=None)
+                                    approval_kind=payload["approval_kind"])
                     next_state = replace(state, modes=governed["proposal"]["modes"],
                                          budgets={**state.budgets, **governed["proposal"]["budgets"]})
-                elif outcome in {"amend", "request_changes"} and "amendment" in decision:
-                    amendment = decision["amendment"]
-                    graph = amendment["graph"]
-                    proposed = amendment["configuration"]
-                    if not valid_graph(graph) or frozen_scope_invalid(state, graph):
-                        return c._block_from_snapshot(snapshot, rid, "graph.invalid")
+                elif outcome == "amend" and "amendment" in decision:
+                    proposed = decision["amendment"]
                     if reason := policy.configuration_error(state, proposed):
                         return c._block_from_snapshot(snapshot, rid, reason)
-                    governed = policy.revise(state.goal, graph, governed, proposal=proposed)
-                    art = artifact("graph", {"graph": policy.canonical_graph(graph)})
-                    domain = (art,)
-                    next_state = replace(state, selected_graph_artifact_id=art["artifact_id"])
-                if outcome == "request_changes":
-                    governed["change_request"] = {"text": decision["change_request"],
-                        "plan_revision": decision["plan_revision"],
-                        "proposal_digest": decision["proposal_digest"]}
-                elif outcome == "reject":
-                    governed.update(state="rejected", change_request=None)
+                    governed = policy.revise(state.goal, snapshot.graph, governed, proposal=proposed)
+                if outcome == "reject":
+                    governed.update(state="rejected")
                 prior = next((r for r in governed["receipts"] if r["id"] == payload["receipt_id"]), None)
                 fingerprint = policy.canonical_digest(payload)
                 if prior is None:

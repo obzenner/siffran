@@ -69,20 +69,14 @@
         }
       },
       "audit_role_profile": "empirica:empirica-auditor",
-      "resource_class": "audit",
-      "audit_auditor": {
-        "provider_id": "anthropic",
-        "model_id": "claude-opus-4-6"
-      }
+      "resource_class": "audit"
     }
   ],
   "committed_artifact_head_id": null,
   "governance": {
     "state": "pending",
     "control_mode": "deliberative",
-    "revision_limit": 64,
     "plan_revision": 0,
-    "revisions_used": 0,
     "approved_digest": null,
     "approval_kind": null,
     "receipts": [],
@@ -95,14 +89,12 @@
       "modes": {
         "multi_provider": false,
         "cli_exec": false
-      },
-      "auditor": null
+      }
     },
     "context": {
       "author": null,
       "ingress": "unavailable"
     },
-    "proposal_digest": "sha256:f4d3b7519e51b39aeaed820a9ec5d9ee2f7b77893bd763c09883453899eed724",
-    "change_request": null
+    "proposal_digest": "sha256:f4d3b7519e51b39aeaed820a9ec5d9ee2f7b77893bd763c09883453899eed724"
   }
 }

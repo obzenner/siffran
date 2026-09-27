@@ -40,7 +40,7 @@
             "roles",
             "hosts/capabilities"
           ],
-          "digest": "sha256:8943e1c76695c1079221a0c52df0e7c43028b90f5507acf04199cdb96880a567"
+          "digest": "sha256:088d5f290954036361ba655c2cea07b44c928422e273d08142b3f92a36ef868d"
         },
         "obligations": {
           "active": [
@@ -72,9 +72,7 @@
         "governance": {
           "state": "pending",
           "control_mode": "deliberative",
-          "revision_limit": 64,
           "plan_revision": 0,
-          "revisions_used": 0,
           "approved_digest": null,
           "approval_kind": null,
           "proposal": {
@@ -86,14 +84,13 @@
             "modes": {
               "multi_provider": false,
               "cli_exec": false
-            },
-            "auditor": null
+            }
           },
           "context": {
             "author": null,
             "ingress": "unavailable"
           },
-          "proposal_digest": "sha256:bc63a404e766447a1c5248a447e1ab9292bcd0da7ed0b8e89c3a6f9f50568900",
+          "proposal_digest": "sha256:3839bdf80e1b820bd34d85e41d310c9f97951e0e043328adb5e5feba3b5c691e",
           "scope": null,
           "budgets": {
             "max_passes": 10,
@@ -114,10 +111,9 @@
             "proposal": 3,
             "total": 128
           },
-          "prompt_error": "governance.author_unknown",
+          "prompt_error": null,
           "next_action": "governance.propose",
-          "change_request": null,
-          "review_text": "EMPIRICA SCOPE DECISION \u2014 proposal revision 0, at most 64 revisions, mode deliberative\nApprove the CURRENT displayed proposal; edits are submitted for another review and are NOT approved yet.\nEvery line beginning '| ' is UNTRUSTED quoted data. Controls, bidi characters, and backslashes are visibly escaped.\n\nGOAL\n| Prove the public contract is internally consistent.\n\nCLAIM GRAPH\n  no claim graph selected\n\nCONFIGURATION\n  Investigation passes: proposed 10, already used 3\n  Child spawns: proposed 5, already used 0\n  Audit spawns: proposed 1, already used 1\n  multi_provider (cross-provider actors): False\n  cli_exec (external model/actor CLI use): False\n  Reviewer (selected): not selected\n  Main model (host-observed): unknown\n  Main and reviewer must be different normalized models. Selection does not prove availability or authorization.\n\nSTATE \u2014 pending; dialogs left 3 this revision, 128 total\nOPEN CHANGE REQUEST\n  none\n\nTECHNICAL DETAIL (secondary)\n  proposal digest sha256:bc63a404e766447a1c5248a447e1ab9292bcd0da7ed0b8e89c3a6f9f50568900\n  ingress unavailable \u00b7 plan revision 0 \u00b7 revision limit 64"
+          "review_text": "EMPIRICA RUN CONFIGURATION — epoch 0, mode deliberative\nApprove the CURRENT displayed configuration; edits are submitted for another review and are NOT approved yet.\nThe goal is read-only context and is not controlled by this decision.\nEvery line beginning '| ' is UNTRUSTED quoted data. Controls, bidi characters, and backslashes are visibly escaped.\n\nGOAL (READ-ONLY)\n| Prove the public contract is internally consistent.\n\nCONFIGURATION\n  Investigation passes: proposed 10, already used 3\n  Child spawns: proposed 5, already used 0\n  Audit spawns: proposed 1, already used 1\n  multi_provider (cross-provider actors): False\n  cli_exec (external model/actor CLI use): False\n\nSTATE — pending; dialogs left 3 this epoch, 128 total\n\nTECHNICAL DETAIL (secondary)\n  proposal digest sha256:3839bdf80e1b820bd34d85e41d310c9f97951e0e043328adb5e5feba3b5c691e\n  ingress unavailable · configuration epoch 0"
         }
       }
     }

@@ -13,7 +13,7 @@ AUDITOR = {"provider_id": "anthropic", "model_id": "claude-opus-4-6"}
 
 def approve_current(coordinator, run_id, *, author=None, auditor=None):
     c = coordinator
-    author, auditor = author or AUTHOR, auditor or AUDITOR
+    author = author or AUTHOR
     before = c.handle({"type": "GetRun", "run_id": run_id}, "test-consent-read")["result"]
     g = before["run"]["governance"]
     if g["scope"] is None:
@@ -21,7 +21,7 @@ def approve_current(coordinator, run_id, *, author=None, auditor=None):
     if g["state"] == "approved":
         return
     configured = c.handle({"type": "ObserveAction", "run_id": run_id, "action": {
-        "kind": "configure_run", "auditor": auditor}}, "test-consent-configure")
+        "kind": "configure_run"}}, "test-consent-configure")
     assert configured["result"]["type"] == "Allow", configured
     ingress = "pi_ui" if c.profile_id.startswith("pi@") else "mcp_elicitation"
     if c.profile_id.startswith("codex"):

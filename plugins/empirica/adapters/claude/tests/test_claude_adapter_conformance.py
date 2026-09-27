@@ -70,8 +70,7 @@ class ClaudeReachabilityTests(unittest.TestCase):
                                     "gating": True, "kind": "needs-experiment"}],
                         "edges": [],
                     }})
-                    approved = observe({"kind": "configure_run", "auditor": {
-                        "provider_id": "anthropic", "model_id": "claude-opus-4-8"}})
+                    approved = observe({"kind": "configure_run"})
                     self.assertEqual(approved["run"]["governance"]["state"], "approved")
                     observe({"kind": "investigate"})
                     observe({"kind": "research", "claim_id": "G0",

@@ -317,7 +317,7 @@
         "terminal_sections",
         "unknown_reason_sections"
       ],
-      "description": "Canonical ordered presentation selector registry (D1 \u00a712). The JSON registry is the executable SSOT; exact operation-context key parity and section resolution are enforced procedurally (no Python selector mapping).",
+      "description": "Canonical ordered presentation selector registry (D1 §12). The JSON registry is the executable SSOT; exact operation-context key parity and section resolution are enforced procedurally (no Python selector mapping).",
       "properties": {
         "context_sections": {
           "type": "object",
@@ -598,7 +598,6 @@
           "required": [
             "approve",
             "edit",
-            "request_changes",
             "reject"
           ],
           "properties": {
@@ -606,9 +605,6 @@
               "$ref": "#/$defs/governanceDecisionAction"
             },
             "edit": {
-              "$ref": "#/$defs/governanceDecisionAction"
-            },
-            "request_changes": {
               "$ref": "#/$defs/governanceDecisionAction"
             },
             "reject": {
@@ -622,9 +618,7 @@
           "required": [
             "actions",
             "budgets",
-            "modes",
-            "auditor",
-            "feedback"
+            "modes"
           ],
           "properties": {
             "actions": {
@@ -633,7 +627,6 @@
               "required": [
                 "approve",
                 "edit",
-                "request_changes",
                 "reject"
               ],
               "properties": {
@@ -642,10 +635,6 @@
                   "minLength": 1
                 },
                 "edit": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "request_changes": {
                   "type": "string",
                   "minLength": 1
                 },
@@ -692,14 +681,6 @@
                   "minLength": 1
                 }
               }
-            },
-            "auditor": {
-              "type": "string",
-              "minLength": 1
-            },
-            "feedback": {
-              "type": "string",
-              "minLength": 1
             }
           }
         },
@@ -833,7 +814,6 @@
           "enum": [
             "approve",
             "amend",
-            "request_changes",
             "reject",
             "dismiss"
           ]
@@ -842,7 +822,6 @@
           "enum": [
             "approve",
             "amend",
-            "request_changes",
             "reject",
             "dismiss"
           ]

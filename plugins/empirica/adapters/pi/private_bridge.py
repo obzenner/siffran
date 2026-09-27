@@ -27,12 +27,12 @@ def _plan(profile: str, raw: dict) -> AuditLaunchPlan:
         raise ValueError("audit operation does not match durable plan")
     return AuditLaunchPlan(
         profile, raw["run_id"], value["child_id"], value["role_profile"], durable["argument"],
-        durable["operation_id"], durable["auditor"])
+        durable["operation_id"])
 
 
 def _plan_json(plan: AuditLaunchPlan) -> dict:
     return {"child_id": plan.child_id, "role_profile": plan.role_profile,
-            "argument": plan.argument, "operation_id": plan.operation_id, "auditor": plan.auditor}
+            "argument": plan.argument, "operation_id": plan.operation_id}
 
 
 def main() -> int:

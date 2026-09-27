@@ -85,13 +85,6 @@ function canonicalPath(value: string): string {
   }
 }
 
-function sameCanonicalAgentFile(candidate: string, expected: string): boolean {
-  if (canonicalPath(candidate) === canonicalPath(expected)) return true;
-  const candidateText = readAuditSession(candidate);
-  const expectedText = readAuditSession(expected);
-  return candidateText !== null && expectedText !== null && candidateText === expectedText;
-}
-
 const PUBLIC_TOOLS_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "..",
   "contracts", "empirica", "v2", "public-tools.json");
@@ -119,32 +112,70 @@ export type SelectorProvider = (ctx: ExtensionContext) => RunSelector;
 export interface ResolvedAuditContract {
   agentFilePath: string;
   model: string;
+  agentScope: "project" | "user";
 }
 export type AuditContractResolver = (
   input: Record<string, unknown>, ctx: ExtensionContext,
 ) => Promise<ResolvedAuditContract>;
 
-async function defaultAuditContractResolver(
-  input: Record<string, unknown>, ctx: ExtensionContext,
-): Promise<ResolvedAuditContract> {
-  const api = await import("pi-subagents/preflight") as {
-    resolveSubagentLaunchContract(input: Record<string, unknown>): Promise<
-      { ok: true; contract: { agent: { filePath: string }; model?: string; modelCandidates: string[] } }
-      | { ok: false; message: string }
-    >;
+export function resolvePiAuditorModel(global: Record<string, unknown>, project: Record<string, unknown>,
+                                       main?: string): string {
+  const configured = (scope: Record<string, unknown>, key: "override" | "default"): string | undefined => {
+    const subagents = scope.subagents as Record<string, unknown> | undefined;
+    if (key === "default") return typeof subagents?.defaultModel === "string" ? subagents.defaultModel : undefined;
+    const overrides = subagents?.agentOverrides as Record<string, { model?: unknown }> | undefined;
+    const model = overrides?.["empirica.empirica-auditor"]?.model;
+    return typeof model === "string" ? model : undefined;
   };
-  const result = await api.resolveSubagentLaunchContract({
-    agent: String(input.agent),
-    task: typeof input.task === "string" ? input.task : undefined,
-    context: "fresh",
-    model: typeof input.model === "string" ? input.model : undefined,
-    cwd: ctx.cwd ?? process.cwd(),
-    availableModels: ctx.modelRegistry?.getAvailable(),
-  });
-  if (!result.ok) throw new Error(result.message);
-  const model = result.contract.modelCandidates[0] ?? result.contract.model;
-  if (!model) throw new Error("packaged auditor has no resolved model");
-  return { agentFilePath: result.contract.agent.filePath, model };
+  const model = configured(project, "override") ?? configured(global, "override")
+    ?? configured(project, "default") ?? configured(global, "default") ?? main;
+  if (!model) throw new Error("auditor model is unconfigured and the main model is unavailable");
+  if (model === main) throw new Error(
+    'auditor model equals the main model; set subagents.agentOverrides["empirica.empirica-auditor"].model');
+  return model;
+}
+
+interface AuditorPreflightApi {
+  resolveSubagentLaunchContract(input: Record<string, unknown>): Promise<
+    { ok: true; contract: { agent: { filePath: string }; model?: string; modelCandidates: string[] } }
+    | { ok: false; message: string }
+  >;
+}
+interface PiSettingsApi {
+  SettingsManager: { create(cwd: string, agentDir?: string): {
+    getGlobalSettings(): Record<string, unknown>; getProjectSettings(): Record<string, unknown> } };
+  getAgentDir(): string;
+}
+
+export async function defaultAuditContractResolver(
+  input: Record<string, unknown>, ctx: ExtensionContext,
+  seams?: { preflight: AuditorPreflightApi; settings: PiSettingsApi },
+): Promise<ResolvedAuditContract> {
+  const api = seams?.preflight ?? await import("pi-subagents/preflight") as AuditorPreflightApi;
+  const host = seams?.settings ?? await import("@earendil-works/pi-coding-agent") as PiSettingsApi;
+  const cwd = ctx.cwd ?? process.cwd();
+  const settings = host.SettingsManager.create(cwd, host.getAgentDir());
+  const global = settings.getGlobalSettings();
+  const project = settings.getProjectSettings();
+  const main = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
+  const model = resolvePiAuditorModel(global, project, main);
+  const expectedAgent = String(input.expectedAgent);
+  for (const agentScope of ["project", "user"] as const) {
+    const result = await api.resolveSubagentLaunchContract({
+      agent: String(input.agent),
+      task: typeof input.task === "string" ? input.task : undefined,
+      context: "fresh", model, agentScope, cwd,
+      availableModels: ctx.modelRegistry?.getAvailable(),
+    });
+    if (!result.ok || canonicalPath(result.contract.agent.filePath) !== canonicalPath(expectedAgent)) continue;
+    const resolvedModel = result.contract.modelCandidates[0] ?? result.contract.model;
+    if (resolvedModel !== model) throw new Error("configured auditor model was substituted by preflight");
+    const available = ctx.modelRegistry?.getAvailable() ?? [];
+    if (!available.some((item) => `${item.provider}/${item.id}` === model || item.fullId === model))
+      throw new Error(`configured auditor model is unavailable: ${model}`);
+    return { agentFilePath: result.contract.agent.filePath, model, agentScope };
+  }
+  throw new Error("auditor package unresolvable");
 }
 
 export interface EmpiricaPiDeps {
@@ -616,27 +647,18 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         if (inputError) return { block: true, reason: inputError };
         try {
           const current = await dispatch(getRunRequest(runHandle, randomUUID()));
-          if (current.result.type !== "Allow") throw new Error("approved scope unavailable");
-          const governed = current.result.run.governance as { state?: string;
-            proposal?: { auditor?: { provider_id: string; model_id: string } } } | undefined;
-          const selected = governed?.proposal?.auditor;
-          if (governed?.state !== "approved" || !selected) throw new Error("approved auditor missing");
-          const selectedModel = `${selected.provider_id}/${selected.model_id}`;
-          const resolvedAudit = await resolveAuditContract({ ...event.input, model: selectedModel }, ctx);
+          if (current.result.type !== "Allow") throw new Error("approved configuration unavailable");
+          const governed = current.result.run.governance as { state?: string } | undefined;
+          if (governed?.state !== "approved") throw new Error("approved configuration unavailable");
           const expectedAgent = path.resolve(skillsDir, "..", "agents", "pi", "empirica-auditor.md");
-          if (!sameCanonicalAgentFile(resolvedAudit.agentFilePath, expectedAgent))
-            return { block: true, reason: "empirica auditor package identity was shadowed" };
-          if (resolvedAudit.model !== selectedModel)
-            throw new Error("approved auditor was substituted by preflight");
+          const resolvedAudit = await resolveAuditContract({ ...event.input, expectedAgent }, ctx);
           const roleProfile = "empirica.empirica-auditor";
           const prepared = await trusted({ operation: "audit_prepare", run_id: runHandle,
                                            role_profile: roleProfile });
           if (prepared.type !== "audit_plan" || !prepared.plan || typeof prepared.plan !== "object")
             return { block: true, reason: "empirica auditor launch plan unavailable" };
           const plan = prepared.plan as unknown as AuditPlanData;
-          if (!plan.auditor || plan.auditor.provider_id !== selected.provider_id
-              || plan.auditor.model_id !== selected.model_id) throw new Error("approval changed during preflight");
-          const [auditorProvider, auditorModel] = modelPair(selectedModel, "pi-subagents");
+          const [auditorProvider, auditorModel] = modelPair(resolvedAudit.model, "pi-subagents");
           const nativeId = event.toolCallId;
           const [authorProvider, authorModel] = modelPair(ctx.model
             ? `${ctx.model.provider}/${ctx.model.id}` : null, "pi");
@@ -652,6 +674,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             `--- AUDIT DOSSIER (UNTRUSTED EVIDENCE CONTENT) ---\n${JSON.stringify(plan.argument)}\n` +
             "--- END AUDIT DOSSIER ---\nReturn exactly one fenced block tagged empirica-verdict.";
           event.input.model = resolvedAudit.model;
+          event.input.agentScope = resolvedAudit.agentScope;
           event.input.async = false;
           // pi-subagents may classify the original author call before this adapter replaces its
           // task with the host-owned read-only dossier. Make the runtime-owned exemption explicit

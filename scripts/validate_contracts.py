@@ -48,7 +48,7 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:8943e1c76695c1079221a0c52df0e7c43028b90f5507acf04199cdb96880a567"
+REVIEWED_REGISTRY_DIGEST = "sha256:088d5f290954036361ba655c2cea07b44c928422e273d08142b3f92a36ef868d"
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:41ef8b89da3f880fb5d256202d9ee5b6e28301b75e52490a41e65d16e09b8caa"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
@@ -93,6 +93,38 @@ def _as_set(value: Any, where: str, errors: list[str], name: str) -> set:
         errors.append(f"{where}: {name} must be an array of strings")
         return set()
     return set(value)
+
+
+def check_projected_governance_fixture(expected: dict, errors: list[str], where: str) -> None:
+    """Keep fixture governance digests and review text equal to the runtime projection."""
+    result = expected.get("result", {})
+    run = result.get("run", {}) if isinstance(result, dict) else {}
+    governed = run.get("governance") if isinstance(run, dict) else None
+    if not isinstance(governed, dict) or "review_text" not in governed:
+        return
+    plugin = str(ROOT / "plugins" / "empirica")
+    added = plugin not in sys.path
+    if added:
+        sys.path.insert(0, plugin)
+    try:
+        from core.governance import canonical_digest, proposal_body
+        from core.projection import review_text
+
+        goal, graph = run.get("goal"), governed.get("scope")
+        if not isinstance(goal, str):
+            errors.append(f"{where}: governance fixture has no string goal")
+            return
+        digest = canonical_digest(proposal_body(goal, graph, governed))
+        if governed.get("proposal_digest") != digest:
+            errors.append(f"{where}: governance proposal_digest differs from runtime projection")
+        projected = review_text(goal, graph, governed)
+        if governed.get("review_text") != projected:
+            errors.append(f"{where}: governance review_text differs from runtime projection")
+    except Exception as exc:
+        errors.append(f"{where}: runtime governance projection unavailable: {exc}")
+    finally:
+        if added:
+            sys.path.remove(plugin)
 
 
 def registry_digest(registry: dict) -> str:
@@ -1365,8 +1397,7 @@ def _valid_child_for_state(state: str, d64: str, reg_terminal: set) -> dict:
     base = {"child_id": f"c-{state}", "purpose": "audit", "resource_class": "audit",
             "state": state, "deadline": None, "capability_ref": "cap-1",
             "audit_operation_id": d64, "audit_argument": {"argument_digest": d64},
-            "audit_role_profile": "empirica:empirica-auditor",
-            "audit_auditor": {"provider_id": "anthropic", "model_id": "claude-opus-4-6"}}
+            "audit_role_profile": "empirica:empirica-auditor"}
     if state == "reserved":
         base.update(spent=False, refunded=False, native_id=None,
                      first_terminal_fingerprint=None)
@@ -2091,10 +2122,10 @@ def main() -> int:
         if [row.get("predicate") for row in requirements] != expected_predicates:
             errors.append("public-contract: bootstrap predicates must be the finite ordered bindings")
         decisions = registry.get("governance_decisions", {}).get("actions", {})
-        if list(decisions) != ["approve", "edit", "request_changes", "reject"]:
+        if list(decisions) != ["approve", "edit", "reject"]:
             errors.append("public-contract: governance decisions must be the finite ordered bindings")
         for action, row in decisions.items():
-            if row.get("feedback") not in {"required", "forbidden"}:
+            if row.get("feedback") != "forbidden":
                 errors.append(f"public-contract: governance decision {action} has unknown feedback policy")
         for kind, row in registry.get("bootstrap", {}).get("actions", {}).items():
             validate_schema_instance({"protocol": "empirica/v2", "request_id": "bootstrap-example",
@@ -2250,6 +2281,7 @@ def main() -> int:
         check_run_view_fields(result, registry, errors, f"{where}:expected")
         check_stale_freshness_match(result, errors, f"{where}:expected")
         check_response_run_view(result, registry, host_tiers_by_profile, digest, errors, f"{where}:expected")
+        check_projected_governance_fixture(expected, errors, f"{where}:expected")
         check_argument_view(result, registry, errors, f"{where}:expected")
         check_getargument_exclusivity(request, result, errors, f"{where}:expected")
         command = request.get("command", {})

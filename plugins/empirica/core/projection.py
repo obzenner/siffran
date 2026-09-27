@@ -104,36 +104,19 @@ def review_text(goal: str, graph: Mapping | None, value: Mapping) -> str:
     def fence(item):
         lines.append("| " + safe_text(item))
     proposal, context = value["proposal"], value["context"]
-    author = context["author"]
-    lines = [f"EMPIRICA SCOPE DECISION — proposal revision {value['plan_revision']}, at most {value['revision_limit']} revisions, mode {value['control_mode']}",
-             "Approve the CURRENT displayed proposal; edits are submitted for another review and are NOT approved yet.",
-             "Every line beginning '| ' is UNTRUSTED quoted data. Controls, bidi characters, and backslashes are visibly escaped.", "", "GOAL"]
+    lines = [f"EMPIRICA RUN CONFIGURATION — epoch {value['plan_revision']}, mode {value['control_mode']}",
+             "Approve the CURRENT displayed configuration; edits are submitted for another review and are NOT approved yet.",
+             "The goal is read-only context and is not controlled by this decision.",
+             "Every line beginning '| ' is UNTRUSTED quoted data. Controls, bidi characters, and backslashes are visibly escaped.", "", "GOAL (READ-ONLY)"]
     fence(goal)
-    if graph is None:
-        lines += ["", "CLAIM GRAPH", "  no claim graph selected"]
-    else:
-        lines += ["", f"CLAIM GRAPH — root {safe_text(graph['root'])}, {len(graph['claims'])} claims, {len(graph['edges'])} dependencies"]
-        for claim in graph["claims"]:
-            fence(f"[{claim['id']}] {'gating' if claim['gating'] else 'non-gating'} {claim['kind']} {claim['text']}")
-        lines.append("DEPENDENCIES")
-        for edge in graph["edges"]:
-            fence(f"{edge['from']} {edge['type']} {edge['to']}")
     lines += ["", "CONFIGURATION"]
     for key, label in (("max_passes", "Investigation passes"), ("max_spawns", "Child spawns"), ("max_audit_spawns", "Audit spawns")):
         lines.append(f"  {label}: proposed {proposal['budgets'][key]}, already used {value['budgets'][governance.CEILINGS[key]]}")
-    modes, auditor = proposal["modes"], proposal["auditor"]
-    lines += [f"  multi_provider (cross-provider actors): {modes['multi_provider']}", f"  cli_exec (external model/actor CLI use): {modes['cli_exec']}",
-              f"  Reviewer (selected): {safe_text(auditor['provider_id'] + '/' + auditor['model_id']) if auditor else 'not selected'}",
-              f"  Main model (host-observed): {safe_text(author['provider_id'] + '/' + author['model_id']) if author else 'unknown'}",
-              "  Main and reviewer must be different normalized models. Selection does not prove availability or authorization."]
-    lines += ["", f"STATE — {value['state']}; dialogs left {value['interactions_remaining']['proposal']} this revision, {value['interactions_remaining']['total']} total", "OPEN CHANGE REQUEST"]
-    request = value.get("change_request")
-    if request:
-        lines.append(f"  requested at revision {request['plan_revision']} for {request['proposal_digest']}")
-        fence(request["text"])
-    else:
-        lines.append("  none")
-    lines += ["", "TECHNICAL DETAIL (secondary)", f"  proposal digest {value['proposal_digest']}", f"  ingress {context['ingress']} · plan revision {value['plan_revision']} · revision limit {value['revision_limit']}"]
+    modes = proposal["modes"]
+    lines += [f"  multi_provider (cross-provider actors): {modes['multi_provider']}",
+              f"  cli_exec (external model/actor CLI use): {modes['cli_exec']}"]
+    lines += ["", f"STATE — {value['state']}; dialogs left {value['interactions_remaining']['proposal']} this epoch, {value['interactions_remaining']['total']} total"]
+    lines += ["", "TECHNICAL DETAIL (secondary)", f"  proposal digest {value['proposal_digest']}", f"  ingress {context['ingress']} · configuration epoch {value['plan_revision']}"]
     return "\n".join(lines)
 
 
@@ -141,8 +124,7 @@ def project_governance(snapshot: EvaluationSnapshot) -> dict:
     value = governance.plain(snapshot.state.governance)
     bootstrap = bootstrap_status(snapshot)
     value.update(interactions_remaining=governance.interactions_remaining(snapshot.state.governance),
-                 prompt_error=governance.context_error(snapshot.state.governance) or
-                              governance.interaction_error(snapshot.state.governance))
+                 prompt_error=governance.interaction_error(snapshot.state.governance))
     value.pop("receipts")
     value.update(scope=governance.canonical_graph(snapshot.graph),
                  budgets=dict(snapshot.state.budgets),

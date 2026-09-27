@@ -814,10 +814,10 @@ class ConformanceCase(unittest.TestCase):
         def _walk(o, path=()):
             if isinstance(o, dict):
                 for k, v in o.items():
-                    # 2.1 exposes bounded proposal revision and accounting telemetry,
-                    # not manifest revisions, receipts, or selected-history pointers.
+                    # Configuration epoch and accounting telemetry are public,
+                    # but manifest revisions, receipts, and selected-history pointers are not.
                     public_governance = "governance" in path and k in {
-                        "plan_revision", "revisions_used", "passes_used", "spawns_used", "audit_spawns_used"}
+                        "plan_revision", "passes_used", "spawns_used", "audit_spawns_used"}
                     if _is_persisted_operational(k) and not public_governance:
                         self.fail(
                             f"persisted operational field {k!r} must not appear in a "

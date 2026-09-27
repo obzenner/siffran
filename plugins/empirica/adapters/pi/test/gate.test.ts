@@ -8,7 +8,9 @@ import assert from "node:assert/strict";
 
 import { PROTOCOL, type Request, type Response, type Result } from "../src/contract.ts";
 import { REPORT_CONVERGENCE_TOOL, SUBAGENT_TOOL } from "../src/translate.ts";
-import { createEmpiricaExtension, DEFAULT_SKILLS_DIR } from "../src/index.ts";
+import {
+  createEmpiricaExtension, DEFAULT_SKILLS_DIR, defaultAuditContractResolver, resolvePiAuditorModel,
+} from "../src/index.ts";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -18,12 +20,75 @@ import type { PrivateIngressRequest } from "../src/private-transport.ts";
 
 const HANDLE = "run-handle-1";
 
+test("Pi auditor model follows host settings precedence and blocks the main model", () => {
+  const global = { subagents: { agentOverrides: {
+    "empirica.empirica-auditor": { model: "global/override" } }, defaultModel: "global/default" } };
+  const project = { subagents: { agentOverrides: {
+    "empirica.empirica-auditor": { model: "project/override" } }, defaultModel: "project/default" } };
+  assert.equal(resolvePiAuditorModel(global, project, "main/model"), "project/override");
+  assert.equal(resolvePiAuditorModel(global, { subagents: { defaultModel: "project/default" } }, "main/model"),
+    "global/override");
+  assert.equal(resolvePiAuditorModel({}, { subagents: { defaultModel: "project/default" } }, "main/model"),
+    "project/default");
+  assert.throws(() => resolvePiAuditorModel({}, {}, "main/model"),
+    /subagents\.agentOverrides\["empirica\.empirica-auditor"\]\.model/);
+});
+
+test("production Pi auditor resolver tries project then user scope", async () => {
+  const expectedAgent = resolve(DEFAULT_SKILLS_DIR, "..", "agents", "pi", "empirica-auditor.md");
+  const scopes: unknown[] = [];
+  const ctx = fakeCtx("/work");
+  ctx.model = { provider: "main", id: "model" };
+  ctx.modelRegistry = { getAvailable: () => [{ provider: "audit", id: "model" }] };
+  const resolved = await defaultAuditContractResolver(
+    { agent: "empirica.empirica-auditor", task: "audit", expectedAgent }, ctx,
+    {
+      settings: {
+        getAgentDir: () => "/agent",
+        SettingsManager: { create: () => ({
+          getGlobalSettings: () => ({}),
+          getProjectSettings: () => ({ subagents: { defaultModel: "audit/model" } }),
+        }) },
+      },
+      preflight: { resolveSubagentLaunchContract: async input => {
+        scopes.push(input.agentScope);
+        return { ok: true, contract: { agent: { filePath: input.agentScope === "project"
+          ? "/shadow/auditor.md" : expectedAgent }, model: "audit/model", modelCandidates: ["audit/model"] } };
+      } },
+    },
+  );
+  assert.deepEqual(scopes, ["project", "user"]);
+  assert.equal(resolved.agentScope, "user");
+});
+
+test("production Pi auditor resolver blocks a registry-unavailable configured model", async () => {
+  const expectedAgent = resolve(DEFAULT_SKILLS_DIR, "..", "agents", "pi", "empirica-auditor.md");
+  const ctx = fakeCtx("/work");
+  ctx.model = { provider: "main", id: "model" };
+  ctx.modelRegistry = { getAvailable: () => [] };
+  await assert.rejects(defaultAuditContractResolver(
+    { agent: "empirica.empirica-auditor", task: "audit", expectedAgent }, ctx,
+    {
+      settings: {
+        getAgentDir: () => "/agent",
+        SettingsManager: { create: () => ({
+          getGlobalSettings: () => ({ subagents: { defaultModel: "stale/model" } }),
+          getProjectSettings: () => ({}),
+        }) },
+      },
+      preflight: { resolveSubagentLaunchContract: async () => ({ ok: true, contract: {
+        agent: { filePath: expectedAgent }, model: "stale/model", modelCandidates: ["stale/model"],
+      } }) },
+    },
+  ), /configured auditor model is unavailable/);
+});
+
 function envelope(result: Result, requestId = "x"): Response {
   return { protocol: PROTOCOL, request_id: requestId, result };
 }
 function run(status = "active") {
   return { id: HANDLE, status: status as never, governance: { state: "approved",
-    proposal: { auditor: { provider_id: "bedrock", model_id: "auditor-model" } } } };
+    proposal: { budgets: {}, modes: {} } } };
 }
 
 interface Wired {
@@ -59,7 +124,6 @@ function wire(
         type: "audit_plan",
         plan: { child_id: "ch-1", role_profile: "empirica.empirica-auditor",
           operation_id: `sha256:${"b".repeat(64)}`,
-          auditor: { provider_id: "bedrock", model_id: "auditor-model" },
           argument: { argument_digest: `sha256:${"a".repeat(64)}`, claims: [] } },
       };
       if (request.operation === "audit_verdict")
@@ -69,7 +133,7 @@ function wire(
     resolveAuditContract: async (input) => {
       auditResolutions.push({ ...input });
       return { agentFilePath: resolve(DEFAULT_SKILLS_DIR, "..", "agents", "pi", "empirica-auditor.md"),
-        model: "bedrock/auditor-model" };
+        model: "bedrock/auditor-model", agentScope: "project" };
     },
   })(pi);
   return { pi, requests, privateRequests, auditResolutions };
@@ -373,6 +437,7 @@ test("subagent: canonical auditor is reserved, bound, attributed, and prompt-inj
   assert.match(String(input.task), /AUDIT DOSSIER/);
   assert.doesNotMatch(String(input.task), /AUTHOR_TASK_IS_NOT_AUTHORITY/);
   assert.equal(input.model, "bedrock/auditor-model");
+  assert.equal(input.agentScope, "project");
   assert.deepEqual(w.privateRequests.map((item) => item.operation), ["audit_prepare"]);
   assert.equal(w.pi.entries.at(-1)?.customType, "empirica.audit");
 });
@@ -616,11 +681,10 @@ test("canonical auditor identity follows filesystem symlinks", async (t) => {
       ? { type: "audit_plan", plan: { child_id: "ch-1",
           role_profile: "empirica.empirica-auditor",
           operation_id: `sha256:${"b".repeat(64)}`,
-          auditor: { provider_id: "bedrock", model_id: "auditor-model" },
           argument: { argument_digest: `sha256:${"a".repeat(64)}`, claims: [] } } }
       : { type: "ok" },
     resolveAuditContract: async () => ({ agentFilePath: realAgent,
-                                         model: "bedrock/auditor-model" }),
+                                         model: "bedrock/auditor-model", agentScope: "project" }),
     skillsDir: join(aliasPackage, "skills"),
   })(pi);
   await (pi.handlers.get("session_start") as (e: unknown, c: unknown) => unknown)(
@@ -632,40 +696,7 @@ test("canonical auditor identity follows filesystem symlinks", async (t) => {
   assert.equal((event.input as Record<string, unknown>).model, "bedrock/auditor-model");
 });
 
-test("byte-identical packaged auditor copies preserve canonical identity", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "empirica-agent-copy-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const expectedAgent = resolve(DEFAULT_SKILLS_DIR, "..", "agents", "pi", "empirica-auditor.md");
-  const copiedAgent = join(root, "empirica-auditor.md");
-  writeFileSync(copiedAgent, readFileSync(expectedAgent));
-
-  const pi = new FakePi();
-  createEmpiricaExtension({
-    dispatch: (request) => ({
-      ...envelope({ type: "Allow", converged: false, run: run() }),
-      request_id: request.request_id,
-    }),
-    deriveSelector: () => ({ project: "p", session: "s" }),
-    privateIngress: async (request) => request.operation === "governance_context"
-      ? { protocol: PROTOCOL, request_id: "trusted-governance", result: { type: "Inert", reason: "unsupported_host_event", run: run() } }
-      : request.operation === "audit_prepare"
-      ? { type: "audit_plan", plan: { child_id: "ch-copy",
-          role_profile: "empirica.empirica-auditor",
-          operation_id: `sha256:${"b".repeat(64)}`,
-          auditor: { provider_id: "bedrock", model_id: "auditor-model" },
-          argument: { argument_digest: `sha256:${"a".repeat(64)}`, claims: [] } } }
-      : { type: "ok" },
-    resolveAuditContract: async () => ({ agentFilePath: copiedAgent,
-                                         model: "bedrock/auditor-model" }),
-  })(pi);
-  await (pi.handlers.get("session_start") as (e: unknown, c: unknown) => unknown)(
-    {}, fakeCtx("/work", [{ customType: "empirica.run", data: { runHandle: HANDLE } }]));
-  const decision = await pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "copied",
-    input: { agent: "empirica.empirica-auditor", task: "audit" } }, fakeCtx());
-  assert.equal(decision, undefined);
-});
-
-test("shadowed packaged auditor identity is blocked before reservation", async () => {
+test("unresolvable auditor package is blocked before reservation", async () => {
   const requests: Request[] = [];
   const pi = new FakePi();
   createEmpiricaExtension({
@@ -676,15 +707,14 @@ test("shadowed packaged auditor identity is blocked before reservation", async (
     deriveSelector: () => ({ project: "p", session: "s" }),
     privateIngress: async () => ({ protocol: PROTOCOL, request_id: "trusted-governance",
       result: { type: "Inert", reason: "unsupported_host_event", run: run() } }),
-    resolveAuditContract: async () => ({ agentFilePath: "/project/.pi/agents/shadow.md",
-                                         model: "bedrock/auditor-model" }),
+    resolveAuditContract: async () => { throw new Error("auditor package unresolvable"); },
   })(pi);
   await (pi.handlers.get("session_start") as (e: unknown, c: unknown) => unknown)(
     {}, fakeCtx("/work", [{ customType: "empirica.run", data: { runHandle: HANDLE } }]));
   const decision = await pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "shadow",
     input: { agent: "empirica.empirica-auditor", task: "audit" } }, fakeCtx());
   assert.equal(decision?.block, true);
-  assert.match(decision!.reason!, /shadowed/);
+  assert.match(decision!.reason!, /auditor package unresolvable/);
   assert.equal(requests.length, 2); // investigation + read-only approved-selection lookup
   assert.equal(requests[0].command.type, "ObserveAction");
   assert.equal(requests[0].command.type === "ObserveAction"

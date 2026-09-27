@@ -28,9 +28,7 @@
   "governance": {
     "state": "pending",
     "control_mode": "deliberative",
-    "revision_limit": 64,
     "plan_revision": 0,
-    "revisions_used": 0,
     "approved_digest": null,
     "approval_kind": null,
     "receipts": [],
@@ -43,14 +41,12 @@
       "modes": {
         "multi_provider": false,
         "cli_exec": false
-      },
-      "auditor": null
+      }
     },
     "context": {
       "author": null,
       "ingress": "unavailable"
     },
-    "proposal_digest": "sha256:a3c922870d40525f3d047f2f5c99fb0e2382ac0bac228d751d6060df2a7a13bb",
-    "change_request": null
+    "proposal_digest": "sha256:a3c922870d40525f3d047f2f5c99fb0e2382ac0bac228d751d6060df2a7a13bb"
   }
 }

@@ -64,7 +64,7 @@ test("a user package with different bytes shadows the project candidate", (t) =>
   assert.match(r.verdict, /SHADOWED/);
 });
 
-test("a byte-identical installed copy is accepted by content, like the adapter guard", (t) => {
+test("the legacy both-scope diagnostic accepts a byte-identical installed copy", (t) => {
   const f = fixture(t);
   const project = path.join(f.root, "project");
   const expected = f.pkg(project, "a/model-1");

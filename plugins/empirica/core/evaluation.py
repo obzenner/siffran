@@ -317,18 +317,14 @@ def bootstrap_status(snapshot: EvaluationSnapshot) -> dict[str, Any]:
         if not facts["graph.selected"]:
             actions.append("graph.record")
         elif not facts["governance.approved"]:
-            context_error = governance.context_error(governed)
             if governance.interaction_error(governed):
                 actions.append("residual.accept")
-            elif context_error and governed["context"]["author"] is not None:
-                actions.append("host.repair_context")
             else:
                 actions.append("governance.propose")
         elif facts["route.recorded"] and not facts["investigation.recorded"]:
             actions.append("investigation.record")
     request_ready = active_run and bootstrap_precondition(snapshot, "configure_run") is None
     display_ready = (active_run and bootstrap_precondition(snapshot, "governance.present") is None
-                     and governance.context_error(governed) is None
                      and governance.interaction_error(governed) is None)
     return {"active": active, "next_actions": actions,
             "request_ready": request_ready, "display_ready": display_ready}
@@ -557,12 +553,8 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             if not valid_graph(graph) or frozen_scope_invalid(state, graph):
                 return _decision(snapshot, state, "Block", reason="graph.invalid")
             graph = governance.canonical_graph(graph)
-            try:
-                governed = governance.revise(state.goal, graph, state.governance)
-            except ValueError as exc:
-                return _decision(snapshot, state, "Block", reason=str(exc))
             art = artifact("graph", {"graph": graph})
-            return _decision(snapshot, replace(state, selected_graph_artifact_id=art["artifact_id"], governance=governed),
+            return _decision(snapshot, replace(state, selected_graph_artifact_id=art["artifact_id"]),
                              artifacts=(art,))
         if akind in {"research", "freeze"} and snapshot.graph is None:
             return _decision(snapshot, state, "Block", reason="graph.invalid")
@@ -598,8 +590,6 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             proposed = governance.plain(state.governance["proposal"])
             proposed["modes"].update(action.get("modes", {}))
             proposed["budgets"].update(action.get("budgets", {}))
-            if "auditor" in action:
-                proposed["auditor"] = governance.plain(action["auditor"])
             if reason := governance.configuration_error(state, proposed):
                 if reason == "governance.budget_invalid":
                     ceiling = next(k for k, used in governance.CEILINGS.items() if proposed["budgets"][k] < state.budgets[used])
@@ -651,7 +641,7 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                      "first_terminal_fingerprint": None,
                      "capability_ref": digest({"capability": seed}),
                      "audit_operation_id": None, "audit_argument": None,
-                     "audit_role_profile": None, "audit_auditor": None}
+                     "audit_role_profile": None}
             budgets = dict(state.budgets)
             budgets[used_key] += 1
             return _decision(snapshot, replace(state, budgets=budgets,
@@ -736,8 +726,6 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
         auditor_pair, covered_pair = identity_pair(auditor), identity_pair(covered)
         if auditor_pair is None or covered_pair is None:
             return _decision(snapshot, state, "Block", reason="audit.independence_unverified")
-        if governance.model_key(auditor) != governance.model_key(state.governance["proposal"]["auditor"]) or governance.model_key(covered) != governance.model_key(state.governance["context"]["author"]):
-            return _decision(snapshot, state, "Block", reason="governance.identity_mismatch")
         if auditor_pair == covered_pair:
             return _decision(snapshot, state, "Block", reason="audit.same_model")
         return _decision(snapshot, replace(state, status="converged"))

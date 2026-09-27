@@ -15,7 +15,7 @@ const PUBLIC_TOOLS_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.ur
 interface DecisionControls {
   actions: Record<string, string>;
   budgets: Record<string, { label: string; maximum: number }>;
-  modes: Record<string, string>; auditor: string; feedback: string;
+  modes: Record<string, string>;
 }
 const PUBLIC_TOOLS = JSON.parse(readFileSync(PUBLIC_TOOLS_PATH, "utf8")) as {
   recovery: Record<string, { message: string; sections: string[]; next_actions: string[] }>;
@@ -24,15 +24,13 @@ const PUBLIC_TOOLS = JSON.parse(readFileSync(PUBLIC_TOOLS_PATH, "utf8")) as {
 const RECOVERY = PUBLIC_TOOLS.recovery;
 const DECISIONS = PUBLIC_TOOLS.governance_decisions;
 
-interface Model { provider_id: string; model_id: string }
 interface Proposal {
   budgets: Record<string, number>; modes: Record<string, boolean>;
-  auditor: Model | null;
 }
 interface Governance {
-  state: string; control_mode: string; proposal_digest: string; plan_revision: number; revision_limit: number;
+  state: string; control_mode: string; proposal_digest: string; plan_revision: number;
   proposal: Proposal; prompt_error: string | null; budgets: Record<string, number>;
-  review_text: string; context: { author: Model | null; ingress: string };
+  review_text: string; context: { author: { provider_id: string; model_id: string } | null; ingress: string };
 }
 
 const USED_COUNTER: Record<string, string> = {
@@ -128,7 +126,7 @@ export async function govern(runId: string, ctx: ExtensionContext, trusted: Priv
     payload: { ...envelope, outcome: "present" } });
   assertResponse(presented, "trusted-governance");
   if (presented.result.type !== "Allow" || !("run" in presented.result)) return presented;
-  let action = "approve", proposal: Proposal = structuredClone(g.proposal), feedback = "";
+  let action = "approve", proposal: Proposal = structuredClone(g.proposal);
   try {
     if (confirmation) {
       const confirmed = await ctx.ui.confirm(DECISIONS.confirmation.title,
@@ -136,17 +134,14 @@ export async function govern(runId: string, ctx: ExtensionContext, trusted: Priv
       if (cancelled(confirmed) || confirmed !== true) return dismiss();
     } else {
       const reviewed = await ctx.ui.confirm(
-        `Empirica scope review — revision ${g.plan_revision} of at most ${g.revision_limit}`,
-        g.review_text + "\nOK = continue to the decision. Cancel = dismiss without approving anything.", options());
+        `Empirica run configuration — epoch ${g.plan_revision}`,
+        g.review_text + `\nHost decision timeout (read-only): ${Math.ceil(Math.max(0, deadline - Date.now()) / 1000)} seconds.` +
+          "\nOK = continue to the decision. Cancel = dismiss without approving anything.", options());
       if (cancelled(reviewed) || reviewed !== true) return dismiss();
       const choice = await ctx.ui.select("Decision", DECISION_CHOICES, options());
       if (cancelled(choice) || !DECISION_CHOICES.includes(choice!)) return dismiss();
       action = actionFor(choice!) ?? "";
-      if (action === "request_changes") {
-        const text = await ctx.ui.input(DECISIONS.controls.feedback, "", options());
-        if (cancelled(text) || !text!.trim()) return dismiss();
-        feedback = text!;
-      } else if (action === "edit") {
+      if (action === "edit") {
         for (const [key, row] of BUDGET_LABELS) {
           const raw = await ctx.ui.input(
             `${row.label} — proposed ${proposal.budgets[key]}, already used ${g.budgets[USED_COUNTER[key]]}. Empty keeps current.`, "", options());
@@ -163,18 +158,8 @@ export async function govern(runId: string, ctx: ExtensionContext, trusted: Priv
           proposal.modes[key] = value === "Enabled";
         }
       }
-      if (["approve", "edit"].includes(action) && (!proposal.auditor || action === "edit")) {
-        const provider = await ctx.ui.input(
-          `Reviewer provider — current ${safeGovernanceText(proposal.auditor?.provider_id ?? "not selected")}. Empty keeps current.`, "", options());
-        if (cancelled(provider) || provider!.length > 128) return dismiss();
-        const model = await ctx.ui.input(
-          `Reviewer model id — current ${safeGovernanceText(proposal.auditor?.model_id ?? "not selected")}. Empty keeps current.`, "", options());
-        if (cancelled(model) || model!.length > 128 || Boolean(provider) !== Boolean(model)) return dismiss();
-        if (provider && model) proposal.auditor = { provider_id: provider, model_id: model };
-      }
     }
     const submission: Record<string, unknown> = { action, configuration: proposal };
-    if (action === "request_changes") submission.feedback = feedback;
     const admitted = await trusted({ operation: "governance_decision", run_id: runId,
       payload: { ...envelope, submission } });
     assertResponse(admitted, "trusted-governance");
@@ -187,8 +172,6 @@ export async function govern(runId: string, ctx: ExtensionContext, trusted: Priv
     const revised = next && next.plan_revision !== revision;
     if (!confirmation && ["approve", "edit"].includes(action) && admitted.result.type === "Allow" && revised)
       return govern(runId, ctx, trusted, signal, { revision: next.plan_revision, digest: next.proposal_digest }, deadline);
-    if (action === "request_changes" && ["Allow", "Inert"].includes(admitted.result.type))
-      return unavailable(admitted, "governance.changes_requested");
     if (action === "edit" && !revised) return unavailable(admitted);
     return admitted;
   } catch { return dismiss(); }

@@ -231,7 +231,6 @@ class Coordinator:
                 child = dict(children[-1])
                 child["audit_argument"] = dossier
                 child["audit_role_profile"] = command["action"]["role_profile"]
-                child["audit_auditor"] = _plain(state.governance["proposal"]["auditor"])
                 child["audit_operation_id"] = digest({
                     "run_id": snapshot.run_id, "child_id": child["child_id"],
                     "argument_digest": dossier["argument_digest"],
@@ -282,7 +281,6 @@ class Coordinator:
             "child_id": child_id,
             "role_profile": child["audit_role_profile"],
             "argument": _plain(child["audit_argument"]),
-            "auditor": _plain(child["audit_auditor"]),
         }
 
     def trusted_attribution(self, run_id: str, payload: dict[str, Any],
@@ -340,19 +338,8 @@ class Coordinator:
             next_state = state
             if kind == "attribution" and not valid_attribution(snapshot, payload):
                 return self._fault_with_run(request_id, snapshot)
-            if kind == "attribution":
-                selected = (state.governance["proposal"]["auditor"] if payload["subject_kind"] == "auditor"
-                            else state.governance["context"]["author"])
-                if (payload.get("observed_by") != "host" or governance.model_key(payload) is None
-                        or governance.model_key(payload) != governance.model_key(selected)):
-                    revoked = replace(state, governance={**state.governance, "state": "revision_pending"})
-                    try:
-                        _, _, _, planned = self._commit(key, read.revision, snapshot, revoked, ())
-                    except Exception as exc:
-                        if self._is_conflict(exc):
-                            continue
-                        return self._fault(request_id, "unavailable")
-                    return self._block_from_snapshot(planned, request_id, "governance.identity_mismatch")
+            if kind == "attribution" and payload.get("observed_by") != "host":
+                return self._fault_with_run(request_id, snapshot)
             if kind == "audit_verdict":
                 expected = audit_binding(snapshot)
                 bound_keys = ("argument_digest", "goal_digest", "frozen_scope_digest",

@@ -603,8 +603,7 @@ class SpawnLifecycleTests(unittest.TestCase):
         from adapters.claude.lifecycle import spawn_main
         argument = {"argument_digest": "sha256:" + "1" * 64, "claims": []}
         plan = AuditLaunchPlan("claude-code@2.1.278", "active-run", "ch-audit",
-                               "empirica:empirica-auditor", argument,
-                               auditor={"provider_id": "anthropic", "model_id": "claude-opus-4-6"})
+                               "empirica:empirica-auditor", argument)
         payload = self._stdin({"subagent_type": "empirica:empirica-auditor",
                                "prompt": "author-controlled prompt"})
         out = StringIO()
@@ -615,6 +614,7 @@ class SpawnLifecycleTests(unittest.TestCase):
              patch("adapters.claude.lifecycle.dispatch_investigation",
                    return_value=investigation), \
              patch("adapters.claude.lifecycle.AuditProtocol.prepare", return_value=plan), \
+             patch("adapters.claude.lifecycle._auditor_alias", return_value="fable"), \
              patch("adapters.claude.lifecycle._governance_context"), \
              patch("sys.stdin", new=payload), patch("sys.stdout", new=out):
             self.assertEqual(spawn_main(), 0)
@@ -626,7 +626,7 @@ class SpawnLifecycleTests(unittest.TestCase):
         self.assertEqual(updated["max_turns"], 8)
         self.assertEqual(set(updated), {"subagent_type", "description", "prompt",
                                         "run_in_background", "max_turns", "model"})
-        self.assertEqual(updated["model"], "claude-opus-4-6")
+        self.assertEqual(updated["model"], "fable")
 
     def test_durable_plan_rejects_missing_operation_or_wrong_role(self) -> None:
         from adapters.claude.lifecycle import _durable_plan

@@ -8,17 +8,15 @@ import { fakeCtx } from "./fakes.ts";
 
 const APPROVE = "Approve current displayed proposal";
 const EDIT = "Edit configuration for another review";
-const REQUEST = "Request changes in plain language";
 const REJECT = "Reject proposal";
 const author = { provider_id: "anthropic", model_id: "claude-sonnet-4-6" };
-const auditor = { provider_id: "anthropic", model_id: "claude-opus-4-6" };
 
 function harness(choice = APPROVE) {
   const g = {
     state: "pending", control_mode: "deliberative", proposal_digest: "sha256:" + "a".repeat(64),
-    plan_revision: 2, revision_limit: 64, prompt_error: null as string | null,
+    plan_revision: 2, prompt_error: null as string | null,
     proposal: { budgets: { max_passes: 8, max_spawns: 0, max_audit_spawns: 1 },
-      modes: { multi_provider: false, cli_exec: false }, auditor },
+      modes: { multi_provider: false, cli_exec: false } },
     budgets: { passes_used: 2, spawns_used: 0, audit_spawns_used: 0 },
     review_text: "CANONICAL REVIEW TEXT",
     context: { author, ingress: "pi_ui" },
@@ -72,7 +70,7 @@ function dismissed(h: ReturnType<typeof harness>) {
 test("canonical review text is delivered and unchanged approval is raw submission", async () => {
   const h = harness();
   await h.invoke();
-  assert.ok(h.calls.includes("Empirica scope review — revision 2 of at most 64"));
+  assert.ok(h.calls.includes("Empirica run configuration — epoch 2"));
   assert.deepEqual(h.decisions.map(d => d.outcome ?? (d.submission as { action: string })?.action), ["present", "approve"]);
   assert.equal((h.decisions[1].submission as { configuration: unknown }).configuration !== undefined, true);
 });
@@ -91,30 +89,6 @@ test("governance context never enumerates configured models", () => {
     getError: () => { calls++; return "configured error"; } } as never;
   assert.deepEqual(piGovernanceContext(ctx), { author, ingress: "pi_ui" });
   assert.equal(calls, 0);
-});
-
-test("reviewer edit uses two bounded scalar inputs and no catalog", async () => {
-  const h = harness(EDIT); const inputs: string[] = [];
-  h.ctx.ui.input = async title => {
-    inputs.push(title);
-    if (title.startsWith("Reviewer provider")) return "openai";
-    if (title.startsWith("Reviewer model id")) return "gpt-4.1-mini-2025-04-14";
-    return "";
-  };
-  await h.invoke();
-  const proposal = (h.decisions[1].submission as { configuration: typeof h.g.proposal }).configuration;
-  assert.deepEqual(proposal.auditor, { provider_id: "openai", model_id: "gpt-4.1-mini-2025-04-14" });
-  assert.equal(inputs.filter(x => x.startsWith("Reviewer ")).length, 2);
-  assert.ok(!h.calls.includes("Independent auditor"));
-});
-
-test("partial or overlong reviewer input dismisses", async () => {
-  for (const [provider, model] of [["openai", ""], ["x".repeat(129), "model"]]) {
-    const h = harness(EDIT);
-    h.ctx.ui.input = async title => title.startsWith("Reviewer provider") ? provider :
-      title.startsWith("Reviewer model id") ? model : "";
-    await h.invoke(); dismissed(h);
-  }
 });
 
 test("confirmation refresh cannot silently replace the amended revision or digest", async () => {
@@ -172,18 +146,7 @@ test("declining locked confirmation keeps edited revision pending", async () => 
   assert.equal(h.g.state, "pending");
 });
 
-test("request changes has a separate exact-text path", async () => {
-  const h = harness(REQUEST);
-  h.settings.requestText = "  Add restore checks.\n";
-  const result = (await h.invoke()).result;
-  const submission = h.decisions[1].submission as { action: string; feedback: string };
-  assert.equal(submission.action, "request_changes");
-  assert.equal(submission.feedback, h.settings.requestText);
-  assert.equal(result.type, "Block");
-});
-
-test("blank feedback, unknown choices, no-op edit, and cancellation approve nothing", async () => {
-  const blank = harness(REQUEST); blank.settings.requestText = "   "; await blank.invoke(); dismissed(blank);
+test("unknown choices, no-op edit, and cancellation approve nothing", async () => {
   const unknown = harness("Approve"); await unknown.invoke(); dismissed(unknown);
   const noOp = harness(EDIT); await noOp.invoke();
   assert.deepEqual(noOp.decisions.map(d => d.outcome ?? (d.submission as { action: string })?.action), ["present", "edit"]);
@@ -191,10 +154,9 @@ test("blank feedback, unknown choices, no-op edit, and cancellation approve noth
   const cancel = harness(); cancel.settings.cancelAt = "Decision"; await cancel.invoke(); dismissed(cancel);
 });
 
-test("reject is a raw choice and never asks for auditor", async () => {
+test("reject is a raw choice", async () => {
   const h = harness(REJECT); await h.invoke();
   assert.equal((h.decisions[1].submission as { action: string }).action, "reject");
-  assert.ok(!h.calls.includes("Independent auditor"));
 });
 
 test("prompt errors and expiry keep typed failure without consent", async () => {

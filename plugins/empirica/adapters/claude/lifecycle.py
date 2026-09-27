@@ -16,6 +16,7 @@ No run file, Git ref, or host runtime directory is read directly.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from collections.abc import Mapping
 
@@ -112,6 +113,29 @@ def _model_observation(raw):
     return {"provider_id": provider, "model_id": raw}
 
 
+def _auditor_alias(payload: Mapping[str, object], environ: Mapping[str, str]) -> str | None:
+    """Choose only a host-resolvable alias different from the observed main family."""
+    configured = environ.get("CLAUDE_CODE_SUBAGENT_MODEL")
+    if configured and configured != "inherit":
+        return None
+    main_model, _ = _transcript_observation(payload.get("transcript_path"))
+    main = next((family for family in ("fable", "opus", "sonnet", "haiku")
+                 if isinstance(main_model, str) and family in main_model.lower()), None)
+    if main is None:
+        raise AuditProtocolError(
+            "main model family is unobservable; set CLAUDE_CODE_SUBAGENT_MODEL or "
+            "ANTHROPIC_DEFAULT_<FAMILY>_MODEL")
+    third_party = any(environ.get(key) for key in (
+        "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"))
+    for family in ("fable", "opus", "sonnet", "haiku"):
+        if family != main and (not third_party or environ.get(f"ANTHROPIC_DEFAULT_{family.upper()}_MODEL")):
+            return family
+    raise AuditProtocolError(
+        "no distinct reviewer alias is resolvable; set CLAUDE_CODE_SUBAGENT_MODEL or pin "
+        "ANTHROPIC_DEFAULT_FABLE_MODEL, ANTHROPIC_DEFAULT_OPUS_MODEL, "
+        "ANTHROPIC_DEFAULT_SONNET_MODEL, or ANTHROPIC_DEFAULT_HAIKU_MODEL")
+
+
 def _governance_context(payload, handle):
     model, _ = _transcript_observation(payload.get("transcript_path"))
     # to_model is host-native PostModelSwitch input, never author tool content.
@@ -194,14 +218,16 @@ def spawn_main() -> int:
             return _deny("empirica auditor launch forbids model overrides")
         plan = AuditProtocol(CLAUDE_PROFILE_ID, execution="async").prepare(
             handle, role_profile="empirica:empirica-auditor")
+        alias = _auditor_alias(payload, os.environ)
         updated = {
-            "model": plan.auditor["model_id"],
             "subagent_type": "empirica:empirica-auditor",
             "description": "Bound Empirica audit",
             "prompt": child_prompt(plan.argument),
             "run_in_background": True,
             "max_turns": 8,
         }
+        if alias is not None:
+            updated["model"] = alias
         json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                           "updatedInput": updated}}, sys.stdout)
         sys.stdout.write("\n")
@@ -366,7 +392,7 @@ def _durable_plan(handle: str, child_id: str) -> AuditLaunchPlan | None:
             or not isinstance(argument, dict)):
         return None
     return AuditLaunchPlan(
-        CLAUDE_PROFILE_ID, handle, child_id, role, argument, operation_id, operation.get("auditor"))
+        CLAUDE_PROFILE_ID, handle, child_id, role, argument, operation_id)
 
 
 def _reserved_plan(handle: str, result: Mapping[str, object]) -> AuditLaunchPlan | None:

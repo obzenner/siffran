@@ -10,8 +10,6 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
-AUTO_REVISION_LIMIT = 8
-MAX_REVISIONS = 64
 MAX_INTERACTIONS = 128
 PROPOSAL_INTERACTIONS = 3
 CEILINGS = {"max_passes": "passes_used", "max_spawns": "spawns_used",
@@ -74,20 +72,17 @@ def canonical_graph(graph: Mapping[str, Any] | None) -> dict | None:
 
 
 def proposal_body(goal: str, graph: Mapping | None, governance: Mapping) -> dict:
-    return {"goal": goal, "graph": canonical_graph(graph),
-            "configuration": plain(governance["proposal"]),
-            "context": plain(governance["context"]),
-            "control_mode": governance["control_mode"],
-            "revision_limit": governance["revision_limit"]}
+    """Bind only the immutable goal context and approvable run configuration."""
+    return {"goal": goal, "configuration": plain(governance["proposal"]),
+            "control_mode": governance["control_mode"]}
 
 
 def initial(goal: str, budgets: Mapping, modes: Mapping, control_mode: str = "deliberative") -> dict:
     value = {"state": "pending", "control_mode": control_mode,
-             "revision_limit": AUTO_REVISION_LIMIT if control_mode == "auto" else MAX_REVISIONS,
-             "plan_revision": 0, "revisions_used": 0, "approved_digest": None,
-             "approval_kind": None, "receipts": [], "change_request": None,
+             "plan_revision": 0, "approved_digest": None,
+             "approval_kind": None, "receipts": [],
              "proposal": {"budgets": {k: budgets[k] for k in CEILINGS},
-                          "modes": dict(modes), "auditor": None},
+                          "modes": dict(modes)},
              "context": {"author": None, "ingress": "unavailable"}}
     value["proposal_digest"] = canonical_digest(proposal_body(goal, None, value))
     return value
@@ -102,11 +97,7 @@ def revise(goal: str, graph: Mapping | None, current: Mapping, *, proposal=None,
     observed = canonical_digest(proposal_body(goal, graph, value))
     if observed == current["proposal_digest"]:
         return value
-    spent = current["revisions_used"] + int(current["approval_kind"] is not None)
-    if spent > current["revision_limit"]:
-        raise ValueError("governance.revision_limit")
     value.update(proposal_digest=observed, plan_revision=current["plan_revision"] + 1,
-                 revisions_used=spent,
                  state="revision_pending" if current["approval_kind"] else "pending")
     return value
 
@@ -114,30 +105,8 @@ def revise(goal: str, graph: Mapping | None, current: Mapping, *, proposal=None,
 def admission(governance: Mapping) -> str | None:
     if governance["state"] == "approved" and governance["approved_digest"] == governance["proposal_digest"]:
         return None
-    if governance["revisions_used"] >= governance["revision_limit"]:
-        return "governance.revision_limit"
     return ("governance.revision_required" if governance["approval_kind"] else
             "governance.approval_required")
-
-
-def context_error(governance: Mapping) -> str | None:
-    if model_key(governance["context"]["author"]) is None:
-        return "governance.author_unknown"
-    return None
-
-
-def selection_error(governance: Mapping) -> str | None:
-    if reason := context_error(governance):
-        return reason
-    author = governance["context"]["author"]
-    selected = governance["proposal"]["auditor"]
-    if selected is None:
-        return "governance.auditor_required"
-    if model_key(selected) is None:
-        return "governance.auditor_unknown"
-    if model_key(author) == model_key(selected):
-        return "audit.same_model"
-    return None
 
 
 def interactions_remaining(governance: Mapping) -> dict:
@@ -177,8 +146,6 @@ def resolve_submission(governance: Mapping, submission: Mapping,
     resolved = {"outcome": outcome}
     if changed:
         resolved["configuration"] = configuration
-    if outcome == "request_changes":
-        resolved["change_request"] = feedback
     return resolved, None
 
 
@@ -189,7 +156,7 @@ def decision_error(run_id: str, governance: Mapping, decision: Mapping) -> str |
         if fingerprint in {prior["fingerprint"], prior["presentation_fingerprint"]}:
             return "inert"
         presentation = {k: v for k, v in decision.items()
-                        if k not in {"amendment", "change_request", "submission"}}
+                        if k not in {"amendment", "submission"}}
         presentation["outcome"] = "present"
         if (prior["outcome"] != "present" or decision.get("outcome") == "present" or
                 canonical_digest(presentation) != prior["presentation_fingerprint"]):
@@ -210,32 +177,15 @@ def decision_error(run_id: str, governance: Mapping, decision: Mapping) -> str |
         return "governance.approval_unavailable"
     if expected == "host_ui" and "submission" not in decision and outcome not in {"present", "dismiss"}:
         return "governance.decision_conflict"
-    if outcome == "request_changes" and expected == "auto":
-        # Guidance is deliberative host_ui feedback; auto has no human to author it.
-        return "governance.approval_unavailable"
     if outcome == "present":
-        return context_error(governance) if expected == "host_ui" else "governance.approval_unavailable"
+        return None if expected == "host_ui" else "governance.approval_unavailable"
     if expected == "host_ui" and prior is None:
-        return context_error(governance) or "governance.receipt_replay"
+        return "governance.receipt_replay"
     return None
-
-
-def change_request_valid(governance: Mapping) -> bool:
-    """Stored guidance refers to a displayed (past or current) revision and is never blank."""
-    request = governance["change_request"]
-    if request is None:
-        return True
-    return (bool(request["text"].strip())
-            and 0 <= request["plan_revision"] <= governance["plan_revision"]
-            and governance["control_mode"] != "auto")
 
 
 def invariant(doc: Mapping) -> bool:
     value = doc["governance"]
-    if value["revision_limit"] != (AUTO_REVISION_LIMIT if value["control_mode"] == "auto" else MAX_REVISIONS):
-        return False
-    if value["revisions_used"] > value["revision_limit"] or value["revisions_used"] > value["plan_revision"]:
-        return False
     receipts = value["receipts"]
     if (len({r["id"] for r in receipts}) != len(receipts)
             or any((r["presentation_fingerprint"] is None) != (value["control_mode"] == "auto")
@@ -249,12 +199,8 @@ def invariant(doc: Mapping) -> bool:
         return False
     if value["approval_kind"] not in {None, "auto" if value["control_mode"] == "auto" else "host_ui"}:
         return False
-    if not change_request_valid(value):
-        return False
     if value["state"] == "approved":
-        return (value["change_request"] is None
-                and value["approved_digest"] == value["proposal_digest"] and bool(receipts)
-                and selection_error(value) is None
+        return (value["approved_digest"] == value["proposal_digest"] and bool(receipts)
                 and value["proposal"]["modes"] == doc["modes"]
                 and all(value["proposal"]["budgets"][k] == doc["budgets"][k] for k in CEILINGS))
     return True

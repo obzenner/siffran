@@ -83,33 +83,24 @@ Do this before reading files, searching, browsing, or running commands.
    discovery uncertainty. Inline shape: `{"root":"G0","claims":[{"id":"G0","text":"<uncertainty>",
    "kind":"ordinary","gating":true}],"edges":[]}`. Larger graphs must be root-connected DAGs
    with edges `{"from":"G0","to":"C1","type":"SupportedBy"}`.
-5. Read `empirica_read(operation="GetRun")`. Propose a concrete reviewer with
-   `configure_run` when one is not already selected. Empirica never reads or displays a configured
-   model catalog: the core only checks that the host-observed main model and reviewer are known,
-   normalized, and different. Unknown or same-model pairs block without an exception or fallback.
-   Reviewer selection is not proof of availability, separate authorization, or execution; the host
-   must later observe the actual reviewer matching the approved selection. Claude and Pi use bounded
-   scalar reviewer fields and open a host-owned read-only locked final confirmation after edits.
-   Never resend stale configuration fields to reopen review; omitted fields retain the human's
-   current proposal. Explicit `--auto` accepts only an author-proposed known-distinct reviewer within
-   existing budgets, modes, and revision limits. Do not read project files or skill references to
-   prepare the proposal.
-   The host-owned human deadline is 900s, with `EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS` in 1..1500s;
-   at most 3 presentations per revision and 128 per run are durably reserved before UI. Timeout
-   is dismissal, not human rejection. Do not loop on refusal or exhaustion.
-6. On `governance.changes_requested`, read `run.governance.change_request`, draft the requested
-   graph/configuration revision, and call `configure_run` for fresh review. The request is guidance,
-   never consent or evidence. Do not repeat approval prompts instead of addressing the request.
-   Wait for `run.governance.state == "approved"` bound to the exact displayed proposal. Amendments
-   need a second review. Both supported hosts own that confirmation; no author action intervenes.
-   Approval and change-request text use separate controls. The locked confirmation offers only
-   Confirm or Decline; decline keeps edits pending, and feedback remains available on the next
-   ordinary review. Human numeric/mode/auditor edits need no prose rationale and are not
-   corruption. Preserve them when revising scope. If re-review is needed, call `configure_run`
-   with only `kind`, not stale budgets/modes. After cancellation/timeout, wait for the human;
-   Claude can settle the turn nonterminally while investigation and convergence remain blocked.
-   Then record `{"kind":"investigate"}` before any native read, search,
-   command, evidence submission, or child launch. Approval does not supply either witness.
+5. Read `empirica_read(operation="GetRun")`, then call `configure_run` to request approval of
+   run configuration only: budgets, modes, and control mode. The goal is displayed read-only;
+   the claim graph and reviewer are not approvable. Reviewer selection comes from host
+   configuration, and the host must later observe a known reviewer different from the covered
+   actor. Configuration edits open a host-owned locked final confirmation; preserve the human's
+   edited values rather than resending stale fields. Explicit `--auto` remains within existing
+   budgets and modes and cannot raise ceilings.
+   The host-owned decision timeout is 900s, with `EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS` in 1..1500s;
+   it is displayed read-only. At most 3 presentations per configuration epoch and 128 per run are
+   durably reserved before UI. Timeout is dismissal, not human rejection. Do not loop on refusal
+   or exhaustion.
+6. Wait for `run.governance.state == "approved"` bound to the exact displayed configuration.
+   Configuration amendments need a second review. The locked confirmation offers only Confirm or
+   Decline; decline keeps edits pending. Human numeric/mode edits need no prose rationale and are
+   not corruption. After cancellation/timeout, wait for the human; Claude can settle the turn
+   nonterminally while investigation and convergence remain blocked. Then record
+   `{"kind":"investigate"}` before any native read, search, command, evidence submission, or child
+   launch. Approval does not supply either witness.
 7. Read [references/governance.md](references/governance.md) and
    [references/host-capabilities.md](references/host-capabilities.md), then investigate. Public
    reads/corrections and explicit honest stop remain available without approval.

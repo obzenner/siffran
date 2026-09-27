@@ -46,8 +46,8 @@ _BOOTSTRAP_OPERATIONS = tuple((name, tuple((step["predicate"], step["reason"])
                                            for step in operation["preconditions"]))
                               for name, operation in _bootstrap["operations"].items())
 _decisions = _PUBLIC_CONTRACT["governance_decisions"]
-if (tuple(_decisions["actions"]) != ("approve", "edit", "request_changes", "reject")
-        or any(row["feedback"] not in {"forbidden", "required"}
+if (tuple(_decisions["actions"]) != ("approve", "edit", "reject")
+        or any(row["feedback"] != "forbidden"
                for row in _decisions["actions"].values())):
     raise RuntimeError("unknown or reordered governance decision binding")
 _GOVERNANCE_DECISIONS = tuple((name, copy.deepcopy(row))

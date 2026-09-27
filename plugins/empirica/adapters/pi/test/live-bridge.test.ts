@@ -62,12 +62,11 @@ test("Pi raw edit and locked approval cross the actual private Python service", 
     };
   };
   const author = { provider: "anthropic", id: "claude-sonnet-4-6" };
-  const auditor = { provider_id: "anthropic", model_id: "claude-opus-4-6" };
   const run = runOf(await dispatch(startRunRequest({ project: "pi-decisions", session: "real-private" }, "governed bridge test", "decision-start")));
   runOf(await dispatch(observeActionRequest(run.id, { kind: "graph", payload: {
     root: "C0", claims: [{ id: "C0", text: "The supplied goal is achievable.", gating: true, kind: "ordinary" }], edges: [],
   } }, "decision-graph")));
-  runOf(await dispatch(observeActionRequest(run.id, { kind: "configure_run", auditor,
+  runOf(await dispatch(observeActionRequest(run.id, { kind: "configure_run",
     budgets: { max_passes: 8, max_spawns: 0, max_audit_spawns: 1 } }, "decision-proposal")));
   const ctx = fakeCtx(testRepo); ctx.hasUI = true; ctx.model = author;
   ctx.modelRegistry = { getAvailable: () => { throw new Error("governance must not enumerate models"); } };
@@ -83,8 +82,7 @@ test("Pi raw edit and locked approval cross the actual private Python service", 
     }
     return true;
   };
-  ctx.ui.select = async (title, choices) => title === "Decision" ? "Edit configuration for another review"
-    : title === "Independent auditor" ? choices.find(choice => choice === `${auditor.provider_id}/${auditor.model_id}`) : "Enabled";
+  ctx.ui.select = async (title) => title === "Decision" ? "Edit configuration for another review" : "Enabled";
   ctx.ui.input = async title => title.startsWith("Investigation passes") ? "8"
     : title.startsWith("Child spawns") || title.startsWith("Audit spawns") ? "2" : "";
   const previous = { EMPIRICA_HOME: process.env.EMPIRICA_HOME, EMPIRICA_REPO_DIR: process.env.EMPIRICA_REPO_DIR };

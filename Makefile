@@ -104,22 +104,25 @@ check-core: ## Fast host-neutral contracts, malformed input, state, bridge, and 
 	@$(PYTHON) $(METHODOLOGIST_CORE_TESTS)
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q \
 		test_governance.GovernanceServiceTests.test_private_exact_replay_conflict_stale_cross_run_and_cas \
-		test_governance.GovernanceServiceTests.test_pair_only_selection_blocks_unknown_same_and_null_reviewer \
-		test_governance.GovernanceServiceTests.test_auto_explicit_no_ceiling_increase_and_bounded_revisions \
-		test_governance.GovernanceServiceTests.test_observed_main_mismatch_revokes_and_blocks_bound_verdict \
+		test_governance.GovernanceServiceTests.test_configuration_amendment_makes_prior_decision_stale \
+		test_governance.GovernanceServiceTests.test_host_ui_final_outcome_without_submission_conflicts \
+		test_governance.GovernanceServiceTests.test_configure_run_schema_rejects_reviewer_field \
+		test_governance.GovernanceServiceTests.test_auto_explicit_cannot_raise_ceiling_and_graph_does_not_change_digest \
+		test_governance.GovernanceServiceTests.test_distinct_bound_audit_converges_with_raw_alias_provenance \
 		test_governance.GovernanceServiceTests.test_graphless_configure_and_private_present_are_effect_free_blocks \
 		test_governance.GovernanceServiceTests.test_bootstrap_graphless_convergence_is_preparation_not_human_wait \
 		test_governance.GovernanceServiceTests.test_bootstrap_contract_examples_have_real_postconditions \
 		test_governance.GovernanceServiceTests.test_bootstrap_terminal_run_has_no_preparation_actions \
-		test_governance.GovernanceServiceTests.test_real_pending_approval_investigation_then_revision_revokes_all_paths \
+		test_governance.GovernanceServiceTests.test_graph_change_does_not_revoke_configuration_approval \
 		test_governance.GovernanceServiceTests.test_raw_submission_conflict_and_amendment_replay \
-		test_governance.GovernanceServiceTests.test_legacy_semantic_receipt_remains_exactly_replayable
+		test_governance.GovernanceServiceTests.test_configuration_is_proposal_only_and_freeze_preserves_approval
 
 check-claude: ## Fast Claude payload, lifecycle translation, and fail-closed adapter tests
 	@printf '$(BOLD)==> claude suite$(RESET)\n'
 	@$(PYTHON) $(EMPIRICA_CLAUDE_ADAPTER_TESTS)
 	@$(MAKE) --no-print-directory empirica-governance-host-check ARGS='-k host_owned'
-	@$(MAKE) --no-print-directory empirica-activation-lifecycle-check ARGS='-k test_post_model_switch_subprocess_revokes_approved_author'
+	@$(MAKE) --no-print-directory empirica-activation-lifecycle-check ARGS='-k test_post_model_switch_updates_read_only_context_without_revoking_approval'
+	@$(MAKE) --no-print-directory empirica-activation-lifecycle-check ARGS='-k ClaudeAuditorAliasTests'
 
 check-codex: methodologist-codex-check empirica-codex-check ## Fast Codex package, hook, payload, and MCP tests
 	@cd $(PLUGINS_DIR)/empirica/adapters/codex/tests && $(PYTHON) -m unittest -q \

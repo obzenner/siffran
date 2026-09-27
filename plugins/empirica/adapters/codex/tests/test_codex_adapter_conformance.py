@@ -42,7 +42,7 @@ class CodexAdapterConformanceTests(unittest.TestCase):
                 tools.call("empirica_observe", {"run_id": handle, "action": {"kind": "graph", "payload": {
                     "root": "G0", "claims": [{"id": "G0", "text": "identity", "gating": True, "kind": "ordinary"}], "edges": []}}})
                 result = tools.call("empirica_observe", {"run_id": handle, "action": {"kind": "configure_run"}})["structuredContent"]
-                self.assertEqual(result["reasons"][0]["code"], "governance.author_unknown")
+                self.assertEqual(result["run"]["governance"]["approval_kind"], "auto")
 
     def test_public_mcp_surface_runs_managed_auditor_but_blocks_unobserved_identity(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -79,8 +79,7 @@ class CodexAdapterConformanceTests(unittest.TestCase):
                                 "gating": True, "kind": "needs-experiment"}],
                     "edges": [],
                 }})
-                approved = observe({"kind": "configure_run", "auditor": {
-                    "provider_id": "openai", "model_id": "gpt-4.1-mini-2025-04-14"}})
+                approved = observe({"kind": "configure_run"})
                 self.assertEqual(approved["run"]["governance"]["approval_kind"], "auto")
                 observe({"kind": "investigate"})
                 observe({"kind": "research", "claim_id": "G0", "source_kind": "code",
@@ -132,7 +131,7 @@ class CodexAdapterConformanceTests(unittest.TestCase):
                 with patch("adapters.codex.audit._default_runner", side_effect=auditor), \
                      patch("adapters.codex.lifecycle.execute_audit", side_effect=managed):
                     stop = _stop(stop_payload)
-                self.assertEqual(auditor_called, [True])
+                self.assertEqual(auditor_called, [])
                 self.assertEqual(managed_results, [False])
                 self.assertEqual(stop.get("decision"), "block")
 
@@ -140,7 +139,7 @@ class CodexAdapterConformanceTests(unittest.TestCase):
                 result = final["structuredContent"]
                 self.assertEqual(result["type"], "Block")
                 self.assertEqual([reason["code"] for reason in result["reasons"]],
-                                 ["governance.revision_required"])
+                                 ["audit.required"])
                 self.assertEqual(result["run"]["status"], "active")
 
 

@@ -51,6 +51,33 @@ def _payload(**extra: object) -> dict:
     return base
 
 
+class ClaudeAuditorAliasTests(unittest.TestCase):
+    def _alias(self, model, env):
+        from adapters.claude import lifecycle
+        with patch.object(lifecycle, "_transcript_observation", return_value=(model, None)):
+            return lifecycle._auditor_alias({"transcript_path": "main.jsonl"}, env)
+
+    def test_anthropic_api_chooses_first_distinct_family(self):
+        self.assertEqual(self._alias("claude-fable-5-1", {}), "opus")
+        self.assertEqual(self._alias("claude-opus-4-8", {}), "fable")
+        self.assertEqual(self._alias("claude-sonnet-5", {}), "fable")
+        self.assertEqual(self._alias("claude-haiku-4-5", {}), "fable")
+
+    def test_explicit_subagent_model_is_left_to_the_host(self):
+        self.assertIsNone(self._alias("claude-opus-4-8", {"CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"}))
+        self.assertEqual(self._alias("claude-opus-4-8", {"CLAUDE_CODE_SUBAGENT_MODEL": "inherit"}), "fable")
+
+    def test_bedrock_uses_only_pinned_distinct_alias(self):
+        env = {"CLAUDE_CODE_USE_BEDROCK": "1", "ANTHROPIC_DEFAULT_OPUS_MODEL": "eu.opus"}
+        self.assertEqual(self._alias("claude-sonnet-5", env), "opus")
+        with self.assertRaisesRegex(RuntimeError, "ANTHROPIC_DEFAULT_FABLE_MODEL"):
+            self._alias("claude-opus-4-8", env)
+
+    def test_unobservable_main_family_fails_closed_with_pin_guidance(self):
+        with self.assertRaisesRegex(RuntimeError, "CLAUDE_CODE_SUBAGENT_MODEL"):
+            self._alias(None, {})
+
+
 class ThinHookTests(unittest.TestCase):
     """Every hook is a thin entrypoint that imports its lifecycle function."""
 
@@ -243,7 +270,7 @@ class IsolatedHookResolutionTests(unittest.TestCase):
         self.assertEqual(self._run("spawn_gate.py", agent, self.repo)[0], 2)
         self.assertEqual(self._run("convergence_gate.py", stop, self.repo)[0], 2)
 
-    def test_post_model_switch_subprocess_revokes_approved_author(self) -> None:
+    def test_post_model_switch_updates_read_only_context_without_revoking_approval(self) -> None:
         from adapters import bridge
         from adapters.claude import CLAUDE_PROFILE_ID
         sys.path.insert(0, str(PLUGIN / "tests"))
@@ -260,11 +287,10 @@ class IsolatedHookResolutionTests(unittest.TestCase):
             bridge.handle({"protocol": "empirica/v2", "request_id": "graph",
                 "command": {"type": "ObserveAction", "run_id": handle,
                             "action": {"kind": "graph", "payload": GRAPH}}}, CLAUDE_PROFILE_ID)
-            reviewer = {"provider_id": "anthropic", "model_id": "claude-opus-4-6"}
             context = {"author": {"provider_id": "anthropic", "model_id": "claude-sonnet-4-6"},
                 "ingress": "mcp_elicitation"}
             bridge.handle({"protocol": "empirica/v2", "request_id": "config", "command": {
-                "type": "ObserveAction", "run_id": handle, "action": {"kind": "configure_run", "auditor": reviewer}}}, CLAUDE_PROFILE_ID)
+                "type": "ObserveAction", "run_id": handle, "action": {"kind": "configure_run"}}}, CLAUDE_PROFILE_ID)
             g = bridge.trusted_governance_context(CLAUDE_PROFILE_ID, handle, context)["result"]["run"]["governance"]
             decision = {"run_id": handle, "receipt_id": "test-ui", "proposal_digest": g["proposal_digest"],
                 "plan_revision": g["plan_revision"], "approval_kind": "host_ui"}
@@ -274,11 +300,13 @@ class IsolatedHookResolutionTests(unittest.TestCase):
                 "submission": {"action": "approve", "configuration": g["proposal"]}})
             self.assertEqual(approved["result"]["type"], "Allow")
             self.assertEqual(approved["result"]["run"]["governance"]["state"], "approved")
+            before_digest = g["proposal_digest"]
             event = self._event("session-a", str(self.repo), hook_event_name="PostModelSwitch", to_model="claude-opus-4-6")
             self.assertEqual(self._run("route_stamp.py", event, self.repo, env)[0], 0)
             result = bridge.handle({"protocol": "empirica/v2", "request_id": "read",
                 "command": {"type": "GetRun", "run_id": handle}}, CLAUDE_PROFILE_ID)["result"]["run"]["governance"]
-            self.assertEqual(result["state"], "revision_pending")
+            self.assertEqual(result["state"], "approved")
+            self.assertEqual(result["proposal_digest"], before_digest)
             self.assertEqual(result["context"]["author"]["model_id"], "claude-opus-4-6")
 
     def test_inactive_git_marker_with_git_failure_is_not_proven_absent(self) -> None:

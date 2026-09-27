@@ -19,15 +19,12 @@ and convergence blocks. Async execution is also unsupported. Codex is excluded f
 installed-host release receipt set until a native resolved-model observation can be bound to the
 managed process and the candidate foreground probe passes.
 
-There is no default auditor model or `EMPIRICA_CODEX_AUDITOR_MODEL` override. The managed
-launcher uses the exact visible approved proposal target. Deliberative approval is explicitly
-unavailable on this profile. Explicit `$empirica --auto <goal>` requires an author-proposed concrete
-known-distinct reviewer and a mapped observed main model. It does not read host model configuration.
-Real active slugs such as
-`gpt-5.1-codex` are currently unmapped and block with `governance.author_unknown`, not a claimed
-identity mismatch. The three dated OpenAI snapshots used in simulated conformance do not prove
-installed Codex support. Bounded automatic acceptance is not human approval and cannot prove
-the actual auditor model. Unknown observation revokes approval and fails the child closed.
+There is no default auditor model or `EMPIRICA_CODEX_AUDITOR_MODEL` override. Deliberative
+approval is explicitly unavailable on this profile. Explicit `$empirica --auto <goal>` can approve
+bounded run configuration, but Codex audit remains unsupported because the adapter cannot observe
+the verdict-producing reviewer identity. It does not read host model configuration or claim an
+identity mismatch. Bounded automatic acceptance is not human approval and cannot prove the actual
+auditor model.
 See [governance](../../skills/empirica/references/governance.md) for configuration and limitations.
 
 ## Surface

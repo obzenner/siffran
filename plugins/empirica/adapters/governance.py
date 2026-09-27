@@ -38,19 +38,10 @@ def form(run: dict, *, confirmation: bool = False) -> tuple[str, dict]:
                           "maximum": row["maximum"], "default": proposed["budgets"][key], "title": row["label"]}
         props.update({key: {"type": "boolean", "default": proposed["modes"][key], "title": label}
                       for key, label in controls["controls"]["modes"].items()})
-        auditor = proposed["auditor"] or {}
-        props["auditor_provider"] = {"type": "string", "maxLength": 128,
-            "default": auditor.get("provider_id", ""), "title": "Reviewer provider (different model from main; empty keeps current)"}
-        props["auditor_model"] = {"type": "string", "maxLength": 128,
-            "default": auditor.get("model_id", ""), "title": "Reviewer model id (exact id, not an availability claim; empty keeps current)"}
     message = controls["confirmation"]["title"] + "\n" if confirmation else ""
-    return message + g["review_text"], {"type": "object", "properties": props, "required": ["decision"]}
-
-
-def feedback_form() -> tuple[str, dict]:
-    title = protocol._GOVERNANCE_CONTROLS["controls"]["feedback"]
-    return title, {"type": "object", "properties": {"feedback": {"type": "string", "maxLength": 4096, "title": title}},
-                   "required": ["feedback"], "additionalProperties": False}
+    timeout = governance_timeout()
+    timeout_text = f"Host decision timeout (read-only): {timeout:g} seconds.\n"
+    return message + timeout_text + g["review_text"], {"type": "object", "properties": props, "required": ["decision"]}
 
 
 class HostGovernance:
@@ -108,26 +99,7 @@ class HostGovernance:
                     proposal["budgets"].update({k: content.get(k, proposal["budgets"][k])
                                                 for k in protocol._GOVERNANCE_CONTROLS["controls"]["budgets"]})
                     proposal["modes"].update({k: content.get(k, proposal["modes"][k]) for k in ("multi_provider", "cli_exec")})
-                    provider = content.get("auditor_provider", "")
-                    model = content.get("auditor_model", "")
-                    if bool(provider) != bool(model):
-                        return dismiss()
-                    if provider and model:
-                        proposal["auditor"] = {"provider_id": provider, "model_id": model}
-                feedback = ""
-                if action == "request_changes":
-                    envelope = {**envelope, "receipt_id": uuid4().hex}
-                    reserved = self.decision_ingress(self.profile, run["id"], {**envelope, "outcome": "present"})["result"]
-                    if reserved.get("type") != "Allow":
-                        return reserved
-                    feedback_answer = self.elicit(*feedback_form())
-                    if not isinstance(feedback_answer, dict) or feedback_answer.get("action") != "accept" or not isinstance(feedback_answer.get("content"), dict):
-                        return dismiss()
-                    jsonschema.validate(feedback_answer["content"], feedback_form()[1])
-                    feedback = feedback_answer["content"]["feedback"]
                 submission = {"action": action, "configuration": proposal}
-                if action == "request_changes":
-                    submission["feedback"] = feedback
                 decision = {**envelope, "submission": submission}
             except (ValueError, TypeError, StopIteration, jsonschema.ValidationError):
                 return dismiss()
@@ -144,8 +116,6 @@ class HostGovernance:
         if not confirmation and action in {"approve", "edit"} and admitted.get("type") == "Allow" and revised:
             # Follow the authoritative amendment result with exactly one locked confirmation.
             return self(admitted, confirmation=True)
-        if action == "request_changes" and admitted.get("type") in {"Allow", "Inert"}:
-            return unavailable(admitted, "governance.changes_requested")
         if action == "edit" and admitted.get("type") in {"Allow", "Inert"} and not revised:
             return unavailable(admitted)
         return admitted
