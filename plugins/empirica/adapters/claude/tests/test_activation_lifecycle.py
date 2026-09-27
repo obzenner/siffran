@@ -54,9 +54,47 @@ def _payload(**extra: object) -> dict:
 class ClaudeAuditorAliasTests(unittest.TestCase):
     def _alias(self, model, env):
         from adapters.claude import lifecycle
-        models = [model] if model is not None else []
-        with patch.object(lifecycle, "_transcript_contents", return_value=(models, None)):
+        with patch.object(lifecycle, "_current_assistant_model", return_value=model):
             return lifecycle._auditor_alias({"transcript_path": "main.jsonl"}, env)
+
+    def test_current_author_is_chronological_and_does_not_inherit_missing_model(self):
+        from adapters.claude.lifecycle import _current_assistant_model
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "main.jsonl"
+            def write(*models):
+                transcript.write_text("\n".join(json.dumps({"message": {
+                    "role": "assistant", "model": model, "content": "served"}})
+                    if model is not None else json.dumps({"message": {
+                        "role": "assistant", "content": [{"type": "tool_use", "name": "tool"}]}})
+                    for model in models) + "\n", encoding="utf-8")
+            write("claude-opus-4-6", "claude-sonnet-4-6", "claude-opus-4-6")
+            self.assertEqual(_current_assistant_model(str(transcript)), "claude-opus-4-6")
+            write("claude-opus-4-6", "claude-sonnet-4-6", "claude-opus-4-6", "claude-sonnet-4-6")
+            self.assertEqual(_current_assistant_model(str(transcript)), "claude-sonnet-4-6")
+            write("claude-opus-4-6", None)
+            self.assertIsNone(_current_assistant_model(str(transcript)))
+
+    def test_explicitly_malformed_message_fails_the_whole_transcript_scan(self):
+        # Regression (M7 final review): the shared reader must not skip a present but
+        # non-mapping ``message``; a valid verdict next to a corrupt row must not be read
+        # as a valid transcript (that let an auditor child complete and the run converge).
+        from adapters.claude.lifecycle import (
+            _current_assistant_model, _transcript_contents, _transcript_handbacks)
+        verdict = json.dumps({"message": {"role": "assistant", "model": "claude-opus-4-6",
+                                           "content": [{"type": "tool_use", "name": "SubagentHandback",
+                                                        "input": {"message": "verdict"}}]}})
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "auditor.jsonl"
+            for malformed in (None, [], "broken"):
+                with self.subTest(message=malformed):
+                    transcript.write_text(
+                        verdict + "\n" + json.dumps({"message": malformed}) + "\n", encoding="utf-8")
+                    self.assertEqual(_transcript_handbacks(str(transcript)), (False, []))
+                    self.assertEqual(_transcript_contents(str(transcript)), ([], None))
+                    self.assertIsNone(_current_assistant_model(str(transcript)))
+            # Positive control: rows without a message field are not messages and are skipped.
+            transcript.write_text(verdict + "\n" + json.dumps({"type": "summary"}) + "\n", encoding="utf-8")
+            self.assertEqual(_transcript_handbacks(str(transcript)), (True, ["verdict"]))
 
     def test_anthropic_api_chooses_first_distinct_family(self):
         self.assertEqual(self._alias("claude-fable-5-1", {}), "opus")

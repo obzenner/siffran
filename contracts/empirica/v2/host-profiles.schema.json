@@ -17,7 +17,7 @@
           "host_id", "profile_id", "version", "compatibility", "current_tier", "audit_execution",
           "required_fixture_ids", "required_live_probe_ids", "promotion_status",
           "input_private", "output_private", "unsupported_reason_ids", "sources",
-          "delegation_env"
+          "delegation_env", "approval_ingress"
         ],
         "properties": {
           "host_id": {"type": "string", "minLength": 1},
@@ -43,7 +43,8 @@
           "output_private": {"oneOf": [{"type": "boolean"}, {"const": "unverified"}]},
           "unsupported_reason_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
           "sources": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true},
-          "delegation_env": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]+$"}
+          "delegation_env": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]+$"},
+          "approval_ingress": {"enum": ["unavailable", "mcp_elicitation", "pi_ui"]}
         },
         "dependentRequired": {
           "candidate_tier": ["candidate_probe_ids"]

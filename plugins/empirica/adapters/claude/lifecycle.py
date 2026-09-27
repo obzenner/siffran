@@ -21,6 +21,7 @@ import sys
 from collections.abc import Mapping
 
 from adapters import bridge as application_bridge
+from application import protocol as _protocol
 from adapters.audit import child_prompt, verdict_from_final_output
 from adapters.audit_protocol import (AuditLaunchPlan, AuditProtocol, AuditProtocolError,
                                      IdentityObservation)
@@ -81,6 +82,16 @@ def _deny(reason: str, result: Mapping[str, object] | None = None) -> int:
     return 2
 
 
+def _reject_reservation(protocol: AuditProtocol | None, plan: AuditLaunchPlan | None) -> None:
+    """Best-effort rollback of a retained reservation; failure must not change the deny."""
+    if protocol is None or plan is None:
+        return
+    try:
+        protocol.reject(plan)
+    except Exception:  # noqa: BLE001 - rollback failure must not override the blocking deny
+        pass
+
+
 def _launch_is_executable(tool_input: object) -> bool:
     """Only executable XOR launch shapes spend a reservation; list/management calls pass."""
     if not isinstance(tool_input, Mapping) or tool_input.get("action") == "list":
@@ -111,8 +122,7 @@ def _model_observation(raw, *, source="claude-transcript"):
 
 
 def _main_model(payload: Mapping[str, object]) -> str | None:
-    models, _ = _transcript_contents(payload.get("transcript_path"))
-    return models[-1] if models else None
+    return _current_assistant_model(payload.get("transcript_path"))
 
 
 def _auditor_alias(payload: Mapping[str, object], environ: Mapping[str, str]) -> str | None:
@@ -144,7 +154,7 @@ def _governance_context(payload, handle):
         model = payload.get("to_model")
     response = application_bridge.trusted_governance_context(CLAUDE_PROFILE_ID, handle, {
         "author": _model_observation(model, source="claude-main-transcript"),
-        "ingress": "mcp_elicitation"})
+        "ingress": _protocol.host_profile(CLAUDE_PROFILE_ID)["approval_ingress"]})
     if response.get("result", {}).get("type") not in {"Allow", "Inert"}:
         raise RuntimeError("governance context unavailable")
 
@@ -213,6 +223,8 @@ def spawn_main() -> int:
         return _deny("empirica spawn denied: run resolution unavailable")
     if handle is None:
         return 0  # exact no-active-run response → no cap to enforce
+    plan = None
+    audit_protocol = None
     try:
         _governance_context(payload, handle)
         investigation = dispatch_investigation(payload, handle)
@@ -232,9 +244,9 @@ def spawn_main() -> int:
                     if decision.exit_code else 0)
         if "model" in tool_input:
             return _deny("empirica auditor launch forbids model overrides")
-        plan = AuditProtocol(CLAUDE_PROFILE_ID, execution="async").prepare(
-            handle, role_profile="empirica:empirica-auditor")
         alias = _auditor_alias(payload, os.environ)
+        audit_protocol = AuditProtocol(CLAUDE_PROFILE_ID, execution="async")
+        plan = audit_protocol.prepare(handle, role_profile="empirica:empirica-auditor")
         updated = {
             "subagent_type": "empirica:empirica-auditor",
             "description": "Bound Empirica audit",
@@ -247,10 +259,10 @@ def spawn_main() -> int:
         json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                           "updatedInput": updated}}, sys.stdout)
         sys.stdout.write("\n")
-    except AuditProtocolError as exc:
-        return _deny(f"empirica spawn denied: {exc}")
-    except Exception:  # noqa: BLE001 - active-run launch failures deny below
-        return _deny("empirica spawn denied: adapter failure")
+    except Exception as exc:  # noqa: BLE001 - every active-run launch failure must deny
+        _reject_reservation(audit_protocol, plan)
+        return _deny(f"empirica spawn denied: {exc}" if isinstance(exc, AuditProtocolError)
+                     else "empirica spawn denied: adapter failure")
     return 0
 
 
@@ -339,34 +351,68 @@ def restore_main() -> int:
     return 0
 
 
-def _transcript_contents(path: object) -> tuple[list[str], str | None]:
-    """Return distinct served assistant models and the textual final message."""
+def _assistant_messages(path: object) -> list[Mapping] | None:
+    """Parse the JSONL transcript into its assistant messages; None on any read error.
+
+    A single reader owns the transcript format so a format change is edited once.
+    Rows without a ``message`` field are not messages and are skipped, but an explicitly
+    present non-mapping ``message`` is a malformed transcript: the whole scan fails closed
+    (returns None) so corruption can never be read as a valid transcript without it.
+    """
     if not isinstance(path, str) or not path:
-        return [], None
-    models: list[str] = []
-    final = None
+        return None
+    messages: list[Mapping] = []
     try:
         with open(path, encoding="utf-8") as stream:
             for line in stream:
                 row = json.loads(line)
                 message = row.get("message", {}) if isinstance(row, dict) else {}
-                if message.get("role") != "assistant":
-                    continue
-                candidate = message.get("model")
-                if (isinstance(candidate, str) and candidate and candidate != "<synthetic>"
-                        and candidate not in models):
-                    models.append(candidate)
-                content = message.get("content")
-                if isinstance(content, str):
-                    final = content
-                elif isinstance(content, list):
-                    text = [item.get("text") for item in content
-                            if isinstance(item, Mapping) and item.get("type") == "text"
-                            and isinstance(item.get("text"), str)]
-                    if text:
-                        final = "\n".join(text)
+                if not isinstance(message, Mapping):
+                    return None
+                if message.get("role") == "assistant":
+                    messages.append(message)
     except (OSError, ValueError, TypeError):
+        return None
+    return messages
+
+
+def _served_model(message: Mapping) -> str | None:
+    """The single served-model rule: a non-empty model string that is not the synthetic sentinel."""
+    candidate = message.get("model")
+    return candidate if (isinstance(candidate, str) and candidate
+                         and candidate != "<synthetic>") else None
+
+
+def _current_assistant_model(path: object) -> str | None:
+    """Return the chronological last assistant message's served model, if observable.
+
+    A tool/verdict-bearing message without model evidence is an unobservable identity;
+    it never inherits an older model.
+    """
+    messages = _assistant_messages(path)
+    return _served_model(messages[-1]) if messages else None
+
+
+def _transcript_contents(path: object) -> tuple[list[str], str | None]:
+    """Return distinct served assistant models and the textual final message."""
+    messages = _assistant_messages(path)
+    if messages is None:
         return [], None
+    models: list[str] = []
+    final = None
+    for message in messages:
+        model = _served_model(message)
+        if model is not None and model not in models:
+            models.append(model)
+        content = message.get("content")
+        if isinstance(content, str):
+            final = content
+        elif isinstance(content, list):
+            text = [item.get("text") for item in content
+                    if isinstance(item, Mapping) and item.get("type") == "text"
+                    and isinstance(item.get("text"), str)]
+            if text:
+                final = "\n".join(text)
     return models, final
 
 
@@ -379,32 +425,22 @@ def _transcript_handbacks(path: object) -> tuple[bool, list[str]]:
     malformed transcripts are distinct from a valid transcript with no handback
     so corruption can never enable the legacy final-message fallback.
     """
-    if not isinstance(path, str) or not path:
+    messages = _assistant_messages(path)
+    if messages is None:
         return False, []
-    messages: list[str] = []
-    try:
-        with open(path, encoding="utf-8") as stream:
-            for line in stream:
-                row = json.loads(line)
-                message = row.get("message", {}) if isinstance(row, dict) else {}
-                if message.get("role") != "assistant":
-                    continue
-                content = message.get("content")
-                if not isinstance(content, list):
-                    continue
-                for item in content:
-                    if (not isinstance(item, Mapping) or item.get("type") != "tool_use"
-                            or item.get("name") != "SubagentHandback"):
-                        continue
-                    tool_input = item.get("input")
-                    candidate = tool_input.get("message") if isinstance(tool_input, Mapping) else None
-                    if isinstance(candidate, str):
-                        messages.append(candidate)
-                    else:
-                        messages.append("")
-    except (OSError, ValueError, TypeError):
-        return False, []
-    return True, messages
+    handbacks: list[str] = []
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for item in content:
+            if (not isinstance(item, Mapping) or item.get("type") != "tool_use"
+                    or item.get("name") != "SubagentHandback"):
+                continue
+            tool_input = item.get("input")
+            candidate = tool_input.get("message") if isinstance(tool_input, Mapping) else None
+            handbacks.append(candidate if isinstance(candidate, str) else "")
+    return True, handbacks
 
 
 def _durable_plan(handle: str, child_id: str) -> AuditLaunchPlan | None:

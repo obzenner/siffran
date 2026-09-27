@@ -36,11 +36,11 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
         governed, domain, next_state = policy.plain(state.governance), (), state
         try:
             if context:
-                if payload["ingress"] == "mcp_elicitation" and not c.profile_id.startswith("claude-code@"):
-                    return c._block_from_snapshot(snapshot, rid, "governance.approval_unavailable")
-                if payload["ingress"] == "pi_ui" and not c.profile_id.startswith("pi@"):
+                profile = _proto.host_profile(c.profile_id)
+                if payload["ingress"] not in {"unavailable", profile["approval_ingress"]}:
                     return c._block_from_snapshot(snapshot, rid, "governance.approval_unavailable")
                 payload = policy.plain(payload)
+                payload["approval_capability"] = _proto.APPROVAL_CAPABILITY[payload["ingress"]]
                 governed = policy.revise(state.goal, governed, context=payload)
                 if governed == policy.plain(state.governance):
                     return c._inert_with_run(rid, snapshot)

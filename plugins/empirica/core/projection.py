@@ -40,15 +40,21 @@ def _reason_metadata(metadata: Mapping[str, tuple[tuple[str, ...], tuple[str, ..
 
 def _obligation(
     obligation_id: str, required: str, observed: list[dict[str, Any]],
-    missing: dict[str, Any] | None, metadata, status: str,
+    missing: dict[str, Any] | None, metadata, status: str, terminal_next: list[str] | None = None,
 ) -> dict[str, Any]:
-    next_actions = [] if missing is None else _reason_metadata(metadata, missing["code"])[0]
+    if terminal_next is not None:
+        next_actions = list(terminal_next)
+    else:
+        next_actions = [] if missing is None else _reason_metadata(metadata, missing["code"])[0]
     return {"id": obligation_id, "required": required, "observed": observed,
             "missing": missing, "next": next_actions, "status": status}
 
 
-def _residual(metadata, code: str, parameters: dict[str, Any], **extra) -> dict[str, Any]:
+def _residual(metadata, code: str, parameters: dict[str, Any],
+              terminal_next: list[str] | None = None, **extra) -> dict[str, Any]:
     next_actions, sections = _reason_metadata(metadata, code)
+    if terminal_next is not None:
+        next_actions = list(terminal_next)
     return {**extra, "code": code, "parameters": parameters,
             "next_actions": next_actions, "sections": sections}
 
@@ -56,19 +62,20 @@ def _residual(metadata, code: str, parameters: dict[str, Any], **extra) -> dict[
 def _obligations(snapshot: EvaluationSnapshot, states: Mapping[str, str],
                  blockers: tuple[dict[str, Any], ...],
                  metadata: Mapping[str, tuple[tuple[str, ...], tuple[str, ...]]],
-                 stale: set[str]) -> dict[str, list[dict[str, Any]]]:
+                 stale: set[str], terminal_next: list[str] | None = None,
+                 ) -> dict[str, list[dict[str, Any]]]:
     state = snapshot.state
     late = bool(snapshot.command and snapshot.command.get("type") == "ObserveAction"
                 and snapshot.command["action"].get("kind") == "route"
                 and state.investigation_stamp is not None)
     bootstrap = bootstrap_status(snapshot)
-    active = [_obligation(row["id"], row["must"], [], None, metadata, row["status"])
+    active = [_obligation(row["id"], row["must"], [], None, metadata, row["status"], terminal_next)
               for row in bootstrap["active"]]
     if late:
         active.append(_obligation(
             "obligation.route.late", snapshot.late_route_must, [],
             {"code": "route.late", "target_claim_id": None, "parameters": {}},
-            metadata, "violated"))
+            metadata, "violated", terminal_next))
     blockers_by_claim = {row["claim_id"]: row for row in blockers}
     _, deferred = _scope(snapshot)
     if snapshot.graph:
@@ -83,7 +90,7 @@ def _obligations(snapshot: EvaluationSnapshot, states: Mapping[str, str],
                         for item in active_evidence(snapshot, claim)]
             row = _obligation(
                 "claim:" + claim["id"], claim["text"], observed, missing, metadata,
-                "satisfied" if states[claim["id"]] == "approved" else "residual")
+                "satisfied" if states[claim["id"]] == "approved" else "residual", terminal_next)
             if claim["id"] in deferred:
                 row["hold"] = "deferred"
             active.append(row)
@@ -92,27 +99,28 @@ def _obligations(snapshot: EvaluationSnapshot, states: Mapping[str, str],
 
 def _residuals(snapshot: EvaluationSnapshot, derivation: Any,
                blockers: tuple[dict[str, Any], ...],
-               metadata: Mapping[str, tuple[tuple[str, ...], tuple[str, ...]]]) -> list[dict[str, Any]]:
+               metadata: Mapping[str, tuple[tuple[str, ...], tuple[str, ...]]],
+               terminal_next: list[str] | None = None) -> list[dict[str, Any]]:
     status = snapshot.state.status
     _, deferred = _scope(snapshot)
     if snapshot.state.frozen_claim_ids is not None and deferred:
         return [_residual(metadata, "freeze.deferred", {
-            "claim_ids": deferred, "deferred_scope_digest": digest(deferred)})]
+            "claim_ids": deferred, "deferred_scope_digest": digest(deferred)}, terminal_next)]
     if status == "stopped_budget":
-        return [_residual(metadata, "budget.exhausted", {"resource": "pass"})]
+        return [_residual(metadata, "budget.exhausted", {"resource": "pass"}, terminal_next)]
     if status == "stopped_frozen":
         return []
     if status == "stopped_residual" and snapshot.graph:
         residuals = []
         for blocker in blockers:
             residuals.append(_residual(
-                metadata, blocker["reason"], blocker["parameters"],
+                metadata, blocker["reason"], blocker["parameters"], terminal_next,
                 claim_id=blocker["claim_id"], target_claim_id=blocker["target_claim_id"]))
         if residuals:
             return residuals
         blocker = audit_blocker(snapshot, derivation)
         if blocker:
-            return [_residual(metadata, blocker["reason"], blocker["parameters"])]
+            return [_residual(metadata, blocker["reason"], blocker["parameters"], terminal_next)]
     return []
 
 
@@ -179,13 +187,18 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
                 for reason, next_actions, sections in snapshot.reason_metadata}
     states = derivation.states
     bootstrap = bootstrap_status(snapshot)
+    terminal = snapshot.state.status != "active"
+    terminal_next = _reason_metadata(metadata, "run.terminal")[0] if terminal else None
+    obligations = _obligations(snapshot, states, blockers, metadata, stale, terminal_next)
+    residuals = _residuals(snapshot, derivation, blockers, metadata, terminal_next)
     children = []
     for child in snapshot.state.children:
         row = {"child_id": child["child_id"], "purpose": child["purpose"],
                "resource_class": child["resource_class"], "state": child["state"]}
         if child.get("deadline") is not None:
             row["deadline"] = str(child["deadline"])
-        if child["state"] in {"launch_rejected", "failed", "cancelled", "timed_out", "orphaned"}:
+        if (not terminal
+                and child["state"] in {"launch_rejected", "failed", "cancelled", "timed_out", "orphaned"}):
             row["recovery_action"] = "child.retry"
         children.append(row)
     return {
@@ -197,10 +210,10 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
                      "digest": snapshot.contract_digest,
                      "relevant_sections": list(["protocol"] if relevant_sections is None
                                                else relevant_sections)},
-        "obligations": _obligations(snapshot, states, blockers, metadata, stale),
-        "residuals": _residuals(snapshot, derivation, blockers, metadata),
+        "obligations": obligations,
+        "residuals": residuals,
         "freshness": {"changes": changes}, "children": children,
-        "next_actions": bootstrap["next_actions"],
+        "next_actions": terminal_next if terminal else bootstrap["next_actions"],
         "untrusted_delimiters": dict(snapshot.untrusted_delimiters),
         "host": {"profile_id": snapshot.profile_id, "tier": snapshot.host_tier,
                  "missing_capabilities": ([HOST_TIER_UNSUPPORTED[snapshot.host_tier]]

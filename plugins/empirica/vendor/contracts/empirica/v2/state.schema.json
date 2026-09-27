@@ -270,7 +270,8 @@
           "additionalProperties": false,
           "required": [
             "author",
-            "ingress"
+            "ingress",
+            "approval_capability"
           ],
           "properties": {
             "author": {
@@ -289,6 +290,12 @@
                 "unavailable",
                 "mcp_elicitation",
                 "pi_ui"
+              ]
+            },
+            "approval_capability": {
+              "enum": [
+                "unavailable",
+                "human_configuration"
               ]
             }
           }

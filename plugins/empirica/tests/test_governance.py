@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """Governance real service/manifest/CAS regressions, not a policy-only scaffold."""
 import copy
+import json
 import sys
+import tempfile
 import unittest
-from unittest import mock
 from pathlib import Path
+from unittest import mock
+
+import jsonschema
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from application.v2 import compose
+from application import protocol
 from application.run_state import classify_and_decode
 from application.snapshot import traverse_history
 from test_d7_transactions import Runs, Artifacts, Workspace, Harness
@@ -18,6 +23,68 @@ PROFILE = "pi@0.84.1+pi-subagents@0.50.0"
 GRAPH = {"root": "C0", "claims": [{"id": "C0", "text": "supplied uncertainty", "gating": True,
                                    "kind": "ordinary"}], "edges": []}
 CONTEXT = {"author": AUTHOR, "ingress": "pi_ui"}
+
+
+class HostProfileApprovalTests(unittest.TestCase):
+    def _profile(self, host_id):
+        root = Path(__file__).resolve().parents[3]
+        profiles = json.loads((root / "contracts/empirica/v2/host-profiles.json").read_text())
+        return next(p for p in profiles["profiles"] if p["host_id"] == host_id)
+
+    def _admit_context(self, profile, ingress):
+        """Compose a real service for ``profile`` and submit one governance context."""
+        with mock.patch.dict(protocol._PROFILES, {profile["profile_id"]: profile}):
+            service = compose(Workspace(), Harness(), Runs(), Artifacts(), None,
+                              profile["profile_id"], {}, None)
+            result = service.dispatch({"protocol": "empirica/v2", "request_id": "start",
+                "command": {"type": "StartRun", "goal": "synthetic profile",
+                "invocation": TEST_INVOCATION,
+                "selector": {"project": "p", "session": "s"}}})["result"]
+            run_id = result["run"]["id"]
+            return service.trusted_governance_context(run_id=run_id,
+                payload={"author": AUTHOR, "ingress": ingress})["result"]
+
+    def test_synthetic_profile_admits_configured_ingress_without_host_branch(self):
+        root = Path(__file__).resolve().parents[3]
+        schema = json.loads((root / "contracts/empirica/v2/host-profiles.schema.json").read_text())
+        synthetic = copy.deepcopy(self._profile("pi"))
+        synthetic.update(host_id="synthetic", profile_id="synthetic-transport@9.9.9",
+                         version="9.9.9", compatibility={"minimum": "9.9.9",
+                         "maximum_exclusive": "10.0.0"})
+        jsonschema.validate({"protocol": "empirica/v2", "profiles": [synthetic]}, schema)
+        admitted = self._admit_context(synthetic, synthetic["approval_ingress"])
+        self.assertEqual(admitted["type"], "Allow")
+        self.assertEqual(admitted["run"]["governance"]["context"]["approval_capability"],
+                         "human_configuration")
+
+    def test_capable_profile_admits_unavailable_ingress_as_unavailable_capability(self):
+        """Headless sessions submit ``unavailable`` and must not be blocked (quality #1)."""
+        admitted = self._admit_context(self._profile("pi"), "unavailable")
+        self.assertEqual(admitted["type"], "Allow", admitted)
+        self.assertEqual(admitted["run"]["governance"]["context"]["approval_capability"],
+                         "unavailable")
+
+    def test_mismatched_transport_is_blocked(self):
+        """A transport that is neither ``unavailable`` nor the profile's ingress blocks."""
+        admitted = self._admit_context(self._profile("pi"), "mcp_elicitation")
+        self.assertEqual(admitted["type"], "Block")
+        self.assertEqual([r["code"] for r in admitted["reasons"]],
+                         ["governance.approval_unavailable"])
+
+    def test_unavailable_profile_never_yields_human_configuration(self):
+        """A profile whose ingress is ``unavailable`` cannot grant host-UI capability."""
+        root = Path(__file__).resolve().parents[3]
+        schema = json.loads((root / "contracts/empirica/v2/host-profiles.schema.json").read_text())
+        synthetic = copy.deepcopy(self._profile("pi"))
+        synthetic.update(host_id="synthetic", profile_id="synthetic-headless@9.9.9",
+                         version="9.9.9", approval_ingress="unavailable",
+                         compatibility={"minimum": "9.9.9", "maximum_exclusive": "10.0.0"})
+        jsonschema.validate({"protocol": "empirica/v2", "profiles": [synthetic]}, schema)
+        admitted = self._admit_context(synthetic, "unavailable")
+        self.assertEqual(admitted["type"], "Allow", admitted)
+        self.assertEqual(admitted["run"]["governance"]["context"]["approval_capability"],
+                         "unavailable")
+        self.assertEqual(self._admit_context(synthetic, "pi_ui")["type"], "Block")
 
 
 class StartAdmissionTests(unittest.TestCase):
@@ -166,7 +233,8 @@ class GovernanceServiceTests(unittest.TestCase):
     def test_bootstrap_terminal_run_has_no_preparation_actions(self):
         result = self.request({"type": "EvaluateRun", "run_id": self.run_id, "intent": "stop"})
         self.assertEqual(result["run"]["status"], "stopped_residual")
-        self.assertEqual(result["run"]["next_actions"], [])
+        self.assertEqual(result["run"]["next_actions"],
+                         protocol._PUBLIC_CONTRACT["reasons"]["run.terminal"]["next_actions"])
         self.assertFalse(result["run"]["governance"]["request_ready"])
         self.assertFalse(result["run"]["governance"]["display_ready"])
 
@@ -223,6 +291,46 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertEqual(decoded.kind, "valid")
         traverse_history(decoded.state, self.artifacts.read(key))
 
+
+    def test_claude_current_model_sequences_attribute_subsequent_artifacts(self):
+        from adapters.claude import lifecycle
+        self.prepare()
+        self.assertEqual(self.admit(self.decision())["type"], "Allow")
+        self.assertEqual(self.action("investigate")["type"], "Allow")
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "main.jsonl"
+            sequences = (
+                ("claude-opus-4-6", "claude-sonnet-4-6", "claude-opus-4-6"),
+                ("claude-opus-4-6", "claude-sonnet-4-6", "claude-opus-4-6",
+                 "claude-sonnet-4-6"),
+                ("claude-opus-4-6", None),
+            )
+            expected = ("claude-opus-4-6", "claude-sonnet-4-6", None)
+            with mock.patch.dict(protocol._PROFILES[PROFILE],
+                                 {"approval_ingress": "mcp_elicitation"}), mock.patch.object(
+                lifecycle.application_bridge, "trusted_governance_context",
+                side_effect=lambda _profile, run_id, payload:
+                    self.service.trusted_governance_context(run_id=run_id, payload={
+                        **payload, "author": lifecycle.application_bridge._identity(payload["author"])}),
+            ):
+                for index, models in enumerate(sequences):
+                    transcript.write_text("\n".join(json.dumps({"message": {
+                        "role": "assistant", "model": model, "content": "served"}})
+                        if model is not None else json.dumps({"message": {
+                            "role": "assistant", "content": [{"type": "tool_use", "name": "tool"}]}})
+                        for model in models) + "\n")
+                    lifecycle._governance_context(
+                        {"transcript_path": str(transcript)}, self.run_id)
+                    admitted = self.action("research", claim_id="C0", source_kind="code",
+                        result="supports", payload={"source_ref": f"sequence-{index}",
+                        "citation": "Current producer observation."})
+                    self.assertEqual(admitted["type"], "Allow")
+        key = next(iter(self.runs.data))
+        history = traverse_history(classify_and_decode(self.runs.data[key].value).state,
+                                   self.artifacts.read(key))
+        research = [item for item in history if item.get("kind") == "research"][-3:]
+        self.assertEqual([item["producer"]["model_id"] if item["producer"] else None
+                          for item in research], list(expected))
 
     def test_configuration_amendment_makes_prior_decision_stale(self):
         self.prepare()
@@ -376,6 +484,58 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertEqual(argument["type"], "Allow")
         self.assertEqual(argument["argument"]["audit"]["independence"], "mixed")
         self.assertEqual(result["reasons"][0]["code"], "audit.producers_mixed")
+
+    def test_private_bridge_audit_reject_refunds_and_relaunches(self):
+        """quality #8: exercise the Pi private bridge audit_prepare -> audit_reject path through the
+        real service. A rejected reservation yields a launch_rejected child, refunds the audit
+        budget, and a subsequent prepare reserves a different child in the same run."""
+        from adapters.pi import private_bridge
+        from adapters.audit_protocol import AuditProtocol
+        from adapters.identity import observe
+        from governance_setup import approve_current
+        self.prepare()
+        approve_current(self.service._coordinator, self.run_id)
+        self.assertEqual(self.action("investigate")["type"], "Allow")
+        self.assertEqual(self.action("research", claim_id="C0", source_kind="code",
+            result="supports", payload={"source_ref": "supplied",
+                                        "citation": "observed"})["type"], "Allow")
+        c = self.service._coordinator
+
+        def make_protocol(profile, **_kw):
+            return AuditProtocol(profile, dispatch=lambda r, _p: self.service.dispatch(r),
+                child_event_ingress=lambda _p, r, ch, v: c.trusted_child_event(r, ch, v),
+                attribution_ingress=lambda _p, r, v: c.trusted_attribution(
+                    r, {**v, **observe(v.get("provider_id"), v.get("model_id"), source=v["source"]),
+                        "observed_by": "host"}),
+                verdict_ingress=lambda _p, r, ch, v: c.trusted_audit_verdict(r, ch, v),
+                plan_ingress=lambda _p, r, ch: c.trusted_audit_plan(r, ch))
+
+        class BridgeShim:
+            def trusted_audit_plan(self, _profile, run_id, child_id):
+                return c.trusted_audit_plan(run_id, child_id)
+
+        def used():
+            return self.view()["governance"]["budgets"]["audit_spawns_used"]
+
+        with mock.patch.object(private_bridge, "AuditProtocol", make_protocol), \
+             mock.patch.object(private_bridge, "bridge", BridgeShim()):
+            prepared = private_bridge._dispatch(PROFILE, {"operation": "audit_prepare",
+                "run_id": self.run_id, "role_profile": "empirica:empirica-auditor"}, {})
+            self.assertEqual(prepared["type"], "audit_plan")
+            plan = prepared["plan"]
+            self.assertEqual(used(), 1)
+            rejected = private_bridge._dispatch(PROFILE, {"operation": "audit_reject",
+                "run_id": self.run_id, "plan": plan}, {})
+            self.assertEqual(rejected["type"], "audit_terminal")
+            child = next(ch for ch in self.view()["children"]
+                         if ch["child_id"] == plan["child_id"])
+            self.assertEqual(child["state"], "launch_rejected")
+            self.assertEqual(used(), 0)  # the audit budget is refunded
+            again = private_bridge._dispatch(PROFILE, {"operation": "audit_prepare",
+                "run_id": self.run_id, "role_profile": "empirica:empirica-auditor"}, {})
+            self.assertEqual(again["type"], "audit_plan")
+            self.assertNotEqual(again["plan"]["child_id"], plan["child_id"])
+            self.assertEqual(used(), 1)
 
 
 

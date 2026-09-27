@@ -12,6 +12,10 @@ from .canonical import canonical_digest as _canonical_digest
 
 MAX_INTERACTIONS = 128
 PROPOSAL_INTERACTIONS = 3
+# Admitted approval capabilities. The application derives these from the contract-owned
+# ingress→capability table; core names only the neutral capability it reasons about.
+HUMAN_CONFIGURATION = "human_configuration"
+UNAVAILABLE_CAPABILITY = "unavailable"
 class Budget(NamedTuple):
     used: str
     resource: str
@@ -61,7 +65,8 @@ def initial(goal: str, budgets: Mapping, modes: Mapping, control_mode: str = "de
              "approval_kind": None, "receipts": [],
              "proposal": {"budgets": {k: budgets[k] for k in CEILINGS},
                           "modes": dict(modes)},
-             "context": {"author": None, "ingress": "unavailable"}}
+             "context": {"author": None, "ingress": "unavailable",
+                         "approval_capability": UNAVAILABLE_CAPABILITY}}
     value["proposal_digest"] = proposal_digest(goal, value)
     return value
 
@@ -142,8 +147,8 @@ def decision_error(run_id: str, governance: Mapping, decision: Mapping) -> str |
     if prior is None and (reason := interaction_error(governance)):
         return reason
     expected = "auto" if governance["control_mode"] == "auto" else "host_ui"
-    if decision["approval_kind"] != expected or (expected == "host_ui" and
-            governance["context"]["ingress"] not in {"mcp_elicitation", "pi_ui"}):
+    if (decision["approval_kind"] != expected or (expected == "host_ui" and
+            governance["context"]["approval_capability"] != HUMAN_CONFIGURATION)):
         return "governance.approval_unavailable"
     if governance["state"] == "approved":
         return "governance.receipt_replay"

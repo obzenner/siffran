@@ -52,7 +52,7 @@
             "roles",
             "hosts/capabilities"
           ],
-          "digest": "sha256:f900c9694ce1432586b2c4ee44af59d4a82fd1453254537ae315d0005580bc1a"
+          "digest": "sha256:5243d6a6394b7d145c058699ed21d9ee60830119f025ac957fee45d0f38c2d85"
         },
         "obligations": {
           "active": [
@@ -114,7 +114,8 @@
           },
           "context": {
             "author": null,
-            "ingress": "unavailable"
+            "ingress": "unavailable",
+            "approval_capability": "unavailable"
           },
           "proposal_digest": "sha256:3839bdf80e1b820bd34d85e41d310c9f97951e0e043328adb5e5feba3b5c691e",
           "scope": null,

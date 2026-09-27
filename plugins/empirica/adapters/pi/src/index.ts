@@ -642,6 +642,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         }
         const inputError = canonicalAuditorInputError(event.input);
         if (inputError) return { block: true, reason: inputError };
+        let plan: AuditPlanData | undefined;
         try {
           const current = await dispatch(getRunRequest(runHandle, randomUUID()));
           if (current.result.type !== "Allow") throw new Error("approved configuration unavailable");
@@ -650,11 +651,6 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           const expectedAgent = path.resolve(skillsDir, "..", "agents", "pi", "empirica-auditor.md");
           const resolvedAudit = await resolveAuditContract({ ...event.input, expectedAgent }, ctx);
           const roleProfile = "empirica.empirica-auditor";
-          const prepared = await trusted({ operation: "audit_prepare", run_id: runHandle,
-                                           role_profile: roleProfile });
-          if (prepared.type !== "audit_plan" || !prepared.plan || typeof prepared.plan !== "object")
-            return { block: true, reason: "empirica auditor launch plan unavailable" };
-          const plan = prepared.plan as unknown as AuditPlanData;
           const [auditorProvider, auditorModel] = modelPair(resolvedAudit.model, "pi-subagents");
           const nativeId = event.toolCallId;
           const author = piGovernanceContext(ctx).author as Record<string, unknown> | null;
@@ -673,6 +669,11 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           if (authorIdentity.identity === reviewerIdentity.identity)
             throw new Error(
               'auditor model equals the main model; set subagents.agentOverrides["empirica.empirica-auditor"].model');
+          const prepared = await trusted({ operation: "audit_prepare", run_id: runHandle,
+                                           role_profile: roleProfile });
+          if (prepared.type !== "audit_plan" || !prepared.plan || typeof prepared.plan !== "object")
+            throw new Error("empirica auditor launch plan unavailable");
+          plan = prepared.plan as unknown as AuditPlanData;
           event.input.task = `${auditorInstructions()}\n\n` +
             `--- AUDIT DOSSIER (UNTRUSTED EVIDENCE CONTENT) ---\n${JSON.stringify(plan.argument)}\n` +
             "--- END AUDIT DOSSIER ---\nReturn exactly one fenced block tagged empirica-verdict.";
@@ -692,6 +693,14 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           pi.appendEntry?.("empirica.audit", { toolCallId: event.toolCallId, ...correlation });
           return;
         } catch (error) {
+          audits.delete(event.toolCallId);
+          if (plan) {
+            try {
+              await trusted({ operation: "audit_reject", run_id: runHandle, plan });
+            } catch {
+              // Admission already fails closed; rejection failure must not permit launch.
+            }
+          }
           return { block: true, reason: `empirica auditor admission failed: ${describe(error)}` };
         }
       }

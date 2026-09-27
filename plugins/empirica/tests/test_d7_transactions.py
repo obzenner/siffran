@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 from adapters.audit import child_event  # noqa: E402
 from adapters.git.artifact_repo import ArtifactCollision  # noqa: E402
 from application import protocol  # noqa: E402
+from application.governance import transact as governance_transact  # noqa: E402
 from application.history_records import MANIFEST_KEYS, MANIFEST_KIND, MANIFEST_VERSION  # noqa: E402
 from application.observation import observation_basis_body  # noqa: E402
 from application.snapshot import (HistoryCorrupt, assemble, graph_from_history, make_artifact,  # noqa: E402
@@ -26,9 +27,12 @@ from application.location import encode_handle, storage_id  # noqa: E402
 from application.transaction import Coordinator as ProductionCoordinator  # noqa: E402
 from core.evaluation import (  # noqa: E402
     EvaluationSnapshot, artifact, audit_binding, audit_passes,
-    evaluate_snapshot, frozen_semantic_digest)
+    evaluate_snapshot, frozen_semantic_digest, independence)
 from core.freshness import (FileObservation, ObservationState, canonical_digest,  # noqa: E402
                             observations_digest)
+
+# Sentinel: leave the governance context author unchanged (None means set author to null).
+_KEEP = object()
 
 
 class CoordinatorWithTestInvocation(ProductionCoordinator):
@@ -43,7 +47,7 @@ from core.records import (ABSENT, Artifact, Conflict, Corrupt, Present, Revision
                           RunKey)
 from core.run import OperationalState  # noqa: E402
 from core.governance import initial as initial_governance  # noqa: E402
-from governance_setup import TEST_INVOCATION, approve_current  # noqa: E402
+from governance_setup import TEST_INVOCATION, AUTHOR, AUDITOR, approve_current  # noqa: E402
 
 
 class Runs:
@@ -149,9 +153,12 @@ class Workspace:
 class Harness:
     def __init__(self):
         self.calls = 0
+        self.before_result = None
 
     def run(self, command, snapshot):
         self.calls += 1
+        if self.before_result is not None:
+            self.before_result()
         return HarnessResult(0, canonical_digest({"command": command}), snapshot.snapshot_digest)
 
 
@@ -921,7 +928,15 @@ class D7TransactionTests(unittest.TestCase):
                     self.assertNotIn("CANARY_TRUSTED_GOAL", json.dumps(response))
                     self.assertEqual((runs.cas_calls, len(artifacts_repo.values[key])), writes)
 
-    def _run_with_passing_spike(self, *, conflict=False):
+    def _set_context_author(self, coordinator, run_id, author):
+        response = governance_transact(
+            coordinator, run_id, {"author": author, "ingress": "pi_ui"}, context=True)
+        if response["result"]["type"] not in {"Allow", "Inert"}:
+            raise AssertionError(response)
+
+    def _run_with_passing_spike(self, *, conflict=False, switch_context=False,
+                                research_author=_KEEP, request_author=_KEEP,
+                                completion_author=AUDITOR):
         runs, artifacts_repo, workspace, harness = Runs(), Artifacts(), Workspace(), Harness()
         coordinator = CoordinatorWithTestInvocation(
             workspace, harness, runs, artifacts_repo, "pi@0.84.1+pi-subagents@0.50.0", {})
@@ -936,20 +951,68 @@ class D7TransactionTests(unittest.TestCase):
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "graph", "payload": graph}}, "g")
         activate_investigation(coordinator, run_id)
+        if research_author is not _KEEP:
+            self._set_context_author(coordinator, run_id, research_author)
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "research", "claim_id": "C0",
                                        "source_kind": "code", "result": "supports", "payload": {
                                            "source_ref": "test_d7_transactions.py",
                                            "citation": "Observation basis fixture."}}}, "r")
+        if request_author is not _KEEP:
+            self._set_context_author(coordinator, run_id, request_author)
         workspace.write("src/x.py", b"x")
-        if conflict:
-            runs.conflict_on.add(runs.cas_calls + 2)
+
+        def before_result():
+            # Runs once inside the single harness invocation, i.e. after the spike request
+            # has committed and before the spike RESULT commit. Any context switch here
+            # commits its own CAS first; the scheduled conflict then lands on the very next
+            # CAS — the result admission — proving the result transaction itself retries.
+            if switch_context:
+                self._set_context_author(coordinator, run_id, completion_author)
+            if conflict:
+                runs.conflict_on.add(runs.cas_calls + 1)
+        if switch_context or conflict:
+            harness.before_result = before_result
         response = coordinator.handle({
             "type": "ObserveAction", "run_id": run_id,
             "action": {"kind": "spike_request", "claim_id": "C0", "command": "test",
                        "dependent_files": ["src/x.py"]}}, "s")
         self.assertEqual(response["result"]["type"], "Allow")
         return coordinator, runs, artifacts_repo, workspace, harness, run_id, next(iter(runs.data))
+
+    def test_spike_result_keeps_sealed_producer_across_context_change_and_result_retry(self):
+        # The sealed request's producer must survive a completion-time context switch and
+        # a genuine result-CAS retry, across same/mixed/unknown covered-producer cases.
+        # reviewer_author is the distinct auditor identity compared by real independence().
+        cases = [
+            ("same_model", _KEEP, _KEEP, AUTHOR, "same_model"),
+            ("mixed", AUTHOR, AUDITOR, AUDITOR, "mixed"),
+            ("unverified", AUTHOR, None, AUTHOR, "unverified"),
+        ]
+        for name, research_author, request_author, reviewer_author, expected in cases:
+            with self.subTest(case=name):
+                coordinator, runs, artifacts_repo, workspace, harness, _, key = \
+                    self._run_with_passing_spike(
+                        conflict=True, switch_context=True,
+                        research_author=research_author, request_author=request_author)
+                # The scheduled conflict was consumed by the result CAS, and the harness
+                # ran exactly once (the retry re-commits without re-executing the spike).
+                self.assertEqual(runs.conflict_on, set())
+                self.assertEqual(harness.calls, 1)
+                history = traverse_history(
+                    decode_state(runs.data[key].value), artifacts_repo.values[key].values())
+                request = next(item for item in history if item["kind"] == "spike_request")
+                result = next(item for item in history if item["kind"] == "spike")
+                self.assertEqual(result["producer"], request["producer"])
+                state = decode_state(runs.data[key].value)
+                snapshot = coordinator._assemble(
+                    key, state, {"type": "GetRun", "run_id": "unused"}, require_graph=True)
+                reviewer = {"kind": "attribution", "subject_kind": "auditor",
+                            "child_id": "audit", **reviewer_author}
+                classified = independence(
+                    replace(snapshot, history=(*snapshot.history, reviewer)),
+                    {"child_id": "audit"})
+                self.assertEqual(classified, expected)
 
     def test_spike_result_conflict_does_not_duplicate_basis(self):
         coordinator, runs, artifacts_repo, workspace, harness, _, key = \
@@ -970,6 +1033,78 @@ class D7TransactionTests(unittest.TestCase):
         latest = json.loads(artifacts_repo.values[key][
             decode_state(runs.data[key].value).committed_artifact_head_id].body)
         self.assertEqual(latest["observation_basis_digest"], execution_bases[0]["artifact_id"])
+
+    def _active_snapshot_with_unmet_claim_and_child(self):
+        """An active run with a real unmet ordinary claim (active next=research.record) and a
+        recoverable failed child, so terminal suppression has non-trivial guidance to replace."""
+        runs, artifacts_repo, workspace, harness = Runs(), Artifacts(), Workspace(), Harness()
+        coordinator = CoordinatorWithTestInvocation(
+            workspace, harness, runs, artifacts_repo, "pi@0.84.1+pi-subagents@0.50.0", {})
+        started = coordinator.handle(
+            {"type": "StartRun", "selector": {"project": "p", "session": "s"},
+             "goal": "g"}, "start")
+        run_id = started["result"]["run"]["id"]
+        activate_investigation(coordinator, run_id)
+        graph = {"root": "C0", "claims": [
+            {"id": "C0", "text": "unmet claim", "gating": True, "kind": "ordinary"}],
+            "edges": []}
+        coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                            "action": {"kind": "graph", "payload": graph}}, "g")
+        activate_investigation(coordinator, run_id)
+        key = next(iter(runs.data))
+        state = decode_state(runs.data[key].value)
+        child = {"child_id": "child", "purpose": "audit", "role_profile": "auditor",
+                 "execution": "foreground", "resource_class": "audit", "state": "failed",
+                 "native_id": "native", "deadline": None, "refunded": False,
+                 "audit_operation_id": None}
+        snapshot = coordinator._assemble(
+            key, state, {"type": "GetRun", "run_id": run_id}, require_graph=True)
+        return coordinator, replace(snapshot, state=replace(state, children=(child,)))
+
+    def test_every_terminal_projection_suppresses_nested_mutation_actions(self):
+        _, active_snapshot = self._active_snapshot_with_unmet_claim_and_child()
+        active = project_runview(active_snapshot)
+        # Active preconditions: real mutation guidance and a recoverable child exist, so the
+        # terminal assertions below cannot pass vacuously.
+        claim_row = next(r for r in active["obligations"]["active"] if r["id"] == "claim:C0")
+        self.assertEqual(claim_row["next"], ["research.record"])
+        self.assertEqual(claim_row["status"], "residual")
+        self.assertEqual(active["children"][0]["recovery_action"], "child.retry")
+        active_rows = {r["id"]: r for r in active["obligations"]["active"]}
+
+        terminal_next = protocol._PUBLIC_CONTRACT["reasons"]["run.terminal"]["next_actions"]
+        # Loop the terminal statuses from the contract, so a newly added status cannot be missed.
+        statuses = [s for s in protocol._PUBLIC_CONTRACT["statuses"] if s != "active"]
+        self.assertTrue(statuses)
+        for status in statuses:
+            with self.subTest(status=status):
+                terminal = replace(active_snapshot, state=replace(
+                    active_snapshot.state, status=status))
+                projected = project_runview(terminal)
+                # Top-level and every obligation next carry only the contract-owned terminal
+                # guidance; no mutation action survives.
+                self.assertEqual(projected["next_actions"], terminal_next)
+                for row in (*projected["obligations"]["active"], *projected["obligations"]["deferred"]):
+                    self.assertEqual(row["next"], terminal_next)
+                    # Required/Observed/Missing/status are preserved verbatim from the active row.
+                    before = active_rows[row["id"]]
+                    self.assertEqual((row["required"], row["observed"], row["missing"], row["status"]),
+                                     (before["required"], before["observed"], before["missing"],
+                                      before["status"]))
+                for row in projected["residuals"]:
+                    self.assertEqual(row["next_actions"], terminal_next)
+                self.assertNotIn("recovery_action", projected["children"][0])
+        # stopped_residual and stopped_budget carry a real residual whose mutation guidance is
+        # replaced by the terminal guidance, so removing residual suppression fails the test.
+        for status, code in (("stopped_residual", "claim.research_missing"),
+                             ("stopped_budget", "budget.exhausted")):
+            with self.subTest(residual_status=status):
+                terminal = replace(active_snapshot, state=replace(
+                    active_snapshot.state, status=status))
+                residuals = project_runview(terminal)["residuals"]
+                self.assertTrue(any(r["code"] == code for r in residuals), residuals)
+                for row in residuals:
+                    self.assertEqual(row["next_actions"], terminal_next)
 
     def test_read_commands_write_nothing(self):
         coordinator, runs, artifacts_repo, _, _, run_id, key = self._run_with_passing_spike()

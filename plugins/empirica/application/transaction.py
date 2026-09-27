@@ -736,8 +736,7 @@ class Coordinator:
                          "digest": _proto._DIGEST, "relevant_sections": sections},
             "obligations": {"active": [], "deferred": []}, "residuals": [],
             "freshness": {"changes": []}, "children": [], "next_actions": [],
-            "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
-                                     "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
+            "untrusted_delimiters": dict(_proto._UNTRUSTED_DELIMITERS),
             "host": {"profile_id": self.profile_id, "tier": profile["current_tier"],
                      "missing_capabilities": list(profile["unsupported_reason_ids"])},
         }

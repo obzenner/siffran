@@ -438,7 +438,7 @@ test("subagent: empty string task retains its existing accepted meaning", async 
   assert.match(String(input.task), /AUDIT DOSSIER/);
   assert.equal(w.auditResolutions.length, 1);
   assert.deepEqual(w.privateRequests.map((request) => request.operation),
-    ["audit_prepare", "classify_identity", "classify_identity"]);
+    ["classify_identity", "classify_identity", "audit_prepare"]);
 });
 
 test("subagent: canonical auditor is reserved, bound, attributed, and prompt-injected", async () => {
@@ -472,7 +472,7 @@ test("subagent: canonical auditor is reserved, bound, attributed, and prompt-inj
   assert.equal(input.model, "bedrock/auditor-model");
   assert.equal(input.agentScope, "project");
   assert.deepEqual(w.privateRequests.map((item) => item.operation),
-    ["audit_prepare", "classify_identity", "classify_identity"]);
+    ["classify_identity", "classify_identity", "audit_prepare"]);
   assert.equal(w.pi.entries.at(-1)?.customType, "empirica.audit");
 });
 
@@ -485,6 +485,8 @@ test("canonical auditor blocks equal normalized identity classes", async () => {
     input: { agent: "empirica.empirica-auditor", task: "audit" } }, fakeCtx());
   assert.equal(decision?.block, true);
   assert.match(decision?.reason ?? "", /agentOverrides/);
+  assert.deepEqual(w.privateRequests.map((item) => item.operation),
+    ["classify_identity", "classify_identity"]);
 });
 
 test("canonical auditor clearly blocks a null reviewer identity classification", async () => {
@@ -497,6 +499,28 @@ test("canonical auditor clearly blocks a null reviewer identity classification",
     input: { agent: "empirica.empirica-auditor", task: "audit" } }, fakeCtx());
   assert.equal(decision?.block, true);
   assert.match(decision?.reason ?? "", /reviewer identity unobservable/);
+  assert.deepEqual(w.privateRequests.map((item) => item.operation),
+    ["classify_identity", "classify_identity"]);
+});
+
+test("canonical auditor rejects a reservation when a later launch step throws", async () => {
+  const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+  await startRun(w);
+  w.pi.appendEntry = () => { throw new Error("late host failure"); };
+  const decision = await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "late-failure",
+    input: { agent: "empirica.empirica-auditor", task: "audit" } }, fakeCtx());
+  assert.equal(decision?.block, true);
+  assert.match(decision?.reason ?? "", /late host failure/);
+  assert.deepEqual(w.privateRequests.map((item) => item.operation),
+    ["classify_identity", "classify_identity", "audit_prepare", "audit_reject"]);
+  // The rejection must release the exact reserved plan, not some other child.
+  assert.equal((w.privateRequests.at(-1) as { plan?: { child_id?: string } }).plan?.child_id, "ch-1");
+  w.pi.appendEntry = (customType, data) => { w.pi.entries.push({ customType, data }); };
+  const corrected = await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "corrected",
+    input: { agent: "empirica.empirica-auditor", task: "audit" } }, fakeCtx());
+  assert.equal(corrected, undefined);
+  assert.deepEqual(w.privateRequests.map((item) => item.operation).slice(-3),
+    ["classify_identity", "classify_identity", "audit_prepare"]);
 });
 
 test("tool_result redacts before privately admitting the correlated verdict", async () => {

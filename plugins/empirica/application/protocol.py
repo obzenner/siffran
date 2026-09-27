@@ -61,6 +61,8 @@ _GOVERNANCE_DECISIONS = tuple((name, copy.deepcopy(row))
                               for name, row in _decisions["actions"].items())
 _GOVERNANCE_CONTROLS = copy.deepcopy(_decisions)
 _PROJECTION_CONTROLS = _GOVERNANCE_CONTROLS["controls"]
+APPROVAL_CAPABILITY = {ingress: row["capability"]
+                      for ingress, row in _PUBLIC_CONTRACT["approval_ingress"].items()}
 _LATE_ROUTE_MUST = _bootstrap["late_route_must"]
 _UNTRUSTED_DELIMITERS = copy.deepcopy(_PUBLIC_CONTRACT["untrusted_delimiters"])
 _DIGEST = canonical_digest(_PUBLIC_CONTRACT)

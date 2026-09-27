@@ -104,7 +104,9 @@ prior digest; read-only commands remain read-only. These records make decisions 
 fully replayable: full replay also requires reconstructible historical state, policy
 implementations and versions, and decision-affecting clock semantics.
 
-All persisted JSON uses `core/canonical.py` as the canonical serializer. Runtime-derived contract
+Canonical digests and content-addressed artifacts use `core/canonical.py`. Operational state files
+retain their separate deterministic, pretty-printed encoding in `adapters/state/fsio.py`; this
+decision does not change their bytes. Runtime-derived contract
 fixtures and shared schema definitions are generated and checked through `make contract-fixtures`
 and `make contract-schemas`; hand-maintained copies are not authoritative.
 

@@ -59,10 +59,10 @@ class HostGovernance:
         if run["status"] != "active" or g["state"] == "approved":
             return result
         auto = g["control_mode"] == "auto"
-        if not auto and (not self.profile.startswith("claude-code@") or self.elicit is None):
+        approval_ingress = protocol.host_profile(self.profile)["approval_ingress"]
+        if not auto and (approval_ingress == "unavailable" or self.elicit is None):
             return unavailable(result)
-        context = {"author": g["context"]["author"],
-                   "ingress": "mcp_elicitation" if self.profile.startswith("claude-code@") else "unavailable"}
+        context = {"author": g["context"]["author"], "ingress": approval_ingress}
         result = self.context_ingress(self.profile, run["id"], context).get("result", {})
         if result.get("type") not in {"Allow", "Inert"} or not result.get("run"):
             return result

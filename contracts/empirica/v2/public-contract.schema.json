@@ -29,6 +29,7 @@
     "scope_reviews",
     "mode_fields",
     "operation_contexts",
+    "approval_ingress",
     "untrusted_delimiters",
     "presentation_selector",
     "next_actions",
@@ -300,6 +301,31 @@
         "minLength": 1
       },
       "uniqueItems": true
+    },
+    "approval_ingress": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "capability"
+        ],
+        "properties": {
+          "capability": {
+            "enum": [
+              "unavailable",
+              "human_configuration"
+            ]
+          }
+        }
+      },
+      "propertyNames": {
+        "enum": [
+          "unavailable",
+          "mcp_elicitation",
+          "pi_ui"
+        ]
+      }
     },
     "untrusted_delimiters": {
       "type": "object",

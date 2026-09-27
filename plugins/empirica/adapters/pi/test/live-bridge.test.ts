@@ -17,7 +17,7 @@ import { join } from "node:path";
 
 import { createStdioBridgeDispatch, HOST_PROFILE_ID } from "../src/stdio-transport.ts";
 import { startRunRequest, startRunNotice, resolveRunRequest, evaluateRunRequest, observeActionRequest, getRunRequest } from "../src/translate.ts";
-import { govern } from "../src/governance-ui.ts";
+import { govern, refreshGovernance, piGovernanceContext } from "../src/governance-ui.ts";
 import { createPrivateIngress } from "../src/private-transport.ts";
 import { fakeCtx } from "./fakes.ts";
 import type { Response } from "../src/contract.ts";
@@ -171,6 +171,41 @@ test(
       response.result.type === "Inert" || response.result.type === "Fault",
       `expected Inert or Fault, got ${response.result.type}`,
     );
+  },
+);
+
+test(
+  "live bridge: headless (hasUI=false) governance refresh does not block tool calls",
+  { skip: !pythonAvailable ? "python3 is missing" : false },
+  async () => {
+    // Regression for the headless-Pi block (quality #1): a print/auto session has
+    // no UI, so it submits ingress "unavailable". Governance refresh (run in front of
+    // every tool call) must still Allow/Inert, and the admitted capability must be
+    // "unavailable" — not blocked, not "human_configuration". Real private service.
+    const env = { ...process.env, EMPIRICA_HOME: testHome, EMPIRICA_REPO_DIR: testRepo };
+    const dispatch = createStdioBridgeDispatch({ command: py, args: [bridgeScript], cwd: testRepo, env });
+    const started = await dispatch(startRunRequest(
+      { project: "pi-headless", session: "no-ui" }, "headless governance", "headless-start", INVOCATION));
+    assert.equal(started.result.type, "Allow", JSON.stringify(started.result));
+    assert.ok("run" in started.result && started.result.run);
+    const runId = (started.result.run as { id: string }).id;
+    const ctx = fakeCtx(testRepo); ctx.hasUI = false; ctx.model = { provider: "anthropic", id: "claude-sonnet-4-6" };
+    assert.equal(piGovernanceContext(ctx).ingress, "unavailable");
+    const previous = { EMPIRICA_HOME: process.env.EMPIRICA_HOME, EMPIRICA_REPO_DIR: process.env.EMPIRICA_REPO_DIR };
+    try {
+      process.env.EMPIRICA_HOME = testHome; process.env.EMPIRICA_REPO_DIR = testRepo;
+      const privateIngress = createPrivateIngress();
+      const refreshed = await refreshGovernance(runId, ctx, privateIngress);
+      assert.ok(["Allow", "Inert"].includes(refreshed.result.type), JSON.stringify(refreshed.result));
+      if ("run" in refreshed.result && refreshed.result.run) {
+        const g = refreshed.result.run.governance as { context: { approval_capability: string } } | null;
+        assert.equal(g?.context.approval_capability, "unavailable");
+      }
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      }
+    }
   },
 );
 

@@ -50,8 +50,8 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:f900c9694ce1432586b2c4ee44af59d4a82fd1453254537ae315d0005580bc1a"
-REVIEWED_HOST_PROFILES_DIGEST = "sha256:4ebe3bd20992570ff8cfd4d203af675144d2674f6dcec2d72561f2838df1f92b"
+REVIEWED_REGISTRY_DIGEST = "sha256:5243d6a6394b7d145c058699ed21d9ee60830119f025ac957fee45d0f38c2d85"
+REVIEWED_HOST_PROFILES_DIGEST = "sha256:9b17d44746e8c4e2981d14575a970a5de286c8262fbdf7e5499faf9ad83a17c2"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
 REGISTRY_VERSION = "3.0.0"
@@ -2156,6 +2156,47 @@ def main() -> int:
     else:
         errors.append("contracts/empirica/v2/public-contract.json: required v2 registry is missing")
 
+    # #6: the approval ingress/capability vocabularies live once in shared-defs.json.
+    # Assert every schema copy and the public-contract ingress→capability table agree with it.
+    shared_defs = load(V2 / "shared-defs.json").get("$defs", {})
+    ingress_enum = shared_defs.get("approvalIngress", {}).get("enum")
+    capability_enum = shared_defs.get("approvalCapability", {}).get("enum")
+    if not ingress_enum or not capability_enum:
+        errors.append("shared-defs.json: approvalIngress/approvalCapability enums are required")
+    else:
+        def _enums_named(node, name):
+            found = []
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if (key == name and isinstance(value, dict)
+                            and isinstance(value.get("enum"), list)):
+                        found.append(value["enum"])
+                    found.extend(_enums_named(value, name))
+            elif isinstance(node, list):
+                for item in node:
+                    found.extend(_enums_named(item, name))
+            return found
+        for (proto, kind), schema in schemas.items():
+            if proto != "empirica/v2":
+                continue
+            for enum in _enums_named(schema, "ingress") + _enums_named(schema, "approval_ingress"):
+                if enum != ingress_enum:
+                    errors.append(f"{kind}.schema: approval ingress enum {enum} != shared-defs "
+                                  f"{ingress_enum}")
+            for enum in _enums_named(schema, "approval_capability"):
+                if enum != capability_enum:
+                    errors.append(f"{kind}.schema: approval capability enum {enum} != shared-defs "
+                                  f"{capability_enum}")
+        if registry:
+            table = registry.get("approval_ingress", {})
+            if set(table) != set(ingress_enum):
+                errors.append(f"public-contract: approval_ingress keys {sorted(table)} != "
+                              f"shared-defs ingress {sorted(ingress_enum)}")
+            for ingress, row in table.items():
+                if row.get("capability") not in capability_enum:
+                    errors.append(f"public-contract: approval_ingress[{ingress!r}].capability "
+                                  f"{row.get('capability')!r} not in shared-defs capabilities")
+
     # --- host profiles ---
     host_profiles_doc = load(V2 / "host-profiles.json")
     if host_profiles_doc:
@@ -2256,6 +2297,19 @@ def main() -> int:
             if isinstance(p, dict):
                 host_tiers_by_profile[p.get("profile_id")] = p.get("current_tier")
         check_host_profiles(host_profiles_doc, registry, v2_names, errors, "host-profiles")
+
+    # #7: the Pi adapter still submits a literal approval ingress. Freeze it against the Pi
+    # profile so a profile change cannot silently strand headless/UI approval.
+    pi_profile = next((p for p in host_profiles_doc.get("profiles", [])
+                       if isinstance(p, dict) and p.get("host_id") == "pi"), None)
+    governance_ui = ROOT / "plugins/empirica/adapters/pi/src/governance-ui.ts"
+    if pi_profile and governance_ui.exists():
+        source = governance_ui.read_text(encoding="utf-8")
+        expected_ingress = pi_profile.get("approval_ingress")
+        if f'"{expected_ingress}"' not in source:
+            errors.append(
+                f"pi governance-ui.ts must submit the Pi profile approval_ingress "
+                f"{expected_ingress!r}")
 
     digest = registry_digest(registry) if registry else ""
 

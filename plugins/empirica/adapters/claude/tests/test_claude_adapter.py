@@ -660,6 +660,59 @@ class SpawnLifecycleTests(unittest.TestCase):
                                         "run_in_background", "max_turns", "model"})
         self.assertEqual(updated["model"], "fable")
 
+    def test_auditor_preflight_failure_does_not_reserve(self) -> None:
+        from adapters.audit_protocol import AuditProtocolError
+        from adapters.claude.lifecycle import spawn_main
+        payload = self._stdin({"subagent_type": "empirica:empirica-auditor", "prompt": "audit"})
+        investigation = {"result": {"type": "Allow", "run": {"id": "active-run"}}}
+        with patch("adapters.claude.lifecycle._resolve", return_value=("active-run", {})), \
+             patch("adapters.claude.lifecycle.dispatch_investigation", return_value=investigation), \
+             patch("adapters.claude.lifecycle._governance_context"), \
+             patch("adapters.claude.lifecycle._auditor_alias",
+                   side_effect=AuditProtocolError("main identity unknown")), \
+             patch("adapters.claude.lifecycle.AuditProtocol.prepare") as prepare, \
+             patch("sys.stdin", new=payload):
+            self.assertEqual(spawn_main(), 2)
+        prepare.assert_not_called()
+
+    def test_auditor_post_reservation_failure_rejects_exact_plan(self) -> None:
+        from adapters.audit_protocol import AuditLaunchPlan
+        from adapters.claude.lifecycle import spawn_main
+        plan = AuditLaunchPlan("claude-code@2.1.278", "active-run", "ch-audit",
+                               "empirica:empirica-auditor", {"claims": []})
+        payload = self._stdin({"subagent_type": "empirica:empirica-auditor", "prompt": "audit"})
+        investigation = {"result": {"type": "Allow", "run": {"id": "active-run"}}}
+        with patch("adapters.claude.lifecycle._resolve", return_value=("active-run", {})), \
+             patch("adapters.claude.lifecycle.dispatch_investigation", return_value=investigation), \
+             patch("adapters.claude.lifecycle._governance_context"), \
+             patch("adapters.claude.lifecycle._auditor_alias", return_value="fable"), \
+             patch("adapters.claude.lifecycle.AuditProtocol.prepare", return_value=plan), \
+             patch("adapters.claude.lifecycle.AuditProtocol.reject") as reject, \
+             patch("adapters.claude.lifecycle.child_prompt", side_effect=RuntimeError("late failure")), \
+             patch("sys.stdin", new=payload):
+            self.assertEqual(spawn_main(), 2)
+        reject.assert_called_once_with(plan)
+
+    def test_auditor_reject_failure_of_any_kind_still_denies(self) -> None:
+        """A rollback that raises a non-AuditProtocolError must still deny (quality #4)."""
+        from adapters.audit_protocol import AuditLaunchPlan
+        from adapters.claude.lifecycle import spawn_main
+        plan = AuditLaunchPlan("claude-code@2.1.278", "active-run", "ch-audit",
+                               "empirica:empirica-auditor", {"claims": []})
+        payload = self._stdin({"subagent_type": "empirica:empirica-auditor", "prompt": "audit"})
+        investigation = {"result": {"type": "Allow", "run": {"id": "active-run"}}}
+        with patch("adapters.claude.lifecycle._resolve", return_value=("active-run", {})), \
+             patch("adapters.claude.lifecycle.dispatch_investigation", return_value=investigation), \
+             patch("adapters.claude.lifecycle._governance_context"), \
+             patch("adapters.claude.lifecycle._auditor_alias", return_value="fable"), \
+             patch("adapters.claude.lifecycle.AuditProtocol.prepare", return_value=plan), \
+             patch("adapters.claude.lifecycle.AuditProtocol.reject",
+                   side_effect=RuntimeError("bridge I/O down")) as reject, \
+             patch("adapters.claude.lifecycle.child_prompt", side_effect=RuntimeError("late failure")), \
+             patch("sys.stdin", new=payload):
+            self.assertEqual(spawn_main(), 2)
+        reject.assert_called_once_with(plan)
+
     def test_durable_plan_rejects_missing_operation_or_wrong_role(self) -> None:
         from adapters.claude.lifecycle import _durable_plan
         for operation in (

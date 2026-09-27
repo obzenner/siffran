@@ -34,7 +34,8 @@
         "doc/design/empirica-2.0-d1h-host-capabilities.md §3",
         "https://code.claude.com/docs/en/hooks"
       ],
-      "delegation_env": "EMPIRICA_AUTO_DELEGATION"
+      "delegation_env": "EMPIRICA_AUTO_DELEGATION",
+      "approval_ingress": "mcp_elicitation"
     },
     {
       "host_id": "pi",
@@ -68,7 +69,8 @@
         "doc/design/empirica-2.0-d1h-host-capabilities.md §2",
         "doc/design/empirica-2.0-d1h-host-capabilities.md §4"
       ],
-      "delegation_env": "EMPIRICA_AUTO_DELEGATION"
+      "delegation_env": "EMPIRICA_AUTO_DELEGATION",
+      "approval_ingress": "pi_ui"
     },
     {
       "host_id": "codex-cli",
@@ -103,7 +105,8 @@
         "doc/design/empirica-2.0-d1h-host-capabilities.md §5",
         "doc/design/specs/empirica-2.0-d11-three-host-reachability.md"
       ],
-      "delegation_env": "EMPIRICA_AUTO_DELEGATION"
+      "delegation_env": "EMPIRICA_AUTO_DELEGATION",
+      "approval_ingress": "unavailable"
     }
   ]
 }

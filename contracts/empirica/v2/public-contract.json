@@ -226,6 +226,17 @@
     "terminal",
     "on_demand"
   ],
+  "approval_ingress": {
+    "unavailable": {
+      "capability": "unavailable"
+    },
+    "mcp_elicitation": {
+      "capability": "human_configuration"
+    },
+    "pi_ui": {
+      "capability": "human_configuration"
+    }
+  },
   "untrusted_delimiters": {
     "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
     "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"

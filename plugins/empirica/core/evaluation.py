@@ -529,7 +529,7 @@ def plan_spike_result(snapshot: EvaluationSnapshot, request_body: Mapping[str, A
         "exit_code": facts.exit_code, "spike_gate": facts.gate.value,
         "outcome": "pass" if facts.exit_code == 0 else "fail",
         "supersedes": prior[-1]["artifact_id"] if prior else None,
-        "producer": _producer(state),
+        "producer": request_body["producer"],
         "route_stamp": state.route_stamp, "investigation_stamp": state.investigation_stamp,
     })
     return _decision(snapshot, state, artifacts=(result,))

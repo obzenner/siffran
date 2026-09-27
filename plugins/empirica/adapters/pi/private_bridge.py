@@ -54,6 +54,11 @@ def _audit_prepare(profile: str, raw: dict, _payload: dict):
     return {"type": "audit_plan", "plan": _plan_json(plan)}
 
 
+def _audit_reject(profile: str, raw: dict, _payload: dict):
+    AuditProtocol(profile).reject(_plan(profile, raw))
+    return {"type": "audit_terminal"}
+
+
 def _audit_start(profile: str, raw: dict, _payload: dict):
     AuditProtocol(profile).observe_started(_plan(profile, raw), raw["native_id"])
     return {"type": "audit_started"}
@@ -96,6 +101,7 @@ _HANDLERS = {
     "governance_context": _governance_context,
     "governance_decision": _governance_decision,
     "audit_prepare": _audit_prepare,
+    "audit_reject": _audit_reject,
     "audit_start": _audit_start,
     "audit_identity": _audit_identity,
     "audit_failure": _audit_failure,

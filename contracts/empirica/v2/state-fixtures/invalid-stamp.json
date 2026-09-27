@@ -45,7 +45,8 @@
     },
     "context": {
       "author": null,
-      "ingress": "unavailable"
+      "ingress": "unavailable",
+      "approval_capability": "unavailable"
     },
     "proposal_digest": "sha256:d3bb5217b72c253dd84bf497fe8045e29e5b9586351842006cf28d0a55486331"
   }
