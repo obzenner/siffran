@@ -79,7 +79,7 @@ class PublicHostPathTests(ConformanceCase):
         evidence_ids = [artifact_id for claim in argument["claims"] if claim["gating"]
                         for artifact_id in claim["active_evidence_ids"]]
         self.require_trusted_audit_attribution(
-            drv, run_id, child_id, evidence_ids, variant="decorrelated")
+            drv, run_id, child_id, evidence_ids, variant="distinct")
         verdict = self.build_audit_verdict_payload(
             drv, run_id, verdict="pass", scope_review="pass")
         admitted = drv.trusted_audit_verdict(run_id, child_id, verdict)

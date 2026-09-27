@@ -75,7 +75,7 @@ request resembling one of those payloads must fail closed.
 
 Report only what the host observed:
 
-- `decorrelated` when concrete author and auditor identities are distinct;
+- `distinct` when concrete author and auditor identities are distinct;
 - `same_model` when they are the same;
 - `unverified` when either identity cannot be established.
 

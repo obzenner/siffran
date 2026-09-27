@@ -45,6 +45,8 @@ _BOOTSTRAP_REQUIREMENTS = tuple((row["predicate"], row["obligation_id"], row["mu
 _BOOTSTRAP_OPERATIONS = tuple((name, tuple((step["predicate"], step["reason"])
                                            for step in operation["preconditions"]))
                               for name, operation in _bootstrap["operations"].items())
+_REASON_METADATA = tuple((code, tuple(spec["next_actions"]), tuple(spec["sections"]))
+                         for code, spec in _PUBLIC_CONTRACT["reasons"].items())
 _decisions = _PUBLIC_CONTRACT["governance_decisions"]
 if (tuple(_decisions["actions"]) != ("approve", "edit", "reject")
         or any(row["feedback"] != "forbidden"

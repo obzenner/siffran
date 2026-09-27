@@ -147,7 +147,7 @@
     "stale"
   ],
   "independence_states": [
-    "decorrelated",
+    "distinct",
     "same_model",
     "unverified"
   ],
@@ -1128,7 +1128,7 @@
       "sections": [
         "audit/independence"
       ],
-      "message": "Auditor is the same model as covered evidence; spawn a decorrelated auditor."
+      "message": "Auditor is the same model as covered evidence; spawn a distinct auditor."
     },
     "audit.independence_unverified": {
       "params": {
@@ -1142,7 +1142,7 @@
       "sections": [
         "audit/independence"
       ],
-      "message": "Audit independence is unverified; spawn a decorrelated auditor."
+      "message": "Audit independence is unverified; spawn a distinct auditor."
     },
     "child.terminal": {
       "params": {
@@ -1485,6 +1485,10 @@
         {
           "id": "claims/residuals/needs_decision",
           "text": "A needs-decision claim cannot be agent-approved and becomes a human residual."
+        },
+        {
+          "id": "claims/residuals/lossless_obligation",
+          "text": "Every claim obligation carries the claim text as required, a summary of active evidence as observed, the shared gate blocker code, target, and parameters as missing (or null when satisfied), and that reason's registry actions as next. Terminal stopped_residual views report every scoped blocked claim in graph order from the same derivation."
         }
       ]
     },
@@ -1610,11 +1614,11 @@
     },
     "audit/independence": {
       "title": "Audit independence",
-      "summary": "Derived independence and the non-decorrelated residuals.",
+      "summary": "Derived independence and the non-distinct residuals.",
       "clauses": [
         {
           "id": "audit/independence/derived",
-          "text": "Independence is derived by the application as decorrelated, same_model, or unverified from trusted normalized identities; it is never supplied in the verdict."
+          "text": "Independence is derived by the application as distinct, same_model, or unverified from trusted normalized identities; it is never supplied in the verdict."
         },
         {
           "id": "audit/independence/required",

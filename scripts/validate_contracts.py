@@ -8,7 +8,9 @@ functions. No runtime contract engine is created here.
 Validated:
   * every ``*.schema.json`` under ``contracts/<protocol>/<version>/``;
   * v1 substrate-neutral fixtures under ``contracts/fixtures/``;
-  * the v2 public contract registry, host profiles, and v2 fixtures:
+  * the v2 public contract registry, host profiles, and intentionally hand-maintained
+    wire exemplars under ``contracts/empirica/v2/fixtures`` (kept aligned with runtime
+    projection semantics, but not replayed against synthetic persisted state):
     referential integrity, closed values, exact key sets, child transitions,
     host profile facts, response reason/residual parameters and exact ordered
     next-action/section lists, child recovery actions, schema↔registry mirror,
@@ -48,7 +50,7 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:6be16ea20983601efae26f4246eb6401a8da0a15e1aa93a2527127be18671eec"
+REVIEWED_REGISTRY_DIGEST = "sha256:0ad67678dd936e1e5024a0c0210a66cf5dcd07975f4d6a9fca12a5eeaa605268"
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:41ef8b89da3f880fb5d256202d9ee5b6e28301b75e52490a41e65d16e09b8caa"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
@@ -2691,7 +2693,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_audit_bad = copy.deepcopy(arg_bad_root)
     arg_audit_bad["argument"]["claims"] = [{"claim_id": "G0", "text": "t", "wording_digest": d64,
         "kind": "ordinary", "state": "approved", "gating": True, "evidence_digest": d64, "active_evidence_ids": []}]
-    arg_audit_bad["argument"]["audit"] = {"state": "passed", "independence": "decorrelated",
+    arg_audit_bad["argument"]["audit"] = {"state": "passed", "independence": "distinct",
         "reviewed_argument_digest": None, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
         "reviewed_claims": []}
@@ -2701,7 +2703,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_audit_frozen = copy.deepcopy(arg_bad_root)
     arg_audit_frozen["argument"]["claims"] = [{"claim_id": "G0", "text": "t", "wording_digest": d64,
         "kind": "ordinary", "state": "approved", "gating": True, "evidence_digest": d64, "active_evidence_ids": []}]
-    arg_audit_frozen["argument"]["audit"] = {"state": "passed", "independence": "decorrelated",
+    arg_audit_frozen["argument"]["audit"] = {"state": "passed", "independence": "distinct",
         "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": d64, "reviewed_deferred_scope_digest": d64,
         "reviewed_claims": [{"claim_id": "G0", "evidence_digest": d64}]}
@@ -2745,7 +2747,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_audit_empty = copy.deepcopy(arg_bad_root)
     arg_audit_empty["argument"]["claims"] = [{"claim_id": "G0", "text": "t", "wording_digest": d64,
         "kind": "ordinary", "state": "approved", "gating": True, "evidence_digest": d64, "active_evidence_ids": []}]
-    arg_audit_empty["argument"]["audit"] = {"state": "passed", "independence": "decorrelated",
+    arg_audit_empty["argument"]["audit"] = {"state": "passed", "independence": "distinct",
         "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
         "reviewed_claims": []}
@@ -2755,7 +2757,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_audit_stale = copy.deepcopy(arg_bad_root)
     arg_audit_stale["argument"]["claims"] = [{"claim_id": "G0", "text": "t", "wording_digest": d64,
         "kind": "ordinary", "state": "approved", "gating": True, "evidence_digest": d64, "active_evidence_ids": []}]
-    arg_audit_stale["argument"]["audit"] = {"state": "passed", "independence": "decorrelated",
+    arg_audit_stale["argument"]["audit"] = {"state": "passed", "independence": "distinct",
         "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
         "reviewed_claims": [{"claim_id": "G0", "evidence_digest": "sha256:" + "e" * 64}]}
@@ -2768,7 +2770,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
          "kind": "ordinary", "state": "approved", "gating": True, "evidence_digest": d64, "active_evidence_ids": []},
         {"claim_id": "G1", "text": "t", "wording_digest": d64,
          "kind": "ordinary", "state": "open", "gating": False, "evidence_digest": d64, "active_evidence_ids": []}]
-    arg_audit_extra["argument"]["audit"] = {"state": "passed", "independence": "decorrelated",
+    arg_audit_extra["argument"]["audit"] = {"state": "passed", "independence": "distinct",
         "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
         "reviewed_claims": [{"claim_id": "G0", "evidence_digest": d64},
@@ -2845,7 +2847,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                  "file_bindings": [{"path": "src/a.py", "sha256": d64},
                                    {"path": "tests/a_test.py", "sha256": d64}],
                  "exit_code": 0, "spike_gate": "pass", "supersedes": None}],
-            "audit": {"state": "passed", "independence": "decorrelated",
+            "audit": {"state": "passed", "independence": "distinct",
                 "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
                 "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
                 "reviewed_claims": [{"claim_id": "G0", "evidence_digest": _ed}]}}
@@ -3049,7 +3051,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                  "file_bindings": [{"path": "src/a.py", "sha256": d64},
                                    {"path": "tests/a_test.py", "sha256": d64}],
                  "exit_code": 0, "spike_gate": "pass", "supersedes": P0}],
-            "audit": {"state": "passed", "independence": "decorrelated",
+            "audit": {"state": "passed", "independence": "distinct",
                 "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
                 "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
                 "reviewed_claims": [{"claim_id": "G0", "evidence_digest": _ed}]}}
@@ -3381,7 +3383,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         errors.append("NEG D2D child_event missing fingerprint: expected schema rejection")
     # extra field.
     p = _child_event_payload()
-    p["independence"] = "decorrelated"
+    p["independence"] = "distinct"
     if not schema_rejects(_req_cmd(_trusted("child_event", "c1", p)), "request"):
         errors.append("NEG D2D child_event extra field: expected schema rejection")
     # nested event alias.
@@ -3412,7 +3414,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         errors.append("NEG D2D attribution unknown subject_kind: expected schema rejection")
     # forbidden independence field.
     p = _attribution_payload()
-    p["independence"] = "decorrelated"
+    p["independence"] = "distinct"
     if not schema_rejects(_req_cmd(_trusted("attribution", None, p)), "request"):
         errors.append("NEG D2D attribution independence field: expected schema rejection")
     # auditor with non-null covered_artifact_ids.
@@ -3436,7 +3438,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     # --- audit_verdict raw-schema negatives (one mutation each) ---
     # forbidden independence field.
     p = _audit_verdict_payload()
-    p["independence"] = "decorrelated"
+    p["independence"] = "distinct"
     if not schema_rejects(_req_cmd(_trusted("audit_verdict", "c1", p)), "request"):
         errors.append("NEG D2D audit_verdict independence field: expected schema rejection")
     # unknown verdict.
@@ -3542,7 +3544,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                     "state": "approved", "gating": True, "evidence_digest": EV,
                     "active_evidence_ids": [R1, P1], "kind": "needs-experiment"}],
                 "edges": [], "artifacts": _artifacts(),
-                "audit": {"state": audit_state, "independence": "decorrelated",
+                "audit": {"state": audit_state, "independence": "distinct",
                     "reviewed_argument_digest": ARG if covered else None,
                     "reviewed_goal_digest": GOAL if covered else None,
                     "reviewed_frozen_scope_digest": (frozen if (covered and frozen) else None),

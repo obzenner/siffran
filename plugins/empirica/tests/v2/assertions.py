@@ -1263,13 +1263,13 @@ class ConformanceCase(unittest.TestCase):
         """Submit the trusted reviewer attribution through private ingress.
 
         Evidence producers are already bound at admission. Same-model uses the
-        producer's normalized class; decorrelated uses a distinct class; alias,
+        producer's normalized class; distinct uses a distinct class; alias,
         configuration, and missing observations remain unverified.
         """
         auditor_observer = "host"
         if variant == "same_model":
             auditor_provider, auditor_model = "anthropic", "claude-sonnet-4-6"
-        elif variant == "decorrelated":
+        elif variant == "distinct":
             auditor_provider, auditor_model = "anthropic", "claude-opus-4-6"
         elif variant == "unverified":
             auditor_provider, auditor_model = None, None

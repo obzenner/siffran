@@ -63,6 +63,7 @@ class EvaluationSnapshot:
     contract_digest: str = ""
     bootstrap_requirements: tuple[tuple[str, str, str], ...] = ()
     bootstrap_operations: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = ()
+    reason_metadata: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = ()
     profile_id: str = ""
     host_tier: str = "observational"
     host_audit_execution: str = "unavailable"
@@ -238,6 +239,65 @@ def local_claim_state(snapshot: EvaluationSnapshot, claim: dict[str, Any],
     approved = supporting and (claim["kind"] == "ordinary" or
                                (claim["kind"] == "needs-experiment" and spike_ok))
     return "approved" if approved else "open"
+
+
+def claim_blockers(snapshot: EvaluationSnapshot,
+                   derivation: ClaimDerivation | None = None) -> tuple[dict[str, Any], ...]:
+    """Derive every scoped claim blocker in stable graph order.
+
+    ``claim_id`` is the scoped claim whose approval is blocked; ``target_claim_id``
+    follows dependency redirection to the claim that must actually be discharged.
+    This is the sole claim-level blocker classification used by both the gate and
+    public projections.
+    """
+    if snapshot.graph is None:
+        return ()
+    derivation = derive_claims(snapshot) if derivation is None else derivation
+    unresolved = [claim_id for claim_id in derivation.scope
+                  if derivation.states[claim_id] != "approved"]
+    if not unresolved:
+        return ()
+    claims = {claim["id"]: claim for claim in snapshot.graph["claims"]}
+    freshness_index = None
+    blockers: list[dict[str, Any]] = []
+    for claim_id in unresolved:
+        target_id = derivation.blockers.get(claim_id, claim_id)
+        claim = claims[target_id]
+        state = derivation.states[target_id]
+        evidence = active_evidence(snapshot, claim)
+        research = [item for item in evidence if item["kind"] == "research"]
+        spikes = [item for item in evidence if item["kind"] == "spike"]
+        parameters: dict[str, Any] = {}
+        if state == "discarded":
+            reason = "claim.refuted"
+        elif state == "blocked":
+            reason = "claim.human_decision"
+        elif claim_conflicted(snapshot, claim):
+            reason = "evidence.conflict"
+        elif (any(item["outcome"] == "supporting" for item in research)
+              and claim["kind"] == "needs-experiment"):
+            if freshness_index is None:
+                freshness = evaluate_freshness(
+                    active_spike_heads(snapshot), snapshot.observations)
+                stale_heads = {head.artifact_id: head for head in freshness.stale_heads}
+                freshness_index = (set(stale_heads), stale_heads)
+            stale, stale_heads = freshness_index
+            if spikes and spikes[-1]["artifact_id"] in stale:
+                stale_head = stale_heads[spikes[-1]["artifact_id"]]
+                parameters = {"changes": [{"path": change.path, "state": change.state.value}
+                                           for change in stale_head.changes]}
+                reason = "claim.spike_stale"
+            else:
+                reason = "claim.spike_missing"
+        else:
+            historical_research = any(
+                item.get("kind") == "research" and item.get("claim_id") == target_id
+                for item in snapshot.history)
+            reason = ("claim.research_unbound" if historical_research
+                      else "claim.research_missing")
+        blockers.append({"claim_id": claim_id, "target_claim_id": target_id,
+                         "reason": reason, "parameters": parameters})
+    return tuple(blockers)
 
 
 def derive_claims(snapshot: EvaluationSnapshot) -> ClaimDerivation:
@@ -494,6 +554,38 @@ def audit_passes(snapshot: EvaluationSnapshot, verdict: Mapping[str, Any]) -> bo
             all(_plain(verdict.get(key)) == value for key, value in expected.items()))
 
 
+def post_claim_blocker(snapshot: EvaluationSnapshot, derivation: ClaimDerivation,
+                       derivation_digest: str) -> dict[str, Any] | None:
+    """Derive the first convergence blocker after every scoped claim is approved."""
+    state = snapshot.state
+    if (derivation_digest != state.last_derivation_digest
+            and state.budgets["passes_used"] >= state.budgets["max_passes"]):
+        return {"reason": "budget.exhausted", "parameters": {"resource": "pass"}}
+    if any(child["resource_class"] == "audit"
+           and child["state"] in {"reserved", "launching", "pending"}
+           and audit_operation_current(snapshot, child) for child in state.children):
+        return {"reason": "audit.pending", "parameters": {}}
+    audits = [item for item in snapshot.history if item.get("kind") == "audit_verdict"]
+    if not audits:
+        return {"reason": "audit.required", "parameters": {}}
+    audit = audits[-1]
+    if not audit_passes(snapshot, audit):
+        return {"reason": "audit.failed", "parameters": {}}
+    if any(claim_id not in set(derivation.scope)
+           for claim_id in (claim["id"] for claim in snapshot.graph["claims"])):
+        return None
+    auditor, producers = audit_attributions(snapshot, audit)
+    auditor_class = identity_pair(auditor)
+    producer_classes = [identity_pair(producer) for producer in producers]
+    if auditor_class is None or not producer_classes or any(value is None for value in producer_classes):
+        return {"reason": "audit.independence_unverified", "parameters": {}}
+    if len(set(producer_classes)) != 1:
+        return {"reason": "audit.producers_mixed", "parameters": {}}
+    if auditor_class == producer_classes[0]:
+        return {"reason": "audit.same_model", "parameters": {}}
+    return None
+
+
 def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> Decision:
     """Apply one validated command without performing I/O."""
     state, kind = snapshot.state, command["type"]
@@ -651,7 +743,6 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
         derivation = derive_claims(snapshot)
         states = [(c, derivation.states[c["id"]]) for c in snapshot.graph["claims"]]
         gating = set(derivation.scope)
-        scoped = [(c, cs) for c, cs in states if c["id"] in gating]
         if intent == "stop":
             if state.budgets["passes_used"] >= state.budgets["max_passes"]:
                 return _decision(snapshot, replace(state, status="stopped_budget"))
@@ -661,72 +752,31 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
         blocked = _investigation_block(snapshot)
         if blocked is not None:
             return blocked
-        missing = next(((c, cs) for c, cs in scoped if cs != "approved"), None)
-        if missing:
-            c, _ = missing
-            target_id = derivation.blockers.get(c["id"], c["id"])
-            c = next(claim for claim in snapshot.graph["claims"] if claim["id"] == target_id)
-            cs = derivation.states[target_id]
-            evidence = active_evidence(snapshot, c)
-            research = [a for a in evidence if a["kind"] == "research"]
-            spikes = [a for a in evidence if a["kind"] == "spike"]
-            if cs == "discarded":
-                reason, parameters = "claim.refuted", {}
-            elif cs == "blocked":
-                reason, parameters = "claim.human_decision", {}
-            elif claim_conflicted(snapshot, c):
-                reason, parameters = "evidence.conflict", {}
-            elif any(a["outcome"] == "supporting" for a in research) and c["kind"] == "needs-experiment":
-                stale = stale_artifact_ids(snapshot)
-                if spikes and spikes[-1]["artifact_id"] in stale:
-                    stale_head = next(h for h in evaluate_freshness(
-                        active_spike_heads(snapshot), snapshot.observations).stale_heads
-                                      if h.artifact_id == spikes[-1]["artifact_id"])
-                    parameters = {"changes": [{"path": change.path, "state": change.state.value}
-                                               for change in stale_head.changes]}
-                    reason = "claim.spike_stale"
-                else:
-                    reason, parameters = "claim.spike_missing", {}
-            else:
-                historical_research = any(a.get("kind") == "research" and a.get("claim_id") == c["id"]
-                                          for a in snapshot.history)
-                reason = "claim.research_unbound" if historical_research else "claim.research_missing"
-                parameters = {}
-            return _decision(snapshot, state, "Block", reason=reason, parameters=parameters,
-                             affected="claim:" + c["id"])
+        blockers = claim_blockers(snapshot, derivation)
+        if blockers:
+            blocker = blockers[0]
+            return _decision(snapshot, state, "Block", reason=blocker["reason"],
+                             parameters=blocker["parameters"],
+                             affected="claim:" + blocker["target_claim_id"])
         derivation_digest = digest({"graph": snapshot.graph,
                                     "claims": [(c["id"], derivation.states[c["id"]],
                                                 [a["artifact_id"] for a in active_evidence(snapshot, c)])
                                                for c in snapshot.graph["claims"]],
                                     "frozen": state.frozen_claim_ids})
+        blocker = post_claim_blocker(snapshot, derivation, derivation_digest)
+        if blocker and blocker["reason"] == "budget.exhausted":
+            return _decision(snapshot, state, "Block", reason=blocker["reason"],
+                             parameters=blocker["parameters"])
         if derivation_digest != state.last_derivation_digest:
-            if state.budgets["passes_used"] >= state.budgets["max_passes"]:
-                return _decision(snapshot, state, "Block", reason="budget.exhausted",
-                                 parameters={"resource": "pass"})
             budgets = dict(state.budgets)
             budgets["passes_used"] += 1
             state = replace(state, budgets=budgets, last_derivation_digest=derivation_digest)
-        if any(child["resource_class"] == "audit" and child["state"] in {"reserved", "launching", "pending"}
-               and audit_operation_current(snapshot, child) for child in state.children):
-            return _decision(snapshot, state, "Block", reason="audit.pending")
-        audits = [a for a in snapshot.history if a.get("kind") == "audit_verdict"]
-        if not audits:
-            return _decision(snapshot, state, "Block", reason="audit.required")
-        audit = audits[-1]
-        if not audit_passes(snapshot, audit):
-            return _decision(snapshot, state, "Block", reason="audit.failed")
+        if blocker:
+            return _decision(snapshot, state, "Block", reason=blocker["reason"],
+                             parameters=blocker["parameters"])
         deferred = [c for c, _ in states if c["id"] not in gating]
         if deferred:
             return _decision(snapshot, replace(state, status="stopped_frozen"))
-        auditor, producers = audit_attributions(snapshot, audit)
-        auditor_class = identity_pair(auditor)
-        producer_classes = [identity_pair(producer) for producer in producers]
-        if auditor_class is None or not producer_classes or any(value is None for value in producer_classes):
-            return _decision(snapshot, state, "Block", reason="audit.independence_unverified")
-        if len(set(producer_classes)) != 1:
-            return _decision(snapshot, state, "Block", reason="audit.producers_mixed")
-        if auditor_class == producer_classes[0]:
-            return _decision(snapshot, state, "Block", reason="audit.same_model")
         return _decision(snapshot, replace(state, status="converged"))
 
     return _decision(snapshot, state, "Fault", reason="unsupported")

@@ -8,8 +8,8 @@ from typing import Any
 from . import governance
 
 from .evaluation import (EvaluationSnapshot, active_evidence, audit_attributions, bootstrap_status,
-                         claim_conflicted, claim_digest, derive_claims, digest, identity_pair,
-                         stale_artifact_ids)
+                         claim_blockers, claim_digest, derive_claims, digest, identity_pair,
+                         post_claim_blocker, stale_artifact_ids)
 
 
 def _scope(snapshot: EvaluationSnapshot) -> tuple[list[str], list[str]]:
@@ -40,21 +40,50 @@ def _freshness(snapshot: EvaluationSnapshot) -> tuple[list[dict[str, Any]], set[
     return changes, stale
 
 
-def _obligations(snapshot: EvaluationSnapshot,
-                 states: Mapping[str, str]) -> dict[str, list[dict[str, Any]]]:
+def _reason_metadata(metadata: Mapping[str, tuple[tuple[str, ...], tuple[str, ...]]],
+                     code: str) -> tuple[list[str], list[str]]:
+    if code not in metadata:
+        raise ValueError(f"missing contract metadata for reason: {code}")
+    next_actions, sections = metadata[code]
+    return list(next_actions), list(sections)
+
+
+def _obligations(snapshot: EvaluationSnapshot, states: Mapping[str, str],
+                 blockers: tuple[dict[str, Any], ...],
+                 metadata: Mapping[str, tuple[tuple[str, ...], tuple[str, ...]]],
+                 stale: set[str]) -> dict[str, list[dict[str, Any]]]:
     state = snapshot.state
     late = bool(snapshot.command and snapshot.command.get("type") == "ObserveAction"
                 and snapshot.command["action"].get("kind") == "route"
                 and state.investigation_stamp is not None)
     bootstrap = bootstrap_status(snapshot)
-    active = list(bootstrap["active"])
+    active = [{"id": row["id"], "required": row["must"], "observed": [],
+               "missing": None, "next": [], "status": row["status"]}
+              for row in bootstrap["active"]]
     if late:
-        active.append({"id": "obligation.route.late", "must": "Do not reroute after investigation.",
-                       "status": "violated"})
-    gating, deferred = _scope(snapshot)
+        next_actions, _ = _reason_metadata(metadata, "route.late")
+        active.append({"id": "obligation.route.late",
+                       "required": "Do not reroute after investigation.",
+                       "observed": [],
+                       "missing": {"code": "route.late", "target_claim_id": None,
+                                   "parameters": {}},
+                       "next": next_actions, "status": "violated"})
+    blockers_by_claim = {row["claim_id"]: row for row in blockers}
+    _, deferred = _scope(snapshot)
     if snapshot.graph:
         for claim in snapshot.graph["claims"]:
-            row = {"id": "claim:" + claim["id"], "must": "Discharge claim " + claim["id"] + ".",
+            blocker = blockers_by_claim.get(claim["id"])
+            missing = (None if blocker is None else {
+                "code": blocker["reason"], "target_claim_id": blocker["target_claim_id"],
+                "parameters": blocker["parameters"]})
+            next_actions = ([] if blocker is None else
+                            _reason_metadata(metadata, blocker["reason"])[0])
+            observed = [{"artifact_id": item["artifact_id"], "kind": item["kind"],
+                         "outcome": item["outcome"],
+                         "stale": item["kind"] == "spike" and item["artifact_id"] in stale}
+                        for item in active_evidence(snapshot, claim)]
+            row = {"id": "claim:" + claim["id"], "required": claim["text"],
+                   "observed": observed, "missing": missing, "next": next_actions,
                    "status": "satisfied" if states[claim["id"]] == "approved" else "residual"}
             if claim["id"] in deferred:
                 row["hold"] = "deferred"
@@ -62,31 +91,44 @@ def _obligations(snapshot: EvaluationSnapshot,
     return {"active": active, "deferred": []}
 
 
-def _residuals(snapshot: EvaluationSnapshot, states: Mapping[str, str]) -> list[dict[str, Any]]:
+def _residuals(snapshot: EvaluationSnapshot, derivation: Any,
+               blockers: tuple[dict[str, Any], ...],
+               metadata: Mapping[str, tuple[tuple[str, ...], tuple[str, ...]]]) -> list[dict[str, Any]]:
     status = snapshot.state.status
     _, deferred = _scope(snapshot)
     if snapshot.state.frozen_claim_ids is not None and deferred:
+        next_actions, sections = _reason_metadata(metadata, "freeze.deferred")
         return [{"code": "freeze.deferred", "parameters": {
             "claim_ids": deferred, "deferred_scope_digest": digest(deferred)},
-            "next_actions": ["residual.accept"], "sections": ["freeze"]}]
+            "next_actions": next_actions, "sections": sections}]
     if status == "stopped_budget":
+        next_actions, sections = _reason_metadata(metadata, "budget.exhausted")
         return [{"code": "budget.exhausted", "parameters": {"resource": "pass"},
-                 "next_actions": ["budget.raise", "residual.accept"], "sections": ["budget"]}]
+                 "next_actions": next_actions, "sections": sections}]
     if status == "stopped_frozen":
         return []
     if status == "stopped_residual" and snapshot.graph:
-        gating, _ = _scope(snapshot)
-        scoped_ids = set(gating)
-        scoped = [c for c in snapshot.graph["claims"] if c["id"] in scoped_ids]
-        conflicted = any(claim_conflicted(snapshot, c) for c in scoped)
-        discarded = any(states[c["id"]] == "discarded" for c in scoped)
-        code = "claim.refuted" if discarded else ("evidence.conflict" if conflicted
-                                                   else "claim.research_missing")
-        metadata = ({"next_actions": ["run.inspect"], "sections": ["claims/refutation"]}
-                    if discarded else ({"next_actions": ["run.inspect", "residual.accept"],
-                    "sections": ["claims/refutation"]} if conflicted else
-                    {"next_actions": ["research.record"], "sections": ["evidence/research"]}))
-        return [{"code": code, "parameters": {}, **metadata}]
+        residuals = []
+        for blocker in blockers:
+            next_actions, sections = _reason_metadata(metadata, blocker["reason"])
+            residuals.append({"claim_id": blocker["claim_id"],
+                              "target_claim_id": blocker["target_claim_id"],
+                              "code": blocker["reason"],
+                              "parameters": blocker["parameters"],
+                              "next_actions": next_actions, "sections": sections})
+        if residuals:
+            return residuals
+        derivation_digest = digest({"graph": snapshot.graph,
+                                    "claims": [(claim["id"], derivation.states[claim["id"]],
+                                                [item["artifact_id"] for item in active_evidence(
+                                                    snapshot, claim)])
+                                               for claim in snapshot.graph["claims"]],
+                                    "frozen": snapshot.state.frozen_claim_ids})
+        blocker = post_claim_blocker(snapshot, derivation, derivation_digest)
+        if blocker:
+            next_actions, sections = _reason_metadata(metadata, blocker["reason"])
+            return [{"code": blocker["reason"], "parameters": blocker["parameters"],
+                     "next_actions": next_actions, "sections": sections}]
     return []
 
 
@@ -137,8 +179,12 @@ def project_governance(snapshot: EvaluationSnapshot) -> dict:
 
 
 def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] | None = None) -> dict[str, Any]:
-    changes, _ = _freshness(snapshot)
-    states = derive_claims(snapshot).states
+    changes, stale = _freshness(snapshot)
+    derivation = derive_claims(snapshot)
+    blockers = claim_blockers(snapshot, derivation)
+    metadata = {reason: (next_actions, sections)
+                for reason, next_actions, sections in snapshot.reason_metadata}
+    states = derivation.states
     bootstrap = bootstrap_status(snapshot)
     children = []
     for child in snapshot.state.children:
@@ -157,8 +203,8 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
                      "digest": snapshot.contract_digest,
                      "relevant_sections": list(["protocol"] if relevant_sections is None
                                                else relevant_sections)},
-        "obligations": _obligations(snapshot, states),
-        "residuals": _residuals(snapshot, states),
+        "obligations": _obligations(snapshot, states, blockers, metadata, stale),
+        "residuals": _residuals(snapshot, derivation, blockers, metadata),
         "freshness": {"changes": changes}, "children": children,
         "next_actions": bootstrap["next_actions"],
         "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
@@ -189,7 +235,7 @@ def _audit(snapshot: EvaluationSnapshot) -> dict[str, Any]:
     elif auditor_class == producer_classes[0]:
         independence = "same_model"
     else:
-        independence = "decorrelated"
+        independence = "distinct"
     return {"state": state, "independence": independence,
             "reviewed_argument_digest": verdict.get("argument_digest"),
             "reviewed_goal_digest": verdict.get("goal_digest"),

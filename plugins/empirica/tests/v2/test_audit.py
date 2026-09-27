@@ -228,7 +228,7 @@ class AuditTests(ConformanceCase):
         scope2 = self.require_audit_scope(drv2, run2)
         child2 = self.require_pending_audit_child(drv2, run2)
         self.require_trusted_audit_attribution(
-            drv2, run2, child2, scope2["c0_artifact_id"], variant="decorrelated")
+            drv2, run2, child2, scope2["c0_artifact_id"], variant="distinct")
         verdict2 = self.build_audit_verdict_payload(drv2, run2, verdict="pass", scope_review="pass")
         self.assertEqual(drv2.trusted_audit_verdict(run2, child2, verdict2)["result"]["type"], "Allow")
         self.dispatch(drv2, observe_action(run_id=run2, action=action_research(
@@ -244,7 +244,7 @@ class AuditTests(ConformanceCase):
         scope = self.require_audit_scope(drv, run_id)
         child_id = self.require_pending_audit_child(drv, run_id)
         self.require_trusted_audit_attribution(
-            drv, run_id, child_id, scope["c0_artifact_id"], variant="decorrelated")
+            drv, run_id, child_id, scope["c0_artifact_id"], variant="distinct")
         verdict = self.build_audit_verdict_payload(
             drv, run_id, verdict="pass", scope_review="pass")
         self.assertEqual(drv.trusted_audit_verdict(
@@ -274,7 +274,7 @@ class AuditTests(ConformanceCase):
                 drv = self.bind_driver(
                     "D9", "case-33",
                     "Independence is derived from trusted observed attribution only and reports "
-                    "same_model | independence_unverified honestly (never decorrelated by a no-op)")
+                    "same_model | independence_unverified honestly (never distinct by a no-op)")
                 run_id = self.start_run(drv, goal=self.GOAL)
                 # otherwise approvable frozen scope.
                 scope = self.require_audit_scope(drv, run_id)
@@ -343,8 +343,8 @@ class AuditTests(ConformanceCase):
                     action=action_attribution(
                         payload=build_attribution_payload(
                             subject_kind="auditor", subject_id="author-claimed",
-                            child_id=child_id, provider_id="p-decorrelated",
-                            model_id="m-decorrelated",
+                            child_id=child_id, provider_id="p-distinct",
+                            model_id="m-distinct",
                             observed_by="host", covered_artifact_ids=[]))))
                 self.assertIn(resp_author["result"]["type"], ("Block", "Fault", "Inert"),
                               "author-claimed decorrelation must be rejected/ignored")
@@ -356,7 +356,7 @@ class AuditTests(ConformanceCase):
                 self.assertEqual(arg_after, arg_before,
                                  "ArgumentView must be unchanged after author attempt")
                 # Exact subsequent audit projection: independence remains the original value,
-                # never upgraded to decorrelated.
+                # never upgraded to distinct.
                 self.assert_audit_view(arg_after, independence=expected_independence)
                 self.assertEqual(arg_after["audit"]["state"], "passed")
                 # The exact independence failure persists after the forgery attempt.
@@ -374,7 +374,7 @@ class AuditTests(ConformanceCase):
 
         child_a = self.require_pending_audit_child(drv, run_id)
         self.require_trusted_audit_attribution(
-            drv, run_id, child_a, scope["c0_artifact_id"], variant="decorrelated")
+            drv, run_id, child_a, scope["c0_artifact_id"], variant="distinct")
         verdict_a = self.build_audit_verdict_payload(
             drv, run_id, verdict="fail", scope_review="pass")
         self.assertEqual(
@@ -383,7 +383,7 @@ class AuditTests(ConformanceCase):
         # A later child's identity cannot retroactively pass child A's failed verdict.
         child_b = self.require_pending_audit_child(drv, run_id)
         self.require_trusted_audit_attribution(
-            drv, run_id, child_b, scope["c0_artifact_id"], variant="decorrelated")
+            drv, run_id, child_b, scope["c0_artifact_id"], variant="distinct")
         # While child B is current and pending, its managed execution takes precedence over the
         # prior failed verdict so Claude can settle the parent turn without respawning.
         blocked = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
@@ -402,7 +402,7 @@ class AuditTests(ConformanceCase):
         drv = self.bind_driver(
             "D9", "case-35",
             "Frozen scope audit covers committed scope and deferred digest exactly: a passing "
-            "frozen-scope audit with decorrelated independence still leaves stopped_frozen "
+            "frozen-scope audit with distinct independence still leaves stopped_frozen "
             "non-converged; deferred scope cannot become convergence")
         run_id = self.start_run(drv, goal=self.GOAL)
         # Build C0 ordinary approved, freeze, add C1 deferred (ordinary).
@@ -412,9 +412,9 @@ class AuditTests(ConformanceCase):
         c0_artifact_id = scope["c0_artifact_id"]
         # admitted pending audit child (reserved→launching→pending via private ingress).
         child_id = self.require_pending_audit_child(drv, run_id)
-        # trusted decorrelated identities (both covered-actor and auditor through ingress).
+        # trusted distinct identities (both covered-actor and auditor through ingress).
         self.require_trusted_audit_attribution(
-            drv, run_id, child_id, c0_artifact_id, variant="decorrelated")
+            drv, run_id, child_id, c0_artifact_id, variant="distinct")
         # Capture typed dossier.
         self.assert_argument_view(
             self.dispatch(drv, get_argument(run_id=run_id))["result"])
@@ -428,11 +428,11 @@ class AuditTests(ConformanceCase):
         resp_v = drv.trusted_audit_verdict(run_id, child_id, payload)
         self.assert_valid_response(resp_v)
         self.assert_child_summary(resp_v["result"]["run"], child_id, state="completed")
-        # GetArgument audit is passed, independence decorrelated, exact reviewed
+        # GetArgument audit is passed, independence distinct, exact reviewed
         # coverage/digests, no stale/extra claim.
         arg = self.assert_argument_view(
             self.dispatch(drv, get_argument(run_id=run_id))["result"])
-        audit = self.assert_audit_view(arg, state="passed", independence="decorrelated")
+        audit = self.assert_audit_view(arg, state="passed", independence="distinct")
         self.assertEqual(audit["reviewed_argument_digest"], arg["argument_digest"],
                          "reviewed argument digest must match current argument")
         self.assertEqual(audit["reviewed_goal_digest"], arg["goal_digest"],

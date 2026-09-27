@@ -815,6 +815,14 @@
                 "minLength": 1
               },
               "uniqueItems": true
+            },
+            "claim_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "target_claim_id": {
+              "type": "string",
+              "minLength": 1
             }
           }
         }
@@ -870,7 +878,10 @@
       "additionalProperties": false,
       "required": [
         "id",
-        "must",
+        "required",
+        "observed",
+        "missing",
+        "next",
         "status"
       ],
       "properties": {
@@ -878,9 +889,43 @@
           "type": "string",
           "minLength": 1
         },
-        "must": {
+        "required": {
           "type": "string",
           "minLength": 1
+        },
+        "observed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["artifact_id", "kind", "outcome", "stale"],
+            "properties": {
+              "artifact_id": {"$ref": "#/$defs/digest256"},
+              "kind": {"enum": ["research", "spike"]},
+              "outcome": {"enum": ["supporting", "refuting", "pass", "fail"]},
+              "stale": {"type": "boolean"}
+            }
+          }
+        },
+        "missing": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["code", "target_claim_id", "parameters"],
+              "properties": {
+                "code": {"type": "string", "minLength": 1},
+                "target_claim_id": {"type": ["string", "null"], "minLength": 1},
+                "parameters": {"type": "object"}
+              }
+            }
+          ]
+        },
+        "next": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
         },
         "status": {
           "enum": [
@@ -2406,7 +2451,7 @@
         },
         "independence": {
           "enum": [
-            "decorrelated",
+            "distinct",
             "same_model",
             "unverified"
           ]
