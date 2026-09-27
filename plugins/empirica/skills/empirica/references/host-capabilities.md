@@ -1,6 +1,6 @@
 # Host capability preflight
 
-Read this file after route, proposal approval, and investigation acknowledgement. Capability claims come from the registered
+Read this file after route, configuration approval, and investigation acknowledgement. Capability claims come from the registered
 profile, its qualified compatibility range, and the live adapter surface—not generic host
 documentation or exact equality with one qualification build. Installed-host receipts retain the
 exact observed version as provenance.
@@ -33,10 +33,11 @@ The host mutates the auditor prompt with the typed dossier, binds the async nati
 audit is pending, the Stop hook lets the parent turn settle without terminalizing the run or
 suggesting another spawn; Claude's native task notification resumes the parent after completion.
 The generic child tier remains `foreground_only`; the registered audit execution mode is `async`.
-`PostModelSwitch` refreshes observed author identity through the lifecycle hook and revokes current
-approval on a material change. The decision deadline environment must reach the Claude
-process and inherited MCP server. This mechanism is tested via lifecycle subprocesses, not native
-model switching or proof that Claude honors every Bedrock-prefixed `Agent.model` override.
+`PostModelSwitch` refreshes observed author identity through the lifecycle hook. Evidence admitted
+before and after a model switch retains its own producer attribution; mixed or unobservable covered
+producers block audit rather than revoking configuration approval. The host decision timeout
+environment must reach the Claude process and inherited MCP server. This mechanism is tested via
+lifecycle subprocesses, not native model switching or proof that Claude honors every alias.
 
 ## Pi capability profile (`>=0.84.1,<0.85.0` + `pi-subagents@0.50.0`)
 
@@ -63,15 +64,13 @@ Required surfaces:
 
 - explicit activation injected an opaque handle;
 - MCP tools `empirica_observe`, `empirica_read`, and `report_convergence` are present;
-- the Empirica Stop hook is enabled and trusted;
-- `codex exec` and the configured auditor model are available.
+- the Empirica Stop hook is enabled and trusted.
 
 The profile was qualified on Codex 0.146.0, which cannot observe an arbitrary native child's final
-output. Its adapter therefore
-owns a bounded foreground `codex exec` auditor at Stop, records lifecycle, privately admits the
-exact final verdict, and re-evaluates before completion. The process argv is configuration, not an
-observed resolved model, so auditor identity remains unverified and convergence blocks. Do not
-spawn an ordinary auditor child. Async remains unsupported.
+output or verdict-producing model identity. When audit is owed, the adapter reconciles reservations
+and rejects the prepared attempt without launching a process. Auditor identity therefore remains
+unverified and convergence blocks. Do not spawn an ordinary auditor child. Async remains
+unsupported.
 
 Hosted WebSearch may be invisible to `PreToolUse`; that sensor gap never proves research ordering.
 

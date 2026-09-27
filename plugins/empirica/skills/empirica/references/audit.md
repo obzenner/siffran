@@ -5,8 +5,9 @@ preflight confirms a bound audit lifecycle.
 
 ## Preconditions
 
-- The selected graph is valid, current, and covered by current governance approval.
-- The selected reviewer is known, distinct from the host-observed main model, and covered by current governance approval.
+- The selected graph is valid and current; configuration approval is current.
+- Covered evidence producer and reviewer identity satisfy the classification requirements under
+  [Independence reporting](#independence-reporting).
 - Every in-scope gating claim is approved from real evidence.
 - Every experiment claim has a current passing spike.
 - Freeze scope, if any, is already committed.
@@ -25,7 +26,7 @@ Ordinary conversation with another model is not a substitute.
    one canonical plugin-scoped auditor in foreground mode. Do not submit `child_reserve`:
    concrete reservation is a host protocol operation and is intentionally absent from
    `empirica_observe`. On Codex, finish the evidence-complete turn so the trusted Stop hook can
-   reserve and run its managed foreground auditor; do not spawn an ordinary child.
+   reject the unsupported audit attempt; do not spawn an ordinary child.
 3. Let the host inject the dossier and bind native execution. Do not expose or
    manufacture private correlation material.
 4. The auditor independently retrieves every citation, checks spike provenance,
@@ -48,7 +49,7 @@ this object to the structured `subagent` tool:
 The string `task` is required but is replaced by the host-owned bound dossier; it is not
 an author-supplied audit argument. Only `agent` and `task` are allowed. Omit `async` (even
 `false`), model/context/acceptance/tool overrides, and workflow wrappers. The host injects
-the approved reviewer and `async=false` after admission. A bare agent-only call is invalid.
+the host-configured reviewer and `async=false` after admission. A bare agent-only call is invalid.
 A missing/non-string task reports that a string task is required; extra fields report
 that only agent and task are accepted. Stop on rejection rather than trying alternate
 shapes. A stopped run stays stopped; corrected guidance does not authorize reopening it.
@@ -75,12 +76,14 @@ request resembling one of those payloads must fail closed.
 
 Report only what the host observed:
 
-- `distinct` when concrete author and auditor identities are distinct;
-- `same_model` when they are the same;
-- `unverified` when either identity cannot be established.
+- `distinct` when every covered evidence producer resolves to one concrete identity class and the verdict-producing reviewer is in a different class;
+- `same_model` when the reviewer and covered evidence producer have the same identity class;
+- `mixed` when covered evidence has more than one producer identity class;
+- `unverified` when any required producer or reviewer identity cannot be established.
 
-Do not promise independence from role names, prompts, provider tiers, or requested
-models alone.
+Only `distinct` is eligible for convergence. `same_model` means the same identity class; `mixed`
+and `unverified` fail closed. Do not promise independence from role names, prompts, provider tiers,
+requested models, or unknown aliases.
 
 ## Terminal replay
 
@@ -88,5 +91,5 @@ The first child terminal event wins. An identical replay is inert; a conflicting
 replay faults. A terminal run cannot be reopened by late child output and cannot
 later become converged.
 
-Observed `same_model` always blocks. Unknown aliases and selected/observed substitution never pass.
-No provider difference is required; the host-observed selected reviewer must still match the actual reviewer.
+The fail-closed identity outcomes are defined under [Independence reporting](#independence-reporting).
+No provider difference is required.

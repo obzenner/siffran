@@ -9,6 +9,8 @@ links:
     kind: Refines
   - target: 55
     kind: Refines
+  - target: 60
+    kind: Amended by
 ---
 
 # Align bootstrap admission and agent guidance

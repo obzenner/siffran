@@ -14,15 +14,17 @@ Asynchronous audit execution is not supported and is never silently downgraded.
 
 ## Governed initialization
 
-4.0.0 adds required exact proposal consent before investigation. Deliberative mode uses
-`ctx.hasUI` and documented select/input/confirm dialogs; cancel/no UI fails closed. Governance
-receives no configured model registry: it checks only a known-distinct main/reviewer pair.
-`configure_run` opens the dialog, and amendments need a second read-only proposal confirmation. Explicit
-`--auto` is bounded automatic acceptance of an author-proposed known-distinct reviewer, not a human decision. See
-[governance](../../skills/empirica/references/governance.md) for limits, pair identity,
-and fresh-generation compatibility. These UI flows have fast simulated-control coverage and real-service governance coverage; the
-historical profile receipt does not certify native human approval for 4.0.0. Follow the
-operator-led procedure printed by `make native-qualification` for that boundary.
+4.0.0 adds exact run-configuration approval before investigation. Deliberative mode uses
+`ctx.hasUI` and documented select/input/confirm dialogs; cancel/no UI fails closed. Approval covers
+budgets, modes, and control mode while showing the goal read-only; graph content and reviewer
+configuration are not approvable. `configure_run` opens the dialog, and configuration amendments
+need a second read-only confirmation. Explicit `--auto` is bounded automatic acceptance, not a
+human decision, and requires an interactive invocation or recorded operator delegation. See
+[governance](../../skills/empirica/references/governance.md) for limits, identity classes,
+and fresh-generation compatibility. These UI flows have fast simulated-control coverage and
+real-service governance coverage; the historical profile receipt does not certify native human
+approval for 4.0.0. Follow the operator-led procedure printed by `make native-qualification` for
+that boundary.
 
 ## Surface
 
@@ -36,9 +38,12 @@ operator-led procedure printed by `make native-qualification` for that boundary.
 | `tool_result(subagent)` | private `audit_identity` + `audit_verdict` | Correlates by `toolCallId`, redacts before the first await, binds the verdict to the final native assistant record in the host-generated child session, and admits only one exact fenced verdict. |
 | compaction | `RestoreRun` | Carries the opaque handle and restores the selected run. |
 
-The canonical auditor has no plugin model pin. The host injects the exact approved visible
-`provider_id/model_id` and rejects preflight substitution, shadowed agent definitions, and
-author-supplied overrides. `EMPIRICA_PI_AUDITOR_MODEL` no longer selects the auditor.
+The canonical auditor has no plugin model pin. The adapter chooses the project or user scope that
+resolves this package's own auditor, then derives the execution model from host settings in order:
+`subagents.agentOverrides["empirica.empirica-auditor"].model`, `subagents.defaultModel`, then the
+main model. It rejects an unavailable reviewer or one in the same identity class before launch,
+and rejects shadowed agent definitions and author-supplied overrides. `EMPIRICA_PI_AUDITOR_MODEL` no longer configures
+the auditor.
 The adapter never trusts `details.results[].model`, which is requested launch configuration.
 Instead it reads the exact result row's host-generated `sessionFile` and accepts identity only when
 the final native assistant record carries concrete provider/model fields and its sole verdict equals
@@ -63,7 +68,7 @@ After current evidence and approval, check `subagent({"action":"list"})`, then s
 
 The `task` string is required and replaced with the host's bound dossier. Do not send
 `async` (even `false`), `model`, `context`, `acceptance`, tool controls or workflow wrappers.
-The host injects the approved model and foreground execution after validating the two-field
+The host injects its configured model and foreground execution after validating the two-field
 input. Missing/non-string task and forbidden fields have distinct errors, both before audit
 resolution/reservation. Rejection is not an audit; do not retry a stopped qualification run.
 

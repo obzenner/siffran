@@ -1,9 +1,9 @@
 # Empirica adapter for Codex CLI
 
 This is the exact `codex-cli@0.146.0` adapter over the shared `empirica/v2` service. It
-translates native hooks, exposes the canonical public MCP tools, and owns one bounded managed
-auditor. Claim, evidence, budget, audit-coverage, and convergence rules remain in the
-host-neutral core.
+translates native hooks, exposes the canonical public MCP tools, and fails closed when audit is
+owed because verdict-producing identity is unobservable. Claim, evidence, budget, audit-coverage,
+and convergence rules remain in the host-neutral core.
 
 ## Work-in-progress status
 
@@ -13,16 +13,15 @@ conformance development and fail-closed experimentation only. Its exact profile 
 not an advertised capability.
 
 Codex native hooks cannot mutate a spawned child request or independently observe the resolved
-model behind a managed `codex exec` process. The adapter can observe one correlated final message,
-but configured argv is not identity evidence. Auditor independence therefore remains `unverified`
-and convergence blocks. Async execution is also unsupported. Codex is excluded from the supported
-installed-host release receipt set until a native resolved-model observation can be bound to the
-managed process and the candidate foreground probe passes.
+model behind a child process. Audit therefore remains `unverified` and convergence blocks. Async
+execution is also unsupported. Codex is excluded from the supported installed-host release receipt
+set until a native resolved-model observation can be bound to an execution.
 
 There is no default auditor model or `EMPIRICA_CODEX_AUDITOR_MODEL` override. Deliberative
-approval is explicitly unavailable on this profile. Explicit `$empirica --auto <goal>` can approve
-bounded run configuration, but Codex audit remains unsupported because the adapter cannot observe
-the verdict-producing reviewer identity. It does not read host model configuration or claim an
+approval is explicitly unavailable on this profile. Explicit `$empirica --auto <goal>` requires
+operator-recorded `EMPIRICA_AUTO_DELEGATION=1` because Codex has no established interactive
+activation signal. It can approve bounded run configuration, but Codex audit remains unsupported
+because the adapter cannot observe the verdict-producing reviewer identity. It does not read host model configuration or claim an
 identity mismatch. Bounded automatic acceptance is not human approval and cannot prove the actual
 auditor model.
 See [governance](../../skills/empirica/references/governance.md) for configuration and limitations.
@@ -35,7 +34,7 @@ See [governance](../../skills/empirica/references/governance.md) for configurati
 | MCP `empirica_observe` | `ObserveAction` | Public route, graph, research, spike request, freeze, and configuration only; concrete reservation is host-owned. |
 | MCP `empirica_read` | `GetRun`, `GetArgument`, `GetContract`, `RestoreRun` | Complete typed public read surface. |
 | MCP `report_convergence` | `EvaluateRun` | Public guarded decision; never trusted ingress. |
-| `Stop` | resolve → evaluate → managed audit when due → re-evaluate | Blocks on any unavailable or non-converged result; permits only `Allow(converged=true)`. |
+| `Stop` | resolve → evaluate → reject unsupported audit when due | Blocks on any unavailable or non-converged result; permits only `Allow(converged=true)`. |
 | `SessionStart:compact` | `ResolveRun` | Reconnects the durable selected run. |
 
 The deterministic spike harness remains the sole machine approver. Audit can block but cannot

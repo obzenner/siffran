@@ -58,8 +58,9 @@ Freeze is an explicit scope commitment, not convergence.
 - Deferred claims remain visible in the terminal handoff.
 - A frozen result is never relabeled `converged:true`.
 
-Freeze requires a current approved graph and preserves proposal consent.
-Before submitting `ObserveAction(kind="freeze")`, show the user the committed and
-expected deferred scope. After acceptance, do not mutate the commitment by
-rewriting prose or resubmitting freeze. Pre-freeze changes require new proposal approval. Changing committed frozen meaning still
-requires a fresh run; even host amendments cannot rewrite that commitment.
+Freeze requires current configuration approval. It does not approve graph content. Graph changes
+preserve configuration authority but invalidate prior audit coverage. Before submitting
+`ObserveAction(kind="freeze")`, show the user the committed and expected deferred scope. After
+acceptance, do not mutate the commitment by rewriting prose or resubmitting freeze. Changing
+committed frozen meaning requires a fresh run; configuration amendments cannot rewrite that
+commitment.

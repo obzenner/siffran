@@ -37,8 +37,8 @@ route acknowledgement.** Use this inline bootstrap matrix:
   and the structured `subagent` tool are present.
 - **Codex CLI observational profile (qualified on `0.146.0`, compatible
   `>=0.146.0,<0.147.0`):** continue when activation injected the opaque
-  handle, the public MCP tools are present, and the Stop hook is trusted; Stop
-  owns the managed foreground audit.
+  handle, the public MCP tools are present, and the Stop hook is trusted; audit
+  remains explicitly unsupported because verdict-producing identity is unobservable.
 - **Unknown, partial, or outside a qualified compatibility range:** stop as unsupported pending
   qualification rather than borrowing another profile's capabilities.
 
@@ -53,7 +53,7 @@ A runnable convergence workflow requires all of these capabilities:
 4. launch and observe a bound independent auditor;
 5. submit the observed verdict through private host ingress;
 6. request the guarded convergence decision;
-7. obtain exact proposal approval through supported host UI (or explicit bounded auto).
+7. obtain exact run-configuration approval through supported host UI (or explicit bounded auto).
 
 If any capability is absent, stop before investigation and report the exact
 unsupported capability. Do not imitate the missing operation in prose or write
@@ -85,7 +85,7 @@ Do this before reading files, searching, browsing, or running commands.
    with edges `{"from":"G0","to":"C1","type":"SupportedBy"}`.
 5. Read `empirica_read(operation="GetRun")`, then call `configure_run` to request approval of
    run configuration only: budgets, modes, and control mode. The goal is displayed read-only;
-   the claim graph and reviewer are not approvable. Reviewer selection comes from host
+   the claim graph and reviewer are not approvable. Reviewer configuration comes from host
    configuration, and the host must later observe a known reviewer different from the covered
    actor. Configuration edits open a host-owned locked final confirmation; preserve the human's
    edited values rather than resending stale fields. Explicit `--auto` remains within existing
@@ -109,7 +109,7 @@ If either witness cannot be recorded, the workflow is unsupported. The core and
 supported host adapters fail closed before investigative tools, evidence, child
 budget, or harness execution; do not continue with an unrecorded substitute.
 
-## 2. Refine the approved claim graph
+## 2. Refine the claim graph
 
 After approval and investigation admission, read
 [references/claim-graph.md](references/claim-graph.md). Construct the smallest
@@ -120,11 +120,12 @@ Submit the graph through the active author-action surface. Never persist a claim
 state or confidence: claim state is derived from current evidence on every read.
 A malformed, detached, missing, or corrupt selected graph fails closed.
 
-Material graph or configuration changes revoke approval, even after investigation has begun.
-Request new host approval through `configure_run`; never reuse old consent. Freeze is not a
-substitute for consent.
+Graph changes do not revoke configuration approval. They do change the argument binding and
+invalidate prior audit coverage, so obtain a fresh bound audit after any graph change. Configuration
+changes require a fresh host decision through `configure_run`. Freeze is not a substitute for either
+configuration authority or current audit coverage.
 
-After the graph is approved, use the returned `run.contract` obligations as the
+After the graph is recorded, use the returned `run.contract` obligations as the
 worklist. Counts and reason strings are telemetry, not authority.
 
 ## 3. Earn or discard every gating claim
@@ -185,18 +186,18 @@ packaged auditor, then invoke the structured `subagent` tool with exactly:
 
 `task` must be a string even though the host replaces it with the bound dossier. Send only
 `agent` and `task`: omit `async` (even `false`), `model`, `context`, `acceptance`, tool controls,
-and workflow wrappers. The host sets foreground execution and the approved reviewer; a bare
+and workflow wrappers. The host sets foreground execution and its configured reviewer; a bare
 agent-only call is invalid. Stop on a rejected launch; do not guess alternate shapes or retry.
 The host protocol—not `empirica_observe`—owns concrete reservation, dossier replacement,
 correlation, identity observation, and terminal admission.
 On Codex, do not launch an ordinary child: finish the turn only when all non-audit
-obligations are closed so the trusted Stop hook can run its bounded managed auditor.
-In every case the host—not the author—binds the dossier, observes the final output,
-and admits the candidate verdict.
+obligations are closed. The trusted Stop hook rejects the audit attempt because the
+verdict-producing identity is unobservable. On supported hosts the host—not the author—binds the
+dossier, observes the final output, and admits the candidate verdict.
 
-Audit may block but cannot manufacture deterministic machine evidence. Model
-independence is reported as observed, same-model, or unverified; never guaranteed
-without host evidence.
+Audit may block but cannot manufacture deterministic machine evidence. Independence is derived by
+the host (see [references/audit.md](references/audit.md)); it is never guaranteed without host
+evidence.
 
 If the host lacks bound child observation or private verdict ingress, true
 convergence is unsupported. Do not substitute an ordinary model response.
@@ -205,8 +206,8 @@ convergence is unsupported. Do not substitute an ordinary model response.
 
 Call the host's guarded convergence operation exactly once after the graph,
 evidence, and scope are current. On Claude and Pi this is `report_convergence`
-after the bound audit. On Codex the trusted Stop hook performs the bound managed
-audit when due and then requests the guarded decision before permitting completion.
+after the bound audit. On Codex the trusted Stop hook rejects the unsupported audit attempt and
+continues to block completion.
 
 - Only a schema-guarded `Allow` permits reporting the result.
 - `Allow(converged=true)` permits a convergence claim.
@@ -240,9 +241,10 @@ stores, not in the product tree.
 
 ## Non-negotiable invariants
 
-- Route and exact host-mediated proposal approval before investigation.
-- Public configuration proposes; only private host decisions approve.
-- Explicit auto never raises ceilings and stops at its finite revision limit.
+- Host-mediated approval covers exact run configuration before investigation; graph content and
+  reviewer configuration remain outside that authority.
+- Explicit auto never raises ceilings and requires an interactive invocation or recorded operator
+  delegation.
 - Research precedes a spike.
 - Process exit code is the sole machine approver.
 - Claim state is derived; it is never author-assigned.

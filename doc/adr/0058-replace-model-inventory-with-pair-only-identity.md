@@ -1,7 +1,7 @@
 ---
 number: 58
 title: "Replace model inventory with pair-only identity"
-status: accepted
+status: superseded
 date: 2026-09-24
 tags: [empirica, governance, identity, compatibility]
 links:
@@ -13,6 +13,8 @@ links:
     kind: Refines
   - target: 57
     kind: Refines
+  - target: 60
+    kind: Superseded by
 ---
 
 # Replace model inventory with pair-only identity

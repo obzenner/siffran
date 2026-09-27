@@ -282,7 +282,7 @@
       {
         "predicate": "governance.approved",
         "obligation_id": "obligation.approval",
-        "must": "Obtain exact host-mediated approval for the current graph and configuration."
+        "must": "Obtain exact host-mediated approval for the current run configuration."
       },
       {
         "predicate": "investigation.recorded",
@@ -754,7 +754,7 @@
       }
     },
     "governance.propose": {
-      "description": "Correct graph/configure_run proposal and request host-mediated decision; cannot self-approve.",
+      "description": "Correct the configure_run proposal and request a host-mediated configuration decision; cannot self-approve.",
       "params": {
         "type": "object",
         "additionalProperties": false,
@@ -1304,7 +1304,7 @@
       "sections": [
         "governance"
       ],
-      "message": "Supply a complete graph/configuration proposal, then request host approval with configure_run. No investigation is authorized."
+      "message": "Supply a complete run-configuration proposal, then request host approval with configure_run. No investigation is authorized."
     },
     "governance.revision_required": {
       "params": {
@@ -1319,7 +1319,7 @@
       "sections": [
         "governance"
       ],
-      "message": "Material proposal changed. Request new host approval before continuing, or stop honestly."
+      "message": "Run configuration changed. Request new host approval before continuing, or stop honestly."
     },
     "governance.approval_unavailable": {
       "params": {
@@ -1693,7 +1693,7 @@
         },
         {
           "id": "audit/independence/required",
-          "text": "Concrete normalized host-observed main and reviewer identities must match the approved pair and must differ. Same or unknown equivalence always blocks."
+          "text": "Every covered evidence producer and the verdict-producing reviewer must have a trusted host-observed canonical identity class. Covered producers must resolve to one class, and the reviewer class must differ from it. Mixed or unobservable producers, an unobservable reviewer, and same-class review always block."
         }
       ]
     },
@@ -1888,6 +1888,14 @@
         {
           "id": "protocol/no_internal_fields",
           "text": "There is no public nonce, reservation entity, ticket, phase enum, CAS revision arithmetic, or artifact path in the public contract."
+        },
+        {
+          "id": "protocol/start_refusal",
+          "text": "A refused StartRun is structurally a Block without a run. Reason dispositions classify start refusal and host recovery."
+        },
+        {
+          "id": "protocol/canonical_json",
+          "text": "Persisted JSON digests use one canonical serialization."
         }
       ]
     },
@@ -1915,11 +1923,11 @@
     },
     "governance": {
       "title": "Governed initialization",
-      "summary": "Exact supplied-context scope negotiation before any investigation.",
+      "summary": "Exact run-configuration authorization before any investigation.",
       "clauses": [
         {
           "id": "governance/approval",
-          "text": "StartRun defaults to deliberative. Route, graph/configuration proposals, public reads, and honest stop are available pending approval. Every investigation, evidence, spike, dispatch, child, audit, freeze and convergence admission requires current host-mediated approval. configure_run proposes ceilings and modes; it never changes effective accounting. No public action can approve."
+          "text": "StartRun defaults to deliberative. Route, graph proposals, configuration proposals, public reads, and honest stop are available pending approval. Every investigation, evidence, spike, dispatch, child, audit, freeze and convergence admission requires current host-mediated configuration approval. configure_run proposes ceilings and modes; it never changes effective accounting. No public action can approve."
         },
         {
           "id": "governance/binding",
@@ -1927,7 +1935,7 @@
         },
         {
           "id": "governance/auto",
-          "text": "Explicit auto accepts only configuration within existing budgets and modes. It cannot raise ceilings. Reviewer selection is host configuration and actual host-observed reviewer independence is checked at convergence."
+          "text": "Explicit auto accepts only configuration within existing budgets and modes. It cannot raise ceilings and is admitted only from an interactive invocation or recorded operator delegation. Reviewer configuration is host-owned, and actual host-observed reviewer distinctness from the covered evidence producer is checked at convergence."
         },
         {
           "id": "governance/limits",
@@ -1935,11 +1943,19 @@
         },
         {
           "id": "governance/hosts",
-          "text": "Claude uses negotiated MCP form elicitation; Pi uses hasUI/select/input/confirm. Codex deliberative approval is unavailable. Reviewer selection comes from host configuration and is not part of approval. Hosts observe the actual reviewer identity; availability, authorization and independence still fail closed. Operator hooks/RPC may answer; physical human identity and same-OS-principal isolation are not claimed. input_private remains unverified until native qualification. Incompatible older governance state requires a fresh generation without migration."
+          "text": "Claude uses negotiated MCP form elicitation; Pi uses hasUI/select/input/confirm. Codex deliberative approval is unavailable. Reviewer configuration is host-owned and is not part of approval. Hosts observe the actual reviewer identity; availability, authorization and independence still fail closed. Operator hooks/RPC may answer; physical human identity and same-OS-principal isolation are not claimed. input_private remains unverified until native qualification. Incompatible older governance state requires a fresh generation without migration."
         },
         {
           "id": "governance/human_decisions",
           "text": "Supported hosts submit the chosen human control and displayed configuration through private ingress. One finite core policy resolves it: edits remain pending until exact locked confirmation; conflicting fields never become consent. Final confirmation offers Confirm or Decline, and decline retains edits pending without opening a third dialog."
+        },
+        {
+          "id": "governance/invocation",
+          "text": "StartRun requires a nonblank verbatim goal and trusted invocation provenance naming host, interactive observation, signal, and operator delegation. Auto requires interactive=true or the host profile's delegation_env (currently EMPIRICA_AUTO_DELEGATION) set to 1; unknown or non-interactive provenance without delegation fails closed before a run exists."
+        },
+        {
+          "id": "governance/decision_timeout",
+          "text": "EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS bounds one host approval wait and is displayed read-only. It is a host decision timeout, not an approvable field or a total run deadline; timeout dismisses and grants no authority."
         }
       ]
     }

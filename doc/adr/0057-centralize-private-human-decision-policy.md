@@ -1,7 +1,7 @@
 ---
 number: 57
 title: "Centralize private human decision policy"
-status: accepted
+status: superseded
 date: 2026-09-24
 tags: [empirica, governance, consent, adapters]
 links:
@@ -9,6 +9,8 @@ links:
     kind: Supersedes
   - target: 56
     kind: Refines
+  - target: 60
+    kind: Superseded by
 ---
 
 # Centralize private human decision policy

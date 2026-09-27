@@ -435,13 +435,13 @@ doctor: ## empirica preflight: actors reachable; pass ARGS="--multi-provider" to
 # unchanged. Local edits hot-reload with /reload. Pi asks to trust the folder once.
 CLAUDE ?= claude
 .PHONY: claude-dev
-claude-dev: ## Run interactive Claude with both plugins from THIS checkout; normal user configuration is inherited
+claude-dev: ## Run interactive Claude from this checkout: CLAUDE=/path/to/claude [ARGS="--debug-file ..."]
 	@command -v "$(CLAUDE)" >/dev/null 2>&1 || { printf 'claude-dev: executable not found (set CLAUDE=/path/to/claude)\n' >&2; exit 2; }
 	@$(CLAUDE) --plugin-dir "$(CURDIR)/plugins/empirica" --plugin-dir "$(CURDIR)/plugins/methodologist" $(ARGS)
 
 PI ?= pi
 .PHONY: pi-dev
-pi-dev: ## Run Pi with siffran overridden by THIS checkout (dogfood; other packages unchanged): make pi-dev [ARGS="..."]
+pi-dev: ## Run Pi with this checkout override: PI=/path/to/pi [ARGS="..."] (other packages unchanged)
 	@command -v $(PI) >/dev/null 2>&1 || { printf 'pi-dev: `$(PI)` not found on PATH (set PI=/path/to/pi)\n' >&2; exit 2; }
 	@test -f .pi/settings.json || { printf 'pi-dev: .pi/settings.json is missing (it is committed; restore it)\n' >&2; exit 2; }
 	@printf '$(BOLD)==> dev pi$(RESET) siffran from %s (project override); answer YES if pi asks to trust this folder\n' "$(CURDIR)"
