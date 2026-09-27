@@ -73,6 +73,7 @@
       "resource_class": "audit"
     }
   ],
+  "observation_basis_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
   "committed_artifact_head_id": null,
   "governance": {
     "state": "pending",

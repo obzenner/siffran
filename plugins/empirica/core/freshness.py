@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import hashlib
-import json
-import math
 import re
 from dataclasses import dataclass
 from enum import Enum
 
+from .canonical import CanonicalJSONError, canonical_digest
 
-class FreshnessContractError(ValueError): ...
+
+FreshnessContractError = CanonicalJSONError
 class PathContractError(FreshnessContractError): ...
-class DigestContractError(FreshnessContractError): ...
+DigestContractError = CanonicalJSONError
 class ObservationContractError(FreshnessContractError): ...
 class ExecutionContractError(FreshnessContractError): ...
 
@@ -37,27 +37,6 @@ def validate_digest256(value) -> str:
     if not isinstance(value, str) or not _DIGEST_RE.fullmatch(value):
         raise DigestContractError("digest must be exact lowercase sha256:<64 hex>")
     return value
-
-def _canonical_json(value) -> str:
-    if isinstance(value, float) and not math.isfinite(value):
-        raise DigestContractError("canonical JSON rejects non-finite floats")
-    if value is None or isinstance(value, bool) or isinstance(value, (int, float, str)):
-        return json.dumps(value, ensure_ascii=False)
-    if isinstance(value, dict):
-        keys = list(value.keys())
-        if any(not isinstance(k, str) for k in keys):
-            raise DigestContractError("canonical JSON mapping keys must be strings")
-        return "{" + ",".join(json.dumps(k, ensure_ascii=False) + ":" + _canonical_json(value[k])
-                              for k in sorted(keys)) + "}"
-    if isinstance(value, (list, tuple)):
-        return "[" + ",".join(_canonical_json(v) for v in value) + "]"
-    if isinstance(value, (set, frozenset)):
-        raise DigestContractError("canonical JSON rejects unordered containers")
-    raise DigestContractError(f"canonical JSON rejects unsupported type {type(value).__name__}")
-
-def canonical_digest(value) -> str:
-    """sha256:<64 hex> of the canonical JSON (sorted keys, preserved order, no sets)."""
-    return "sha256:" + hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
 
 def command_digest(command) -> str:
     """sha256:<64 hex> of the exact UTF-8 command bytes (no trimming/normalizing)."""
@@ -99,6 +78,13 @@ class FileObservation:
             validate_digest256(self.sha256)
         elif self.sha256 is not None:
             raise DigestContractError("non-present observation requires null digest")
+
+
+def observations_digest(observations) -> str:
+    """Digest canonical file observations using the core's sole JSON canonicalizer."""
+    return canonical_digest([(item.path, item.state.value, item.sha256)
+                             for item in observations])
+
 
 @dataclass(frozen=True)
 class ActiveSpikeHead:

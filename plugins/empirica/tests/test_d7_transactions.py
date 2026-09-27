@@ -15,15 +15,19 @@ sys.path.insert(0, str(ROOT))
 from adapters.audit import child_event  # noqa: E402
 from adapters.git.artifact_repo import ArtifactCollision  # noqa: E402
 from application import protocol  # noqa: E402
-from application.snapshot import (HistoryCorrupt, graph_from_history, make_artifact,  # noqa: E402
+from application.history_records import MANIFEST_KEYS, MANIFEST_KIND, MANIFEST_VERSION  # noqa: E402
+from application.observation import observation_basis_body  # noqa: E402
+from application.snapshot import (HistoryCorrupt, assemble, graph_from_history, make_artifact,  # noqa: E402
                                   state_digest, traverse_history)
-from application.ports import CapturedFile, HarnessResult, WorkspaceCapture  # noqa: E402
+from application.ports import (CapturedFile, HarnessResult, ObservationSnapshot,  # noqa: E402
+                               WorkspaceCapture)
 from application.run_state import decode_state, encode_state  # noqa: E402
 from application.location import encode_handle, storage_id  # noqa: E402
 from application.transaction import Coordinator  # noqa: E402
 from core.evaluation import (EvaluationSnapshot, artifact, audit_binding, audit_passes,  # noqa: E402
                              evaluate_snapshot, frozen_semantic_digest)
-from core.freshness import FileObservation, ObservationState, canonical_digest  # noqa: E402
+from core.freshness import (FileObservation, ObservationState, canonical_digest,  # noqa: E402
+                            observations_digest)
 from core.projection import project_runview  # noqa: E402
 from core.records import (ABSENT, Artifact, Conflict, Corrupt, Present, Revision,  # noqa: E402
                           RunKey)
@@ -39,6 +43,7 @@ class Runs:
         self.conflicts = 0
         self.cas_calls = 0
         self.conflict_on = set()
+        self.crashes = 0
         self.read_calls = 0
         self.bump_on_read = set()
         self.replace_on_read = {}
@@ -70,6 +75,9 @@ class Runs:
     def compare_and_set(self, key, value, expected):
         self.cas_calls += 1
         current = self.data[key]
+        if self.crashes:
+            self.crashes -= 1
+            raise RuntimeError("injected crash between append and CAS")
         if self.conflicts:
             self.conflicts -= 1
             raise Conflict(key, expected, "injected")
@@ -147,7 +155,15 @@ def activate_investigation(coordinator: Coordinator, run_id: str) -> None:
                             "action": {"kind": "investigate"}}, "investigate")
 
 
+def basis_for(observations=(), basis_id="empty") -> Artifact:
+    snapshot = ObservationSnapshot(
+        tuple(observations), basis_id, observations_digest(observations))
+    return make_artifact(observation_basis_body(
+        (("workspace", snapshot),), protocol.policy_inputs("test")))
+
+
 def initial() -> OperationalState:
+    basis = basis_for()
     return OperationalState(
         protocol="empirica/v2", state_schema="empirica.run/2", goal="g",
         invocation={"host": "test", "interactive": True,
@@ -160,17 +176,29 @@ def initial() -> OperationalState:
         selected_graph_artifact_id=None, frozen_claim_ids=None, frozen_semantic_digest=None,
         route_stamp=None,
         investigation_stamp=None, stamp_seq=0, last_derivation_digest=None, children=(),
-        committed_artifact_head_id=None,
+        observation_basis_digest=basis.artifact_id, committed_artifact_head_id=None,
     )
 
 
+def manifest_for(parent, artifacts, state, *, basis_id="empty",
+                 observation_digest=None) -> Artifact:
+    body = {
+        "kind": MANIFEST_KIND, "version": MANIFEST_VERSION, "parent": parent,
+        "artifact_ids": [item.artifact_id for item in artifacts],
+        "observation_basis_id": basis_id,
+        "observation_digest": observation_digest or canonical_digest(()),
+        "observation_basis_digest": state.observation_basis_digest,
+        "next_state_digest": state_digest(state),
+    }
+    assert set(body) | {"artifact_id"} == MANIFEST_KEYS
+    return make_artifact(body)
+
+
 def chain(state: OperationalState, domain=()):
-    values = [make_artifact(item["body"]) for item in domain]
-    body = {"kind": "transaction_manifest", "version": 1, "parent": None,
-            "artifact_ids": [item.artifact_id for item in values],
-            "observation_basis_id": "empty", "observation_digest": "sha256:" + "0" * 64,
-            "next_state_digest": state_digest(state)}
-    manifest = make_artifact(body)
+    basis = basis_for()
+    state = replace(state, observation_basis_digest=basis.artifact_id)
+    values = [basis, *[make_artifact(item["body"]) for item in domain]]
+    manifest = manifest_for(None, values, state)
     return replace(state, committed_artifact_head_id=manifest.artifact_id), values + [manifest]
 
 
@@ -182,7 +210,8 @@ class D7TransactionTests(unittest.TestCase):
         orphan = make_artifact(artifact("research", {"n": 3})["body"])
         malformed_orphan = Artifact("sha256:" + "f" * 64, "not-json")
         history = traverse_history(state, frozenset([orphan, malformed_orphan, *reversed(values)]))
-        self.assertEqual([item["artifact_id"] for item in history],
+        self.assertEqual([item["artifact_id"] for item in history
+                          if item["kind"] != "observation_basis"],
                          [first["artifact_id"], second["artifact_id"]])
 
     def test_missing_manifest_and_state_witness_mismatch_fail_closed(self):
@@ -193,15 +222,69 @@ class D7TransactionTests(unittest.TestCase):
         with self.assertRaises(HistoryCorrupt):
             traverse_history(changed, values)
 
+    def test_observation_basis_validation_and_non_ascii_path(self):
+        observation = FileObservation(
+            "src/é.py", ObservationState.PRESENT, "sha256:" + "a" * 64)
+        unicode_basis = basis_for((observation,), "unicode")
+        unicode_state = replace(initial(), observation_basis_digest=unicode_basis.artifact_id)
+        unicode_manifest = manifest_for(
+            None, (unicode_basis,), unicode_state, basis_id="unicode",
+            observation_digest=observations_digest((observation,)))
+        unicode_state = replace(
+            unicode_state, committed_artifact_head_id=unicode_manifest.artifact_id)
+        self.assertEqual(
+            traverse_history(unicode_state, (unicode_basis, unicode_manifest))[0]["sources"][0]
+            ["observations"][0]["path"],
+            "src/é.py")
+
+        def one_manifest(basis, *, state_basis=None, include_basis=True):
+            state = replace(initial(), observation_basis_digest=state_basis or basis.artifact_id)
+            included = (basis,) if include_basis else ()
+            manifest = manifest_for(None, included, state, basis_id="case")
+            return replace(state, committed_artifact_head_id=manifest.artifact_id), [*included, manifest]
+
+        base = json.loads(unicode_basis.body)
+
+        def mutate_basis(**changes):
+            return make_artifact({**base, **changes})
+
+        def mutate_source(**changes):
+            return mutate_basis(sources=[{**base["sources"][0], **changes}])
+
+        malformed = mutate_source(
+            observations=[{"path": 1, "state": "bogus", "sha256": None}])
+        malformed_source = mutate_source(name=1)
+        mismatch = mutate_source(digest=canonical_digest(()))
+        cases = {
+            "missing observation basis": one_manifest(unicode_basis, include_basis=False),
+            "malformed observation basis": one_manifest(malformed),
+            "malformed observation basis source": one_manifest(malformed_source),
+            "persisted observation digest mismatch": one_manifest(mismatch),
+            "policy inputs list": one_manifest(mutate_basis(policy_inputs=[])),
+            "policy inputs null": one_manifest(mutate_basis(policy_inputs=None)),
+            "nonempty malformed clock inputs": one_manifest(mutate_basis(clock_inputs=[1])),
+            "boolean observation basis version": one_manifest(mutate_basis(version=True)),
+        }
+        base_state, base_values = chain(initial())
+        basis = base_values[0]
+        prior_manifest = base_values[-1]
+        duplicate_manifest = manifest_for(
+            prior_manifest.artifact_id, (basis,), base_state, basis_id="empty")
+        cases["observation basis deduplication mismatch"] = (
+            replace(base_state, committed_artifact_head_id=duplicate_manifest.artifact_id),
+            [*base_values, duplicate_manifest])
+        other_basis = basis_for((), "other")
+        cases["latest observation basis state witness mismatch"] = one_manifest(
+            basis, state_basis=other_basis.artifact_id)
+        for name, (state, values) in cases.items():
+            with self.subTest(name=name), self.assertRaises(HistoryCorrupt):
+                traverse_history(state, values)
+
     def test_cycle_duplicate_and_wrong_kind_fail_closed(self):
         state = initial()
         item = artifact("research", {"n": 1})
         value = make_artifact(item["body"])
-        duplicate_body = {"kind": "transaction_manifest", "version": 1, "parent": None,
-                          "artifact_ids": [value.artifact_id, value.artifact_id],
-                          "observation_basis_id": "x", "observation_digest": "sha256:" + "0" * 64,
-                          "next_state_digest": state_digest(state)}
-        manifest = make_artifact(duplicate_body)
+        manifest = manifest_for(None, (value, value), state, basis_id="x")
         with self.assertRaises(HistoryCorrupt):
             traverse_history(replace(state, committed_artifact_head_id=manifest.artifact_id),
                              [manifest, value])
@@ -307,7 +390,8 @@ class D7TransactionTests(unittest.TestCase):
         key = next(iter(runs.data))
         state = decode_state(runs.data[key].value)
         history = traverse_history(state, artifacts_repo.values[key].values())
-        self.assertEqual([a["kind"] for a in history], ["graph", "research"])
+        self.assertEqual([a["kind"] for a in history],
+                         ["observation_basis", "graph", "research"])
 
     def test_deduplicated_noop_retries_if_revision_changed(self):
         runs, artifacts_repo = Runs(), Artifacts()
@@ -383,10 +467,8 @@ class D7TransactionTests(unittest.TestCase):
         graph_artifact = make_artifact({"kind": "graph", "graph": bad_graph})
         artifacts_repo.append(key, graph_artifact)
         next_state = replace(state, selected_graph_artifact_id=graph_artifact.artifact_id)
-        manifest = make_artifact({"kind": "transaction_manifest", "version": 1,
-            "parent": state.committed_artifact_head_id, "artifact_ids": [graph_artifact.artifact_id],
-            "observation_basis_id": "test", "observation_digest": "sha256:" + "0" * 64,
-            "next_state_digest": state_digest(next_state)})
+        manifest = manifest_for(state.committed_artifact_head_id, (graph_artifact,), next_state,
+                                basis_id="test")
         artifacts_repo.append(key, manifest)
         committed = replace(next_state, committed_artifact_head_id=manifest.artifact_id)
         runs.data[key] = Present(encode_state(committed), Revision("inconsistent"))
@@ -416,10 +498,8 @@ class D7TransactionTests(unittest.TestCase):
         key = next(iter(runs.data))
         state = decode_state(runs.data[key].value)
         next_state = replace(state, selected_graph_artifact_id=None)
-        manifest = make_artifact({"kind": "transaction_manifest", "version": 1,
-            "parent": state.committed_artifact_head_id, "artifact_ids": [],
-            "observation_basis_id": "test", "observation_digest": "sha256:" + "0" * 64,
-            "next_state_digest": state_digest(next_state)})
+        manifest = manifest_for(state.committed_artifact_head_id, (), next_state,
+                                basis_id="test")
         artifacts_repo.append(key, manifest)
         corrupt = replace(next_state, committed_artifact_head_id=manifest.artifact_id)
         runs.data[key] = Present(encode_state(corrupt), Revision("missing-selection"))
@@ -782,12 +862,8 @@ class D7TransactionTests(unittest.TestCase):
                         "edges": [{"from": "C0", "to": "C0", "type": "SupportedBy"}]}})
                     artifacts_repo.append(key, invalid)
                     next_state = replace(state, selected_graph_artifact_id=invalid.artifact_id)
-                    manifest = make_artifact({"kind": "transaction_manifest", "version": 1,
-                        "parent": state.committed_artifact_head_id,
-                        "artifact_ids": [invalid.artifact_id],
-                        "observation_basis_id": "test",
-                        "observation_digest": "sha256:" + "0" * 64,
-                        "next_state_digest": state_digest(next_state)})
+                    manifest = manifest_for(
+                        state.committed_artifact_head_id, (invalid,), next_state, basis_id="test")
                     artifacts_repo.append(key, manifest)
                     committed = replace(next_state, committed_artifact_head_id=manifest.artifact_id)
                     runs.data[key] = Present(encode_state(committed), Revision("structural"))
@@ -837,15 +913,18 @@ class D7TransactionTests(unittest.TestCase):
                     self.assertNotIn("CANARY_TRUSTED_GOAL", json.dumps(response))
                     self.assertEqual((runs.cas_calls, len(artifacts_repo.values[key])), writes)
 
-    def test_spike_result_conflict_retries_without_rerun_or_post_commit_observation(self):
+    def _run_with_passing_spike(self, *, conflict=False):
         runs, artifacts_repo, workspace, harness = Runs(), Artifacts(), Workspace(), Harness()
-        coordinator = Coordinator(workspace, harness, runs, artifacts_repo, "pi@0.84.1+pi-subagents@0.50.0", {})
-        started = coordinator.handle({"type": "StartRun", "selector": {"project": "p", "session": "s"},
-                                      "goal": "g"}, "start")
+        coordinator = Coordinator(
+            workspace, harness, runs, artifacts_repo, "pi@0.84.1+pi-subagents@0.50.0", {})
+        started = coordinator.handle(
+            {"type": "StartRun", "selector": {"project": "p", "session": "s"},
+             "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
         activate_investigation(coordinator, run_id)
-        graph = {"root": "C0", "claims": [{"id": "C0", "text": "t", "gating": True,
-                                              "kind": "needs-experiment"}], "edges": []}
+        graph = {"root": "C0", "claims": [
+            {"id": "C0", "text": "t", "gating": True, "kind": "needs-experiment"}],
+            "edges": []}
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "graph", "payload": graph}}, "g")
         activate_investigation(coordinator, run_id)
@@ -853,23 +932,147 @@ class D7TransactionTests(unittest.TestCase):
                             "action": {"kind": "research", "claim_id": "C0",
                                        "source_kind": "code", "result": "supports", "payload": {
                                            "source_ref": "test_d7_transactions.py",
-                                           "citation": "Retry fixture."}}}, "r")
+                                           "citation": "Observation basis fixture."}}}, "r")
         workspace.write("src/x.py", b"x")
-        # Request commit is the next CAS; inject the conflict on the following result commit.
-        runs.conflict_on.add(runs.cas_calls + 2)
+        if conflict:
+            runs.conflict_on.add(runs.cas_calls + 2)
         response = coordinator.handle({
             "type": "ObserveAction", "run_id": run_id,
             "action": {"kind": "spike_request", "claim_id": "C0", "command": "test",
                        "dependent_files": ["src/x.py"]}}, "s")
         self.assertEqual(response["result"]["type"], "Allow")
+        return coordinator, runs, artifacts_repo, workspace, harness, run_id, next(iter(runs.data))
+
+    def test_spike_result_conflict_does_not_duplicate_basis(self):
+        coordinator, runs, artifacts_repo, workspace, harness, _, key = \
+            self._run_with_passing_spike(conflict=True)
         self.assertEqual(harness.calls, 1)
-        # Immutable execution capture plus one complete post-plan capture per result attempt;
+        # Immutable execution capture plus one post-plan capture per result attempt;
         # successful projection performs no additional observation.
         self.assertEqual(len(workspace.calls), 3)
-        key = next(iter(runs.data))
-        history = traverse_history(decode_state(runs.data[key].value),
-                                   artifacts_repo.values[key].values())
-        self.assertEqual(sum(a["kind"] == "spike" for a in history), 1)
+        history = traverse_history(
+            decode_state(runs.data[key].value), artifacts_repo.values[key].values())
+        spikes = [item for item in history if item["kind"] == "spike"]
+        self.assertEqual(len(spikes), 1)
+        execution_bases = [item for item in history
+                           if item["kind"] == "observation_basis"
+                           and [source["name"] for source in item["sources"]]
+                           == ["workspace", "spike_execution"]]
+        self.assertEqual(len(execution_bases), 1)
+        latest = json.loads(artifacts_repo.values[key][
+            decode_state(runs.data[key].value).committed_artifact_head_id].body)
+        self.assertEqual(latest["observation_basis_digest"], execution_bases[0]["artifact_id"])
+
+    def test_read_commands_write_nothing(self):
+        coordinator, runs, artifacts_repo, _, _, run_id, key = self._run_with_passing_spike()
+        writes = (runs.cas_calls, artifacts_repo.append_calls,
+                  frozenset(artifacts_repo.values[key]))
+        coordinator.handle({"type": "GetRun", "run_id": run_id}, "read-run")
+        coordinator.handle({"type": "GetArgument", "run_id": run_id}, "read-argument")
+        coordinator.handle({"type": "RestoreRun", "run_id": run_id}, "restore")
+        coordinator.handle({"type": "ResolveRun",
+                            "selector": {"project": "p", "session": "s"}}, "resolve")
+        coordinator.handle({"type": "GetContract", "target": "index"}, "contract")
+        self.assertEqual((runs.cas_calls, artifacts_repo.append_calls,
+                          frozenset(artifacts_repo.values[key])), writes)
+
+    def test_continue_ignores_changed_workspace(self):
+        coordinator, runs, artifacts_repo, workspace, _, run_id, key = \
+            self._run_with_passing_spike()
+        workspace.write("src/x.py", b"changed")
+        writes = (runs.cas_calls, artifacts_repo.append_calls,
+                  frozenset(artifacts_repo.values[key]))
+        coordinator.handle({"type": "EvaluateRun", "run_id": run_id,
+                            "intent": "continue"}, "continue")
+        self.assertEqual((runs.cas_calls, artifacts_repo.append_calls,
+                          frozenset(artifacts_repo.values[key])), writes)
+
+    def test_open_claim_does_not_consult_freshness(self):
+        coordinator, runs, artifacts_repo, workspace, _, run_id, key = \
+            self._run_with_passing_spike()
+        state = decode_state(runs.data[key].value)
+        command = {"type": "EvaluateRun", "run_id": run_id, "intent": "report_convergence"}
+        snapshot = assemble(
+            state, artifacts_repo.values[key].values(), workspace, run_id=run_id,
+            profile_id="pi@0.84.1+pi-subagents@0.50.0", command=command,
+            require_graph=True)
+        open_snapshot = replace(
+            snapshot, history=tuple(item for item in snapshot.history
+                                    if item["kind"] not in {"research", "spike"}))
+        decision = evaluate_snapshot(open_snapshot, command)
+        self.assertEqual(decision.reason_code, "claim.research_missing")
+        self.assertFalse(decision.observations_consulted)
+
+    def test_freshness_consulted_flag_matches_claim_sensitivity(self):
+        coordinator, runs, artifacts_repo, workspace, _, run_id, key = \
+            self._run_with_passing_spike()
+        state = decode_state(runs.data[key].value)
+        snapshot = assemble(
+            state, artifacts_repo.values[key].values(), workspace, run_id=run_id,
+            profile_id="pi@0.84.1+pi-subagents@0.50.0",
+            command={"type": "EvaluateRun", "run_id": run_id, "intent": "continue"},
+            require_graph=True)
+        self.assertFalse(evaluate_snapshot(snapshot, snapshot.command).observations_consulted)
+        report = {"type": "EvaluateRun", "run_id": run_id, "intent": "report_convergence"}
+        self.assertTrue(evaluate_snapshot(snapshot, report).observations_consulted)
+
+    def test_changed_stale_basis_persisted_once(self):
+        coordinator, runs, artifacts_repo, workspace, _, run_id, key = \
+            self._run_with_passing_spike()
+        report = {"type": "EvaluateRun", "run_id": run_id, "intent": "report_convergence"}
+        coordinator.handle(report, "baseline")
+        prior = decode_state(runs.data[key].value).observation_basis_digest
+        workspace.write("src/x.py", b"changed")
+        stale = coordinator.handle(report, "stale")
+        self.assertEqual(stale["result"]["reasons"][0]["code"], "claim.spike_stale")
+        changed = decode_state(runs.data[key].value).observation_basis_digest
+        self.assertNotEqual(changed, prior)
+        basis_ids = {item["artifact_id"] for item in traverse_history(
+            decode_state(runs.data[key].value), artifacts_repo.values[key].values())
+                     if item["kind"] == "observation_basis"}
+        self.assertIn(changed, basis_ids)
+        writes = (runs.cas_calls, artifacts_repo.append_calls, frozenset(basis_ids))
+        coordinator.handle(report, "same-stale")
+        after_ids = {item["artifact_id"] for item in traverse_history(
+            decode_state(runs.data[key].value), artifacts_repo.values[key].values())
+                     if item["kind"] == "observation_basis"}
+        self.assertEqual((runs.cas_calls, artifacts_repo.append_calls, frozenset(after_ids)), writes)
+
+    def test_restored_bytes_reuse_prior_basis(self):
+        coordinator, runs, artifacts_repo, workspace, _, run_id, key = \
+            self._run_with_passing_spike()
+        report = {"type": "EvaluateRun", "run_id": run_id, "intent": "report_convergence"}
+        coordinator.handle(report, "baseline")
+        original = decode_state(runs.data[key].value).observation_basis_digest
+        workspace.write("src/x.py", b"changed")
+        coordinator.handle(report, "stale")
+        workspace.write("src/x.py", b"x")
+        coordinator.handle(report, "reverted")
+        state = decode_state(runs.data[key].value)
+        self.assertEqual(state.observation_basis_digest, original)
+        latest = json.loads(artifacts_repo.values[key][state.committed_artifact_head_id].body)
+        self.assertEqual(latest["observation_basis_digest"], original)
+        self.assertNotIn(original, latest["artifact_ids"])
+
+    def test_crash_between_basis_append_and_cas_reuses_basis(self):
+        coordinator, runs, artifacts_repo, workspace, _, run_id, key = \
+            self._run_with_passing_spike()
+        report = {"type": "EvaluateRun", "run_id": run_id, "intent": "report_convergence"}
+        coordinator.handle(report, "baseline")
+        workspace.write("src/x.py", b"changed")
+        runs.crashes = 1
+        failed = coordinator.handle(report, "crash")
+        self.assertEqual(failed["result"]["type"], "Fault")
+        bases_before_retry = {artifact_id for artifact_id, value
+                              in artifacts_repo.values[key].items()
+                              if json.loads(value.body).get("kind") == "observation_basis"}
+        artifacts_before_retry = set(artifacts_repo.values[key])
+        coordinator.handle(report, "retry")
+        state = decode_state(runs.data[key].value)
+        latest = json.loads(artifacts_repo.values[key][state.committed_artifact_head_id].body)
+        self.assertIn(state.observation_basis_digest, bases_before_retry)
+        self.assertEqual(set(artifacts_repo.values[key]), artifacts_before_retry)
+        self.assertEqual(latest["observation_basis_digest"], state.observation_basis_digest)
 
     def test_inconsistent_persisted_frozen_scope_is_corrupt_not_repairable(self):
         state = replace(initial(), selected_graph_artifact_id="sha256:" + "1" * 64,

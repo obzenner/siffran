@@ -24,6 +24,7 @@ Coverage (D6 spec section 10):
 """
 from __future__ import annotations
 
+import copy
 import json
 import sys
 import unittest
@@ -914,6 +915,17 @@ class D6MinimalServiceTests(unittest.TestCase):
         resp = service.dispatch(_valid_request(
             {"type": "GetRun", "run_id": "r-missing-invocation"}, request_id="r"))
         self.assertEqual(resp, _expected_corrupt_block("r-missing-invocation", "Unsupported run state."))
+        self.assertEqual((runs.create_calls, runs.cas_calls), (0, 0))
+
+    def test_missing_observation_basis_digest_is_current_corrupt(self):
+        missing = copy.deepcopy(_VALID_ACTIVE_STATE)
+        missing.pop("observation_basis_digest")
+        runs = RecordingRunRepository()
+        runs.inject("r-missing-basis", missing)
+        service, runs = self._compose(runs)
+        resp = service.dispatch(_valid_request(
+            {"type": "GetRun", "run_id": "r-missing-basis"}, request_id="r"))
+        self.assertEqual(resp, _expected_corrupt_block("r-missing-basis", "Unsupported run state."))
         self.assertEqual((runs.create_calls, runs.cas_calls), (0, 0))
 
     def test_corrupt_state_restore_run_failure_safe_block(self):

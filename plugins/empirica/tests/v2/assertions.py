@@ -31,6 +31,7 @@ from pathlib import Path
 import jsonschema
 
 from adapters.identity import observe
+from core.canonical import canonical_digest
 from driver import V2SeamAbsent, new_driver
 
 # ---------------------------------------------------------------------------
@@ -136,9 +137,7 @@ class HarnessDefect(Exception):
 
 # Deterministic canonical digest of the PublicContract (D9 computes this at runtime; the static
 # fixtures record the same value, so tests assert the response digest matches the registry digest).
-_CONTRACT_DIGEST = "sha256:" + hashlib.sha256(
-    json.dumps(_PUBLIC_CONTRACT, sort_keys=True, separators=(",", ":")).encode("utf-8")
-).hexdigest()
+_CONTRACT_DIGEST = canonical_digest(_PUBLIC_CONTRACT)
 
 
 def contract_digest() -> str:
@@ -149,9 +148,7 @@ def active_set_digest(active_evidence_ids: list[str]) -> str:
     """Canonical registry digest of the exact ordered ``active_evidence_ids`` JSON array (D2C
     invariant §10). This is the single central helper tests use instead of per-case
     self-comparison: ``claim.evidence_digest`` must equal this value."""
-    canonical = json.dumps(active_evidence_ids, sort_keys=True,
-                           separators=(",", ":")).encode("utf-8")
-    return "sha256:" + hashlib.sha256(canonical).hexdigest()
+    return canonical_digest(active_evidence_ids)
 
 
 def protocol() -> str:
@@ -460,9 +457,7 @@ def canonical_claim_id(*, index: int = 0) -> str:
 def child_event_fingerprint(state: str, native_id: str | None) -> str:
     """Stable canonical digest of child-event facts (state, native_id) so identical calls
     produce identical fingerprints (D2D). Used for identical-replay detection."""
-    facts = json.dumps({"state": state, "native_id": native_id},
-                       sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return "sha256:" + hashlib.sha256(facts).hexdigest()
+    return canonical_digest({"state": state, "native_id": native_id})
 
 
 def build_child_event_payload(state: str, *,

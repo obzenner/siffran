@@ -32,6 +32,7 @@ class OperationalState:
     stamp_seq: int
     last_derivation_digest: str | None
     children: tuple[Mapping[str, Any], ...]
+    observation_basis_digest: str
     committed_artifact_head_id: str | None
 
     def __post_init__(self) -> None:

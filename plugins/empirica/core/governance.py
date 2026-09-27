@@ -5,10 +5,10 @@ in OperationalState.budgets, never in proposal metadata.
 """
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Mapping
 from typing import Any
+
+from .canonical import canonical_digest as _canonical_digest
 
 MAX_INTERACTIONS = 128
 PROPOSAL_INTERACTIONS = 3
@@ -25,9 +25,8 @@ def plain(value: Any) -> Any:
 
 
 def canonical_digest(value: object) -> str:
-    return "sha256:" + hashlib.sha256(json.dumps(
-        plain(value), sort_keys=True, separators=(",", ":"), ensure_ascii=True,
-    ).encode()).hexdigest()
+    """Delegate governance values to the core's sole canonical JSON implementation."""
+    return _canonical_digest(plain(value))
 
 
 def canonical_graph(graph: Mapping[str, Any] | None) -> dict | None:
@@ -44,6 +43,11 @@ def proposal_body(goal: str, graph: Mapping | None, governance: Mapping) -> dict
             "control_mode": governance["control_mode"]}
 
 
+def proposal_digest(goal: str, graph: Mapping | None, governance: Mapping) -> str:
+    """Own the canonical identity formula for one governance proposal."""
+    return canonical_digest(proposal_body(goal, graph, governance))
+
+
 def initial(goal: str, budgets: Mapping, modes: Mapping, control_mode: str = "deliberative") -> dict:
     value = {"state": "pending", "control_mode": control_mode,
              "plan_revision": 0, "approved_digest": None,
@@ -51,7 +55,7 @@ def initial(goal: str, budgets: Mapping, modes: Mapping, control_mode: str = "de
              "proposal": {"budgets": {k: budgets[k] for k in CEILINGS},
                           "modes": dict(modes)},
              "context": {"author": None, "ingress": "unavailable"}}
-    value["proposal_digest"] = canonical_digest(proposal_body(goal, None, value))
+    value["proposal_digest"] = proposal_digest(goal, None, value)
     return value
 
 
@@ -61,7 +65,7 @@ def revise(goal: str, graph: Mapping | None, current: Mapping, *, proposal=None,
         value["proposal"] = plain(proposal)
     if context is not None:
         value["context"] = plain(context)
-    observed = canonical_digest(proposal_body(goal, graph, value))
+    observed = proposal_digest(goal, graph, value)
     if observed == current["proposal_digest"]:
         return value
     value.update(proposal_digest=observed, plan_revision=current["plan_revision"] + 1,

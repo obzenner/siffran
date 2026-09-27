@@ -19,7 +19,6 @@ Validated:
   * in-memory negative cases: one mutation each asserting an expected
     diagnostic substring so a case cannot pass for the wrong rejection reason.
 """
-import hashlib
 import json
 import re
 import sys
@@ -35,6 +34,11 @@ except ImportError:  # Structural gates still validate required wire fields.
     Registry = Resource = DRAFT202012 = None
 
 ROOT = Path(__file__).resolve().parents[1]
+PLUGIN = str(ROOT / "plugins" / "empirica")
+if PLUGIN not in sys.path:
+    sys.path.insert(0, PLUGIN)
+from core.canonical import canonical_digest  # noqa: E402
+
 CONTRACTS = ROOT / "contracts"
 V2 = CONTRACTS / "empirica" / "v2"
 
@@ -50,8 +54,8 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:1e8ae282e796471fe0822cc306dd6d8c0383f2615ea4010f1452d38919d2e0b4"
-REVIEWED_HOST_PROFILES_DIGEST = "sha256:41ef8b89da3f880fb5d256202d9ee5b6e28301b75e52490a41e65d16e09b8caa"
+REVIEWED_REGISTRY_DIGEST = "sha256:cc09fccbb0d4251d8e5f7b5a97cf62831116834b31a9616574057c95d5ed963c"
+REVIEWED_HOST_PROFILES_DIGEST = "sha256:9db99c23cfad683c0c314861279d022fefeed4333e1abb6a44a153eadfe879c2"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
 REGISTRY_VERSION = "3.0.0"
@@ -109,14 +113,14 @@ def check_projected_governance_fixture(expected: dict, errors: list[str], where:
     if added:
         sys.path.insert(0, plugin)
     try:
-        from core.governance import canonical_digest, proposal_body
+        from core.governance import proposal_digest
         from core.projection import review_text
 
         goal, graph = run.get("goal"), governed.get("scope")
         if not isinstance(goal, str):
             errors.append(f"{where}: governance fixture has no string goal")
             return
-        digest = canonical_digest(proposal_body(goal, graph, governed))
+        digest = proposal_digest(goal, graph, governed)
         if governed.get("proposal_digest") != digest:
             errors.append(f"{where}: governance proposal_digest differs from runtime projection")
         projected = review_text(goal, graph, governed, run.get("invocation"))
@@ -130,9 +134,8 @@ def check_projected_governance_fixture(expected: dict, errors: list[str], where:
 
 
 def registry_digest(registry: dict) -> str:
-    """Deterministic canonical SHA-256 of the registry (placeholder; D9 owns runtime digest)."""
-    canonical = json.dumps(registry, sort_keys=True, separators=(",", ":")).encode()
-    return "sha256:" + hashlib.sha256(canonical).hexdigest()
+    """Use the runtime's single canonical JSON identity for every reviewed registry."""
+    return canonical_digest(registry)
 
 
 def materialize_contract_result(registry: dict, target: str, section_id: str | None = None) -> dict:
@@ -1385,6 +1388,7 @@ def _minimal_valid_state() -> dict:
                     "max_spawns": 1, "spawns_used": 0,
                     "max_audit_spawns": 1, "audit_spawns_used": 0},
         "selected_graph_artifact_id": None,
+        "observation_basis_digest": "sha256:" + "f" * 64,
         "committed_artifact_head_id": None,
         "frozen_claim_ids": None,
         "frozen_semantic_digest": None,

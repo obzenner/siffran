@@ -24,7 +24,8 @@ import posixpath
 from typing import Any, Protocol
 
 from application.ports import CapturedFile, HarnessResult, WorkspaceCapture
-from core.freshness import FileObservation, ObservationState, canonical_digest
+from core.freshness import (FileObservation, ObservationState, canonical_digest,
+                            observations_digest)
 
 import sut_adapter  # the only composition bridge; no load-time cycle (sut_adapter late-imports this)
 
@@ -176,7 +177,7 @@ class FakeWorkspace:
             observation = FileObservation(row["path"], ObservationState(row["state"]), sha)
             files.append(CapturedFile(observation, self._files.get(row["path"])
                                       if row["state"] == "present" else None))
-        basis = canonical_digest([(r["path"], r["state"], r["sha256"]) for r in out])
+        basis = observations_digest(tuple(item.observation for item in files))
         return WorkspaceCapture(basis, tuple(files))
 
     def observe_history(self) -> tuple[tuple[tuple[str, ...], tuple[dict, ...]], ...]:

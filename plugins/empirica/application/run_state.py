@@ -43,7 +43,8 @@ def decode_state(doc: dict[str, Any]) -> OperationalState:
         frozen_semantic_digest=doc["frozen_semantic_digest"],
         route_stamp=doc["route_stamp"], investigation_stamp=doc["investigation_stamp"],
         stamp_seq=doc["stamp_seq"], last_derivation_digest=doc["last_derivation_digest"],
-        children=tuple(doc["children"]), committed_artifact_head_id=doc["committed_artifact_head_id"],
+        children=tuple(doc["children"]), observation_basis_digest=doc["observation_basis_digest"],
+        committed_artifact_head_id=doc["committed_artifact_head_id"],
     )
 
 
@@ -59,6 +60,7 @@ def encode_state(state: OperationalState) -> dict[str, Any]:
         "route_stamp": state.route_stamp, "investigation_stamp": state.investigation_stamp,
         "stamp_seq": state.stamp_seq, "last_derivation_digest": state.last_derivation_digest,
         "children": _thaw(state.children),
+        "observation_basis_digest": state.observation_basis_digest,
         "committed_artifact_head_id": state.committed_artifact_head_id,
     }
 

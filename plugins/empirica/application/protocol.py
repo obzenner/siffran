@@ -5,12 +5,14 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 from pathlib import Path
 
 import jsonschema
 from referencing import Registry, Resource
+
+from core.canonical import canonical_digest
+from .history_records import POLICY_INPUT_KEYS
 
 # Sole internal loader and canonical PublicContract digest.
 
@@ -55,9 +57,20 @@ if (tuple(_decisions["actions"]) != ("approve", "edit", "reject")
 _GOVERNANCE_DECISIONS = tuple((name, copy.deepcopy(row))
                               for name, row in _decisions["actions"].items())
 _GOVERNANCE_CONTROLS = copy.deepcopy(_decisions)
-_DIGEST = "sha256:" + hashlib.sha256(
-    json.dumps(_PUBLIC_CONTRACT, sort_keys=True, separators=(",", ":")).encode(),
-).hexdigest()
+_DIGEST = canonical_digest(_PUBLIC_CONTRACT)
+
+
+def policy_inputs(profile_id: str) -> dict[str, str]:
+    """Return the canonical policy identity persisted with each observation basis."""
+    inputs = {
+        "contract_id": _PUBLIC_CONTRACT["id"],
+        "contract_version": _PUBLIC_CONTRACT["version"],
+        "contract_digest": _DIGEST,
+        "profile_id": profile_id,
+    }
+    assert set(inputs) == POLICY_INPUT_KEYS
+    return inputs
+
 
 def _safe_request_id(raw) -> str:
     """Use the supplied valid nonempty request ID when safe; otherwise ``invalid-request``."""

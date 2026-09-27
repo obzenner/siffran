@@ -6,7 +6,11 @@ import hashlib
 
 from core.freshness import (
     FileBinding, FileObservation, ObservationState, PathContractError, canonical_digest,
-    execution_facts, required_paths, validate_relative_posix_path,
+    execution_facts, observations_digest, required_paths, validate_relative_posix_path,
+)
+from .history_records import (
+    OBSERVATION_BASIS_KEYS, OBSERVATION_BASIS_KIND, OBSERVATION_BASIS_VERSION,
+    OBSERVATION_ROW_KEYS, OBSERVATION_SOURCE_KEYS,
 )
 from .ports import (
     CapturedFile, ExecutionSnapshot, HarnessResult, ObservationSnapshot, WorkspaceCapture,
@@ -66,12 +70,43 @@ def _validate_dependent_paths(dependent_paths) -> tuple[str, ...]:
 def build_observation_snapshot(active_heads, workspace):
     rpaths = required_paths(active_heads)
     if not rpaths:
-        return ObservationSnapshot((), _EMPTY_BASIS, canonical_digest(()))
+        return ObservationSnapshot((), _EMPTY_BASIS, observations_digest(()))
     capture = _capture(rpaths, workspace)
     files = _validate_capture(capture, rpaths)
     observations = tuple(cf.observation for cf in files)
-    digest = canonical_digest([(o.path, o.state.value, o.sha256) for o in observations])
+    digest = observations_digest(observations)
     return ObservationSnapshot(observations, capture.basis_id, digest)
+
+
+def _serialized_source(name, source: ObservationSnapshot):
+    if not isinstance(source, ObservationSnapshot):
+        raise TypeError("observation basis sources must be ObservationSnapshot values")
+    observations = [
+        {"path": item.path, "state": item.state.value, "sha256": item.sha256}
+        for item in source.observations
+    ]
+    assert all(set(row) == OBSERVATION_ROW_KEYS for row in observations)
+    body = {
+        "name": name,
+        "basis_id": source.basis_id,
+        "digest": source.digest,
+        "observations": observations,
+    }
+    assert set(body) == OBSERVATION_SOURCE_KEYS
+    return body
+
+
+def observation_basis_body(sources, policy_inputs, clock_inputs=()):
+    """Serialize exact observation and policy inputs consumed by one transaction."""
+    body = {
+        "kind": OBSERVATION_BASIS_KIND,
+        "version": OBSERVATION_BASIS_VERSION,
+        "sources": [_serialized_source(name, source) for name, source in sources],
+        "policy_inputs": dict(policy_inputs),
+        "clock_inputs": list(clock_inputs),
+    }
+    assert set(body) | {"artifact_id"} == OBSERVATION_BASIS_KEYS
+    return body
 
 
 def build_execution_snapshot(dependent_paths, workspace):
@@ -103,8 +138,7 @@ def execute_spike_bound(command, dependent_paths, workspace, harness):
         canonical_digest([(b.path, b.sha256) for b in bindings]))
     observations = tuple(cf.observation for cf in files)
     observation = ObservationSnapshot(
-        observations, capture.basis_id,
-        canonical_digest([(o.path, o.state.value, o.sha256) for o in observations]))
+        observations, capture.basis_id, observations_digest(observations))
     try:
         result = harness.run(command, execution)
     except Exception as exc:

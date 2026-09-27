@@ -21,6 +21,7 @@
     "stamp_seq",
     "last_derivation_digest",
     "children",
+    "observation_basis_digest",
     "committed_artifact_head_id",
     "governance"
   ],
@@ -161,6 +162,10 @@
       "items": {
         "$ref": "#/$defs/childRecord"
       }
+    },
+    "observation_basis_digest": {
+      "$ref": "#/$defs/digest256",
+      "description": "Content digest of the observation-basis event referenced by the latest committed transaction manifest."
     },
     "committed_artifact_head_id": {
       "$ref": "#/$defs/nullableDigest256"

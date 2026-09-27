@@ -7,19 +7,22 @@ from typing import Any
 
 from core.context_selector import select_sections
 from core import governance
-from core.evaluation import (SPAWN_BUDGET, Decision, EvaluationSnapshot, audit_binding,
+from core.evaluation import (READ_COMMANDS, SPAWN_BUDGET, Decision, EvaluationSnapshot,
+                             audit_binding,
                              audit_operation_current, digest,
                              evaluate_snapshot, frozen_scope_invalid, plan_spike_request,
                              plan_spike_result, valid_attribution)
-from core.freshness import canonical_digest
 from core.projection import project_argument, project_runview
 from core.records import Conflict, Corrupt, RunKey
 from core.run import OperationalState
 from . import protocol as _proto
 from . import run_state
+from .history_records import MANIFEST_KEYS, MANIFEST_KIND, MANIFEST_VERSION
 from .location import decode_handle, encode_handle, storage_id
 from .observation import (HarnessContractError, HarnessUnavailable, ObservationUnavailable,
-                          build_observation_snapshot, execute_spike_bound)
+                          build_observation_snapshot, execute_spike_bound,
+                          observation_basis_body)
+from .ports import ObservationSnapshot
 from .snapshot import (GraphInvalid, HistoryCorrupt, active_spike_heads as captured_heads,
                        assemble, graph_from_history, make_artifact, state_digest, traverse_history,
                        validate_investigation_history)
@@ -31,6 +34,10 @@ def _plain(value: Any) -> Any:
     if isinstance(value, (tuple, list)):
         return [_plain(item) for item in value]
     return value
+
+
+def _history_item(item: dict[str, Any]) -> dict[str, Any]:
+    return {"artifact_id": item["artifact_id"], **item["body"]}
 
 
 class Coordinator:
@@ -67,7 +74,7 @@ class Coordinator:
         generations = self._generations(project, session)
         return RunKey(project, session, generations[-1]) if generations else None
 
-    def _initial_state(self, command: dict[str, Any]) -> OperationalState:
+    def _initial_state(self, command: dict[str, Any], observation_basis_digest: str) -> OperationalState:
         modes = {"multi_provider": False, "cli_exec": False}
         modes.update({k: v for k, v in self.limits.get("modes", {}).items() if k in modes})
         modes.update(command.get("modes", {}))
@@ -88,7 +95,8 @@ class Coordinator:
             selected_graph_artifact_id=None, frozen_claim_ids=None, frozen_semantic_digest=None,
             route_stamp=None,
             investigation_stamp=None, stamp_seq=0, last_derivation_digest=None,
-            children=(), committed_artifact_head_id=None,
+            children=(), observation_basis_digest=observation_basis_digest,
+            committed_artifact_head_id=None,
         )
 
     def _append_once(self, key: RunKey, value: Any) -> None:
@@ -101,19 +109,30 @@ class Coordinator:
         for item in domain:
             self._append_once(key, make_artifact(item["body"]))
         body = {
-            "kind": "transaction_manifest", "version": 1, "parent": parent,
+            "kind": MANIFEST_KIND, "version": MANIFEST_VERSION, "parent": parent,
             "artifact_ids": [item["artifact_id"] for item in domain],
             "observation_basis_id": basis, "observation_digest": observation_digest,
+            "observation_basis_digest": state.observation_basis_digest,
             "next_state_digest": state_digest(state),
         }
+        assert set(body) | {"artifact_id"} == MANIFEST_KEYS
         manifest = make_artifact(body)
         self._append_once(key, manifest)
         return manifest
+
+    def _observation_basis_artifact(self, workspace_observation: ObservationSnapshot,
+                                    additional=()):
+        sources = (("workspace", workspace_observation), *additional)
+        body = observation_basis_body(sources, _proto.policy_inputs(self.profile_id))
+        return {"artifact_id": digest(body), "body": body}
 
     def start(self, command: dict[str, Any], request_id: str) -> dict[str, Any]:
         if self.artifacts is None:
             return self._fault(request_id, "unsupported")
         selector = command["selector"]
+        empty = build_observation_snapshot((), self.workspace)
+        basis_artifact = self._observation_basis_artifact(empty)
+        state = self._initial_state(command, basis_artifact["artifact_id"])
         rejected = ("run.goal_required" if not isinstance(command.get("goal"), str)
                     or not command["goal"].strip() else None)
         invocation = command.get("invocation", {})
@@ -123,7 +142,7 @@ class Coordinator:
             rejected = "governance.auto_invocation_required"
         if rejected:
             key = RunKey(storage_id(selector["project"]), storage_id(selector["session"]), 1)
-            return self._block_from_state(key, self._initial_state(command), command, request_id, rejected)
+            return self._block_from_state(key, state, command, request_id, rejected)
         latest = self._latest_key(selector)
         if latest is not None:
             current = self.runs.read(latest)
@@ -137,9 +156,8 @@ class Coordinator:
             key = RunKey(latest.project_id, latest.run_id, latest.generation + 1)
         else:
             key = RunKey(storage_id(selector["project"]), storage_id(selector["session"]), 1)
-        state = self._initial_state(command)
-        empty = canonical_digest(())
-        manifest = self._manifest(key, state, None, (), empty, empty)
+        manifest = self._manifest(
+            key, state, None, (basis_artifact,), empty.basis_id, empty.digest)
         state = replace(state, committed_artifact_head_id=manifest.artifact_id)
         try:
             self.runs.create(key, run_state.encode_state(state))
@@ -227,10 +245,9 @@ class Coordinator:
             except Exception:
                 return self._fault(request_id, "unavailable")
             if decision.result_type in {"Inert", "Fault"} or (
-                    decision.result_type == "Block" and decision.intent.state == state
-                    and not decision.intent.artifacts) or (
-                    decision.result_type == "Allow" and decision.intent.state == state
-                    and not decision.intent.artifacts):
+                    decision.intent.state == state and not decision.intent.artifacts
+                    and (command["type"] in READ_COMMANDS
+                         or not decision.observations_consulted)):
                 if not self._revision_unchanged(key, read.revision):
                     continue
                 self.last_state = state
@@ -513,7 +530,7 @@ class Coordinator:
         else:
             return self._fault(request_id, "conflict")
         try:
-            facts, _execution, _execution_observation = execute_spike_bound(
+            facts, _execution, execution_observation = execute_spike_bound(
                 action["command"], tuple(sorted(action["dependent_files"])),
                 self.workspace, self.harness)
         except (ObservationUnavailable, HarnessUnavailable, HarnessContractError, ValueError):
@@ -544,7 +561,8 @@ class Coordinator:
             result_art = decision.intent.artifacts[0]
             try:
                 state, _, _, committed = self._commit(
-                    key, read.revision, snapshot, state, (result_art,))
+                    key, read.revision, snapshot, state, (result_art,),
+                    additional_observations=(("spike_execution", execution_observation),))
                 self.last_state = state
                 return self._allow(request_id, committed)
             except Exception as exc:
@@ -563,8 +581,7 @@ class Coordinator:
 
     def _post_plan(self, snapshot: EvaluationSnapshot, state: OperationalState,
                    domain: tuple[dict[str, Any], ...]) -> EvaluationSnapshot:
-        history = tuple(snapshot.history) + tuple({"artifact_id": item["artifact_id"], **item["body"]}
-                                                  for item in domain)
+        history = tuple(snapshot.history) + tuple(_history_item(item) for item in domain)
         graph = graph_from_history(
             state, history, required=state.selected_graph_artifact_id is not None)
         before_heads = captured_heads(tuple(snapshot.history), snapshot.graph)
@@ -584,18 +601,34 @@ class Coordinator:
                         profile_id=self.profile_id, command=command, require_graph=require_graph)
 
     def _commit(self, key: RunKey, revision: Any, snapshot: EvaluationSnapshot,
-                next_state: OperationalState, domain: tuple[dict[str, Any], ...]):
+                next_state: OperationalState, domain: tuple[dict[str, Any], ...],
+                additional_observations=()):
         reachable = {item["artifact_id"] for item in snapshot.history}
         unique: dict[str, dict[str, Any]] = {}
         for item in domain:
             if item["artifact_id"] not in reachable:
                 unique.setdefault(item["artifact_id"], item)
         effective = tuple(unique.values())
-        if not effective and next_state == snapshot.state:
+        workspace_observation = ObservationSnapshot(
+            snapshot.observations, snapshot.observation_basis_id, snapshot.observation_digest)
+        basis_artifact = self._observation_basis_artifact(
+            workspace_observation, additional_observations)
+        basis_changed = basis_artifact["artifact_id"] != snapshot.state.observation_basis_digest
+        basis_new = basis_artifact["artifact_id"] not in reachable
+        if not effective and next_state == snapshot.state and not basis_changed:
             if not self._revision_unchanged(key, revision):
                 raise Conflict(key, revision, "deduplicated no-op lost its read revision")
             return snapshot.state, revision, (), snapshot
+        # Every committed write records the pre-plan workspace capture over active spike heads that
+        # the snapshot evaluated against, plus any sealed spike-execution capture. The manifest's
+        # observation_digest is post-plan so newly admitted spikes project as immediately current.
         planned = self._post_plan(snapshot, next_state, effective)
+        next_state = replace(next_state, observation_basis_digest=basis_artifact["artifact_id"])
+        history = planned.history
+        if basis_changed and basis_new:
+            effective = (*effective, basis_artifact)
+            history = (*history, _history_item(basis_artifact))
+        planned = replace(planned, history=history, state=next_state)
         manifest = self._manifest(
             key, next_state, snapshot.state.committed_artifact_head_id, effective,
             planned.observation_basis_id, planned.observation_digest)

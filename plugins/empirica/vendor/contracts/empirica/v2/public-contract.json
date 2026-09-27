@@ -1595,6 +1595,14 @@
         {
           "id": "evidence/freshness/regate",
           "text": "Re-gate runs only stale active spike heads with their current active research prerequisites and appends a superseding attestation."
+        },
+        {
+          "id": "evidence/freshness/decision_basis",
+          "text": "Every committed transaction links to a content-addressed observation-basis event containing the exact pre-plan workspace capture over active spike heads that the snapshot evaluated against, any sealed spike-execution capture, and the contract identity, contract digest, and host profile policy inputs. A manifest observation_digest separately describes the post-plan observation used to project newly admitted spike evidence immediately; it is not the decision basis. An unchanged basis reuses the prior event digest. On a state-and-artifact no-op, a changed basis is appended only when pure evaluation reports that freshness observations affected evaluation; continue and read-only commands never append a basis event or manifest."
+        },
+        {
+          "id": "evidence/freshness/auditable_not_replay",
+          "text": "A persisted observation basis makes a committed decision auditable, not fully replayable. Operational state and the public contract identity/digest used by the decision are persisted, as are identity-policy versions inside applicable identity observations; implementation/derivation policy versions are not comprehensively persisted. No application clock currently contributes to a decision, so clock_inputs is persisted as empty; future decision-affecting clock values must be recorded there before use. Full replay additionally requires all state, policy implementations and versions, and clock semantics to remain reconstructible."
         }
       ]
     },
@@ -1832,7 +1840,7 @@
         },
         {
           "id": "protocol/no_migration",
-          "text": "Rejected persisted data is never decoded, migrated, adjudicated, or repaired and contributes no public fields."
+          "text": "Rejected persisted data is never decoded, migrated, adjudicated, or repaired and contributes no public fields. Transaction manifest version 2 and its observation-basis link are required; pre-M5 version 1 manifests are not accepted because current state has no migration path and no current writer emits them."
         },
         {
           "id": "protocol/no_internal_fields",

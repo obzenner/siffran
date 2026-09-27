@@ -1,20 +1,21 @@
 """Pure command evaluation over immutable Empirica snapshots."""
 from __future__ import annotations
 
-import hashlib
-import json
 from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from functools import partial
 from types import MappingProxyType
 from typing import Any
 
+from .canonical import canonical_digest
 from .freshness import ActiveSpikeHead, FileBinding, evaluate_freshness
 from .run import OperationalState
 from . import governance
 
 SPAWN_BUDGET = {"investigation": ("max_spawns", "spawns_used", "spawn"),
                 "audit": ("max_audit_spawns", "audit_spawns_used", "audit_spawn")}
+READ_COMMANDS = frozenset({"GetRun", "GetArgument", "RestoreRun"})
 
 
 def _plain(value: Any) -> Any:
@@ -34,8 +35,7 @@ def _freeze(value: Any) -> Any:
 
 
 def digest(value: Any) -> str:
-    raw = json.dumps(_plain(value), sort_keys=True, separators=(",", ":")).encode()
-    return "sha256:" + hashlib.sha256(raw).hexdigest()
+    return canonical_digest(_plain(value))
 
 
 def artifact(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -95,6 +95,7 @@ class Decision:
     reason_code: str | None = None
     parameters: tuple[tuple[str, Any], ...] = ()
     affected_obligation_id: str | None = None
+    observations_consulted: bool = False
 
 
 def valid_graph(value: Any) -> bool:
@@ -201,6 +202,22 @@ def active_spike_heads(snapshot: EvaluationSnapshot) -> tuple[ActiveSpikeHead, .
     return tuple(heads)
 
 
+def _freshness_sensitive(snapshot: EvaluationSnapshot, claim: Mapping[str, Any]) -> bool:
+    """Whether this claim's current state depends on workspace freshness."""
+    if claim["kind"] != "needs-experiment":
+        return False
+    evidence = active_evidence(snapshot, claim)
+    outcomes = {item["outcome"] for item in evidence if item["kind"] == "research"}
+    spikes = [item for item in evidence if item["kind"] == "spike"]
+    return outcomes == {"supporting"} and bool(spikes and spikes[-1]["outcome"] == "pass")
+
+
+def claim_freshness_relevant(snapshot: EvaluationSnapshot) -> bool:
+    """Whether deriving current claim state must consult workspace observations."""
+    return snapshot.graph is not None and any(
+        _freshness_sensitive(snapshot, claim) for claim in snapshot.graph["claims"])
+
+
 def stale_artifact_ids(snapshot: EvaluationSnapshot) -> set[str]:
     if not snapshot.observations:
         return set()
@@ -227,9 +244,9 @@ def local_claim_state(snapshot: EvaluationSnapshot, claim: dict[str, Any],
     refuting = any(a["outcome"] == "refuting" for a in research)
     spikes = [a for a in evidence if a["kind"] == "spike"]
     spike_failed = bool(spikes and spikes[-1]["outcome"] == "fail")
-    spike_ok = bool(spikes and spikes[-1]["outcome"] == "pass"
-                    and spikes[-1]["artifact_id"] not in (
-                        stale_artifact_ids(snapshot) if stale is None else stale))
+    sensitive = _freshness_sensitive(snapshot, claim)
+    spike_ok = bool(sensitive and spikes[-1]["artifact_id"] not in (
+        stale_artifact_ids(snapshot) if stale is None else stale))
     if supporting and refuting and not spike_failed:
         return "open"
     if spike_failed or refuting:
@@ -276,19 +293,17 @@ def claim_blockers(snapshot: EvaluationSnapshot,
             reason = "evidence.conflict"
         elif (any(item["outcome"] == "supporting" for item in research)
               and claim["kind"] == "needs-experiment"):
-            if freshness_index is None:
-                freshness = evaluate_freshness(
-                    active_spike_heads(snapshot), snapshot.observations)
+            sensitive = _freshness_sensitive(snapshot, claim)
+            if sensitive and freshness_index is None:
+                freshness = evaluate_freshness(active_spike_heads(snapshot), snapshot.observations)
                 stale_heads = {head.artifact_id: head for head in freshness.stale_heads}
                 freshness_index = (set(stale_heads), stale_heads)
-            stale, stale_heads = freshness_index
-            if spikes and spikes[-1]["artifact_id"] in stale:
-                stale_head = stale_heads[spikes[-1]["artifact_id"]]
+            stale_head = (freshness_index[1].get(spikes[-1]["artifact_id"])
+                          if sensitive and freshness_index is not None else None)
+            if stale_head is not None:
                 parameters = {"changes": [{"path": change.path, "state": change.state.value}
                                            for change in stale_head.changes]}
-                reason = "claim.spike_stale"
-            else:
-                reason = "claim.spike_missing"
+            reason = "claim.spike_stale" if stale_head is not None else "claim.spike_missing"
         else:
             historical_research = any(
                 item.get("kind") == "research" and item.get("claim_id") == target_id
@@ -300,7 +315,8 @@ def claim_blockers(snapshot: EvaluationSnapshot,
     return tuple(blockers)
 
 
-def derive_claims(snapshot: EvaluationSnapshot) -> ClaimDerivation:
+def derive_claims(snapshot: EvaluationSnapshot,
+                  stale: set[str] | None = None) -> ClaimDerivation:
     if snapshot.graph is None:
         return ClaimDerivation(MappingProxyType({}), MappingProxyType({}), ())
     claims = snapshot.graph["claims"]
@@ -320,7 +336,9 @@ def derive_claims(snapshot: EvaluationSnapshot) -> ClaimDerivation:
             indegree[child] -= 1
             if indegree[child] == 0:
                 ready.append(child)
-    stale = stale_artifact_ids(snapshot)
+    if stale is None:
+        # Avoid freshness work when no claim state can depend on it.
+        stale = (stale_artifact_ids(snapshot) if claim_freshness_relevant(snapshot) else set())
     local = {claim["id"]: local_claim_state(snapshot, claim, stale) for claim in claims}
     scoped = effective_scope_ids(snapshot)
     scope = set(scoped)
@@ -396,8 +414,9 @@ def bootstrap_status(snapshot: EvaluationSnapshot) -> dict[str, Any]:
             "request_ready": request_ready, "display_ready": display_ready}
 
 
-def _decision(snapshot: EvaluationSnapshot, state: OperationalState, result: str = "Allow", artifacts: tuple[dict[str, Any], ...] = (), reason: str | None = None, parameters: dict[str, Any] | None = None, affected: str | None = None) -> Decision:
-    return Decision(result, StateIntent(state, artifacts), reason, tuple((parameters or {}).items()), affected)
+def _decision(snapshot: EvaluationSnapshot, state: OperationalState, result: str = "Allow", artifacts: tuple[dict[str, Any], ...] = (), reason: str | None = None, parameters: dict[str, Any] | None = None, affected: str | None = None, *, observations_consulted: bool = False) -> Decision:
+    return Decision(result, StateIntent(state, artifacts), reason, tuple((parameters or {}).items()),
+                    affected, observations_consulted)
 
 
 def _investigation_block(snapshot: EvaluationSnapshot) -> Decision | None:
@@ -592,16 +611,16 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
     if frozen_scope_invalid(state, snapshot.graph):
         return _decision(snapshot, state, "Block", reason="graph.invalid")
     if state.status != "active":
-        if kind in {"GetRun", "GetArgument", "RestoreRun"} or (
+        if kind in READ_COMMANDS or (
                 kind == "EvaluateRun" and command["intent"] in {"stop", "report_convergence"}):
             return _decision(snapshot, state)
         return _decision(snapshot, state, "Inert")
 
-    if kind in {"GetRun", "RestoreRun"}:
-        return _decision(snapshot, state)
     if kind == "GetArgument":
         return (_decision(snapshot, state) if snapshot.graph is not None
                 else _decision(snapshot, state, "Block", reason="graph.invalid"))
+    if kind in READ_COMMANDS:
+        return _decision(snapshot, state)
 
     if kind == "EvaluateRun" and command["intent"] == "stop" and snapshot.graph is None:
         return _decision(snapshot, replace(state, status="stopped_residual"))
@@ -740,24 +759,28 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
         intent = command["intent"]
         if intent == "continue":
             return _decision(snapshot, state)
-        derivation = derive_claims(snapshot)
+        if intent == "report_convergence":
+            blocked = _investigation_block(snapshot)
+            if blocked is not None:
+                return blocked
+        observations_consulted = claim_freshness_relevant(snapshot)
+        decide = partial(_decision, snapshot, observations_consulted=observations_consulted)
+        stale = stale_artifact_ids(snapshot) if observations_consulted else set()
+        derivation = derive_claims(snapshot, stale)
         states = [(c, derivation.states[c["id"]]) for c in snapshot.graph["claims"]]
         gating = set(derivation.scope)
         if intent == "stop":
             if state.budgets["passes_used"] >= state.budgets["max_passes"]:
-                return _decision(snapshot, replace(state, status="stopped_budget"))
+                return decide(replace(state, status="stopped_budget"))
             deferred = [c for c, _ in states if c["id"] not in gating]
             status = "stopped_frozen" if deferred else "stopped_residual"
-            return _decision(snapshot, replace(state, status=status))
-        blocked = _investigation_block(snapshot)
-        if blocked is not None:
-            return blocked
+            return decide(replace(state, status=status))
         blockers = claim_blockers(snapshot, derivation)
         if blockers:
             blocker = blockers[0]
-            return _decision(snapshot, state, "Block", reason=blocker["reason"],
-                             parameters=blocker["parameters"],
-                             affected="claim:" + blocker["target_claim_id"])
+            return decide(state, "Block", reason=blocker["reason"],
+                          parameters=blocker["parameters"],
+                          affected="claim:" + blocker["target_claim_id"])
         derivation_digest = digest({"graph": snapshot.graph,
                                     "claims": [(c["id"], derivation.states[c["id"]],
                                                 [a["artifact_id"] for a in active_evidence(snapshot, c)])
@@ -765,18 +788,18 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                                     "frozen": state.frozen_claim_ids})
         blocker = post_claim_blocker(snapshot, derivation, derivation_digest)
         if blocker and blocker["reason"] == "budget.exhausted":
-            return _decision(snapshot, state, "Block", reason=blocker["reason"],
-                             parameters=blocker["parameters"])
+            return decide(state, "Block", reason=blocker["reason"],
+                          parameters=blocker["parameters"])
         if derivation_digest != state.last_derivation_digest:
             budgets = dict(state.budgets)
             budgets["passes_used"] += 1
             state = replace(state, budgets=budgets, last_derivation_digest=derivation_digest)
         if blocker:
-            return _decision(snapshot, state, "Block", reason=blocker["reason"],
-                             parameters=blocker["parameters"])
+            return decide(state, "Block", reason=blocker["reason"],
+                          parameters=blocker["parameters"])
         deferred = [c for c, _ in states if c["id"] not in gating]
         if deferred:
-            return _decision(snapshot, replace(state, status="stopped_frozen"))
-        return _decision(snapshot, replace(state, status="converged"))
+            return decide(replace(state, status="stopped_frozen"))
+        return decide(replace(state, status="converged"))
 
     return _decision(snapshot, state, "Fault", reason="unsupported")
