@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Empirica 2.0 architecture target-state validator (D3).
+"""Empirica 4.0 architecture target-state validator (D3).
 
 A dependency-free static guard that makes the v2 ownership/subtraction rules machine-checkable.
 It detects architecture drift *without* becoming a runtime framework or freezing incidental file
@@ -7,7 +7,7 @@ layout. The validator is structural: it parses AST import edges and scans scoped
 literals. It owns no domain reason tables; the accepted D2 PublicContract/host-profiles registry is
 loaded only to assert the configured required identity references resolve.
 
-ADR 0053 composes this target into ``check-static``. Line count is not an architecture rule (the
+ADR 0060 composes this target into ``check-static``. Line count is not an architecture rule (the
 former effective-runtime ceiling is removed); forbidden authority patterns and dependency
 violations fail closed.
 
@@ -1402,7 +1402,7 @@ def run_self_test() -> int:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Empirica 2.0 architecture target-state validator.")
+    parser = argparse.ArgumentParser(description="Empirica 4.0 architecture target-state validator.")
     parser.add_argument("--config", default="plugins/empirica/architecture.json",
                         help="path to architecture.json (default: plugins/empirica/architecture.json)")
     parser.add_argument("--root", default=".",

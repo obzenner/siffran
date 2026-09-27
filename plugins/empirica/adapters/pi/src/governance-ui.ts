@@ -29,17 +29,6 @@ const DECISION_CHOICES = Object.values(DECISIONS.controls.actions);
 const actionFor = (label: string) => Object.entries(DECISIONS.controls.actions).find(([, value]) => value === label)?.[0];
 const MODE_CHOICES = ["Enabled", "Disabled"];
 
-// Backslash is escaped so an actual ESC and the literal text "\x1b" stay distinguishable.
-const HIDDEN = /[\\\u0000-\u001f\u007f-\u009f\u00ad\u061c\u200b-\u200f\u2028-\u202e\u2060\u2066-\u2069\ufeff]/gu;
-
-export function safeGovernanceText(value: unknown): string {
-  return String(value).replace(HIDDEN, ch => {
-    if (ch === "\\") return "\\\\";
-    const code = ch.codePointAt(0)!;
-    return code <= 255 ? `\\x${code.toString(16).padStart(2, "0")}` : `\\u${code.toString(16).padStart(4, "0")}`;
-  });
-}
-
 export function piGovernanceContext(ctx: ExtensionContext): Record<string, unknown> {
   return { author: ctx.model ? { provider_id: ctx.model.provider, model_id: ctx.model.id,
                                  source: "pi-context" } : null,

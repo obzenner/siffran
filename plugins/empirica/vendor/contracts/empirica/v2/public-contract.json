@@ -599,27 +599,6 @@
         }
       }
     },
-    "claim.record_refutation": {
-      "description": "Record an active refutation that supersedes a prior support.",
-      "params": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "claim_id",
-          "research_id"
-        ],
-        "properties": {
-          "claim_id": {
-            "type": "string",
-            "minLength": 1
-          },
-          "research_id": {
-            "type": "string",
-            "minLength": 1
-          }
-        }
-      }
-    },
     "human.request_decision": {
       "description": "Request a human decision for a residual claim.",
       "params": {
@@ -712,22 +691,6 @@
         }
       }
     },
-    "child.cancel": {
-      "description": "Cancel a pending child.",
-      "params": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "child_id"
-        ],
-        "properties": {
-          "child_id": {
-            "type": "string",
-            "minLength": 1
-          }
-        }
-      }
-    },
     "residual.accept": {
       "description": "Accept the current residual and stop or continue with it recorded.",
       "params": {
@@ -736,22 +699,6 @@
         "properties": {
           "note": {
             "type": "string"
-          }
-        }
-      }
-    },
-    "contract.get_section": {
-      "description": "Retrieve one contract section by ID.",
-      "params": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "section_id"
-        ],
-        "properties": {
-          "section_id": {
-            "type": "string",
-            "minLength": 1
           }
         }
       }
@@ -766,15 +713,6 @@
     },
     "governance.propose": {
       "description": "Correct the configure_run proposal and request a host-mediated configuration decision; cannot self-approve.",
-      "params": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [],
-        "properties": {}
-      }
-    },
-    "governance.await_decision": {
-      "description": "Await host UI decision on the exact displayed proposal; cancel leaves investigation blocked.",
       "params": {
         "type": "object",
         "additionalProperties": false,

@@ -2,7 +2,7 @@
 // Python service tests own decision resolution, CAS, replay, and consent authority.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { govern, governanceTimeout, piGovernanceContext, safeGovernanceText } from "../src/governance-ui.ts";
+import { govern, governanceTimeout, piGovernanceContext } from "../src/governance-ui.ts";
 import type { PrivateIngress } from "../src/private-transport.ts";
 import { fakeCtx } from "./fakes.ts";
 
@@ -175,7 +175,7 @@ test("budget parser rejects coercions and accepts bounded decimal", async () => 
   await valid.invoke(); assert.equal(valid.g.proposal.budgets.max_passes, 6);
 });
 
-test("timeout and escaping remain bounded and reversible", () => {
+test("timeout remains bounded", () => {
   const prior = process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS;
   try {
     for (const value of ["", "0", "1501", "NaN", "Infinity", "invalid"]) {
@@ -183,6 +183,4 @@ test("timeout and escaping remain bounded and reversible", () => {
     }
     process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS = "1"; assert.equal(governanceTimeout(), 1000);
   } finally { if (prior === undefined) delete process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS; else process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS = prior; }
-  assert.equal(safeGovernanceText("\u061c"), "\\u061c");
-  assert.notEqual(safeGovernanceText("\u061c"), safeGovernanceText("\\u061c"));
 });

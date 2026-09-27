@@ -75,10 +75,9 @@ through public tools and never edit operational state. Execute rows in table ord
 | `audit_stales_after_graph_change` | Optional, after a passing audit | Amend the graph, then re-evaluate. | Prior audit coverage becomes stale while configuration approval remains current; a fresh bound audit is required. | RunView before/after |
 | `snapshot_completion` | After current passing audit | Call the guarded completion path. | Exact `Allow(converged=true)` and matching durable terminal state. Prose, child pass alone, or `Allow(converged=false)` is not convergence. | Decision and terminal RunView |
 
-For the Pi audit row, first check `subagent({"action":"list"})`, then invoke exactly
-`{"agent":"empirica.empirica-auditor","task":"Audit the host-provided dossier."}`. Send no model,
-context, acceptance, tool, workflow, or async override. Missing/non-string task and extra-field
-errors are distinct admission failures: stop rather than retrying either one. The
+For the Pi audit row, invoke the packaged auditor once through the structured `subagent` tool
+with exactly `{"agent":"empirica.empirica-auditor","task":"Audit the host-provided dossier."}`;
+send no other fields. A rejected launch is an admission failure, so stop rather than retrying. The
 [Pi adapter guide](../../../plugins/empirica/adapters/pi/README.md#canonical-audit-call) owns the
 complete invocation and reviewer-derivation rules.
 

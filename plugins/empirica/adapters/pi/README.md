@@ -60,17 +60,16 @@ payloads.
 
 ## Canonical audit call
 
-After current evidence and approval, check `subagent({"action":"list"})`, then submit only:
+After current evidence and approval, invoke the packaged auditor once through the structured
+`subagent` tool with exactly:
 
 ```json
 {"agent":"empirica.empirica-auditor","task":"Audit the host-provided dossier."}
 ```
 
-The `task` string is required and replaced with the host's bound dossier. Do not send
-`async` (even `false`), `model`, `context`, `acceptance`, tool controls or workflow wrappers.
-The host injects its configured model and foreground execution after validating the two-field
-input. Missing/non-string task and forbidden fields have distinct errors, both before audit
-resolution/reservation. Rejection is not an audit; do not retry a stopped qualification run.
+Send only `agent` and `task`; the host injects its configured model and foreground execution after
+validating the input. Rejection is not an audit, so do not retry a stopped qualification run. See
+[audit](../../skills/empirica/references/audit.md) for the complete invocation rules.
 
 ## Hard gate
 

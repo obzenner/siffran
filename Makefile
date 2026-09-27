@@ -329,13 +329,13 @@ empirica-codex-check: ## Validate the Empirica Codex manifest, hooks, and packag
 	@printf '$(BOLD)==> empirica Codex adapter$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_codex_adapter.py
 
-# Empirica 2.0 target-state architecture validator (D3). Structural-only: ownership/dependency
+# Empirica 4.0 target-state architecture validator (D3). Structural-only: ownership/dependency
 # direction, subtraction (forbidden files/symbols/fields/actions/protocols), thin hooks,
-# public-contract/profile alignment, and Make lifecycle. ADR 0053 composes this target into
+# public-contract/profile alignment, and Make lifecycle. ADR 0060 composes this target into
 # check-static/check/check-ci. Line count is not a rule.
 # Pass ARGS=--self-test to run the committed synthetic suite (GREEN) instead of validating the repo.
 .PHONY: empirica-architecture-check
-empirica-architecture-check: ## validate Empirica 2.0 target ownership, dependencies, and subtraction
+empirica-architecture-check: ## validate Empirica 4.0 target ownership, dependencies, and subtraction
 	@printf '$(BOLD)==> empirica architecture$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_empirica_architecture.py $(ARGS)
 

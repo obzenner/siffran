@@ -55,13 +55,10 @@ A runnable convergence workflow requires all of these capabilities:
 6. request the guarded convergence decision;
 7. obtain exact run-configuration approval through supported host UI (or explicit bounded auto).
 
-If any capability is absent, stop before investigation and report the exact
-unsupported capability. Do not imitate the missing operation in prose or write
-runtime artifacts by hand.
-
-The base Pi surface without `pi-subagents`, a Codex session with untrusted hooks,
-or any host missing one of the three public tools is unsupported. Report the exact
-missing capability; do not imitate it in prose or write runtime artifacts by hand.
+If any capability is absent — including the base Pi surface without `pi-subagents`, a Codex
+session with untrusted hooks, or any host missing one of the three public tools — stop before
+investigation and report the exact unsupported capability. Do not imitate the missing operation
+in prose or write runtime artifacts by hand.
 
 The user invocation is `$ARGUMENTS`. Leading `--` values are mode flags, not part
 of the goal. The host adapter owns parsing. Surface unknown flags and read the
@@ -75,32 +72,29 @@ Do this before reading files, searching, browsing, or running commands.
 2. List each dependency as:
    - **known** — already fixed by evidence you can cite now;
    - **unknown** — requires observation, experiment, or human judgment.
-3. Announce the route and record the exact public action
+3. Announce the route and record the exact author action
    `{"kind":"route","reason":"<non-empty routing reason>"}` through the active
-   author-action surface. `reason` is a top-level action field; do not put it in
-   `payload` and do not rename the action kind.
-4. Before investigation, propose the exact graph from supplied context only. Claims can name
-   discovery uncertainty. Inline shape: `{"root":"G0","claims":[{"id":"G0","text":"<uncertainty>",
-   "kind":"ordinary","gating":true}],"edges":[]}`. Larger graphs must be root-connected DAGs
-   with edges `{"from":"G0","to":"C1","type":"SupportedBy"}`.
+   author-action surface; `reason` is a top-level field.
+4. Before investigation, propose the smallest claim graph from supplied context
+   only; claims can name discovery uncertainty. Larger graphs must be
+   root-connected DAGs. Take exact action and graph shapes from the current
+   public contract; do not guess field names or nesting.
 5. Read `empirica_read(operation="GetRun")`, then call `configure_run` to request approval of
    run configuration only: budgets, modes, and control mode. The goal is displayed read-only;
-   the claim graph and reviewer are not approvable. Reviewer configuration comes from host
-   configuration, and the host must later observe a known reviewer different from the covered
-   actor. Configuration edits open a host-owned locked final confirmation; preserve the human's
-   edited values rather than resending stale fields. Explicit `--auto` remains within existing
-   budgets and modes and cannot raise ceilings.
-   The host-owned decision timeout is 900s, with `EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS` in 1..1500s;
-   it is displayed read-only. At most 3 presentations per configuration epoch and 128 per run are
-   durably reserved before UI. Timeout is dismissal, not human rejection. Do not loop on refusal
-   or exhaustion.
-6. Wait for `run.governance.state == "approved"` bound to the exact displayed configuration.
-   Configuration amendments need a second review. The locked confirmation offers only Confirm or
-   Decline; decline keeps edits pending. Human numeric/mode edits need no prose rationale and are
-   not corruption. After cancellation/timeout, wait for the human; Claude can settle the turn
-   nonterminally while investigation and convergence remain blocked. Then record
-   `{"kind":"investigate"}` before any native read, search, command, evidence submission, or child
-   launch. Approval does not supply either witness.
+   the claim graph and reviewer are not approvable. Preserve the human's edited values rather than
+   resending stale fields, and note explicit `--auto` stays within existing budgets and modes and
+   cannot raise ceilings.
+   The host-owned decision timeout and the durable per-epoch/per-run presentation
+   reservations are fixed by the contract and displayed read-only; take exact values,
+   reviewer, and confirmation semantics from
+   [references/governance.md](references/governance.md). Timeout is dismissal, not human
+   rejection. Do not loop on refusal or exhaustion.
+6. Wait for `run.governance.state == "approved"` bound to the exact displayed configuration;
+   configuration amendments need a second review and human numeric/mode edits are not corruption.
+   After cancellation/timeout, wait for the human; Claude can settle the turn nonterminally while
+   investigation and convergence remain blocked. Then record the `investigate` witness `{"kind":"investigate"}` before any
+   native read, search, command, evidence submission, or child launch. Approval does not supply
+   either witness.
 7. Read [references/governance.md](references/governance.md) and
    [references/host-capabilities.md](references/host-capabilities.md), then investigate. Public
    reads/corrections and explicit honest stop remain available without approval.
@@ -177,17 +171,15 @@ When every in-scope gating claim is approved, read
 The author never grades its own convergence. On Claude, invoke the exact
 `empirica:empirica-auditor` once and let the parent turn settle while that bound async child is
 pending; Claude's native completion notification resumes the workflow after `SubagentStop`
-admits the terminal result. On Pi, check `subagent({"action":"list"})` for the executable
-packaged auditor, then invoke the structured `subagent` tool with exactly:
+admits the terminal result. On Pi, invoke the packaged auditor once through the structured
+`subagent` tool with exactly:
 
 ```json
 {"agent":"empirica.empirica-auditor","task":"Audit the host-provided dossier."}
 ```
 
-`task` must be a string even though the host replaces it with the bound dossier. Send only
-`agent` and `task`: omit `async` (even `false`), `model`, `context`, `acceptance`, tool controls,
-and workflow wrappers. The host sets foreground execution and its configured reviewer; a bare
-agent-only call is invalid. Stop on a rejected launch; do not guess alternate shapes or retry.
+Send only `agent` and `task`; do not guess alternate fields or retry a rejected launch. See
+[references/audit.md](references/audit.md) for the complete invocation and reviewer rules.
 The host protocol—not `empirica_observe`—owns concrete reservation, dossier replacement,
 correlation, identity observation, and terminal admission.
 On Codex, do not launch an ordinary child: finish the turn only when all non-audit
