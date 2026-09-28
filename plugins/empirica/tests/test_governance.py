@@ -128,7 +128,7 @@ class GovernanceServiceTests(unittest.TestCase):
         return self.request({"type": "GetRun", "run_id": self.run_id})["run"]
 
     def presentation(self):
-        """QUAL-1: review_text and scope live only in the private governance presentation.
+        """QUAL-1: dialog and scope live only in the private governance presentation.
         Read them from project_presentation over the current snapshot, never the author RunView."""
         from core.projection import project_presentation
         self.view()
@@ -693,14 +693,11 @@ class GovernanceServiceTests(unittest.TestCase):
             self.assertEqual(allowed["run"]["goal"], "  verbatim goal  ")
             self.assertEqual(allowed["run"]["invocation"], invocation)
 
-    def test_graphless_review_text_shows_read_only_goal(self):
-        text = self.presentation()["review_text"]
-        self.assertIn("GOAL (READ-ONLY)", text)
-        self.assertIn("governed task", text)
-        self.assertIn("INVOCATION (READ-ONLY)", text)
-        self.assertIn("  host: ", text)
-        self.assertIn("  delegation: ", text)
-        self.assertNotIn("CLAIM GRAPH", text)
+    def test_graphless_dialog_shows_read_only_goal_and_invocation(self):
+        dialog = self.presentation()["dialog"]
+        self.assertEqual(dialog["goal"], "governed task")
+        self.assertEqual(dialog["invocation"], TEST_INVOCATION)
+        self.assertNotIn("scope", dialog)
 
     def test_maximal_escaped_graph_amendment_round_trip(self):
         import json
@@ -718,9 +715,9 @@ class GovernanceServiceTests(unittest.TestCase):
         for text in ('"' * 2048, "\\" * 2048, "\u0000" * 2048):
             graph["claims"][0]["text"] = text
             self.action("graph", payload=graph)
-            rendered = self.presentation()["review_text"]
-            self.assertIn("| ", rendered)
-            self.assertNotIn("\u0000", rendered)
+            presentation = self.presentation()
+            self.assertEqual(presentation["scope"], graph)
+            self.assertNotIn(text, json.dumps(presentation["dialog"]))
 
 
 if __name__ == "__main__":

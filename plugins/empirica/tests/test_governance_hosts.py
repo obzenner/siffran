@@ -9,7 +9,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from adapters.governance import HostGovernance, form
+from adapters.governance import (Approve, Dismiss, HostGovernance, Reject, confirm_form,
+                                 decision, review_form)
 from adapters.mcp_server import McpSession
 from adapters.public_tools import PublicTools
 from application import protocol as _proto
@@ -60,7 +61,7 @@ class GovernanceHostTests(unittest.TestCase):
             return
         if self.reply_action == "timeout":
             return
-        content = {"decision": "approve"}
+        content = {}
         self.incoming.put({"jsonrpc": "2.0", "id": "wrong" if self.wrong_id else message["id"],
                            "result": {"action": self.reply_action, "content": content}})
 
@@ -74,6 +75,40 @@ class GovernanceHostTests(unittest.TestCase):
                 "params": {"name": "empirica_observe", "arguments": {"run_id": self.run,
                             "action": {"kind": "configure_run"}}}})
 
+    def test_host_owned_decision_table_is_fail_closed(self):
+        dialog = self.service.trusted_governance_context(
+            run_id=self.run, payload=copy.deepcopy(CONTEXT))["result"]["presentation"]["dialog"]
+        schema = review_form(dialog, 900)[1]
+        cases = [
+            ({"action": "accept", "content": {}}, Approve),
+            ({"action": "accept", "content": {"max_passes": "6"}}, Approve),
+            ({"action": "decline"}, Reject),
+            ({"action": "cancel"}, Dismiss),
+            (None, Dismiss),
+            ({"action": "accept", "content": {"extra": 1}}, Dismiss),
+            ({"action": "accept", "content": {"max_passes": 0}}, Dismiss),
+        ]
+        for answer, expected in cases:
+            with self.subTest(answer=answer):
+                self.assertIsInstance(decision(answer, dialog, schema, confirmation=False), expected)
+        changed = decision({"action": "accept", "content": {"max_passes": "6"}},
+                           dialog, schema, confirmation=False)
+        self.assertIsInstance(changed, Approve)
+        self.assertEqual(changed.configuration["budgets"]["max_passes"], 6)
+        for answer in ({"action": "accept", "content": {"max_passes": 6.0}},
+                       {"action": "accept", "content": {"max_passes": True}},
+                       {"action": "accept", "content": {"max_passes": "٣"}}):
+            self.assertIsInstance(decision(answer, dialog, schema, confirmation=False), Dismiss)
+        confirm_schema = confirm_form(dialog, dialog, 900)[1]
+        for answer in ({"action": "accept"}, {"action": "accept", "content": {}}):
+            self.assertIsInstance(decision(answer, dialog, confirm_schema,
+                                           confirmation=True), Approve)
+        self.assertIsInstance(decision({"action": "accept", "content": {"max_passes": 6}},
+                                       dialog, confirm_schema, confirmation=True), Dismiss)
+        for answer in ({"action": "decline"}, {"action": "cancel"}, None):
+            self.assertIsInstance(decision(answer, dialog, confirm_schema,
+                                           confirmation=True), Dismiss)
+
     def test_host_owned_approval_views_do_not_offer_feedback_input(self):
         """The native incident must be impossible through the offered form fields."""
         self.initialize({"elicitation": {"form": {}}})
@@ -82,13 +117,13 @@ class GovernanceHostTests(unittest.TestCase):
             seen.append(message)
             self.assertNotIn("change_request", schema["properties"],
                              "An approval view must not also collect scope-change text")
-            content = {"decision": "approve"}
+            content = {}
             if len(seen) == 1:
                 content.update(max_passes=8, max_spawns=2, max_audit_spawns=2,
                                multi_provider=True, cli_exec=True)
             else:
                 self.assertEqual(len(seen), 2)
-                self.assertIn("FINAL CONFIRMATION", message)
+                self.assertIn("confirm edited configuration", message)
             return {"action": "accept", "content": content}
         self.mediator.elicit = answer
         result = self.propose()["result"]["structuredContent"]
@@ -120,19 +155,19 @@ class GovernanceHostTests(unittest.TestCase):
         def answer(message, schema):
             seen.append((message, schema))
             if len(seen) == 1:
-                return {"action": "accept", "content": {"decision": "approve",
+                return {"action": "accept", "content": {
                     "max_passes": 8, "max_spawns": 2,
                     "max_audit_spawns": 3, "cli_exec": True, "multi_provider": True}}
             self.assertEqual(len(seen), 2)
-            self.assertIn("FINAL CONFIRMATION", message)
-            self.assertIn("Child spawns: proposed 2", message)
-            self.assertIn("Audit spawns: proposed 3", message)
+            self.assertIn("confirm edited configuration", message)
+            self.assertIn("spawns 2 (was 1)", message)
+            self.assertIn("audits 3 (was 1)", message)
             self.assertNotIn("max_spawns", schema["properties"])
             self.assertNotIn("cli_exec", schema["properties"])
             current = self.dispatch({"type": "GetRun", "run_id": self.run})["result"]["run"]
             self.assertEqual(current["governance"]["state"], "pending")
             self.assertEqual(current["governance"]["budgets"]["max_audit_spawns"], 1)
-            return {"action": "accept", "content": {"decision": "approve"}}
+            return {"action": "accept", "content": {}}
         self.mediator.elicit = answer
         result = self.propose()["result"]["structuredContent"]
         self.assertEqual(len(seen), 2)
@@ -145,7 +180,7 @@ class GovernanceHostTests(unittest.TestCase):
 
     def test_host_owned_confirmation_cancel_preserves_pending_edit(self):
         self.initialize({"elicitation": {}})
-        replies = iter([{"action": "accept", "content": {"decision": "approve",
+        replies = iter([{"action": "accept", "content": {
             "max_passes": 6}}, {"action": "cancel"}])
         self.mediator.elicit = lambda *_: next(replies)
         result = self.propose()["result"]["structuredContent"]
@@ -166,16 +201,16 @@ class GovernanceHostTests(unittest.TestCase):
                     nonlocal count
                     count += 1
                     if count == 1:
-                        return {"action": "accept", "content": {"decision": "approve",
+                        return {"action": "accept", "content": {
                             "max_passes": 6}}
                     self.assertEqual(count, 2)
-                    content = {"decision": "approve"}
+                    content = {}
                     if scenario == "edited_reply":
                         content["max_passes"] = 7
                     elif scenario == "timeout":
                         return None
                     elif scenario == "reject":
-                        content = {"decision": "reject"}
+                        return {"action": "decline"}
                     return {"action": "accept", "content": content}
                 self.mediator.elicit = answer
                 result = self.propose()["result"]["structuredContent"]
@@ -195,10 +230,10 @@ class GovernanceHostTests(unittest.TestCase):
             nonlocal calls
             calls += 1
             if calls == 1:
-                return {"action": "accept", "content": {"decision": "approve", "max_passes": 6}}
+                return {"action": "accept", "content": {"max_passes": 6}}
             self.dispatch({"type": "ObserveAction", "run_id": self.run,
                            "action": {"kind": "configure_run", "budgets": {"max_passes": 7}}})
-            return {"action": "accept", "content": {"decision": "approve"}}
+            return {"action": "accept", "content": {}}
 
         self.mediator.elicit = answer
         result = self.propose()["result"]["structuredContent"]
@@ -229,9 +264,9 @@ class GovernanceHostTests(unittest.TestCase):
     def test_locked_confirmation_decline_keeps_edits_pending_without_feedback_form(self):
         self.initialize({"elicitation": {}})
         replies = iter([
-            {"action": "accept", "content": {"decision": "approve",
+            {"action": "accept", "content": {
              "max_passes": 6}},
-            {"action": "accept", "content": {"decision": "decline"}},
+            {"action": "decline"},
         ])
         seen = []
         self.mediator.elicit = lambda message, schema: (seen.append((message, schema)), next(replies))[1]
@@ -240,7 +275,7 @@ class GovernanceHostTests(unittest.TestCase):
                 "action": {"kind": "configure_run"}})["result"])
         g = result["run"]["governance"]
         self.assertEqual(len(seen), 2)
-        self.assertIn("FINAL CONFIRMATION", seen[1][0])
+        self.assertIn("confirm edited configuration", seen[1][0])
         self.assertNotIn("change_request", seen[1][1]["properties"])
         self.assertEqual(g["proposal"]["budgets"]["max_passes"], 6)
         self.assertEqual(g["state"], "pending")
@@ -250,7 +285,7 @@ class GovernanceHostTests(unittest.TestCase):
 
     def test_reject_needs_no_model_affirmation_and_safe_rendering_is_reversible(self):
         self.initialize({"elicitation": {}})
-        self.mediator.elicit = lambda *_: {"action": "accept", "content": {"decision": "reject"}}
+        self.mediator.elicit = lambda *_: {"action": "decline"}
         with patch.dict("os.environ", {}):
             rejected = self.mediator(self.dispatch({"type": "ObserveAction", "run_id": self.run,
                 "action": {"kind": "configure_run"}})["result"])
@@ -271,7 +306,7 @@ class GovernanceHostTests(unittest.TestCase):
 
     def test_dismissals_durable_and_no_fourth_dialog(self):
         self.initialize({"elicitation": {}})
-        for action in ("cancel", "decline", "timeout"):
+        for action in ("cancel", "timeout", "cancel"):
             self.reply_action = action
             self.assertEqual(self.propose()["result"]["structuredContent"]["type"], "Block")
             c = self.service._coordinator
@@ -350,9 +385,9 @@ class GovernanceHostTests(unittest.TestCase):
         self.assertEqual(result, {"type": "Fault", "code": "unsupported",
                                   "fail_direction": "closed"})
 
-    def test_cancel_decline_timeout_and_wrong_id_never_approve(self):
+    def test_cancel_timeout_and_wrong_id_never_approve(self):
         self.initialize({"elicitation": {}})
-        for action in ("cancel", "decline", "timeout"):
+        for action in ("cancel", "timeout"):
             self.reply_action = action
             response = self.propose()["result"]["structuredContent"]
             self.assertEqual(response["type"], "Block")
@@ -361,6 +396,15 @@ class GovernanceHostTests(unittest.TestCase):
         self.reply_action = "accept"
         self.wrong_id = True
         self.assertEqual(self.propose()["result"]["structuredContent"]["type"], "Block")
+
+    def test_decline_rejects_without_admitting_work(self):
+        self.initialize({"elicitation": {}})
+        self.reply_action = "decline"
+        response = self.propose()["result"]["structuredContent"]
+        self.assertEqual(response["type"], "Allow")
+        self.assertEqual(response["run"]["governance"]["state"], "rejected")
+        self.assertIsNone(response["run"]["governance"]["approved_digest"])
+        self.assertEqual(response["run"]["governance"]["budgets"]["passes_used"], 0)
 
     def test_request_with_matching_id_is_not_a_reply_and_concurrency_rejected(self):
         self.initialize({"elicitation": {"form": {}}})
@@ -418,8 +462,7 @@ class GovernanceHostTests(unittest.TestCase):
                         "action": {"kind": "configure_run"}}}})
                     dialog = receive()
                     self.assertEqual(dialog["method"], "elicitation/create")
-                    send({"id": dialog["id"], "result": {"action": "accept", "content": {
-                        "decision": "approve"}}})
+                    send({"id": dialog["id"], "result": {"action": "accept", "content": {}}})
                     response = receive()
                     self.assertEqual(response["id"], "proposal")
                     self.assertEqual(set(response["result"]), {"content", "isError"})
@@ -448,12 +491,11 @@ class GovernanceHostTests(unittest.TestCase):
         self.assertEqual(len(self.session.tools.definitions()), 3)
         self.assertNotIn("governance_decision", repr(self.session.tools.definitions()))
         view = self.dispatch({"type": "GetRun", "run_id": self.run})["result"]["run"]
-        # review_text now lives in the private presentation, not the author RunView; rebuild it
-        # here to assert the form body carries the proposal digest but no work/author content.
-        from core.projection import review_text
-        review = review_text(view["goal"], view["governance"], _proto._PROJECTION_CONTROLS,
-                             view.get("invocation"))
-        self.assertIn(view["governance"]["proposal_digest"], form(view, review)[0])
+        from core.projection import governance_dialog
+        dialog = governance_dialog(view["goal"], view["governance"],
+                                   _proto.projection_controls(), view.get("invocation"))
+        form_message, _ = review_form(dialog, 900)
+        self.assertNotIn(view["governance"]["proposal_digest"], form_message)
 
 
 class GovernancePresentationTests(unittest.TestCase):
@@ -466,22 +508,22 @@ class GovernancePresentationTests(unittest.TestCase):
         g.update(scope=copy.deepcopy(GRAPH), context=copy.deepcopy(CONTEXT),
                  budgets={**budgets, "passes_used": 2, "spawns_used": 0, "audit_spawns_used": 0},
                  interactions_remaining={"proposal": 3, "total": 128})
-        from core.projection import review_text
-        g["review_text"] = review_text("Exact goal", g, _proto._PROJECTION_CONTROLS)
+        from core.projection import governance_dialog
+        g["dialog"] = governance_dialog("Exact goal", g, _proto.projection_controls())
         return {"goal": "Exact goal", "governance": g}
 
-
     def test_configuration_presentation_excludes_the_work_graph(self):
-        from core.projection import review_text
+        from core.projection import governance_dialog
         view = self.view()
         graph = view["governance"]["scope"]
         graph["claims"][0]["text"] = "work graph is not approvable"
-        text = review_text(view["goal"], view["governance"], _proto._PROJECTION_CONTROLS)
-        self.assertIn("GOAL (READ-ONLY)", text)
-        self.assertIn("Exact goal", text)
-        self.assertIn(view["governance"]["proposal_digest"], text)
-        self.assertNotIn("work graph is not approvable", text)
-        self.assertNotIn(AUTHOR["model_id"], text)
+        dialog = governance_dialog(view["goal"], view["governance"], _proto.projection_controls())
+        message, _ = review_form(dialog, 900)
+        self.assertIn("Goal:", message)
+        self.assertIn("Exact goal", message)
+        self.assertNotIn(view["governance"]["proposal_digest"], message)
+        self.assertNotIn("work graph is not approvable", message)
+        self.assertNotIn(AUTHOR["model_id"], message)
 
 
 if __name__ == "__main__":

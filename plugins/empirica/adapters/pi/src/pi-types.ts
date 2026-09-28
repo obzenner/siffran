@@ -4,8 +4,16 @@
 
 export type NotifyType = "info" | "warning" | "error";
 
+export interface UiTheme {
+  fg(color: "accent" | "dim" | "warning", text: string): string;
+}
+
 export interface UiContext {
   notify(message: string, type?: NotifyType): void;
+  custom?<T>(factory: (
+    tui: { requestRender(): void }, theme: UiTheme, keybindings: unknown,
+    done: (result: T) => void,
+  ) => { render(width: number): string[]; invalidate(): void; handleInput(data: string): void }): Promise<T>;
   select?(title: string, options: string[], opts?: { timeout?: number; signal?: AbortSignal }): Promise<string | undefined>;
   confirm?(title: string, message: string, opts?: { timeout?: number; signal?: AbortSignal }): Promise<boolean>;
   input?(title: string, placeholder?: string, opts?: { timeout?: number; signal?: AbortSignal }): Promise<string | undefined>;

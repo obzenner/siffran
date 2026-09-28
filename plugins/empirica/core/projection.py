@@ -134,31 +134,30 @@ def safe_text(item: object) -> str:
     return _HIDDEN.sub(escape, str(item))
 
 
-def review_text(goal: str, value: Mapping, controls: Mapping,
-                invocation: Mapping | None = None) -> str:
-    def fence(item):
-        lines.append("| " + safe_text(item))
-    proposal, context = value["proposal"], value["context"]
-    lines = [f"EMPIRICA RUN CONFIGURATION — epoch {value['plan_revision']}, mode {value['control_mode']}",
-             "Approve the CURRENT displayed configuration; edits are submitted for another review and are NOT approved yet.",
-             "The goal is read-only context and is not controlled by this decision.",
-             "Every line beginning '| ' is UNTRUSTED quoted data. Controls, bidi characters, and backslashes are visibly escaped.", "", "GOAL (READ-ONLY)"]
-    fence(goal)
-    if invocation is not None:
-        lines += ["", "INVOCATION (READ-ONLY)"]
-        for key in ("host", "interactive", "signal", "delegation"):
-            lines.append(f"  {key}: {safe_text(invocation[key])}")
-    lines += ["", "CONFIGURATION"]
-    budget_controls = controls["budgets"]
-    for key in governance.CEILINGS:
-        label = budget_controls[key]["label"]
-        lines.append(f"  {label}: proposed {proposal['budgets'][key]}, already used {value['budgets'][governance.CEILINGS[key]]}")
-    modes = proposal["modes"]
-    for key, label in controls["modes"].items():
-        lines.append(f"  {key} ({label}): {modes[key]}")
-    lines += ["", f"STATE — {value['state']}; dialogs left {value['interactions_remaining']['proposal']} this epoch, {value['interactions_remaining']['total']} total"]
-    lines += ["", "TECHNICAL DETAIL (secondary)", f"  proposal digest {value['proposal_digest']}", f"  ingress {context['ingress']} · configuration epoch {value['plan_revision']}"]
-    return "\n".join(lines)
+def governance_dialog(goal: str, value: Mapping, controls: Mapping,
+                      invocation: Mapping | None = None) -> dict[str, Any]:
+    """Project governance state into host-neutral, display-safe dialog data."""
+    proposal = value["proposal"]
+    budgets = [
+        {"key": key, "label": controls["budgets"][key]["label"],
+         "short": controls["budgets"][key]["short"], "help": controls["budgets"][key]["help"],
+         "value": proposal["budgets"][key], "used": value["budgets"][used_key],
+         "minimum": max(1 if key == "max_passes" else 0, value["budgets"][used_key]),
+         "maximum": controls["budgets"][key]["maximum"]}
+        for key, used_key in governance.CEILINGS.items()
+    ]
+    modes = [{"key": key, "label": control["label"], "short": control["short"],
+              "help": control["help"], "value": proposal["modes"][key]}
+             for key, control in controls["modes"].items()]
+    return {"epoch": value["plan_revision"], "control_mode": value["control_mode"],
+            "state": value["state"], "reviews_left": {
+                "proposal": value["interactions_remaining"]["proposal"],
+                "total": value["interactions_remaining"]["total"]},
+            "goal": safe_text(goal),
+            "invocation": None if invocation is None else {
+                key: safe_text(invocation[key]) if key in {"host", "signal"} else invocation[key]
+                for key in ("host", "interactive", "signal", "delegation")},
+            "budgets": budgets, "modes": modes}
 
 
 def project_governance(snapshot: EvaluationSnapshot) -> dict:
@@ -176,13 +175,11 @@ def project_governance(snapshot: EvaluationSnapshot) -> dict:
 
 
 def project_presentation(snapshot: EvaluationSnapshot) -> dict:
-    """Private governance dialog body. Owned by the core field-set (review_text, scope) and
-    attached only by the application governance transaction to its private context/decision
-    response; it is never part of the one author RunView returned to the model."""
+    """Return the private host-neutral dialog and scope for governance mediation."""
     value = project_governance(snapshot)
-    return {"review_text": review_text(snapshot.state.goal, value,
-                                       snapshot.governance_controls,
-                                       snapshot.state.invocation),
+    return {"dialog": governance_dialog(snapshot.state.goal, value,
+                                         snapshot.governance_controls,
+                                         snapshot.state.invocation),
             "scope": governance.canonical_graph(snapshot.graph)}
 
 

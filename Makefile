@@ -81,7 +81,7 @@ help: ## Show this help (generated from target descriptions)
 # `check` is the fast deterministic contributor gate. Expensive filesystem/host-journey matrices
 # live under the explicit integration targets below; installed-host qualification is operator-led
 # and never runs automatically. `check-ci` omits Pi unless the runner explicitly opts in.
-.PHONY: check check-ci check-static check-core check-claude check-codex check-pi
+.PHONY: check check-ci check-static check-core check-claude check-codex check-pi pi-governance-dialog-golden
 check: check-static check-core check-claude check-codex check-pi ## Fast contributor gate (not integration/native certification)
 	@printf '\n$(BOLD)Fast contributor checks passed.$(RESET)\n'
 
@@ -92,7 +92,7 @@ check-ci: check-static check-core check-claude check-codex ## Fast contributor g
 check-static: lint validate docs-check adr-check empirica-architecture-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check empirica-context-economy-unit-check claude-subagent-models-unit-check pi-canary-unit-check pi-validator-unit-check ## Lint, manifests, docs, ADRs, contracts, vendor copies, activation, receipts, canary config
 	@printf '$(BOLD)==> static suite ok$(RESET)\n'
 
-check-core: empirica-author-view-golden ## Fast host-neutral contracts, malformed input, state, bridge, and governance boundaries
+check-core: empirica-author-view-golden empirica-governance-dialog-golden ## Fast host-neutral contracts, malformed input, state, bridge, and governance boundaries
 	@printf '$(BOLD)==> core suite$(RESET)\n'
 	@$(PYTHON) lib/obligations/tests/test_obligations.py
 	@$(PYTHON) $(EMPIRICA_FRESHNESS_TESTS)
@@ -146,8 +146,15 @@ check-codex: methodologist-codex-check empirica-codex-check ## Fast Codex packag
 		test_codex_adapter.StoreIsolationTests
 	@printf '$(BOLD)==> codex suite ok$(RESET)\n'
 
-check-pi: pi-bundle-check methodologist-pi-check empirica-pi-check pi-auditor-resolution-unit-check ## Fast Pi package, type, unit, guard, and bounded bridge tests — needs Node
+check-pi: pi-governance-dialog-golden pi-bundle-check methodologist-pi-check empirica-pi-check pi-auditor-resolution-unit-check ## Fast Pi package, type, unit, guard, and bounded bridge tests — needs Node
 	@printf '$(BOLD)==> pi suite ok$(RESET)\n'
+
+pi-governance-dialog-golden: node_modules ## Check Pi governance screen goldens (UPDATE=1 regenerates)
+	@if [ "$(UPDATE)" = "1" ]; then \
+		node --experimental-strip-types $(SCRIPTS)/gen_pi_governance_dialog_golden.ts; \
+	else \
+		node --experimental-strip-types $(SCRIPTS)/gen_pi_governance_dialog_golden.ts --check; \
+	fi
 
 .PHONY: empirica-governance-check empirica-core-integration empirica-host-integration empirica-governance-host-check empirica-governance-service-check
 empirica-governance-service-check: ## Check real-service governance transitions (ARGS="-k test_name" selects cases)
@@ -298,10 +305,17 @@ pi-bundle-check: node_modules ## Validate repository-root Pi package composition
 	@printf '$(BOLD)==> Pi bundle$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py . --package-only
 
-.PHONY: empirica-pi-check empirica-author-view-golden
+.PHONY: empirica-pi-check empirica-author-view-golden empirica-governance-dialog-golden
 empirica-pi-check: node_modules empirica-author-view-golden ## Validate the Empirica Pi adapter package (static + bridge smoke always; typecheck + tests if node present)
 	@printf '$(BOLD)==> empirica Pi adapter$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py plugins/empirica/adapters/pi
+
+empirica-governance-dialog-golden: ## Check Claude governance dialog golden fixtures (UPDATE=1 regenerates)
+	@if [ "$(UPDATE)" = "1" ]; then \
+		$(PYTHON) $(SCRIPTS)/gen_governance_dialog_golden.py; \
+	else \
+		$(PYTHON) $(SCRIPTS)/gen_governance_dialog_golden.py --check; \
+	fi
 
 empirica-author-view-golden: ## Check author-view golden fixtures (UPDATE=1 regenerates from Python)
 	@if [ "$(UPDATE)" = "1" ]; then \

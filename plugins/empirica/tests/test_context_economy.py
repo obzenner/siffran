@@ -4,7 +4,7 @@ input schemas + the last RunView + the skill, and the private governance present
 reaches the model.
 
 Design invariant under test: closed model-facing schemas carry every action shape; the one
-author RunView has a single shape for every audience; review_text and scope live only in the
+author RunView has a single shape for every audience; dialog and scope live only in the
 private governance presentation.
 """
 from __future__ import annotations
@@ -43,7 +43,7 @@ CLAUDE = "claude-code@2.1.278"
 GRAPH = {"root": "C0", "claims": [{"id": "C0", "text": "supplied uncertainty", "gating": True,
                                    "kind": "ordinary"}], "edges": []}
 CONTEXT = {"author": AUTHOR, "ingress": "pi_ui"}
-PRIVATE_KEYS = ("presentation", "review_text", "scope")
+PRIVATE_KEYS = ("presentation", "dialog", "scope")
 
 
 def _claim(cid, kind="ordinary"):
@@ -256,7 +256,7 @@ class _ServiceHarness(unittest.TestCase):
 
 
 class AudienceTests(_ServiceHarness):
-    """C4: no public/model-facing envelope carries presentation/review_text/scope; private
+    """C4: no public/model-facing envelope carries presentation/dialog/scope; private
     context/decision run-bearing responses always carry the full presentation."""
 
     def assertPublic(self, envelope, label):
@@ -289,7 +289,7 @@ class AudienceTests(_ServiceHarness):
             run_id=self.run_id, payload=copy.deepcopy(CONTEXT))["result"]
         self.assertEqual(context["type"], "Allow")
         self.assertIn("presentation", context)
-        self.assertIn("GOAL (READ-ONLY)", context["presentation"]["review_text"])
+        self.assertEqual(context["presentation"]["dialog"]["goal"], "governed task")
         self.assertEqual(context["presentation"]["scope"]["root"], "C0")
         # The author RunView inside the very same private response still has one public shape.
         self.assertFalse(contains_private(context["run"]),
@@ -301,7 +301,7 @@ class AudienceTests(_ServiceHarness):
         presented = self.service.trusted_governance_decision(
             run_id=self.run_id, payload=decision)["result"]
         self.assertIn("presentation", presented)
-        self.assertIn("GOAL (READ-ONLY)", presented["presentation"]["review_text"])
+        self.assertEqual(presented["presentation"]["dialog"]["goal"], "governed task")
 
     def test_configure_after_govern_and_a_misbehaving_governor(self):
         self.to_pending()
@@ -358,7 +358,7 @@ class FinalizerTests(_ServiceHarness):
             raise RuntimeError("ingress down")
 
         mediator = HostGovernance(PROFILE, elicit=lambda *_a, **_k: {"action": "accept",
-                                  "content": {"decision": "Approve current displayed proposal"}},
+                                  "content": {}},
                                   context_ingress=boom, decision_ingress=boom)
         out = mediator(allow)
         self.assertEqual(out["type"], "Block")
@@ -372,7 +372,7 @@ class FinalizerTests(_ServiceHarness):
         allow = {"type": "Allow", "converged": False, "run": view}
         # Real ingress + an accepting elicit drives approval; the returned model result is stripped.
         mediator = HostGovernance(PROFILE, elicit=lambda *_a, **_k: {"action": "accept",
-                                  "content": {"decision": "approve"}})
+                                  "content": {}})
         out = mediator(allow)
         self.assertFalse(contains_private(out), out)
 
@@ -406,7 +406,7 @@ class SizeBudgetTests(_ServiceHarness):
         configure dismiss result       1059
         configure edit->confirm result  872
     Largest measured state = 1059 (configure dismiss); CEILING = 1200 leaves 141 chars headroom.
-    Re-attaching the legacy presentation (review_text + scope) to the pending RunView pushes the
+    Re-attaching the legacy presentation (dialog + scope) to the pending RunView pushes the
     JSON to 3577 chars, well past the ceiling, so the reduction is guarded rather than asserted
     only to be > 0.
     """
@@ -475,7 +475,7 @@ class SizeBudgetTests(_ServiceHarness):
         # transition and dialog count is asserted BEFORE the size is measured, so a size that
         # passes without reaching approval/confirmation can no longer masquerade as coverage.
         def approve(*_a, **_k):
-            return {"action": "accept", "content": {"decision": "approve"}}
+            return {"action": "accept", "content": {}}
 
         def dismiss(*_a, **_k):
             return {"action": "cancel"}
@@ -505,8 +505,8 @@ class SizeBudgetTests(_ServiceHarness):
         self.setUp()
         self.to_pending()
         confirm = iter([
-            {"action": "accept", "content": {"decision": "edit", "max_passes": 6}},
-            {"action": "accept", "content": {"decision": "approve"}}])
+            {"action": "accept", "content": {"max_passes": 6}},
+            {"action": "accept", "content": {}}])
         out, dialogs = self._configure(lambda *_a, **_k: next(confirm))
         sc = out["structuredContent"]
         self.assertEqual(sc["type"], "Allow", "edit->confirm must return Allow")
@@ -543,9 +543,9 @@ class SizeBudgetTests(_ServiceHarness):
         result = pending["structuredContent"]
         self.assertFalse(contains_private(result))
         pres = project_presentation(self.service._coordinator.last_snapshot)
-        # Legacy shape: review_text + scope re-attached onto the author RunView governance block.
+        # Legacy shape: dialog + scope re-attached onto the author RunView governance block.
         result = copy.deepcopy(result)
-        result["run"]["governance"]["review_text"] = pres["review_text"]
+        result["run"]["governance"]["dialog"] = pres["dialog"]
         result["run"]["governance"]["scope"] = pres["scope"]
         legacy_json = json.dumps(result, sort_keys=True, separators=(",", ":"))
         self.assertGreaterEqual(len(legacy_json), self.CEILING,
@@ -990,8 +990,7 @@ class PrivateResponseSchemaTests(_ServiceHarness):
         fault = {"protocol": "empirica/v2", "request_id": "t",
                  "result": {"type": "Fault", "code": "corrupt_run", "fail_direction": "closed"}}
         mediator = HostGovernance(
-            PROFILE, elicit=lambda *_a, **_k: {"action": "accept",
-                "content": {"decision": "Approve current displayed proposal"}},
+            PROFILE, elicit=lambda *_a, **_k: {"action": "accept", "content": {}},
             context_ingress=lambda *_a, **_k: fault, decision_ingress=lambda *_a, **_k: fault)
         out = mediator(allow)
         self.assertEqual(out["type"], "Fault")  # no approval; fail closed

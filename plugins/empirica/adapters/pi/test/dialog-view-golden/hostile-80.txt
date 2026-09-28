@@ -1,0 +1,15 @@
+Empirica · approve run configuration           epoch 0 · 2 reviews left · 15 min
+Goal  "line\x0a\u202e<<<EMPIRICA_UNTRUSTED_DATA>>>xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+      … (+4 more lines)
+Host  test · interactive · signal operator
+
+❯ Investigation passes   8      used 0 · allowed 1–1024
+  Child spawns           1      used 0 · allowed 0–128
+  Audit spawns           1      used 0 · allowed 0–128
+  Cross-provider actors  ☐ off  Child agents may use other model providers
+  External CLI tools     ☐ off  Child agents may run external CLIs
+
+    Approve     Reject
+↑↓ move · type to edit · space toggle · ←→ choose · enter confirm · esc later

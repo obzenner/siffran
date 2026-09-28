@@ -92,32 +92,40 @@
       }
     },
     "controls": {
-      "actions": {
-        "approve": "Approve current displayed proposal",
-        "edit": "Edit configuration for another review",
-        "reject": "Reject proposal"
-      },
       "budgets": {
         "max_passes": {
           "label": "Investigation passes",
-          "maximum": 1024
+          "maximum": 1024,
+          "short": "passes",
+          "help": "Passes the run may use"
         },
         "max_spawns": {
           "label": "Child spawns",
-          "maximum": 128
+          "maximum": 128,
+          "short": "spawns",
+          "help": "Non-audit child agents"
         },
         "max_audit_spawns": {
           "label": "Audit spawns",
-          "maximum": 128
+          "maximum": 128,
+          "short": "audits",
+          "help": "Independent auditor launches"
         }
       },
       "modes": {
-        "multi_provider": "Cross-provider actors",
-        "cli_exec": "External model/actor CLI use"
+        "multi_provider": {
+          "label": "Cross-provider actors",
+          "short": "cross-provider",
+          "help": "Child agents may use other model providers"
+        },
+        "cli_exec": {
+          "label": "External CLI tools",
+          "short": "CLI tools",
+          "help": "Child agents may run external CLIs"
+        }
       }
     },
     "confirmation": {
-      "title": "FINAL CONFIRMATION \u2014 Your edits are saved, NOT approved. Confirm the exact values below; configuration is read-only.",
       "actions": [
         "approve",
         "decline"

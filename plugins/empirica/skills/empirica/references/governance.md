@@ -6,7 +6,7 @@ The default control mode is **deliberative**. Route, then propose a root-connect
 
 Submit `configure_run` with proposed `budgets` and `modes`. Omitted fields retain the current configuration. This requests host review; it is not approval. The schema rejects reviewer fields because reviewer selection belongs to host configuration. Only the exact current approved configuration permits `investigate`.
 
-The ordinary host review displays the goal read-only and the complete configuration in plain language. Edits are submitted for another review and are not approved. Claude and Pi immediately open one host-owned **FINAL CONFIRMATION** in the same call. It is read-only and offers only Confirm or Decline. No author action runs between amendment and confirmation. The original timeout, raw receipt fingerprinting, CAS, and exact epoch/digest checks apply across both forms.
+The ordinary host review displays the goal read-only and the complete configuration in native fields. Claude uses its built-in **Accept** button to approve the displayed values, **Decline** to reject, and Esc to decide later; editing any value and accepting submits an amendment. Pi presents the same model in one keyboard-driven component: ↑/↓ moves, digits edit budgets, space toggles modes, ←/→ chooses Approve or Reject, Enter activates, and Esc decides later. Amendments immediately open one host-owned locked confirmation in the same call. It is read-only: Accept/Approve approves exactly that revision, while Decline/Esc/Keep pending retains the edits without consent. No author action runs between amendment and confirmation. The original timeout, raw receipt fingerprinting, CAS, and exact epoch/digest checks apply across both forms.
 
 Cancel, timeout, invalid content, stale/conflicting replies, and missing UI never grant authority. Presentations are CAS-reserved before UI and bounded to three per configuration epoch and 128 per run. Exact current-schema receipt replay is inert; conflicting replay blocks. Configuration changes revoke approval. Graph and host-observed author changes do not; the audit dossier continues to bind the goal, graph, and scope.
 
@@ -24,7 +24,7 @@ Reviewer configuration is not itself evidence of independence. Audit identity cl
 
 ## Timeout, compatibility, and recovery
 
-The host decision timeout defaults to 900 seconds. `EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS` accepts finite 1..1500-second host-owned overrides. It is displayed read-only and is never approvable. Pi shares one timeout across the dialog sequence.
+The host decision timeout defaults to 900 seconds. `EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS` accepts finite 1..1500-second host-owned overrides. It appears in the dialog header and is never approvable. Pi shares one timeout across review and locked confirmation.
 
 Public contract 3.0.0 keeps wire `empirica/v2` and state family `empirica.run/2`. Persisted documents with removed governance fields are intentionally incompatible with the strict current schema and fail closed as `run.corrupt`. A later `StartRun` creates a fresh generation. The runtime never mutates, repairs, converts, or carries approval from an obsolete document.
 

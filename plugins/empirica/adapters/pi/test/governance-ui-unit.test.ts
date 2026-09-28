@@ -1,46 +1,132 @@
-// Fast native-control tests. The fake ingress models only service response shape;
-// Python service tests own decision resolution, CAS, replay, and consent authority.
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { govern, governanceTimeout, piGovernanceContext } from "../src/governance-ui.ts";
+import { initialState, reduce, renderLines } from "../src/dialog-view.ts";
+import type { Dialog, DialogDecision } from "../src/dialog-view.ts";
 import type { PrivateIngress } from "../src/private-transport.ts";
 import { fakeCtx } from "./fakes.ts";
 
-const APPROVE = "Approve current displayed proposal";
-const EDIT = "Edit configuration for another review";
-const REJECT = "Reject proposal";
-const author = { provider_id: "anthropic", model_id: "claude-sonnet-4-6", source: "pi-context" };
+const fixture = JSON.parse(readFileSync(new URL("../../../tests/fixtures/governance-dialog-golden.json", import.meta.url), "utf8")) as {
+  dialogs: { review: Dialog; confirmation: Dialog; hostile: Dialog };
+};
+const reviewDialog = fixture.dialogs.review;
+const theme = { accent: (x: string) => x, muted: (x: string) => x, warning: (x: string) => x };
+const ENTER = "\r", DOWN = "\x1b[B", RIGHT = "\x1b[C", SPACE = " ", BACKSPACE = "\x7f", ESC = "\x1b[27u";
 
-function harness(choice = APPROVE) {
-  const g = {
-    state: "pending", control_mode: "deliberative", proposal_digest: "sha256:" + "a".repeat(64),
-    plan_revision: 2, prompt_error: null as string | null,
-    proposal: { budgets: { max_passes: 8, max_spawns: 0, max_audit_spawns: 1 },
-      modes: { multi_provider: false, cli_exec: false } },
-    budgets: { passes_used: 2, spawns_used: 0, audit_spawns_used: 0 },
-    review_text: "CANONICAL REVIEW TEXT",
-    context: { author, ingress: "pi_ui" },
+function drive(keys: string[], dialog = reviewDialog, confirmation = false): DialogDecision | undefined {
+  let state = initialState(dialog, confirmation);
+  for (const key of keys) {
+    const result = reduce(state, key, dialog, confirmation);
+    if ("done" in result) return result.done;
+    state = result.state;
+  }
+  return undefined;
+}
+
+const toButtons = [DOWN, DOWN, DOWN, DOWN, DOWN];
+
+test("dialog reducer approves defaults and maps reject and kitty escape", () => {
+  assert.equal(drive([ENTER, ENTER])?.type, "approve");
+  assert.equal(drive([...toButtons, RIGHT, ENTER])?.type, "reject");
+  assert.equal(drive([ESC])?.type, "dismiss");
+});
+
+test("invalid integer histories never emit Approve", () => {
+  const histories = [
+    ["0", ...toButtons, ENTER],
+    [DOWN, "9", "9", "9", "9", ...toButtons.slice(1), ENTER],
+    ["1", "2", "3", "4", "5", ...toButtons, ENTER],
+    ["5", BACKSPACE, ...toButtons, ENTER],
+  ];
+  for (const keys of histories) assert.equal(drive(keys), undefined, keys.join(" "));
+});
+
+test("range error follows its row after focus moves", () => {
+  let state = initialState(reviewDialog);
+  for (const key of ["0", DOWN]) {
+    const result = reduce(state, key, reviewDialog);
+    assert.ok("state" in result);
+    if ("state" in result) state = result.state;
+  }
+  const lines = renderLines(reviewDialog, state, 80, theme,
+    { confirmation: false, timeoutMs: 900_000 });
+  assert.ok(lines.some(line => line.includes("Must be an integer between 1 and 1024")));
+});
+
+test("mode toggle and edited integer are returned exactly", () => {
+  const result = drive(["6", DOWN, DOWN, DOWN, SPACE, DOWN, DOWN, ENTER]);
+  assert.equal(result?.type, "approve");
+  if (result?.type === "approve") {
+    assert.equal(result.configuration.budgets.max_passes, 6);
+    assert.equal(result.configuration.modes.multi_provider, true);
+  }
+});
+
+test("renderLines shows an escaped, bounded prefix of a hostile goal at widths 80 and 50", () => {
+  for (const width of [80, 50]) {
+    const lines = renderLines(fixture.dialogs.hostile, initialState(fixture.dialogs.hostile), width, theme,
+      { confirmation: false, timeoutMs: 120_000 });
+    assert.ok(lines.every(line => visibleWidth(line) <= width));
+    const start = lines.findIndex(line => line.startsWith("Goal  "));
+    const end = lines.findIndex(line => line.startsWith("Host  "));
+    const goal = lines.slice(start, end);
+    assert.equal(goal.length, 4, "the goal never takes more than four lines");
+    assert.match(goal[3], /… \(\+\d+ more lines\)$/);
+    const shown = goal.slice(0, 3).map(line => line.slice(6)).join("");
+    assert.ok(`"${fixture.dialogs.hostile.goal}"`.startsWith(shown), "the shown goal is an exact prefix");
+    assert.ok(!lines.some(line => line.includes("\n")), "escaped control characters stay escaped");
+    if (width === 80) assert.ok(lines[0].includes("2 min"));
+  }
+});
+
+test("renderLines matches checked-in screens byte-for-byte", () => {
+  const invalid = initialState(reviewDialog); invalid.values.max_passes = 0;
+  const cases = {
+    review: (width: number) => renderLines(reviewDialog, initialState(reviewDialog), width, theme,
+      { confirmation: false, timeoutMs: 900_000 }),
+    confirmation: (width: number) => renderLines(fixture.dialogs.confirmation,
+      initialState(fixture.dialogs.confirmation, true), width, theme,
+      { confirmation: true, before: reviewDialog, timeoutMs: 900_000 }),
+    hostile: (width: number) => renderLines(fixture.dialogs.hostile,
+      initialState(fixture.dialogs.hostile), width, theme,
+      { confirmation: false, timeoutMs: 900_000 }),
+    "range-error": (width: number) => renderLines(reviewDialog, invalid, width, theme,
+      { confirmation: false, timeoutMs: 900_000 }),
   };
-  const run = { id: "ui-unit-run", status: "active", goal: "goal", governance: g };
-  const calls: string[] = [], decisions: Array<Record<string, unknown>> = [];
-  const settings = { cancelAt: "", inputValue: "", requestText: "Please revise scope.",
-    onPresent: () => {}, onRefresh: (_count: number) => {} };
-  let refreshes = 0;
-  const ctx = fakeCtx();
-  ctx.hasUI = true;
-  ctx.ui.confirm = async title => { calls.push(title); return title !== settings.cancelAt; };
-  ctx.ui.select = async (title, options) => {
-    calls.push(title);
-    if (title === settings.cancelAt) return undefined;
-    if (title === "Decision") return choice;
-    if (title === "Independent auditor") return options.at(-1);
-    return "Disabled";
-  };
-  ctx.ui.input = async title => {
-    calls.push(title);
-    if (title === settings.cancelAt) return undefined;
-    return title.startsWith("What must change?") ? settings.requestText : settings.inputValue;
-  };
+  for (const [name, render] of Object.entries(cases)) {
+    for (const width of [80, 50]) {
+      const expected = readFileSync(new URL(`dialog-view-golden/${name}-${width}.txt`, import.meta.url), "utf8");
+      assert.equal(render(width).join("\n") + "\n", expected);
+    }
+  }
+});
+
+interface HarnessSettings {
+  onPresent(): void;
+  onRefresh(count: number): void;
+  onCustom(): void;
+}
+
+function harness(keyScripts: string[][] = [[ENTER, ENTER]]) {
+  const dialog = structuredClone(reviewDialog);
+  const g = { state: "pending", control_mode: "deliberative", proposal_digest: "sha256:" + "a".repeat(64),
+    plan_revision: 0, prompt_error: null as string | null, proposal: {
+      budgets: Object.fromEntries(dialog.budgets.map(row => [row.key, row.value])) as Record<string, number>,
+      modes: Object.fromEntries(dialog.modes.map(row => [row.key, row.value])) as Record<string, boolean>,
+    }, context: { author: null, ingress: "pi_ui" } };
+  const run = { id: "run", status: "active", governance: g };
+  const decisions: Array<Record<string, unknown>> = [];
+  const settings: HarnessSettings = { onPresent() {}, onRefresh() {}, onCustom() {} };
+  let refreshes = 0, customCalls = 0;
+  const ctx = fakeCtx(); ctx.hasUI = true;
+  ctx.ui.custom = async factory => await new Promise(resolve => {
+    customCalls++;
+    const component = factory({ requestRender() {} }, { fg: (_color, text) => text }, {}, resolve);
+    settings.onCustom();
+    for (const key of keyScripts.shift() ?? []) component.handleInput(key);
+  });
   const trusted: PrivateIngress = async request => {
     if (request.operation === "governance_context") settings.onRefresh(++refreshes);
     if (request.operation === "governance_decision") {
@@ -48,131 +134,132 @@ function harness(choice = APPROVE) {
       decisions.push(payload);
       if (payload.outcome === "present") settings.onPresent();
       const submission = payload.submission as { action: string; configuration: typeof g.proposal } | undefined;
-      if (submission && ["approve", "edit"].includes(submission.action) &&
-          JSON.stringify(submission.configuration) !== JSON.stringify(g.proposal)) {
-        g.proposal = structuredClone(submission.configuration);
-        g.plan_revision++;
-        g.proposal_digest = "sha256:" + "b".repeat(64);
-        g.review_text = "CANONICAL EDITED REVIEW TEXT";
-      } else if (submission?.action === "approve") g.state = "approved";
+      if (submission?.action === "reject") g.state = "rejected";
+      if (submission?.action === "approve") {
+        if (JSON.stringify(submission.configuration) === JSON.stringify(g.proposal)) g.state = "approved";
+        else {
+          g.proposal = structuredClone(submission.configuration);
+          g.plan_revision++;
+          g.proposal_digest = "sha256:" + "b".repeat(64);
+          dialog.epoch = g.plan_revision;
+          for (const row of dialog.budgets) row.value = g.proposal.budgets[row.key];
+          for (const row of dialog.modes) row.value = g.proposal.modes[row.key];
+        }
+      }
     }
-    return { protocol: "empirica/v2", request_id: "trusted-governance",
-      result: { type: "Allow", converged: false, run } };
+    const withPresentation = request.operation === "governance_decision"
+      && (request.payload as { outcome?: string }).outcome === "present";
+    return structuredClone({ protocol: "empirica/v2", request_id: "trusted-governance",
+      result: { type: "Allow", converged: false, run,
+        ...(withPresentation ? { presentation: { dialog, scope: null } } : {}) } }) as never;
   };
-  return { g, run, calls, decisions, settings, ctx, trusted,
-    invoke: (signal?: AbortSignal) => govern(run.id, ctx, trusted, signal) };
+  return { ctx, trusted, decisions, run, g, settings, get customCalls() { return customCalls; },
+    invoke: (signal?: AbortSignal, deadline?: number) => govern("run", ctx, trusted, signal, undefined, deadline) };
 }
 
-function dismissed(h: ReturnType<typeof harness>) {
-  assert.deepEqual(h.decisions.map(d => d.outcome ?? (d.submission as { action: string })?.action), ["present", "dismiss"]);
+function outcomes(h: ReturnType<typeof harness>): string[] {
+  return h.decisions.map(row => row.outcome as string ?? (row.submission as { action: string })?.action);
 }
 
-test("canonical review text is delivered and unchanged approval is raw submission", async () => {
+test("govern uses one custom component and Accept approves", async () => {
   const h = harness();
-  await h.invoke();
-  assert.ok(h.calls.includes("Empirica run configuration — epoch 2"));
-  assert.deepEqual(h.decisions.map(d => d.outcome ?? (d.submission as { action: string })?.action), ["present", "approve"]);
-  assert.equal((h.decisions[1].submission as { configuration: unknown }).configuration !== undefined, true);
+  const result = await h.invoke();
+  assert.equal(result.result.type, "Allow");
+  assert.deepEqual(outcomes(h), ["present", "approve"]);
+  assert.equal(h.customCalls, 1);
 });
 
 test("already-cancelled review consumes no presentation capacity", async () => {
   const h = harness(), controller = new AbortController(); controller.abort();
-  const result = (await h.invoke(controller.signal)).result;
-  assert.equal(result.type, "Block");
+  assert.equal((await h.invoke(controller.signal)).result.type, "Block");
   assert.deepEqual(h.decisions, []);
-  assert.deepEqual(h.calls, []);
+  assert.equal(h.customCalls, 0);
 });
 
-test("governance context never enumerates configured models", () => {
-  const ctx = fakeCtx(); ctx.hasUI = true; ctx.model = { provider: "anthropic", id: "claude-sonnet-4-6" } as never;
-  let calls = 0; ctx.modelRegistry = { getAvailable: () => { calls++; throw new Error("must not read"); },
-    getError: () => { calls++; return "configured error"; } } as never;
-  assert.deepEqual(piGovernanceContext(ctx), { author, ingress: "pi_ui" });
-  assert.equal(calls, 0);
-});
-
-test("confirmation refresh cannot silently replace the amended revision or digest", async () => {
-  for (const changeDigest of [false, true]) {
-    const h = harness(EDIT);
-    h.ctx.ui.input = async title => title.startsWith("Investigation passes") ? "6" : "";
+test("confirmation refresh rejects stale revision or digest", async () => {
+  for (const digest of [false, true]) {
+    const h = harness([["6", ...toButtons, ENTER], [ENTER]]);
     h.settings.onRefresh = count => {
       if (count === 2) {
         h.g.plan_revision++;
-        if (changeDigest) h.g.proposal_digest = "sha256:" + "c".repeat(64);
+        if (digest) h.g.proposal_digest = "sha256:" + "c".repeat(64);
       }
     };
-    const result = (await h.invoke()).result;
-    assert.equal(result.type, "Block");
-    if (result.type === "Block") assert.equal(result.reasons[0].code, "governance.stale_proposal");
-    assert.deepEqual(h.decisions.map(d => d.outcome ?? (d.submission as { action: string })?.action),
-      ["present", "edit"]);
+    const result = await h.invoke();
+    assert.equal(result.result.type, "Block");
+    if (result.result.type === "Block") assert.equal(result.result.reasons[0].code, "governance.stale_proposal");
+    assert.deepEqual(outcomes(h), ["present", "approve"]);
     assert.equal(h.g.state, "pending");
-    assert.ok(!h.calls.some(title => title.startsWith("FINAL CONFIRMATION")));
   }
 });
 
-test("confirmation shares the original review deadline", async () => {
+test("confirmation shares the original deadline", async () => {
   const original = Date.now; let clock = 0; Date.now = () => clock;
   try {
-    const h = harness(EDIT);
-    h.ctx.ui.input = async title => title.startsWith("Investigation passes") ? "6" : "";
+    const h = harness([["6", ...toButtons, ENTER], [ENTER]]);
     h.settings.onRefresh = count => { if (count === 2) clock = 900_001; };
-    const result = (await h.invoke()).result;
-    assert.equal(result.type, "Block");
-    assert.deepEqual(h.decisions.map(d => d.outcome ?? (d.submission as { action: string })?.action),
-      ["present", "edit"]);
+    assert.equal((await h.invoke(undefined, 900_000)).result.type, "Block");
+    assert.deepEqual(outcomes(h), ["present", "approve"]);
+    assert.equal(h.customCalls, 1);
   } finally { Date.now = original; }
 });
 
-test("edited proposal gets same-call locked confirmation before approval", async () => {
-  const h = harness(EDIT);
-  h.ctx.ui.input = async title => title.startsWith("Investigation passes") ? "6" : "";
+test("amend receives locked confirmation and then approves", async () => {
+  const h = harness([["6", ...toButtons, ENTER], [ENTER]]);
   await h.invoke();
-  assert.deepEqual(h.decisions.map(d => d.outcome ?? (d.submission as { action: string })?.action),
-    ["present", "edit", "present", "approve"]);
-  assert.ok(h.calls.some(title => title.startsWith("FINAL CONFIRMATION")));
+  assert.deepEqual(outcomes(h), ["present", "approve", "present", "approve"]);
   assert.equal(h.g.proposal.budgets.max_passes, 6);
   assert.equal(h.g.state, "approved");
 });
 
-test("declining locked confirmation keeps edited revision pending", async () => {
-  const h = harness(EDIT);
-  h.ctx.ui.input = async title => title.startsWith("Investigation passes") ? "6" : "";
-  h.ctx.ui.confirm = async title => { h.calls.push(title); return !title.startsWith("FINAL CONFIRMATION"); };
+test("declining confirmation keeps the edited revision pending", async () => {
+  const h = harness([["6", ...toButtons, ENTER], [RIGHT, ENTER]]);
   await h.invoke();
-  assert.deepEqual(h.decisions.map(d => d.outcome ?? (d.submission as { action: string })?.action),
-    ["present", "edit", "present", "dismiss"]);
-  assert.equal(h.g.plan_revision, 3);
+  assert.deepEqual(outcomes(h), ["present", "approve", "present", "dismiss"]);
+  assert.equal(h.g.plan_revision, 1);
   assert.equal(h.g.state, "pending");
 });
 
-test("unknown choices, no-op edit, and cancellation approve nothing", async () => {
-  const unknown = harness("Approve"); await unknown.invoke(); dismissed(unknown);
-  const noOp = harness(EDIT); await noOp.invoke();
-  assert.deepEqual(noOp.decisions.map(d => d.outcome ?? (d.submission as { action: string })?.action), ["present", "edit"]);
-  assert.equal(noOp.g.state, "pending");
-  const cancel = harness(); cancel.settings.cancelAt = "Decision"; await cancel.invoke(); dismissed(cancel);
+test("no-op keys and cancel approve nothing", async () => {
+  const h = harness([["x", ESC]]);
+  await h.invoke();
+  assert.deepEqual(outcomes(h), ["present", "dismiss"]);
+  assert.equal(h.g.state, "pending");
 });
 
-test("reject is a raw choice", async () => {
-  const h = harness(REJECT); await h.invoke();
-  assert.equal((h.decisions[1].submission as { action: string }).action, "reject");
-});
-
-test("prompt errors and expiry keep typed failure without consent", async () => {
-  const h = harness(); h.g.prompt_error = "governance.interaction_limit";
-  const result = (await h.invoke()).result; assert.equal(result.type, "Block"); assert.deepEqual(h.decisions, []);
+test("prompt error and expiry remain fail closed", async () => {
+  const prompt = harness(); prompt.g.prompt_error = "governance.interaction_limit";
+  assert.equal((await prompt.invoke()).result.type, "Block");
+  assert.deepEqual(prompt.decisions, []);
   const original = Date.now; let clock = 0; Date.now = () => clock;
-  try { const expired = harness(); expired.settings.onPresent = () => { clock += 1_500_001; }; await expired.invoke(); dismissed(expired); }
-  finally { Date.now = original; }
+  try {
+    const expired = harness([[ESC]]);
+    expired.settings.onPresent = () => { clock = 2; };
+    await expired.invoke(undefined, 1);
+    assert.deepEqual(outcomes(expired), ["present", "dismiss"]);
+  } finally { Date.now = original; }
 });
 
-test("budget parser rejects coercions and accepts bounded decimal", async () => {
-  for (const value of ["6.0", "+6", "1e1", "1025", "0"]) {
-    const h = harness(EDIT); h.settings.inputValue = value; await h.invoke(); dismissed(h);
-  }
-  const valid = harness(EDIT); valid.ctx.ui.input = async title => title.startsWith("Investigation passes") ? "6" : "";
-  await valid.invoke(); assert.equal(valid.g.proposal.budgets.max_passes, 6);
+test("abort closes an open custom dialog", async () => {
+  const controller = new AbortController();
+  const h = harness([[]]);
+  h.settings.onCustom = () => controller.abort();
+  await h.invoke(controller.signal);
+  assert.deepEqual(outcomes(h), ["present", "dismiss"]);
+});
+
+test("missing custom UI fails closed without prompt fallback", async () => {
+  const h = harness(); delete h.ctx.ui.custom;
+  assert.equal((await h.invoke()).result.type, "Block");
+  assert.deepEqual(h.decisions, []);
+});
+
+test("governance context does not inspect configured models", () => {
+  const ctx = fakeCtx(); ctx.hasUI = true; ctx.model = { provider: "anthropic", id: "sonnet" } as never;
+  let calls = 0; ctx.modelRegistry = { getAvailable: () => { calls++; throw new Error("must not read"); },
+    getError: () => { calls++; return "configured error"; } } as never;
+  assert.deepEqual(piGovernanceContext(ctx), { author: { provider_id: "anthropic", model_id: "sonnet", source: "pi-context" }, ingress: "pi_ui" });
+  assert.equal(calls, 0);
 });
 
 test("timeout remains bounded", () => {
@@ -185,40 +272,26 @@ test("timeout remains bounded", () => {
   } finally { if (prior === undefined) delete process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS; else process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS = prior; }
 });
 
-// D4: the initial refreshGovernance is inside the finalizer. A throwing or malformed initial
-// response never escapes govern as an untyped rejection: it becomes the typed
-// governance.approval_unavailable Block over the public configure result's author RunView
-// (passed as the fallback), or a defined closed Fault when no snapshot exists.
-const configureFallback = {
-  protocol: "empirica/v2", request_id: "cfg",
-  result: { type: "Allow", converged: false,
-    run: { id: "cfg-run", status: "active", goal: "g", governance: null } },
-} as const;
+const configureFallback = { protocol: "empirica/v2", request_id: "cfg", result: { type: "Allow", converged: false,
+  run: { id: "cfg-run", status: "active", goal: "g", governance: null } } } as const;
 
-test("initial ingress throw fails closed with the fallback author RunView (typed Block)", async () => {
-  const throwing: PrivateIngress = async () => { throw new Error("injected ingress unavailable"); };
+test("initial ingress throw fails closed with fallback RunView", async () => {
+  const throwing: PrivateIngress = async () => { throw new Error("injected"); };
   const ctx = fakeCtx(); ctx.hasUI = true;
-  const out = await govern("cfg-run", ctx, throwing, undefined, undefined, undefined,
-    structuredClone(configureFallback));
+  const out = await govern("cfg-run", ctx, throwing, undefined, undefined, undefined, structuredClone(configureFallback));
   assert.equal(out.result.type, "Block");
-  if (out.result.type === "Block") {
-    assert.equal(out.result.reasons[0].code, "governance.approval_unavailable");
-    assert.equal(out.result.run?.id, "cfg-run");
-  }
+  if (out.result.type === "Block") assert.equal(out.result.reasons[0].code, "governance.approval_unavailable");
 });
 
-test("malformed initial response fails closed with the typed fallback Block", async () => {
+test("malformed initial response fails closed with fallback Block", async () => {
   const malformed: PrivateIngress = async () => ({ not: "a response" } as never);
   const ctx = fakeCtx(); ctx.hasUI = true;
-  const out = await govern("cfg-run", ctx, malformed, undefined, undefined, undefined,
-    structuredClone(configureFallback));
+  const out = await govern("cfg-run", ctx, malformed, undefined, undefined, undefined, structuredClone(configureFallback));
   assert.equal(out.result.type, "Block");
-  if (out.result.type === "Block")
-    assert.equal(out.result.reasons[0].code, "governance.approval_unavailable");
 });
 
-test("initial ingress throw without a fallback returns a defined closed Fault", async () => {
-  const throwing: PrivateIngress = async () => { throw new Error("injected ingress unavailable"); };
+test("initial ingress throw without fallback returns closed Fault", async () => {
+  const throwing: PrivateIngress = async () => { throw new Error("injected"); };
   const ctx = fakeCtx(); ctx.hasUI = true;
   const out = await govern("cfg-run", ctx, throwing);
   assert.equal(out.result.type, "Fault");

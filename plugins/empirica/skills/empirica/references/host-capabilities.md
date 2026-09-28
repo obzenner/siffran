@@ -57,9 +57,10 @@ configured result model and binds identity to the final native assistant record 
 host-generated child session only when that record's verdict equals the admitted result. Missing
 or ambiguous session evidence remains unverified and blocks. Pi has no native completion veto;
 call `report_convergence` before any status claim. Bare Pi without the subagent surface is
-unsupported even when its harness version lies in the compatible range. Governance dialog API
-signatures were checked on installed Pi 0.87.1 only; that is not qualification of the pinned
-0.84.1 surface or a native human approval receipt.
+unsupported even when its harness version lies in the compatible range. The pinned Pi 0.84.3
+`ctx.ui.custom()` API and required `pi-tui` width/wrapping exports are verified statically. Pi uses one
+custom governance component and fails closed when that surface is absent; there is no select/input/
+confirm prompt-chain fallback.
 
 ## Codex CLI observational profile (`>=0.146.0,<0.147.0`)
 

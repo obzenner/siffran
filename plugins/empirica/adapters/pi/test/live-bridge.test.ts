@@ -81,20 +81,16 @@ test("Pi raw edit and locked approval cross the actual private Python service", 
   const ctx = fakeCtx(testRepo); ctx.hasUI = true; ctx.model = author;
   ctx.modelRegistry = { getAvailable: () => { throw new Error("governance must not enumerate models"); } };
   const ui: string[] = [], payloads: Array<Record<string, unknown>> = [];
-  ctx.ui.confirm = async (title, message) => {
-    ui.push(title);
-    if (title.startsWith("FINAL CONFIRMATION")) {
-      assert.match(message, /Child spawns: proposed 2/);
-      assert.match(message, /Audit spawns: proposed 2/);
-      const pending = runOf(await dispatch(getRunRequest(run.id, "decision-pending")));
-      assert.equal(pending.governance?.state, "pending");
-      assert.equal(pending.governance?.approved_digest, null);
-    }
-    return true;
-  };
-  ctx.ui.select = async (title) => title === "Decision" ? "Edit configuration for another review" : "Enabled";
-  ctx.ui.input = async title => title.startsWith("Investigation passes") ? "8"
-    : title.startsWith("Child spawns") || title.startsWith("Audit spawns") ? "2" : "";
+  let dialogs = 0;
+  ctx.ui.custom = async factory => await new Promise(resolve => {
+    const component = factory({ requestRender() {} }, { fg: (_color, text) => text }, {}, resolve);
+    ui.push(...component.render(80));
+    dialogs++;
+    const keys = dialogs === 1
+      ? ["8", "\x1b[B", "2", "\x1b[B", "2", "\x1b[B", " ", "\x1b[B", " ", "\x1b[B", "\r"]
+      : ["\r"];
+    for (const key of keys) component.handleInput(key);
+  });
   const previous = { EMPIRICA_HOME: process.env.EMPIRICA_HOME, EMPIRICA_REPO_DIR: process.env.EMPIRICA_REPO_DIR };
   try {
     process.env.EMPIRICA_HOME = testHome; process.env.EMPIRICA_REPO_DIR = testRepo;
@@ -114,8 +110,9 @@ test("Pi raw edit and locked approval cross the actual private Python service", 
     assert.ok(persisted.obligations.active.some((row: { id: string; status: string }) =>
       row.id === "obligation.investigation" && row.status === "residual"));
     assert.deepEqual(payloads.map(p => p.outcome ?? (p.submission as { action: string })?.action),
-      ["present", "edit", "present", "approve"]);
-    assert.equal(ui.filter(title => title.startsWith("FINAL CONFIRMATION")).length, 1);
+      ["present", "approve", "present", "approve"]);
+    assert.equal(dialogs, 2);
+    assert.ok(ui.some(line => line.includes("confirm edited configuration")));
     assert.ok(!ui.includes("Inventory is complete and authorized"));
   } finally {
     for (const [key, value] of Object.entries(previous)) {

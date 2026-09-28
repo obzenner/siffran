@@ -111,8 +111,14 @@
           "additionalProperties": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["evidence"],
-            "properties": {"evidence": {"type": "boolean"}}
+            "required": [
+              "evidence"
+            ],
+            "properties": {
+              "evidence": {
+                "type": "boolean"
+              }
+            }
           }
         }
       }
@@ -353,7 +359,7 @@
         "terminal_sections",
         "unknown_reason_sections"
       ],
-      "description": "Canonical ordered presentation selector registry (D1 §12). The JSON registry is the executable SSOT; exact operation-context key parity and section resolution are enforced procedurally (no Python selector mapping).",
+      "description": "Canonical ordered presentation selector registry (D1 \u00a712). The JSON registry is the executable SSOT; exact operation-context key parity and section resolution are enforced procedurally (no Python selector mapping).",
       "properties": {
         "context_sections": {
           "type": "object",
@@ -400,7 +406,10 @@
         "late_route_must"
       ],
       "properties": {
-        "late_route_must": {"type": "string", "minLength": 1},
+        "late_route_must": {
+          "type": "string",
+          "minLength": 1
+        },
         "requirements": {
           "type": "array",
           "minItems": 4,
@@ -664,34 +673,10 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "actions",
             "budgets",
             "modes"
           ],
           "properties": {
-            "actions": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "approve",
-                "edit",
-                "reject"
-              ],
-              "properties": {
-                "approve": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "edit": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "reject": {
-                  "type": "string",
-                  "minLength": 1
-                }
-              }
-            },
             "budgets": {
               "type": "object",
               "additionalProperties": false,
@@ -721,12 +706,10 @@
               ],
               "properties": {
                 "multi_provider": {
-                  "type": "string",
-                  "minLength": 1
+                  "$ref": "#/$defs/governanceModeControl"
                 },
                 "cli_exec": {
-                  "type": "string",
-                  "minLength": 1
+                  "$ref": "#/$defs/governanceModeControl"
                 }
               }
             }
@@ -736,14 +719,9 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "title",
             "actions"
           ],
           "properties": {
-            "title": {
-              "type": "string",
-              "minLength": 1
-            },
             "actions": {
               "type": "array",
               "prefixItems": [
@@ -949,6 +927,8 @@
       "additionalProperties": false,
       "required": [
         "label",
+        "short",
+        "help",
         "maximum"
       ],
       "properties": {
@@ -959,6 +939,41 @@
         "maximum": {
           "type": "integer",
           "minimum": 1
+        },
+        "short": {
+          "type": "string",
+          "minLength": 1
+        },
+        "help": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "pattern": "[^.]$"
+        }
+      }
+    },
+    "governanceModeControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "short",
+        "help"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "short": {
+          "type": "string",
+          "minLength": 1
+        },
+        "help": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "pattern": "[^.]$"
         }
       }
     }

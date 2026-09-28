@@ -50,7 +50,7 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:228f8189055ceddb3974981f03d4030f57c5f1a234b579c4967c8d12ba10820f"
+REVIEWED_REGISTRY_DIGEST = "sha256:c9f2afb5a8e618ea5644be4e1682531edba3fccb438d2c1891bc7f56c3516b58"
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:9b17d44746e8c4e2981d14575a970a5de286c8262fbdf7e5499faf9ad83a17c2"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"

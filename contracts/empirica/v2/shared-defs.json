@@ -187,13 +187,143 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "review_text",
+        "dialog",
         "scope"
       ],
       "properties": {
-        "review_text": {
-          "type": "string",
-          "minLength": 1
+        "dialog": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "epoch",
+            "control_mode",
+            "state",
+            "reviews_left",
+            "goal",
+            "invocation",
+            "budgets",
+            "modes"
+          ],
+          "properties": {
+            "epoch": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "control_mode": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            },
+            "reviews_left": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "proposal",
+                "total"
+              ],
+              "properties": {
+                "proposal": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "total": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "goal": {
+              "type": "string"
+            },
+            "invocation": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/invocationProvenance"
+                }
+              ]
+            },
+            "budgets": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "key",
+                  "label",
+                  "short",
+                  "help",
+                  "value",
+                  "used",
+                  "minimum",
+                  "maximum"
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "short": {
+                    "type": "string"
+                  },
+                  "help": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "integer"
+                  },
+                  "used": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "minimum": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "maximum": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            },
+            "modes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "key",
+                  "label",
+                  "short",
+                  "help",
+                  "value"
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "short": {
+                    "type": "string"
+                  },
+                  "help": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
         },
         "scope": {
           "anyOf": [
@@ -205,8 +335,7 @@
             }
           ]
         }
-      },
-      "description": "Private governance dialog body. Never present on any public/author RunView; only application governance attaches it to a private context/decision response."
+      }
     }
   }
 }

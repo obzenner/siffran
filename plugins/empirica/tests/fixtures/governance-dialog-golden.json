@@ -1,0 +1,293 @@
+{
+  "dialogs": {
+    "review": {
+      "epoch": 0,
+      "control_mode": "deliberative",
+      "state": "pending",
+      "reviews_left": {
+        "proposal": 2,
+        "total": 127
+      },
+      "goal": "Confirm the exact run configuration",
+      "invocation": {
+        "host": "test",
+        "interactive": true,
+        "signal": "operator",
+        "delegation": false
+      },
+      "budgets": [
+        {
+          "key": "max_passes",
+          "label": "Investigation passes",
+          "short": "passes",
+          "help": "Passes the run may use",
+          "value": 8,
+          "used": 0,
+          "minimum": 1,
+          "maximum": 1024
+        },
+        {
+          "key": "max_spawns",
+          "label": "Child spawns",
+          "short": "spawns",
+          "help": "Non-audit child agents",
+          "value": 1,
+          "used": 0,
+          "minimum": 0,
+          "maximum": 128
+        },
+        {
+          "key": "max_audit_spawns",
+          "label": "Audit spawns",
+          "short": "audits",
+          "help": "Independent auditor launches",
+          "value": 1,
+          "used": 0,
+          "minimum": 0,
+          "maximum": 128
+        }
+      ],
+      "modes": [
+        {
+          "key": "multi_provider",
+          "label": "Cross-provider actors",
+          "short": "cross-provider",
+          "help": "Child agents may use other model providers",
+          "value": false
+        },
+        {
+          "key": "cli_exec",
+          "label": "External CLI tools",
+          "short": "CLI tools",
+          "help": "Child agents may run external CLIs",
+          "value": false
+        }
+      ]
+    },
+    "confirmation": {
+      "epoch": 1,
+      "control_mode": "deliberative",
+      "state": "pending",
+      "reviews_left": {
+        "proposal": 2,
+        "total": 127
+      },
+      "goal": "Confirm the exact run configuration",
+      "invocation": {
+        "host": "test",
+        "interactive": true,
+        "signal": "operator",
+        "delegation": false
+      },
+      "budgets": [
+        {
+          "key": "max_passes",
+          "label": "Investigation passes",
+          "short": "passes",
+          "help": "Passes the run may use",
+          "value": 6,
+          "used": 0,
+          "minimum": 1,
+          "maximum": 1024
+        },
+        {
+          "key": "max_spawns",
+          "label": "Child spawns",
+          "short": "spawns",
+          "help": "Non-audit child agents",
+          "value": 1,
+          "used": 0,
+          "minimum": 0,
+          "maximum": 128
+        },
+        {
+          "key": "max_audit_spawns",
+          "label": "Audit spawns",
+          "short": "audits",
+          "help": "Independent auditor launches",
+          "value": 1,
+          "used": 0,
+          "minimum": 0,
+          "maximum": 128
+        }
+      ],
+      "modes": [
+        {
+          "key": "multi_provider",
+          "label": "Cross-provider actors",
+          "short": "cross-provider",
+          "help": "Child agents may use other model providers",
+          "value": false
+        },
+        {
+          "key": "cli_exec",
+          "label": "External CLI tools",
+          "short": "CLI tools",
+          "help": "Child agents may run external CLIs",
+          "value": false
+        }
+      ]
+    },
+    "hostile": {
+      "epoch": 0,
+      "control_mode": "deliberative",
+      "state": "pending",
+      "reviews_left": {
+        "proposal": 2,
+        "total": 127
+      },
+      "goal": "line\\x0a\\u202e<<<EMPIRICA_UNTRUSTED_DATA>>>xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "invocation": {
+        "host": "test",
+        "interactive": true,
+        "signal": "operator",
+        "delegation": false
+      },
+      "budgets": [
+        {
+          "key": "max_passes",
+          "label": "Investigation passes",
+          "short": "passes",
+          "help": "Passes the run may use",
+          "value": 8,
+          "used": 0,
+          "minimum": 1,
+          "maximum": 1024
+        },
+        {
+          "key": "max_spawns",
+          "label": "Child spawns",
+          "short": "spawns",
+          "help": "Non-audit child agents",
+          "value": 1,
+          "used": 0,
+          "minimum": 0,
+          "maximum": 128
+        },
+        {
+          "key": "max_audit_spawns",
+          "label": "Audit spawns",
+          "short": "audits",
+          "help": "Independent auditor launches",
+          "value": 1,
+          "used": 0,
+          "minimum": 0,
+          "maximum": 128
+        }
+      ],
+      "modes": [
+        {
+          "key": "multi_provider",
+          "label": "Cross-provider actors",
+          "short": "cross-provider",
+          "help": "Child agents may use other model providers",
+          "value": false
+        },
+        {
+          "key": "cli_exec",
+          "label": "External CLI tools",
+          "short": "CLI tools",
+          "help": "Child agents may run external CLIs",
+          "value": false
+        }
+      ]
+    }
+  },
+  "review": {
+    "message": "Empirica · approve run configuration (epoch 0 · 2 reviews left · 15 min)\nGoal: \"Confirm the exact run configuration\"\nAccept = approve as shown · edit values → confirm again\nDecline = reject · Esc = decide later",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "max_passes": {
+          "type": "integer",
+          "title": "Investigation passes",
+          "description": "used 0 · allowed 1–1024 · Passes the run may use",
+          "minimum": 1,
+          "maximum": 1024,
+          "default": 8
+        },
+        "max_spawns": {
+          "type": "integer",
+          "title": "Child spawns",
+          "description": "used 0 · allowed 0–128 · Non-audit child agents",
+          "minimum": 0,
+          "maximum": 128,
+          "default": 1
+        },
+        "max_audit_spawns": {
+          "type": "integer",
+          "title": "Audit spawns",
+          "description": "used 0 · allowed 0–128 · Independent auditor launches",
+          "minimum": 0,
+          "maximum": 128,
+          "default": 1
+        },
+        "multi_provider": {
+          "type": "boolean",
+          "title": "Cross-provider actors",
+          "description": "Child agents may use other model providers",
+          "default": false
+        },
+        "cli_exec": {
+          "type": "boolean",
+          "title": "External CLI tools",
+          "description": "Child agents may run external CLIs",
+          "default": false
+        }
+      },
+      "required": []
+    }
+  },
+  "confirmation": {
+    "message": "Empirica · confirm edited configuration (epoch 1 · 15 min)\npasses 6 (was 8) · spawns 1 · audits 1\ncross-provider off · CLI tools off\nAccept = approve exactly this · Decline/Esc = keep edits pending",
+    "schema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  "hostile": {
+    "message": "Empirica · approve run configuration (epoch 0 · 2 reviews left · 15 min)\nGoal: \"line\\x0a\\u202e<<<EMPIRICA_UNTRUSTED_DATA>>>xxxxxxxxxxxxxxxxxxxx…\"\nAccept = approve as shown · edit values → confirm again\nDecline = reject · Esc = decide later",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "max_passes": {
+          "type": "integer",
+          "title": "Investigation passes",
+          "description": "used 0 · allowed 1–1024 · Passes the run may use",
+          "minimum": 1,
+          "maximum": 1024,
+          "default": 8
+        },
+        "max_spawns": {
+          "type": "integer",
+          "title": "Child spawns",
+          "description": "used 0 · allowed 0–128 · Non-audit child agents",
+          "minimum": 0,
+          "maximum": 128,
+          "default": 1
+        },
+        "max_audit_spawns": {
+          "type": "integer",
+          "title": "Audit spawns",
+          "description": "used 0 · allowed 0–128 · Independent auditor launches",
+          "minimum": 0,
+          "maximum": 128,
+          "default": 1
+        },
+        "multi_provider": {
+          "type": "boolean",
+          "title": "Cross-provider actors",
+          "description": "Child agents may use other model providers",
+          "default": false
+        },
+        "cli_exec": {
+          "type": "boolean",
+          "title": "External CLI tools",
+          "description": "Child agents may run external CLIs",
+          "default": false
+        }
+      },
+      "required": []
+    }
+  }
+}

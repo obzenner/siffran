@@ -25,7 +25,7 @@ _PUBLIC_TOOL_ARTIFACT = (Path(__file__).resolve().parents[1]
 Dispatch = Callable[[dict, str], dict]
 
 
-_PRIVATE_RESULT_KEYS = ("presentation", "review_text", "scope")
+_PRIVATE_RESULT_KEYS = ("presentation", "dialog", "scope")
 
 
 def _contains_private(value: Any) -> bool:

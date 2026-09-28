@@ -139,8 +139,19 @@ const POST_MEDIATION_CEILING = 1200;
 const APPROVED_CONFIGURE = JSON.parse(readFileSync(
   path.join(HERE, "fixtures", "approved-configure-runview.json"), "utf8")) as
   { type: string; converged: boolean; run: { id: string; governance: Record<string, unknown> } };
-const PRESENTATION = { review_text: "GOAL (READ-ONLY)\nReview the run configuration below.",
-  scope: { root: "C0" } };
+const PRESENTATION = { dialog: {
+  epoch: 0, control_mode: "deliberative", state: "pending",
+  reviews_left: { proposal: 2, total: 127 }, goal: "Review the run configuration below.",
+  invocation: { host: "pi", interactive: true, signal: "operator", delegation: false },
+  budgets: [
+    { key: "max_passes", label: "Investigation passes", short: "passes", help: "Investigation passes the run may use", value: 8, used: 0, minimum: 1, maximum: 1024 },
+    { key: "max_spawns", label: "Child spawns", short: "spawns", help: "Non-audit child agents", value: 1, used: 0, minimum: 0, maximum: 128 },
+    { key: "max_audit_spawns", label: "Audit spawns", short: "audits", help: "Independent auditor launches", value: 1, used: 0, minimum: 0, maximum: 128 },
+  ],
+  modes: [
+    { key: "multi_provider", label: "Cross-provider actors", short: "cross-provider", help: "Child agents may use other model providers", value: false },
+    { key: "cli_exec", label: "External CLI tools", short: "CLI tools", help: "Child agents may run external CLIs", value: false },
+  ] }, scope: { root: "C0" } };
 
 function mediatedObserve(choice: "approve" | "dismiss"): {
   observe: () => Promise<{ content: { text: string }[]; details?: unknown }>; } {
@@ -169,10 +180,11 @@ function mediatedObserve(choice: "approve" | "dismiss"): {
   const ctx = fakeCtx("/work/repo",
     [{ customType: "empirica.run", data: { runHandle: APPROVED_CONFIGURE.run.id } }]);
   ctx.hasUI = true;
-  ctx.ui.confirm = async () => choice === "approve";
-  ctx.ui.select = async (title: string) =>
-    title === "Decision" ? "Approve current displayed proposal" : undefined;
-  ctx.ui.input = async () => "";
+  ctx.ui.custom = async factory => await new Promise(resolve => {
+    const component = factory({ requestRender() {} }, { fg: (_color, text) => text }, {}, resolve);
+    component.handleInput(choice === "approve" ? "\r" : "\x1b");
+    if (choice === "approve") component.handleInput("\r");
+  });
   return {
     observe: async () => {
       const sessionStart = pi.handlers.get("session_start") as
@@ -206,7 +218,7 @@ test("empirica_observe configure_run approve: model-visible size stays under the
     assert.equal((details.run?.governance as { state?: string }).state, "approved");
   const text = out.content[0].text;
   // The private presentation injected on the mediated responses must be stripped before display.
-  for (const key of ["presentation", "review_text", "\"scope\""])
+  for (const key of ["presentation", "dialog", "\"scope\""])
     assert.ok(!text.includes(key), `model-visible text leaked ${key}`);
   assert.ok(text.length < POST_MEDIATION_CEILING,
     `post-mediation approve text ${text.length} must stay under ${POST_MEDIATION_CEILING}`);
