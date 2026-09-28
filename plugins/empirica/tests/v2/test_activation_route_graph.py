@@ -271,16 +271,29 @@ class ActivationRouteGraphTests(ConformanceCase):
                     resp = self.dispatch(drv, evaluate(
                         run_id=run_id, intent="report_convergence"))
                 else:
-                    # Malformed variant: submit a malformed graph.
+                    # Malformed variant: submit a structurally valid but semantically invalid graph
+                    # (unknown edge endpoint). The closed schema admits it; core valid_graph
+                    # rejects it as graph.invalid, so it fails at the authoritative layer.
                     resp = self.dispatch(drv, observe_action(
-                        run_id=run_id, action=action_graph(payload={"malformed": True})))
+                        run_id=run_id, action=action_graph(payload={
+                            "root": "C0",
+                            "claims": [{"id": "C0", "text": "Claim C0",
+                                        "gating": True, "kind": "ordinary"}],
+                            "edges": [{"from": "C0", "to": "C1",
+                                       "type": "SupportedBy"}]})))
                 result = self.assert_block_only(resp, ["graph.missing" if label == "missing"
                                                        else "graph.invalid"])
                 self.assertEqual(result["run"]["governance"]["state"], "pending")
-                self.assertIsNone(result["run"]["governance"]["scope"])
+                # scope moved to the private presentation; the reason code and pending state
+                # prove no graph was selected without reading a removed public field.
 
     def test_structurally_invalid_dependency_graphs_are_rejected_without_replacement(self):
-        """Seam 4A: the selected argument is one strict root-connected dependency DAG."""
+        """Seam 4A: the selected argument is one strict root-connected dependency DAG.
+
+        QUAL-1 defence in depth: uniqueness, root membership, acyclicity and reachability stay
+        core-only, so those semantically invalid graphs still reach the coordinator and Block as
+        graph.invalid. A structurally invalid edge type is refused at the wire (invalid_request)
+        by the closed graph schema and never reaches the coordinator; both layers reject it."""
         def claim(cid):
             return {"id": cid, "text": f"Claim {cid}", "gating": True,
                     "kind": "ordinary"}
@@ -301,9 +314,6 @@ class ActivationRouteGraphTests(ConformanceCase):
                                 {"from": "C1", "to": "C0", "type": "SupportedBy"}]},
             "detached": {"root": "C0", "claims": [claim("C0"), claim("C1")],
                          "edges": []},
-            "in-context-edge": {"root": "C0", "claims": [claim("C0"), claim("C1")],
-                                "edges": [{"from": "C0", "to": "C1",
-                                           "type": "InContextOf"}]},
         }
         for label, candidate in variants.items():
             with self.subTest(variant=label):
@@ -320,6 +330,24 @@ class ActivationRouteGraphTests(ConformanceCase):
                 after = self.dispatch(drv, get_argument(run_id=run_id))["result"]["argument"]
                 self.assertEqual(after, before,
                                  "an invalid candidate must not replace the selected graph")
+        # QUAL-1 negative control: a non-SupportedBy edge type is refused at the closed graph
+        # schema before the coordinator sees it, and cannot replace the selected graph.
+        with self.subTest(variant="in-context-edge"):
+            in_context = {"root": "C0", "claims": [claim("C0"), claim("C1")],
+                          "edges": [{"from": "C0", "to": "C1", "type": "InContextOf"}]}
+            drv = self.bind_driver(
+                "D7", "seam-4a",
+                "A non-SupportedBy edge type is refused at the wire and cannot replace the "
+                "previous selected graph")
+            run_id = self.start_run(drv)
+            self.require_graph_admitted(drv, run_id, canonical_graph(n_claims=1))
+            before = self.dispatch(drv, get_argument(run_id=run_id))["result"]["argument"]
+            refused = self.raw_dispatch(drv, observe_action(
+                run_id=run_id, action=action_graph(payload=in_context)))
+            self.assert_fault(refused, code="invalid_request", fail_direction="closed")
+            after = self.dispatch(drv, get_argument(run_id=run_id))["result"]["argument"]
+            self.assertEqual(after, before,
+                             "a wire-refused candidate must not replace the selected graph")
 
     def test_branching_and_shared_dependency_dag_is_admitted(self):
         def claim(cid):

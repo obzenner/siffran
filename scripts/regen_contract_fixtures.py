@@ -12,9 +12,8 @@ PLUGIN = ROOT / "plugins" / "empirica"
 sys.path.insert(0, str(PLUGIN))
 
 from application.protocol import (  # noqa: E402
-    contract_digest, contract_result, projection_controls)
+    contract_digest, contract_result)
 from core.governance import proposal_digest  # noqa: E402
-from core.projection import review_text  # noqa: E402
 
 FIXTURES = ROOT / "contracts" / "empirica" / "v2" / "fixtures"
 
@@ -22,18 +21,21 @@ FIXTURES = ROOT / "contracts" / "empirica" / "v2" / "fixtures"
 def generated(path: Path) -> str:
     document = json.loads(path.read_text(encoding="utf-8"))
     command = document.get("request", {}).get("command", {})
-    if command.get("type") == "GetContract" and "expected" in document:
+    if (command.get("type") == "GetContract" and "expected" in document
+            and not document.get("refused")):
         document["expected"]["result"]["contract_result"] = contract_result(
             command["target"], command.get("section_id"))
     run = document.get("expected", {}).get("result", {}).get("run", {})
     governed = run.get("governance") if isinstance(run, dict) else None
     if isinstance(run.get("contract"), dict):
         run["contract"]["digest"] = contract_digest()
-    if isinstance(governed, dict) and "review_text" in governed:
+    if isinstance(governed, dict) and "proposal_digest" in governed:
         goal = run["goal"]
+        # QUAL-1: review_text and scope moved off the author RunView into the private
+        # presentation object; the RunView governance never carries them.
+        governed.pop("review_text", None)
+        governed.pop("scope", None)
         governed["proposal_digest"] = proposal_digest(goal, governed)
-        governed["review_text"] = review_text(
-            goal, governed, projection_controls(), run.get("invocation"))
     return json.dumps(document, indent=2) + "\n"
 
 

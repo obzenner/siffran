@@ -1372,8 +1372,8 @@ class ConformanceCase(unittest.TestCase):
         return resp
 
     def require_governance_approved(self, drv, run_id: str) -> None:
-        current = self.dispatch(drv, get_run(run_id=run_id))["result"]["run"]
-        if current["governance"]["scope"] is None:
+        argument = self.dispatch(drv, get_argument(run_id=run_id))["result"]
+        if argument.get("type") != "Allow":
             self.dispatch(drv, observe_action(run_id=run_id, action=action_graph(canonical_graph())))
         drv.approve_governance(run_id)
 
@@ -1569,9 +1569,6 @@ class ConformanceCase(unittest.TestCase):
             self.assertNotIn("index", cr, "section projection must not carry a sibling index payload")
             self.assertNotIn("full", cr, "section projection must not carry a sibling full payload")
         elif target == "full":
-            full = cr["full"]
-            self.assertEqual(full["id"], _CONTRACT_ID)
-            self.assertEqual(full["version"], _CONTRACT_VERSION)
-            self.assertNotIn("index", cr, "full projection must not carry a sibling index payload")
-            self.assertNotIn("section_id", cr, "full projection must not carry a sibling section payload")
+            raise self.failureException(
+                "GetContract target: full left the public wire (QUAL-1); it is never a projection")
         return cr

@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import type { ExtensionContext } from "./pi-types.ts";
 import type { PrivateIngress } from "./private-transport.ts";
 import type { Response } from "./contract.ts";
+import { PROTOCOL } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
 import { PUBLIC_TOOLS } from "./public-tools.ts";
 
@@ -17,7 +18,23 @@ interface Proposal {
 interface Governance {
   state: string; control_mode: string; proposal_digest: string; plan_revision: number;
   proposal: Proposal; prompt_error: string | null; budgets: Record<string, number>;
-  review_text: string; context: { author: { provider_id: string; model_id: string } | null; ingress: string };
+  context: { author: { provider_id: string; model_id: string } | null; ingress: string };
+}
+interface Presentation { review_text: string; scope: unknown }
+
+function presentationOf(response: Response): Presentation {
+  const result = response.result as { presentation?: Presentation };
+  return result.presentation ?? { review_text: "", scope: null };
+}
+
+// Sole finalizer strip: return a copy of a governance envelope without the private presentation
+// key, never mutating an object the host UI already consumed.
+function stripPresentation(response: Response): Response {
+  if (response && typeof response === "object" && "presentation" in (response.result as object)) {
+    const { presentation: _dropped, ...rest } = response.result as Record<string, unknown>;
+    return { ...response, result: rest } as Response;
+  }
+  return response;
 }
 
 const USED_COUNTER: Record<string, string> = {
@@ -66,8 +83,40 @@ function parseBudget(key: string, raw: string, g: Governance): number | undefine
 
 export async function govern(runId: string, ctx: ExtensionContext, trusted: PrivateIngress,
                              signal?: AbortSignal, confirmation?: { revision: number; digest: string },
+                             deadline = Date.now() + governanceTimeout(),
+                             fallback?: Response): Promise<Response> {
+  // Sole outer finalizer: run the initial ingress AND the mediation inside the finalizer, strip
+  // the private presentation on every normal return, and convert any thrown mediation/ingress/UI
+  // error (including the initial refresh) into the existing typed fail-closed result — the
+  // governance.approval_unavailable Block over the public configure result's author RunView
+  // (passed in as `fallback`), or a defined closed Fault when no snapshot exists. Never an
+  // untyped rejection.
+  let response: Response;
+  try {
+    response = await refreshGovernance(runId, ctx, trusted);
+  } catch {
+    return fallback && "run" in fallback.result
+      ? stripPresentation(unavailable(fallback))
+      : closedFault("unavailable");
+  }
+  try {
+    return stripPresentation(
+      await mediateGovernance(response, runId, ctx, trusted, signal, confirmation, deadline));
+  } catch {
+    return stripPresentation("run" in response.result ? unavailable(response) : response);
+  }
+}
+
+function closedFault(code: "unavailable" | "corrupt_run" = "unavailable"): Response {
+  // Defined closed Fault when no author RunView exists to present; never an untyped rejection.
+  return { protocol: PROTOCOL, request_id: randomUUID(),
+    result: { type: "Fault", code, fail_direction: "closed" } };
+}
+
+async function mediateGovernance(response: Response, runId: string, ctx: ExtensionContext,
+                             trusted: PrivateIngress, signal?: AbortSignal,
+                             confirmation?: { revision: number; digest: string },
                              deadline = Date.now() + governanceTimeout()): Promise<Response> {
-  const response = await refreshGovernance(runId, ctx, trusted);
   const result = response.result;
   if (!("run" in result) || !result.run || !["Allow", "Inert"].includes(result.type)) return response;
   const g = result.run.governance as Governance | null;
@@ -103,16 +152,18 @@ export async function govern(runId: string, ctx: ExtensionContext, trusted: Priv
     payload: { ...envelope, outcome: "present" } });
   assertResponse(presented, "trusted-governance");
   if (presented.result.type !== "Allow" || !("run" in presented.result)) return presented;
+  // review_text moved off the author RunView into the private presentation of this response.
+  const reviewText = presentationOf(presented).review_text;
   let action = "approve", proposal: Proposal = structuredClone(g.proposal);
   try {
     if (confirmation) {
       const confirmed = await ctx.ui.confirm(DECISIONS.confirmation.title,
-        g.review_text + "\nConfirm = approve this exact revision. Cancel = keep edits pending.", options());
+        reviewText + "\nConfirm = approve this exact revision. Cancel = keep edits pending.", options());
       if (cancelled(confirmed) || confirmed !== true) return dismiss();
     } else {
       const reviewed = await ctx.ui.confirm(
         `Empirica run configuration — epoch ${g.plan_revision}`,
-        g.review_text + `\nHost decision timeout (read-only): ${Math.ceil(Math.max(0, deadline - Date.now()) / 1000)} seconds.` +
+        reviewText + `\nHost decision timeout (read-only): ${Math.ceil(Math.max(0, deadline - Date.now()) / 1000)} seconds.` +
           "\nOK = continue to the decision. Cancel = dismiss without approving anything.", options());
       if (cancelled(reviewed) || reviewed !== true) return dismiss();
       const choice = await ctx.ui.select("Decision", DECISION_CHOICES, options());
@@ -147,8 +198,14 @@ export async function govern(runId: string, ctx: ExtensionContext, trusted: Priv
     }
     const next = "run" in admitted.result ? admitted.result.run?.governance as Governance | undefined : undefined;
     const revised = next && next.plan_revision !== revision;
-    if (!confirmation && ["approve", "edit"].includes(action) && admitted.result.type === "Allow" && revised)
-      return govern(runId, ctx, trusted, signal, { revision: next.plan_revision, digest: next.proposal_digest }, deadline);
+    if (!confirmation && ["approve", "edit"].includes(action) && admitted.result.type === "Allow" && revised) {
+      // Capture the amended identity before refreshing so a concurrent revision is still
+      // detected as stale (the refresh mutates the shared governance snapshot).
+      const confirmRevision = next.plan_revision, confirmDigest = next.proposal_digest;
+      const fresh = await refreshGovernance(runId, ctx, trusted);
+      return mediateGovernance(fresh, runId, ctx, trusted, signal,
+        { revision: confirmRevision, digest: confirmDigest }, deadline);
+    }
     if (action === "edit" && !revised) return unavailable(admitted);
     return admitted;
   } catch { return dismiss(); }

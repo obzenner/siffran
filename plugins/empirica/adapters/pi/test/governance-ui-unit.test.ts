@@ -184,3 +184,43 @@ test("timeout remains bounded", () => {
     process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS = "1"; assert.equal(governanceTimeout(), 1000);
   } finally { if (prior === undefined) delete process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS; else process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS = prior; }
 });
+
+// D4: the initial refreshGovernance is inside the finalizer. A throwing or malformed initial
+// response never escapes govern as an untyped rejection: it becomes the typed
+// governance.approval_unavailable Block over the public configure result's author RunView
+// (passed as the fallback), or a defined closed Fault when no snapshot exists.
+const configureFallback = {
+  protocol: "empirica/v2", request_id: "cfg",
+  result: { type: "Allow", converged: false,
+    run: { id: "cfg-run", status: "active", goal: "g", governance: null } },
+} as const;
+
+test("initial ingress throw fails closed with the fallback author RunView (typed Block)", async () => {
+  const throwing: PrivateIngress = async () => { throw new Error("injected ingress unavailable"); };
+  const ctx = fakeCtx(); ctx.hasUI = true;
+  const out = await govern("cfg-run", ctx, throwing, undefined, undefined, undefined,
+    structuredClone(configureFallback));
+  assert.equal(out.result.type, "Block");
+  if (out.result.type === "Block") {
+    assert.equal(out.result.reasons[0].code, "governance.approval_unavailable");
+    assert.equal(out.result.run?.id, "cfg-run");
+  }
+});
+
+test("malformed initial response fails closed with the typed fallback Block", async () => {
+  const malformed: PrivateIngress = async () => ({ not: "a response" } as never);
+  const ctx = fakeCtx(); ctx.hasUI = true;
+  const out = await govern("cfg-run", ctx, malformed, undefined, undefined, undefined,
+    structuredClone(configureFallback));
+  assert.equal(out.result.type, "Block");
+  if (out.result.type === "Block")
+    assert.equal(out.result.reasons[0].code, "governance.approval_unavailable");
+});
+
+test("initial ingress throw without a fallback returns a defined closed Fault", async () => {
+  const throwing: PrivateIngress = async () => { throw new Error("injected ingress unavailable"); };
+  const ctx = fakeCtx(); ctx.hasUI = true;
+  const out = await govern("cfg-run", ctx, throwing);
+  assert.equal(out.result.type, "Fault");
+  if (out.result.type === "Fault") assert.equal(out.result.fail_direction, "closed");
+});

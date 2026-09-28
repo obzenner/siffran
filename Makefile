@@ -30,6 +30,7 @@ EMPIRICA_PROTOCOL_ISOLATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_protocol
 EMPIRICA_LIVE_RECEIPT_TESTS := $(SCRIPTS)/tests/test_empirica_live_receipts.py
 EMPIRICA_CLAUDE_MCP_LOG_TESTS := $(SCRIPTS)/tests/test_check_claude_mcp_log.py
 EMPIRICA_RUN_CENSUS_TESTS := $(SCRIPTS)/tests/test_empirica_run_census.py
+EMPIRICA_CONTEXT_ECONOMY_TESTS := $(SCRIPTS)/tests/test_empirica_context_economy.py
 CLAUDE_SUBAGENT_MODEL_TESTS := $(SCRIPTS)/tests/test_claude_subagent_models.py
 PI_CANARY_CONFIG_TESTS := $(SCRIPTS)/tests/test_configure_pi_canary.py
 EMPIRICA_D6_STRICT_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d6_strict_v2.py
@@ -88,7 +89,7 @@ check-ci: check-static check-core check-claude check-codex ## Fast contributor g
 	@if [ "$(PI_CHECKS)" = "1" ]; then $(MAKE) check-pi; else printf '$(DIM)Pi suite skipped in CI (PI_CHECKS=1 to include)$(RESET)\n'; fi
 	@printf '\n$(BOLD)CI checks passed.$(RESET)\n'
 
-check-static: lint validate docs-check adr-check empirica-architecture-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check claude-subagent-models-unit-check pi-canary-unit-check pi-validator-unit-check ## Lint, manifests, docs, ADRs, contracts, vendor copies, activation, receipts, canary config
+check-static: lint validate docs-check adr-check empirica-architecture-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check empirica-context-economy-unit-check claude-subagent-models-unit-check pi-canary-unit-check pi-validator-unit-check ## Lint, manifests, docs, ADRs, contracts, vendor copies, activation, receipts, canary config
 	@printf '$(BOLD)==> static suite ok$(RESET)\n'
 
 check-core: ## Fast host-neutral contracts, malformed input, state, bridge, and governance boundaries
@@ -100,6 +101,7 @@ check-core: ## Fast host-neutral contracts, malformed input, state, bridge, and 
 	@$(PYTHON) $(EMPIRICA_PROTOCOL_ISOLATION_TESTS)
 	@$(PYTHON) $(EMPIRICA_LOCATION_TESTS)
 	@$(PYTHON) $(EMPIRICA_PUBLIC_TOOLS_TESTS)
+	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_context_economy
 	@$(PYTHON) $(EMPIRICA_AUDIT_PROTOCOL_TESTS)
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_IDENTITY_TESTS)
 	@$(PYTHON) $(EMPIRICA_STATE_TESTS)
@@ -347,6 +349,15 @@ empirica-claude-mcp-log-unit-check: ## Test native Claude MCP admission-log veri
 .PHONY: empirica-run-census-unit-check
 empirica-run-census-unit-check: ## Test the read-only Empirica run-state census (fixed layout, no writes)
 	@$(PYTHON) $(EMPIRICA_RUN_CENSUS_TESTS)
+
+.PHONY: empirica-context-economy-unit-check
+empirica-context-economy-unit-check: ## Test the model-visible context-economy counter (fixed layout, no writes)
+	@$(PYTHON) $(EMPIRICA_CONTEXT_ECONOMY_TESTS)
+
+.PHONY: empirica-context-economy-report
+empirica-context-economy-report: ## Count model-visible Empirica context from a transcript slice: FILE=... [MAX=chars]
+	@test -n "$(FILE)" || { printf 'FILE is required (newline-delimited Empirica tool results)\n' >&2; exit 2; }
+	@$(PYTHON) $(SCRIPTS)/empirica_context_economy.py "$(FILE)" $(if $(MAX),--max-chars $(MAX),)
 
 .PHONY: claude-subagent-models-unit-check
 claude-subagent-models-unit-check: ## Test the requested-vs-served Claude subagent model report (fixed layout, no writes)

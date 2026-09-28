@@ -150,7 +150,7 @@
     },
     "payload": {
       "type": "object",
-      "description": "Extensible deep graph/evidence/actor domain data; only this object may carry D6-validated payload. The control object itself is closed."
+      "description": "Extensible deep evidence/actor domain data; only this object may carry D6-validated payload. The control object itself is closed."
     },
     "researchPayload": {
       "type": "object",
@@ -572,7 +572,7 @@
           "const": "graph"
         },
         "payload": {
-          "$ref": "#/$defs/payload"
+          "$ref": "#/$defs/graphPayload"
         }
       }
     },
@@ -1072,9 +1072,6 @@
         },
         {
           "$ref": "#/$defs/getContractSection"
-        },
-        {
-          "$ref": "#/$defs/getContractFull"
         }
       ]
     },
@@ -1129,22 +1126,6 @@
         "section_id": {
           "type": "string",
           "minLength": 1
-        }
-      }
-    },
-    "getContractFull": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "type",
-        "target"
-      ],
-      "properties": {
-        "type": {
-          "const": "GetContract"
-        },
-        "target": {
-          "const": "full"
         }
       }
     },
@@ -1398,6 +1379,97 @@
         }
       },
       "description": "Open only for allOf extension; every direct $ref use must set unevaluatedProperties: false."
+    },
+    "graphClaimItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "text",
+        "kind",
+        "gating"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "kind": {
+          "enum": [
+            "ordinary",
+            "needs-experiment",
+            "needs-decision"
+          ]
+        },
+        "gating": {
+          "type": "boolean"
+        }
+      },
+      "description": "Closed author-supplied claim vertex for a graph action; matches core.evaluation.valid_graph. Uniqueness, root membership, acyclicity and reachability stay core-only."
+    },
+    "graphEdgeItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "to",
+        "type"
+      ],
+      "properties": {
+        "from": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "type": {
+          "const": "SupportedBy"
+        }
+      },
+      "description": "Closed author-supplied support edge for a graph action."
+    },
+    "graphPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "root",
+        "claims",
+        "edges"
+      ],
+      "properties": {
+        "root": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "claims": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/graphClaimItem"
+          }
+        },
+        "edges": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/graphEdgeItem"
+          }
+        }
+      },
+      "description": "Closed graph action payload owned by the SSOT and projected into the model-facing tool schema. Defence in depth; core.evaluation.valid_graph remains authoritative."
     }
   }
 }

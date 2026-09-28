@@ -25,6 +25,20 @@ _PUBLIC_TOOL_ARTIFACT = (Path(__file__).resolve().parents[1]
 Dispatch = Callable[[dict, str], dict]
 
 
+_PRIVATE_RESULT_KEYS = ("presentation", "review_text", "scope")
+
+
+def _contains_private(value: Any) -> bool:
+    """Recursively detect any private presentation field anywhere in a model-facing result."""
+    if isinstance(value, dict):
+        if any(key in value for key in _PRIVATE_RESULT_KEYS):
+            return True
+        return any(_contains_private(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_private(item) for item in value)
+    return False
+
+
 def _deref(value: Any) -> Any:
     """Inline local request-schema refs for MCP clients that do not resolve them."""
     if isinstance(value, list):
@@ -76,7 +90,7 @@ def _project_schemas() -> dict[str, dict]:
             },
             "run_id": run_id,
             "target": {
-                "enum": ["index", "section", "full"],
+                "enum": ["index", "section"],
                 "description": (
                     "Contract projection for GetContract. Use section with section_id."
                 ),
@@ -213,13 +227,17 @@ class PublicTools:
         }
         try:
             response = self._dispatch(request, self._profile_id)
-        except Exception:  # public transport failure remains a typed tool error
+            result = response.get("result") if isinstance(response, dict) else None
+            if not isinstance(result, dict):
+                return self._error("Empirica bridge returned no typed result.")
+            if self._govern and name == OBSERVE_TOOL and arguments["action"]["kind"] == "configure_run":
+                result = self._govern(result)
+        except Exception:  # public transport or mediation failure remains a typed tool error
             return self._error("Empirica bridge unavailable.")
-        result = response.get("result") if isinstance(response, dict) else None
-        if not isinstance(result, dict):
-            return self._error("Empirica bridge returned no typed result.")
-        if self._govern and name == OBSERVE_TOOL and arguments["action"]["kind"] == "configure_run":
-            result = self._govern(result)
+        if not isinstance(result, dict) or _contains_private(result):
+            # A misbehaving governor (or any producer) that reintroduces a private presentation
+            # field after dispatch validation becomes a typed closed error with no private payload.
+            return self._error("Empirica returned a non-public result.")
         text = json.dumps(result, sort_keys=True, separators=(",", ":"))
         return {
             "content": [{"type": "text", "text": text}],

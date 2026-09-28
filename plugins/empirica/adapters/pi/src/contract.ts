@@ -74,7 +74,7 @@ export interface GetArgumentCommand {
 
 export interface GetContractCommand {
   type: "GetContract";
-  target: "index" | "section" | "full";
+  target: "index" | "section";
   section_id?: string;
 }
 

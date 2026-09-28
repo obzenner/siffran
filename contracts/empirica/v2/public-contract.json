@@ -33,11 +33,11 @@
       "configure_run",
       "route",
       "investigate",
-      "dispatch",
       "freeze"
     ],
     "host": [
-      "child_reserve"
+      "child_reserve",
+      "dispatch"
     ],
     "trusted": [
       "evidence_leaf",
@@ -62,9 +62,6 @@
         "evidence": false
       },
       "investigate": {
-        "evidence": false
-      },
-      "dispatch": {
         "evidence": false
       },
       "freeze": {
@@ -322,9 +319,21 @@
                 "text": "The supplied goal can be achieved safely.",
                 "gating": true,
                 "kind": "ordinary"
+              },
+              {
+                "id": "C1",
+                "text": "The chosen approach fits the existing architecture.",
+                "gating": true,
+                "kind": "needs-decision"
               }
             ],
-            "edges": []
+            "edges": [
+              {
+                "from": "C0",
+                "to": "C1",
+                "type": "SupportedBy"
+              }
+            ]
           }
         },
         "operation": "graph"
@@ -426,6 +435,10 @@
   "next_actions": {
     "run.start_fresh": {
       "description": "Start a fresh v2 run.",
+      "surface": {
+        "owner": "host",
+        "operation": "StartRun"
+      },
       "params": {
         "type": "object",
         "additionalProperties": false,
@@ -461,6 +474,10 @@
     },
     "graph.record": {
       "description": "Propose a minimal valid claim graph from supplied context; no repository investigation or evidence is required.",
+      "surface": {
+        "tool": "empirica_observe",
+        "action": "graph"
+      },
       "params": {
         "type": "object",
         "additionalProperties": false,
@@ -486,6 +503,10 @@
     },
     "run.inspect": {
       "description": "Inspect the current run residuals and state.",
+      "surface": {
+        "tool": "empirica_read",
+        "operation": "GetRun"
+      },
       "params": {
         "type": "object",
         "additionalProperties": false,
@@ -494,14 +515,18 @@
     },
     "route.record": {
       "description": "Record a routing commitment before investigation.",
+      "surface": {
+        "tool": "empirica_observe",
+        "action": "route"
+      },
       "params": {
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "label"
+          "reason"
         ],
         "properties": {
-          "label": {
+          "reason": {
             "type": "string",
             "minLength": 1
           }
@@ -510,6 +535,10 @@
     },
     "investigation.record": {
       "description": "Record the first investigation witness after routing.",
+      "surface": {
+        "tool": "empirica_observe",
+        "action": "investigate"
+      },
       "params": {
         "type": "object",
         "additionalProperties": false,
@@ -518,15 +547,18 @@
     },
     "research.record": {
       "description": "Record one externally observed Fold-1 research citation bound to a claim.",
+      "surface": {
+        "tool": "empirica_observe",
+        "action": "research"
+      },
       "params": {
         "type": "object",
         "additionalProperties": false,
         "required": [
           "claim_id",
           "source_kind",
-          "source_ref",
-          "citation",
-          "result"
+          "result",
+          "payload"
         ],
         "properties": {
           "claim_id": {
@@ -541,35 +573,50 @@
               "web"
             ]
           },
-          "source_ref": {
-            "type": "string",
-            "minLength": 1
-          },
-          "citation": {
-            "type": "string",
-            "minLength": 1
-          },
-          "observed_content_digest": {
-            "type": "string",
-            "pattern": "^sha256:[0-9a-f]{64}$"
-          },
           "result": {
             "enum": [
               "supports",
               "refutes"
             ]
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source_ref",
+              "citation"
+            ],
+            "properties": {
+              "source_ref": {
+                "type": "string",
+                "minLength": 1
+              },
+              "citation": {
+                "type": "string",
+                "minLength": 1
+              },
+              "observed_content_digest": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              }
+            }
           }
         }
       }
     },
     "spike.run": {
       "description": "Request a deterministic harness spike against active research.",
+      "surface": {
+        "tool": "empirica_observe",
+        "action": "spike_request"
+      },
       "params": {
         "type": "object",
         "additionalProperties": false,
         "required": [
           "claim_id",
-          "command"
+          "command",
+          "dependent_files"
         ],
         "properties": {
           "claim_id": {
@@ -579,28 +626,62 @@
           "command": {
             "type": "string",
             "minLength": 1
+          },
+          "dependent_files": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[^/].*$"
+            }
           }
         }
       }
     },
     "spike.regate": {
       "description": "Re-gate a stale spike with current prerequisites.",
+      "surface": {
+        "tool": "empirica_observe",
+        "action": "spike_request"
+      },
       "params": {
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "claim_id"
+          "claim_id",
+          "command",
+          "dependent_files"
         ],
         "properties": {
           "claim_id": {
             "type": "string",
             "minLength": 1
+          },
+          "command": {
+            "type": "string",
+            "minLength": 1
+          },
+          "dependent_files": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[^/].*$"
+            }
           }
         }
       }
     },
     "human.request_decision": {
       "description": "Request a human decision for a residual claim.",
+      "surface": {
+        "owner": "human",
+        "operation": "decision"
+      },
       "params": {
         "type": "object",
         "additionalProperties": false,
@@ -620,29 +701,59 @@
     },
     "budget.raise": {
       "description": "Propose a ceiling change through configure_run; only renewed host approval can apply it, never auto.",
+      "surface": {
+        "tool": "empirica_observe",
+        "action": "configure_run"
+      },
       "params": {
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "resource"
+          "budgets"
         ],
         "properties": {
-          "resource": {
-            "enum": [
-              "spawn",
-              "audit_spawn",
-              "pass"
-            ]
+          "budgets": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "max_passes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1024
+              },
+              "max_spawns": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 128
+              },
+              "max_audit_spawns": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 128
+              }
+            }
           },
-          "amount": {
-            "type": "integer",
-            "minimum": 1
+          "modes": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "multi_provider": {
+                "type": "boolean"
+              },
+              "cli_exec": {
+                "type": "boolean"
+              }
+            }
           }
         }
       }
     },
     "child.spawn_auditor": {
       "description": "Spawn an independent auditor child.",
+      "surface": {
+        "owner": "host",
+        "operation": "child_reserve"
+      },
       "params": {
         "type": "object",
         "additionalProperties": false,
@@ -663,7 +774,11 @@
       }
     },
     "child.wait": {
-      "description": "Wait for a pending child.",
+      "description": "Await a pending audit child; the host settles it through the trusted child_event lifecycle (Claude SubagentStop, Pi foreground tool result), not a callable wait.",
+      "surface": {
+        "owner": "host",
+        "operation": "child_event"
+      },
       "params": {
         "type": "object",
         "additionalProperties": false,
@@ -677,6 +792,10 @@
     },
     "child.retry": {
       "description": "Retry a failed or rejected child.",
+      "surface": {
+        "owner": "host",
+        "operation": "child_reserve"
+      },
       "params": {
         "type": "object",
         "additionalProperties": false,
@@ -693,18 +812,22 @@
     },
     "residual.accept": {
       "description": "Accept the current residual and stop or continue with it recorded.",
+      "surface": {
+        "tool": "report_convergence",
+        "intent": "stop"
+      },
       "params": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {
-          "note": {
-            "type": "string"
-          }
-        }
+        "properties": {}
       }
     },
     "host.repair_context": {
-      "description": "Host must refresh or repair the observed main-model identity; do not retry configure_run blindly.",
+      "description": "Host must refresh the observed governance context through the trusted governance_context ingress (Pi refreshGovernance, Claude _governance_context); do not retry configure_run blindly.",
+      "surface": {
+        "owner": "host",
+        "operation": "governance_context"
+      },
       "params": {
         "type": "object",
         "additionalProperties": false,
@@ -713,11 +836,49 @@
     },
     "governance.propose": {
       "description": "Correct the configure_run proposal and request a host-mediated configuration decision; cannot self-approve.",
+      "surface": {
+        "tool": "empirica_observe",
+        "action": "configure_run"
+      },
       "params": {
         "type": "object",
         "additionalProperties": false,
         "required": [],
-        "properties": {}
+        "properties": {
+          "budgets": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "max_passes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1024
+              },
+              "max_spawns": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 128
+              },
+              "max_audit_spawns": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 128
+              }
+            }
+          },
+          "modes": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "multi_provider": {
+                "type": "boolean"
+              },
+              "cli_exec": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
       }
     }
   },

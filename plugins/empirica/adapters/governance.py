@@ -27,7 +27,7 @@ def unavailable(result: dict, code: str = "governance.approval_unavailable", *, 
             "next_actions": row["next_actions"]}]}
 
 
-def form(run: dict, *, confirmation: bool = False) -> tuple[str, dict]:
+def form(run: dict, review_text: str, *, confirmation: bool = False) -> tuple[str, dict]:
     g, proposed = run["governance"], run["governance"]["proposal"]
     controls = protocol._GOVERNANCE_CONTROLS
     actions = controls["confirmation"]["actions"] if confirmation else list(controls["actions"])
@@ -41,7 +41,15 @@ def form(run: dict, *, confirmation: bool = False) -> tuple[str, dict]:
     message = controls["confirmation"]["title"] + "\n" if confirmation else ""
     timeout = governance_timeout()
     timeout_text = f"Host decision timeout (read-only): {timeout:g} seconds.\n"
-    return message + timeout_text + g["review_text"], {"type": "object", "properties": props, "required": ["decision"]}
+    return message + timeout_text + review_text, {"type": "object", "properties": props, "required": ["decision"]}
+
+
+def _strip_presentation(result: dict) -> dict:
+    """Return a copy of a governance result envelope without the private presentation key,
+    never mutating an object the host UI already consumed."""
+    if isinstance(result, dict) and "presentation" in result:
+        return {key: value for key, value in result.items() if key != "presentation"}
+    return result
 
 
 class HostGovernance:
@@ -51,6 +59,21 @@ class HostGovernance:
         self.context_ingress, self.decision_ingress = context_ingress, decision_ingress
 
     def __call__(self, result: dict, *, confirmation: bool = False) -> dict:
+        """Sole outer finalizer. Runs one mediation, then (a) returns a copy of the final
+        envelope without the private ``presentation`` key on every normal return, and
+        (b) converts any exception raised during mediation into the existing typed
+        fail-closed result (governance.approval_unavailable Block with the author RunView),
+        never an untyped exception or a private object."""
+        try:
+            mediated = self._mediate(result, confirmation=confirmation)
+        except Exception:
+            run = result.get("run") if isinstance(result, dict) else None
+            if isinstance(run, dict):
+                return _strip_presentation(unavailable(result))
+            return _strip_presentation(result)
+        return _strip_presentation(mediated)
+
+    def _mediate(self, result: dict, *, confirmation: bool = False) -> dict:
         run = result.get("run")
         if result.get("type") != "Allow" or not isinstance(run, dict) or not run.get("governance"):
             return result
@@ -81,7 +104,8 @@ class HostGovernance:
             presented = self.decision_ingress(self.profile, run["id"], {**envelope, "outcome": "present"})["result"]
             if presented.get("type") != "Allow":
                 return presented
-            message, schema = form(presented["run"], confirmation=confirmation)
+            review = (presented.get("presentation") or {}).get("review_text", "")
+            message, schema = form(presented["run"], review, confirmation=confirmation)
             try:
                 answer = self.elicit(message, schema)
                 if not isinstance(answer, dict) or answer.get("action") != "accept" or not isinstance(answer.get("content"), dict):
@@ -115,7 +139,7 @@ class HostGovernance:
         revised = (admitted.get("run", {}).get("governance", {}).get("plan_revision") != g["plan_revision"])
         if not confirmation and action in {"approve", "edit"} and admitted.get("type") == "Allow" and revised:
             # Follow the authoritative amendment result with exactly one locked confirmation.
-            return self(admitted, confirmation=True)
+            return self._mediate(admitted, confirmation=True)
         if action == "edit" and admitted.get("type") in {"Allow", "Inert"} and not revised:
             return unavailable(admitted)
         return admitted

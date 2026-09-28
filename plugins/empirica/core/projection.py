@@ -167,16 +167,23 @@ def project_governance(snapshot: EvaluationSnapshot) -> dict:
     value.update(interactions_remaining=governance.interactions_remaining(snapshot.state.governance),
                  prompt_error=governance.interaction_error(snapshot.state.governance))
     value.pop("receipts")
-    value.update(scope=governance.canonical_graph(snapshot.graph),
-                 budgets=dict(snapshot.state.budgets),
+    value.update(budgets=dict(snapshot.state.budgets),
                  remaining={ceiling: snapshot.state.budgets[ceiling] - snapshot.state.budgets[used]
                             for ceiling, used in governance.CEILINGS.items()},
                  request_ready=bootstrap["request_ready"], display_ready=bootstrap["display_ready"],
                  next_action=bootstrap["next_actions"][-1] if bootstrap["next_actions"] else "run.inspect")
-    value["review_text"] = review_text(snapshot.state.goal, value,
-                                        snapshot.governance_controls,
-                                        snapshot.state.invocation)
     return value
+
+
+def project_presentation(snapshot: EvaluationSnapshot) -> dict:
+    """Private governance dialog body. Owned by the core field-set (review_text, scope) and
+    attached only by the application governance transaction to its private context/decision
+    response; it is never part of the one author RunView returned to the model."""
+    value = project_governance(snapshot)
+    return {"review_text": review_text(snapshot.state.goal, value,
+                                       snapshot.governance_controls,
+                                       snapshot.state.invocation),
+            "scope": governance.canonical_graph(snapshot.graph)}
 
 
 def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] | None = None) -> dict[str, Any]:

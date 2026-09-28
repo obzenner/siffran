@@ -127,6 +127,13 @@ class GovernanceServiceTests(unittest.TestCase):
     def view(self):
         return self.request({"type": "GetRun", "run_id": self.run_id})["run"]
 
+    def presentation(self):
+        """QUAL-1: review_text and scope live only in the private governance presentation.
+        Read them from project_presentation over the current snapshot, never the author RunView."""
+        from core.projection import project_presentation
+        self.view()
+        return project_presentation(self.service._coordinator.last_snapshot)
+
     def decision(self, receipt="receipt", outcome="approve", *, reserve=True, **kwargs):
         """Explicit simulated-host reservation before constructing a final UI decision."""
         g = self.view()["governance"]
@@ -195,7 +202,7 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertEqual(self.action(**examples["route"]["example"])["type"], "Allow")
         self.assertIsNotNone(self.view()["obligations"]["active"][0]["status"])
         self.assertEqual(self.action(**examples["graph"]["example"])["type"], "Allow")
-        self.assertEqual(self.view()["governance"]["scope"]["root"], "C0")
+        self.assertEqual(self.presentation()["scope"]["root"], "C0")
         before = self.view()["governance"]["budgets"]["max_passes"]
         self.assertEqual(self.action(**examples["configure_run"]["example"])["type"], "Allow")
         governed = self.view()["governance"]
@@ -267,7 +274,7 @@ class GovernanceServiceTests(unittest.TestCase):
         governed = governance.revise(state.goal, state.governance)
         historical = replace(state, selected_graph_artifact_id=None, governance=governed)
         self.service._coordinator._commit(key, entry.revision, snapshot, historical, ())
-        self.assertIsNone(self.view()["governance"]["scope"])
+        self.assertIsNone(self.presentation()["scope"])
         self.assertEqual(self.admit(decision)["type"], "Inert")
 
     def test_private_exact_replay_conflict_stale_cross_run_and_cas(self):
@@ -687,7 +694,7 @@ class GovernanceServiceTests(unittest.TestCase):
             self.assertEqual(allowed["run"]["invocation"], invocation)
 
     def test_graphless_review_text_shows_read_only_goal(self):
-        text = self.view()["governance"]["review_text"]
+        text = self.presentation()["review_text"]
         self.assertIn("GOAL (READ-ONLY)", text)
         self.assertIn("governed task", text)
         self.assertIn("INVOCATION (READ-ONLY)", text)
@@ -707,11 +714,11 @@ class GovernanceServiceTests(unittest.TestCase):
         raw = json.dumps(graph, ensure_ascii=True)
         self.assertGreater(len(raw), 1000000)
         self.assertEqual(self.action("graph", payload=json.loads(raw))["type"], "Allow")
-        self.assertEqual(self.view()["governance"]["scope"], graph)
+        self.assertEqual(self.presentation()["scope"], graph)
         for text in ('"' * 2048, "\\" * 2048, "\u0000" * 2048):
             graph["claims"][0]["text"] = text
             self.action("graph", payload=graph)
-            rendered = self.view()["governance"]["review_text"]
+            rendered = self.presentation()["review_text"]
             self.assertIn("| ", rendered)
             self.assertNotIn("\u0000", rendered)
 

@@ -76,3 +76,7 @@ Confidence and terminal state are derived projections, never graph input.
 Submit the canonical graph only through the active host's public author-action
 surface as the `payload` of `{"kind": "graph"}`. The service requires at least
 one valid claim. Trusted host actions are not part of graph submission.
+
+When resuming a run after host compaction or restore, recover the exact `root`, claim `kind`s,
+and `edges` needed to amend the graph from `empirica_read(operation="GetArgument")`; the reduced
+RunView does not carry the typed graph.

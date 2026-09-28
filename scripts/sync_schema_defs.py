@@ -2,8 +2,9 @@
 """Generate local Empirica schema embeddings from explicit canonical sources.
 
 ``shared-defs.json#/$defs`` is the sole source for invocationProvenance and
-identityObservation. ``public-contract.schema.json`` is the sole source for the embedded
-publicContract and its prefixed definitions. Neither source file is rewritten here.
+identityObservation. The dead ``publicContract`` embedding (only reachable through the removed
+``GetContract target: full`` response) is stripped here, not re-embedded. No source file is
+rewritten.
 """
 from __future__ import annotations
 
@@ -18,6 +19,14 @@ CONTRACTS = ROOT / "contracts" / "empirica" / "v2"
 TARGETS = ("request.schema.json", "response.schema.json", "state.schema.json")
 IDENTITY_KEYS = ("identity", "provider_id", "model_id", "policy_version", "source", "observed_by")
 INVOCATION_KEYS = ("host", "interactive", "signal", "delegation")
+# Extra closed shared definitions copied verbatim into the targets that reference them.
+# The graph payload is the SSOT for the model-facing graph action shape (defence in depth for
+# core.evaluation.valid_graph); governancePresentation is the private-only dialog body.
+_GRAPH_DEFS = ("graphClaimItem", "graphEdgeItem", "graphPayload")
+_EXTRA_SHARED_DEFS = {
+    "request.schema.json": _GRAPH_DEFS,
+    "response.schema.json": (*_GRAPH_DEFS, "governancePresentation"),
+}
 _MANAGED_KEY = "x-generated-public-contract-defs"
 _PUBLIC_PREFIX = "publicContract__"
 _STRUCTURAL = frozenset({"type", "additionalProperties", "required", "properties"})
@@ -94,32 +103,18 @@ def _replace_shared(value: object, shared: dict[str, dict],
     return {key: _replace_shared(item, shared, (*path, key)) for key, item in value.items()}
 
 
-def _rewrite_public_refs(value: object) -> object:
-    if isinstance(value, list):
-        return [_rewrite_public_refs(item) for item in value]
-    if not isinstance(value, dict):
-        return value
-    result = {key: _rewrite_public_refs(item) for key, item in value.items()}
-    ref = result.get("$ref")
-    if isinstance(ref, str) and ref.startswith("#/$defs/"):
-        result["$ref"] = f"#/$defs/{_PUBLIC_PREFIX}{ref.split('/')[-1]}"
-    return result
+def _drop_managed_public_defs(response: dict) -> None:
+    """Strip the dead embedded publicContract definitions and their management marker.
 
-
-def _embed_public(response: dict, public_schema: dict) -> None:
-    defs = response["$defs"]
+    QUAL-1 removed ``GetContract target: full`` — the only response path that reached the embedded
+    publicContract — so these definitions are unreachable (a reference-closure check from the
+    response root and privateGovernanceResponse finds no path). Regeneration is idempotent.
+    """
+    defs = response.get("$defs", {})
     for name in response.pop(_MANAGED_KEY, []):
         defs.pop(name, None)
-    public_definition = {key: copy.deepcopy(value) for key, value in public_schema.items()
-                         if key not in {"$schema", "$id", "title", "$defs"}}
-    names = ["publicContract", *(_PUBLIC_PREFIX + name for name in public_schema.get("$defs", {}))]
-    collisions = [name for name in names if name in defs]
-    if collisions:
-        raise SchemaGenerationError("public-contract definition collision at #/$defs/" + collisions[0])
-    defs["publicContract"] = _rewrite_public_refs(public_definition)
-    for name, value in public_schema.get("$defs", {}).items():
-        defs[_PUBLIC_PREFIX + name] = _rewrite_public_refs(copy.deepcopy(value))
-    response[_MANAGED_KEY] = names
+    for name in [n for n in defs if n == "publicContract" or n.startswith(_PUBLIC_PREFIX)]:
+        defs.pop(name, None)
 
 
 def generated_documents() -> dict[str, dict]:
@@ -134,11 +129,14 @@ def generated_documents() -> dict[str, dict]:
         defs.pop("publicContractDefs", None)
         defs["invocationProvenance"] = copy.deepcopy(shared["invocationProvenance"])
         defs["identityObservation"] = copy.deepcopy(shared["identityObservation"])
+        for extra in _EXTRA_SHARED_DEFS.get(name, ()):
+            if extra not in shared:
+                raise SchemaGenerationError(f"missing shared definition #/$defs/{extra}")
+            defs[extra] = copy.deepcopy(shared[extra])
         docs[name] = document
 
-    public_schema = _load("public-contract.schema.json")
     public_contract = _load("public-contract.json")
-    _embed_public(docs["response.schema.json"], public_schema)
+    _drop_managed_public_defs(docs["response.schema.json"])
     refusal_codes = [code for code, row in public_contract["reasons"].items()
                      if row.get("disposition") == "start_refused"]
     block = docs["response.schema.json"]["$defs"]["block"]

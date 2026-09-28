@@ -1,4 +1,5 @@
 {
+  "refused": true,
   "request": {
     "protocol": "empirica/v2",
     "request_id": "fx-getcontract-full",
@@ -7,7 +8,13 @@
       "target": "full"
     }
   },
-  "expected_from_registry": {
-    "target": "full"
+  "expected": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-getcontract-full",
+    "result": {
+      "type": "Fault",
+      "code": "invalid_request",
+      "fail_direction": "closed"
+    }
   }
 }

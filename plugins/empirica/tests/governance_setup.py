@@ -21,7 +21,10 @@ def approve_current(coordinator, run_id, *, author=None, auditor=None):
     author = author or AUTHOR
     before = c.handle({"type": "GetRun", "run_id": run_id}, "test-consent-read")["result"]
     g = before["run"]["governance"]
-    if g["scope"] is None:
+    # scope moved off the author RunView into the private presentation; confirm a graph is
+    # selected through the public GetArgument projection instead of governance.scope.
+    argument = c.handle({"type": "GetArgument", "run_id": run_id}, "test-consent-graph")["result"]
+    if argument.get("type") != "Allow":
         raise AssertionError("explicit test consent requires its actual graph first")
     if g["state"] == "approved":
         return

@@ -130,7 +130,7 @@ export function getArgumentRequest(runId: string, requestId: string): Request {
 }
 
 export function getContractRequest(
-  target: "index" | "section" | "full",
+  target: "index" | "section",
   requestId: string,
   sectionId?: string,
 ): Request {

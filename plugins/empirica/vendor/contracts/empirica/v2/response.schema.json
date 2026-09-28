@@ -1230,7 +1230,6 @@
                 "proposal_digest",
                 "proposal",
                 "context",
-                "scope",
                 "budgets",
                 "remaining",
                 "request_ready",
@@ -1363,94 +1362,6 @@
                     }
                   }
                 },
-                "scope": {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": [
-                        "root",
-                        "claims",
-                        "edges"
-                      ],
-                      "properties": {
-                        "root": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "claims": {
-                          "type": "array",
-                          "minItems": 1,
-                          "maxItems": 32,
-                          "items": {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": [
-                              "id",
-                              "text",
-                              "kind",
-                              "gating"
-                            ],
-                            "properties": {
-                              "id": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 128
-                              },
-                              "text": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 2048
-                              },
-                              "kind": {
-                                "enum": [
-                                  "ordinary",
-                                  "needs-experiment",
-                                  "needs-decision"
-                                ]
-                              },
-                              "gating": {
-                                "type": "boolean"
-                              }
-                            }
-                          }
-                        },
-                        "edges": {
-                          "type": "array",
-                          "maxItems": 128,
-                          "items": {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": [
-                              "from",
-                              "to",
-                              "type"
-                            ],
-                            "properties": {
-                              "from": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 128
-                              },
-                              "to": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 128
-                              },
-                              "type": {
-                                "const": "SupportedBy"
-                              }
-                            }
-                          }
-                        }
-                      }
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
                 "budgets": {
                   "type": "object",
                   "additionalProperties": false,
@@ -1548,10 +1459,6 @@
                     null,
                     "governance.interaction_limit"
                   ]
-                },
-                "review_text": {
-                  "type": "string",
-                  "minLength": 1
                 }
               }
             },
@@ -1830,9 +1737,6 @@
         },
         {
           "$ref": "#/$defs/contractResultSection"
-        },
-        {
-          "$ref": "#/$defs/contractResultFull"
         }
       ]
     },
@@ -1882,28 +1786,6 @@
         },
         "section": {
           "$ref": "#/$defs/contractSection"
-        }
-      }
-    },
-    "contractResultFull": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "target",
-        "digest",
-        "full"
-      ],
-      "description": "GetContract full result carries the canonical PublicContract digest so on-demand discovery can be correlated with RunView contract identity; the digest is not embedded inside PublicContract itself.",
-      "properties": {
-        "target": {
-          "const": "full"
-        },
-        "digest": {
-          "$ref": "#/$defs/digest256",
-          "description": "Canonical digest of public-contract.json computed by the registry_digest algorithm; exact-equal to RunView contract.digest."
-        },
-        "full": {
-          "$ref": "#/$defs/publicContract"
         }
       }
     },
@@ -2729,6 +2611,151 @@
         }
       }
     },
+    "privateAllowPresented": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "converged",
+        "run",
+        "presentation"
+      ],
+      "description": "QUAL-1 private run-bearing Allow: the public author RunView plus the required private governance presentation. Never emitted on the public wire.",
+      "properties": {
+        "type": {
+          "const": "Allow"
+        },
+        "converged": {
+          "type": "boolean"
+        },
+        "run": {
+          "$ref": "#/$defs/runView"
+        },
+        "presentation": {
+          "$ref": "#/$defs/governancePresentation"
+        }
+      }
+    },
+    "privateBlockPresented": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "run",
+        "reasons",
+        "presentation"
+      ],
+      "description": "QUAL-1 private run-bearing Block plus the required private governance presentation.",
+      "properties": {
+        "type": {
+          "const": "Block"
+        },
+        "run": {
+          "$ref": "#/$defs/runView"
+        },
+        "reasons": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/reasonEntry"
+          }
+        },
+        "presentation": {
+          "$ref": "#/$defs/governancePresentation"
+        }
+      }
+    },
+    "privateInertPresented": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "reason",
+        "run",
+        "presentation"
+      ],
+      "description": "QUAL-1 private run-bearing Inert plus the required private governance presentation.",
+      "properties": {
+        "type": {
+          "const": "Inert"
+        },
+        "reason": {
+          "enum": [
+            "no_run",
+            "unsupported_host_event"
+          ]
+        },
+        "run": {
+          "$ref": "#/$defs/runView"
+        },
+        "presentation": {
+          "$ref": "#/$defs/governancePresentation"
+        }
+      }
+    },
+    "privateGovernanceResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "request_id",
+        "result"
+      ],
+      "description": "QUAL-1 private governance response definition: a run-bearing Allow/Block/Inert must carry the private presentation; the public Block/Inert alternatives are restricted to runless results (a run-bearing unpresented Block/Inert is rejected). Validated only inside application governance ingress; the public response schema forbids a presentation key.",
+      "properties": {
+        "protocol": {
+          "const": "empirica/v2"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "result": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/privateAllowPresented"
+            },
+            {
+              "$ref": "#/$defs/privateBlockPresented"
+            },
+            {
+              "$ref": "#/$defs/privateInertPresented"
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/block"
+                },
+                {
+                  "not": {
+                    "required": [
+                      "run"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/inert"
+                },
+                {
+                  "not": {
+                    "required": [
+                      "run"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "$ref": "#/$defs/fault"
+            }
+          ]
+        }
+      }
+    },
     "invocationProvenance": {
       "type": "object",
       "additionalProperties": false,
@@ -2806,904 +2833,121 @@
       },
       "description": "Open only for allOf extension; every direct $ref use must set unevaluatedProperties: false."
     },
-    "publicContract": {
+    "graphClaimItem": {
       "type": "object",
       "additionalProperties": false,
       "required": [
         "id",
-        "version",
-        "protocol",
-        "commands",
-        "decisions",
-        "statuses",
-        "actions",
-        "child_lifecycle",
-        "host_tiers",
-        "audit_execution_modes",
-        "claim_states",
-        "claim_kinds",
-        "audit_states",
-        "independence_states",
-        "freshness_states",
-        "artifact_kinds",
-        "artifact_outcomes",
-        "spike_gates",
-        "attribution_subject_kinds",
-        "attribution_observers",
-        "audit_verdicts",
-        "scope_reviews",
-        "mode_fields",
-        "operation_contexts",
-        "approval_ingress",
-        "untrusted_delimiters",
-        "presentation_selector",
-        "next_actions",
-        "reasons",
-        "sections",
-        "bootstrap",
-        "governance_decisions"
+        "text",
+        "kind",
+        "gating"
       ],
       "properties": {
         "id": {
-          "const": "empirica/public"
-        },
-        "version": {
-          "const": "3.0.0"
-        },
-        "protocol": {
-          "const": "empirica/v2"
-        },
-        "commands": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        },
-        "decisions": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        },
-        "statuses": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        },
-        "actions": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "author",
-            "host",
-            "trusted",
-            "metadata"
-          ],
-          "properties": {
-            "author": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              },
-              "uniqueItems": true
-            },
-            "host": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              },
-              "uniqueItems": true
-            },
-            "trusted": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              },
-              "uniqueItems": true
-            },
-            "metadata": {
-              "type": "object",
-              "additionalProperties": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "evidence"
-                ],
-                "properties": {
-                  "evidence": {
-                    "type": "boolean"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "child_lifecycle": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "states",
-            "terminal_states",
-            "transitions"
-          ],
-          "properties": {
-            "states": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              },
-              "uniqueItems": true
-            },
-            "terminal_states": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              },
-              "uniqueItems": true
-            },
-            "transitions": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "from",
-                  "to"
-                ],
-                "properties": {
-                  "from": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "to": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              },
-              "uniqueItems": true
-            }
-          }
-        },
-        "host_tiers": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        },
-        "audit_execution_modes": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        },
-        "claim_states": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        },
-        "claim_kinds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true,
-          "minItems": 1
-        },
-        "audit_states": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        },
-        "independence_states": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        },
-        "freshness_states": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        },
-        "artifact_kinds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true,
-          "minItems": 1
-        },
-        "artifact_outcomes": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true,
-          "minItems": 1
-        },
-        "spike_gates": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true,
-          "minItems": 1
-        },
-        "attribution_subject_kinds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true,
-          "minItems": 1
-        },
-        "attribution_observers": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true,
-          "minItems": 1
-        },
-        "audit_verdicts": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true,
-          "minItems": 1
-        },
-        "scope_reviews": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true,
-          "minItems": 1
-        },
-        "mode_fields": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        },
-        "operation_contexts": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        },
-        "approval_ingress": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "capability"
-            ],
-            "properties": {
-              "capability": {
-                "enum": [
-                  "unavailable",
-                  "human_configuration"
-                ]
-              }
-            }
-          },
-          "propertyNames": {
-            "enum": [
-              "unavailable",
-              "mcp_elicitation",
-              "pi_ui"
-            ]
-          }
-        },
-        "untrusted_delimiters": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "open",
-            "close"
-          ],
-          "properties": {
-            "open": {
-              "type": "string",
-              "minLength": 1
-            },
-            "close": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        },
-        "presentation_selector": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "context_sections",
-            "terminal_sections",
-            "unknown_reason_sections"
-          ],
-          "description": "Canonical ordered presentation selector registry (D1 §12). The JSON registry is the executable SSOT; exact operation-context key parity and section resolution are enforced procedurally (no Python selector mapping).",
-          "properties": {
-            "context_sections": {
-              "type": "object",
-              "additionalProperties": false,
-              "patternProperties": {
-                "^[a-z][a-z0-9_.-]*$": {
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "uniqueItems": true
-                }
-              }
-            },
-            "terminal_sections": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              },
-              "uniqueItems": true,
-              "minItems": 1
-            },
-            "unknown_reason_sections": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              },
-              "uniqueItems": true,
-              "minItems": 1
-            }
-          }
-        },
-        "bootstrap": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "requirements",
-            "operations",
-            "actions",
-            "tools",
-            "late_route_must"
-          ],
-          "properties": {
-            "late_route_must": {
-              "type": "string",
-              "minLength": 1
-            },
-            "requirements": {
-              "type": "array",
-              "minItems": 4,
-              "maxItems": 4,
-              "uniqueItems": true,
-              "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "predicate",
-                  "obligation_id",
-                  "must"
-                ],
-                "properties": {
-                  "predicate": {
-                    "enum": [
-                      "route.recorded",
-                      "graph.selected",
-                      "governance.approved",
-                      "investigation.recorded"
-                    ]
-                  },
-                  "obligation_id": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "must": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              }
-            },
-            "actions": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "route",
-                "graph",
-                "configure_run",
-                "investigate"
-              ],
-              "properties": {
-                "route": {
-                  "$ref": "#/$defs/publicContract__bootstrapAction"
-                },
-                "graph": {
-                  "$ref": "#/$defs/publicContract__bootstrapAction"
-                },
-                "configure_run": {
-                  "$ref": "#/$defs/publicContract__bootstrapAction"
-                },
-                "investigate": {
-                  "$ref": "#/$defs/publicContract__bootstrapAction"
-                }
-              }
-            },
-            "tools": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "empirica_read",
-                "empirica_observe",
-                "report_convergence"
-              ],
-              "properties": {
-                "empirica_read": {
-                  "$ref": "#/$defs/publicContract__toolGuidance"
-                },
-                "empirica_observe": {
-                  "$ref": "#/$defs/publicContract__toolGuidance"
-                },
-                "report_convergence": {
-                  "$ref": "#/$defs/publicContract__toolGuidance"
-                }
-              }
-            },
-            "operations": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "route",
-                "graph",
-                "configure_run",
-                "governance.present",
-                "investigate",
-                "report_convergence"
-              ],
-              "properties": {
-                "route": {
-                  "$ref": "#/$defs/publicContract__bootstrapOperation"
-                },
-                "graph": {
-                  "$ref": "#/$defs/publicContract__bootstrapOperation"
-                },
-                "configure_run": {
-                  "$ref": "#/$defs/publicContract__bootstrapOperation"
-                },
-                "governance.present": {
-                  "$ref": "#/$defs/publicContract__bootstrapOperation"
-                },
-                "investigate": {
-                  "$ref": "#/$defs/publicContract__bootstrapOperation"
-                },
-                "report_convergence": {
-                  "$ref": "#/$defs/publicContract__bootstrapOperation"
-                }
-              }
-            }
-          }
-        },
-        "next_actions": {
-          "type": "object",
-          "additionalProperties": false,
-          "patternProperties": {
-            "^[a-z][a-z0-9_.-]*$": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "description",
-                "params"
-              ],
-              "properties": {
-                "description": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "params": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        },
-        "reasons": {
-          "type": "object",
-          "additionalProperties": false,
-          "patternProperties": {
-            "^[a-z][a-z0-9_.-]*$": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "params",
-                "next_actions",
-                "sections",
-                "message"
-              ],
-              "properties": {
-                "params": {
-                  "type": "object"
-                },
-                "next_actions": {
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "uniqueItems": true
-                },
-                "sections": {
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "uniqueItems": true
-                },
-                "message": {
-                  "type": "string"
-                },
-                "disposition": {
-                  "enum": [
-                    "start_refused",
-                    "host_recovery"
-                  ]
-                }
-              }
-            }
-          }
-        },
-        "sections": {
-          "type": "object",
-          "additionalProperties": false,
-          "patternProperties": {
-            "^[a-z][a-z0-9_/.-]*$": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "title",
-                "summary",
-                "clauses"
-              ],
-              "properties": {
-                "title": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "summary": {
-                  "type": "string"
-                },
-                "clauses": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "id",
-                      "text"
-                    ],
-                    "properties": {
-                      "id": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "text": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    }
-                  },
-                  "uniqueItems": true
-                }
-              }
-            }
-          }
-        },
-        "governance_decisions": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "actions",
-            "controls",
-            "confirmation"
-          ],
-          "properties": {
-            "actions": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "approve",
-                "edit",
-                "reject"
-              ],
-              "properties": {
-                "approve": {
-                  "$ref": "#/$defs/publicContract__governanceDecisionAction"
-                },
-                "edit": {
-                  "$ref": "#/$defs/publicContract__governanceDecisionAction"
-                },
-                "reject": {
-                  "$ref": "#/$defs/publicContract__governanceDecisionAction"
-                }
-              }
-            },
-            "controls": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "actions",
-                "budgets",
-                "modes"
-              ],
-              "properties": {
-                "actions": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "approve",
-                    "edit",
-                    "reject"
-                  ],
-                  "properties": {
-                    "approve": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "edit": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "reject": {
-                      "type": "string",
-                      "minLength": 1
-                    }
-                  }
-                },
-                "budgets": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "max_passes",
-                    "max_spawns",
-                    "max_audit_spawns"
-                  ],
-                  "properties": {
-                    "max_passes": {
-                      "$ref": "#/$defs/publicContract__governanceBudgetControl"
-                    },
-                    "max_spawns": {
-                      "$ref": "#/$defs/publicContract__governanceBudgetControl"
-                    },
-                    "max_audit_spawns": {
-                      "$ref": "#/$defs/publicContract__governanceBudgetControl"
-                    }
-                  }
-                },
-                "modes": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "multi_provider",
-                    "cli_exec"
-                  ],
-                  "properties": {
-                    "multi_provider": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "cli_exec": {
-                      "type": "string",
-                      "minLength": 1
-                    }
-                  }
-                }
-              }
-            },
-            "confirmation": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "title",
-                "actions"
-              ],
-              "properties": {
-                "title": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "actions": {
-                  "type": "array",
-                  "prefixItems": [
-                    {
-                      "const": "approve"
-                    },
-                    {
-                      "const": "decline"
-                    }
-                  ],
-                  "items": false,
-                  "minItems": 2,
-                  "maxItems": 2
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "publicContract__bootstrapAction": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "operation",
-        "description",
-        "example"
-      ],
-      "properties": {
-        "description": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 128
         },
-        "example": {
-          "type": "object"
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
         },
-        "operation": {
+        "kind": {
           "enum": [
-            "route",
-            "graph",
-            "configure_run",
-            "investigate"
-          ]
-        }
-      }
-    },
-    "publicContract__toolGuidance": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "title",
-        "description"
-      ],
-      "properties": {
-        "title": {
-          "type": "string",
-          "minLength": 1
-        },
-        "description": {
-          "type": "string",
-          "minLength": 1
-        }
-      }
-    },
-    "publicContract__bootstrapOperation": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "preconditions"
-      ],
-      "properties": {
-        "preconditions": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "predicate",
-              "reason"
-            ],
-            "properties": {
-              "predicate": {
-                "enum": [
-                  "route.recorded",
-                  "graph.selected",
-                  "governance.approved",
-                  "investigation.recorded"
-                ]
-              },
-              "reason": {
-                "type": "string",
-                "minLength": 1
-              }
-            }
-          }
-        }
-      }
-    },
-    "publicContract__governanceDecisionAction": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "unchanged_outcome",
-        "changed_outcome"
-      ],
-      "properties": {
-        "unchanged_outcome": {
-          "enum": [
-            "approve",
-            "amend",
-            "reject",
-            "dismiss"
+            "ordinary",
+            "needs-experiment",
+            "needs-decision"
           ]
         },
-        "changed_outcome": {
-          "enum": [
-            "approve",
-            "amend",
-            "reject",
-            "dismiss"
-          ]
+        "gating": {
+          "type": "boolean"
         }
-      }
+      },
+      "description": "Closed author-supplied claim vertex for a graph action; matches core.evaluation.valid_graph. Uniqueness, root membership, acyclicity and reachability stay core-only."
     },
-    "publicContract__governanceBudgetControl": {
+    "graphEdgeItem": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "label",
-        "maximum"
+        "from",
+        "to",
+        "type"
       ],
       "properties": {
-        "label": {
+        "from": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "type": {
+          "const": "SupportedBy"
+        }
+      },
+      "description": "Closed author-supplied support edge for a graph action."
+    },
+    "graphPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "root",
+        "claims",
+        "edges"
+      ],
+      "properties": {
+        "root": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "claims": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/graphClaimItem"
+          }
+        },
+        "edges": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/graphEdgeItem"
+          }
+        }
+      },
+      "description": "Closed graph action payload owned by the SSOT and projected into the model-facing tool schema. Defence in depth; core.evaluation.valid_graph remains authoritative."
+    },
+    "governancePresentation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "review_text",
+        "scope"
+      ],
+      "properties": {
+        "review_text": {
           "type": "string",
           "minLength": 1
         },
-        "maximum": {
-          "type": "integer",
-          "minimum": 1
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/graphPayload"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
-      }
+      },
+      "description": "Private governance dialog body. Never present on any public/author RunView; only application governance attaches it to a private context/decision response."
     }
-  },
-  "x-generated-public-contract-defs": [
-    "publicContract",
-    "publicContract__bootstrapAction",
-    "publicContract__toolGuidance",
-    "publicContract__bootstrapOperation",
-    "publicContract__governanceDecisionAction",
-    "publicContract__governanceBudgetControl"
-  ]
+  }
 }

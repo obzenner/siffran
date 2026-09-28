@@ -5,13 +5,15 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createEmpiricaExtension, DEFAULT_SKILLS_DIR } from "../src/index.ts";
 import type { Response } from "../src/contract.ts";
-import { FakePi } from "./fakes.ts";
+import type { Request } from "../src/contract.ts";
+import type { PrivateIngress } from "../src/private-transport.ts";
+import { FakePi, fakeCtx } from "./fakes.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -93,4 +95,122 @@ test("every registered tool declares a JSON-Schema object parameters block", () 
     assert.equal(schema.type, "object", `${def.name}: parameters.type must be "object"`);
     assert.equal(typeof schema.properties, "object", `${def.name}: parameters.properties missing`);
   }
+});
+
+// D4 at the observe-tool boundary: when the configure_run governance ingress is unavailable, the
+// model-facing observe result is the typed governance.approval_unavailable Block over the public
+// configure RunView, never a host-level tool failure (untyped rejection).
+test("empirica_observe configure_run fails closed when the governance ingress throws", async () => {
+  const pi = new FakePi();
+  const configureRun = {
+    id: "obs-run", status: "active", goal: "g",
+    governance: { state: "pending", control_mode: "deliberative" },
+  };
+  const dispatch = (request: Request): Response => ({
+    protocol: "empirica/v2", request_id: request.request_id,
+    result: { type: "Allow", converged: false, run: configureRun as never },
+  });
+  const throwingIngress: PrivateIngress = async () => {
+    throw new Error("injected governance ingress unavailable");
+  };
+  createEmpiricaExtension({ dispatch, privateIngress: throwingIngress })(pi);
+  // Restore the durable run handle; session_start's own refresh throws (ingress down) but the
+  // handle is already set, so the observe tool has an active run to gate.
+  const ctx = fakeCtx("/work/repo", [{ customType: "empirica.run", data: { runHandle: "obs-run" } }]);
+  ctx.hasUI = true;
+  const sessionStart = pi.handlers.get("session_start") as
+    (e: unknown, c: unknown) => Promise<void>;
+  await sessionStart({}, ctx).catch(() => {});
+  const observe = pi.tools.get("empirica_observe");
+  assert.ok(observe, "empirica_observe must be registered");
+  const out = await observe!.execute(
+    "call-1", { action: { kind: "configure_run" } },
+    new AbortController().signal, () => {}, ctx);
+  const details = out.details as Response["result"];
+  assert.equal(details.type, "Block");
+  if (details.type === "Block")
+    assert.equal(details.reasons[0].code, "governance.approval_unavailable");
+});
+
+// D2 (QUAL-1-F2 item 4): the model-visible size of the Pi observe return AFTER real host
+// mediation. The observe boundary emits `JSON.stringify(response.result)` (index.ts resultText),
+// so this drives configure_run through the actual observe execute + govern with an injected
+// ingress/UI, over a production-shaped approved configure RunView, and measures the exact text
+// the model reads. The private presentation is injected on the mediated responses and must be
+// stripped before it reaches the model; the model-visible text stays under the shared 3300 char
+// ceiling (matching the Python C5 measurements).
+const POST_MEDIATION_CEILING = 3300;
+const APPROVED_CONFIGURE = JSON.parse(readFileSync(
+  path.join(HERE, "fixtures", "approved-configure-runview.json"), "utf8")) as
+  { type: string; converged: boolean; run: { id: string; governance: Record<string, unknown> } };
+const PRESENTATION = { review_text: "GOAL (READ-ONLY)\nReview the run configuration below.",
+  scope: { root: "C0" } };
+
+function mediatedObserve(choice: "approve" | "dismiss"): {
+  observe: () => Promise<{ content: { text: string }[]; details?: unknown }>; } {
+  const pi = new FakePi();
+  const approvedRun = structuredClone(APPROVED_CONFIGURE.run);
+  const pendingRun = structuredClone(APPROVED_CONFIGURE.run);
+  (pendingRun.governance as { state: string }).state = "pending";
+  const allow = (run: unknown, withPresentation: boolean): Record<string, unknown> => ({
+    protocol: "empirica/v2", request_id: "trusted-governance",
+    result: withPresentation
+      ? { type: "Allow", converged: false, run, presentation: PRESENTATION }
+      : { type: "Allow", converged: false, run },
+  });
+  const dispatch = (request: Request): Response => ({
+    protocol: "empirica/v2", request_id: request.request_id,
+    result: { type: "Allow", converged: false, run: pendingRun as never },
+  });
+  const trusted: PrivateIngress = async (request) => {
+    if (request.operation === "governance_context") return allow(pendingRun, true);
+    const payload = request.payload as { outcome?: string; submission?: { action: string } };
+    if (payload.outcome === "present") return allow(pendingRun, true);
+    if (payload.submission?.action === "approve") return allow(approvedRun, true);
+    return allow(pendingRun, false); // dismiss / stored
+  };
+  createEmpiricaExtension({ dispatch, privateIngress: trusted })(pi);
+  const ctx = fakeCtx("/work/repo",
+    [{ customType: "empirica.run", data: { runHandle: APPROVED_CONFIGURE.run.id } }]);
+  ctx.hasUI = true;
+  ctx.ui.confirm = async () => choice === "approve";
+  ctx.ui.select = async (title: string) =>
+    title === "Decision" ? "Approve current displayed proposal" : undefined;
+  ctx.ui.input = async () => "";
+  return {
+    observe: async () => {
+      const sessionStart = pi.handlers.get("session_start") as
+        (e: unknown, c: unknown) => Promise<void>;
+      await sessionStart({}, ctx).catch(() => {});
+      const tool = pi.tools.get("empirica_observe");
+      assert.ok(tool, "empirica_observe must be registered");
+      return tool!.execute("call-1", { action: { kind: "configure_run" } },
+        new AbortController().signal, () => {}, ctx);
+    },
+  };
+}
+
+test("empirica_observe configure_run approve: model-visible size stays under the ceiling, no private leak", async () => {
+  const out = await mediatedObserve("approve").observe();
+  const details = out.details as Response["result"];
+  assert.equal(details.type, "Allow", "approve must return Allow");
+  if (details.type === "Allow")
+    assert.equal((details.run?.governance as { state?: string }).state, "approved");
+  const text = out.content[0].text;
+  // The private presentation injected on the mediated responses must be stripped before display.
+  for (const key of ["presentation", "review_text", "\"scope\""])
+    assert.ok(!text.includes(key), `model-visible text leaked ${key}`);
+  assert.ok(text.length < POST_MEDIATION_CEILING,
+    `post-mediation approve text ${text.length} must stay under ${POST_MEDIATION_CEILING}`);
+});
+
+test("empirica_observe configure_run dismiss: pending Block model-visible size stays under the ceiling", async () => {
+  const out = await mediatedObserve("dismiss").observe();
+  const details = out.details as Response["result"];
+  assert.equal(details.type, "Block", "dismiss must return the documented pending Block");
+  if (details.type === "Block")
+    assert.equal(details.reasons[0].code, "governance.approval_unavailable");
+  const text = out.content[0].text;
+  assert.ok(text.length < POST_MEDIATION_CEILING,
+    `post-mediation dismiss text ${text.length} must stay under ${POST_MEDIATION_CEILING}`);
 });

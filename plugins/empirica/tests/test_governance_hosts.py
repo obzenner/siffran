@@ -327,6 +327,29 @@ class GovernanceHostTests(unittest.TestCase):
         result = self.dispatch({"type": "ObserveAction", "run_id": self.run, "action": {"kind": "investigate"}})
         self.assertEqual(result["result"]["type"], "Allow")
 
+    def test_hook_translation_of_an_actor_cli_still_fails_closed(self):
+        """The Claude PreToolUse hook is dispatch's only producer: it translates an actor-CLI Bash
+        call into an ObserveAction(dispatch) submitted through the bridge. dispatch is a host
+        action with no core evaluation, so even a fully approved and investigated run refuses it
+        with the exact unsupported/closed Fault. No public author schema exposes the kind."""
+        from adapters.claude.dispatch import build_dispatch_request
+        self.initialize({"elicitation": {"form": {}}})
+        self.assertEqual(self.propose()["result"]["structuredContent"]["run"]["governance"]["state"],
+                         "approved")
+        self.dispatch({"type": "ObserveAction", "run_id": self.run,
+                       "action": {"kind": "route", "reason": "supplied"}})
+        self.assertEqual(self.dispatch({"type": "ObserveAction", "run_id": self.run,
+                                        "action": {"kind": "investigate"}})["result"]["type"], "Allow")
+        payload = {"session_id": "claude-session", "cwd": ".", "tool_name": "Bash",
+                   "tool_input": {"command": "codex exec --model openai.gpt-5 resolve G0"}}
+        request = build_dispatch_request(payload, self.run, claim_id="C0",
+                                         correlation_id="claude-dispatch")
+        self.assertEqual(request["command"]["action"],
+                         {"kind": "dispatch", "target": "codex", "claim_id": "C0"})
+        result = self.service.dispatch(request)["result"]
+        self.assertEqual(result, {"type": "Fault", "code": "unsupported",
+                                  "fail_direction": "closed"})
+
     def test_cancel_decline_timeout_and_wrong_id_never_approve(self):
         self.initialize({"elicitation": {}})
         for action in ("cancel", "decline", "timeout"):
@@ -422,7 +445,12 @@ class GovernanceHostTests(unittest.TestCase):
         self.assertEqual(len(self.session.tools.definitions()), 3)
         self.assertNotIn("governance_decision", repr(self.session.tools.definitions()))
         view = self.dispatch({"type": "GetRun", "run_id": self.run})["result"]["run"]
-        self.assertIn(view["governance"]["proposal_digest"], form(view)[0])
+        # review_text now lives in the private presentation, not the author RunView; rebuild it
+        # here to assert the form body carries the proposal digest but no work/author content.
+        from core.projection import review_text
+        review = review_text(view["goal"], view["governance"], _proto._PROJECTION_CONTROLS,
+                             view.get("invocation"))
+        self.assertIn(view["governance"]["proposal_digest"], form(view, review)[0])
 
 
 class GovernancePresentationTests(unittest.TestCase):

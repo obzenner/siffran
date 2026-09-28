@@ -12,7 +12,7 @@ from core.evaluation import (READ_COMMANDS, SPAWN_BUDGET, Decision, EvaluationSn
                              audit_operation_current, digest,
                              evaluate_snapshot, frozen_scope_invalid, plan_spike_request,
                              plan_spike_result, valid_attribution)
-from core.projection import project_argument, project_runview
+from core.projection import project_argument, project_runview, project_presentation
 from core.records import Conflict, Corrupt, RunKey
 from core.run import OperationalState, start_admission
 from . import protocol as _proto
@@ -482,10 +482,13 @@ class Coordinator:
                 "result": {"type": "Fault", "code": "conflict", "fail_direction": "closed",
                            "run": project_runview(snapshot)}}
 
-    def _inert_with_run(self, request_id: str, snapshot: EvaluationSnapshot):
-        return {"protocol": _proto._PROTOCOL, "request_id": request_id,
-                "result": {"type": "Inert", "reason": "unsupported_host_event",
-                           "run": project_runview(snapshot)}}
+    def _inert_with_run(self, request_id: str, snapshot: EvaluationSnapshot, *,
+                        presentation: bool = False):
+        result = {"type": "Inert", "reason": "unsupported_host_event",
+                  "run": project_runview(snapshot)}
+        if presentation:
+            result["presentation"] = project_presentation(snapshot)
+        return {"protocol": _proto._PROTOCOL, "request_id": request_id, "result": result}
 
     def _spike(self, key: RunKey, command: dict[str, Any], request_id: str) -> dict[str, Any]:
         action = command["action"]
@@ -680,12 +683,15 @@ class Coordinator:
         terminal = snapshot.state.status if snapshot.state.status != "active" else None
         return select_sections(_proto._PUBLIC_CONTRACT, context, list(reasons or ()), terminal)
 
-    def _allow(self, request_id: str, snapshot: EvaluationSnapshot, argument: bool = False):
+    def _allow(self, request_id: str, snapshot: EvaluationSnapshot, argument: bool = False, *,
+               presentation: bool = False):
         self.last_snapshot = snapshot
         result = {"type": "Allow", "converged": snapshot.state.status == "converged",
                   "run": project_runview(snapshot, self._sections(snapshot))}
         if argument:
             result["argument"] = project_argument(snapshot)
+        if presentation:
+            result["presentation"] = project_presentation(snapshot)
         return {"protocol": _proto._PROTOCOL, "request_id": request_id, "result": result}
 
     def _reason(self, code: str, parameters: dict[str, Any] | None = None,
@@ -699,14 +705,17 @@ class Coordinator:
         return row
 
     def _block_from_snapshot(self, snapshot: EvaluationSnapshot, request_id: str, code: str,
-                             parameters: dict[str, Any] | None = None, affected: str | None = None):
+                             parameters: dict[str, Any] | None = None, affected: str | None = None,
+                             *, presentation: bool = False):
         self.last_snapshot = snapshot
         reason = self._reason(code, parameters, affected)
         run = project_runview(snapshot, select_sections(
             _proto._PUBLIC_CONTRACT, "block", [code],
             snapshot.state.status if snapshot.state.status != "active" else None))
-        return {"protocol": _proto._PROTOCOL, "request_id": request_id,
-                "result": {"type": "Block", "run": run, "reasons": [reason]}}
+        result = {"type": "Block", "run": run, "reasons": [reason]}
+        if presentation:
+            result["presentation"] = project_presentation(snapshot)
+        return {"protocol": _proto._PROTOCOL, "request_id": request_id, "result": result}
 
     def _block_from_state(self, key: RunKey, state: OperationalState, command: dict[str, Any],
                           request_id: str, code: str):

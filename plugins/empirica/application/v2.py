@@ -7,6 +7,12 @@ from .location import decode_handle
 from .run_state import classify_and_decode
 from .transaction import Coordinator
 
+# Canonical names of the adapter-private governance ingress operations, defined once here
+# next to the trusted methods that implement them.  Pi ``adapters/pi/private_bridge.py``
+# dispatches these names and Claude ``adapters/bridge.py`` exposes ``trusted_<name>`` callables;
+# C3 asserts both use exactly this tuple.
+PRIVATE_GOVERNANCE_OPERATIONS = ("governance_context", "governance_decision")
+
 
 class _Service:
     __slots__ = ("_workspace", "_harness", "_runs", "_artifacts", "_host", "_profile_id",
@@ -76,13 +82,19 @@ class _Service:
         from .governance import transact
         if not self._valid_trusted("governanceContextPayload", payload):
             return Coordinator._fault("trusted-governance", "invalid_request")
-        return transact(self._coordinator, run_id, payload, context=True)
+        response = transact(self._coordinator, run_id, payload, context=True)
+        if not _proto.validate_private_governance_response(response):
+            return Coordinator._fault("trusted-governance", "unavailable")
+        return response
 
     def trusted_governance_decision(self, *, run_id, payload) -> dict:
         from .governance import transact
         if not self._valid_trusted("governanceDecisionPayload", payload):
             return Coordinator._fault("trusted-governance", "invalid_request")
-        return transact(self._coordinator, run_id, payload)
+        response = transact(self._coordinator, run_id, payload)
+        if not _proto.validate_private_governance_response(response):
+            return Coordinator._fault("trusted-governance", "unavailable")
+        return response
 
     def trusted_resolve_child(self, *, run_id, native_id) -> str | None:
         """Resolve one native execution through private host correlation only."""

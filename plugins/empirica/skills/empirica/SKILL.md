@@ -77,8 +77,10 @@ Do this before reading files, searching, browsing, or running commands.
    author-action surface; `reason` is a top-level field.
 4. Before investigation, propose the smallest claim graph from supplied context
    only; claims can name discovery uncertainty. Larger graphs must be
-   root-connected DAGs. Take exact action and graph shapes from the current
-   public contract; do not guess field names or nesting.
+   root-connected DAGs. Take exact action and graph shapes from the `empirica_observe`
+   tool input schema, which carries every closed action shape (including the graph
+   payload); do not guess field names or nesting. Contract reads are optional
+   explanation, never the source of a shape.
 5. Read `empirica_read(operation="GetRun")`, then call `configure_run` to request approval of
    run configuration only: budgets, modes, and control mode. The goal is displayed read-only;
    the claim graph and reviewer are not approvable. Preserve the human's edited values rather than
@@ -147,7 +149,7 @@ root and pass through both folds when applicable.
 
 Use only author actions exposed by the current host. Evidence leaves, attribution,
 child events, and audit verdicts are trusted host ingress; the author must never
-submit or fabricate them.
+submit or fabricate them. External actor CLIs are refused in 4.0; the host blocks them.
 
 ## 4. Assess one fixed-point pass
 

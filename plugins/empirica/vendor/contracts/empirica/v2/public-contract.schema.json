@@ -521,12 +521,16 @@
           "additionalProperties": false,
           "required": [
             "description",
+            "surface",
             "params"
           ],
           "properties": {
             "description": {
               "type": "string",
               "minLength": 1
+            },
+            "surface": {
+              "$ref": "#/$defs/nextActionSurface"
             },
             "params": {
               "type": "object"
@@ -760,6 +764,81 @@
     }
   },
   "$defs": {
+    "nextActionSurface": {
+      "type": "object",
+      "description": "Exactly one machine-readable execution surface for a directive: a model author action (empirica_observe), a report intent (report_convergence), a read operation (empirica_read), or an explicit host/human owner with the operation it activates.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "required": [
+            "tool",
+            "action"
+          ],
+          "properties": {
+            "tool": {
+              "const": "empirica_observe"
+            },
+            "action": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": [
+            "tool",
+            "intent"
+          ],
+          "properties": {
+            "tool": {
+              "const": "report_convergence"
+            },
+            "intent": {
+              "enum": [
+                "report_convergence",
+                "stop"
+              ]
+            }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": [
+            "tool",
+            "operation"
+          ],
+          "properties": {
+            "tool": {
+              "const": "empirica_read"
+            },
+            "operation": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "operation"
+          ],
+          "properties": {
+            "owner": {
+              "enum": [
+                "host",
+                "human"
+              ]
+            },
+            "operation": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
     "bootstrapAction": {
       "type": "object",
       "additionalProperties": false,

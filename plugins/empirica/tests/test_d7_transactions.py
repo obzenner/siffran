@@ -165,8 +165,8 @@ class Harness:
 def activate_investigation(coordinator: ProductionCoordinator, run_id: str) -> None:
     coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                         "action": {"kind": "route", "reason": "test"}}, "route")
-    current = coordinator.handle({"type": "GetRun", "run_id": run_id}, "setup-read")
-    if current["result"]["run"]["governance"]["scope"] is not None:
+    current = coordinator.handle({"type": "GetArgument", "run_id": run_id}, "setup-read")
+    if current["result"].get("type") == "Allow":
         approve_current(coordinator, run_id)
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "investigate"}}, "investigate")

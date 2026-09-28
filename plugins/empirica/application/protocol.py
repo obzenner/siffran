@@ -140,9 +140,28 @@ def contract_result(target: str, section_id: str | None = None) -> dict | None:
         return {"target": target, "digest": _DIGEST, "section_id": section_id,
                 "section": {"id": section_id, "title": row["title"],
                             "summary": row["summary"], "clauses": copy.deepcopy(row["clauses"])}}
-    if target == "full":
-        return {"target": target, "digest": _DIGEST, "full": copy.deepcopy(_PUBLIC_CONTRACT)}
     return None
+
+
+def validate_private_governance_response(response: object) -> bool:
+    """Validate one application-private governance response against the private-response
+    definition (public result + required presentation for run-bearing Allow/Block/Inert).
+
+    The public response schema forbids a ``presentation`` key, so private governance responses
+    are validated here, never on the public wire. A mismatch lets the caller fail closed with
+    the same Fault shape ``dispatch_request`` produces.
+    """
+    schema = {
+        "$schema": _RESPONSE_SCHEMA.get("$schema", "https://json-schema.org/draft/2020-12/schema"),
+        "$defs": _RESPONSE_SCHEMA.get("$defs", {}),
+        "$ref": "#/$defs/privateGovernanceResponse",
+    }
+    try:
+        jsonschema.validators.validator_for(_RESPONSE_SCHEMA)(
+            schema, registry=_SCHEMA_REGISTRY).validate(response)
+    except (jsonschema.ValidationError, TypeError):
+        return False
+    return True
 
 
 def validate_trusted_payload(name: str, payload: object) -> bool:

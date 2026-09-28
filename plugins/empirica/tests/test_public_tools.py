@@ -122,6 +122,7 @@ class PublicToolContractTests(unittest.TestCase):
         for action in (
             {"kind": "child_reserve", "purpose": "audit", "role_profile": "forged",
              "execution": "foreground"},
+            {"kind": "dispatch", "target": "codex"},
             {"kind": "evidence_leaf", "trusted": {}},
             {"kind": "attribution", "trusted": {}},
             {"kind": "child_event", "trusted": {}},
@@ -131,6 +132,20 @@ class PublicToolContractTests(unittest.TestCase):
                 "empirica_observe", {"run_id": "r", "action": action},
             )
             self.assertTrue(result["isError"], action["kind"])
+        self.assertEqual(self.requests, [])
+
+    def test_public_author_dispatch_is_refused_and_absent_from_the_tool_schema(self):
+        """dispatch is a host action, never a public author kind: it is absent from the model-facing
+        observe tool schema and invalid at the author boundary (the actor-CLI hook path in
+        adapters/claude/dispatch.py remains its only producer, still failing closed in core)."""
+        tools = self._tools()
+        observe = next(d for d in tools.definitions() if d["name"] == "empirica_observe")
+        kinds = {row["properties"]["kind"]["const"]
+                 for row in observe["inputSchema"]["properties"]["action"]["oneOf"]}
+        self.assertNotIn("dispatch", kinds)
+        result = tools.call(
+            "empirica_observe", {"run_id": "r", "action": {"kind": "dispatch", "target": "codex"}})
+        self.assertTrue(result["isError"])
         self.assertEqual(self.requests, [])
 
     def test_research_requires_locator_and_citation_before_dispatch(self):

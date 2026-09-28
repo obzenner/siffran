@@ -50,7 +50,7 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:8c412c60e0036d3f6bc8beaa747ea21388e18c57cd3d342b9b02a87d9ee0c1a8"
+REVIEWED_REGISTRY_DIGEST = "sha256:aa5a3d52b597af56d32d567ad5ec440710333f7ada4acf7cc6c7a8ed90072a9e"
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:9b17d44746e8c4e2981d14575a970a5de286c8262fbdf7e5499faf9ad83a17c2"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
@@ -129,7 +129,7 @@ def materialize_contract_result(registry: dict, target: str, section_id: str | N
         return {"target": "section", "digest": digest, "section_id": section_id,
                 "section": {"id": section_id, "title": s["title"], "summary": s["summary"],
                             "clauses": s["clauses"]}}
-    return {"target": "full", "digest": digest, "full": registry}
+    raise ValueError(f"GetContract target {target!r} is not a public projection")
 
 
 def check_getcontract_digest(contract_result: dict, registry: dict, errors: list[str], where: str) -> None:
@@ -236,6 +236,167 @@ def check_referential(contract: dict, errors: list[str], where: str) -> None:
     if not _as_set(contract.get("claim_kinds", []), where, errors, "claim_kinds"):
         errors.append(f"{where}: claim_kinds must be a nonempty array")
 
+
+def _projected_tool_surfaces(public_tools: dict) -> tuple[set, set, set]:
+    """Extract the author-action kinds, read operations and report intents from the projected
+    model-facing tool schemas (public-tools.json). These are the exact surfaces a model can act
+    on; a directive surface that names any name absent here is unreachable."""
+    model = public_tools.get("schemas", {}).get("model", {})
+    observe = model.get("empirica_observe", {}).get("properties", {}).get("action", {})
+    author_kinds = {row.get("properties", {}).get("kind", {}).get("const")
+                    for row in observe.get("oneOf", [])
+                    if isinstance(row, dict)}
+    author_kinds.discard(None)
+    read_ops = set(model.get("empirica_read", {}).get("properties", {})
+                   .get("operation", {}).get("enum", []))
+    report_intents = set(model.get("report_convergence", {}).get("properties", {})
+                         .get("intent", {}).get("enum", []))
+    return author_kinds, read_ops, report_intents
+
+
+def check_next_action_surfaces(contract: dict, public_tools: dict, errors: list[str],
+                               where: str,
+                               private_governance_ops: tuple[str, ...] = ()) -> None:
+    """Every next_actions directive carries exactly one machine-readable execution surface
+    (D1a). The raw schema enforces the closed one-of shape; this procedural check binds every
+    tool-owned surface to the projected model tool schemas so a renamed/removed action, read
+    operation or report intent fails, and confirms host/human-owned surfaces name a real
+    operation without claiming a model tool.
+
+    Host-owned operations must be one of: contract ``commands``, ``actions.host``,
+    ``actions.trusted``, or the private governance operations.  Human-owned operations
+    must be exactly ``decision``, and only on a claim-scoped decision directive: its params
+    require ``claim_id`` and every reason that lists it lists only human-owned directives.
+    (The runtime tie to the ``needs-decision`` claim kind is asserted in C3 from the core's
+    own blocker derivation.)"""
+    next_actions = contract.get("next_actions", {})
+    if not isinstance(next_actions, dict):
+        return
+    author_kinds, read_ops, report_intents = _projected_tool_surfaces(public_tools)
+    allowed_host_ops: set[str] = set()
+    allowed_host_ops |= set(contract.get("commands", []))
+    _actions = contract.get("actions", {})
+    allowed_host_ops |= set(_actions.get("host", {}))
+    allowed_host_ops |= set(_actions.get("trusted", {}))
+    allowed_host_ops |= set(private_governance_ops)
+    human_owned = {name for name, row in next_actions.items()
+                   if isinstance(row, dict) and isinstance(row.get("surface"), dict)
+                   and row["surface"].get("owner") == "human"}
+    for directive, entry in sorted(next_actions.items()):
+        if not isinstance(entry, dict):
+            continue
+        surface = entry.get("surface")
+        if not isinstance(surface, dict):
+            errors.append(f"{where}: next_actions.{directive} must carry a surface object")
+            continue
+        tool = surface.get("tool")
+        owner = surface.get("owner")
+        if tool == "empirica_observe":
+            action = surface.get("action")
+            if action not in author_kinds:
+                errors.append(f"{where}: next_actions.{directive} surface action {action!r} "
+                              f"is not a projected empirica_observe author action")
+        elif tool == "empirica_read":
+            operation = surface.get("operation")
+            if operation not in read_ops:
+                errors.append(f"{where}: next_actions.{directive} surface operation {operation!r} "
+                              f"is not a projected empirica_read operation")
+        elif tool == "report_convergence":
+            intent = surface.get("intent")
+            if intent not in report_intents:
+                errors.append(f"{where}: next_actions.{directive} surface intent {intent!r} "
+                              f"is not a projected report_convergence intent")
+        elif owner == "host":
+            operation = surface.get("operation")
+            if not isinstance(operation, str) or not operation:
+                errors.append(f"{where}: next_actions.{directive} host-owned surface "
+                              f"must name an operation")
+            elif operation not in allowed_host_ops:
+                errors.append(f"{where}: next_actions.{directive} host-owned surface "
+                              f"operation {operation!r} is not a known host operation")
+        elif owner == "human":
+            operation = surface.get("operation")
+            if operation != "decision":
+                errors.append(f"{where}: next_actions.{directive} human-owned surface "
+                              f"operation {operation!r} must be 'decision'")
+            params = entry.get("params")
+            required = params.get("required", []) if isinstance(params, dict) else []
+            listing = [code for code, reason in contract.get("reasons", {}).items()
+                       if directive in reason.get("next_actions", [])]
+            if "claim_id" not in required or not listing or any(
+                    set(contract["reasons"][code]["next_actions"]) - human_owned
+                    for code in listing):
+                errors.append(f"{where}: next_actions.{directive} human-owned surface is "
+                              f"not a claim-scoped decision directive")
+        else:
+            errors.append(f"{where}: next_actions.{directive} surface is not a valid "
+                          f"tool/owner binding: {surface!r}")
+    _check_params_subset(contract, public_tools, errors, where)
+
+
+def _tool_property_names(action_shape: dict) -> set[str]:
+    """Collect all parameter names a directive ``params`` may legitimately use for one
+    observe action: top-level properties (minus ``kind``) plus, when the action carries a
+    ``payload`` object, the nested payload property names.  This lets ``graph.record``
+    describe the payload contents (root/claims/edges) while ``research.record`` uses the
+    top-level shape directly."""
+    props: set[str] = set()
+    top = action_shape.get("properties", {})
+    for name in top:
+        if name != "kind":
+            props.add(name)
+    payload = top.get("payload", {})
+    if isinstance(payload, dict):
+        for name in payload.get("properties", {}):
+            props.add(name)
+    return props
+
+
+def _check_params_subset(contract: dict, public_tools: dict, errors: list[str],
+                          where: str) -> None:
+    """Every ``params`` of an observe/report-bound directive must be a subset of the bound
+    tool shape: for ``empirica_observe`` the action's top-level properties (minus ``kind``)
+    plus any nested ``payload`` properties; for ``report_convergence`` the report tool's
+    properties minus the fixed ``intent`` and the host-supplied ``run_id``."""
+    next_actions = contract.get("next_actions", {})
+    if not isinstance(next_actions, dict):
+        return
+    model = public_tools.get("schemas", {}).get("model", {})
+    observe_one_of = model.get("empirica_observe", {}).get("properties", {}).get(
+        "action", {}).get("oneOf", [])
+    action_shapes: dict[str, dict] = {}
+    for row in observe_one_of:
+        if not isinstance(row, dict):
+            continue
+        kind = row.get("properties", {}).get("kind", {}).get("const")
+        if isinstance(kind, str):
+            action_shapes[kind] = row
+    report_props = set(model.get("report_convergence", {}).get("properties", {}).keys())
+    report_props.discard("intent")
+    report_props.discard("run_id")
+    for directive, entry in sorted(next_actions.items()):
+        if not isinstance(entry, dict):
+            continue
+        surface = entry.get("surface")
+        if not isinstance(surface, dict):
+            continue
+        params = entry.get("params")
+        if not isinstance(params, dict):
+            continue
+        param_props = set(params.get("properties", {}).keys())
+        tool = surface.get("tool")
+        if tool == "empirica_observe":
+            action = surface.get("action")
+            allowed = _tool_property_names(action_shapes.get(action, {}))
+            extra = param_props - allowed
+            if extra:
+                errors.append(f"{where}: next_actions.{directive} params {sorted(extra)} "
+                              f"are not in the bound {action!r} tool shape")
+        elif tool == "report_convergence":
+            extra = param_props - report_props
+            if extra:
+                errors.append(f"{where}: next_actions.{directive} params {sorted(extra)} "
+                              f"are not in the bound report_convergence tool shape")
 
 
 def check_clauses(contract: dict, errors: list[str], where: str) -> None:
@@ -2122,6 +2283,15 @@ def main() -> int:
             errors.append("public-contract: bootstrap predicates must be the finite ordered bindings")
         decisions = registry.get("governance_decisions", {}).get("actions", {})
         public_tools = load(V2 / "public-tools.json")
+        private_gov_ops: tuple[str, ...] = ()
+        try:
+            sys.path.insert(0, str(ROOT / "plugins" / "empirica"))
+            from application.v2 import PRIVATE_GOVERNANCE_OPERATIONS
+            private_gov_ops = PRIVATE_GOVERNANCE_OPERATIONS
+        except ImportError:
+            pass
+        check_next_action_surfaces(registry, public_tools, errors, "public-contract",
+                                   private_gov_ops)
         expected_refusals = sorted(code for code, row in registry["reasons"].items()
                                    if row.get("disposition") == "start_refused")
         if not expected_refusals or public_tools.get("start_refusal_codes") != expected_refusals:
@@ -2271,6 +2441,7 @@ def main() -> int:
         "block-pending-audit", "block-child-terminal", "allow-stopped-frozen",
         "allow-stopped-budget", "allow-converged", "block-corrupt-state",
         "getcontract-index", "getcontract-section", "getcontract-full",
+        # QUAL-1: getcontract-full is now a refusal fixture (target: full → invalid_request).
         # D2E added presentation_selector GetContract section fixture.
         "getcontract-presentation-selector",
         "block-host-async-unsupported",
@@ -2317,6 +2488,21 @@ def main() -> int:
         fx = load(path)
         where = str(path.relative_to(ROOT))
         request = fx.get("request", {})
+        # QUAL-1: `target: full` and any removed public surface must be refused at the request
+        # wire. A refusal fixture asserts schema rejection and a Fault invalid_request expectation.
+        if fx.get("refused"):
+            before = len(errors)
+            validate_schema_instance(request, "empirica/v2", "request", f"{where}:request")
+            if len(errors) == before:
+                errors.append(f"{where}: refusal fixture request was NOT rejected by the request schema")
+            else:
+                del errors[before:]
+            expected = fx.get("expected", {})
+            validate_schema_instance(expected, "empirica/v2", "response", f"{where}:expected")
+            result = expected.get("result", {})
+            if result.get("type") != "Fault" or result.get("code") != "invalid_request":
+                errors.append(f"{where}: refusal fixture must expect a Fault invalid_request")
+            continue
         # GetContract fixtures use expected_from_registry (no hand-copied registry).
         if "expected_from_registry" in fx:
             validate_schema_instance(request, "empirica/v2", "request", f"{where}:request")
@@ -2352,7 +2538,8 @@ def main() -> int:
 
     # --- in-memory negative cases: one mutation each, expected substring ---
     run_negatives(registry, host_profiles_doc, v2_names, res_schema, req_schema,
-                  state_schema, errors, validate_schema_instance)
+                  state_schema, load(V2 / "public-tools.json"), errors, validate_schema_instance,
+                  private_gov_ops)
 
     if errors:
         print("\n".join(f"ERROR: {e}" for e in errors), file=sys.stderr)
@@ -2364,7 +2551,9 @@ def main() -> int:
 
 def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: set,
                   res_schema: dict, req_schema: dict, state_schema: dict,
-                  errors: list[str], validate_schema: Callable) -> None:
+                  public_tools_doc: dict,
+                  errors: list[str], validate_schema: Callable,
+                  private_gov_ops: tuple[str, ...] = ()) -> None:
     """Each case: one mutation + expected diagnostic substring (cannot pass for wrong reason).
 
     ``expect`` takes a thunk that receives a fresh error list and runs one check,
@@ -2413,6 +2602,40 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     bad = copy.deepcopy(registry)
     bad["next_actions"].pop("run.start_fresh", None)
     expect(lambda e: check_registry_digest(bad, e, "neg"), "registry digest", "remove next_action id")
+    # Directive surface must resolve against the projected model tool schemas.
+    bad = copy.deepcopy(registry)
+    bad["next_actions"]["graph.record"]["surface"] = {"tool": "empirica_observe",
+                                                      "action": "nonexistent_action"}
+    expect(lambda e: check_next_action_surfaces(bad, public_tools_doc, e, "neg",
+                                              private_gov_ops),
+           "not a projected empirica_observe author action", "surface names missing action")
+    bad = copy.deepcopy(registry)
+    del bad["next_actions"]["run.inspect"]["surface"]
+    expect(lambda e: check_next_action_surfaces(bad, public_tools_doc, e, "neg",
+                                              private_gov_ops),
+           "must carry a surface object", "surface missing")
+    bad = copy.deepcopy(registry)
+    bad["next_actions"]["host.repair_context"]["surface"]["operation"] = "nonexistent_operation"
+    expect(lambda e: check_next_action_surfaces(bad, public_tools_doc, e, "neg",
+                                              private_gov_ops),
+           "not a known host operation", "surface names nonexistent host operation")
+    bad = copy.deepcopy(registry)
+    bad["next_actions"]["human.request_decision"]["surface"]["operation"] = "reject"
+    expect(lambda e: check_next_action_surfaces(bad, public_tools_doc, e, "neg",
+                                              private_gov_ops),
+           "must be 'decision'", "human op other than decision")
+    bad = copy.deepcopy(registry)
+    bad["next_actions"]["route.record"]["surface"] = {"owner": "human", "operation": "decision"}
+    expect(lambda e: check_next_action_surfaces(bad, public_tools_doc, e, "neg",
+                                              private_gov_ops),
+           "not a claim-scoped decision directive", "human ownership on an unrelated directive")
+    bad = copy.deepcopy(registry)
+    bad["next_actions"]["residual.accept"]["params"]["properties"] = {
+        "note": {"type": "string"}}
+    expect(lambda e: check_next_action_surfaces(bad, public_tools_doc, e, "neg",
+                                              private_gov_ops),
+           "not in the bound report_convergence tool shape",
+           "params outside report tool shape")
     bad = copy.deepcopy(registry)
     bad["claim_states"] = ["open", "approved"]
     expect(lambda e: check_registry_digest(bad, e, "neg"), "registry digest", "canonical claim_states drift")

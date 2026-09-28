@@ -66,30 +66,25 @@ class SyncSchemaDefsTests(unittest.TestCase):
             self.assertEqual(result, 2)
             self.assertIn("missing shared definition", output)
 
-    def test_public_definition_collision_fails_and_removed_defs_do_not_linger(self) -> None:
+    def test_dead_public_contract_embedding_is_stripped(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             contracts = self._contracts(tmp)
             response_path = contracts / "response.schema.json"
             response = json.loads(response_path.read_text())
-            collision = "publicContract__bootstrapAction"
-            response[sync_schema_defs._MANAGED_KEY].remove(collision)
-            response["$defs"][collision] = {"type": "string"}
+            # Simulate a stale embedding from before QUAL-1 removed GetContract target: full.
+            response["$defs"]["publicContract"] = {"type": "object"}
+            response["$defs"]["publicContract__bootstrapAction"] = {"type": "object"}
+            response[sync_schema_defs._MANAGED_KEY] = [
+                "publicContract", "publicContract__bootstrapAction"]
             response_path.write_text(json.dumps(response), encoding="utf-8")
-            result, output = self._main(contracts)
-            self.assertEqual(result, 2)
-            self.assertIn("collision", output)
-
-        with tempfile.TemporaryDirectory() as tmp:
-            contracts = self._contracts(tmp)
-            public_path = contracts / "public-contract.schema.json"
-            public = json.loads(public_path.read_text())
-            del public["$defs"]["bootstrapAction"]
-            public_path.write_text(json.dumps(public), encoding="utf-8")
+            # Regeneration strips both the dead definitions and the management marker.
             self.assertEqual(self._main(contracts)[0], 0)
-            generated = json.loads((contracts / "response.schema.json").read_text())
+            generated = json.loads(response_path.read_text())
+            self.assertNotIn("publicContract", generated["$defs"])
             self.assertNotIn("publicContract__bootstrapAction", generated["$defs"])
-            self.assertNotIn("publicContract__bootstrapAction",
-                             generated[sync_schema_defs._MANAGED_KEY])
+            self.assertNotIn(sync_schema_defs._MANAGED_KEY, generated)
+            # And a --check on the stripped output reports no drift.
+            self.assertEqual(self._main(contracts, "--check")[0], 0)
 
 
 if __name__ == "__main__":

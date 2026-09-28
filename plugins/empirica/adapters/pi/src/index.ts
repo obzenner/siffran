@@ -57,6 +57,19 @@ import {
 } from "./translate.ts";
 
 const MAX_AUDIT_SESSION_BYTES = 16 * 1024 * 1024;
+const PRIVATE_RESULT_KEYS = ["presentation", "review_text", "scope"] as const;
+
+// Recursively detect any private governance presentation field in a model-facing result.
+function containsPrivateResult(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsPrivateResult);
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (PRIVATE_RESULT_KEYS.some((key) => key in record)) return true;
+    return Object.values(record).some(containsPrivateResult);
+  }
+  return false;
+}
+
 function readAuditSession(file: string): string | null {
   try {
     const before = lstatSync(file);
@@ -390,8 +403,8 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           let request: Request;
           if (operation === "GetContract") {
             const target = params.target;
-            if (target !== "index" && target !== "section" && target !== "full")
-              throw new Error("GetContract requires target=index|section|full");
+            if (target !== "index" && target !== "section")
+              throw new Error("GetContract requires target=index|section");
             if (target === "section" && typeof params.section_id !== "string")
               throw new Error("GetContract(section) requires section_id");
             request = getContractRequest(target, randomUUID(),
@@ -435,7 +448,11 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             let response = await dispatch(observeActionRequest(
               runHandle, action as { kind: string; [key: string]: unknown }, randomUUID()));
             if (governanceDialog && response.result.type === "Allow")
-              response = await govern(runHandle, ctx, trusted, signal);
+              response = await govern(runHandle, ctx, trusted, signal, undefined, undefined, response);
+            // QUAL-1 final public-result guard: the model-facing observe result must never carry
+            // a private governance presentation field, even if host mediation reintroduced one.
+            if (containsPrivateResult(response.result))
+              throw new Error("Empirica returned a non-public result.");
             return { content: [{ type: "text", text: resultText(response) }], details: response.result };
           } finally { governanceDialog = false; }
         },
