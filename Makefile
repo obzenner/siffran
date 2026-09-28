@@ -92,7 +92,7 @@ check-ci: check-static check-core check-claude check-codex ## Fast contributor g
 check-static: lint validate docs-check adr-check empirica-architecture-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check empirica-context-economy-unit-check claude-subagent-models-unit-check pi-canary-unit-check pi-validator-unit-check ## Lint, manifests, docs, ADRs, contracts, vendor copies, activation, receipts, canary config
 	@printf '$(BOLD)==> static suite ok$(RESET)\n'
 
-check-core: ## Fast host-neutral contracts, malformed input, state, bridge, and governance boundaries
+check-core: empirica-author-view-golden ## Fast host-neutral contracts, malformed input, state, bridge, and governance boundaries
 	@printf '$(BOLD)==> core suite$(RESET)\n'
 	@$(PYTHON) lib/obligations/tests/test_obligations.py
 	@$(PYTHON) $(EMPIRICA_FRESHNESS_TESTS)
@@ -101,6 +101,7 @@ check-core: ## Fast host-neutral contracts, malformed input, state, bridge, and 
 	@$(PYTHON) $(EMPIRICA_PROTOCOL_ISOLATION_TESTS)
 	@$(PYTHON) $(EMPIRICA_LOCATION_TESTS)
 	@$(PYTHON) $(EMPIRICA_PUBLIC_TOOLS_TESTS)
+	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_author_view
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_context_economy
 	@$(PYTHON) $(EMPIRICA_AUDIT_PROTOCOL_TESTS)
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_IDENTITY_TESTS)
@@ -297,10 +298,17 @@ pi-bundle-check: node_modules ## Validate repository-root Pi package composition
 	@printf '$(BOLD)==> Pi bundle$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py . --package-only
 
-.PHONY: empirica-pi-check
-empirica-pi-check: node_modules ## Validate the Empirica Pi adapter package (static + bridge smoke always; typecheck + tests if node present)
+.PHONY: empirica-pi-check empirica-author-view-golden
+empirica-pi-check: node_modules empirica-author-view-golden ## Validate the Empirica Pi adapter package (static + bridge smoke always; typecheck + tests if node present)
 	@printf '$(BOLD)==> empirica Pi adapter$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py plugins/empirica/adapters/pi
+
+empirica-author-view-golden: ## Check author-view golden fixtures (UPDATE=1 regenerates from Python)
+	@if [ "$(UPDATE)" = "1" ]; then \
+		$(PYTHON) $(SCRIPTS)/gen_author_view_golden.py; \
+	else \
+		$(PYTHON) $(SCRIPTS)/gen_author_view_golden.py --check; \
+	fi
 
 .PHONY: empirica-governance-bridge-check
 empirica-governance-bridge-check: node_modules ## Check Pi governance through the real private Python service (scripted UI, no native host)

@@ -49,7 +49,7 @@ def _error(request_id: object, code: int, message: str) -> dict[str, object]:
             "error": {"code": code, "message": message}}
 
 
-def handle_message(message: object, tools: PublicTools) -> dict[str, object] | None:
+def handle_message(message: object, tools: PublicTools, *, include_internal: bool = False) -> dict[str, object] | None:
     if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
         return _error(None, -32600, "Invalid Request")
     request_id = message.get("id")
@@ -79,8 +79,9 @@ def handle_message(message: object, tools: PublicTools) -> dict[str, object] | N
         names = {item["name"] for item in tools.definitions()}
         if params["name"] not in names:
             return _error(request_id, -32602, "Unknown tool")
+        call = tools.call_internal if include_internal else tools.call
         return {"jsonrpc": "2.0", "id": request_id,
-                "result": tools.call(params["name"], params.get("arguments"))}
+                "result": call(params["name"], params.get("arguments"))}
     return _error(request_id, -32601, "Method not found")
 
 
@@ -96,6 +97,14 @@ class McpSession:
         self.initialized = False
 
     def process(self, message):
+        """Process a real MCP wire message; tool results contain rendered text only."""
+        return self._process(message, include_internal=False)
+
+    def process_internal(self, message):
+        """Test-only inspection path retaining validated JSON outside the MCP wire."""
+        return self._process(message, include_internal=True)
+
+    def _process(self, message, *, include_internal: bool):
         if isinstance(message, dict) and message.get("method") == "initialize":
             # No capability upgrades while serving a dialog; initialize is only accepted once.
             if self.initialized:
@@ -104,7 +113,7 @@ class McpSession:
             caps = params.get("capabilities", {}) if isinstance(params, dict) else {}
             elicitation = caps.get("elicitation") if isinstance(caps, dict) else None
             form_supported = isinstance(elicitation, dict) and (not elicitation or "form" in elicitation)
-            response = handle_message(message, self.tools)
+            response = handle_message(message, self.tools, include_internal=include_internal)
             if response and "result" in response:
                 self.initialized = True
                 self.mediator.elicit = self.elicit if form_supported else None
@@ -114,7 +123,7 @@ class McpSession:
             return None
         self.active_call_id = message.get("id") if isinstance(message, dict) and message.get("method") == "tools/call" else None
         try:
-            return handle_message(message, self.tools)
+            return handle_message(message, self.tools, include_internal=include_internal)
         finally:
             self.active_call_id = None
 

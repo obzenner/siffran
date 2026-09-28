@@ -1,0 +1,65 @@
+{
+  "result": {
+    "type": "Allow",
+    "converged": true,
+    "run": {
+      "id": "run-fx",
+      "goal": "Prove the public contract is internally consistent.",
+      "status": "converged",
+      "modes": {
+        "multi_provider": false,
+        "cli_exec": false
+      },
+      "contract": {
+        "id": "empirica/public",
+        "version": "3.0.0",
+        "relevant_sections": [
+          "terminal",
+          "audit",
+          "audit/independence"
+        ],
+        "digest": "sha256:228f8189055ceddb3974981f03d4030f57c5f1a234b579c4967c8d12ba10820f"
+      },
+      "obligations": {
+        "active": [
+          {
+            "id": "empirica/G0",
+            "required": "record research",
+            "observed": [],
+            "missing": null,
+            "next": [],
+            "status": "satisfied"
+          }
+        ],
+        "deferred": []
+      },
+      "residuals": [],
+      "freshness": {
+        "changes": []
+      },
+      "children": [
+        {
+          "child_id": "ch-audit-1",
+          "purpose": "audit",
+          "resource_class": "audit",
+          "state": "completed"
+        }
+      ],
+      "host": {
+        "profile_id": "claude-code@2.1.278",
+        "tier": "foreground_only",
+        "missing_capabilities": [
+          "host.async_unsupported"
+        ]
+      },
+      "terminal_note": "All committed claims approved and fresh; independent audit current and passing.",
+      "next_actions": [],
+      "untrusted_delimiters": {
+        "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+        "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+      },
+      "governance": null
+    }
+  },
+  "text": "Allow (converged=true) converged — no governance\nrun_id: run-fx\n\nSatisfied obligations:\n  empirica/G0\n\nChildren:\n  <<<EMPIRICA_UNTRUSTED_DATA>>>audit<<<END_EMPIRICA_UNTRUSTED_DATA>>>: completed"
+}

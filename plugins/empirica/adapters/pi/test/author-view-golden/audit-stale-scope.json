@@ -1,0 +1,68 @@
+{
+  "result": {
+    "type": "Block",
+    "run": {
+      "id": "run-fx",
+      "goal": "Prove the public contract is internally consistent.",
+      "status": "active",
+      "modes": {
+        "multi_provider": false,
+        "cli_exec": false
+      },
+      "contract": {
+        "id": "empirica/public",
+        "version": "3.0.0",
+        "relevant_sections": [
+          "audit",
+          "children"
+        ],
+        "digest": "sha256:228f8189055ceddb3974981f03d4030f57c5f1a234b579c4967c8d12ba10820f"
+      },
+      "obligations": {
+        "active": [],
+        "deferred": []
+      },
+      "residuals": [],
+      "freshness": {
+        "changes": []
+      },
+      "children": [
+        {
+          "child_id": "ch-audit-1",
+          "purpose": "audit",
+          "resource_class": "audit",
+          "state": "pending",
+          "deadline": "2026-09-14T00:00:00Z"
+        }
+      ],
+      "host": {
+        "profile_id": "claude-code@2.1.278",
+        "tier": "foreground_only",
+        "missing_capabilities": [
+          "host.async_unsupported"
+        ]
+      },
+      "next_actions": [],
+      "untrusted_delimiters": {
+        "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+        "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+      },
+      "governance": null
+    },
+    "reasons": [
+      {
+        "code": "audit.stale",
+        "message": "Audit coverage is stale.",
+        "parameters": {
+          "scope": "claim",
+          "claim_id": "C1"
+        },
+        "next_actions": [],
+        "sections": [
+          "audit"
+        ]
+      }
+    ]
+  },
+  "text": "Block active — no governance\nrun_id: run-fx\n\nReasons:\n  audit.stale: Audit coverage is stale.\n    params: claim_id=<<<EMPIRICA_UNTRUSTED_DATA>>>C1<<<END_EMPIRICA_UNTRUSTED_DATA>>>; scope=claim\n\nChildren:\n  <<<EMPIRICA_UNTRUSTED_DATA>>>audit<<<END_EMPIRICA_UNTRUSTED_DATA>>>: pending"
+}

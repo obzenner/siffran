@@ -92,6 +92,33 @@ def projection_controls() -> dict:
     return copy.deepcopy(_PROJECTION_CONTROLS)
 
 
+def next_action_surfaces() -> dict[str, dict]:
+    """Return the public next-action surface table without exposing the contract registry."""
+    return {key: copy.deepcopy(row["surface"])
+            for key, row in _PUBLIC_CONTRACT["next_actions"].items()}
+
+
+def response_schema_defs() -> dict[str, dict]:
+    """Return a copy of the v2 response schema ``$defs`` (parameter and payload shapes)."""
+    return copy.deepcopy(_RESPONSE_SCHEMA["$defs"])
+
+
+def untrusted_delimiters() -> dict[str, str]:
+    """Return the contract's untrusted-data delimiters."""
+    return copy.deepcopy(_UNTRUSTED_DELIMITERS)
+
+
+def validate_public_result(result: object) -> bool:
+    """Validate one public result with the canonical v2 response validator."""
+    envelope = {"protocol": _PROTOCOL, "request_id": "author-view", "result": result}
+    try:
+        jsonschema.validators.validator_for(_RESPONSE_SCHEMA)(
+            _RESPONSE_SCHEMA, registry=_SCHEMA_REGISTRY).validate(envelope)
+    except (jsonschema.ValidationError, TypeError):
+        return False
+    return True
+
+
 def policy_inputs(profile_id: str) -> dict[str, str]:
     """Return the canonical policy identity persisted with each observation basis."""
     inputs = {

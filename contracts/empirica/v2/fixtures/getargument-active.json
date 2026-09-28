@@ -28,7 +28,7 @@
             "claims/graph",
             "evidence/research"
           ],
-          "digest": "sha256:aa5a3d52b597af56d32d567ad5ec440710333f7ada4acf7cc6c7a8ed90072a9e"
+          "digest": "sha256:228f8189055ceddb3974981f03d4030f57c5f1a234b579c4967c8d12ba10820f"
         },
         "obligations": {
           "active": [],
@@ -56,6 +56,7 @@
       "argument": {
         "root_claim_id": "G0",
         "argument_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "goal": "Prove the public contract is internally consistent.",
         "goal_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "frozen_scope_digest": null,
         "deferred_scope_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -110,6 +111,8 @@
             "observed_content_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999"
           }
         ],
+        "route_stamp": 1,
+        "investigation_stamp": 2,
         "audit": {
           "state": "not_required",
           "independence": "unverified",

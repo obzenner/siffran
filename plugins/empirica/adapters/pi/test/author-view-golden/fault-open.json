@@ -1,0 +1,9 @@
+{
+  "result": {
+    "type": "Fault",
+    "code": "unavailable",
+    "fail_direction": "open",
+    "message": "bridge"
+  },
+  "text": "Fault unavailable (open): bridge"
+}

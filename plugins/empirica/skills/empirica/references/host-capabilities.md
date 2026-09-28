@@ -15,10 +15,13 @@ coverage, not installed/native human approval qualification.
 
 ## Required surface
 
-A complete host reads the public RunView, submits public author actions, obtains the audit
+A complete host reads the public RunView through the shared deterministic plain-text author view,
+submits public author actions, obtains the detailed audit
 argument, binds and observes an independent auditor, admits its output privately, and requests a
-guarded terminal decision. Trusted evidence, attribution, child events, and verdicts are never
-model-callable.
+guarded terminal decision. Authors act on rendered reasons, obligations, and next-call surfaces;
+they do not parse RunView JSON. Pi may retain validated JSON in host-internal `details`, while the
+Claude/Codex MCP wire result carries only rendered text. Trusted evidence, attribution, child
+events, and verdicts are never model-callable.
 
 ## Claude Code capability profile (`>=2.1.278,<2.2.0`)
 

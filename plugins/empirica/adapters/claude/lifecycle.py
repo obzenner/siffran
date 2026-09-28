@@ -416,14 +416,36 @@ def _transcript_contents(path: object) -> tuple[list[str], str | None]:
     return models, final
 
 
+def _transcript_all_text(path: object) -> str | None:
+    """Concatenate every assistant text block; None on any read error.
+
+    Used for the fallback verdict scan: the auditor may have written the verdict
+    fence in assistant text rather than the handback message.
+    """
+    messages = _assistant_messages(path)
+    if messages is None:
+        return None
+    parts: list[str] = []
+    for message in messages:
+        content = message.get("content")
+        if isinstance(content, str):
+            parts.append(content)
+        elif isinstance(content, list):
+            for item in content:
+                if (isinstance(item, Mapping) and item.get("type") == "text"
+                        and isinstance(item.get("text"), str)):
+                    parts.append(item["text"])
+    return "\n".join(parts)
+
+
 def _transcript_handbacks(path: object) -> tuple[bool, list[str]]:
     """Return whether the transcript scan succeeded and all handback messages.
 
-    Claude 2.1.278 may append explanatory assistant prose after delivering the
-    actual final report through SubagentHandback. The handback tool input is
-    therefore authoritative whenever a successful scan finds one. Unreadable or
-    malformed transcripts are distinct from a valid transcript with no handback
-    so corruption can never enable the legacy final-message fallback.
+    A handback containing a valid verdict wins (see ``subagent_stop_main``).
+    When no handback carries a verdict, the adapter falls back to scanning all
+    assistant text plus handback messages for exactly one valid verdict fence.
+    Unreadable or malformed transcripts are distinct from a valid transcript with
+    no handback so corruption can never enable the fallback.
     """
     messages = _assistant_messages(path)
     if messages is None:
@@ -533,18 +555,28 @@ def subagent_stop_main() -> int:
         if child is None or plan is None:
             return 0
         child_path = payload.get("agent_transcript_path")
-        auditor_models, transcript_final = _transcript_contents(child_path)
+        auditor_models, _ = _transcript_contents(child_path)
         auditor_model = auditor_models[0] if len(auditor_models) == 1 else None
         handback_scan_ok, handbacks = _transcript_handbacks(child_path)
         if not handback_scan_ok:
             verdict = None
-        elif handbacks:
-            # A handback is authoritative. Duplicate or malformed handbacks fail
-            # closed rather than falling back to later assistant prose.
-            verdict = verdict_from_final_output(handbacks[0]) if len(handbacks) == 1 else None
         else:
-            output = payload.get("last_assistant_message") or transcript_final
-            verdict = verdict_from_final_output(output)
+            # A handback containing a valid verdict wins. Multiple valid handback
+            # verdicts fail closed (two different verdicts).
+            handback_verdicts = [v for v in
+                (verdict_from_final_output(hb) for hb in handbacks) if v is not None]
+            if handback_verdicts:
+                verdict = handback_verdicts[0] if len(handback_verdicts) == 1 else None
+            else:
+                # No handback verdict: accept the transcript only if it contains
+                # exactly one valid verdict fence across all assistant text and
+                # handbacks. Two fences, a malformed fence, or none → fail closed.
+                all_text = _transcript_all_text(child_path)
+                if all_text is None:
+                    verdict = None
+                else:
+                    combined = "\n".join([all_text, *handbacks]) if handbacks else all_text
+                    verdict = verdict_from_final_output(combined)
         protocol = AuditProtocol(CLAUDE_PROFILE_ID)
         if verdict is None or auditor_model is None:
             protocol.observe_failure(plan, native_id, "failed")

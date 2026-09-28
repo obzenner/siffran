@@ -24,9 +24,9 @@ and run only checks needed to verify them.
 4. Research precedes its spike through the sealed prerequisite relationship.
 5. Refuted claims are discarded rather than treated as weak support.
 6. Child claims specialize their parents.
-7. The dossier's route and investigation witnesses show routing first.
-8. The frozen claim set covers the goal's material core; deferred claims are genuine follow-up.
-9. The graph covers every material uncertainty required by the stated goal.
+7. The dossier's `route_stamp` and `investigation_stamp` are both non-null and `route_stamp < investigation_stamp`. Evidence admission after investigation and routing-first are enforced by the core; confirm these witnesses rather than re-deriving artifact order.
+8. When `frozen_scope_digest` is non-null, the frozen claim set covers the goal's material core and deferred claims are genuine follow-up. When `frozen_scope_digest` is null, this item is not applicable and `scope_review` must be null.
+9. The graph covers every material uncertainty required by the stated `goal`.
 
 A passing audit can only block or permit the deterministic evaluation to continue. It never
 creates evidence and never overrides a missing or failing machine gate.
@@ -42,3 +42,7 @@ Return exactly one fenced block and no prose outside it:
 `reviewed_claims` must contain every approved gating claim in dossier order. Use the exact
 digests supplied by the dossier. If any rubric item cannot be established, return `fail` and
 state the concrete finding.
+
+If the host provides a handback or return tool (e.g. `SubagentHandback`), the tool message must
+be exactly that fenced block — the same fence you would return as text. Do not write the fence
+as plain text and then hand back a summary; the handback message is what your caller receives.

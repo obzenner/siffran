@@ -16,15 +16,12 @@ sys.path.insert(0, str(SCRIPTS))
 import empirica_context_economy as ce  # noqa: E402
 
 
-def _result(text: str, *, structured: dict | None = None) -> dict:
-    result: dict = {"content": [{"type": "text", "text": text}]}
-    if structured is not None:
-        result["structuredContent"] = structured
-    return result
+def _result(text: str) -> dict:
+    return {"content": [{"type": "text", "text": text}]}
 
 
-def _row(tool: str, text: str, **kw) -> str:
-    return json.dumps({"tool": tool, "result": _result(text, **kw)})
+def _row(tool: str, text: str) -> str:
+    return json.dumps({"tool": tool, "result": _result(text)})
 
 
 class MeasureTests(unittest.TestCase):
@@ -45,13 +42,11 @@ class MeasureTests(unittest.TestCase):
         report = ce.measure(ce.parse_calls([_row("empirica_read", "\u00e9\u00e9\U0001f600")]))
         self.assertEqual(report["max_chars"], 3)
 
-    def test_normalized_envelope_bytes_tracked_separately_from_model_visible_chars(self):
-        row = _row("empirica_read", "hi", structured={"run": {"id": "r", "big": "z" * 50}})
-        report = ce.measure(ce.parse_calls([row]))
+    def test_normalized_text_only_envelope_bytes_tracked_separately_from_visible_chars(self):
+        report = ce.measure(ce.parse_calls([_row("empirica_read", "hi")]))
         self.assertEqual(report["max_chars"], 2)
-        # The normalized envelope carries the duplicated structuredContent and is much larger.
+        # Even the text-only protocol envelope has framing bytes, tracked separately.
         self.assertGreater(report["max_normalized_envelope_bytes"], report["max_chars"])
-        self.assertGreaterEqual(report["max_normalized_envelope_bytes"], 50)
         # The separated byte figure is named "normalized envelope bytes" in the rendered output.
         self.assertIn("Normalized envelope bytes", ce.render(report))
 

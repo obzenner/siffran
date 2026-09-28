@@ -70,7 +70,7 @@ class GovernanceHostTests(unittest.TestCase):
 
     def propose(self):
         with patch.dict("os.environ", {}):
-            return self.session.process({"jsonrpc": "2.0", "id": "call", "method": "tools/call",
+            return self.session.process_internal({"jsonrpc": "2.0", "id": "call", "method": "tools/call",
                 "params": {"name": "empirica_observe", "arguments": {"run_id": self.run,
                             "action": {"kind": "configure_run"}}}})
 
@@ -422,8 +422,11 @@ class GovernanceHostTests(unittest.TestCase):
                         "decision": "approve"}}})
                     response = receive()
                     self.assertEqual(response["id"], "proposal")
-                    self.assertEqual(response["result"]["structuredContent"]["run"]["governance"]["state"], "approved")
-                    self.assertEqual(call({"type": "GetRun", "run_id": run})["run"]["governance"]["approval_kind"], "host_ui")
+                    self.assertEqual(set(response["result"]), {"content", "isError"})
+                    self.assertNotIn("structuredContent", response["result"])
+                    state = call({"type": "GetRun", "run_id": run})["run"]
+                    self.assertEqual(state["governance"]["state"], "approved")
+                    self.assertEqual(state["governance"]["approval_kind"], "host_ui")
                 finally:
                     process.stdin.close()
                     try:

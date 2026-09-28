@@ -2,12 +2,11 @@
 """Measure Empirica model-visible context economy from a retained native transcript slice.
 
 QUAL-1 D6: the qualification ``context_economy`` row needs a reproducible counter so independent
-operators produce identical totals. The measurement object is the model-visible tool result TEXT
-each Empirica tool returns (Pi ``content`` text; Claude MCP ``content`` text) — the characters the
-model actually reads — counted in Unicode code points. The envelope size (the full serialized MCP
-result including any duplicate ``structuredContent``) is reported SEPARATELY as "normalized
-envelope bytes": the UTF-8 byte length of one canonical compact reserialization of the extracted
-result. It is a normalized figure (native MCP field-name normalization/extraction is the
+operators produce identical totals. The measurement object is the rendered model-visible tool result
+TEXT each Empirica tool returns (Pi ``content`` text; Claude/Codex MCP ``content`` text) — counted
+as-is in Unicode code points, never parsed as JSON. The envelope size is reported SEPARATELY as
+"normalized envelope bytes": the UTF-8 byte length of one canonical compact reserialization of the
+extracted text-only result. It is a normalized figure (native MCP field-name normalization/extraction is the
 operator's slice step), not necessarily the exact native wire byte count, and is never conflated
 with the model-visible character count.
 
@@ -77,9 +76,10 @@ def parse_calls(lines) -> list[dict]:
 def measure(calls: list[dict]) -> dict:
     """Return per-call and aggregate model-visible character counts plus transport bytes.
 
-    ``max_chars``/``total_chars`` count only Empirica tool results. ``normalized_envelope_bytes``
-    are the UTF-8 byte size of one canonical compact reserialization of the full result (text plus
-    structuredContent), tracked apart from the model-visible character budget.
+    ``max_chars``/``total_chars`` count only Empirica tool results. The rendered text is counted
+    as-is and is never JSON-decoded. ``normalized_envelope_bytes`` is the UTF-8 byte size of one
+    canonical compact reserialization of the text-only host result, tracked apart from the
+    model-visible character budget.
     """
     rows = []
     for row in calls:

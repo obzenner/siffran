@@ -1534,9 +1534,10 @@ class ConformanceCase(unittest.TestCase):
         if "argument" not in result:
             raise self.failureException("GetArgument Allow must carry the typed argument (D2C)")
         arg = result["argument"]
-        for key in ("root_claim_id", "argument_digest", "goal_digest", "frozen_scope_digest",
-                    "deferred_scope_digest", "untrusted_delimiters", "claims", "edges",
-                    "artifacts", "audit"):
+        for key in ("root_claim_id", "argument_digest", "goal", "goal_digest",
+                    "frozen_scope_digest", "deferred_scope_digest", "untrusted_delimiters",
+                    "claims", "edges", "artifacts", "route_stamp", "investigation_stamp",
+                    "audit"):
             if key not in arg:
                 raise self.failureException(f"ArgumentView must carry {key!r} (D2C)")
         self.assertNotIn("evidence", arg,

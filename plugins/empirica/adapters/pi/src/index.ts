@@ -37,6 +37,7 @@ import {
   identityFromSessionJsonl, sessionFileFromDetails,
 } from "./audit-identity.ts";
 import { createStdioBridgeDispatch, defaultBridgeConfig, HOST_PROFILE_ID } from "./stdio-transport.ts";
+import { renderAuthorView } from "./author-view.ts";
 import { PUBLIC_TOOLS } from "./public-tools.ts";
 import {
   REPORT_CONVERGENCE_INTENT,
@@ -366,7 +367,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     const EMPTY_PARAMS = PUBLIC_TOOL_SCHEMAS.report_convergence;
     const OBSERVE_PARAMS = PUBLIC_TOOL_SCHEMAS.empirica_observe;
     const READ_PARAMS = PUBLIC_TOOL_SCHEMAS.empirica_read;
-    const resultText = (response: Response): string => JSON.stringify(response.result);
+    const resultText = (response: Response): string => renderAuthorView(response.result);
     let governanceDialog = false;
     if (pi.registerTool) {
       pi.registerTool({

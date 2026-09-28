@@ -17,4 +17,5 @@ completionGuard: false
 The host-owned task contains the canonical rubric and one immutable audit dossier. Follow
 that task exactly. Do not inspect `~/.empirica-plugin`, `refs/empirica`, hooks, transcripts,
 or bridge internals. Do not call Empirica tools and do not modify project files. Return only
-the single `empirica-verdict` block requested by the task.
+the single `empirica-verdict` block requested by the task. If the host provides a handback or
+return tool, its message must be exactly that fenced block, not a summary.

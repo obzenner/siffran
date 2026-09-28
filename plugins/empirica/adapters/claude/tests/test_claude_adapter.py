@@ -457,6 +457,10 @@ class ResponseMappingTests(unittest.TestCase):
             self.assertIn("not converged", notice["systemMessage"])
             self.assertNotIn("converged", notice)
             self.assertNotIn("decision", notice)
+        with patch("adapters.author_view.render_author_view",
+                   side_effect=AssertionError("systemMessage must bypass author renderer")):
+            notice = json.loads(stop_result({"result": result()}).stdout)
+            self.assertIn("systemMessage", notice)
         for changed in ("auto", "approved", "missing_context", "mixed", "fault", "terminal", "mismatched_reason"):
             blocked = result()
             if changed == "auto":
@@ -478,18 +482,18 @@ class ResponseMappingTests(unittest.TestCase):
 
     def test_stop_result_inert_allow_block_and_faults(self) -> None:
         self.assertEqual(stop_result({"result": {"type": "Inert", "reason": "no_run"}}).exit_code, 0)
-        allow = stop_result({"result": {"type": "Allow", "converged": True,
-                                        "run": {"id": "r", "status": "converged"}}})
+        fixture_root = PLUGIN_ROOT.parents[1] / "contracts" / "empirica" / "v2" / "fixtures"
+        allow_result = json.loads(
+            (fixture_root / "allow-converged.json").read_text())["expected"]["result"]
+        allow = stop_result({"result": allow_result})
         self.assertEqual(allow.exit_code, 0)
-        self.assertEqual(json.loads(allow.stdout)["type"], "Allow")
-        pending_result = {"type": "Block", "run": {"status": "active", "children": [
-            {"child_id": "ch-audit", "resource_class": "audit", "state": "pending"},
-        ]}, "reasons": [
-            {"code": "audit.pending", "message": "Audit child is pending; wait."},
-        ]}
+        self.assertIn("Allow (converged=true)", allow.stdout)
+        self.assertIn("run_id: run-fx", allow.stdout)
+        pending_result = json.loads(
+            (fixture_root / "block-pending-audit.json").read_text())["expected"]["result"]
         pending = stop_result({"result": pending_result})
         self.assertEqual(pending.exit_code, 0)
-        self.assertEqual(json.loads(pending.stdout)["reasons"][0]["code"], "audit.pending")
+        self.assertIn("audit.pending", pending.stdout)
         self.assertEqual(pending.stderr, "")
         for malformed in (
             {**pending_result, "run": {"status": "active", "children": []}},
@@ -520,7 +524,9 @@ class ResponseMappingTests(unittest.TestCase):
         context = restore_context(fixture["expected"])
         self.assertIn("BEGIN UNTRUSTED EMPIRICA RUN DATA", context)
         body = context.split("-----\n", 1)[1].split("\n----- END", 1)[0]
-        self.assertEqual(json.loads(body), {"run": fixture["expected"]["result"]["run"]})
+        run = fixture["expected"]["result"]["run"]
+        self.assertIn(f"run_id: {run['id']}", body)
+        self.assertIn(run["status"], body)
         terminal = json.loads(json.dumps(fixture["expected"]))
         terminal["result"]["run"]["status"] = "converged"
         self.assertEqual(restore_context(terminal), "")
@@ -567,6 +573,10 @@ class AuditBoundaryTests(unittest.TestCase):
         text = "```empirica-verdict\n" + json.dumps(payload) + "\n```"
         self.assertEqual(verdict_from_final_output(text), payload)
         self.assertIsNone(verdict_from_final_output(text + "\n" + text))
+        unclosed = "```empirica-verdict\n" + json.dumps({"verdict": "fail"})
+        self.assertIsNone(verdict_from_final_output(unclosed + "\n" + text))
+        no_newline = "```empirica-verdict " + json.dumps({"verdict": "fail"}) + "```"
+        self.assertIsNone(verdict_from_final_output(text + "\n" + no_newline))
         self.assertIsNone(verdict_from_final_output("not a verdict"))
 
 
@@ -789,6 +799,100 @@ class SpawnLifecycleTests(unittest.TestCase):
             payload = StringIO(json.dumps({"agent_type": "empirica:empirica-auditor",
                 "agent_id": "native-1", "agent_transcript_path": str(transcript),
                 "last_assistant_message": valid}))
+            with patch("adapters.claude.lifecycle._resolve", return_value=resolved), \
+                 patch("adapters.claude.lifecycle.application_bridge.trusted_audit_plan",
+                       return_value={"operation_id": "sha256:" + "2" * 64,
+                                     "role_profile": "empirica:empirica-auditor",
+                                     "argument": {}}), \
+                 patch("adapters.claude.lifecycle.application_bridge.trusted_resolve_child",
+                       return_value="ch-audit"), \
+                 patch("adapters.claude.lifecycle.AuditProtocol.observe_failure") as failed, \
+                 patch("adapters.claude.lifecycle.AuditProtocol.observe_verdict") as deliver, \
+                 patch("sys.stdin", new=payload):
+                self.assertEqual(subagent_stop_main(), 0)
+        failed.assert_called_once()
+        deliver.assert_not_called()
+
+    def test_subagent_stop_accepts_transcript_verdict_when_handback_has_no_fence(self) -> None:
+        """S1 shape: auditor wrote the verdict fence in assistant text, then
+        called SubagentHandback with prose only. The transcript verdict wins."""
+        from adapters.claude.lifecycle import subagent_stop_main
+        verdict = {"verdict": "fail", "findings": ["dossier gap"]}
+        fence = "```empirica-verdict\n" + json.dumps(verdict) + "\n```"
+        resolved = ("active-run", {"run": {"children": [{
+            "child_id": "ch-audit", "resource_class": "audit", "state": "pending"}]}})
+        argument = {"argument_digest": "sha256:" + "1" * 64, "claims": []}
+        with TemporaryDirectory() as directory:
+            transcript = Path(directory) / "child.jsonl"
+            transcript.write_text(json.dumps({"message": {"role": "assistant",
+                "model": "auditor", "content": [
+                    {"type": "text", "text": fence},
+                    {"type": "tool_use", "name": "SubagentHandback",
+                     "input": {"message": "verdict delivered above"}}]}}) + "\n")
+            payload = StringIO(json.dumps({"agent_type": "empirica:empirica-auditor",
+                "agent_id": "native-1", "agent_transcript_path": str(transcript),
+                "last_assistant_message": "verdict delivered above"}))
+            with patch("adapters.claude.lifecycle._resolve", return_value=resolved), \
+                 patch("adapters.claude.lifecycle.application_bridge.trusted_audit_plan",
+                       return_value={"operation_id": "sha256:" + "2" * 64,
+                                     "role_profile": "empirica:empirica-auditor",
+                                     "argument": argument}), \
+                 patch("adapters.claude.lifecycle.application_bridge.trusted_resolve_child",
+                       return_value="ch-audit"), \
+                 patch("adapters.claude.lifecycle.AuditProtocol.observe_reviewer"), \
+                 patch("adapters.claude.lifecycle.AuditProtocol.observe_verdict",
+                       return_value=True) as deliver, \
+                 patch("sys.stdin", new=payload):
+                self.assertEqual(subagent_stop_main(), 0)
+        self.assertEqual(deliver.call_args.args[2], verdict)
+
+    def test_subagent_stop_fails_closed_on_two_conflicting_verdict_fences(self) -> None:
+        """Negative control: two different valid fences in assistant text, handback
+        prose only → two different verdicts in the fallback scan → fail closed."""
+        from adapters.claude.lifecycle import subagent_stop_main
+        verdict_a = {"verdict": "pass", "findings": ["ok"]}
+        verdict_b = {"verdict": "fail", "findings": ["nope"]}
+        fence_a = "```empirica-verdict\n" + json.dumps(verdict_a) + "\n```"
+        fence_b = "```empirica-verdict\n" + json.dumps(verdict_b) + "\n```"
+        resolved = ("active-run", {"run": {"children": [{
+            "child_id": "ch-audit", "resource_class": "audit", "state": "pending"}]}})
+        with TemporaryDirectory() as directory:
+            transcript = Path(directory) / "child.jsonl"
+            transcript.write_text(json.dumps({"message": {"role": "assistant",
+                "model": "auditor", "content": [
+                    {"type": "text", "text": fence_a + "\n" + fence_b},
+                    {"type": "tool_use", "name": "SubagentHandback",
+                     "input": {"message": "verdict delivered above"}}]}}) + "\n")
+            payload = StringIO(json.dumps({"agent_type": "empirica:empirica-auditor",
+                "agent_id": "native-1", "agent_transcript_path": str(transcript)}))
+            with patch("adapters.claude.lifecycle._resolve", return_value=resolved), \
+                 patch("adapters.claude.lifecycle.application_bridge.trusted_audit_plan",
+                       return_value={"operation_id": "sha256:" + "2" * 64,
+                                     "role_profile": "empirica:empirica-auditor",
+                                     "argument": {}}), \
+                 patch("adapters.claude.lifecycle.application_bridge.trusted_resolve_child",
+                       return_value="ch-audit"), \
+                 patch("adapters.claude.lifecycle.AuditProtocol.observe_failure") as failed, \
+                 patch("adapters.claude.lifecycle.AuditProtocol.observe_verdict") as deliver, \
+                 patch("sys.stdin", new=payload):
+                self.assertEqual(subagent_stop_main(), 0)
+        failed.assert_called_once()
+        deliver.assert_not_called()
+
+    def test_subagent_stop_fails_closed_when_handback_prose_and_no_fence_anywhere(self) -> None:
+        """Negative control: handback has prose, no fence in transcript or handback."""
+        from adapters.claude.lifecycle import subagent_stop_main
+        resolved = ("active-run", {"run": {"children": [{
+            "child_id": "ch-audit", "resource_class": "audit", "state": "pending"}]}})
+        with TemporaryDirectory() as directory:
+            transcript = Path(directory) / "child.jsonl"
+            transcript.write_text(json.dumps({"message": {"role": "assistant",
+                "model": "auditor", "content": [
+                    {"type": "text", "text": "Some analysis."},
+                    {"type": "tool_use", "name": "SubagentHandback",
+                     "input": {"message": "verdict delivered above"}}]}}) + "\n")
+            payload = StringIO(json.dumps({"agent_type": "empirica:empirica-auditor",
+                "agent_id": "native-1", "agent_transcript_path": str(transcript)}))
             with patch("adapters.claude.lifecycle._resolve", return_value=resolved), \
                  patch("adapters.claude.lifecycle.application_bridge.trusted_audit_plan",
                        return_value={"operation_id": "sha256:" + "2" * 64,

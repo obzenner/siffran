@@ -27,7 +27,7 @@ class PublicHostPathTests(ConformanceCase):
                             dispatch=lambda request, _profile: drv.request(request))
 
         def observe(action: dict) -> dict:
-            out = tools.call("empirica_observe", {"run_id": run_id, "action": action})
+            out = tools.call_internal("empirica_observe", {"run_id": run_id, "action": action})
             self.assertFalse(out["isError"], out)
             return out["structuredContent"]
 
@@ -79,7 +79,7 @@ class PublicHostPathTests(ConformanceCase):
         admitted = drv.trusted_audit_verdict(run_id, child_id, verdict)
         self.assertEqual(admitted["result"]["type"], "Allow")
 
-        final = tools.call("report_convergence", {"run_id": run_id})
+        final = tools.call_internal("report_convergence", {"run_id": run_id})
         self.assertFalse(final["isError"], final)
         result = final["structuredContent"]
         self.assertEqual(result["type"], "Allow")

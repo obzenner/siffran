@@ -1,0 +1,132 @@
+{
+  "result": {
+    "type": "Allow",
+    "converged": false,
+    "run": {
+      "id": "run-fx",
+      "goal": "Prove the public contract is internally consistent.",
+      "invocation": {
+        "host": "test",
+        "interactive": true,
+        "signal": "fixture",
+        "delegation": false
+      },
+      "status": "active",
+      "modes": {
+        "multi_provider": false,
+        "cli_exec": false
+      },
+      "contract": {
+        "id": "empirica/public",
+        "version": "3.0.0",
+        "relevant_sections": [
+          "core",
+          "roles",
+          "hosts/capabilities"
+        ],
+        "digest": "sha256:228f8189055ceddb3974981f03d4030f57c5f1a234b579c4967c8d12ba10820f"
+      },
+      "obligations": {
+        "active": [
+          {
+            "id": "obligation.route",
+            "required": "Record routing before investigation.",
+            "observed": [],
+            "missing": null,
+            "next": [],
+            "status": "residual"
+          },
+          {
+            "id": "obligation.graph",
+            "required": "Propose a valid claim graph from supplied context before requesting review.",
+            "observed": [],
+            "missing": null,
+            "next": [],
+            "status": "residual"
+          }
+        ],
+        "deferred": []
+      },
+      "residuals": [],
+      "freshness": {
+        "changes": []
+      },
+      "children": [],
+      "host": {
+        "profile_id": "claude-code@2.1.278",
+        "tier": "foreground_only",
+        "missing_capabilities": [
+          "host.async_unsupported"
+        ]
+      },
+      "next_actions": [
+        "run.start_fresh",
+        "graph.record",
+        "run.inspect",
+        "route.record",
+        "investigation.record",
+        "research.record",
+        "spike.run",
+        "spike.regate",
+        "human.request_decision",
+        "budget.raise",
+        "child.spawn_auditor",
+        "child.wait",
+        "child.retry",
+        "residual.accept",
+        "host.repair_context",
+        "governance.propose"
+      ],
+      "untrusted_delimiters": {
+        "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+        "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+      },
+      "governance": {
+        "state": "pending",
+        "control_mode": "deliberative",
+        "plan_revision": 0,
+        "approved_digest": null,
+        "approval_kind": null,
+        "proposal": {
+          "budgets": {
+            "max_passes": 10,
+            "max_spawns": 5,
+            "max_audit_spawns": 1
+          },
+          "modes": {
+            "multi_provider": false,
+            "cli_exec": false
+          }
+        },
+        "context": {
+          "author": null,
+          "ingress": "unavailable",
+          "approval_capability": "unavailable"
+        },
+        "proposal_digest": "sha256:3839bdf80e1b820bd34d85e41d310c9f97951e0e043328adb5e5feba3b5c691e",
+        "budgets": {
+          "max_passes": 10,
+          "passes_used": 3,
+          "max_spawns": 5,
+          "spawns_used": 0,
+          "max_audit_spawns": 1,
+          "audit_spawns_used": 1
+        },
+        "remaining": {
+          "max_passes": 7,
+          "max_spawns": 5,
+          "max_audit_spawns": 0
+        },
+        "request_ready": false,
+        "display_ready": false,
+        "interactions_remaining": {
+          "proposal": 3,
+          "total": 128
+        },
+        "prompt_error": null,
+        "next_action": "governance.propose"
+      }
+    }
+  },
+  "text": "Allow (converged=false) active — governance: pending; passes/spawns/audits: 3/10 0/5 1/1; modes: cli_exec=false, multi_provider=false\nrun_id: run-fx\n\nOpen obligations:\n  obligation.route: Record routing before investigation.\n  obligation.graph: Propose a valid claim graph from supplied context before requesting review.\n\nNext:\n  host: StartRun\n  empirica_observe kind=graph\n  empirica_read GetRun\n  empirica_observe kind=route\n  empirica_observe kind=investigate\n  empirica_observe kind=research\n  empirica_observe kind=spike_request\n  empirica_observe kind=spike_request\n  human: decision\n  empirica_observe kind=configure_run\n  host: child_reserve\n  host: child_event\n  host: child_reserve\n  report_convergence intent=stop\n  host: governance_context\n  empirica_observe kind=configure_run"
+}

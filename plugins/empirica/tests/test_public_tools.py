@@ -303,6 +303,37 @@ class McpTransportTests(unittest.TestCase):
             ["empirica_read", "empirica_observe", "report_convergence"],
         )
 
+    def test_mcp_runview_wire_contains_only_rendered_text(self):
+        """Claude/Codex must not receive a duplicate JSON RunView via structuredContent."""
+        from adapters.mcp_server import handle_message
+        from adapters.public_tools import PublicTools
+
+        marker = "JSON_ONLY_RUNVIEW_MARKER"
+        fixture = json.loads((PLUGIN.parents[1] / "contracts" / "empirica" / "v2" / "fixtures" /
+                              "start-bootstrap-allow.json").read_text())
+        valid_result = fixture["expected"]["result"]
+        valid_result["run"]["goal"] = marker
+        tools = PublicTools(
+            "claude-code@2.1.278",
+            dispatch=lambda request, _profile: {
+                "protocol": "empirica/v2",
+                "request_id": request["request_id"],
+                "result": valid_result,
+            },
+        )
+        arguments = {"run_id": "run-visible", "operation": "GetRun"}
+        internal = tools.call_internal("empirica_read", arguments)
+        self.assertEqual(internal["structuredContent"]["run"]["goal"], marker)
+
+        response = handle_message({
+            "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+            "params": {"name": "empirica_read", "arguments": arguments},
+        }, tools)
+        wire_result = response["result"]
+        self.assertEqual(set(wire_result), {"content", "isError"})
+        self.assertNotIn("structuredContent", wire_result)
+        self.assertNotIn(marker, json.dumps(wire_result))
+
     def test_plugin_copy_starts_without_repository_root_contracts(self):
         with tempfile.TemporaryDirectory() as temp:
             isolated = Path(temp) / "empirica"

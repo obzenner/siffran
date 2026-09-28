@@ -308,7 +308,7 @@ class AudienceTests(_ServiceHarness):
         # A well-behaved governor whose returned result is reprojected/filtered to the author view.
         good = PublicTools(PROFILE, dispatch=self._observe_dispatch,
                            govern=lambda result: result)
-        out = good.call("empirica_observe", {"run_id": self.run_id,
+        out = good.call_internal("empirica_observe", {"run_id": self.run_id,
                                              "action": {"kind": "configure_run"}})
         self.assertFalse(out["isError"])
         self.assertPublic(out["structuredContent"], "configure_run after govern")
@@ -336,7 +336,7 @@ class AudienceTests(_ServiceHarness):
         self.assertPublic(codex_mediator(allow), "codex unavailable mediation")
         # The shared public tool wrapper reprojects a govern result to the author view.
         tools = PublicTools(CODEX, dispatch=self._observe_dispatch, govern=lambda r: r)
-        out = tools.call("empirica_observe", {"run_id": self.run_id,
+        out = tools.call_internal("empirica_observe", {"run_id": self.run_id,
                                              "action": {"kind": "configure_run"}})
         self.assertFalse(contains_private(out.get("structuredContent", {})))
 
@@ -392,26 +392,26 @@ class SizeBudgetTests(_ServiceHarness):
       * the audit-pending author RunView read text, driven through the real lifecycle
         (research -> freeze -> reserved -> launching -> pending audit child).
 
-    Wire-envelope bytes are tracked SEPARATELY, not by this ceiling: a native MCP result carries
-    the text plus a duplicate ``structuredContent`` (roughly twice the text; a measured configure
-    envelope was ~5.8K against ~2.7K of text). Only the model-visible result text is budgeted
-    here; the transport envelope size is recorded by the qualification ``context_economy`` row.
+    Wire-envelope bytes are tracked separately from this ceiling. The MCP wire result carries only
+    rendered text; validated JSON is available solely through the test/host-internal inspection
+    path and is not serialized onto Claude/Codex's MCP result.
 
-    Measured sizes at authoring (chars of model-visible text):
-        pending RunView read           2455
-        approved RunView read          2878
-        audit-pending RunView read     3051
-        terminal RunView report        3082
-        audit-pending Block            3186
-        configure approve result       2705
-        configure dismiss result       2715
-        configure edit->confirm result 2705
-    Largest measured state = 3186 (audit-pending Block); CEILING = 3300 leaves ~114 headroom.
-    Re-attaching the legacy presentation (review_text + scope) to the pending RunView pushes it
-    past the ceiling, so the reduction is guarded rather than asserted only to be > 0.
+    Measured sizes at authoring (chars of model-visible rendered text):
+        pending RunView read            855
+        approved RunView read           872
+        audit-pending RunView read      676
+        terminal RunView report         928
+        audit-pending Block             743
+        configure approve result        872
+        configure dismiss result       1059
+        configure edit->confirm result  872
+    Largest measured state = 1059 (configure dismiss); CEILING = 1200 leaves 141 chars headroom.
+    Re-attaching the legacy presentation (review_text + scope) to the pending RunView pushes the
+    JSON to 3577 chars, well past the ceiling, so the reduction is guarded rather than asserted
+    only to be > 0.
     """
 
-    CEILING = 3300
+    CEILING = 1200
     ROLE_PROFILE = "claude-code@2.1.278"
 
     @staticmethod
@@ -441,7 +441,7 @@ class SizeBudgetTests(_ServiceHarness):
             return elicit(*args, **kwargs)
 
         tools = PublicTools(PROFILE, dispatch=self._observe_dispatch, govern=self._mediator(counted))
-        out = tools.call("empirica_observe",
+        out = tools.call_internal("empirica_observe",
                          {"run_id": self.run_id, "action": {"kind": "configure_run"}})
         self.assertFalse(contains_private(out.get("structuredContent", {})))
         return out, calls["n"]
@@ -468,7 +468,7 @@ class SizeBudgetTests(_ServiceHarness):
 
     def _read_text(self) -> dict:
         tools = PublicTools(PROFILE, dispatch=self._observe_dispatch)
-        return tools.call("empirica_read", {"operation": "GetRun", "run_id": self.run_id})
+        return tools.call_internal("empirica_read", {"operation": "GetRun", "run_id": self.run_id})
 
     def test_post_mediation_and_runview_text_stay_under_the_ceiling(self):
         # Canonical form answers (approve, dismiss, edit) drive the real mediation; each intended
@@ -523,16 +523,16 @@ class SizeBudgetTests(_ServiceHarness):
         approve_current(self.service._coordinator, self.run_id)
         self.assertLess(self._text_size(self._read_text()), self.CEILING, "approved RunView")
         tools = PublicTools(PROFILE, dispatch=self._observe_dispatch)
-        terminal = tools.call("report_convergence", {"run_id": self.run_id, "intent": "stop"})
+        terminal = tools.call_internal("report_convergence", {"run_id": self.run_id, "intent": "stop"})
         self.assertLess(self._text_size(terminal), self.CEILING, "terminal RunView")
 
     def test_audit_pending_runview_stays_under_the_ceiling(self):
         self._reach_audit_pending()
         audit_read = self._read_text()
         self.assertLess(self._text_size(audit_read), self.CEILING, "audit-pending RunView read")
-        blocked = PublicTools(PROFILE, dispatch=self._observe_dispatch).call(
+        blocked = PublicTools(PROFILE, dispatch=self._observe_dispatch).call_internal(
             "report_convergence", {"run_id": self.run_id, "intent": "report_convergence"})
-        run = json.loads(blocked["content"][0]["text"])["run"]
+        run = blocked["structuredContent"]["run"]
         self.assertEqual([c["state"] for c in run["children"]], ["pending"])
         self.assertLess(self._text_size(blocked), self.CEILING, "audit-pending Block")
 
@@ -540,14 +540,15 @@ class SizeBudgetTests(_ServiceHarness):
         self.to_pending()
         pending = self._read_text()
         self.assertLess(self._text_size(pending), self.CEILING)
-        result = json.loads(pending["content"][0]["text"])
+        result = pending["structuredContent"]
         self.assertFalse(contains_private(result))
         pres = project_presentation(self.service._coordinator.last_snapshot)
         # Legacy shape: review_text + scope re-attached onto the author RunView governance block.
+        result = copy.deepcopy(result)
         result["run"]["governance"]["review_text"] = pres["review_text"]
         result["run"]["governance"]["scope"] = pres["scope"]
-        legacy_text = json.dumps(result, sort_keys=True, separators=(",", ":"))
-        self.assertGreaterEqual(len(legacy_text), self.CEILING,
+        legacy_json = json.dumps(result, sort_keys=True, separators=(",", ":"))
+        self.assertGreaterEqual(len(legacy_json), self.CEILING,
                                 "re-attaching the legacy presentation must exceed the ceiling")
 
 

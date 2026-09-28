@@ -16,6 +16,7 @@ from application.protocol import (  # noqa: E402
 from core.governance import proposal_digest  # noqa: E402
 
 FIXTURES = ROOT / "contracts" / "empirica" / "v2" / "fixtures"
+STATE_FIXTURES = ROOT / "contracts" / "empirica" / "v2" / "state-fixtures"
 
 
 def generated(path: Path) -> str:
@@ -44,7 +45,8 @@ def main() -> int:
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     stale = []
-    for path in sorted(FIXTURES.glob("*.json")):
+    paths = sorted(FIXTURES.glob("*.json")) + sorted(STATE_FIXTURES.glob("*.json"))
+    for path in paths:
         rendered = generated(path)
         if args.check:
             if path.read_text(encoding="utf-8") != rendered:

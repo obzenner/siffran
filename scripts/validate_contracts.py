@@ -50,7 +50,7 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:aa5a3d52b597af56d32d567ad5ec440710333f7ada4acf7cc6c7a8ed90072a9e"
+REVIEWED_REGISTRY_DIGEST = "sha256:228f8189055ceddb3974981f03d4030f57c5f1a234b579c4967c8d12ba10820f"
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:9b17d44746e8c4e2981d14575a970a5de286c8262fbdf7e5499faf9ad83a17c2"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
@@ -3099,7 +3099,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
 
     def _d2c_arg() -> dict:
         _ed = registry_digest([R1, R2, P1])
-        return {"root_claim_id": "G0", "argument_digest": d64, "goal_digest": d64,
+        return {"root_claim_id": "G0", "argument_digest": d64, "goal": "Test goal.",
+            "goal_digest": d64,
             "frozen_scope_digest": None, "deferred_scope_digest": d64,
             "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
                 "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
@@ -3127,6 +3128,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                  "file_bindings": [{"path": "src/a.py", "sha256": d64},
                                    {"path": "tests/a_test.py", "sha256": d64}],
                  "exit_code": 0, "spike_gate": "pass", "supersedes": None}],
+            "route_stamp": 1, "investigation_stamp": 2,
             "audit": {"state": "passed", "independence": "distinct",
                 "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
                 "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
@@ -3296,7 +3298,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
 
     def _d2c_super_arg() -> dict:
         _ed = registry_digest([R1, P1])
-        return {"root_claim_id": "G0", "argument_digest": d64, "goal_digest": d64,
+        return {"root_claim_id": "G0", "argument_digest": d64, "goal": "Test goal.",
+            "goal_digest": d64,
             "frozen_scope_digest": None, "deferred_scope_digest": d64,
             "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
                 "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
@@ -3331,6 +3334,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                  "file_bindings": [{"path": "src/a.py", "sha256": d64},
                                    {"path": "tests/a_test.py", "sha256": d64}],
                  "exit_code": 0, "spike_gate": "pass", "supersedes": P0}],
+            "route_stamp": 1, "investigation_stamp": 2,
             "audit": {"state": "passed", "independence": "distinct",
                 "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
                 "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,

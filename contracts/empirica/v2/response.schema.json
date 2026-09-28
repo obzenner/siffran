@@ -1950,6 +1950,7 @@
       "required": [
         "root_claim_id",
         "argument_digest",
+        "goal",
         "goal_digest",
         "frozen_scope_digest",
         "deferred_scope_digest",
@@ -1957,6 +1958,8 @@
         "claims",
         "edges",
         "artifacts",
+        "route_stamp",
+        "investigation_stamp",
         "audit"
       ],
       "description": "Closed GetArgument projection; no generic argument extension map.",
@@ -1967,6 +1970,10 @@
         },
         "argument_digest": {
           "$ref": "#/$defs/digest256"
+        },
+        "goal": {
+          "type": "string",
+          "minLength": 1
         },
         "goal_digest": {
           "$ref": "#/$defs/digest256"
@@ -2000,6 +2007,22 @@
             "$ref": "#/$defs/artifactItem"
           },
           "uniqueItems": true
+        },
+        "route_stamp": {
+          "description": "First-write-wins route witness sequence; null when routing has not been observed.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "investigation_stamp": {
+          "description": "First-write-wins investigation witness sequence; null when investigation has not been observed.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
         },
         "audit": {
           "$ref": "#/$defs/auditView"

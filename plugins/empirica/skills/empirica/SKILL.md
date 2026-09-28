@@ -45,6 +45,12 @@ route acknowledgement.** Use this inline bootstrap matrix:
 The exact observed harness version is provenance recorded in an installed-host receipt; it is not
 itself the capability-profile identity and need not equal the qualification baseline.
 
+The three public tools return one deterministic plain-text author view on Claude, Codex, and Pi.
+Read its first-line status/governance summary, `Reasons`, `Open obligations`, and rendered `Next`
+calls directly; do not parse it as JSON or look for hidden digests/governance internals. Pi retains
+validated structured details for host UI only. `GetArgument` and `GetContract` keep their detailed
+sections because the auditor and contract inspection require them.
+
 A runnable convergence workflow requires all of these capabilities:
 
 1. read the complete public run view, including obligations;
@@ -91,7 +97,8 @@ Do this before reading files, searching, browsing, or running commands.
    reviewer, and confirmation semantics from
    [references/governance.md](references/governance.md). Timeout is dismissal, not human
    rejection. Do not loop on refusal or exhaustion.
-6. Wait for `run.governance.state == "approved"` bound to the exact displayed configuration;
+6. Wait until the text view's governance summary says `approved` for the exact displayed
+   configuration; do not expect or parse a `run.governance.state` JSON field.
    configuration amendments need a second review and human numeric/mode edits are not corruption.
    After cancellation/timeout, wait for the human; Claude can settle the turn nonterminally while
    investigation and convergence remain blocked. Then record the `investigate` witness `{"kind":"investigate"}` before any
@@ -121,7 +128,7 @@ invalidate prior audit coverage, so obtain a fresh bound audit after any graph c
 changes require a fresh host decision through `configure_run`. Freeze is not a substitute for either
 configuration authority or current audit coverage.
 
-After the graph is recorded, use the returned `run.contract` obligations as the
+After the graph is recorded, use the returned open obligations and rendered next actions as the
 worklist. Counts and reason strings are telemetry, not authority.
 
 ## 3. Earn or discard every gating claim

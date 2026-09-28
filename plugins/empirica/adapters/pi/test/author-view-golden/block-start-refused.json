@@ -1,0 +1,19 @@
+{
+  "result": {
+    "type": "Block",
+    "reasons": [
+      {
+        "code": "run.goal_required",
+        "message": "A non-empty goal is required; supply the goal explicitly. No run was created.",
+        "next_actions": [
+          "run.start_fresh"
+        ],
+        "sections": [
+          "run/lifecycle"
+        ],
+        "parameters": {}
+      }
+    ]
+  },
+  "text": "Block\n  run.goal_required: A non-empty goal is required; supply the goal explicitly. No run was created.\n    next: host: StartRun"
+}

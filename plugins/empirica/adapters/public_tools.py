@@ -208,6 +208,17 @@ class PublicTools:
         return definitions
 
     def call(self, name: str, arguments: object) -> dict[str, object]:
+        """Return the model-facing MCP tool result (rendered text only)."""
+        return self._call(name, arguments, include_internal=False)
+
+    def call_internal(self, name: str, arguments: object) -> dict[str, object]:
+        """Return a test/host-internal result with validated JSON beside rendered text.
+
+        MCP transport must call :meth:`call`, never this non-wire inspection path.
+        """
+        return self._call(name, arguments, include_internal=True)
+
+    def _call(self, name: str, arguments: object, *, include_internal: bool) -> dict[str, object]:
         schema = self._schemas.get(name)
         if schema is None:
             return self._error("Unknown public Empirica tool.")
@@ -238,12 +249,15 @@ class PublicTools:
             # A misbehaving governor (or any producer) that reintroduces a private presentation
             # field after dispatch validation becomes a typed closed error with no private payload.
             return self._error("Empirica returned a non-public result.")
-        text = json.dumps(result, sort_keys=True, separators=(",", ":"))
-        return {
+        from adapters.author_view import render_author_view
+        text = render_author_view(result)
+        tool_result: dict[str, object] = {
             "content": [{"type": "text", "text": text}],
-            "structuredContent": result,
             "isError": result.get("type") == "Fault",
         }
+        if include_internal:
+            tool_result["structuredContent"] = result
+        return tool_result
 
     @staticmethod
     def _read_argument_error(name: str, arguments: Mapping[str, object]) -> str | None:

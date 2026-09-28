@@ -37,6 +37,7 @@
       "audit_argument": {
         "argument_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "root_claim_id": "G0",
+        "goal": "Prove strict v2 state codec roundtrip with no defaults.",
         "goal_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "frozen_scope_digest": null,
         "deferred_scope_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
@@ -58,6 +59,8 @@
         ],
         "edges": [],
         "artifacts": [],
+        "route_stamp": 2,
+        "investigation_stamp": 3,
         "audit": {
           "state": "required",
           "independence": "unverified",

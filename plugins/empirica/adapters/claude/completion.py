@@ -57,9 +57,10 @@ def dispatch_stop(
     return (transport if transport is not None else BridgeTransport()).dispatch(request)
 
 
-def _json_line(result: dict) -> str:
-    """Stable compact output; one line exactly, matching a hook process' stdout discipline."""
-    return json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n"
+def _hook_stdout(result: dict) -> str:
+    """Render a Stop result as the author plain-text view (one trailing newline)."""
+    from adapters.author_view import render_author_view
+    return render_author_view(result) + "\n"
 
 
 def _async_audit_wait(result: Mapping[str, object]) -> bool:
@@ -94,13 +95,19 @@ def stop_result(response: object) -> StopResult:
     if kind == "Inert":
         return StopResult(0)
     if kind == "Allow":
-        return StopResult(0, stdout=_json_line(result))
+        return StopResult(0, stdout=_hook_stdout(result))
     if kind == "Block":
         if _human_approval_wait(result):
-            return StopResult(0, stdout=_json_line({"systemMessage":
-                "Empirica is paused for human governance input, not converged. Investigation remains blocked; no approval was granted by this pause."}))
+            message = {
+                "systemMessage": (
+                    "Empirica is paused for human governance input, not converged. "
+                    "Investigation remains blocked; no approval was granted by this pause."
+                )
+            }
+            return StopResult(0, stdout=json.dumps(
+                message, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n")
         if _async_audit_wait(result):
-            return StopResult(0, stdout=_json_line(result))
+            return StopResult(0, stdout=_hook_stdout(result))
         reasons = result.get("reasons")
         messages = [row.get("message") or row.get("code") for row in reasons
                     if isinstance(row, dict)] if isinstance(reasons, list) else []

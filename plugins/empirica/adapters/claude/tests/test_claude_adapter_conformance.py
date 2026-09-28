@@ -71,7 +71,7 @@ class ClaudeReachabilityTests(unittest.TestCase):
                     tools = PublicTools("claude-code@2.1.278", govern=mediator)
 
                     def observe(action: dict) -> dict:
-                        result = tools.call("empirica_observe", {
+                        result = tools.call_internal("empirica_observe", {
                             "run_id": run_id, "action": action,
                         })
                         self.assertFalse(result["isError"], result)
@@ -127,22 +127,22 @@ class ClaudeReachabilityTests(unittest.TestCase):
                     with patch.object(lifecycle, "_payload", return_value=payload), \
                          redirect_stdout(pending_output):
                         self.assertEqual(lifecycle.completion_main(), 0)
-                    pending = json.loads(pending_output.getvalue())
-                    self.assertEqual([r["code"] for r in pending["reasons"]], ["audit.pending"])
-                    self.assertEqual(pending["run"]["status"], "active")
+                    pending = pending_output.getvalue()
+                    self.assertIn("Block active", pending)
+                    self.assertIn("audit.pending", pending)
 
                     restore_output = io.StringIO()
                     with patch.object(lifecycle, "_payload", return_value=payload), \
                          redirect_stdout(restore_output):
                         self.assertEqual(lifecycle.restore_main(), 0)
-                    restored = tools.call("empirica_read", {
+                    restored = tools.call_internal("empirica_read", {
                         "run_id": run_id, "operation": "GetRun",
                     })["structuredContent"]
                     audit_children = [child for child in restored["run"]["children"]
                                       if child["resource_class"] == "audit"]
                     self.assertEqual([child["state"] for child in audit_children], ["pending"])
 
-                    argument = tools.call("empirica_read", {
+                    argument = tools.call_internal("empirica_read", {
                         "run_id": run_id, "operation": "GetArgument",
                     })["structuredContent"]["argument"]
                     verdict = {
@@ -179,7 +179,7 @@ class ClaudeReachabilityTests(unittest.TestCase):
                     with patch.object(lifecycle, "_payload", return_value=stop_payload):
                         self.assertEqual(lifecycle.subagent_stop_main(), 0)
 
-                    final = tools.call("report_convergence", {"run_id": run_id})
+                    final = tools.call_internal("report_convergence", {"run_id": run_id})
                     self.assertFalse(final["isError"], final)
                     self.assertEqual(final["structuredContent"]["type"], "Allow")
                     self.assertTrue(final["structuredContent"]["converged"])

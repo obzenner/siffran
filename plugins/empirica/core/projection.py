@@ -293,9 +293,12 @@ def project_argument(snapshot: EvaluationSnapshot) -> dict[str, Any]:
     argument_digest = digest({"graph": snapshot.graph, "evidence": [a["artifact_id"] for a in artifacts]})
     return governance.plain({
         "root_claim_id": snapshot.graph["root"], "argument_digest": argument_digest,
-        "goal_digest": digest(snapshot.state.goal), "frozen_scope_digest": frozen_digest,
+        "goal": snapshot.state.goal, "goal_digest": digest(snapshot.state.goal),
+        "frozen_scope_digest": frozen_digest,
         "deferred_scope_digest": digest(deferred),
         "untrusted_delimiters": dict(snapshot.untrusted_delimiters),
         "claims": claims, "edges": [dict(edge) for edge in snapshot.graph["edges"]], "artifacts": artifacts,
+        "route_stamp": snapshot.state.route_stamp,
+        "investigation_stamp": snapshot.state.investigation_stamp,
         "audit": _audit(snapshot),
     })

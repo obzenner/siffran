@@ -470,5 +470,62 @@ class AuditTests(ConformanceCase):
         self.assert_status(result["run"], "stopped_frozen")
 
 
+    def test_dossier_carries_goal_route_investigation_witnesses_unfrozen(self):
+        """Rubric inputs: unfrozen dossier carries goal text, non-null route/investigation
+        stamps, and null frozen_scope_digest (scope_review must be null)."""
+        drv = self.bind_driver(
+            "D9", "dossier-rubric-unfrozen",
+            "Unfrozen GetArgument dossier carries goal, route/investigation witnesses, "
+            "and null frozen_scope_digest for the auditor rubric")
+        run_id = self.start_run(drv, goal=self.GOAL)
+        graph = self.require_graph_admitted(drv, run_id)
+        root_id = graph["root"]
+        self.require_research_recorded(drv, run_id, root_id)
+        arg = self.assert_argument_view(
+            self.dispatch(drv, get_argument(run_id=run_id))["result"])
+        # Rubric 9: goal text is present
+        self.assertEqual(arg["goal"], self.GOAL)
+        # Rubric 7: route and investigation are genuine core stamps. Evidence admission
+        # after investigation is a core invariant, not a dossier-derived ordering claim.
+        self.assertIsNotNone(arg["route_stamp"], "route_stamp must be non-null after start_run")
+        self.assertIsNotNone(arg["investigation_stamp"],
+                             "investigation_stamp must be non-null after start_run")
+        self.assertIsInstance(arg["route_stamp"], int)
+        self.assertIsInstance(arg["investigation_stamp"], int)
+        self.assertLess(arg["route_stamp"], arg["investigation_stamp"])
+        self.assertTrue(arg["artifacts"])
+        self.assertTrue(all("witness_seq" not in artifact for artifact in arg["artifacts"]))
+        # Rubric 8: unfrozen → frozen_scope_digest is null (scope_review must be null)
+        self.assertIsNone(arg["frozen_scope_digest"],
+                         "unfrozen dossier must have null frozen_scope_digest")
+
+    def test_dossier_carries_goal_route_investigation_witnesses_frozen(self):
+        """Rubric inputs: frozen dossier carries goal text, non-null route/investigation
+        stamps, and non-null frozen_scope_digest."""
+        drv = self.bind_driver(
+            "D9", "dossier-rubric-frozen",
+            "Frozen GetArgument dossier carries goal, route/investigation witnesses, "
+            "and non-null frozen_scope_digest for the auditor rubric")
+        run_id = self.start_run(drv, goal=self.GOAL)
+        scope = self.require_audit_scope(drv, run_id)
+        arg = scope["dossier"]
+        # Rubric 9: goal text is present
+        self.assertEqual(arg["goal"], self.GOAL)
+        # Rubric 7: the auditor confirms genuine route/investigation witnesses. Core
+        # separately enforces routing-first and evidence admission after investigation.
+        self.assertIsNotNone(arg["route_stamp"], "route_stamp must be non-null after start_run")
+        self.assertIsNotNone(arg["investigation_stamp"],
+                             "investigation_stamp must be non-null after start_run")
+        self.assertIsInstance(arg["route_stamp"], int)
+        self.assertIsInstance(arg["investigation_stamp"], int)
+        self.assertLess(arg["route_stamp"], arg["investigation_stamp"],
+                        "route_stamp must precede investigation_stamp")
+        self.assertTrue(arg["artifacts"])
+        self.assertTrue(all("witness_seq" not in artifact for artifact in arg["artifacts"]))
+        # Rubric 8: frozen → frozen_scope_digest is non-null
+        self.assertIsNotNone(arg["frozen_scope_digest"],
+                            "frozen dossier must have non-null frozen_scope_digest")
+
+
 if __name__ == "__main__":
     unittest.main()

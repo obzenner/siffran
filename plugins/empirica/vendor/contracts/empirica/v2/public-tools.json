@@ -3,15 +3,15 @@
   "definitions": {
     "empirica_read": {
       "title": "Read Empirica state",
-      "description": "Read public state owned by Empirica. Get the current run, audit argument, public contract, or restored run. Inspect state after an uncertain configure_run outcome. Do not blindly reopen host UI."
+      "description": "Read Empirica state. GetRun and RestoreRun return a deterministic plain-text author view; act on its reasons, obligations, and rendered next calls rather than parsing JSON. GetArgument and GetContract retain their detailed auditor/contract sections. Inspect state after an uncertain configure_run outcome. Do not blindly reopen host UI."
     },
     "empirica_observe": {
       "title": "Record an Empirica author action",
-      "description": "Submit exactly one public author action. Normal bootstrap is route, graph, configure_run, then investigate after approval. Graph may precede route and needs no prior investigation. configure_run requires a selected graph and requests host mediation without self-approval. Host-owned lifecycle facts are not author actions."
+      "description": "Submit exactly one public author action. The result is a deterministic plain-text author view; follow its rendered reasons and next calls rather than parsing JSON. Normal bootstrap is route, graph, configure_run, then investigate after approval. Graph may precede route and needs no prior investigation. configure_run requires a selected graph and requests host mediation without self-approval. Host-owned lifecycle facts are not author actions."
     },
     "report_convergence": {
       "title": "Request an Empirica decision",
-      "description": "Request guarded convergence or an honest residual stop. Current obligations and audit gates remain authoritative. Human waiting is neither investigation nor convergence. Typed blocks identify current recovery."
+      "description": "Request guarded convergence or an honest residual stop. The deterministic plain-text result renders current recovery calls; follow it rather than parsing JSON. Current obligations and audit gates remain authoritative. Human waiting is neither investigation nor convergence."
     }
   },
   "bootstrap_actions": {

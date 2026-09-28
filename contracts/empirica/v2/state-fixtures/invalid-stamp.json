@@ -2,7 +2,12 @@
   "protocol": "empirica/v2",
   "state_schema": "empirica.run/2",
   "goal": "Prove stamp overflow is rejected procedurally.",
-  "invocation": {"host": "test", "interactive": true, "signal": "fixture", "delegation": false},
+  "invocation": {
+    "host": "test",
+    "interactive": true,
+    "signal": "fixture",
+    "delegation": false
+  },
   "status": "active",
   "modes": {
     "multi_provider": false,

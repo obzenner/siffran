@@ -1,0 +1,8 @@
+{
+  "result": {
+    "type": "Fault",
+    "code": "invalid_request",
+    "fail_direction": "closed"
+  },
+  "text": "Fault invalid_request (closed)"
+}

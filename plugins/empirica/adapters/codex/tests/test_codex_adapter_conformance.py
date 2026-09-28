@@ -52,10 +52,10 @@ class CodexAdapterConformanceTests(unittest.TestCase):
                     for tool in ("empirica_read", "empirica_observe", "report_convergence"):
                         self.assertIsNone(_pre_tool_use({**payload, "tool_name": prefix + tool}))
                 tools = PublicTools("codex-cli@0.146.0", govern=HostGovernance("codex-cli@0.146.0"))
-                tools.call("empirica_observe", {"run_id": handle, "action": {"kind": "route", "reason": "route first"}})
-                tools.call("empirica_observe", {"run_id": handle, "action": {"kind": "graph", "payload": {
+                tools.call_internal("empirica_observe", {"run_id": handle, "action": {"kind": "route", "reason": "route first"}})
+                tools.call_internal("empirica_observe", {"run_id": handle, "action": {"kind": "graph", "payload": {
                     "root": "G0", "claims": [{"id": "G0", "text": "identity", "gating": True, "kind": "ordinary"}], "edges": []}}})
-                result = tools.call("empirica_observe", {"run_id": handle, "action": {"kind": "configure_run"}})["structuredContent"]
+                result = tools.call_internal("empirica_observe", {"run_id": handle, "action": {"kind": "configure_run"}})["structuredContent"]
                 self.assertEqual(result["run"]["governance"]["approval_kind"], "auto")
 
     def test_public_mcp_surface_runs_managed_auditor_but_blocks_unobserved_identity(self) -> None:
@@ -83,7 +83,7 @@ class CodexAdapterConformanceTests(unittest.TestCase):
                 tools = PublicTools("codex-cli@0.146.0", govern=HostGovernance("codex-cli@0.146.0"))
 
                 def observe(action: dict) -> dict:
-                    out = tools.call("empirica_observe", {"run_id": handle, "action": action})
+                    out = tools.call_internal("empirica_observe", {"run_id": handle, "action": action})
                     self.assertFalse(out["isError"], out)
                     return out["structuredContent"]
 
@@ -110,7 +110,7 @@ class CodexAdapterConformanceTests(unittest.TestCase):
                 stop = _stop(stop_payload)
                 self.assertEqual(stop.get("decision"), "block")
 
-                final = tools.call("report_convergence", {"run_id": handle})
+                final = tools.call_internal("report_convergence", {"run_id": handle})
                 result = final["structuredContent"]
                 self.assertEqual(result["type"], "Block")
                 self.assertEqual([reason["code"] for reason in result["reasons"]],
