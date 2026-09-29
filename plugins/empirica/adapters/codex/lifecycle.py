@@ -24,7 +24,7 @@ from pathlib import Path
 
 from adapters.state import project_id, run_id
 from adapters import bridge as application_bridge
-from adapters.invocation import env_mode, provenance, split_leading_flags
+from adapters.invocation import provenance, split_leading_flags
 from .transport import CODEX_PROFILE_ID
 
 from .correlation import PROTOCOL, request_id as new_request_id
@@ -35,8 +35,6 @@ _ACTIVATION = re.compile(
     r"^\s*(?:\$empirica(?::empirica)?|/empirica(?::empirica)?)\b(?P<args>.*)$",
     re.DOTALL,
 )
-_MODE_FLAGS = {"--multi-provider": "multi_provider", "--cli-exec": "cli_exec"}
-_MODE_ENV = {"multi_provider": "EMPIRICA_MODE_MULTI_PROVIDER", "cli_exec": "EMPIRICA_MODE_CLI_EXEC"}
 
 
 class SelectorError(ValueError):
@@ -81,27 +79,6 @@ def explicit_activation(payload: Mapping[str, object]) -> str | None:
     return args[1:] if args[:1].isspace() else args
 
 
-def _resolve_modes(tokens: list[str], environ: Mapping[str, str]) -> dict[str, bool]:
-    """Resolve env > leading invocation flag > default for each known mode."""
-    flags: dict[str, bool] = {}
-    index = 0
-    while index < len(tokens) and tokens[index].startswith("--"):
-        token = tokens[index]
-        if token in _MODE_FLAGS:
-            flags[_MODE_FLAGS[token]] = True
-        elif token.startswith("--no-") and f"--{token[5:]}" in _MODE_FLAGS:
-            flags[_MODE_FLAGS[f"--{token[5:]}"]] = False
-        index += 1
-    modes: dict[str, bool] = {}
-    for mode in ("multi_provider", "cli_exec"):
-        env = env_mode(environ, _MODE_ENV[mode])
-        if env is not None:
-            modes[mode] = env
-        elif mode in flags:
-            modes[mode] = flags[mode]
-    return modes
-
-
 def _positive_env(environ: Mapping[str, str], name: str, *, zero: bool = False) -> int | None:
     value = environ.get(name)
     if value is None:
@@ -121,9 +98,8 @@ def build_start_run_request(
 ) -> dict | None:
     """Translate an explicit ``$empirica`` prompt into an exact v2 ``StartRun`` envelope.
 
-    No ``actor`` field is emitted.  Explicit max values are nested under ``budgets`` and omitted
-    when absent; resolved modes are emitted only when non-empty.  Returns ``None`` when the prompt
-    does not explicitly start Empirica.
+    No ``actor`` field is emitted. Explicit max values are nested under ``budgets`` and omitted
+    when absent. Returns ``None`` when the prompt does not explicitly start Empirica.
     """
     args = explicit_activation(payload)
     if args is None:
@@ -141,9 +117,6 @@ def build_start_run_request(
     }
     if "--auto" in leading:
         command["control_mode"] = "auto"
-    modes = _resolve_modes(leading, env)
-    if modes:
-        command["modes"] = modes
     budgets: dict[str, int] = {}
     if (passes := _positive_env(env, "EMPIRICA_MAX_PASSES")) is not None:
         budgets["max_passes"] = passes
@@ -205,9 +178,14 @@ def _context_output(event: str, context: str) -> dict:
 
 def _start(payload: dict) -> dict | None:
     """UserPromptSubmit: best-effort activation, always fail open."""
-    request = build_start_run_request(payload)
-    if request is None:
+    args = explicit_activation(payload)
+    if args is None:
         return None
+    leading, _ = split_leading_flags(args)
+    unknown = [flag for flag in leading if flag != "--auto"]
+    if unknown:
+        return {"systemMessage": "empirica activation failed: unknown flags: " + " ".join(unknown)}
+    request = build_start_run_request(payload)
     response = _dispatch(payload, request)
     result = response.get("result", {}) if isinstance(response, dict) else {}
     if result.get("type") == "Fault":

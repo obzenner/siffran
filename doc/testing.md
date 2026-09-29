@@ -32,7 +32,7 @@ The old D-stage aliases and custom v2 preflight runner were removed. Full v2 dia
 ## What was subtracted
 
 - The repository-root Pi package no longer reruns the same adapter typecheck and Node suite.
-- Repeated Pi simulated end-to-end journeys (`adapter-conformance.test.ts` and `governance-ui.test.ts`) were removed. Their UI-only assertions—strict numeric input, Escape/cancellation, unknown choices, reversible modes, locked confirmation, and safe rendering—live in `governance-ui-unit.test.ts`. Real-service CAS, stale/replay, durable guidance, identity-class, and denial rules remain in Python governance tests; a bounded local bridge smoke remains in the Pi suite.
+- Repeated Pi simulated end-to-end journeys (`adapter-conformance.test.ts` and `governance-ui.test.ts`) were removed. Their UI-only assertions—strict numeric input, Escape/cancellation, unknown choices, locked confirmation, and safe rendering—live in `governance-ui-unit.test.ts`. Real-service CAS, stale/replay, durable guidance, identity-class, and denial rules remain in Python governance tests; a bounded local bridge smoke remains in the Pi suite.
 - The duplicate private transport file was merged into `transport.test.ts`.
 - The obsolete v2 `__main__.py --preflight` machinery was deleted; it encoded stale fixed file/test counts and duplicated schema/static checks.
 - Scripted online Codex sessions and credential copying were deleted. Deterministic package/hook/MCP tests remain.

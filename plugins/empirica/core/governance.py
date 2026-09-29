@@ -59,12 +59,11 @@ def proposal_digest(goal: str, governance: Mapping) -> str:
     return canonical_digest(proposal_body(goal, governance))
 
 
-def initial(goal: str, budgets: Mapping, modes: Mapping, control_mode: str = "deliberative") -> dict:
+def initial(goal: str, budgets: Mapping, control_mode: str = "deliberative") -> dict:
     value = {"state": "pending", "control_mode": control_mode,
              "plan_revision": 0, "approved_digest": None,
              "approval_kind": None, "receipts": [],
-             "proposal": {"budgets": {k: budgets[k] for k in CEILINGS},
-                          "modes": dict(modes)},
+             "proposal": {"budgets": {k: budgets[k] for k in CEILINGS}},
              "context": {"author": None, "ingress": "unavailable",
                          "approval_capability": UNAVAILABLE_CAPABILITY}}
     value["proposal_digest"] = proposal_digest(goal, value)
@@ -181,6 +180,5 @@ def invariant(doc: Mapping) -> bool:
         return False
     if value["state"] == "approved":
         return (value["approved_digest"] == value["proposal_digest"] and bool(receipts)
-                and value["proposal"]["modes"] == doc["modes"]
                 and all(value["proposal"]["budgets"][k] == doc["budgets"][k] for k in CEILINGS))
     return True

@@ -111,18 +111,6 @@
           "short": "audits",
           "help": "Independent auditor launches"
         }
-      },
-      "modes": {
-        "multi_provider": {
-          "label": "Cross-provider actors",
-          "short": "cross-provider",
-          "help": "Child agents may use other model providers"
-        },
-        "cli_exec": {
-          "label": "External CLI tools",
-          "short": "CLI tools",
-          "help": "Child agents may run external CLIs"
-        }
       }
     },
     "confirmation": {
@@ -493,18 +481,6 @@
                         "type": "integer",
                         "minimum": 0,
                         "maximum": 128
-                      }
-                    }
-                  },
-                  "modes": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                      "multi_provider": {
-                        "type": "boolean"
-                      },
-                      "cli_exec": {
-                        "type": "boolean"
                       }
                     }
                   }
@@ -884,18 +860,6 @@
                         "type": "integer",
                         "minimum": 0,
                         "maximum": 128
-                      }
-                    }
-                  },
-                  "modes": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                      "multi_provider": {
-                        "type": "boolean"
-                      },
-                      "cli_exec": {
-                        "type": "boolean"
                       }
                     }
                   }

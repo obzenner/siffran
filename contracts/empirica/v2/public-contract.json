@@ -36,8 +36,7 @@
       "freeze"
     ],
     "host": [
-      "child_reserve",
-      "dispatch"
+      "child_reserve"
     ],
     "trusted": [
       "evidence_leaf",
@@ -210,10 +209,6 @@
   "scope_reviews": [
     "pass",
     "fail"
-  ],
-  "mode_fields": [
-    "multi_provider",
-    "cli_exec"
   ],
   "operation_contexts": [
     "bootstrap",
@@ -732,18 +727,6 @@
                 "maximum": 128
               }
             }
-          },
-          "modes": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "multi_provider": {
-                "type": "boolean"
-              },
-              "cli_exec": {
-                "type": "boolean"
-              }
-            }
           }
         }
       }
@@ -843,7 +826,9 @@
       "params": {
         "type": "object",
         "additionalProperties": false,
-        "required": [],
+        "required": [
+          "budgets"
+        ],
         "properties": {
           "budgets": {
             "type": "object",
@@ -863,18 +848,6 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 128
-              }
-            }
-          },
-          "modes": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "multi_provider": {
-                "type": "boolean"
-              },
-              "cli_exec": {
-                "type": "boolean"
               }
             }
           }
@@ -1945,7 +1918,7 @@
         },
         {
           "id": "trusted/ingress/capability",
-          "text": "A trusted action carries a private capability reference that is application/host-held and non-public; payload validity never grants trust, and author dispatch with a forged or reflected reference still fails capability admission."
+          "text": "A trusted action carries a private capability reference that is application/host-held and non-public; payload validity never grants trust, and author submission with a forged or reflected reference still fails capability admission."
         },
         {
           "id": "trusted/ingress/replay",
@@ -2037,15 +2010,15 @@
       "clauses": [
         {
           "id": "governance/approval",
-          "text": "StartRun defaults to deliberative. Route, graph proposals, configuration proposals, public reads, and honest stop are available pending approval. Every investigation, evidence, spike, dispatch, child, audit, freeze and convergence admission requires current host-mediated configuration approval. configure_run proposes ceilings and modes; it never changes effective accounting. No public action can approve."
+          "text": "StartRun defaults to deliberative. Route, graph proposals, configuration proposals, public reads, and honest stop are available pending approval. Every investigation, evidence, spike, child, audit, freeze and convergence admission requires current host-mediated configuration approval. configure_run proposes ceilings; it never changes effective accounting. No public action can approve."
         },
         {
           "id": "governance/binding",
-          "text": "Host-private decisions bind run, exact configuration proposal digest and configuration epoch. The immutable goal is displayed as read-only context. Proposed ceilings, modes and control policy are covered; the claim graph and host decision timeout are not approvable. Configuration revisions revoke permission; graph changes do not. Freeze preserves approval and remains fresh-run-only."
+          "text": "Host-private decisions bind run, exact configuration proposal digest and configuration epoch. The immutable goal is displayed as read-only context. Proposed ceilings and control policy are covered; the claim graph and host decision timeout are not approvable. Configuration revisions revoke permission; graph changes do not. Freeze preserves approval and remains fresh-run-only."
         },
         {
           "id": "governance/auto",
-          "text": "Explicit auto accepts only configuration within existing budgets and modes. It cannot raise ceilings and is admitted only from an interactive invocation or recorded operator delegation. Reviewer configuration is host-owned, and actual host-observed reviewer distinctness from the covered evidence producer is checked at convergence."
+          "text": "Explicit auto accepts only configuration within existing budgets. It cannot raise ceilings and is admitted only from an interactive invocation or recorded operator delegation. Reviewer configuration is host-owned, and actual host-observed reviewer distinctness from the covered evidence producer is checked at convergence."
         },
         {
           "id": "governance/limits",
@@ -2104,18 +2077,6 @@
           "maximum": 128,
           "short": "audits",
           "help": "Independent auditor launches"
-        }
-      },
-      "modes": {
-        "multi_provider": {
-          "label": "Cross-provider actors",
-          "short": "cross-provider",
-          "help": "Child agents may use other model providers"
-        },
-        "cli_exec": {
-          "label": "External CLI tools",
-          "short": "CLI tools",
-          "help": "Child agents may run external CLIs"
         }
       }
     },

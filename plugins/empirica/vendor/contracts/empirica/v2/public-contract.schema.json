@@ -27,7 +27,6 @@
     "attribution_observers",
     "audit_verdicts",
     "scope_reviews",
-    "mode_fields",
     "operation_contexts",
     "approval_ingress",
     "untrusted_delimiters",
@@ -292,14 +291,6 @@
       "uniqueItems": true,
       "minItems": 1
     },
-    "mode_fields": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      },
-      "uniqueItems": true
-    },
     "operation_contexts": {
       "type": "array",
       "items": {
@@ -359,7 +350,7 @@
         "terminal_sections",
         "unknown_reason_sections"
       ],
-      "description": "Canonical ordered presentation selector registry (D1 \u00a712). The JSON registry is the executable SSOT; exact operation-context key parity and section resolution are enforced procedurally (no Python selector mapping).",
+      "description": "Canonical ordered presentation selector registry (D1 §12). The JSON registry is the executable SSOT; exact operation-context key parity and section resolution are enforced procedurally (no Python selector mapping).",
       "properties": {
         "context_sections": {
           "type": "object",
@@ -673,8 +664,7 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "budgets",
-            "modes"
+            "budgets"
           ],
           "properties": {
             "budgets": {
@@ -694,22 +684,6 @@
                 },
                 "max_audit_spawns": {
                   "$ref": "#/$defs/governanceBudgetControl"
-                }
-              }
-            },
-            "modes": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "multi_provider",
-                "cli_exec"
-              ],
-              "properties": {
-                "multi_provider": {
-                  "$ref": "#/$defs/governanceModeControl"
-                },
-                "cli_exec": {
-                  "$ref": "#/$defs/governanceModeControl"
                 }
               }
             }
@@ -939,31 +913,6 @@
         "maximum": {
           "type": "integer",
           "minimum": 1
-        },
-        "short": {
-          "type": "string",
-          "minLength": 1
-        },
-        "help": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 60,
-          "pattern": "[^.]$"
-        }
-      }
-    },
-    "governanceModeControl": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "label",
-        "short",
-        "help"
-      ],
-      "properties": {
-        "label": {
-          "type": "string",
-          "minLength": 1
         },
         "short": {
           "type": "string",

@@ -87,7 +87,7 @@ function envelope(result: Result, requestId = "x"): Response {
 }
 function run(status = "active") {
   return { id: HANDLE, status: status as never, governance: { state: "approved",
-    proposal: { budgets: {}, modes: {} } } };
+    proposal: { budgets: {} } } };
 }
 
 interface Wired {
@@ -230,6 +230,17 @@ test("/empirica rejects a busy session before creating a run", async () => {
   assert.equal(w.pi.userMessages.length, 0);
   assert.match(ui.notifications[0].message, /requires an idle session/);
   assert.equal(ui.notifications[0].type, "warning");
+});
+
+test("/empirica refuses unknown flags (including withdrawn modes) without starting", async () => {
+  const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+  const ui = new FakeUi();
+  await w.pi.command("empirica").handler("--cli-exec --multi-provider build the thing", { ui });
+  assert.equal(w.requests.length, 0);
+  assert.equal(w.pi.entries.length, 0);
+  assert.equal(w.pi.userMessages.length, 0);
+  assert.match(ui.notifications[0].message, /not started — unknown flags: --cli-exec --multi-provider/);
+  assert.equal(ui.notifications[0].type, "error");
 });
 
 // --- tool_call gate ----------------------------------------------------------

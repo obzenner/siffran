@@ -146,9 +146,6 @@ def governance_dialog(goal: str, value: Mapping, controls: Mapping,
          "maximum": controls["budgets"][key]["maximum"]}
         for key, used_key in governance.CEILINGS.items()
     ]
-    modes = [{"key": key, "label": control["label"], "short": control["short"],
-              "help": control["help"], "value": proposal["modes"][key]}
-             for key, control in controls["modes"].items()]
     return {"epoch": value["plan_revision"], "control_mode": value["control_mode"],
             "state": value["state"], "reviews_left": {
                 "proposal": value["interactions_remaining"]["proposal"],
@@ -157,7 +154,7 @@ def governance_dialog(goal: str, value: Mapping, controls: Mapping,
             "invocation": None if invocation is None else {
                 key: safe_text(invocation[key]) if key in {"host", "signal"} else invocation[key]
                 for key in ("host", "interactive", "signal", "delegation")},
-            "budgets": budgets, "modes": modes}
+            "budgets": budgets}
 
 
 def project_governance(snapshot: EvaluationSnapshot) -> dict:
@@ -208,7 +205,6 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
     return {
         "id": snapshot.run_id, "goal": snapshot.state.goal,
         "invocation": governance.plain(snapshot.state.invocation), "status": snapshot.state.status,
-        "modes": dict(snapshot.state.modes),
         "governance": project_governance(snapshot),
         "contract": {"id": snapshot.contract_id, "version": snapshot.contract_version,
                      "digest": snapshot.contract_digest,

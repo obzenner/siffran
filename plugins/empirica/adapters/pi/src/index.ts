@@ -49,7 +49,7 @@ import {
   getRunRequest,
   isExecutableSubagentLaunch,
   observeActionRequest,
-  parseModeFlags,
+  parseInvocationFlags,
   resolveRunRequest,
   restoreRunRequest,
   startRunRequest,
@@ -194,7 +194,7 @@ export interface EmpiricaPiDeps {
   deriveSelector?: SelectorProvider;
   /** Tool names whose call is the convergence report and must be gated. */
   gatedTools?: readonly string[];
-  /** StartRun options (max_passes, max_spawns, modes). */
+  /** StartRun budget options. */
   startRunOptions?: StartRunOptions;
   /** Tool name used for the bound auditor lifecycle. */
   subagentToolName?: string;
@@ -468,11 +468,12 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             "warning");
           return;
         }
-        const parsed = parseModeFlags(args);
+        const parsed = parseInvocationFlags(args);
         const goal = parsed.goal;
-        const modes = { ...startOptions.modes, ...parsed.modes };
-        if (parsed.unknownFlags.length)
-          ctx.ui.notify(`empirica: unknown mode flags ignored: ${parsed.unknownFlags.join(" ")}`, "warning");
+        if (parsed.unknownFlags.length) {
+          ctx.ui.notify(`empirica: not started — unknown flags: ${parsed.unknownFlags.join(" ")}`, "error");
+          return;
+        }
         try {
           // Render the canonical installed skill before creating a run. If the
           // package is incomplete, fail without leaving an active orphan.
@@ -483,7 +484,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             delegation: process.env[PUBLIC_TOOLS.host_profiles[HOST_PROFILE_ID].delegation_env] === "1",
           };
           const response = await dispatch(startRunRequest(selectorOf(ctx), goal, randomUUID(), invocation, {
-            ...startOptions, modes, controlMode: parsed.controlMode,
+            ...startOptions, controlMode: parsed.controlMode,
           }));
           const result = response.result;
           if ((result.type === "Allow" || result.type === "Block")

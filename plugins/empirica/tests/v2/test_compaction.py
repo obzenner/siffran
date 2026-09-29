@@ -27,13 +27,13 @@ class CompactionTests(ConformanceCase):
     def test_compaction_preserves_public_facts(self):
         drv = self.bind_driver(
             "D9", "case-43",
-            "Compaction preserves exact goal, status, modes, contract identity/digest/relevant "
+            "Compaction preserves exact goal, status, contract identity/digest/relevant "
             "sections, active/deferred obligation rows, residuals, freshness, pending child "
             "summaries, host, and ordered next_actions; exact canonical untrusted delimiters; "
             "one freeze.deferred residual binding claim_ids [C1] and exact dossier "
             "deferred_scope_digest; no full contract, native/capability, operational counters, or "
             "persisted revision/history/phase/hashes")
-        run_id = self.start_run(drv, goal=self.GOAL, modes={"multi_provider": False})
+        run_id = self.start_run(drv, goal=self.GOAL)
         # Real public setup: C0 ordinary approved, freeze, C1 deferred, foreground audit child → pending
         scope = self.require_audit_scope(drv, run_id, deferred_kind="ordinary")
         c1_id = scope["c1_id"]
@@ -48,8 +48,6 @@ class CompactionTests(ConformanceCase):
                          "compaction must preserve the exact goal")
         self.assertEqual(compacted.get("status"), run_before["status"],
                          "compaction must preserve the exact status")
-        self.assertEqual(compacted.get("modes"), run_before["modes"],
-                         "compaction must preserve the exact modes")
         self.assertEqual(compacted["governance"], run_before["governance"],
                          "compaction preserves exact proposal, approval and budget telemetry")
         c_comp = compacted.get("contract", {})

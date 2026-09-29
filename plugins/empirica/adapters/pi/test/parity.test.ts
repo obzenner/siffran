@@ -148,13 +148,11 @@ test("lexical projection: RunSelector is canonical-required-exact, TS-optional s
   assertCanonicalRequiredExactOptionalSubsetNoExtras("RunSelector", "runSelector");
 });
 
-test("lexical projection: Budgets and Modes are canonical-optional schema properties", () => {
-  for (const [iface, defName] of [["Budgets", "budgets"], ["Modes", "modes"]] as const) {
-    const def = schema.$defs[defName];
-    assert.ok(!Array.isArray(def.required), `${iface}: schema ${defName} must not require fields`);
-    for (const { field } of parseInterfaceFields(contractSrc, iface))
-      assert.ok(def.properties[field], `${iface}.${field} not in schema ${defName}`);
-  }
+test("lexical projection: Budgets are canonical-optional schema properties", () => {
+  const def = schema.$defs.budgets;
+  assert.ok(!Array.isArray(def.required), "Budgets: schema budgets must not require fields");
+  for (const { field } of parseInterfaceFields(contractSrc, "Budgets"))
+    assert.ok(def.properties[field], `Budgets.${field} not in schema budgets`);
 });
 
 // --- (b) emitted-builder conformance (one builder table) ---------------------
@@ -162,7 +160,7 @@ test("lexical projection: Budgets and Modes are canonical-optional schema proper
 const INVOCATION = { host: "pi", interactive: true, signal: "ctx.mode=tui", delegation: false };
 const BUILDER_TABLE: Array<{ type: string; build: () => Request }> = [
   { type: "StartRun", build: () => startRunRequest({ project: "p", session: "s" }, "goal", "r1", INVOCATION) },
-  { type: "StartRun", build: () => startRunRequest({ project: "p", session: "s" }, "g", "r2", INVOCATION, { maxPasses: 3, maxSpawns: 1, modes: { cli_exec: true, multi_provider: false } }) },
+  { type: "StartRun", build: () => startRunRequest({ project: "p", session: "s" }, "g", "r2", INVOCATION, { maxPasses: 3, maxSpawns: 1 }) },
   { type: "ResolveRun", build: () => resolveRunRequest({ project: "p", session: "s" }, "r3") },
   { type: "ObserveAction", build: () => observeActionRequest("h", { kind: "route", reason: "r" }, "r-observe") },
   { type: "GetRun", build: () => getRunRequest("h", "r-get") },

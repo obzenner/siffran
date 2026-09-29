@@ -65,23 +65,6 @@
         }
       }
     },
-    "runModes": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "multi_provider",
-        "cli_exec"
-      ],
-      "description": "Effective run modes; output always reports both effective values.",
-      "properties": {
-        "multi_provider": {
-          "type": "boolean"
-        },
-        "cli_exec": {
-          "type": "boolean"
-        }
-      }
-    },
     "obligations": {
       "type": "object",
       "additionalProperties": false,
@@ -1143,7 +1126,6 @@
         "id",
         "goal",
         "status",
-        "modes",
         "contract",
         "obligations",
         "residuals",
@@ -1174,9 +1156,6 @@
             "stopped_frozen",
             "stopped_budget"
           ]
-        },
-        "modes": {
-          "$ref": "#/$defs/runModes"
         },
         "contract": {
           "$ref": "#/$defs/contractIdentity"
@@ -1279,8 +1258,7 @@
                   "type": "object",
                   "additionalProperties": false,
                   "required": [
-                    "budgets",
-                    "modes"
+                    "budgets"
                   ],
                   "properties": {
                     "budgets": {
@@ -1306,22 +1284,6 @@
                           "type": "integer",
                           "minimum": 0,
                           "maximum": 128
-                        }
-                      }
-                    },
-                    "modes": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": [
-                        "multi_provider",
-                        "cli_exec"
-                      ],
-                      "properties": {
-                        "multi_provider": {
-                          "type": "boolean"
-                        },
-                        "cli_exec": {
-                          "type": "boolean"
                         }
                       }
                     }
@@ -2965,8 +2927,7 @@
             "reviews_left",
             "goal",
             "invocation",
-            "budgets",
-            "modes"
+            "budgets"
           ],
           "properties": {
             "epoch": {
@@ -3052,37 +3013,6 @@
                   "maximum": {
                     "type": "integer",
                     "minimum": 1
-                  }
-                }
-              }
-            },
-            "modes": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "key",
-                  "label",
-                  "short",
-                  "help",
-                  "value"
-                ],
-                "properties": {
-                  "key": {
-                    "type": "string"
-                  },
-                  "label": {
-                    "type": "string"
-                  },
-                  "short": {
-                    "type": "string"
-                  },
-                  "help": {
-                    "type": "string"
-                  },
-                  "value": {
-                    "type": "boolean"
                   }
                 }
               }

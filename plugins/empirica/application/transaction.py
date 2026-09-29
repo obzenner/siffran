@@ -75,9 +75,6 @@ class Coordinator:
         return RunKey(project, session, generations[-1]) if generations else None
 
     def _initial_state(self, command: dict[str, Any], observation_basis_digest: str) -> OperationalState:
-        modes = {"multi_provider": False, "cli_exec": False}
-        modes.update({k: v for k, v in self.limits.get("modes", {}).items() if k in modes})
-        modes.update(command.get("modes", {}))
         budgets = {"max_passes": 8, "passes_used": 0, "max_spawns": 1, "spawns_used": 0,
                    "max_audit_spawns": 1, "audit_spawns_used": 0}
         supplied_limits = self.limits.get("budgets", self.limits)
@@ -87,8 +84,8 @@ class Coordinator:
         invocation = command["invocation"]
         return OperationalState(
             protocol=_proto._PROTOCOL, state_schema=_proto._STATE_SCHEMA_ID,
-            goal=command["goal"], invocation=invocation, status="active", modes=modes, budgets=budgets,
-            governance=governance.initial(command["goal"], budgets, modes, command.get("control_mode", "deliberative")),
+            goal=command["goal"], invocation=invocation, status="active", budgets=budgets,
+            governance=governance.initial(command["goal"], budgets, command.get("control_mode", "deliberative")),
             selected_graph_artifact_id=None, frozen_claim_ids=None, frozen_semantic_digest=None,
             route_stamp=None,
             investigation_stamp=None, stamp_seq=0, last_derivation_digest=None,
@@ -738,8 +735,7 @@ class Coordinator:
         profile = _proto._PROFILES[self.profile_id]
         run_id = encode_handle(key) if isinstance(key, RunKey) else str(key)
         run = {
-            "id": run_id, "goal": goal, "status": "active",
-            "modes": {"multi_provider": False, "cli_exec": False}, "governance": None,
+            "id": run_id, "goal": goal, "status": "active", "governance": None,
             "contract": {"id": _proto._PUBLIC_CONTRACT["id"],
                          "version": _proto._PUBLIC_CONTRACT["version"],
                          "digest": _proto._DIGEST, "relevant_sections": sections},

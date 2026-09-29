@@ -236,7 +236,7 @@ def _envelope(request_id: str, command: dict) -> dict:
 
 def start_run(*, goal: str, project: str = "demo", session: str = "s1",
               request_id: str | None = None, budgets: dict | None = None,
-              modes: dict | None = None, control_mode: str = "deliberative",
+              control_mode: str = "deliberative",
               invocation: dict | None = None) -> dict:
     """Build a valid StartRun envelope. Host profile selection is a driver-factory fact, never an
     invented StartRun field — there is deliberately no ``profile_id`` parameter (D4 spec §4)."""
@@ -246,8 +246,6 @@ def start_run(*, goal: str, project: str = "demo", session: str = "s1",
                  "invocation": invocation or {**TEST_INVOCATION, "signal": "v2 harness"}}
     if budgets is not None:
         cmd["budgets"] = budgets
-    if modes is not None:
-        cmd["modes"] = modes
     return _envelope(request_id or _rid("start"), cmd)
 
 
@@ -324,13 +322,10 @@ def action_spike_request(*, claim_id: str, command: str, dependent_files: list[s
             "command": command, "dependent_files": list(dependent_files)}
 
 
-def action_configure_run(*, budgets: dict | None = None,
-                         modes: dict | None = None) -> dict:
+def action_configure_run(*, budgets: dict | None = None) -> dict:
     a: dict = {"kind": "configure_run"}
     if budgets is not None:
         a["budgets"] = budgets
-    if modes is not None:
-        a["modes"] = modes
     return a
 
 
@@ -344,13 +339,6 @@ def action_investigate() -> dict:
 
 def action_freeze() -> dict:
     return {"kind": "freeze"}
-
-
-def action_dispatch(*, target: str, claim_id: str | None = None) -> dict:
-    a: dict = {"kind": "dispatch", "target": target}
-    if claim_id is not None:
-        a["claim_id"] = claim_id
-    return a
 
 
 def action_child_reserve(*, purpose: str, role_profile: str, execution: str,

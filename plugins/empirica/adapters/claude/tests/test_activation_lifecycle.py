@@ -29,7 +29,6 @@ _ENTRYPOINTS = {
     "run_start.py": "run_start_main",
     "spawn_gate.py": "spawn_main",
     "route_stamp.py": "route_main",
-    "dispatch_gate.py": "dispatch_main",
     "convergence_gate.py": "completion_main",
     "state_restore.py": "restore_main",
     "subagent_stop.py": "subagent_stop_main",
@@ -130,10 +129,10 @@ class ThinHookTests(unittest.TestCase):
 
     def test_lifecycle_functions_remain_importable(self) -> None:
         from adapters.claude.lifecycle import (
-            completion_main, dispatch_main, restore_main, route_main, run_start_main,
+            completion_main, restore_main, route_main, run_start_main,
             spawn_main, subagent_stop_main,
         )
-        for fn in (run_start_main, spawn_main, route_main, dispatch_main, completion_main,
+        for fn in (run_start_main, spawn_main, route_main, completion_main,
                    restore_main, subagent_stop_main):
             self.assertTrue(callable(fn))
 
@@ -176,6 +175,18 @@ class HookNativeBehaviorTests(unittest.TestCase):
         self.assertIn("empirica_observe", context)
         self.assertIn("empirica_read", context)
         self.assertIn("report_convergence", context)
+
+    def test_unknown_flags_refuse_activation_before_start(self) -> None:
+        from adapters.claude import lifecycle
+        payload = _payload(command_name="empirica:empirica", command_args="--cli-exec --multi-provider prove X")
+        output = io.StringIO()
+        with patch.object(lifecycle, "_payload", return_value=payload), \
+             patch.object(lifecycle, "dispatch_start_run") as start, redirect_stdout(output):
+            self.assertEqual(lifecycle.run_start_main(), 0)
+        start.assert_not_called()
+        value = json.loads(output.getvalue())
+        self.assertEqual(value["decision"], "block")
+        self.assertIn("unknown flags: --cli-exec --multi-provider", value["reason"])
 
     def test_start_transport_exception_and_malformed_result_are_operator_visible(self) -> None:
         from adapters.claude import lifecycle
@@ -259,20 +270,6 @@ class HookNativeBehaviorTests(unittest.TestCase):
         code, out, err = _run("route_stamp.py",
                               _payload(tool_name="Grep", tool_input={"pattern": "x"}),
                               self.cwd)
-        self.assertEqual((code, out, err), (0, "", ""))
-
-    def test_dispatch_non_actor_bash_is_inert(self) -> None:
-        code, out, err = _run("dispatch_gate.py",
-                              _payload(tool_name="Bash", tool_input={"command": "grep -rn x src/"}),
-                              self.cwd)
-        self.assertEqual((code, out, err), (0, "", ""))
-
-    def test_dispatch_actor_bash_is_inert_when_no_run(self) -> None:
-        code, out, err = _run(
-            "dispatch_gate.py",
-            _payload(tool_name="Bash", tool_input={"command": "codex exec --model m resolve G"}),
-            self.cwd,
-        )
         self.assertEqual((code, out, err), (0, "", ""))
 
     def test_completion_is_inert_when_no_run(self) -> None:

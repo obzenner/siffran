@@ -16,9 +16,9 @@ Asynchronous audit execution is not supported and is never silently downgraded.
 
 4.0.0 adds exact run-configuration approval before investigation. Deliberative mode uses
 `ctx.hasUI` and one documented `ctx.ui.custom()` component; cancel/no custom UI fails closed. ↑/↓
-moves through controls, digits edit budgets, space toggles modes, ←/→ chooses the action, Enter
+moves through controls, digits edit budgets, ←/→ chooses the action, Enter
 activates it, and Esc dismisses. Approval covers
-budgets, modes, and control mode while showing the goal read-only; graph content and reviewer
+budget ceilings and control mode while showing the goal read-only; graph content and reviewer
 configuration are not approvable. `configure_run` opens the component, and configuration amendments
 need a second read-only confirmation in the same component frame. Explicit `--auto` is bounded automatic acceptance, not a
 human decision, and requires an interactive invocation or recorded operator delegation. See

@@ -316,8 +316,6 @@ def _build_action_sample(kind: str) -> dict:
         return {"kind": "investigate"}
     if kind == "freeze":
         return {"kind": "freeze"}
-    if kind == "dispatch":
-        return {"kind": "dispatch", "target": "claim"}
     if kind == "child_reserve":
         return {"kind": "child_reserve", "purpose": "audit",
                 "role_profile": _DEFAULT_PROFILE, "execution": "foreground",

@@ -28,8 +28,6 @@ from adapters.claude import (  # noqa: E402
     CLAUDE_PROFILE_ID,
     PROTOCOL,
     build_child_reserve_request,
-    build_configure_run_request,
-    build_dispatch_request,
     build_get_argument_request,
     build_investigation_request,
     build_resolve_request,
@@ -169,13 +167,6 @@ class StartRunTests(unittest.TestCase):
         _assert_valid(request_both)
         self.assertEqual(request_both["command"]["budgets"],
                          {"max_passes": 5, "max_spawns": 3, "max_audit_spawns": 2})
-
-    def test_modes_emitted_only_when_resolved(self) -> None:
-        request = build_start_run_request(
-            _payload(command_args="--cli-exec prove X"), correlation_id="start-5", environ={},
-        )
-        _assert_valid(request)
-        self.assertEqual(request["command"]["modes"], {"cli_exec": True})
 
     def test_goal_is_verbatim_and_provenance_uses_env_then_transcript(self) -> None:
         with TemporaryDirectory() as td:
@@ -356,51 +347,14 @@ class RouteAndInvestigateTests(unittest.TestCase):
         self.assertNotIn("observed_at", request["command"])
 
 
-class DispatchTests(unittest.TestCase):
-    def test_dispatch_emits_only_target_and_optional_claim(self) -> None:
-        payload = _payload(tool_name="Bash",
-                           tool_input={"command": "codex exec --model openai.gpt-5.6-sol resolve G4"},
-                           ts="2026-09-05T20:01:00Z")
-        request = build_dispatch_request(payload, "run", claim_id="G4", correlation_id="dispatch-1")
-        _assert_valid(request)
-        self.assertEqual(request["command"]["action"],
-                         {"kind": "dispatch", "target": "codex", "claim_id": "G4"})
-        self.assertEqual(request["command"]["observed_at"], "2026-09-05T20:01:00Z")
-
-    def test_dispatch_omits_claim_id_when_absent_and_is_inert_for_plain_bash(self) -> None:
-        payload = _payload(tool_name="Bash", tool_input={"command": "grep -rn claude src/"})
-        self.assertIsNone(build_dispatch_request(payload, "run"))
-        dispatched = _payload(tool_name="Bash",
-                              tool_input={"command": "pi -p prove X"})
-        request = build_dispatch_request(dispatched, "run", correlation_id="dispatch-2")
-        _assert_valid(request)
-        self.assertEqual(request["command"]["action"], {"kind": "dispatch", "target": "pi"})
-
-
-class ConfigureRunTests(unittest.TestCase):
-    def test_mode_becomes_exact_configure_run(self) -> None:
-        automatic = parse_invocation(
+class RemovedInvocationFlagTests(unittest.TestCase):
+    def test_removed_flags_surface_as_unknown(self) -> None:
+        invocation = parse_invocation(
             {"command_args": "--auto --cli-exec --multi-provider prove X"}, environ={},
         )
-        self.assertEqual(automatic.control_mode, "auto")
-        self.assertTrue(automatic.modes["cli_exec"])
-        self.assertTrue(automatic.modes["multi_provider"])
-        invocation = parse_invocation(
-            {"command_args": "--cli-exec --multi-provider prove X"}, environ={},
-        )
-        request = build_configure_run_request("opaque-run", invocation.modes,
-                                               correlation_id="configure-1")
-        _assert_valid(request)
-        self.assertEqual(request["command"]["action"],
-                         {"kind": "configure_run",
-                          "modes": {"multi_provider": True, "cli_exec": True}})
-
-    def test_configure_run_rejects_unknown_and_empty_modes(self) -> None:
-        with self.assertRaises(ValueError):
-            build_configure_run_request("opaque-run", {"cli_exex": True}, correlation_id="bad")
-        with self.assertRaises(ValueError):
-            build_configure_run_request("opaque-run", {}, correlation_id="empty")
-
+        self.assertEqual(invocation.control_mode, "auto")
+        self.assertEqual(invocation.unknown_flags, ("--cli-exec", "--multi-provider"))
+        self.assertEqual(invocation.goal, "prove X")
 
 class ChildReserveTests(unittest.TestCase):
     def _payload(self, tool_input: dict) -> dict:

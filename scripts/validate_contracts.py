@@ -50,7 +50,7 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:c9f2afb5a8e618ea5644be4e1682531edba3fccb438d2c1891bc7f56c3516b58"
+REVIEWED_REGISTRY_DIGEST = "sha256:66a4c7d19d2fdfe656671b11b46aa727478c769178e0560751430e5d996213e0"
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:9b17d44746e8c4e2981d14575a970a5de286c8262fbdf7e5499faf9ad83a17c2"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
@@ -740,7 +740,7 @@ def check_run_view_fields(result: dict, contract: dict, errors: list[str], where
     run = result.get("run")
     if not isinstance(run, dict):
         return
-    required = ["id", "goal", "status", "modes", "contract", "obligations",
+    required = ["id", "goal", "status", "contract", "obligations",
                 "residuals", "freshness", "children", "host"]
     for field in required:
         if field not in run:
@@ -754,17 +754,6 @@ def check_run_view_fields(result: dict, contract: dict, errors: list[str], where
                                  f"{where}: run.freshness", errors)
     elif "freshness" in run:
         errors.append(f"{where}: run.freshness must be an object")
-    modes = run.get("modes")
-    mode_fields = set(contract.get("mode_fields", []))
-    if isinstance(modes, dict):
-        if set(modes.keys()) != mode_fields:
-            errors.append(f"{where}: run.modes keys {sorted(modes.keys())} != canonical "
-                          f"{sorted(mode_fields)}")
-        for mf in mode_fields:
-            if not isinstance(modes.get(mf), bool):
-                errors.append(f"{where}: run.modes.{mf} must be a boolean")
-    elif "modes" in run:
-        errors.append(f"{where}: run.modes must be an object")
     obligations = run.get("obligations")
     if isinstance(obligations, dict):
         if set(obligations.keys()) != {"active", "deferred"}:
@@ -1528,7 +1517,6 @@ def _minimal_valid_state() -> dict:
         "invocation": {"host": "test", "interactive": True,
                        "signal": "validator fixture", "delegation": False},
         "status": "active",
-        "modes": {"multi_provider": False, "cli_exec": False},
         "budgets": {"max_passes": 1, "passes_used": 0,
                     "max_spawns": 1, "spawns_used": 0,
                     "max_audit_spawns": 1, "audit_spawns_used": 0},
@@ -2041,13 +2029,6 @@ def check_schema_mirror(request_schema: dict, response_schema: dict, contract: d
     reg_tiers = set(contract.get("host_tiers", []))
     if set(ht.get("enum", [])) != reg_tiers:
         errors.append(f"{where}: response hostView.tier enum {ht.get('enum')} != registry {sorted(reg_tiers)}")
-    reg_modes = set(contract.get("mode_fields", []))
-    req_modes = request_schema.get("$defs", {}).get("modes", {}).get("properties", {})
-    if set(req_modes.keys()) != reg_modes:
-        errors.append(f"{where}: request modes keys {sorted(req_modes.keys())} != registry {sorted(reg_modes)}")
-    rm = defs.get("runModes", {}).get("properties", {})
-    if set(rm.keys()) != reg_modes:
-        errors.append(f"{where}: response runModes keys {sorted(rm.keys())} != registry {sorted(reg_modes)}")
     fci = set(defs.get("freshnessChangeItem", {}).get("properties", {}).get("state", {}).get("enum", []))
     if fci != set(contract.get("freshness_states", [])):
         errors.append(f"{where}: response freshnessChangeItem.state enum {sorted(fci)} != registry {sorted(contract.get('freshness_states', []))}")
@@ -2835,7 +2816,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         "contract_result.digest", "GetContract wrong-but-well-formed digest")
 
     # D2A §8/§9 negatives: one mutation each with its own expected diagnostic substring.
-    full_rv = {"governance": None, "id": "r", "goal": "g", "status": "active", "modes": {"multi_provider": False, "cli_exec": False},
+    full_rv = {"governance": None, "id": "r", "goal": "g", "status": "active",
                "contract": {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
                "obligations": {"active": [], "deferred": []}, "residuals": [],
                "freshness": {"changes": []}, "children": [], "next_actions": [],
@@ -2849,15 +2830,11 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                "result": {"type": "Allow", "converged": False,
                           "run": {"id": "r", "goal": "g", "status": "active", "contract": ci}}}
     if not schema_rejects(partial, "response"):
-        errors.append("NEG partial RunView missing modes/freshness/host: expected schema rejection")
+        errors.append("NEG partial RunView missing freshness/host: expected schema rejection")
 
     # (b) canonical additions drift is covered by the registry-digest negatives above.
 
     # (c) complete RunView required fields missing -> check_run_view_fields rejects.
-    no_modes = copy.deepcopy(full_rv)
-    no_modes.pop("modes")
-    expect(lambda e: check_run_view_fields({"type": "Allow", "run": no_modes}, registry, e, "neg"),
-           "run.modes is required", "RunView missing modes")
     no_host = copy.deepcopy(full_rv)
     no_host.pop("host")
     expect(lambda e: check_run_view_fields({"type": "Allow", "run": no_host}, registry, e, "neg"),
@@ -3792,7 +3769,6 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     # Build a valid correlated request/response bundle and mutate exactly one fact.
     def _run_view(status="active", sections=None, children=None) -> dict:
         return {"id": "run-fx", "goal": "g", "status": status,
-                "modes": {"multi_provider": False, "cli_exec": False},
                 "contract": {"id": "empirica/public", "version": REGISTRY_VERSION,
                               "digest": d64, "relevant_sections": sections or ["audit"]},
                 "obligations": {"active": [], "deferred": []}, "residuals": [],

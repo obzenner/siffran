@@ -67,7 +67,6 @@ test("Pi raw edit and locked approval cross the actual private Python service", 
       id: string;
       governance: { state: string; approved_digest: string | null; proposal_digest: string;
         budgets: { max_spawns: number; max_audit_spawns: number } };
-      modes: { cli_exec: boolean; multi_provider: boolean };
       obligations: { active: Array<{ id: string; status: string }> };
     };
   };
@@ -87,7 +86,7 @@ test("Pi raw edit and locked approval cross the actual private Python service", 
     ui.push(...component.render(80));
     dialogs++;
     const keys = dialogs === 1
-      ? ["8", "\x1b[B", "2", "\x1b[B", "2", "\x1b[B", " ", "\x1b[B", " ", "\x1b[B", "\r"]
+      ? ["8", "\x1b[B", "2", "\x1b[B", "2", "\r", "\r"]
       : ["\r"];
     for (const key of keys) component.handleInput(key);
   });
@@ -105,8 +104,6 @@ test("Pi raw edit and locked approval cross the actual private Python service", 
     const budgets = persisted.governance?.budgets as { max_spawns: number; max_audit_spawns: number };
     assert.equal(budgets.max_spawns, 2);
     assert.equal(budgets.max_audit_spawns, 2);
-    assert.equal(persisted.modes.cli_exec, true);
-    assert.equal(persisted.modes.multi_provider, true);
     assert.ok(persisted.obligations.active.some((row: { id: string; status: string }) =>
       row.id === "obligation.investigation" && row.status === "residual"));
     assert.deepEqual(payloads.map(p => p.outcome ?? (p.submission as { action: string })?.action),

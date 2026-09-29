@@ -86,18 +86,6 @@
         }
       }
     },
-    "modes": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "multi_provider": {
-          "type": "boolean"
-        },
-        "cli_exec": {
-          "type": "boolean"
-        }
-      }
-    },
     "invocationProvenance": {
       "type": "object",
       "additionalProperties": false,
@@ -658,9 +646,6 @@
         },
         "budgets": {
           "$ref": "#/$defs/budgets"
-        },
-        "modes": {
-          "$ref": "#/$defs/modes"
         }
       }
     },
@@ -702,27 +687,6 @@
       "properties": {
         "kind": {
           "const": "freeze"
-        }
-      }
-    },
-    "actionDispatch": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "kind",
-        "target"
-      ],
-      "properties": {
-        "kind": {
-          "const": "dispatch"
-        },
-        "target": {
-          "type": "string",
-          "minLength": 1
-        },
-        "claim_id": {
-          "type": "string",
-          "minLength": 1
         }
       }
     },
@@ -900,9 +864,6 @@
           "$ref": "#/$defs/actionFreeze"
         },
         {
-          "$ref": "#/$defs/actionDispatch"
-        },
-        {
           "$ref": "#/$defs/actionChildReserve"
         },
         {
@@ -945,9 +906,6 @@
         },
         "budgets": {
           "$ref": "#/$defs/budgets"
-        },
-        "modes": {
-          "$ref": "#/$defs/modes"
         },
         "control_mode": {
           "enum": [
@@ -1205,8 +1163,7 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "budgets",
-            "modes"
+            "budgets"
           ],
           "properties": {
             "budgets": {
@@ -1232,22 +1189,6 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 128
-                }
-              }
-            },
-            "modes": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "multi_provider",
-                "cli_exec"
-              ],
-              "properties": {
-                "multi_provider": {
-                  "type": "boolean"
-                },
-                "cli_exec": {
-                  "type": "boolean"
                 }
               }
             }

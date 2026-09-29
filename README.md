@@ -8,7 +8,7 @@ and evidence in Git shadow refs, leaving project worktrees clean.
 
 ## Governed Empirica starts
 
-Empirica 4.0.0 defaults to host-mediated approval of run configuration—budgets, modes, and
+Empirica 4.0.0 defaults to host-mediated approval of run configuration—budget ceilings and
 control mode—**before investigation**. The immutable goal is shown read-only; the claim graph
 defines the work but is not approvable. Prepare from supplied context, record route, propose scope,
 and submit `configure_run` to open approval. Configuration changes need a new exact decision;

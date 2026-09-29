@@ -23,25 +23,21 @@ from assertions import (  # noqa: E402
 
 
 class ActivationRouteGraphTests(ConformanceCase):
-    # 1 — Start exposes goal, modes, contract identity/digest, host profile/tier (no full dump)
-    def test_start_exposes_goal_modes_contract_identity_host_profile(self):
+    # 1 — Start exposes goal, contract identity/digest, host profile/tier (no full dump)
+    def test_start_exposes_goal_contract_identity_host_profile(self):
         drv = self.bind_driver(
             "D9", "case-1",
-            "StartRun exposes goal, exact effective modes requested (and required boolean sibling), "
-            "canonical contract identity/digest, exact selected host profile/tier, active status, "
+            "StartRun exposes goal, canonical contract identity/digest, exact selected "
+            "host profile/tier, active status, "
             "complete bounded RunView arrays, and no full/private dump")
         env = start_run(goal=self.DEFAULT_GOAL,
-                        budgets={"max_passes": 3, "max_spawns": 2},
-                        modes={"multi_provider": False})
+                        budgets={"max_passes": 3, "max_spawns": 2})
         resp = self.dispatch(drv, env)
         self.assert_protocol_identity(resp, env["request_id"])
         result = self.assert_allow(resp, converged=False)
         run = result["run"]
         self.assertEqual(run["goal"], self.DEFAULT_GOAL, "StartRun must echo the goal")
         self.assert_status(run, "active")
-        # Exact complete effective modes object, not just key presence.
-        self.assertEqual(run["modes"], {"multi_provider": False, "cli_exec": False},
-                         "RunView modes must be the exact complete effective modes object")
         # Complete bounded RunView arrays.
         self.assertIn("obligations", run, "RunView must carry obligations")
         self.assertIn("active", run["obligations"], "obligations must carry active array")

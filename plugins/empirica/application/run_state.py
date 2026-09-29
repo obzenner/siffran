@@ -36,7 +36,7 @@ def _thaw(value: Any) -> Any:
 def decode_state(doc: dict[str, Any]) -> OperationalState:
     return OperationalState(
         protocol=doc["protocol"], state_schema=doc["state_schema"], goal=doc["goal"],
-        invocation=doc["invocation"], status=doc["status"], modes=doc["modes"], budgets=doc["budgets"],
+        invocation=doc["invocation"], status=doc["status"], budgets=doc["budgets"],
         governance=doc["governance"],
         selected_graph_artifact_id=doc["selected_graph_artifact_id"],
         frozen_claim_ids=None if doc["frozen_claim_ids"] is None else tuple(doc["frozen_claim_ids"]),
@@ -52,7 +52,7 @@ def encode_state(state: OperationalState) -> dict[str, Any]:
     return {
         "protocol": state.protocol, "state_schema": state.state_schema, "goal": state.goal,
         "invocation": _thaw(state.invocation), "status": state.status,
-        "modes": _thaw(state.modes), "budgets": _thaw(state.budgets),
+        "budgets": _thaw(state.budgets),
         "governance": _thaw(state.governance),
         "selected_graph_artifact_id": state.selected_graph_artifact_id,
         "frozen_claim_ids": None if state.frozen_claim_ids is None else list(state.frozen_claim_ids),

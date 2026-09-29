@@ -11,10 +11,6 @@
       "delegation": false
     },
     "status": "active",
-    "modes": {
-      "multi_provider": false,
-      "cli_exec": false
-    },
     "governance": {
       "state": "approved",
       "control_mode": "deliberative",
@@ -26,10 +22,6 @@
           "max_passes": 8,
           "max_spawns": 1,
           "max_audit_spawns": 1
-        },
-        "modes": {
-          "multi_provider": false,
-          "cli_exec": false
         }
       },
       "context": {

@@ -6,22 +6,6 @@ import re
 
 from application import protocol as _proto
 
-_TRUE = frozenset({"1", "true", "on", "enabled"})
-_FALSE = frozenset({"0", "false", "off", "disabled", ""})
-
-
-def env_mode(environ: Mapping[str, str], key: str) -> bool | None:
-    """Decode the common tri-state environment vocabulary."""
-    raw = environ.get(key)
-    if raw is None:
-        return None
-    value = raw.strip().lower()
-    if value in _TRUE:
-        return True
-    if value in _FALSE:
-        return False
-    return None
-
 
 def provenance(
     host: str,

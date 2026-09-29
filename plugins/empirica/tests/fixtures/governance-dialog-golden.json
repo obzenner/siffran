@@ -46,22 +46,6 @@
           "minimum": 0,
           "maximum": 128
         }
-      ],
-      "modes": [
-        {
-          "key": "multi_provider",
-          "label": "Cross-provider actors",
-          "short": "cross-provider",
-          "help": "Child agents may use other model providers",
-          "value": false
-        },
-        {
-          "key": "cli_exec",
-          "label": "External CLI tools",
-          "short": "CLI tools",
-          "help": "Child agents may run external CLIs",
-          "value": false
-        }
       ]
     },
     "confirmation": {
@@ -109,22 +93,6 @@
           "used": 0,
           "minimum": 0,
           "maximum": 128
-        }
-      ],
-      "modes": [
-        {
-          "key": "multi_provider",
-          "label": "Cross-provider actors",
-          "short": "cross-provider",
-          "help": "Child agents may use other model providers",
-          "value": false
-        },
-        {
-          "key": "cli_exec",
-          "label": "External CLI tools",
-          "short": "CLI tools",
-          "help": "Child agents may run external CLIs",
-          "value": false
         }
       ]
     },
@@ -174,22 +142,6 @@
           "minimum": 0,
           "maximum": 128
         }
-      ],
-      "modes": [
-        {
-          "key": "multi_provider",
-          "label": "Cross-provider actors",
-          "short": "cross-provider",
-          "help": "Child agents may use other model providers",
-          "value": false
-        },
-        {
-          "key": "cli_exec",
-          "label": "External CLI tools",
-          "short": "CLI tools",
-          "help": "Child agents may run external CLIs",
-          "value": false
-        }
       ]
     }
   },
@@ -221,25 +173,13 @@
           "minimum": 0,
           "maximum": 128,
           "default": 1
-        },
-        "multi_provider": {
-          "type": "boolean",
-          "title": "Cross-provider actors",
-          "description": "Child agents may use other model providers",
-          "default": false
-        },
-        "cli_exec": {
-          "type": "boolean",
-          "title": "External CLI tools",
-          "description": "Child agents may run external CLIs",
-          "default": false
         }
       },
       "required": []
     }
   },
   "confirmation": {
-    "message": "Empirica · confirm edited configuration (epoch 1 · 15 min)\npasses 6 (was 8) · spawns 1 · audits 1\ncross-provider off · CLI tools off\nAccept = approve exactly this · Decline/Esc = keep edits pending",
+    "message": "Empirica · confirm edited configuration (epoch 1 · 15 min)\npasses 6 (was 8) · spawns 1 · audits 1\nAccept = approve exactly this · Decline/Esc = keep edits pending",
     "schema": {
       "type": "object",
       "properties": {}
@@ -273,18 +213,6 @@
           "minimum": 0,
           "maximum": 128,
           "default": 1
-        },
-        "multi_provider": {
-          "type": "boolean",
-          "title": "Cross-provider actors",
-          "description": "Child agents may use other model providers",
-          "default": false
-        },
-        "cli_exec": {
-          "type": "boolean",
-          "title": "External CLI tools",
-          "description": "Child agents may run external CLIs",
-          "default": false
         }
       },
       "required": []

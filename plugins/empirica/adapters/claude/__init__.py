@@ -6,20 +6,8 @@ Claude lifecycle binds the shared durable audit operation to exact SubagentStart
 
 from .completion import REPORT_CONVERGENCE, StopResult, build_stop_request, dispatch_stop, stop_result
 from .correlation import PROTOCOL, CorrelationError, correlate, request_id
-from .dispatch import (
-    bash_command,
-    build_dispatch_request,
-    dispatch_advice,
-    dispatch_dispatch,
-    dispatched_harness,
-)
 from .fail_direction import FailureDirection, blocks_on_failure, failure_direction
-from .invocation import (
-    Invocation,
-    MODES,
-    build_configure_run_request,
-    parse_invocation,
-)
+from .invocation import Invocation, parse_invocation
 from .preflight import diagnose
 from .restore import (
     build_get_argument_request,
@@ -58,7 +46,6 @@ __all__ = [
     "FailureDirection",
     "INVESTIGATIVE_TOOLS",
     "Invocation",
-    "MODES",
     "PayloadContext",
     "PROTOCOL",
     "REPORT_CONVERGENCE",
@@ -66,11 +53,8 @@ __all__ = [
     "SpawnDecision",
     "StopResult",
     "Transport",
-    "bash_command",
     "blocks_on_failure",
     "build_child_reserve_request",
-    "build_configure_run_request",
-    "build_dispatch_request",
     "build_get_argument_request",
     "build_investigation_request",
     "build_resolve_request",
@@ -82,9 +66,7 @@ __all__ = [
     "correlate",
     "diagnose",
     "dispatch",
-    "dispatch_advice",
     "dispatch_child_reserve",
-    "dispatch_dispatch",
     "dispatch_get_argument",
     "dispatch_investigation",
     "dispatch_resolve",
@@ -92,7 +74,6 @@ __all__ = [
     "dispatch_route_announcement",
     "dispatch_start_run",
     "dispatch_stop",
-    "dispatched_harness",
     "failure_direction",
     "observed_at",
     "parse_invocation",

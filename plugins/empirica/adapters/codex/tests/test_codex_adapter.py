@@ -39,7 +39,7 @@ from adapters.codex import (  # noqa: E402
     build_start_run_request,
 )
 from adapters.codex.correlation import CorrelationError, correlate, request_id  # noqa: E402
-from adapters.codex.lifecycle import explicit_activation  # noqa: E402
+from adapters.codex.lifecycle import _start, explicit_activation  # noqa: E402
 from adapters.codex.transport import BridgeTransport  # noqa: E402
 
 _REQUEST_SCHEMA = json.loads(
@@ -247,12 +247,12 @@ class StartRunTests(unittest.TestCase):
         self.assertEqual(request_both["command"]["budgets"],
                          {"max_passes": 5, "max_spawns": 3, "max_audit_spawns": 2})
 
-    def test_modes_emitted_only_when_resolved(self) -> None:
-        request = build_start_run_request(
-            _payload(prompt="$empirica --cli-exec prove X"), correlation_id="start-5", environ={},
-        )
-        _assert_valid(request)
-        self.assertEqual(request["command"]["modes"], {"cli_exec": True})
+    def test_removed_flags_surface_as_unknown(self) -> None:
+        for flag in ("--cli-exec", "--multi-provider"):
+            with self.subTest(flag=flag):
+                result = _start(_payload(prompt=f"$empirica {flag} prove X"))
+                self.assertIn("unknown flags", result["systemMessage"])
+                self.assertIn(flag, result["systemMessage"])
 
     def test_goal_is_verbatim_and_codex_auto_requires_delegation_signal(self) -> None:
         command = build_start_run_request(
@@ -270,8 +270,8 @@ class StartRunTests(unittest.TestCase):
         self.assertIsNone(build_start_run_request(
             _payload(prompt="please discuss empirica"), environ={},
         ))
-        self.assertEqual(explicit_activation(_payload(prompt="$empirica --cli-exec design X")),
-                         "--cli-exec design X")
+        self.assertEqual(explicit_activation(_payload(prompt="$empirica --auto design X")),
+                         "--auto design X")
 
     def test_missing_session_is_rejected_before_transport(self) -> None:
         with self.assertRaises(SelectorError):

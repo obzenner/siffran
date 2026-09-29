@@ -13,7 +13,7 @@ const fixture = JSON.parse(readFileSync(new URL("../../../tests/fixtures/governa
 };
 const reviewDialog = fixture.dialogs.review;
 const theme = { accent: (x: string) => x, muted: (x: string) => x, warning: (x: string) => x };
-const ENTER = "\r", DOWN = "\x1b[B", RIGHT = "\x1b[C", SPACE = " ", BACKSPACE = "\x7f", ESC = "\x1b[27u";
+const ENTER = "\r", DOWN = "\x1b[B", RIGHT = "\x1b[C", BACKSPACE = "\x7f", ESC = "\x1b[27u";
 
 function drive(keys: string[], dialog = reviewDialog, confirmation = false): DialogDecision | undefined {
   let state = initialState(dialog, confirmation);
@@ -25,7 +25,7 @@ function drive(keys: string[], dialog = reviewDialog, confirmation = false): Dia
   return undefined;
 }
 
-const toButtons = [DOWN, DOWN, DOWN, DOWN, DOWN];
+const toButtons = [DOWN, DOWN, DOWN];
 
 test("dialog reducer approves defaults and maps reject and kitty escape", () => {
   assert.equal(drive([ENTER, ENTER])?.type, "approve");
@@ -55,13 +55,10 @@ test("range error follows its row after focus moves", () => {
   assert.ok(lines.some(line => line.includes("Must be an integer between 1 and 1024")));
 });
 
-test("mode toggle and edited integer are returned exactly", () => {
-  const result = drive(["6", DOWN, DOWN, DOWN, SPACE, DOWN, DOWN, ENTER]);
+test("edited integer is returned exactly", () => {
+  const result = drive(["6", ...toButtons, ENTER]);
   assert.equal(result?.type, "approve");
-  if (result?.type === "approve") {
-    assert.equal(result.configuration.budgets.max_passes, 6);
-    assert.equal(result.configuration.modes.multi_provider, true);
-  }
+  if (result?.type === "approve") assert.equal(result.configuration.budgets.max_passes, 6);
 });
 
 test("renderLines shows an escaped, bounded prefix of a hostile goal at widths 80 and 50", () => {
@@ -114,7 +111,6 @@ function harness(keyScripts: string[][] = [[ENTER, ENTER]]) {
   const g = { state: "pending", control_mode: "deliberative", proposal_digest: "sha256:" + "a".repeat(64),
     plan_revision: 0, prompt_error: null as string | null, proposal: {
       budgets: Object.fromEntries(dialog.budgets.map(row => [row.key, row.value])) as Record<string, number>,
-      modes: Object.fromEntries(dialog.modes.map(row => [row.key, row.value])) as Record<string, boolean>,
     }, context: { author: null, ingress: "pi_ui" } };
   const run = { id: "run", status: "active", governance: g };
   const decisions: Array<Record<string, unknown>> = [];
@@ -143,7 +139,6 @@ function harness(keyScripts: string[][] = [[ENTER, ENTER]]) {
           g.proposal_digest = "sha256:" + "b".repeat(64);
           dialog.epoch = g.plan_revision;
           for (const row of dialog.budgets) row.value = g.proposal.budgets[row.key];
-          for (const row of dialog.modes) row.value = g.proposal.modes[row.key];
         }
       }
     }

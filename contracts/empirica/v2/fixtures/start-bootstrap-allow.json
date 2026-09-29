@@ -18,9 +18,6 @@
       "budgets": {
         "max_passes": 3,
         "max_spawns": 2
-      },
-      "modes": {
-        "multi_provider": false
       }
     }
   },
@@ -40,10 +37,6 @@
           "delegation": false
         },
         "status": "active",
-        "modes": {
-          "multi_provider": false,
-          "cli_exec": false
-        },
         "contract": {
           "id": "empirica/public",
           "version": "3.0.0",
@@ -52,7 +45,7 @@
             "roles",
             "hosts/capabilities"
           ],
-          "digest": "sha256:c9f2afb5a8e618ea5644be4e1682531edba3fccb438d2c1891bc7f56c3516b58"
+          "digest": "sha256:66a4c7d19d2fdfe656671b11b46aa727478c769178e0560751430e5d996213e0"
         },
         "obligations": {
           "active": [
@@ -106,10 +99,6 @@
               "max_passes": 10,
               "max_spawns": 5,
               "max_audit_spawns": 1
-            },
-            "modes": {
-              "multi_provider": false,
-              "cli_exec": false
             }
           },
           "context": {
@@ -117,7 +106,7 @@
             "ingress": "unavailable",
             "approval_capability": "unavailable"
           },
-          "proposal_digest": "sha256:3839bdf80e1b820bd34d85e41d310c9f97951e0e043328adb5e5feba3b5c691e",
+          "proposal_digest": "sha256:f2cd925381687e56f3bc97866b54e33e279f5aed380821e345779641ef5fade0",
           "budgets": {
             "max_passes": 10,
             "passes_used": 3,

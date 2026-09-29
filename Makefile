@@ -458,7 +458,7 @@ adr-list: ## List all ADRs with their status
 	@if command -v adrs >/dev/null 2>&1; then adrs --ng list; else ls -1 $(ADR_DIR)/*.md; fi
 
 .PHONY: doctor
-doctor: ## empirica preflight: actors reachable; pass ARGS="--multi-provider" to probe (no inference)
+doctor: ## empirica preflight: report baseline host capability without inference
 	@PYTHONPATH=plugins/empirica $(PYTHON) -c 'from adapters.claude.preflight import main; raise SystemExit(main())' $(ARGS)
 
 # Dogfooding (see docs/packages.md "Scope and Deduplication" in pi): the committed .pi/settings.json

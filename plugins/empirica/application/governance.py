@@ -72,7 +72,7 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                         return c._block_from_snapshot(snapshot, rid, reason, presentation=True)
                     governed.update(state="approved", approved_digest=governed["proposal_digest"],
                                     approval_kind=payload["approval_kind"])
-                    next_state = replace(state, modes=governed["proposal"]["modes"],
+                    next_state = replace(state,
                                          budgets={**state.budgets, **governed["proposal"]["budgets"]})
                 elif outcome == "amend" and "amendment" in decision:
                     proposed = decision["amendment"]

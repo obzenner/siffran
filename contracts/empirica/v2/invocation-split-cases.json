@@ -1,9 +1,7 @@
 [
   {"args": "", "flags": [], "goal": ""},
   {"args": "  exact goal  ", "flags": [], "goal": "  exact goal  "},
-  {"args": "--auto --multi-provider  exact goal  ", "flags": ["--auto", "--multi-provider"], "goal": "exact goal  "},
-  {"args": "--wat\t--cli-exec\nnext", "flags": ["--wat", "--cli-exec"], "goal": "next"},
+  {"args": "--wat\tnext", "flags": ["--wat"], "goal": "next"},
   {"args": "prove --auto x", "flags": [], "goal": "prove --auto x"},
-  {"args": "--auto\r\n--cli-exec\r\ngoal", "flags": ["--auto", "--cli-exec"], "goal": "goal"},
   {"args": "--auto   ", "flags": ["--auto"], "goal": ""}
 ]

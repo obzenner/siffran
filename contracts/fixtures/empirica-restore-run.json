@@ -27,9 +27,6 @@
             "max_spawns": 4,
             "remaining": 3
           },
-          "modes": {
-            "cli_exec": true
-          },
           "route": {
             "route_seq": 1,
             "first_investigation_seq": 2,
@@ -93,10 +90,7 @@
             "held": []
           }
         },
-        "goal": "fixture goal",
-        "modes": {
-          "cli_exec": true
-        }
+        "goal": "fixture goal"
       }
     }
   }

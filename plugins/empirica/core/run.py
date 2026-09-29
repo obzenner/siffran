@@ -35,7 +35,6 @@ class OperationalState:
     goal: str
     invocation: Mapping[str, Any]
     status: str
-    modes: Mapping[str, bool]
     budgets: Mapping[str, int]
     governance: Mapping[str, Any]
     selected_graph_artifact_id: str | None
@@ -51,7 +50,6 @@ class OperationalState:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "invocation", _immutable(self.invocation))
-        object.__setattr__(self, "modes", _immutable(self.modes))
         object.__setattr__(self, "budgets", _immutable(self.budgets))
         object.__setattr__(self, "governance", _immutable(self.governance))
         object.__setattr__(self, "children", _immutable(self.children))

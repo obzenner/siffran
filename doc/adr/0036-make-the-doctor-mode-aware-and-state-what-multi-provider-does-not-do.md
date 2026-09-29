@@ -1,7 +1,7 @@
 ---
 number: 36
 title: "Make the doctor mode-aware, and state what multi_provider does not do"
-status: accepted
+status: superseded
 date: 2026-09-08
 tags:
   - workflow

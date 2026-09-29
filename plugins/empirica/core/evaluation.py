@@ -771,7 +771,6 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                                                 frozen_semantic_digest=semantic_digest))
         if akind == "configure_run":
             proposed = governance.plain(state.governance["proposal"])
-            proposed["modes"].update(action.get("modes", {}))
             proposed["budgets"].update(action.get("budgets", {}))
             if reason := governance.configuration_error(state, proposed):
                 if reason == "governance.budget_invalid":

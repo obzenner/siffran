@@ -9,7 +9,7 @@ import { initialState, reduce, renderLines } from "./dialog-view.ts";
 import type { Dialog, DialogDecision, DialogState, DialogTheme } from "./dialog-view.ts";
 
 const RECOVERY = PUBLIC_TOOLS.recovery;
-interface Proposal { budgets: Record<string, number>; modes: Record<string, boolean> }
+interface Proposal { budgets: Record<string, number> }
 interface Governance {
   state: string; control_mode: string; proposal_digest: string; plan_revision: number;
   proposal: Proposal; prompt_error: string | null;

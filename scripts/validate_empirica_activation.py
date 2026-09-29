@@ -13,7 +13,6 @@ ENTRYPOINTS = {
     "run_start.py": "run_start_main",
     "spawn_gate.py": "spawn_main",
     "route_stamp.py": "route_main",
-    "dispatch_gate.py": "dispatch_main",
     "convergence_gate.py": "completion_main",
     "state_restore.py": "restore_main",
     "agent_failure.py": "agent_failure_main",

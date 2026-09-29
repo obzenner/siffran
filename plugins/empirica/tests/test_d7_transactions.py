@@ -184,11 +184,9 @@ def initial() -> OperationalState:
     return OperationalState(
         protocol="empirica/v2", state_schema="empirica.run/2", goal="g",
         invocation={**TEST_INVOCATION, "signal": "transaction fixture"}, status="active",
-        modes={"multi_provider": False, "cli_exec": False},
         budgets={"max_passes": 8, "passes_used": 0, "max_spawns": 1, "spawns_used": 0,
                  "max_audit_spawns": 1, "audit_spawns_used": 0},
-        governance=initial_governance("g", {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 1},
-                                      {"multi_provider": False, "cli_exec": False}),
+        governance=initial_governance("g", {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 1}),
         selected_graph_artifact_id=None, frozen_claim_ids=None, frozen_semantic_digest=None,
         route_stamp=None,
         investigation_stamp=None, stamp_seq=0, last_derivation_digest=None, children=(),

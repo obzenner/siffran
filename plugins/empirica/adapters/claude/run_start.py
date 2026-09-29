@@ -53,7 +53,7 @@ def build_start_run_request(
     correlation_id: str | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Build exact v2 StartRun with no actor and only supplied budgets/resolved modes."""
+    """Build exact v2 StartRun with no actor and only supplied budgets."""
     context_from_payload(payload)  # validate cwd/session together before deriving the selector
     env = os.environ if environ is None else environ
     invocation = parse_invocation(payload, environ=env)
@@ -65,8 +65,6 @@ def build_start_run_request(
     }
     if invocation.control_mode == "auto":
         command["control_mode"] = "auto"
-    if invocation.modes:
-        command["modes"] = invocation.modes
     budgets: dict[str, int] = {}
     for field, env_name, minimum in (
         ("max_passes", "EMPIRICA_MAX_PASSES", 1),

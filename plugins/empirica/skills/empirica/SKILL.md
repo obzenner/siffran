@@ -3,7 +3,7 @@ name: empirica
 description: "Empirical-convergence workflow for non-trivial work whose plan is uncertain. Route before investigating, represent unknowns as claims, require cited research before deterministic spikes, discard refuted claims, and request an independently audited convergence decision. Use for design-and-implement work, architectural uncertainty, competing approaches, and risky assumptions. Host capabilities differ; run the capability preflight before promising convergence. Invoke as /empirica <goal>."
 allowed-tools: Read Glob Grep Bash Edit Write Agent TaskCreate TaskUpdate WebFetch
 compatibility: Designed for Claude Code >=2.1.278,<2.2.0, Codex CLI >=0.146.0,<0.147.0, and Pi >=0.84.1,<0.85.0 with pi-subagents 0.50.0; requires methodologist and python3 for hook-backed hosts. Exact observed versions remain receipt provenance; live capabilities still gate execution.
-argument-hint: "[--auto] [--cli-exec] [--multi-provider] <goal>"
+argument-hint: "[--auto] <goal>"
 ---
 
 # Empirica — empirical convergence
@@ -66,15 +66,17 @@ session with untrusted hooks, or any host missing one of the three public tools 
 investigation and report the exact unsupported capability. Do not imitate the missing operation
 in prose or write runtime artifacts by hand.
 
-The user invocation is `$ARGUMENTS`. Leading `--` values are mode flags, not part
+The user invocation is `$ARGUMENTS`. Leading `--` values are invocation flags, not part
 of the goal. The host adapter owns parsing. Surface unknown flags and read the
-resolved goal and modes only from the public run view when that view is available.
+resolved goal only from the public run view when that view is available.
+
+External actor CLIs are not metered or attributed in 4.0 (ADR 0061).
 
 ## 1. Route before investigating
 
 Do this before reading files, searching, browsing, or running commands.
 
-1. Restate the goal without mode flags.
+1. Restate the goal without invocation flags.
 2. List each dependency as:
    - **known** — already fixed by evidence you can cite now;
    - **unknown** — requires observation, experiment, or human judgment.
@@ -88,9 +90,9 @@ Do this before reading files, searching, browsing, or running commands.
    payload); do not guess field names or nesting. Contract reads are optional
    explanation, never the source of a shape.
 5. Read `empirica_read(operation="GetRun")`, then call `configure_run` to request approval of
-   run configuration only: budgets, modes, and control mode. The goal is displayed read-only;
+   run configuration only: budget ceilings and control mode. The goal is displayed read-only;
    the claim graph and reviewer are not approvable. Preserve the human's edited values rather than
-   resending stale fields, and note explicit `--auto` stays within existing budgets and modes and
+   resending stale fields, and note explicit `--auto` stays within existing budgets and
    cannot raise ceilings.
    The host-owned decision timeout and the durable per-epoch/per-run presentation
    reservations are fixed by the contract and displayed read-only; take exact values,
@@ -99,7 +101,7 @@ Do this before reading files, searching, browsing, or running commands.
    rejection. Do not loop on refusal or exhaustion.
 6. Wait until the text view's governance summary says `approved` for the exact displayed
    configuration; do not expect or parse a `run.governance.state` JSON field.
-   configuration amendments need a second review and human numeric/mode edits are not corruption.
+   configuration amendments need a second review and human numeric edits are not corruption.
    After cancellation/timeout, wait for the human; Claude can settle the turn nonterminally while
    investigation and convergence remain blocked. Then record the `investigate` witness `{"kind":"investigate"}` before any
    native read, search, command, evidence submission, or child launch. Approval does not supply
@@ -156,7 +158,7 @@ root and pass through both folds when applicable.
 
 Use only author actions exposed by the current host. Evidence leaves, attribution,
 child events, and audit verdicts are trusted host ingress; the author must never
-submit or fabricate them. External actor CLIs are refused in 4.0; the host blocks them.
+submit or fabricate them.
 
 ## 4. Assess one fixed-point pass
 

@@ -134,10 +134,8 @@ class PublicToolContractTests(unittest.TestCase):
             self.assertTrue(result["isError"], action["kind"])
         self.assertEqual(self.requests, [])
 
-    def test_public_author_dispatch_is_refused_and_absent_from_the_tool_schema(self):
-        """dispatch is a host action, never a public author kind: it is absent from the model-facing
-        observe tool schema and invalid at the author boundary (the actor-CLI hook path in
-        adapters/claude/dispatch.py remains its only producer, still failing closed in core)."""
+    def test_removed_dispatch_is_refused_and_absent_from_the_public_schema(self):
+        """The removed action is absent from the model-facing schema and rejected pre-dispatch."""
         tools = self._tools()
         observe = next(d for d in tools.definitions() if d["name"] == "empirica_observe")
         kinds = {row["properties"]["kind"]["const"]
@@ -145,6 +143,15 @@ class PublicToolContractTests(unittest.TestCase):
         self.assertNotIn("dispatch", kinds)
         result = tools.call(
             "empirica_observe", {"run_id": "r", "action": {"kind": "dispatch", "target": "codex"}})
+        self.assertTrue(result["isError"])
+        self.assertEqual(self.requests, [])
+
+    def test_configure_run_with_removed_modes_field_is_rejected(self):
+        tools = self._tools()
+        result = tools.call("empirica_observe", {
+            "run_id": "r",
+            "action": {"kind": "configure_run", "modes": {"cli_exec": True}},
+        })
         self.assertTrue(result["isError"])
         self.assertEqual(self.requests, [])
 

@@ -147,10 +147,6 @@ const PRESENTATION = { dialog: {
     { key: "max_passes", label: "Investigation passes", short: "passes", help: "Investigation passes the run may use", value: 8, used: 0, minimum: 1, maximum: 1024 },
     { key: "max_spawns", label: "Child spawns", short: "spawns", help: "Non-audit child agents", value: 1, used: 0, minimum: 0, maximum: 128 },
     { key: "max_audit_spawns", label: "Audit spawns", short: "audits", help: "Independent auditor launches", value: 1, used: 0, minimum: 0, maximum: 128 },
-  ],
-  modes: [
-    { key: "multi_provider", label: "Cross-provider actors", short: "cross-provider", help: "Child agents may use other model providers", value: false },
-    { key: "cli_exec", label: "External CLI tools", short: "CLI tools", help: "Child agents may run external CLIs", value: false },
   ] }, scope: { root: "C0" } };
 
 function mediatedObserve(choice: "approve" | "dismiss"): {

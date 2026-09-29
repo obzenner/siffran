@@ -27,11 +27,6 @@ export interface Budgets {
   max_audit_spawns?: number;
 }
 
-export interface Modes {
-  multi_provider?: boolean;
-  cli_exec?: boolean;
-}
-
 export interface InvocationProvenance {
   host: string;
   interactive: boolean | null;
@@ -46,7 +41,6 @@ export interface StartRunCommand {
   goal: string;
   invocation: InvocationProvenance;
   budgets?: Budgets;
-  modes?: Modes;
 }
 
 export interface ResolveRunCommand {
@@ -108,7 +102,7 @@ export interface Request {
 
 // --- response: minimum guard surface ----------------------------------------
 //
-// The canonical response schema is far richer (RunView carries goal, modes,
+// The canonical response schema is far richer (RunView carries goal,
 // contract identity, obligations, residuals, freshness, children, host). The
 // adapter reads only the minimum safe fields the guard asserts before any
 // gate or render; everything else is `[key: string]: unknown` passthrough.

@@ -201,8 +201,7 @@
             "reviews_left",
             "goal",
             "invocation",
-            "budgets",
-            "modes"
+            "budgets"
           ],
           "properties": {
             "epoch": {
@@ -288,37 +287,6 @@
                   "maximum": {
                     "type": "integer",
                     "minimum": 1
-                  }
-                }
-              }
-            },
-            "modes": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "key",
-                  "label",
-                  "short",
-                  "help",
-                  "value"
-                ],
-                "properties": {
-                  "key": {
-                    "type": "string"
-                  },
-                  "label": {
-                    "type": "string"
-                  },
-                  "short": {
-                    "type": "string"
-                  },
-                  "help": {
-                    "type": "string"
-                  },
-                  "value": {
-                    "type": "boolean"
                   }
                 }
               }

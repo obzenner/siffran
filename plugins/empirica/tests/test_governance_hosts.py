@@ -119,8 +119,7 @@ class GovernanceHostTests(unittest.TestCase):
                              "An approval view must not also collect scope-change text")
             content = {}
             if len(seen) == 1:
-                content.update(max_passes=8, max_spawns=2, max_audit_spawns=2,
-                               multi_provider=True, cli_exec=True)
+                content.update(max_passes=8, max_spawns=2, max_audit_spawns=2)
             else:
                 self.assertEqual(len(seen), 2)
                 self.assertIn("confirm edited configuration", message)
@@ -157,7 +156,7 @@ class GovernanceHostTests(unittest.TestCase):
             if len(seen) == 1:
                 return {"action": "accept", "content": {
                     "max_passes": 8, "max_spawns": 2,
-                    "max_audit_spawns": 3, "cli_exec": True, "multi_provider": True}}
+                    "max_audit_spawns": 3}}
             self.assertEqual(len(seen), 2)
             self.assertIn("confirm edited configuration", message)
             self.assertIn("spawns 2 (was 1)", message)
@@ -176,7 +175,6 @@ class GovernanceHostTests(unittest.TestCase):
         self.assertEqual(g["approved_digest"], g["proposal_digest"])
         self.assertEqual(g["budgets"]["max_spawns"], 2)
         self.assertEqual(g["budgets"]["max_audit_spawns"], 3)
-        self.assertEqual(result["run"]["modes"], {"cli_exec": True, "multi_provider": True})
 
     def test_host_owned_confirmation_cancel_preserves_pending_edit(self):
         self.initialize({"elicitation": {}})
@@ -362,27 +360,14 @@ class GovernanceHostTests(unittest.TestCase):
         result = self.dispatch({"type": "ObserveAction", "run_id": self.run, "action": {"kind": "investigate"}})
         self.assertEqual(result["result"]["type"], "Allow")
 
-    def test_hook_translation_of_an_actor_cli_still_fails_closed(self):
-        """The Claude PreToolUse hook is dispatch's only producer: it translates an actor-CLI Bash
-        call into an ObserveAction(dispatch) submitted through the bridge. dispatch is a host
-        action with no core evaluation, so even a fully approved and investigated run refuses it
-        with the exact unsupported/closed Fault. No public author schema exposes the kind."""
-        from adapters.claude.dispatch import build_dispatch_request
-        self.initialize({"elicitation": {"form": {}}})
-        self.assertEqual(self.propose()["result"]["structuredContent"]["run"]["governance"]["state"],
-                         "approved")
-        self.dispatch({"type": "ObserveAction", "run_id": self.run,
-                       "action": {"kind": "route", "reason": "supplied"}})
-        self.assertEqual(self.dispatch({"type": "ObserveAction", "run_id": self.run,
-                                        "action": {"kind": "investigate"}})["result"]["type"], "Allow")
-        payload = {"session_id": "claude-session", "cwd": ".", "tool_name": "Bash",
-                   "tool_input": {"command": "codex exec --model openai.gpt-5 resolve G0"}}
-        request = build_dispatch_request(payload, self.run, claim_id="C0",
-                                         correlation_id="claude-dispatch")
-        self.assertEqual(request["command"]["action"],
-                         {"kind": "dispatch", "target": "codex", "claim_id": "C0"})
-        result = self.service.dispatch(request)["result"]
-        self.assertEqual(result, {"type": "Fault", "code": "unsupported",
+    def test_removed_dispatch_action_is_rejected_on_private_wire(self):
+        """The private bridge schema rejects the removed host action before core evaluation."""
+        result = self.service.dispatch({
+            "protocol": "empirica/v2", "request_id": "removed-dispatch",
+            "command": {"type": "ObserveAction", "run_id": self.run,
+                        "action": {"kind": "dispatch", "target": "codex"}},
+        })["result"]
+        self.assertEqual(result, {"type": "Fault", "code": "invalid_request",
                                   "fail_direction": "closed"})
 
     def test_cancel_timeout_and_wrong_id_never_approve(self):
@@ -504,7 +489,7 @@ class GovernancePresentationTests(unittest.TestCase):
     def view(self):
         from core.governance import initial
         budgets = {"max_passes": 8, "max_spawns": 0, "max_audit_spawns": 1}
-        g = initial("Exact goal", budgets, {"cli_exec": False, "multi_provider": False})
+        g = initial("Exact goal", budgets)
         g.update(scope=copy.deepcopy(GRAPH), context=copy.deepcopy(CONTEXT),
                  budgets={**budgets, "passes_used": 2, "spawns_used": 0, "audit_spawns_used": 0},
                  interactions_remaining={"proposal": 3, "total": 128})

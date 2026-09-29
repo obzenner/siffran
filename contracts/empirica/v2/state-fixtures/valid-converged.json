@@ -9,10 +9,6 @@
     "delegation": false
   },
   "status": "converged",
-  "modes": {
-    "multi_provider": true,
-    "cli_exec": true
-  },
   "budgets": {
     "max_passes": 20,
     "passes_used": 8,
@@ -113,10 +109,6 @@
         "max_passes": 20,
         "max_spawns": 3,
         "max_audit_spawns": 1
-      },
-      "modes": {
-        "multi_provider": true,
-        "cli_exec": true
       }
     },
     "context": {

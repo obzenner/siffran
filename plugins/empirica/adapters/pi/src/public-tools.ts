@@ -5,7 +5,6 @@ import * as path from "node:path";
 export interface DecisionControls {
   actions: Record<string, string>;
   budgets: Record<string, { label: string; maximum: number }>;
-  modes: Record<string, string>;
 }
 
 export interface PublicToolsProjection {

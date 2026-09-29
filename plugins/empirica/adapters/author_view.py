@@ -221,11 +221,6 @@ def _governance(run: dict[str, Any]) -> Trusted:
             f"{budgets[used]}/{proposal['budgets'][ceiling]}"
             for ceiling, used in CEILINGS.items())
         parts.append(f"passes/spawns/audits: {usage}")
-        modes = ", ".join(
-            f"{key}={'true' if value else 'false'}"
-            for key, value in sorted(proposal["modes"].items()))
-        if modes:
-            parts.append(f"modes: {modes}")
     return Trusted("; ".join(parts))
 
 

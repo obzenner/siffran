@@ -18,7 +18,7 @@ from application import protocol
 class Approve:
     """A validated approval carrying the exact displayed configuration."""
 
-    configuration: dict[str, dict[str, int | bool]]
+    configuration: dict[str, dict[str, int]]
 
 
 @dataclass(frozen=True)
@@ -68,12 +68,6 @@ def _budget_property(row: Mapping[str, Any]) -> dict[str, Any]:
             "minimum": row["minimum"], "maximum": row["maximum"], "default": row["value"]}
 
 
-def _mode_property(row: Mapping[str, Any]) -> dict[str, Any]:
-    """Map one mode row to an editable boolean property."""
-    return {"type": "boolean", "title": row["label"],
-            "description": row["help"], "default": row["value"]}
-
-
 def review_form(dialog: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
     """Map a validated dialog model to Claude's editable elicitation form."""
     reviews = dialog["reviews_left"]["proposal"]
@@ -84,10 +78,7 @@ def review_form(dialog: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
         "Accept = approve as shown · edit values → confirm again",
         "Decline = reject · Esc = decide later",
     ))
-    properties = {
-        **{row["key"]: _budget_property(row) for row in dialog["budgets"]},
-        **{row["key"]: _mode_property(row) for row in dialog["modes"]},
-    }
+    properties = {row["key"]: _budget_property(row) for row in dialog["budgets"]}
     return message, {"type": "object", "properties": properties, "required": []}
 
 
@@ -101,13 +92,11 @@ def _part(row: Mapping[str, Any], old: object) -> str:
 
 def confirm_form(dialog: Mapping[str, Any], before: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
     """Map an amended dialog and its prior display to a buttons-only confirmation."""
-    old = {row["key"]: row["value"] for row in (*before["budgets"], *before["modes"])}
+    old = {row["key"]: row["value"] for row in before["budgets"]}
     budget_parts = [_part(row, old[row["key"]]) for row in dialog["budgets"]]
-    mode_parts = [_part(row, old[row["key"]]) for row in dialog["modes"]]
     message = "\n".join((
         _line(f"Empirica · confirm edited configuration (epoch {dialog['epoch']} · {_duration(timeout)})"),
         _line(" · ".join(budget_parts)),
-        _line(" · ".join(mode_parts)),
         "Accept = approve exactly this · Decline/Esc = keep edits pending",
     ))
     return message, {"type": "object", "properties": {}}
@@ -141,11 +130,10 @@ def decision(answer: object, dialog: Mapping[str, Any], schema: Mapping[str, Any
     return Approve(_configuration(dialog, content))
 
 
-def _configuration(dialog: Mapping[str, Any], content: Mapping[str, Any]) -> dict[str, dict[str, int | bool]]:
+def _configuration(dialog: Mapping[str, Any], content: Mapping[str, Any]) -> dict[str, dict[str, int]]:
     """Build an exact configuration from validated form values and displayed defaults."""
     return {
         "budgets": {row["key"]: content.get(row["key"], row["value"]) for row in dialog["budgets"]},
-        "modes": {row["key"]: content.get(row["key"], row["value"]) for row in dialog["modes"]},
     }
 
 

@@ -12,7 +12,6 @@ import {
   type EvaluateIntent,
   type FaultCode,
   type InvocationProvenance,
-  type Modes,
   type Request,
   type Result,
   type RunSelector,
@@ -23,9 +22,8 @@ import {
 export const REPORT_CONVERGENCE_INTENT: EvaluateIntent = "report_convergence";
 export const REPORT_CONVERGENCE_TOOL = "report_convergence";
 
-export interface ParsedModeFlags {
+export interface ParsedInvocationFlags {
   goal: string;
-  modes: Modes;
   unknownFlags: string[];
   controlMode?: "auto";
 }
@@ -40,23 +38,12 @@ export function splitLeadingFlags(args: string): { flags: string[]; goal: string
   };
 }
 
-/** Consume only leading recognized flags; unknown flags are surfaced, never enabled. */
-export function parseModeFlags(args: string): ParsedModeFlags {
+/** Consume only --auto; every other leading flag is surfaced as unknown. */
+export function parseInvocationFlags(args: string): ParsedInvocationFlags {
   const { flags, goal } = splitLeadingFlags(args);
-  const modes: Modes = {};
-  const unknownFlags: string[] = [];
-  let controlMode: "auto" | undefined;
-  let i = 0;
-  while (i < flags.length) {
-    const flag = flags[i++];
-    if (flag === "--auto") controlMode = "auto";
-    else if (flag === "--cli-exec") modes.cli_exec = true;
-    else if (flag === "--no-cli-exec") modes.cli_exec = false;
-    else if (flag === "--multi-provider") modes.multi_provider = true;
-    else if (flag === "--no-multi-provider") modes.multi_provider = false;
-    else unknownFlags.push(flag);
-  }
-  return { goal, modes, unknownFlags, ...(controlMode ? { controlMode } : {}) };
+  const unknownFlags = flags.filter((flag) => flag !== "--auto");
+  const controlMode = flags.includes("--auto") ? "auto" : undefined;
+  return { goal, unknownFlags, ...(controlMode ? { controlMode } : {}) };
 }
 
 // --- Pi invocation -> Request -----------------------------------------------
@@ -66,7 +53,6 @@ export interface StartRunOptions {
   maxPasses?: number;
   maxSpawns?: number;
   maxAuditSpawns?: number;
-  modes?: Modes;
 }
 
 export function startRunRequest(
@@ -91,7 +77,6 @@ export function startRunRequest(
       budgets.max_audit_spawns = options.maxAuditSpawns;
     command.budgets = budgets;
   }
-  if (options.modes !== undefined) command.modes = options.modes;
   if (options.controlMode !== undefined) command.control_mode = options.controlMode;
   return { protocol: PROTOCOL, request_id: requestId, command };
 }

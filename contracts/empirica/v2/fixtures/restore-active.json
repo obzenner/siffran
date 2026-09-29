@@ -17,10 +17,6 @@
         "id": "run-fx",
         "goal": "Prove the public contract is internally consistent.",
         "status": "active",
-        "modes": {
-          "multi_provider": false,
-          "cli_exec": false
-        },
         "contract": {
           "id": "empirica/public",
           "version": "3.0.0",
@@ -29,7 +25,7 @@
             "children",
             "audit"
           ],
-          "digest": "sha256:c9f2afb5a8e618ea5644be4e1682531edba3fccb438d2c1891bc7f56c3516b58"
+          "digest": "sha256:66a4c7d19d2fdfe656671b11b46aa727478c769178e0560751430e5d996213e0"
         },
         "obligations": {
           "active": [],

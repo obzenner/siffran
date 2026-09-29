@@ -9,10 +9,6 @@
     "delegation": false
   },
   "status": "active",
-  "modes": {
-    "multi_provider": false,
-    "cli_exec": false
-  },
   "budgets": {
     "max_passes": 1,
     "passes_used": 0,
@@ -94,10 +90,6 @@
         "max_passes": 1,
         "max_spawns": 0,
         "max_audit_spawns": 1
-      },
-      "modes": {
-        "multi_provider": false,
-        "cli_exec": false
       }
     },
     "context": {

@@ -24,7 +24,6 @@ def dialog(goal: str = "Confirm the exact run configuration") -> dict:
         "interactions_remaining": {"proposal": 2, "total": 127},
         "proposal": {
             "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 1},
-            "modes": {"multi_provider": False, "cli_exec": False},
         },
         "budgets": {"passes_used": 0, "spawns_used": 0, "audit_spawns_used": 0},
     }

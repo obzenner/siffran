@@ -28,10 +28,10 @@ from adapters.audit_protocol import (AuditLaunchPlan, AuditProtocol, AuditProtoc
 from adapters.identity import REVIEWER_FAMILIES, claude_observation, family
 from adapters.public_tools import EVIDENCE_ACTIONS, OBSERVE_TOOL
 from .completion import dispatch_stop, stop_result
-from .dispatch import bash_command, dispatched_harness
 from .restore import dispatch_restore, restore_context
 from .route import dispatch_investigation
 from .run_start import dispatch_resolve, dispatch_start_run
+from .invocation import parse_invocation
 from .selector import SelectorError
 from .spawn import dispatch_child_reserve, spawn_decision
 from .transport import CLAUDE_PROFILE_ID
@@ -168,6 +168,10 @@ def run_start_main() -> int:
     """UserPromptExpansion: activate and inject the opaque handle/public tool contract."""
     try:
         payload = _payload()
+        invocation = parse_invocation(payload, environ=os.environ)
+        if invocation.unknown_flags:
+            _emit_start_block("unknown flags: " + " ".join(invocation.unknown_flags))
+            return 0
         response = dispatch_start_run(payload)
         result = response.get("result", {}) if isinstance(response, dict) else {}
         run = result.get("run", {}) if isinstance(result, Mapping) else {}
@@ -295,26 +299,6 @@ def route_main() -> int:
         return _deny("empirica investigation denied: adapter failure")
     return 0
 
-
-def dispatch_main() -> int:
-    """PreToolUse:Bash: record a recognized CLI actor dispatch; fail open."""
-    payload = _payload()
-    try:
-        harness = dispatched_harness(bash_command(payload))
-        if harness is None:
-            return 0
-        handle, _ = _resolve(payload)
-        if handle is None:
-            return 0  # no active run → nothing to attribute
-        from .dispatch import dispatch_dispatch
-        _, advice = dispatch_dispatch(payload, handle, correlation_id="claude-dispatch")
-        if advice:
-            json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse",
-                                              "additionalContext": advice}}, sys.stdout)
-            sys.stdout.write("\n")
-    except Exception:  # noqa: BLE001 - unrecognised/failed Bash classification fails open
-        return 0
-    return 0
 
 
 def completion_main() -> int:

@@ -240,10 +240,6 @@ function governance(run: Json): Trusted {
     parts.push(`passes/spawns/audits: ${CEILINGS.map(
       ([ceiling, used]) => `${value.budgets[used]}/${value.proposal.budgets[ceiling]}`,
     ).join(" ")}`);
-    const modes = Object.keys(value.proposal.modes).sort().map(
-      (key) => `${key}=${value.proposal.modes[key] ? "true" : "false"}`,
-    ).join(", ");
-    if (modes) parts.push(`modes: ${modes}`);
   }
   return trusted(parts.join("; "));
 }
