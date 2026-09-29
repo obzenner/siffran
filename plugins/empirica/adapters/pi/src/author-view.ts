@@ -31,7 +31,8 @@ interface Obligation {
   readonly nextActions: readonly Trusted[];
 }
 interface Child {
-  readonly purpose: Untrusted;
+  readonly resourceClass: Trusted;
+  readonly purpose: Trusted | Untrusted;
   readonly state: Trusted;
   readonly recovery: Trusted | null;
 }
@@ -59,6 +60,10 @@ const RESPONSE_DEFS = (JSON.parse(readFileSync(
   path.join(path.dirname(CONTRACT_PATH), "response.schema.json"), "utf8",
 )) as Json).$defs as Json;
 const DIGEST_DEFS = new Set(["digest256", "nullableDigest256"]);
+const CLAIM_ID_DEF = "claimId";
+// The one claim-id pattern, read from the contract. ECMAScript `$` (no `m` flag) matches only at
+// the end, so this is the same full match the Python renderer applies.
+const CLAIM_ID = new RegExp(String((RESPONSE_DEFS[CLAIM_ID_DEF] as Json).pattern));
 const SURFACES = Object.fromEntries(
   Object.entries(PUBLIC_CONTRACT.next_actions as Json).map(([id, row]) => [id, row.surface]),
 ) as Json;
@@ -82,6 +87,11 @@ function untrusted(value: unknown, safety: TextSafety): Untrusted {
     .replaceAll("<", "\\x3c")
     .replaceAll(">", "\\x3e");
   return `${safety.open}${escaped}${safety.close}` as Untrusted;
+}
+
+/** Render a claim id raw; it is safe by construction only if it matches the pattern. */
+function claimId(value: unknown, safety: TextSafety): Trusted | Untrusted {
+  return typeof value === "string" && CLAIM_ID.test(value) ? trusted(value) : untrusted(value, safety);
 }
 
 /** Return recursively sorted compact JSON without throwing. */
@@ -174,10 +184,10 @@ function surface(actionId: string): Trusted {
   return trusted(`${row.owner}: ${row.operation}`);
 }
 
-/** Fence an embedded claim id while preserving its contract prefix. */
+/** Render a contract id; an embedded claim id is raw only when its suffix is a claim id. */
 function obligationId(value: string, safety: TextSafety): Trusted {
   return value.startsWith("claim:")
-    ? trusted(`claim:${untrusted(value.slice("claim:".length), safety)}`)
+    ? trusted(`claim:${claimId(value.slice("claim:".length), safety)}`)
     : trusted(value);
 }
 
@@ -186,19 +196,29 @@ type ValueRenderer = (value: any, safety: TextSafety) => string;
 /**
  * Derive a value renderer from its response-schema shape; `null` drops digests.
  *
- * Ownership follows the schema: enums/consts are contract-owned (trusted), free strings are
- * author-supplied (untrusted), arrays and objects compose their item/field renderers.
+ * Ownership follows the schema: enums/consts are contract-owned (trusted), claim ids are safe by
+ * construction (raw), free strings are author-supplied (untrusted), a nullable `anyOf` renders
+ * its one non-null branch, and arrays and objects compose their item/field renderers.
  */
 function valueRenderer(schema: Json): ValueRenderer | null {
   if (schema.$ref !== undefined) {
     const name = String(schema.$ref).split("/").pop() as string;
+    if (name === CLAIM_ID_DEF) return (value, safety) => claimId(value, safety);
     return DIGEST_DEFS.has(name) ? null : valueRenderer(RESPONSE_DEFS[name]);
+  }
+  if (schema.anyOf !== undefined) {
+    const branches = (schema.anyOf as Json[]).filter((row) => !isNull(row));
+    if (branches.length !== 1)
+      throw new Error(`author view cannot render parameter schema: ${JSON.stringify(schema)}`);
+    const inner = valueRenderer(branches[0] as Json);
+    if (inner === null) return null;
+    return (value, safety) => (value === null ? "null" : inner(value, safety));
   }
   if (schema.enum !== undefined || schema.const !== undefined) return (value) => String(value);
   if (schema.type === "string") return (value, safety) => untrusted(value, safety);
   if (schema.type === "array") {
     const item = valueRenderer(schema.items) as ValueRenderer;
-    const separator = schema.items.type === "string" ? ", " : "; ";
+    const separator = isString(schema.items) ? ", " : "; ";
     return (value, safety) => (value as unknown[]).map((row) => item(row, safety)).join(separator);
   }
   if (schema.type === "object") {
@@ -209,6 +229,17 @@ function valueRenderer(schema: Json): ValueRenderer | null {
       .map(([name, render]) => (render as ValueRenderer)(value[name], safety)).join(": ");
   }
   throw new Error(`author view cannot render parameter schema: ${JSON.stringify(schema)}`);
+}
+
+/** Whether a schema is exactly the `{"type": "null"}` branch of a nullable `anyOf`. */
+function isNull(schema: Json): boolean {
+  return objectWithKeys(schema, ["type"]) && schema.type === "null";
+}
+
+/** Whether a schema (following refs) is a string, which joins with `", "` in arrays. */
+function isString(schema: Json): boolean {
+  if (schema.$ref !== undefined) return isString(RESPONSE_DEFS[String(schema.$ref).split("/").pop() as string]);
+  return schema.type === "string";
 }
 
 /**
@@ -251,9 +282,9 @@ function affected(value: Json | null | undefined, safety: TextSafety): Trusted |
 /** Render the claim a residual blocks and, when redirected, the claim to discharge. */
 function residualClaims(row: Json, safety: TextSafety): Trusted | null {
   if (row.claim_id === undefined) return null;
-  const claim = `claim:${untrusted(row.claim_id, safety)}`;
+  const claim = `claim:${claimId(row.claim_id, safety)}`;
   const target = row.target_claim_id ?? row.claim_id;
-  return trusted(target === row.claim_id ? claim : `${claim} via claim:${untrusted(target, safety)}`);
+  return trusted(target === row.claim_id ? claim : `${claim} via claim:${claimId(target, safety)}`);
 }
 
 /** Parse one schema-valid reason row. */
@@ -276,6 +307,12 @@ function governance(run: Json): Trusted {
     ).join(" ")}`);
   }
   return trusted(parts.join("; "));
+}
+
+/** The host audit child's label is the contract literal `audit`; any other purpose is fenced. */
+function childLabel(row: Json, safety: TextSafety): Trusted | Untrusted {
+  return row.resource_class === "audit" && row.purpose === "audit"
+    ? trusted(row.purpose) : untrusted(row.purpose, safety);
 }
 
 /** Parse one guarded run-bearing Allow or Block result. */
@@ -309,7 +346,8 @@ function parse(result: Json): AuthorView {
     nextActions: (row.next_actions as string[]).map(surface),
   }));
   const children = (run.children as Json[]).map((row): Child => ({
-    purpose: untrusted(row.purpose, safety), state: trusted(row.state),
+    resourceClass: trusted(row.resource_class), purpose: childLabel(row, safety),
+    state: trusted(row.state),
     recovery: row.recovery_action ? surface(row.recovery_action) : null,
   }));
   const freshness = (run.freshness.changes as Json[]).map((row): Freshness => ({
@@ -373,16 +411,16 @@ function render(view: AuthorView): string {
 /** Render the graph projection without private identity or artifact fields. */
 function argumentLines(argument: Json, safety: TextSafety): readonly string[] {
   const claims = (argument.claims as Json[]).map((item) =>
-    `  ${untrusted(item.claim_id, safety)} kind=${item.kind} gating=${item.gating ? "true" : "false"} ` +
+    `  ${claimId(item.claim_id, safety)} kind=${item.kind} gating=${item.gating ? "true" : "false"} ` +
     `state=${item.state} evidence=${item.active_evidence_ids.length ? "present" : "none"}: ` +
     `${untrusted(item.text, safety)}`);
   const edges = (argument.edges as Json[]).map((item) =>
-    `  ${untrusted(item.from, safety)} -${item.type}-> ${untrusted(item.to, safety)}`);
+    `  ${claimId(item.from, safety)} -${item.type}-> ${claimId(item.to, safety)}`);
   const citations = (argument.artifacts as Json[]).filter((item) => item.citation !== undefined)
     .map((item) => `  ${untrusted(item.citation, safety)}`);
   return [
     `goal: ${untrusted(argument.goal, safety)}`,
-    `root_claim_id: ${untrusted(argument.root_claim_id, safety)}`,
+    `root_claim_id: ${claimId(argument.root_claim_id, safety)}`,
     "Claims:", ...claims,
     ...(edges.length ? ["Edges:", ...edges] : []),
     ...(citations.length ? ["Citations:", ...citations] : []),

@@ -99,8 +99,7 @@
         "array"
       ],
       "items": {
-        "type": "string",
-        "minLength": 1
+        "$ref": "#/$defs/claimId"
       },
       "uniqueItems": true
     },
@@ -679,6 +678,10 @@
         }
       },
       "description": "Open only for allOf extension; every direct $ref use must set unevaluatedProperties: false."
+    },
+    "claimId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
     }
   }
 }

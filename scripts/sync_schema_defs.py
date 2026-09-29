@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Generate local Empirica schema embeddings from explicit canonical sources.
 
-``shared-defs.json#/$defs`` is the sole source for invocationProvenance and
-identityObservation. The dead ``publicContract`` embedding (only reachable through the removed
+``shared-defs.json#/$defs`` is the sole source for invocationProvenance,
+identityObservation and claimId (the one claim-identifier pattern, embedded in every target). The dead ``publicContract`` embedding (only reachable through the removed
 ``GetContract target: full`` response) is stripped here, not re-embedded. No source file is
 rewritten.
 """
@@ -23,6 +23,8 @@ INVOCATION_KEYS = ("host", "interactive", "signal", "delegation")
 # The graph payload is the SSOT for the model-facing graph action shape (defence in depth for
 # core.evaluation.valid_graph); governancePresentation is the private-only dialog body.
 _GRAPH_DEFS = ("graphClaimItem", "graphEdgeItem", "graphPayload")
+# Every target carries the claim-identifier definition; each claim-id position refers to it.
+_UNIVERSAL_SHARED_DEFS = ("claimId",)
 _EXTRA_SHARED_DEFS = {
     "request.schema.json": _GRAPH_DEFS,
     "response.schema.json": (*_GRAPH_DEFS, "governancePresentation"),
@@ -129,7 +131,7 @@ def generated_documents() -> dict[str, dict]:
         defs.pop("publicContractDefs", None)
         defs["invocationProvenance"] = copy.deepcopy(shared["invocationProvenance"])
         defs["identityObservation"] = copy.deepcopy(shared["identityObservation"])
-        for extra in _EXTRA_SHARED_DEFS.get(name, ()):
+        for extra in (*_UNIVERSAL_SHARED_DEFS, *_EXTRA_SHARED_DEFS.get(name, ())):
             if extra not in shared:
                 raise SchemaGenerationError(f"missing shared definition #/$defs/{extra}")
             defs[extra] = copy.deepcopy(shared[extra])

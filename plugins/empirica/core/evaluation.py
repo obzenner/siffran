@@ -9,7 +9,7 @@ from types import MappingProxyType
 from typing import Any
 
 from .canonical import canonical_digest
-from .freshness import ActiveSpikeHead, FileBinding, evaluate_freshness
+from .freshness import ActiveSpikeHead, FileBinding, evaluate_freshness, valid_claim_id
 from .run import OperationalState
 from . import governance
 
@@ -147,8 +147,8 @@ def valid_graph(value: Any) -> bool:
     ids: list[str] = []
     for claim in claims:
         if (not isinstance(claim, Mapping) or set(claim) != {"id", "text", "gating", "kind"}
-                or not isinstance(claim["id"], str) or not claim["id"] or not isinstance(claim["text"], str)
-                or len(claim["id"]) > 128 or not 1 <= len(claim["text"]) <= 2048
+                or not valid_claim_id(claim["id"]) or not isinstance(claim["text"], str)
+                or not 1 <= len(claim["text"]) <= 2048
                 or type(claim["gating"]) is not bool
                 or claim["kind"] not in {"ordinary", "needs-experiment", "needs-decision"}):
             return False

@@ -31,7 +31,7 @@ The graph is exactly `root`, `claims`, and `edges`:
 
 Each claim has exactly:
 
-- `id`: unique string;
+- `id`: unique claim id of 1–64 characters from `A-Z a-z 0-9 . _ -` (the same rule applies to `root`, edge endpoints, and every `claim_id`);
 - `text`: falsifiable statement whose digest binds its evidence;
 - `gating`: whether it blocks the active scope;
 - `kind`: `ordinary`, `needs-experiment`, or `needs-decision`.

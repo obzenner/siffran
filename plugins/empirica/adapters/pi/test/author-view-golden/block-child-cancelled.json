@@ -12,7 +12,7 @@
           "children",
           "recovery"
         ],
-        "digest": "sha256:66a4c7d19d2fdfe656671b11b46aa727478c769178e0560751430e5d996213e0"
+        "digest": "sha256:1022d7635d42d050a4f829d0a8a5809fba88d3839a5566d90bfd1a0fd314dbe5"
       },
       "obligations": {
         "active": [],
@@ -62,5 +62,5 @@
       }
     ]
   },
-  "text": "Block active — no governance\nrun_id: run-fx\n\nReasons:\n  child.terminal: Child terminated in state cancelled.\n    params: state=cancelled\n    next: host: child_reserve; report_convergence intent=stop\n\nChildren:\n  <<<EMPIRICA_UNTRUSTED_DATA>>>audit<<<END_EMPIRICA_UNTRUSTED_DATA>>>: cancelled — recovery: host: child_reserve"
+  "text": "Block active — no governance\nrun_id: run-fx\n\nReasons:\n  child.terminal: Child terminated in state cancelled.\n    params: state=cancelled\n    next: host: child_reserve; report_convergence intent=stop\n\nChildren:\n  audit: cancelled — recovery: host: child_reserve"
 }

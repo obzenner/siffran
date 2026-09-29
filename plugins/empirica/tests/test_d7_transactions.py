@@ -27,7 +27,7 @@ from application.location import encode_handle, storage_id  # noqa: E402
 from application.transaction import Coordinator as ProductionCoordinator  # noqa: E402
 from core.evaluation import (  # noqa: E402
     EvaluationSnapshot, active_spike_heads, artifact, audit_binding, audit_passes,
-    claim_digest, evaluate_snapshot, frozen_semantic_digest, independence)
+    claim_digest, evaluate_snapshot, frozen_semantic_digest, independence, valid_graph)
 from core.freshness import (FileObservation, ObservationState, canonical_digest,  # noqa: E402
                             observations_digest)
 
@@ -1348,6 +1348,37 @@ class D7TransactionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown bootstrap operation"):
             project_runview(replace(snapshot, contract=replace(protocol.CONTRACT_VIEW,
                                                                bootstrap_operations=())))
+
+
+class ValidGraphClaimIdTests(unittest.TestCase):
+    """``valid_graph`` gates every claim id (vertex, root, edge endpoints) with the one pattern."""
+
+    ACCEPTED = ("A", "a.b-C_9", "x" * 64)
+    REJECTED = ("", "x" * 65, "a b", "claim:C0", "caf\u00e9", "a\nb", "C0\n",
+                "<<<EMPIRICA_UNTRUSTED_DATA>>>")
+
+    @staticmethod
+    def _graph(root, vertex, edge_from, edge_to):
+        claims = [{"id": vertex, "text": "t", "gating": True, "kind": "ordinary"},
+                  {"id": "L", "text": "t", "gating": True, "kind": "ordinary"}]
+        return {"root": root, "claims": claims,
+                "edges": [{"from": edge_from, "to": edge_to, "type": "SupportedBy"}]}
+
+    def test_accepted_ids_in_every_position(self):
+        for value in self.ACCEPTED:
+            with self.subTest(value=value):
+                self.assertTrue(valid_graph(self._graph(value, value, value, "L")))
+
+    def test_rejected_ids_in_every_position(self):
+        for value in self.REJECTED:
+            with self.subTest(value=value, position="id+root+from"):
+                self.assertFalse(valid_graph(self._graph(value, value, value, "L")))
+            with self.subTest(value=value, position="root"):
+                self.assertFalse(valid_graph(self._graph(value, "R", "R", "L")))
+            with self.subTest(value=value, position="from"):
+                self.assertFalse(valid_graph(self._graph("R", "R", value, "L")))
+            with self.subTest(value=value, position="to"):
+                self.assertFalse(valid_graph(self._graph("R", "R", "R", value)))
 
 
 if __name__ == "__main__":

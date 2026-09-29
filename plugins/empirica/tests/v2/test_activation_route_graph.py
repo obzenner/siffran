@@ -345,6 +345,36 @@ class ActivationRouteGraphTests(ConformanceCase):
             self.assertEqual(after, before,
                              "a wire-refused candidate must not replace the selected graph")
 
+    def test_claim_ids_follow_the_one_pattern_at_wire_and_core(self):
+        """Claim ids are ``[A-Za-z0-9._-]{1,64}``: boundary ids are admitted; pattern-invalid ids,
+        including a trailing newline, in any graph position or an action ``claim_id`` are refused
+        at the wire. Core ``valid_graph`` rejects them independently (test_d7_transactions)."""
+        def graph(root, vertex, edge_from, edge_to):
+            return {"root": root, "edges": [{"from": edge_from, "to": edge_to,
+                                             "type": "SupportedBy"}],
+                    "claims": [{"id": vertex, "text": "Claim", "gating": True, "kind": "ordinary"},
+                               {"id": "L", "text": "Leaf", "gating": True, "kind": "ordinary"}]}
+        for good in ("a.b-C_9", "x" * 64):
+            with self.subTest(accepted=good):
+                drv = self.bind_driver("D7", "seam-4a", "Boundary claim ids are admitted")
+                run_id = self.start_run(drv)
+                self.require_graph_admitted(drv, run_id, graph(good, good, good, "L"))
+        for bad in ("", "x" * 65, "a b", "claim:C0", "caf\u00e9", "a\nb", "C0\n",
+                    "<<<EMPIRICA_UNTRUSTED_DATA>>>"):
+            for position, action in (
+                    ("id", action_graph(payload=graph("R", bad, "R", "L"))),
+                    ("root", action_graph(payload=graph(bad, "R", "R", "L"))),
+                    ("from", action_graph(payload=graph("R", "R", bad, "L"))),
+                    ("to", action_graph(payload=graph("R", "R", "R", bad))),
+                    ("claim_id", action_research(claim_id=bad, source_kind="code",
+                                                 result="supports"))):
+                with self.subTest(rejected=bad, position=position):
+                    drv = self.bind_driver("D7", "seam-4a",
+                                           "Pattern-invalid claim ids are refused at the wire")
+                    run_id = self.start_run(drv)
+                    refused = self.raw_dispatch(drv, observe_action(run_id=run_id, action=action))
+                    self.assert_fault(refused, code="invalid_request", fail_direction="closed")
+
     def test_branching_and_shared_dependency_dag_is_admitted(self):
         def claim(cid):
             return {"id": cid, "text": f"Claim {cid}", "gating": True,

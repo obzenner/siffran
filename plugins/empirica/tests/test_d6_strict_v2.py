@@ -319,6 +319,67 @@ def _build_action_sample(kind: str) -> dict:
     raise ValueError(f"no sample for {kind!r}")
 
 
+class D6ClaimIdSchemaBoundaries(unittest.TestCase):
+    """Every schema claim-id position accepts exactly ``[A-Za-z0-9._-]{1,64}``, nothing more."""
+
+    ACCEPTED = ("A", "a.b-C_9", "x" * 64)
+    REJECTED = ("", "x" * 65, "a b", "claim:C0", "caf\u00e9", "a\nb", "C0\n",
+                "<<<EMPIRICA_UNTRUSTED_DATA>>>")
+
+    @staticmethod
+    def _graph(root, vertex, edge_from, edge_to):
+        return {"kind": "graph", "payload": {
+            "root": root,
+            "claims": [{"id": vertex, "text": "t", "kind": "ordinary", "gating": True},
+                       {"id": "L", "text": "t", "kind": "ordinary", "gating": True}],
+            "edges": [{"from": edge_from, "to": edge_to, "type": "SupportedBy"}]}}
+
+    def _request_valid(self, action: dict) -> bool:
+        env = _valid_request({"type": "ObserveAction", "run_id": "run-1", "action": action})
+        return jsonschema.Draft202012Validator(_REQUEST_SCHEMA).is_valid(env)
+
+    def test_graph_positions(self):
+        for value in self.ACCEPTED:
+            with self.subTest(value=value):
+                self.assertTrue(self._request_valid(self._graph(value, value, value, "L")))
+        for value in self.REJECTED:
+            for position, action in (
+                    ("id", self._graph("R", value, "R", "L")),
+                    ("root", self._graph(value, "R", "R", "L")),
+                    ("from", self._graph("R", "R", value, "L")),
+                    ("to", self._graph("R", "R", "R", value))):
+                with self.subTest(value=value, position=position):
+                    self.assertFalse(self._request_valid(action))
+
+    def test_action_claim_id(self):
+        for kind in ("research", "spike_request"):
+            for value in self.ACCEPTED:
+                with self.subTest(kind=kind, value=value):
+                    self.assertTrue(self._request_valid(
+                        {**_build_action_sample(kind), "claim_id": value}))
+            for value in self.REJECTED:
+                with self.subTest(kind=kind, value=value):
+                    self.assertFalse(self._request_valid(
+                        {**_build_action_sample(kind), "claim_id": value}))
+
+    def test_state_frozen_claim_ids_and_nullable_target(self):
+        state = json.loads((_V2 / "state.schema.json").read_text(encoding="utf-8"))
+        frozen = jsonschema.Draft202012Validator(
+            {**state["properties"]["frozen_claim_ids"], "$defs": state["$defs"]})
+        missing = _RESPONSE_SCHEMA["$defs"]["obligationSummary"]["properties"]["missing"]
+        target = jsonschema.Draft202012Validator(
+            {**missing["oneOf"][1]["properties"]["target_claim_id"],
+             "$defs": _RESPONSE_SCHEMA["$defs"]})
+        self.assertTrue(frozen.is_valid(None))
+        self.assertTrue(target.is_valid(None))
+        for value in self.ACCEPTED:
+            self.assertTrue(frozen.is_valid([value]), value)
+            self.assertTrue(target.is_valid(value), value)
+        for value in self.REJECTED:
+            self.assertFalse(frozen.is_valid([value]), value)
+            self.assertFalse(target.is_valid(value), value)
+
+
 class D6StrictProtocolTests(unittest.TestCase):
     """D6-A red strict tests for ``application.protocol`` (future module).
 

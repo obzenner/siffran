@@ -17,6 +17,16 @@ class ObservationContractError(FreshnessContractError): ...
 class ExecutionContractError(FreshnessContractError): ...
 
 _DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
+# The one claim-identifier pattern; the literal mirrors shared-defs.json#/$defs/claimId (a test
+# pins the equality). The final lookahead means absolute end under both Python ``re.search`` and
+# ECMA-262 (``$`` would also match before a trailing newline in Python).
+CLAIM_ID_PATTERN = r"^[A-Za-z0-9._-]{1,64}(?![\s\S])"
+_CLAIM_ID_RE = re.compile(CLAIM_ID_PATTERN)
+
+
+def valid_claim_id(value) -> bool:
+    """Return whether ``value`` is a claim identifier (safe by construction to render raw)."""
+    return isinstance(value, str) and _CLAIM_ID_RE.fullmatch(value) is not None
 
 
 def validate_relative_posix_path(value) -> str:
@@ -94,8 +104,8 @@ class ActiveSpikeHead:
     file_bindings: tuple[FileBinding, ...]
     def __post_init__(self):
         validate_digest256(self.artifact_id)
-        if not isinstance(self.claim_id, str) or not self.claim_id:
-            raise FreshnessContractError("claim_id must be a nonempty string")
+        if not valid_claim_id(self.claim_id):
+            raise FreshnessContractError("claim_id must match " + CLAIM_ID_PATTERN)
         if not isinstance(self.harness_request_id, str) or not self.harness_request_id:
             raise FreshnessContractError("harness_request_id must be a nonempty string")
         if not isinstance(self.file_bindings, tuple) or not self.file_bindings:

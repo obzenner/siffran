@@ -484,7 +484,7 @@
         "properties": {
           "root": {
             "type": "string",
-            "minLength": 1
+            "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
           },
           "claims": {
             "type": "array",
@@ -558,7 +558,7 @@
         "properties": {
           "claim_id": {
             "type": "string",
-            "minLength": 1
+            "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
           },
           "source_kind": {
             "enum": [
@@ -616,7 +616,7 @@
         "properties": {
           "claim_id": {
             "type": "string",
-            "minLength": 1
+            "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
           },
           "command": {
             "type": "string",
@@ -652,7 +652,7 @@
         "properties": {
           "claim_id": {
             "type": "string",
-            "minLength": 1
+            "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
           },
           "command": {
             "type": "string",
@@ -686,7 +686,7 @@
         "properties": {
           "claim_id": {
             "type": "string",
-            "minLength": 1
+            "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
           },
           "question": {
             "type": "string"
@@ -1231,7 +1231,7 @@
           },
           "claim_id": {
             "type": "string",
-            "minLength": 1
+            "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
           }
         }
       },
@@ -1342,7 +1342,7 @@
             "uniqueItems": true,
             "items": {
               "type": "string",
-              "minLength": 1
+              "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
             }
           },
           "deferred_scope_digest": {

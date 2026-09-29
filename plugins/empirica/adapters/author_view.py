@@ -12,6 +12,7 @@ from application.protocol import (
     untrusted_delimiters,
     validate_public_result,
 )
+from core.freshness import valid_claim_id
 from core.governance import CEILINGS
 from core.projection import safe_text
 
@@ -20,6 +21,8 @@ Untrusted = NewType("Untrusted", str)
 _SURFACES = next_action_surfaces()
 _DEFS = response_schema_defs()
 _DIGEST_DEFS = frozenset({"digest256", "nullableDigest256"})
+_CLAIM_ID_DEF = "claimId"
+_NULL = {"type": "null"}
 
 
 @dataclass(frozen=True)
@@ -32,6 +35,10 @@ class TextSafety:
     def untrusted(self, value: object) -> Untrusted:
         escaped = safe_text(value).replace("<", r"\x3c").replace(">", r"\x3e")
         return Untrusted(f"{self.open}{escaped}{self.close}")
+
+    def claim_id(self, value: object) -> Trusted | Untrusted:
+        """Render a claim id raw; it is safe by construction only if it matches the pattern."""
+        return Trusted(value) if valid_claim_id(value) else self.untrusted(value)
 
 
 @dataclass(frozen=True)
@@ -67,9 +74,10 @@ class Obligation:
 
 @dataclass(frozen=True)
 class Child:
-    """One child summary with an author-controlled purpose."""
+    """One child summary: the host audit label is trusted, an investigation purpose is not."""
 
-    purpose: Untrusted
+    resource_class: Trusted
+    purpose: Trusted | Untrusted
     state: Trusted
     recovery: Trusted | None
 
@@ -118,9 +126,9 @@ def _surface(action_id: str) -> Trusted:
 
 
 def _obligation_id(value: str, safety: TextSafety) -> Trusted:
-    """Render a contract id while fencing an embedded claim id."""
+    """Render a contract id; an embedded claim id is raw only when its suffix is a claim id."""
     if value.startswith("claim:"):
-        return Trusted("claim:" + safety.untrusted(value.removeprefix("claim:")))
+        return Trusted("claim:" + safety.claim_id(value.removeprefix("claim:")))
     return Trusted(value)
 
 
@@ -130,19 +138,28 @@ ValueRenderer = Callable[[Any, "TextSafety"], str]
 def _value_renderer(schema: dict[str, Any]) -> ValueRenderer | None:
     """Derive a value renderer from its response-schema shape; ``None`` drops digests.
 
-    Ownership follows the schema: enums/consts are contract-owned (trusted), free strings are
-    author-supplied (untrusted), arrays and objects compose their item/field renderers.
+    Ownership follows the schema: enums/consts are contract-owned (trusted), claim ids are safe by
+    construction (raw), free strings are author-supplied (untrusted), a nullable ``anyOf`` renders
+    its one non-null branch, and arrays and objects compose their item/field renderers.
     """
     if "$ref" in schema:
         name = schema["$ref"].rsplit("/", 1)[-1]
+        if name == _CLAIM_ID_DEF:
+            return lambda value, safety: safety.claim_id(value)
         return None if name in _DIGEST_DEFS else _value_renderer(_DEFS[name])
+    if "anyOf" in schema:
+        (branch,) = (row for row in schema["anyOf"] if row != _NULL)
+        inner = _value_renderer(branch)
+        if inner is None:
+            return None
+        return lambda value, safety: "null" if value is None else inner(value, safety)
     if "enum" in schema or "const" in schema:
         return lambda value, _safety: str(value)
     if schema.get("type") == "string":
         return lambda value, safety: safety.untrusted(value)
     if schema.get("type") == "array":
         item = _value_renderer(schema["items"])
-        separator = ", " if schema["items"].get("type") == "string" else "; "
+        separator = ", " if _is_string(schema["items"]) else "; "
         return lambda value, safety: separator.join(item(row, safety) for row in value)
     if schema.get("type") == "object":
         fields = tuple((name, _value_renderer(sub))
@@ -151,6 +168,13 @@ def _value_renderer(schema: dict[str, Any]) -> ValueRenderer | None:
             render(value[name], safety) for name, render in fields
             if render is not None and name in value)
     raise ValueError(f"author view cannot render parameter schema: {schema!r}")
+
+
+def _is_string(schema: dict[str, Any]) -> bool:
+    """Whether a schema (following refs) is a string, which joins with ``", "`` in arrays."""
+    if "$ref" in schema:
+        return _is_string(_DEFS[schema["$ref"].rsplit("/", 1)[-1]])
+    return schema.get("type") == "string"
 
 
 def _parameter_renderers() -> dict[str, ValueRenderer | None]:
@@ -191,11 +215,11 @@ def _residual_claims(row: dict[str, Any], safety: TextSafety) -> Trusted | None:
     """Render the claim a residual blocks and, when redirected, the claim to discharge."""
     if "claim_id" not in row:
         return None
-    claim = "claim:" + safety.untrusted(row["claim_id"])
+    claim = "claim:" + safety.claim_id(row["claim_id"])
     target = row.get("target_claim_id", row["claim_id"])
     if target == row["claim_id"]:
         return Trusted(claim)
-    return Trusted(f"{claim} via claim:{safety.untrusted(target)}")
+    return Trusted(f"{claim} via claim:{safety.claim_id(target)}")
 
 
 def _reason(row: dict[str, Any], safety: TextSafety) -> Reason:
@@ -222,6 +246,13 @@ def _governance(run: dict[str, Any]) -> Trusted:
             for ceiling, used in CEILINGS.items())
         parts.append(f"passes/spawns/audits: {usage}")
     return Trusted("; ".join(parts))
+
+
+def _child_label(row: dict[str, Any], safety: TextSafety) -> Trusted | Untrusted:
+    """The host audit child's label is the contract literal ``audit``; any other purpose is fenced."""
+    if row["resource_class"] == "audit" and row["purpose"] == "audit":
+        return Trusted(row["purpose"])
+    return safety.untrusted(row["purpose"])
 
 
 def _parse(result: dict[str, Any]) -> AuthorView:
@@ -256,7 +287,7 @@ def _parse(result: dict[str, Any]) -> AuthorView:
                tuple(_surface(action) for action in row["next_actions"]))
         for row in run["residuals"])
     children = tuple(
-        Child(safety.untrusted(row["purpose"]), Trusted(row["state"]),
+        Child(Trusted(row["resource_class"]), _child_label(row, safety), Trusted(row["state"]),
               _surface(row["recovery_action"]) if row.get("recovery_action") else None)
         for row in run["children"])
     freshness = tuple(
@@ -328,14 +359,14 @@ def _render(view: AuthorView) -> str:
 def _argument_lines(argument: dict[str, Any], safety: TextSafety) -> tuple[str, ...]:
     """Render the graph projection without private identity or artifact fields."""
     claims = tuple(
-        f"  {safety.untrusted(row['claim_id'])} kind={row['kind']} "
+        f"  {safety.claim_id(row['claim_id'])} kind={row['kind']} "
         f"gating={'true' if row['gating'] else 'false'} state={row['state']} "
         f"evidence={'present' if row['active_evidence_ids'] else 'none'}: "
         f"{safety.untrusted(row['text'])}"
         for row in argument["claims"]
     )
     edges = tuple(
-        f"  {safety.untrusted(row['from'])} -{row['type']}-> {safety.untrusted(row['to'])}"
+        f"  {safety.claim_id(row['from'])} -{row['type']}-> {safety.claim_id(row['to'])}"
         for row in argument["edges"]
     )
     citations = tuple(
@@ -345,7 +376,7 @@ def _argument_lines(argument: dict[str, Any], safety: TextSafety) -> tuple[str, 
     audit = argument["audit"]
     return (
         f"goal: {safety.untrusted(argument['goal'])}",
-        f"root_claim_id: {safety.untrusted(argument['root_claim_id'])}",
+        f"root_claim_id: {safety.claim_id(argument['root_claim_id'])}",
         "Claims:", *claims,
         *(("Edges:", *edges) if edges else ()),
         *(("Citations:", *citations) if citations else ()),

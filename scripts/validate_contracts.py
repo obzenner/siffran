@@ -50,7 +50,7 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:66a4c7d19d2fdfe656671b11b46aa727478c769178e0560751430e5d996213e0"
+REVIEWED_REGISTRY_DIGEST = "sha256:1022d7635d42d050a4f829d0a8a5809fba88d3839a5566d90bfd1a0fd314dbe5"
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:9b17d44746e8c4e2981d14575a970a5de286c8262fbdf7e5499faf9ad83a17c2"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
@@ -2762,6 +2762,36 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                         "command": {"type": "GetContract", "target": "section"}}
     if not schema_rejects(gc_section_no_id, "request"):
         errors.append("NEG schema GetContract section without section_id: expected schema rejection but none")
+
+    # Direct schema boundaries: every claim id is [A-Za-z0-9._-]{1,64} (graph id/root/from/to
+    # and action claim_id). Accepted ids must validate, so a rejection cannot pass for the wrong reason.
+    def graph_action(root: str, vertex: str, edge_from: str, edge_to: str) -> dict:
+        return {"protocol": "empirica/v2", "request_id": "x", "command": {
+            "type": "ObserveAction", "run_id": "r", "action": {"kind": "graph", "payload": {
+                "root": root, "edges": [{"from": edge_from, "to": edge_to, "type": "SupportedBy"}],
+                "claims": [{"id": vertex, "text": "t", "kind": "ordinary", "gating": True},
+                           {"id": "L", "text": "t", "kind": "ordinary", "gating": True}]}}}}
+
+    def research_action(claim_id: str) -> dict:
+        return {"protocol": "empirica/v2", "request_id": "x", "command": {
+            "type": "ObserveAction", "run_id": "r", "action": {
+                "kind": "research", "claim_id": claim_id, "source_kind": "code",
+                "result": "supports", "payload": {"source_ref": "a.py:1", "citation": "c"}}}}
+
+    for good in ("A", "a.b-C_9", "x" * 64):
+        if schema_rejects(graph_action(good, good, good, "L"), "request"):
+            errors.append(f"NEG schema claim id {good!r}: graph unexpectedly rejected")
+        if schema_rejects(research_action(good), "request"):
+            errors.append(f"NEG schema claim id {good!r}: research unexpectedly rejected")
+    for bad in ("", "x" * 65, "a b", "claim:C0", "caf\u00e9", "a\nb", "C0\n",
+                "<<<EMPIRICA_UNTRUSTED_DATA>>>"):
+        for position, envelope in (("id", graph_action("R", bad, "R", "L")),
+                                   ("root", graph_action(bad, "R", "R", "L")),
+                                   ("from", graph_action("R", "R", bad, "L")),
+                                   ("to", graph_action("R", "R", "R", bad)),
+                                   ("claim_id", research_action(bad))):
+            if not schema_rejects(envelope, "request"):
+                errors.append(f"NEG schema claim {position} {bad!r}: expected schema rejection")
 
     # Direct schema negatives: GetContract response closed branches reject sibling target payloads.
     # Each sibling case carries a well-formed digest so the only mutation is the sibling payload;

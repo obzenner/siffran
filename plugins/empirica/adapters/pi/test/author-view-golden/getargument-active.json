@@ -13,7 +13,7 @@
           "claims/graph",
           "evidence/research"
         ],
-        "digest": "sha256:66a4c7d19d2fdfe656671b11b46aa727478c769178e0560751430e5d996213e0"
+        "digest": "sha256:1022d7635d42d050a4f829d0a8a5809fba88d3839a5566d90bfd1a0fd314dbe5"
       },
       "obligations": {
         "active": [],
@@ -109,5 +109,5 @@
       }
     }
   },
-  "text": "Argument\ngoal: <<<EMPIRICA_UNTRUSTED_DATA>>>Prove the public contract is internally consistent.<<<END_EMPIRICA_UNTRUSTED_DATA>>>\nroot_claim_id: <<<EMPIRICA_UNTRUSTED_DATA>>>G0<<<END_EMPIRICA_UNTRUSTED_DATA>>>\nClaims:\n  <<<EMPIRICA_UNTRUSTED_DATA>>>G0<<<END_EMPIRICA_UNTRUSTED_DATA>>> kind=ordinary gating=true state=open evidence=present: <<<EMPIRICA_UNTRUSTED_DATA>>>Root claim<<<END_EMPIRICA_UNTRUSTED_DATA>>>\n  <<<EMPIRICA_UNTRUSTED_DATA>>>S1<<<END_EMPIRICA_UNTRUSTED_DATA>>> kind=ordinary gating=true state=open evidence=none: <<<EMPIRICA_UNTRUSTED_DATA>>>Support claim<<<END_EMPIRICA_UNTRUSTED_DATA>>>\nEdges:\n  <<<EMPIRICA_UNTRUSTED_DATA>>>G0<<<END_EMPIRICA_UNTRUSTED_DATA>>> -SupportedBy-> <<<EMPIRICA_UNTRUSTED_DATA>>>S1<<<END_EMPIRICA_UNTRUSTED_DATA>>>\nCitations:\n  <<<EMPIRICA_UNTRUSTED_DATA>>>The observed source supports G0.<<<END_EMPIRICA_UNTRUSTED_DATA>>>\nAudit status: not_required (unverified)"
+  "text": "Argument\ngoal: <<<EMPIRICA_UNTRUSTED_DATA>>>Prove the public contract is internally consistent.<<<END_EMPIRICA_UNTRUSTED_DATA>>>\nroot_claim_id: G0\nClaims:\n  G0 kind=ordinary gating=true state=open evidence=present: <<<EMPIRICA_UNTRUSTED_DATA>>>Root claim<<<END_EMPIRICA_UNTRUSTED_DATA>>>\n  S1 kind=ordinary gating=true state=open evidence=none: <<<EMPIRICA_UNTRUSTED_DATA>>>Support claim<<<END_EMPIRICA_UNTRUSTED_DATA>>>\nEdges:\n  G0 -SupportedBy-> S1\nCitations:\n  <<<EMPIRICA_UNTRUSTED_DATA>>>The observed source supports G0.<<<END_EMPIRICA_UNTRUSTED_DATA>>>\nAudit status: not_required (unverified)"
 }

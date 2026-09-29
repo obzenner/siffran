@@ -140,8 +140,7 @@
           ]
         },
         "claim_id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/claimId"
         }
       }
     },
@@ -176,8 +175,7 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": {
-            "type": "string",
-            "minLength": 1
+            "$ref": "#/$defs/claimId"
           }
         },
         "deferred_scope_digest": {
@@ -830,12 +828,10 @@
               "uniqueItems": true
             },
             "claim_id": {
-              "type": "string",
-              "minLength": 1
+              "$ref": "#/$defs/claimId"
             },
             "target_claim_id": {
-              "type": "string",
-              "minLength": 1
+              "$ref": "#/$defs/claimId"
             }
           }
         }
@@ -960,11 +956,14 @@
                   "minLength": 1
                 },
                 "target_claim_id": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "minLength": 1
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/claimId"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "parameters": {
                   "type": "object"
@@ -1927,8 +1926,7 @@
       "description": "Closed GetArgument projection; no generic argument extension map.",
       "properties": {
         "root_claim_id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/claimId"
         },
         "argument_digest": {
           "$ref": "#/$defs/digest256"
@@ -2006,8 +2004,7 @@
       ],
       "properties": {
         "claim_id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/claimId"
         },
         "text": {
           "type": "string"
@@ -2058,12 +2055,10 @@
       ],
       "properties": {
         "from": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/claimId"
         },
         "to": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/claimId"
         },
         "type": {
           "enum": [
@@ -2112,8 +2107,7 @@
           "$ref": "#/$defs/digest256"
         },
         "claim_id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/claimId"
         },
         "claim_digest": {
           "$ref": "#/$defs/digest256"
@@ -2180,8 +2174,7 @@
           "$ref": "#/$defs/digest256"
         },
         "claim_id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/claimId"
         },
         "claim_digest": {
           "$ref": "#/$defs/digest256"
@@ -2252,8 +2245,7 @@
           "$ref": "#/$defs/digest256"
         },
         "claim_id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/claimId"
         },
         "claim_digest": {
           "$ref": "#/$defs/digest256"
@@ -2473,8 +2465,7 @@
       ],
       "properties": {
         "claim_id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/claimId"
         },
         "evidence_digest": {
           "$ref": "#/$defs/digest256"
@@ -2829,9 +2820,7 @@
       ],
       "properties": {
         "id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
+          "$ref": "#/$defs/claimId"
         },
         "text": {
           "type": "string",
@@ -2861,14 +2850,10 @@
       ],
       "properties": {
         "from": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
+          "$ref": "#/$defs/claimId"
         },
         "to": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
+          "$ref": "#/$defs/claimId"
         },
         "type": {
           "const": "SupportedBy"
@@ -2886,9 +2871,7 @@
       ],
       "properties": {
         "root": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
+          "$ref": "#/$defs/claimId"
         },
         "claims": {
           "type": "array",
@@ -3030,6 +3013,10 @@
           ]
         }
       }
+    },
+    "claimId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
     }
   }
 }
