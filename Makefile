@@ -461,10 +461,13 @@ doctor: ## empirica preflight: report baseline host capability without inference
 # checkout-bundled exact pi-subagents profile remains active; providers and unrelated packages are
 # unchanged. Local edits hot-reload with /reload. Pi asks to trust the folder once.
 CLAUDE ?= claude
+# Dev sessions run `make` themselves. Command-line make variables (ARGS=...) are exported to children,
+# so without this an author's `make check-static` inherits the launcher's ARGS and fails.
+DEV_CHILD_ENV := env -u MAKEFLAGS -u MFLAGS -u MAKELEVEL -u ARGS
 .PHONY: claude-dev
 claude-dev: ## Run interactive Claude from this checkout: CLAUDE=/path/to/claude [ARGS="--debug-file ..."]
 	@command -v "$(CLAUDE)" >/dev/null 2>&1 || { printf 'claude-dev: executable not found (set CLAUDE=/path/to/claude)\n' >&2; exit 2; }
-	@$(CLAUDE) --plugin-dir "$(CURDIR)/plugins/empirica" --plugin-dir "$(CURDIR)/plugins/methodologist" $(ARGS)
+	@$(DEV_CHILD_ENV) $(CLAUDE) --plugin-dir "$(CURDIR)/plugins/empirica" --plugin-dir "$(CURDIR)/plugins/methodologist" $(ARGS)
 
 PI ?= pi
 .PHONY: pi-dev
@@ -472,7 +475,7 @@ pi-dev: ## Run Pi with this checkout override: PI=/path/to/pi [ARGS="..."] (othe
 	@command -v $(PI) >/dev/null 2>&1 || { printf 'pi-dev: `$(PI)` not found on PATH (set PI=/path/to/pi)\n' >&2; exit 2; }
 	@test -f .pi/settings.json || { printf 'pi-dev: .pi/settings.json is missing (it is committed; restore it)\n' >&2; exit 2; }
 	@printf '$(BOLD)==> dev pi$(RESET) siffran from %s (project override); answer YES if pi asks to trust this folder\n' "$(CURDIR)"
-	@$(PI) $(ARGS)
+	@$(DEV_CHILD_ENV) $(PI) $(ARGS)
 
 # Canary: dogfood a pushed PR branch inside a REAL project, not inside siffran. Installs the branch
 # as a project-local package there (project wins over the global install; identity is the repo URL,
