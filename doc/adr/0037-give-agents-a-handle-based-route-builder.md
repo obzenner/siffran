@@ -1,17 +1,19 @@
 ---
 number: 37
-title: "Give agents a handle-based route builder to match the driving surface"
-status: accepted
+title: Give agents a handle-based route builder to match the driving surface
+status: superseded
 date: 2026-09-08
 tags:
-  - workflow
-  - api
-  - usability
+- workflow
+- api
+- usability
 links:
-  - target: 30
-    kind: Refines
-  - target: 20
-    kind: relatesto
+- target: 30
+  kind: Refines
+- target: 20
+  kind: Relates to
+- target: 42
+  kind: Superseded by
 ---
 
 # Give agents a handle-based route builder to match the driving surface

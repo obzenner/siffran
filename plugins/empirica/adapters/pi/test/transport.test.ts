@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createStdioBridgeDispatch, HOST_PROFILE_ID } from "../src/stdio-transport.ts";
-import { createPrivateIngress } from "../src/private-transport.ts";
+import { createPrivateIngress, type PrivateOperation } from "../src/private-transport.ts";
 import { resolveRunRequest } from "../src/translate.ts";
 import { GuardError } from "../src/guard.ts";
 
@@ -124,4 +124,35 @@ test("private ingress kills and rejects a bridge that exceeds its deadline", asy
 
 test("HOST_PROFILE_ID is the exact pi profile with no default", () => {
   assert.equal(HOST_PROFILE_ID, "pi@0.84.1+pi-subagents@0.50.0");
+});
+
+test("assertPrivateResponse accepts the real private shapes and rejects every malformed one", async () => {
+  const { assertPrivateResponse } = await import("../src/private-transport.ts");
+  const plan = { child_id: "c", role_profile: "empirica.empirica-auditor", operation_id: "o", argument: {} };
+  const accepted: Array<[PrivateOperation, unknown]> = [
+    ["classify_identity", null],
+    ["classify_identity", { identity: "anthropic/claude" }],
+    ["audit_prepare", { type: "audit_plan", plan }],
+    ["audit_verdict", { type: "audit_verdict", admitted: true }],
+    ["audit_verdict", { type: "audit_verdict", admitted: false }],
+    ["audit_start", { type: "audit_started" }],
+    ["audit_identity", { type: "audit_identity" }],
+    ["audit_reject", { type: "audit_terminal" }],
+    ["audit_failure", { type: "audit_terminal" }],
+    ["child_event", { protocol: "empirica/v2", request_id: "trusted-child", result: { type: "Allow" } }],
+  ];
+  for (const [operation, value] of accepted)
+    assert.deepEqual(assertPrivateResponse(operation, value), value, operation);
+  const rejected: Array<[PrivateOperation, unknown]> = [
+    ["classify_identity", { identity: "" }],
+    ["audit_prepare", { type: "audit_plan", plan: { ...plan, argument: "x" } }],
+    ["audit_verdict", { type: "audit_verdict", admitted: {} }],
+    ["audit_verdict", { type: "audit_verdict" }],
+    ["audit_start", { type: "audit_terminal" }],
+    ["child_event", { result: { type: "Allow" } }],
+    ["child_event", []],
+    ["audit_verdict", null],
+  ];
+  for (const [operation, value] of rejected)
+    assert.throws(() => assertPrivateResponse(operation, value), /response is invalid/, operation);
 });

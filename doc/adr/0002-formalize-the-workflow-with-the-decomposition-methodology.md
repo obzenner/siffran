@@ -8,7 +8,7 @@ tags:
   - process
 links:
   - target: 4
-    kind: relatesto
+    kind: Relates to
 ---
 
 # Formalize the workflow with the decomposition methodology

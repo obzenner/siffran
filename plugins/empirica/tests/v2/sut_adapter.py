@@ -150,11 +150,6 @@ class LiveDriver:
     def operational_state(self) -> dict:
         return self._service.operational_state()
 
-    def workspace_observe_calls(self) -> int:
-        # Transport telemetry for the pure-core boundary case (D4 case 15): proves workspace reads
-        # are requested through the fake Workspace port, never hidden behind adapter behavior.
-        return self._workspace.observe_calls
-
     def workspace_observe_history(self) -> tuple:
         # D4-S2 transport telemetry: tuples of (exact normalized path batch, result batch) per
         # observe call. Transport facts only; never derives claim/audit/run policy.

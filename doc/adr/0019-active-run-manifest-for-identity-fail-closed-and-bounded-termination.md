@@ -1,22 +1,40 @@
 ---
 number: 19
-title: "Active-run manifest: run identity, fail-closed gating, and bounded termination"
+title: 'Active-run manifest: run identity, fail-closed gating, and bounded termination'
 status: accepted
 date: 2026-07-24
 tags:
-  - architecture
-  - state
-  - termination
-  - trust-boundary
+- architecture
+- state
+- termination
+- trust-boundary
 links:
-  - target: 9
-    kind: Refines
-  - target: 8
-    kind: Depends on
-  - target: 17
-    kind: relatesto
-  - target: 18
-    kind: relatesto
+- target: 9
+  kind: Refines
+- target: 8
+  kind: Depends on
+- target: 17
+  kind: Relates to
+- target: 18
+  kind: Relates to
+- target: 20
+  kind: Depends on
+- target: 21
+  kind: Depends on
+- target: 22
+  kind: Relates to
+- target: 24
+  kind: Relates to
+- target: 25
+  kind: Relates to
+- target: 26
+  kind: Depends on
+- target: 28
+  kind: Depends on
+- target: 31
+  kind: Amended by
+- target: 34
+  kind: Amended by
 ---
 
 # Active-run manifest: run identity, fail-closed gating, and bounded termination

@@ -25,6 +25,7 @@ from pathlib import Path
 from adapters.state import project_id, run_id
 from adapters import bridge as application_bridge
 from adapters.invocation import provenance, split_leading_flags
+from adapters.public_tools import TOOL_NAMES
 from .transport import CODEX_PROFILE_ID
 
 from .correlation import PROTOCOL, request_id as new_request_id
@@ -146,20 +147,17 @@ def build_resolve_request(
 
 # --- lifecycle entry points ---------------------------------------------------
 
-def _dispatch(payload: Mapping[str, object], request: dict,
-               transport: Transport | None = None) -> dict:
+def _dispatch(request: dict, transport: Transport | None = None) -> dict:
     return (transport if transport is not None else BridgeTransport()).dispatch(request)
 
 
 def _resolve_run(payload: Mapping[str, object], transport: Transport | None = None, *, strict=False) -> str | None:
     """``ResolveRun`` through the strict bridge shell; return a run handle only when resolved.
 
-    At D6 the no-location run port reports every opaque ID unresolved, so this always
-    returns ``None``.  Any transport failure is treated as no resolvable run rather than
-    wedging the host event.
+    Transport failure is inert for observational hooks and raises for strict admission hooks.
     """
     try:
-        response = _dispatch(payload, build_resolve_request(payload), transport)
+        response = _dispatch(build_resolve_request(payload), transport)
     except Exception:
         if strict:
             raise
@@ -186,7 +184,7 @@ def _start(payload: dict) -> dict | None:
     if unknown:
         return {"systemMessage": "empirica activation failed: unknown flags: " + " ".join(unknown)}
     request = build_start_run_request(payload)
-    response = _dispatch(payload, request)
+    response = _dispatch(request)
     result = response.get("result", {}) if isinstance(response, dict) else {}
     if result.get("type") == "Fault":
         code = result.get("code")
@@ -229,9 +227,9 @@ def _pre_tool_use(payload: dict) -> dict | None:
             raise RuntimeError("governance context unavailable")
         name = payload.get("tool_name", "")
         if name in {prefix + tool for prefix in ("", "mcp__empirica__")
-                    for tool in ("empirica_read", "empirica_observe", "report_convergence")}:
+                    for tool in TOOL_NAMES}:
             return None
-        result = _dispatch(payload, {"protocol": PROTOCOL, "request_id": new_request_id(payload, "investigate"),
+        result = _dispatch({"protocol": PROTOCOL, "request_id": new_request_id(payload, "investigate"),
             "command": {"type": "ObserveAction", "run_id": handle, "action": {"kind": "investigate"}}})["result"]
         if result.get("type") == "Allow":
             return None
@@ -266,11 +264,11 @@ def _stop(payload: dict) -> dict | None:
         if handle is None:
             return None
         _refresh_governance(payload, handle)
-        response = _dispatch(payload, build_evaluate_request(payload, handle))
+        response = _dispatch(build_evaluate_request(payload, handle))
         result = response.get("result", {}) if isinstance(response, dict) else {}
         if isinstance(result, Mapping) and _audit_required(result):
             execute_audit(handle)
-            response = _dispatch(payload, build_evaluate_request(payload, handle))
+            response = _dispatch(build_evaluate_request(payload, handle))
     except Exception:  # active located run: evaluation/audit failure must deny Stop
         return {"decision": "block", "reason": "Empirica convergence gate unavailable."}
     result = response.get("result", {}) if isinstance(response, dict) else {}
@@ -290,8 +288,7 @@ def _restore(payload: dict) -> dict | None:
     """SessionStart:compact: ``ResolveRun`` through the strict shell; inert when unresolved."""
     if payload.get("source") != "compact":
         return None
-    _resolve_run(payload)
-    return None  # D6: no active run to restore (D7 owns run identity)
+    return None
 
 
 def _payload() -> dict:

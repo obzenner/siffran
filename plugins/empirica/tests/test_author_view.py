@@ -20,6 +20,7 @@ sys.path.insert(0, str(PLUGIN))
 from adapters import author_view  # noqa: E402
 from adapters.author_view import render_author_view  # noqa: E402
 from application.protocol import (  # noqa: E402
+    contract_result,
     next_action_surfaces,
     response_schema_defs,
     untrusted_delimiters,
@@ -58,7 +59,7 @@ SYNTHETIC = [
     ("inert", {"type": "Inert", "reason": "no_run"}),
 ]
 
-# Argument/contract results pass through as JSON (auditor needs digests).
+# Argument results render as author-safe text; private audit paths retain typed JSON internally.
 ARGUMENT_FIXTURES = [
     "getargument-active",
     "getargument-audited",
@@ -88,13 +89,45 @@ class NoFallbackTests(unittest.TestCase):
         rendered = 0
         for path in sorted(FIXTURES.glob("*.json")):
             result = json.loads(path.read_text()).get("expected", {}).get("result")
-            if (not validate_public_result(result)
-                    or "argument" in result or "contract_result" in result):
+            if not validate_public_result(result):
                 continue
             text = render_author_view(result, strict=True)
             self.assertNotEqual(text, _fallback(result), f"{path.name} fell back to JSON")
+            with self.assertRaises(json.JSONDecodeError, msg=path.name):
+                json.loads(text)
             rendered += 1
         self.assertGreaterEqual(rendered, 12, "fixture sweep is not vacuous")
+
+    def test_public_tools_and_read_operations_never_emit_json(self):
+        """Contract-owned tool/read enums drive the no-JSON sweep."""
+        tools = json.loads((ROOT / "contracts" / "empirica" / "v2" /
+                            "public-tools.json").read_text())
+        tool_names = tuple(tools["schemas"]["model"])
+        read_operations = tuple(
+            tools["schemas"]["model"]["empirica_read"]["properties"]["operation"]["enum"]
+        )
+        samples = {
+            "GetRun": _load_fixture("start-bootstrap-allow"),
+            "GetArgument": _load_fixture("getargument-active"),
+            "GetContract": {"type": "Allow", "contract_result": contract_result("index")},
+            "RestoreRun": _load_fixture("restore-active"),
+        }
+        self.assertEqual(set(read_operations), set(samples))
+        for operation in read_operations:
+            with self.assertRaises(json.JSONDecodeError, msg=operation):
+                json.loads(render_author_view(samples[operation], strict=True))
+        tool_samples = {
+            "empirica_observe": _load_fixture("block-open-claim"),
+            "empirica_read": samples["GetRun"],
+            "report_convergence": _load_fixture("allow-converged"),
+        }
+        self.assertEqual(set(tool_names), set(tool_samples))
+        for tool, result in tool_samples.items():
+            with self.assertRaises(json.JSONDecodeError, msg=tool):
+                json.loads(render_author_view(result, strict=True))
+        for name, result in SYNTHETIC:
+            with self.assertRaises(json.JSONDecodeError, msg=name):
+                json.loads(render_author_view(result, strict=True))
 
     def test_synthetic_never_fall_back(self):
         for name, result in SYNTHETIC:
@@ -103,14 +136,37 @@ class NoFallbackTests(unittest.TestCase):
                 text, _fallback(result),
                 f"{name}: renderer fell back to compact JSON")
 
-    def test_argument_results_pass_through_as_json(self):
-        """GetArgument/GetContract pass through as compact JSON (auditor needs digests)."""
+    def test_argument_results_are_plain_text_and_round_trip_graph(self):
+        """Every graph field needed to amend or resubmit appears, without private ids."""
         for name in ARGUMENT_FIXTURES:
             result = _load_fixture(name)
-            text = render_author_view(result)
-            self.assertEqual(
-                text, _fallback(result),
-                f"{name}: argument/contract result should pass through as JSON")
+            text = render_author_view(result, strict=True)
+            with self.assertRaises(json.JSONDecodeError, msg=name):
+                json.loads(text)
+            argument = result["argument"]
+            for value in (argument["goal"], argument["root_claim_id"]):
+                self.assertIn(value, text)
+            for claim in argument["claims"]:
+                for value in (claim["claim_id"], claim["kind"], claim["text"],
+                              "true" if claim["gating"] else "false"):
+                    self.assertIn(value, text)
+            for edge in argument["edges"]:
+                for value in (edge["from"], edge["type"], edge["to"]):
+                    self.assertIn(value, text)
+            self.assertNotIn("sha256:", text)
+            self.assertNotIn("artifact_id", text)
+            self.assertNotIn("route_stamp", text)
+
+    def test_contract_results_are_plain_text(self):
+        from application.protocol import contract_result
+        for result in (
+            {"type": "Allow", "contract_result": contract_result("index")},
+            {"type": "Allow", "contract_result": contract_result("section", "claims/graph")},
+        ):
+            text = render_author_view(result, strict=True)
+            with self.assertRaises(json.JSONDecodeError):
+                json.loads(text)
+            self.assertNotIn("sha256:", text)
 
 
 class NoDigestsOrOpaqueIdsTests(unittest.TestCase):

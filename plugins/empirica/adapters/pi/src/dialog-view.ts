@@ -137,7 +137,7 @@ function hostLine(dialog: Dialog): string[] {
 
 type Control = BudgetControl;
 
-function valueText(_control: Control, value: DialogState["values"][string]): string {
+function valueText(value: DialogState["values"][string]): string {
   return String(value);
 }
 
@@ -154,8 +154,8 @@ function controlLines(dialog: Dialog, state: DialogState, options: RenderOptions
   const shown = controls.map(control => {
     const value = state.values[control.key], prior = before.get(control.key);
     const was = options.confirmation && prior !== undefined && prior !== value
-      ? ` (was ${valueText(control, prior).replace(/^[☐☑] /, "")})` : "";
-    return valueText(control, value) + was;
+      ? ` (was ${valueText(prior).replace(/^[☐☑] /, "")})` : "";
+    return valueText(value) + was;
   });
   const labelWidth = Math.max(...controls.map(control => visibleWidth(control.label))) + 2;
   const valueWidth = Math.max(...shown.map(visibleWidth)) + 2;

@@ -11,11 +11,11 @@ links:
   - target: 7
     kind: Refines
   - target: 13
-    kind: relatesto
+    kind: Relates to
   - target: 14
-    kind: relatesto
+    kind: Relates to
   - target: 3
-    kind: relatesto
+    kind: Relates to
   - target: 16
     kind: Depended on by
   - target: 22

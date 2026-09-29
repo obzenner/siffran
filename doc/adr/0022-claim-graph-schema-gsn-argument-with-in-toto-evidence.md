@@ -1,24 +1,34 @@
 ---
 number: 22
-title: "Claim-graph schema: a GSN assurance argument with in-toto evidence records"
-status: accepted
+title: 'Claim-graph schema: a GSN assurance argument with in-toto evidence records'
+status: superseded
 date: 2026-07-24
 tags:
-  - architecture
-  - state
-  - standards
-  - verification
+- architecture
+- state
+- standards
+- verification
 links:
-  - target: 15
-    kind: Supersedes
-  - target: 20
-    kind: Depends on
-  - target: 18
-    kind: relatesto
-  - target: 7
-    kind: relatesto
-  - target: 19
-    kind: relatesto
+- target: 15
+  kind: Supersedes
+- target: 20
+  kind: Depends on
+- target: 18
+  kind: Relates to
+- target: 7
+  kind: Relates to
+- target: 19
+  kind: Relates to
+- target: 45
+  kind: Superseded by
+- target: 24
+  kind: Relates to
+- target: 25
+  kind: Depends on
+- target: 26
+  kind: Relates to
+- target: 31
+  kind: Depends on
 ---
 
 # Claim-graph schema: a GSN assurance argument with in-toto evidence records

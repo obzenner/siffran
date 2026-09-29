@@ -132,6 +132,8 @@ def execute_spike_bound(command, dependent_paths, workspace, harness):
     paths = _validate_dependent_paths(dependent_paths)
     capture = _capture(paths, workspace)
     files = _validate_capture(capture, paths)
+    if any(cf.observation.state is not ObservationState.PRESENT for cf in files):
+        raise ObservationUnavailable("execution capture must be present")
     bindings = tuple(FileBinding(cf.observation.path, cf.observation.sha256) for cf in files)
     execution = ExecutionSnapshot(
         bindings, tuple(cf.content for cf in files),
@@ -151,15 +153,6 @@ def execute_spike_bound(command, dependent_paths, workspace, harness):
 
 
 def execute_spike(command, dependent_paths, workspace, harness):
-    if not isinstance(command, str) or not command:
-        raise ValueError("command must be a nonempty string")
-    snapshot = build_execution_snapshot(dependent_paths, workspace)
-    try:
-        result = harness.run(command, snapshot)
-    except Exception as exc:
-        raise HarnessUnavailable("harness run failed") from exc
-    if not isinstance(result, HarnessResult):
-        raise HarnessContractError("harness must return a HarnessResult")
-    if result.snapshot_digest != snapshot.snapshot_digest:
-        raise HarnessContractError("harness echoed a mismatched snapshot digest")
-    return execution_facts(snapshot.file_bindings, result)
+    """Compatibility projection of the canonical bound executor's facts."""
+    facts, _, _ = execute_spike_bound(command, dependent_paths, workspace, harness)
+    return facts

@@ -1,26 +1,50 @@
 ---
 number: 20
-title: "Mandatory run protocol: claim graph, two-fold validation, fan-out, and independent audit"
+title: 'Mandatory run protocol: claim graph, two-fold validation, fan-out, and independent audit'
 status: accepted
 date: 2026-07-24
 tags:
-  - architecture
-  - process
-  - verification
-  - trust-boundary
+- architecture
+- process
+- verification
+- trust-boundary
 links:
-  - target: 13
-    kind: Depends on
-  - target: 18
-    kind: Realizes
-  - target: 19
-    kind: Depends on
-  - target: 7
-    kind: relatesto
-  - target: 9
-    kind: relatesto
-  - target: 17
-    kind: relatesto
+- target: 13
+  kind: Depends on
+- target: 18
+  kind: Realizes
+- target: 19
+  kind: Depends on
+- target: 7
+  kind: Relates to
+- target: 9
+  kind: Relates to
+- target: 17
+  kind: Relates to
+- target: 62
+  kind: Amended by
+- target: 21
+  kind: Depends on
+- target: 22
+  kind: Depends on
+- target: 23
+  kind: Depends on
+- target: 24
+  kind: Depends on
+- target: 25
+  kind: Amended by
+- target: 26
+  kind: Relates to
+- target: 27
+  kind: Depends on
+- target: 35
+  kind: Refines
+- target: 37
+  kind: Relates to
+- target: 41
+  kind: Amended by
+- target: 48
+  kind: Refines
 ---
 
 # Mandatory run protocol: claim graph, two-fold validation, fan-out, and independent audit

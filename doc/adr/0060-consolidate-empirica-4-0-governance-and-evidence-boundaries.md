@@ -9,6 +9,8 @@ tags:
 - identity
 - contracts
 links:
+- target: 24
+  kind: Supersedes
 - target: 53
   kind: Supersedes
 - target: 54
@@ -21,6 +23,10 @@ links:
   kind: Supersedes
 - target: 56
   kind: Amends
+- target: 41
+  kind: Supersedes
+- target: 61
+  kind: Amended by
 ---
 
 # Consolidate Empirica 4.0 governance and evidence boundaries

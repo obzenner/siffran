@@ -42,7 +42,7 @@ class _Service:
         if snapshot is None:
             return {"status": "unsupported"}
         view = project_runview(snapshot, self._coordinator._sections(snapshot))
-        view["untrusted_delimiters"] = dict(_proto._UNTRUSTED_DELIMITERS)
+        view["untrusted_delimiters"] = dict(_proto.untrusted_delimiters())
         return view
 
     def operational_state(self) -> dict:

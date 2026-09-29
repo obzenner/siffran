@@ -1,17 +1,25 @@
 ---
 number: 32
-title: "Port Claude completion gating to a gated domain operation on Pi"
+title: Port Claude completion gating to a gated domain operation on Pi
 status: accepted
 date: 2026-09-04
 tags:
-  - pi
-  - adapters
-  - convergence
+- pi
+- adapters
+- convergence
 links:
-  - target: 8
-    kind: Amends
-  - target: 30
-    kind: Depends on
+- target: 21
+  kind: Supersedes
+- target: 8
+  kind: Amends
+- target: 30
+  kind: Depends on
+- target: 33
+  kind: Amended by
+- target: 39
+  kind: Relates to
+- target: 40
+  kind: Relates to
 ---
 
 # Port Claude completion gating to a gated domain operation on Pi

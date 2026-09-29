@@ -1,14 +1,22 @@
 ---
 number: 54
-title: "Plain-language governance review with durable change requests"
+title: Plain-language governance review with durable change requests
 status: superseded
 date: 2026-09-23
-tags: [empirica, governance, approval, ux]
+tags:
+- empirica
+- governance
+- approval
+- ux
 links:
-  - target: 53
-    kind: Refines
-  - target: 60
-    kind: Superseded by
+- target: 53
+  kind: Refines
+- target: 60
+  kind: Superseded by
+- target: 55
+  kind: Refines
+- target: 58
+  kind: Refines
 ---
 
 # Plain-language governance review with durable change requests

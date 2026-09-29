@@ -2,7 +2,7 @@
 name: empirica
 description: "Empirical-convergence workflow for non-trivial work whose plan is uncertain. Route before investigating, represent unknowns as claims, require cited research before deterministic spikes, discard refuted claims, and request an independently audited convergence decision. Use for design-and-implement work, architectural uncertainty, competing approaches, and risky assumptions. Host capabilities differ; run the capability preflight before promising convergence. Invoke as /empirica <goal>."
 allowed-tools: Read Glob Grep Bash Edit Write Agent TaskCreate TaskUpdate WebFetch
-compatibility: Designed for Claude Code >=2.1.278,<2.2.0, Codex CLI >=0.146.0,<0.147.0, and Pi >=0.84.1,<0.85.0 with pi-subagents 0.50.0; requires methodologist and python3 for hook-backed hosts. Exact observed versions remain receipt provenance; live capabilities still gate execution.
+compatibility: Designed for Claude Code >=2.1.278,<2.2.0, Codex CLI >=0.146.0,<0.147.0, and Pi >=0.84.1,<0.85.0 with pi-subagents 0.50.0; requires python3 for hook-backed hosts. Exact observed versions remain receipt provenance; live capabilities still gate execution.
 argument-hint: "[--auto] <goal>"
 ---
 
@@ -18,13 +18,11 @@ translate host events and expose capabilities. Never edit operational state unde
 
 ## 0. Adopt the stance and preflight the host
 
-Before anything else, emit this line verbatim:
+Treat training-weight knowledge as hypothesis: discharge load-bearing claims against evidence or surface them as unverified.
 
-> **Stance:** parametric knowledge (training weights) = hypothesis only. Every load-bearing claim discharged against evidence (code / docs / runtime) or surfaced as UNVERIFIED. Open questions are resolved until blocked, then surfaced with what was tried.
-
-Then identify the exact active host surface from the tools and lifecycle already
-present in context. **Do not read any file, including a skill reference, before
-route acknowledgement.** Use this inline bootstrap matrix:
+Identify the exact active host surface from the tools and lifecycle already present in context.
+**Do not read any file, including a skill reference, before the `investigate` witness is admitted
+(route → graph → approved configuration).** Use this inline bootstrap matrix:
 
 - **Claude Code capability profile (qualified on `2.1.278`, compatible
   `>=2.1.278,<2.2.0`):** continue when the Empirica hooks and
@@ -40,22 +38,20 @@ route acknowledgement.** Use this inline bootstrap matrix:
   handle, the public MCP tools are present, and the Stop hook is trusted; audit
   remains explicitly unsupported because verdict-producing identity is unobservable.
 - **Unknown, partial, or outside a qualified compatibility range:** stop as unsupported pending
-  qualification rather than borrowing another profile's capabilities.
-
-The exact observed harness version is provenance recorded in an installed-host receipt; it is not
-itself the capability-profile identity and need not equal the qualification baseline.
+  qualification rather than borrowing another profile's capabilities. After admission, consult
+[references/host-capabilities.md](references/host-capabilities.md) only to diagnose a capability failure.
 
 The three public tools return one deterministic plain-text author view on Claude, Codex, and Pi.
 Read its first-line status/governance summary, `Reasons`, `Open obligations`, and rendered `Next`
 calls directly; do not parse it as JSON or look for hidden digests/governance internals. Pi retains
-validated structured details for host UI only. `GetArgument` and `GetContract` keep their detailed
-sections because the auditor and contract inspection require them.
+validated structured details for host UI only. The host binds and injects the private audit dossier;
+`GetArgument` is text for authors recovering a graph, while `GetContract` is text for inspection.
 
 A runnable convergence workflow requires all of these capabilities:
 
 1. read the complete public run view, including obligations;
 2. submit author actions for route, graph, research, spike request, and freeze;
-3. obtain the current audit argument;
+3. obtain the current audit argument through the host-bound workflow;
 4. launch and observe a bound independent auditor;
 5. submit the observed verdict through private host ingress;
 6. request the guarded convergence decision;
@@ -94,21 +90,18 @@ Do this before reading files, searching, browsing, or running commands.
    the claim graph and reviewer are not approvable. Preserve the human's edited values rather than
    resending stale fields, and note explicit `--auto` stays within existing budgets and
    cannot raise ceilings.
-   The host-owned decision timeout and the durable per-epoch/per-run presentation
-   reservations are fixed by the contract and displayed read-only; take exact values,
-   reviewer, and confirmation semantics from
-   [references/governance.md](references/governance.md). Timeout is dismissal, not human
-   rejection. Do not loop on refusal or exhaustion.
+   The host-owned timeout and presentation limits are fixed by the contract and displayed read-only.
+   Timeout is dismissal, not rejection. Do not loop on refusal or exhaustion. The optional
+   [governance reference](references/governance.md) documents host-owned recovery details; it is
+   not a prerequisite read.
 6. Wait until the text view's governance summary says `approved` for the exact displayed
    configuration; do not expect or parse a `run.governance.state` JSON field.
-   configuration amendments need a second review and human numeric edits are not corruption.
+   Configuration amendments need a second review; human numeric edits are not corruption.
    After cancellation/timeout, wait for the human; Claude can settle the turn nonterminally while
    investigation and convergence remain blocked. Then record the `investigate` witness `{"kind":"investigate"}` before any
    native read, search, command, evidence submission, or child launch. Approval does not supply
    either witness.
-7. Read [references/governance.md](references/governance.md) and
-   [references/host-capabilities.md](references/host-capabilities.md), then investigate. Public
-   reads/corrections and explicit honest stop remain available without approval.
+7. Investigate. Public reads/corrections and explicit honest stop remain available without approval.
 
 If either witness cannot be recorded, the workflow is unsupported. The core and
 supported host adapters fail closed before investigative tools, evidence, child
@@ -176,31 +169,11 @@ language. When budgets, a stall, or scope closure matter, read
 
 ## 5. Obtain independent audit
 
-When every in-scope gating claim is approved, read
-[references/audit.md](references/audit.md).
-
-The author never grades its own convergence. On Claude, invoke the exact
-`empirica:empirica-auditor` once and let the parent turn settle while that bound async child is
-pending; Claude's native completion notification resumes the workflow after `SubagentStop`
-admits the terminal result. On Pi, invoke the packaged auditor once through the structured
-`subagent` tool with exactly:
-
-```json
-{"agent":"empirica.empirica-auditor","task":"Audit the host-provided dossier."}
-```
-
-Send only `agent` and `task`; do not guess alternate fields or retry a rejected launch. See
-[references/audit.md](references/audit.md) for the complete invocation and reviewer rules.
-The host protocol—not `empirica_observe`—owns concrete reservation, dossier replacement,
-correlation, identity observation, and terminal admission.
-On Codex, do not launch an ordinary child: finish the turn only when all non-audit
-obligations are closed. The trusted Stop hook rejects the audit attempt because the
-verdict-producing identity is unobservable. On supported hosts the host—not the author—binds the
-dossier, observes the final output, and admits the candidate verdict.
-
-Audit may block but cannot manufacture deterministic machine evidence. Independence is derived by
-the host (see [references/audit.md](references/audit.md)); it is never guaranteed without host
-evidence.
+When every in-scope gating claim is approved, read [references/audit.md](references/audit.md).
+Follow its exact host procedure once: Claude launches `empirica:empirica-auditor`, Pi calls the
+packaged auditor, and Codex ends the turn without launching an ordinary child. The host owns dossier
+binding, correlation, identity observation, and verdict admission. Audit may block but cannot
+manufacture deterministic machine evidence.
 
 If the host lacks bound child observation or private verdict ingress, true
 convergence is unsupported. Do not substitute an ordinary model response.
@@ -242,19 +215,3 @@ Commit only the goal's product artifacts, tests, and accepted decisions. Runtime
 state, claim history, evidence records, and audit bindings remain in Empirica's
 stores, not in the product tree.
 
-## Non-negotiable invariants
-
-- Host-mediated approval covers exact run configuration before investigation; graph content and
-  reviewer configuration remain outside that authority.
-- Explicit auto never raises ceilings and requires an interactive invocation or recorded operator
-  delegation.
-- Research precedes a spike.
-- Process exit code is the sole machine approver.
-- Claim state is derived; it is never author-assigned.
-- Knowledge is append-only and selected history is manifest-reachable.
-- Corrupt or missing selected state fails closed.
-- Stale file-bound spikes require deterministic re-gating.
-- Author-controlled input never becomes trusted ingress.
-- First child terminal event wins; a terminal run never later converges.
-- Audit can block but cannot approve a machine claim.
-- Only the guarded service decision authorizes the final status.

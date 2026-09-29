@@ -21,7 +21,6 @@ import { govern, refreshGovernance, piGovernanceContext } from "../src/governanc
 import { createPrivateIngress } from "../src/private-transport.ts";
 import { fakeCtx } from "./fakes.ts";
 import type { Response } from "../src/contract.ts";
-import { GuardError } from "../src/guard.ts";
 
 const py = process.env.EMPIRICA_PYTHON ?? "python3";
 let pythonAvailable = true;

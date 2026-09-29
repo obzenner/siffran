@@ -30,10 +30,6 @@ class IdentityObservation:
     model_id: str | None
     source: str
 
-    @property
-    def concrete(self) -> bool:
-        return bool(self.provider_id and self.model_id)
-
 
 @dataclass(frozen=True)
 class AuditLaunchPlan:
@@ -46,12 +42,10 @@ class AuditLaunchPlan:
 
     @property
     def evidence_ids(self) -> list[str]:
-        claims = self.argument.get("claims", [])
         return [artifact_id
-                for claim in claims if isinstance(claim, Mapping)
-                and claim.get("gating") is True and claim.get("state") == "approved"
-                for artifact_id in claim.get("active_evidence_ids", [])
-                if isinstance(artifact_id, str)]
+                for claim in self.argument["claims"]
+                if claim["gating"] is True and claim["state"] == "approved"
+                for artifact_id in claim["active_evidence_ids"]]
 
 
 class AuditProtocol:

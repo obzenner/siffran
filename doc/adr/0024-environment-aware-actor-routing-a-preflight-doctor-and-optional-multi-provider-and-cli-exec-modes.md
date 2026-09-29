@@ -1,30 +1,46 @@
 ---
 number: 24
-title: "Environment-aware actor routing: a preflight doctor, and optional multi-provider and CLI-exec modes"
+title: 'Environment-aware actor routing: a preflight doctor, and optional multi-provider and CLI-exec modes'
 status: accepted
 date: 2026-08-05
 tags:
-  - architecture
-  - routing
-  - harness
-  - verification
-  - attribution
-  - portability
+- architecture
+- routing
+- harness
+- verification
+- attribution
+- portability
 links:
-  - target: 23
-    kind: Supersedes
-  - target: 20
-    kind: Depends on
-  - target: 21
-    kind: Depends on
-  - target: 17
-    kind: relatesto
-  - target: 13
-    kind: relatesto
-  - target: 19
-    kind: relatesto
-  - target: 22
-    kind: relatesto
+- target: 23
+  kind: Supersedes
+- target: 20
+  kind: Depends on
+- target: 21
+  kind: Depends on
+- target: 17
+  kind: Relates to
+- target: 13
+  kind: Relates to
+- target: 19
+  kind: Relates to
+- target: 22
+  kind: Relates to
+- target: 45
+  kind: Superseded by
+- target: 60
+  kind: Superseded by
+- target: 62
+  kind: Amended by
+- target: 28
+  kind: Amended by
+- target: 35
+  kind: Relates to
+- target: 36
+  kind: Refines
+- target: 41
+  kind: Depends on
+- target: 61
+  kind: Amended by
 ---
 
 # Environment-aware actor routing: a preflight doctor, and optional multi-provider and CLI-exec modes

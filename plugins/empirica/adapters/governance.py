@@ -41,7 +41,7 @@ def governance_timeout() -> float:
 
 
 def unavailable(result: dict, code: str = "governance.approval_unavailable", *, message: str | None = None) -> dict:
-    row = protocol._PUBLIC_CONTRACT["reasons"][code]
+    row = protocol.public_contract()["reasons"][code]
     return {"type": "Block", "run": result["run"], "reasons": [{"code": code,
             "parameters": {}, "message": message or row["message"], "sections": row["sections"],
             "next_actions": row["next_actions"]}]}

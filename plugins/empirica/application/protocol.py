@@ -7,6 +7,7 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Mapping
 
 import jsonschema
@@ -76,12 +77,57 @@ CONTRACT_VIEW = ContractView(
 )
 
 
+def protocol_id() -> str:
+    """Return the canonical wire protocol identifier."""
+    return _PROTOCOL
+
+
+def public_contract() -> Mapping[str, Any]:
+    """Return a read-only view of the canonical public contract."""
+    return MappingProxyType(_PUBLIC_CONTRACT)
+
+
+def request_schema() -> Mapping[str, Any]:
+    """Return a read-only view of the canonical request schema."""
+    return MappingProxyType(_REQUEST_SCHEMA)
+
+
+def response_schema() -> Mapping[str, Any]:
+    """Return a read-only view of the canonical response schema."""
+    return MappingProxyType(_RESPONSE_SCHEMA)
+
+
+def state_schema() -> Mapping[str, Any]:
+    """Return a read-only view of the canonical state schema."""
+    return MappingProxyType(_STATE_SCHEMA)
+
+
+def schema_registry() -> Registry:
+    """Return the immutable referencing registry used by schema validators."""
+    return _SCHEMA_REGISTRY
+
+
+def state_schema_id() -> str:
+    """Return the canonical persisted-state schema identifier."""
+    return _STATE_SCHEMA_ID
+
+
 def profile_ids() -> tuple[str, ...]:
     return tuple(sorted(_PROFILES))
 
 
 def host_profile(profile_id: str) -> Mapping[str, Any]:
     return copy.deepcopy(_PROFILES[profile_id])
+
+
+def governance_decisions() -> tuple[tuple[str, Mapping[str, Any]], ...]:
+    """Return the canonical governance decision rows."""
+    return tuple((name, MappingProxyType(row)) for name, row in _GOVERNANCE_DECISIONS)
+
+
+def untrusted_delimiters() -> Mapping[str, Any]:
+    """Return the canonical untrusted-text delimiters."""
+    return MappingProxyType(_UNTRUSTED_DELIMITERS)
 
 
 def contract_digest() -> str:
@@ -102,10 +148,6 @@ def response_schema_defs() -> dict[str, dict]:
     """Return a copy of the v2 response schema ``$defs`` (parameter and payload shapes)."""
     return copy.deepcopy(_RESPONSE_SCHEMA["$defs"])
 
-
-def untrusted_delimiters() -> dict[str, str]:
-    """Return the contract's untrusted-data delimiters."""
-    return copy.deepcopy(_UNTRUSTED_DELIMITERS)
 
 
 def validate_public_result(result: object) -> bool:

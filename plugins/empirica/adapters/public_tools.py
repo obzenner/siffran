@@ -16,9 +16,9 @@ from adapters import bridge as _bridge
 READ_TOOL = "empirica_read"
 OBSERVE_TOOL = "empirica_observe"
 REPORT_TOOL = "report_convergence"
-_TOOL_ORDER = (READ_TOOL, OBSERVE_TOOL, REPORT_TOOL)
-_AUTHOR_KINDS = frozenset(_protocol._PUBLIC_CONTRACT["actions"]["author"])
-_PROFILES = frozenset(_protocol._PROFILES)
+TOOL_NAMES = (READ_TOOL, OBSERVE_TOOL, REPORT_TOOL)
+_AUTHOR_KINDS = frozenset(_protocol.public_contract()["actions"]["author"])
+_PROFILES = frozenset(_protocol.profile_ids())
 _PUBLIC_TOOL_ARTIFACT = (Path(__file__).resolve().parents[1]
                          / "vendor/contracts/empirica/v2/public-tools.json")
 
@@ -48,14 +48,14 @@ def _deref(value: Any) -> Any:
     ref = value.get("$ref")
     if isinstance(ref, str) and ref.startswith("#/$defs/"):
         name = ref.removeprefix("#/$defs/")
-        return _deref(_protocol._REQUEST_SCHEMA["$defs"][name])
+        return _deref(_protocol.request_schema()["$defs"][name])
     return {key: _deref(item) for key, item in value.items()}
 
 
 def _author_action_schema() -> dict:
     choices = []
-    guidance = _protocol._PUBLIC_CONTRACT["bootstrap"]["actions"]
-    for item in _protocol._REQUEST_SCHEMA["$defs"]["action"]["oneOf"]:
+    guidance = _protocol.public_contract()["bootstrap"]["actions"]
+    for item in _protocol.request_schema()["$defs"]["action"]["oneOf"]:
         expanded = _deref(item)
         kind = expanded.get("properties", {}).get("kind", {}).get("const")
         if kind in _AUTHOR_KINDS:
@@ -141,15 +141,15 @@ def _host_handle_schemas(model: dict[str, dict]) -> dict[str, dict]:
 
 
 def _project_public_tools() -> dict:
-    bootstrap = _protocol._PUBLIC_CONTRACT["bootstrap"]
-    recovery = _protocol._PUBLIC_CONTRACT["reasons"]
-    return {"protocol": _protocol._PROTOCOL,
+    bootstrap = _protocol.public_contract()["bootstrap"]
+    recovery = _protocol.public_contract()["reasons"]
+    return {"protocol": _protocol.protocol_id(),
             "definitions": copy.deepcopy(bootstrap["tools"]),
             "bootstrap_actions": copy.deepcopy(bootstrap["actions"]),
             "evidence_actions": sorted(
-                kind for kind, metadata in _protocol._PUBLIC_CONTRACT["actions"]["metadata"].items()
+                kind for kind, metadata in _protocol.public_contract()["actions"]["metadata"].items()
                 if metadata["evidence"]),
-            "governance_decisions": copy.deepcopy(_protocol._PUBLIC_CONTRACT["governance_decisions"]),
+            "governance_decisions": copy.deepcopy(_protocol.public_contract()["governance_decisions"]),
             "host_profiles": {profile_id: {
                 "delegation_env": _protocol.host_profile(profile_id)["delegation_env"],
             } for profile_id in _protocol.profile_ids()},
@@ -191,7 +191,7 @@ class PublicTools:
     def definitions(self) -> list[dict[str, object]]:
         metadata = self._artifact["definitions"]
         definitions = []
-        for name in _TOOL_ORDER:
+        for name in TOOL_NAMES:
             read_only = name == READ_TOOL
             definitions.append({
                 "name": name,
@@ -232,7 +232,7 @@ class PublicTools:
             return self._error(read_error)
         command = self._command(name, arguments)
         request = {
-            "protocol": _protocol._PROTOCOL,
+            "protocol": _protocol.protocol_id(),
             "request_id": str(uuid.uuid4()),
             "command": command,
         }

@@ -79,13 +79,9 @@ REASONS: dict[str, dict] = _PUBLIC_CONTRACT["reasons"]
 NEXT_ACTIONS: dict[str, dict] = _PUBLIC_CONTRACT["next_actions"]
 SECTIONS: dict[str, dict] = _PUBLIC_CONTRACT["sections"]
 STATUSES: list[str] = _PUBLIC_CONTRACT["statuses"]
-DECISIONS: list[str] = _PUBLIC_CONTRACT["decisions"]
 CHILD_STATES: list[str] = _PUBLIC_CONTRACT["child_lifecycle"]["states"]
 CHILD_TERMINAL: list[str] = _PUBLIC_CONTRACT["child_lifecycle"]["terminal_states"]
-CHILD_TRANSITIONS: list = _PUBLIC_CONTRACT["child_lifecycle"]["transitions"]
 HOST_TIERS: list[str] = _PUBLIC_CONTRACT["host_tiers"]
-AUTHOR_ACTIONS: list[str] = _PUBLIC_CONTRACT["actions"]["author"]
-TRUSTED_ACTIONS: list[str] = _PUBLIC_CONTRACT["actions"]["trusted"]
 
 _PROFILES = {p["profile_id"]: p for p in _HOST_PROFILES["profiles"]}
 PROFILE_IDS = sorted(_PROFILES)
@@ -103,9 +99,6 @@ UNTRUSTED_OPEN = _PUBLIC_CONTRACT["untrusted_delimiters"]["open"]
 UNTRUSTED_CLOSE = _PUBLIC_CONTRACT["untrusted_delimiters"]["close"]
 # D2C canonical artifact vocabularies, DERIVED from the registry (never copied as constants).
 CLAIM_KINDS: list[str] = _PUBLIC_CONTRACT["claim_kinds"]
-ARTIFACT_KINDS: list[str] = _PUBLIC_CONTRACT["artifact_kinds"]
-ARTIFACT_OUTCOMES: list[str] = _PUBLIC_CONTRACT["artifact_outcomes"]
-SPIKE_GATES: list[str] = _PUBLIC_CONTRACT["spike_gates"]
 # D2E canonical presentation-selector registry, DERIVED from the PublicContract (the SSOT).
 # Tests compare real selector output directly to these loaded arrays; no context/reason
 # mapping or fallback table is copied into a test file. Every context_sections key equals a
@@ -191,10 +184,6 @@ def reason(code: str) -> dict:
     return REASONS[code]
 
 
-def next_action(action_id: str) -> dict:
-    return NEXT_ACTIONS[action_id]
-
-
 def section(section_id: str) -> dict:
     return SECTIONS[section_id]
 
@@ -247,13 +236,6 @@ def start_run(*, goal: str, project: str = "demo", session: str = "s1",
     if budgets is not None:
         cmd["budgets"] = budgets
     return _envelope(request_id or _rid("start"), cmd)
-
-
-def resolve_run(*, project: str = "demo", session: str = "s1",
-                request_id: str | None = None) -> dict:
-    return _envelope(request_id or _rid("resolve"),
-                     {"type": "ResolveRun",
-                      "selector": {"project": project, "session": session}})
 
 
 def observe_action(*, run_id: str, action: dict, observed_at: str | None = None,
@@ -369,13 +351,6 @@ def action_attribution(*, payload: dict | None = None,
     return a
 
 
-def action_child_event(*, child_id: str, payload: dict,
-                        boundary: str = "host") -> dict:
-    return {"kind": "child_event", "child_id": child_id,
-            "trusted": {"capability_ref": "<redacted>", "boundary": boundary},
-            "payload": payload}
-
-
 def action_audit_verdict(*, child_id: str, payload: dict,
                          boundary: str = "host") -> dict:
     return {"kind": "audit_verdict", "child_id": child_id,
@@ -427,11 +402,6 @@ def canonical_graph(*, n_claims: int = 1, kind: str | None = None) -> dict:
     if n_claims > 1:
         edges.append({"from": _CANONICAL_ROOT, "to": "C1", "type": "SupportedBy"})
     return {"root": _CANONICAL_ROOT, "claims": claims, "edges": edges}
-
-
-def canonical_claim_id(*, index: int = 0) -> str:
-    """Return the canonical claim ID at the given index (stable prefix)."""
-    return _CANONICAL_CLAIMS[index]["id"]
 
 
 # ---------------------------------------------------------------------------
@@ -1490,16 +1460,6 @@ class ConformanceCase(unittest.TestCase):
         return out
 
     # ---- typed-view assertions (D2A §3, §4) --------------------------------
-
-    def assert_freshness_has_path(self, run: dict, path: str, *, state: str | None = None) -> None:
-        """Assert the run's freshness.changes observes ``path`` (per-path workspace observation)."""
-        changes = run.get("freshness", {}).get("changes", [])
-        match = [c for c in changes if c.get("path") == path]
-        if not match:
-            raise self.failureException(f"freshness.changes must observe bound path {path!r}; got {changes}")
-        if state is not None:
-            self.assertEqual(match[0].get("state"), state,
-                             f"freshness change for {path!r} must report state {state!r}")
 
     def assert_evidence_digest(self, claim: dict) -> None:
         """Assert claim ``evidence_digest`` equals the canonical registry digest of its exact

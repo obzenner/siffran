@@ -1,14 +1,22 @@
 ---
 number: 43
-title: "Vendor runtime contracts inside the Empirica plugin"
+title: Vendor runtime contracts inside the Empirica plugin
 status: accepted
 date: 2026-09-20
-tags: [empirica, packaging, contracts, claude, codex, pi]
+tags:
+- empirica
+- packaging
+- contracts
+- claude
+- codex
+- pi
 links:
-  - target: 30
-    kind: Amends
-  - target: 42
-    kind: Amends
+- target: 30
+  kind: Amends
+- target: 42
+  kind: Amends
+- target: 44
+  kind: Depends on
 ---
 
 # Vendor runtime contracts inside the Empirica plugin

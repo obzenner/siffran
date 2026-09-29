@@ -1,20 +1,22 @@
 ---
 number: 35
-title: "Surface the P1 routing violation at run time, not only at the audit"
-status: accepted
+title: Surface the P1 routing violation at run time, not only at the audit
+status: superseded
 date: 2026-09-08
 tags:
-  - workflow
-  - harness
-  - usability
-  - enforcement
+- workflow
+- harness
+- usability
+- enforcement
 links:
-  - target: 20
-    kind: Refines
-  - target: 24
-    kind: relatesto
-  - target: 33
-    kind: relatesto
+- target: 20
+  kind: Refines
+- target: 24
+  kind: Relates to
+- target: 33
+  kind: Relates to
+- target: 48
+  kind: Superseded by
 ---
 
 # Surface the P1 routing violation at run time, not only at the audit

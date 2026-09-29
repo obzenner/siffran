@@ -60,7 +60,6 @@ class ConformanceDriver(Protocol):
     def compact(self) -> dict: ...
     def artifacts(self) -> tuple[dict, ...]: ...
     def operational_state(self) -> dict: ...
-    def workspace_observe_calls(self) -> int: ...
     # D4-S2 policy-free telemetry seams: observation history (path batches/results) and harness
     # invocation attestations. Trusted lifecycle events use the real private composition ingress
     # (trusted_child_event/trusted_evidence_leaf/trusted_audit_verdict); fake telemetry alone is
@@ -88,13 +87,6 @@ class FakeClock:
 
     def __init__(self, start: float = 0.0) -> None:
         self._t = float(start)
-
-    def now(self) -> float:
-        self._t += 1.0
-        return self._t
-
-    def advance(self, seconds: float) -> None:
-        self._t += float(seconds)
 
     def read(self) -> float:
         return self._t

@@ -49,7 +49,7 @@ from adapters.invocation import split_leading_flags  # noqa: E402
 from adapters.claude.restore import restore_context  # noqa: E402
 from adapters.claude.selector import SelectorError  # noqa: E402
 from adapters.claude.spawn import spawn_decision  # noqa: E402
-from adapters.claude.transport import BridgeTransport  # noqa: E402
+from adapters.claude.transport import BridgeTransport, Response  # noqa: E402
 
 _REQUEST_SCHEMA = json.loads(
     (PLUGIN_ROOT.parent.parent / "contracts" / "empirica" / "v2" / "request.schema.json").read_text(
@@ -67,6 +67,26 @@ def _payload(**extra: object) -> dict:
     return base
 
 
+_FIXTURES = PLUGIN_ROOT.parent.parent / "contracts" / "empirica" / "v2" / "fixtures"
+
+
+def _valid_active_allow() -> dict:
+    return json.loads((_FIXTURES / "start-bootstrap-allow.json").read_text())["expected"]["result"]
+
+
+def _typed(result: dict, request_id: str = "typed-test") -> Response:
+    request = {"request_id": request_id}
+    return Response.from_envelope(request, {
+        "protocol": PROTOCOL, "request_id": request_id, "result": result})
+
+
+def _active_result(*, children: list[dict] | None = None) -> dict:
+    result = json.loads(json.dumps(_valid_active_allow()))
+    if children is not None:
+        result["run"]["children"] = children
+    return result
+
+
 class ExactV2ProfileTests(unittest.TestCase):
     """The transport reaches the shared bridge with the fixed exact Claude profile and no cwd."""
 
@@ -80,7 +100,7 @@ class ExactV2ProfileTests(unittest.TestCase):
             captured["request"] = request
             captured["profile_id"] = profile_id
             return {"protocol": PROTOCOL, "request_id": request["request_id"],
-                    "result": {"type": "Inert", "reason": "recorded"}}
+                    "result": {"type": "Inert", "reason": "no_run"}}
 
         with patch.object(bridge, "handle", side_effect=fake_handle):
             resp = BridgeTransport().dispatch(
@@ -252,23 +272,20 @@ class RestoreAndGetArgumentTests(unittest.TestCase):
 class RouteAndInvestigateTests(unittest.TestCase):
     def test_investigation_hook_fails_closed_for_active_run(self) -> None:
         payload = _payload(tool_name="Read", tool_input={"file_path": "package.json"})
-        block = {"protocol": PROTOCOL, "request_id": "r", "result": {
-            "type": "Block", "run": {"id": "run", "status": "active"},
-            "reasons": [{"code": "route.required", "parameters": {},
-                         "next_actions": ["route.record"], "sections": ["route"]}]}}
-        allow = {"protocol": PROTOCOL, "request_id": "r", "result": {
-            "type": "Allow", "converged": False,
-            "run": {"id": "run", "status": "active"}}}
+        block = _typed(json.loads(
+            (_FIXTURES / "block-open-claim.json").read_text())["expected"]["result"])
+        allow = _typed(_valid_active_allow())
+        resolved = allow.result
         with patch.object(lifecycle, "_payload", return_value=payload), \
-             patch.object(lifecycle, "_resolve", return_value=("run", {})), \
+             patch.object(lifecycle, "_resolve", return_value=("run", resolved)), \
              patch.object(lifecycle, "dispatch_investigation", return_value=block):
             self.assertEqual(lifecycle.route_main(), 2)
         with patch.object(lifecycle, "_payload", return_value=payload), \
-             patch.object(lifecycle, "_resolve", return_value=("run", {})), \
+             patch.object(lifecycle, "_resolve", return_value=("run", resolved)), \
              patch.object(lifecycle, "dispatch_investigation", return_value=allow):
             self.assertEqual(lifecycle.route_main(), 0)
         with patch.object(lifecycle, "_payload", return_value=payload), \
-             patch.object(lifecycle, "_resolve", return_value=("run", {})), \
+             patch.object(lifecycle, "_resolve", return_value=("run", resolved)), \
              patch.object(lifecycle, "dispatch_investigation", side_effect=RuntimeError("down")):
             self.assertEqual(lifecycle.route_main(), 2)
 
@@ -283,14 +300,12 @@ class RouteAndInvestigateTests(unittest.TestCase):
         read = _payload(tool_name="Read", tool_input={"file_path": "package.json"})
         agent = _payload(tool_name="Agent", tool_input={
             "subagent_type": "worker", "prompt": "investigate"})
-        for failure in (
-            RuntimeError("transport down"),
-            {"protocol": PROTOCOL, "request_id": "claude-resolve", "result": {
-                "type": "Fault", "code": "internal", "message": "unavailable",
-                "fail_direction": "closed"}},
-            {"protocol": PROTOCOL, "request_id": "claude-resolve", "result": {
-                "type": "Allow", "converged": False}},
-        ):
+        failures = [RuntimeError("transport down"), _typed({
+            "type": "Fault", "code": "unavailable", "message": "unavailable",
+            "fail_direction": "closed"})]
+        with self.assertRaises(ValueError):
+            _typed({"type": "Allow", "converged": False})
+        for failure in failures:
             effect = failure if isinstance(failure, Exception) else None
             value = None if effect is not None else failure
             with self.subTest(failure=failure), \
@@ -305,11 +320,10 @@ class RouteAndInvestigateTests(unittest.TestCase):
                 self.assertEqual(lifecycle.spawn_main(), 2)
 
     def test_strict_resolution_distinguishes_exact_no_run_from_unavailability(self) -> None:
-        response = {"protocol": PROTOCOL, "request_id": "claude-resolve",
-                    "result": {"type": "Inert", "reason": "no_run"}}
+        response = _typed({"type": "Inert", "reason": "no_run"}, "claude-resolve")
         with patch.object(lifecycle, "dispatch_resolve", return_value=response):
             self.assertEqual(lifecycle._resolve(_payload(), strict=True),
-                             (None, response["result"]))
+                             (None, response.result))
 
     def test_investigation_is_exact_v2_and_marker_text_cannot_bypass_it(self) -> None:
         request = build_investigation_request(
@@ -398,14 +412,17 @@ class ResponseMappingTests(unittest.TestCase):
 
     def test_human_governance_wait_settles_turn_without_convergence(self) -> None:
         def result(state="pending", code="governance.approval_required"):
-            return {"type": "Block", "run": {"status": "active", "governance": {
-                "state": state, "control_mode": "deliberative",
-                "context": {"ingress": "mcp_elicitation"}}},
-                "reasons": [{"code": code, "message": "approval required"}]}
+            run = json.loads(json.dumps(_valid_active_allow()["run"]))
+            run["governance"].update({
+                "state": state, "control_mode": "deliberative"})
+            run["governance"]["context"]["ingress"] = "mcp_elicitation"
+            return {"type": "Block", "run": run, "reasons": [{
+                "code": code, "parameters": {}, "next_actions": [],
+                "sections": ["governance"], "message": "approval required"}]}
         for state, code in (("pending", "governance.approval_required"),
                             ("revision_pending", "governance.revision_required"),
                             ("rejected", "governance.approval_required")):
-            mapped = stop_result({"result": result(state, code)})
+            mapped = stop_result(_typed(result(state, code)))
             self.assertEqual(mapped.exit_code, 0)
             notice = json.loads(mapped.stdout)
             self.assertIn("not converged", notice["systemMessage"])
@@ -413,39 +430,39 @@ class ResponseMappingTests(unittest.TestCase):
             self.assertNotIn("decision", notice)
         with patch("adapters.author_view.render_author_view",
                    side_effect=AssertionError("systemMessage must bypass author renderer")):
-            notice = json.loads(stop_result({"result": result()}).stdout)
+            notice = json.loads(stop_result(_typed(result())).stdout)
             self.assertIn("systemMessage", notice)
-        for changed in ("auto", "approved", "missing_context", "mixed", "fault", "terminal", "mismatched_reason"):
+        for changed in ("auto", "approved", "missing_context", "mixed", "terminal", "mismatched_reason"):
             blocked = result()
             if changed == "auto":
                 blocked["run"]["governance"]["control_mode"] = "auto"
             elif changed == "approved":
                 blocked["run"]["governance"]["state"] = "approved"
             elif changed == "missing_context":
-                blocked["run"]["governance"]["context"] = {}
+                blocked["run"]["governance"]["context"]["ingress"] = "unavailable"
             elif changed == "mixed":
-                blocked["reasons"].append({"code": "run.corrupt"})
-            elif changed == "fault":
-                blocked["type"] = "Fault"
+                blocked["reasons"].append({"code": "run.corrupt", "parameters": {},
+                                           "next_actions": [], "sections": [],
+                                           "message": "corrupt"})
             elif changed == "terminal":
                 blocked["run"]["status"] = "converged"
             elif changed == "mismatched_reason":
                 blocked["reasons"][0]["code"] = "governance.revision_required"
             with self.subTest(changed=changed):
-                self.assertEqual(stop_result({"result": blocked}).exit_code, 2)
+                self.assertEqual(stop_result(_typed(blocked)).exit_code, 2)
 
     def test_stop_result_inert_allow_block_and_faults(self) -> None:
-        self.assertEqual(stop_result({"result": {"type": "Inert", "reason": "no_run"}}).exit_code, 0)
+        self.assertEqual(stop_result(_typed({"type": "Inert", "reason": "no_run"})).exit_code, 0)
         fixture_root = PLUGIN_ROOT.parents[1] / "contracts" / "empirica" / "v2" / "fixtures"
         allow_result = json.loads(
             (fixture_root / "allow-converged.json").read_text())["expected"]["result"]
-        allow = stop_result({"result": allow_result})
+        allow = stop_result(_typed(allow_result))
         self.assertEqual(allow.exit_code, 0)
         self.assertIn("Allow (converged=true)", allow.stdout)
         self.assertIn("run_id: run-fx", allow.stdout)
         pending_result = json.loads(
             (fixture_root / "block-pending-audit.json").read_text())["expected"]["result"]
-        pending = stop_result({"result": pending_result})
+        pending = stop_result(_typed(pending_result))
         self.assertEqual(pending.exit_code, 0)
         self.assertIn("audit.pending", pending.stdout)
         self.assertEqual(pending.stderr, "")
@@ -456,56 +473,58 @@ class ResponseMappingTests(unittest.TestCase):
             {**pending_result, "reasons": [*pending_result["reasons"],
                                            {"code": "graph.missing", "message": "missing"}]},
         ):
-            with self.subTest(malformed=malformed):
-                self.assertEqual(stop_result({"result": malformed}).exit_code, 2)
-        block = stop_result({"result": {"type": "Block", "reasons": [
-            {"code": "graph.missing", "message": "not converged"},
-            {"code": "route.required", "message": "route first"},
-        ]}})
+            with self.subTest(malformed=malformed), self.assertRaises(ValueError):
+                _typed(malformed)
+        block_result = json.loads(
+            (fixture_root / "block-open-claim.json").read_text())["expected"]["result"]
+        block_result["reasons"].append({
+            "code": "route.required", "parameters": {}, "next_actions": [],
+            "sections": [], "message": "route first"})
+        block_result["reasons"][0]["message"] = "not converged"
+        block = stop_result(_typed(block_result))
         self.assertEqual((block.exit_code, block.stdout), (2, ""))
         self.assertEqual(block.stderr, "not converged\nroute first\n")
-        closed = stop_result({"result": {"type": "Fault", "code": "unsupported",
-                                         "fail_direction": "closed", "message": "no eval"}})
+        closed = stop_result(_typed({"type": "Fault", "code": "unsupported",
+                                     "fail_direction": "closed", "message": "no eval"}))
         self.assertEqual((closed.exit_code, closed.stdout), (2, ""))
-        open_fault = stop_result({"result": {"type": "Fault", "code": "unavailable",
-                                             "fail_direction": "open", "message": "bridge"}})
+        open_fault = stop_result(_typed({"type": "Fault", "code": "unavailable",
+                                         "fail_direction": "open", "message": "bridge"}))
         self.assertEqual((open_fault.exit_code, open_fault.stderr), (0, "bridge\n"))
         self.assertEqual(stop_result({"not": "a response"}).exit_code, 2)
 
     def test_restore_context_renders_bounded_v2_runview(self) -> None:
         fixture = json.loads((PLUGIN_ROOT.parent.parent / "contracts" / "empirica" / "v2" /
                               "fixtures" / "restore-active.json").read_text(encoding="utf-8"))
-        context = restore_context(fixture["expected"])
+        context = restore_context(_typed(fixture["expected"]["result"]))
         self.assertIn("BEGIN UNTRUSTED EMPIRICA RUN DATA", context)
         body = context.split("-----\n", 1)[1].split("\n----- END", 1)[0]
         run = fixture["expected"]["result"]["run"]
         self.assertIn(f"run_id: {run['id']}", body)
         self.assertIn(run["status"], body)
-        terminal = json.loads(json.dumps(fixture["expected"]))
-        terminal["result"]["run"]["status"] = "converged"
-        self.assertEqual(restore_context(terminal), "")
+        terminal = json.loads((_FIXTURES / "allow-converged.json").read_text())["expected"]
+        self.assertEqual(restore_context(_typed(terminal["result"])), "")
 
     def test_spawn_decision_block_closed_fault_and_malformed(self) -> None:
-        self.assertEqual(spawn_decision(
-            {"result": {"type": "Block", "reason": "cap exhausted"}}).exit_code, 2)
-        self.assertEqual(spawn_decision(
-            {"result": {"type": "Fault", "code": "unsupported",
-                        "fail_direction": "closed", "message": "no cap"}}).exit_code, 2)
-        self.assertEqual(spawn_decision(
-            {"result": {"type": "Allow", "run": {"status": "converged"}}}).exit_code, 0)
-        self.assertEqual(spawn_decision(
-            {"result": {"type": "Fault", "fail_direction": "open"}}).exit_code, 0)
-        self.assertEqual(spawn_decision(
-            {"result": {"type": "Inert", "reason": "no_run"}}).exit_code, 2)
-        self.assertEqual(spawn_decision(
-            {"result": {"type": "Surprise"}}).exit_code, 2)
+        block = json.loads((_FIXTURES / "block-open-claim.json").read_text())["expected"]["result"]
+        self.assertEqual(spawn_decision(_typed(block)).exit_code, 2)
+        self.assertEqual(spawn_decision(_typed(
+            {"type": "Fault", "code": "unsupported",
+             "fail_direction": "closed", "message": "no cap"})).exit_code, 2)
+        self.assertEqual(spawn_decision(_typed(_valid_active_allow())).exit_code, 0)
+        self.assertEqual(spawn_decision(_typed(
+            {"type": "Fault", "code": "unavailable", "fail_direction": "open"})).exit_code, 0)
+        self.assertEqual(spawn_decision(_typed(
+            {"type": "Inert", "reason": "no_run"})).exit_code, 2)
+        with self.assertRaises(ValueError):
+            _typed({"type": "Surprise"})
         # malformed/non-object/mismatched deny the native launch
         self.assertEqual(spawn_decision({"not": "a response"}).exit_code, 2)
         self.assertEqual(spawn_decision({"result": "not-a-dict"}).exit_code, 2)
         self.assertEqual(spawn_decision([]).exit_code, 2)
 
     def test_fail_direction_explicit_wins_and_malformed_uses_fallback(self) -> None:
-        fault = {"result": {"type": "Fault", "fail_direction": "closed"}}
+        fault = _typed({"type": "Fault", "code": "unavailable",
+                        "fail_direction": "closed"})
         self.assertEqual(failure_direction(fault, fallback=FailureDirection.OPEN),
                          FailureDirection.CLOSED)
         self.assertTrue(blocks_on_failure(fault, fallback=FailureDirection.OPEN))
@@ -586,12 +605,15 @@ class SpawnLifecycleTests(unittest.TestCase):
         def fake_handle(request, profile_id=None):
             cmd = request["command"]
             if cmd.get("type") == "ResolveRun":
-                return {"protocol": PROTOCOL, "request_id": request["request_id"],
-                        "result": {"type": "Allow", "run": {"id": "active-run"}}}
-            if raises:
+                result = _valid_active_allow()
+            elif child_result and child_result.get("type") == "Allow":
+                result = _valid_active_allow()
+            else:
+                result = child_result
+            if raises and cmd.get("type") != "ResolveRun":
                 raise RuntimeError("bridge exploded")
             return {"protocol": PROTOCOL, "request_id": request["request_id"],
-                    "result": child_result}
+                    "result": result}
         return patch.object(bridge, "handle", side_effect=fake_handle)
 
     def test_auditor_reservation_replaces_author_prompt_and_defers_lifecycle(self) -> None:
@@ -603,9 +625,7 @@ class SpawnLifecycleTests(unittest.TestCase):
         payload = self._stdin({"subagent_type": "empirica:empirica-auditor",
                                "prompt": "author-controlled prompt"})
         out = StringIO()
-        investigation = {"protocol": PROTOCOL, "request_id": "investigate", "result": {
-            "type": "Allow", "converged": False,
-            "run": {"id": "active-run", "status": "active"}}}
+        investigation = _typed(_active_result(), "investigate")
         with patch("adapters.claude.lifecycle._resolve", return_value=("active-run", {})), \
              patch("adapters.claude.lifecycle.dispatch_investigation",
                    return_value=investigation), \
@@ -628,7 +648,7 @@ class SpawnLifecycleTests(unittest.TestCase):
         from adapters.audit_protocol import AuditProtocolError
         from adapters.claude.lifecycle import spawn_main
         payload = self._stdin({"subagent_type": "empirica:empirica-auditor", "prompt": "audit"})
-        investigation = {"result": {"type": "Allow", "run": {"id": "active-run"}}}
+        investigation = _typed(_active_result(), "investigate")
         with patch("adapters.claude.lifecycle._resolve", return_value=("active-run", {})), \
              patch("adapters.claude.lifecycle.dispatch_investigation", return_value=investigation), \
              patch("adapters.claude.lifecycle._governance_context"), \
@@ -645,7 +665,7 @@ class SpawnLifecycleTests(unittest.TestCase):
         plan = AuditLaunchPlan("claude-code@2.1.278", "active-run", "ch-audit",
                                "empirica:empirica-auditor", {"claims": []})
         payload = self._stdin({"subagent_type": "empirica:empirica-auditor", "prompt": "audit"})
-        investigation = {"result": {"type": "Allow", "run": {"id": "active-run"}}}
+        investigation = _typed(_active_result(), "investigate")
         with patch("adapters.claude.lifecycle._resolve", return_value=("active-run", {})), \
              patch("adapters.claude.lifecycle.dispatch_investigation", return_value=investigation), \
              patch("adapters.claude.lifecycle._governance_context"), \
@@ -664,7 +684,7 @@ class SpawnLifecycleTests(unittest.TestCase):
         plan = AuditLaunchPlan("claude-code@2.1.278", "active-run", "ch-audit",
                                "empirica:empirica-auditor", {"claims": []})
         payload = self._stdin({"subagent_type": "empirica:empirica-auditor", "prompt": "audit"})
-        investigation = {"result": {"type": "Allow", "run": {"id": "active-run"}}}
+        investigation = _typed(_active_result(), "investigate")
         with patch("adapters.claude.lifecycle._resolve", return_value=("active-run", {})), \
              patch("adapters.claude.lifecycle.dispatch_investigation", return_value=investigation), \
              patch("adapters.claude.lifecycle._governance_context"), \
@@ -678,7 +698,7 @@ class SpawnLifecycleTests(unittest.TestCase):
         reject.assert_called_once_with(plan)
 
     def test_durable_plan_rejects_missing_operation_or_wrong_role(self) -> None:
-        from adapters.claude.lifecycle import _durable_plan
+        from adapters.claude.lifecycle import _parse_durable_plan
         for operation in (
             {"role_profile": "empirica:empirica-auditor", "argument": {}},
             {"operation_id": "sha256:" + "2" * 64, "role_profile": "other", "argument": {}},
@@ -687,17 +707,17 @@ class SpawnLifecycleTests(unittest.TestCase):
                 "adapters.claude.lifecycle.application_bridge.trusted_audit_plan",
                 return_value=operation,
             ):
-                self.assertIsNone(_durable_plan("run", "child"))
+                self.assertIsNone(_parse_durable_plan("run", "child"))
 
     def test_subagent_stop_delivers_handback_verdict_before_trailing_prose(self) -> None:
         from adapters.claude.lifecycle import subagent_stop_main
         verdict = {"verdict": "pass", "findings": ["ok"]}
         text = "```empirica-verdict\n" + json.dumps(verdict) + "\n```"
-        resolved = ("active-run", {"run": {"children": [
+        resolved = ("active-run", _typed(_active_result(children=[
             {"child_id": "ordinary", "purpose": "audit",
              "resource_class": "investigation", "state": "pending"},
             {"child_id": "ch-audit", "purpose": "audit",
-             "resource_class": "audit", "state": "pending"}]}})
+             "resource_class": "audit", "state": "pending"}])).result)
         argument = {"argument_digest": "sha256:" + "1" * 64, "claims": []}
         with TemporaryDirectory() as directory:
             transcript = Path(directory) / "child.jsonl"
@@ -724,26 +744,26 @@ class SpawnLifecycleTests(unittest.TestCase):
         self.assertEqual(deliver.call_args.args[2], verdict)
 
     def test_handback_extraction_preserves_legacy_and_rejects_ambiguity(self) -> None:
-        from adapters.claude.lifecycle import _transcript_handbacks
+        from adapters.claude.lifecycle import _parse_transcript_handbacks
         with TemporaryDirectory() as directory:
             transcript = Path(directory) / "child.jsonl"
             transcript.write_text(json.dumps({"message": {"role": "assistant", "content": [
                 {"type": "text", "text": "legacy final output"}]}}) + "\n")
-            self.assertEqual(_transcript_handbacks(str(transcript)), (True, []))
+            self.assertEqual(_parse_transcript_handbacks(str(transcript)), (True, []))
             transcript.write_text("\n".join(json.dumps({"message": {
                 "role": "assistant", "content": [{"type": "tool_use",
                     "name": "SubagentHandback", "input": {"message": value}}]}})
                 for value in ("first", "second")) + "\n")
-            self.assertEqual(_transcript_handbacks(str(transcript)),
+            self.assertEqual(_parse_transcript_handbacks(str(transcript)),
                              (True, ["first", "second"]))
             transcript.write_text(transcript.read_text() + "{")
-            self.assertEqual(_transcript_handbacks(str(transcript)), (False, []))
+            self.assertEqual(_parse_transcript_handbacks(str(transcript)), (False, []))
 
     def test_subagent_stop_does_not_fallback_past_an_unreadable_handback_transcript(self) -> None:
         from adapters.claude.lifecycle import subagent_stop_main
         valid = "```empirica-verdict\n" + json.dumps({"verdict": "pass"}) + "\n```"
-        resolved = ("active-run", {"run": {"children": [{
-            "child_id": "ch-audit", "resource_class": "audit", "state": "pending"}]}})
+        resolved = ("active-run", _typed(_active_result(children=[{
+            "child_id": "ch-audit", "purpose": "audit", "resource_class": "audit", "state": "pending"}])).result)
         with TemporaryDirectory() as directory:
             transcript = Path(directory) / "child.jsonl"
             transcript.write_text(json.dumps({"message": {"role": "assistant",
@@ -773,8 +793,8 @@ class SpawnLifecycleTests(unittest.TestCase):
         from adapters.claude.lifecycle import subagent_stop_main
         verdict = {"verdict": "fail", "findings": ["dossier gap"]}
         fence = "```empirica-verdict\n" + json.dumps(verdict) + "\n```"
-        resolved = ("active-run", {"run": {"children": [{
-            "child_id": "ch-audit", "resource_class": "audit", "state": "pending"}]}})
+        resolved = ("active-run", _typed(_active_result(children=[{
+            "child_id": "ch-audit", "purpose": "audit", "resource_class": "audit", "state": "pending"}])).result)
         argument = {"argument_digest": "sha256:" + "1" * 64, "claims": []}
         with TemporaryDirectory() as directory:
             transcript = Path(directory) / "child.jsonl"
@@ -808,8 +828,8 @@ class SpawnLifecycleTests(unittest.TestCase):
         verdict_b = {"verdict": "fail", "findings": ["nope"]}
         fence_a = "```empirica-verdict\n" + json.dumps(verdict_a) + "\n```"
         fence_b = "```empirica-verdict\n" + json.dumps(verdict_b) + "\n```"
-        resolved = ("active-run", {"run": {"children": [{
-            "child_id": "ch-audit", "resource_class": "audit", "state": "pending"}]}})
+        resolved = ("active-run", _typed(_active_result(children=[{
+            "child_id": "ch-audit", "purpose": "audit", "resource_class": "audit", "state": "pending"}])).result)
         with TemporaryDirectory() as directory:
             transcript = Path(directory) / "child.jsonl"
             transcript.write_text(json.dumps({"message": {"role": "assistant",
@@ -836,8 +856,8 @@ class SpawnLifecycleTests(unittest.TestCase):
     def test_subagent_stop_fails_closed_when_handback_prose_and_no_fence_anywhere(self) -> None:
         """Negative control: handback has prose, no fence in transcript or handback."""
         from adapters.claude.lifecycle import subagent_stop_main
-        resolved = ("active-run", {"run": {"children": [{
-            "child_id": "ch-audit", "resource_class": "audit", "state": "pending"}]}})
+        resolved = ("active-run", _typed(_active_result(children=[{
+            "child_id": "ch-audit", "purpose": "audit", "resource_class": "audit", "state": "pending"}])).result)
         with TemporaryDirectory() as directory:
             transcript = Path(directory) / "child.jsonl"
             transcript.write_text(json.dumps({"message": {"role": "assistant",
@@ -911,7 +931,7 @@ class TranscriptIdentityTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "child.jsonl"
             path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
-            models, final = lifecycle._transcript_contents(str(path))
+            models, final = lifecycle._parse_transcript_contents(str(path))
             return (models[0] if len(models) == 1 else None), final
 
     def test_single_served_model_ignores_synthetic_rows(self):
@@ -937,7 +957,7 @@ class TranscriptIdentityTests(unittest.TestCase):
             path = Path(tmp) / "child.jsonl"
             path.write_text(json.dumps({"message": {"role": "assistant", "model": "model-a"}})
                             + "\n{broken\n")
-            self.assertEqual(lifecycle._transcript_contents(str(path)), ([], None))
+            self.assertEqual(lifecycle._parse_transcript_contents(str(path)), ([], None))
 
     def test_subagent_cannot_admit_main_author_evidence(self):
         payload = StringIO(json.dumps({

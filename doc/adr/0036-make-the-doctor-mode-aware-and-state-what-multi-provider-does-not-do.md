@@ -1,18 +1,20 @@
 ---
 number: 36
-title: "Make the doctor mode-aware, and state what multi_provider does not do"
+title: Make the doctor mode-aware, and state what multi_provider does not do
 status: superseded
 date: 2026-09-08
 tags:
-  - workflow
-  - harness
-  - usability
-  - configuration
+- workflow
+- harness
+- usability
+- configuration
 links:
-  - target: 24
-    kind: Refines
-  - target: 28
-    kind: relatesto
+- target: 24
+  kind: Refines
+- target: 28
+  kind: Relates to
+- target: 61
+  kind: Superseded by
 ---
 
 # Make the doctor mode-aware, and state what multi_provider does not do

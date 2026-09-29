@@ -9,7 +9,7 @@ from .correlation import PROTOCOL, request_id as new_request_id
 from .fail_direction import FailureDirection, blocks_on_failure
 from .route import observed_at
 from .selector import context_from_payload
-from .transport import BridgeTransport, Transport
+from .transport import Response, Result, Transport, dispatch_with
 
 REPORT_CONVERGENCE = "report_convergence"
 
@@ -52,46 +52,44 @@ def build_stop_request(
 def dispatch_stop(
     payload: Mapping[str, object], run_id: str, *, transport: Transport | None = None,
     correlation_id: str | None = None,
-) -> dict:
+) -> Response:
     request = build_stop_request(payload, run_id, correlation_id=correlation_id)
-    return (transport if transport is not None else BridgeTransport()).dispatch(request)
+    return dispatch_with(transport, request)
 
 
-def _hook_stdout(result: dict) -> str:
+def _hook_stdout(result: Result) -> str:
     """Render a Stop result as the author plain-text view (one trailing newline)."""
     from adapters.author_view import render_author_view
-    return render_author_view(result) + "\n"
+    return render_author_view(result.as_dict()) + "\n"
 
 
-def _async_audit_wait(result: Mapping[str, object]) -> bool:
-    reasons, run = result.get("reasons"), result.get("run")
-    children = run.get("children") if isinstance(run, Mapping) else None
-    return (isinstance(reasons, list) and len(reasons) == 1
-        and isinstance(reasons[0], Mapping) and reasons[0].get("code") == "audit.pending"
-        and isinstance(run, Mapping) and run.get("status") == "active"
-        and isinstance(children, list) and sum(isinstance(c, Mapping)
-            and c.get("resource_class") == "audit" and c.get("state") == "pending"
-            and bool(c.get("child_id")) for c in children) == 1)
+def _async_audit_wait(result: Result) -> bool:
+    run = result.run
+    return (len(result.reasons) == 1 and result.reasons[0].code == "audit.pending"
+        and run is not None and run.status == "active"
+        and sum(child.resource_class == "audit" and child.state == "pending"
+                and bool(child.child_id) for child in run.children) == 1)
 
 
-def _human_approval_wait(result: Mapping[str, object]) -> bool:
-    reasons, run = result.get("reasons"), result.get("run")
-    g = run.get("governance") if isinstance(run, Mapping) else None
+def _human_approval_wait(result: Result) -> bool:
+    run = result.run
+    governance = run.governance if run is not None else None
     expected = {"pending": "governance.approval_required", "rejected": "governance.approval_required",
                 "revision_pending": "governance.revision_required"}
-    return (isinstance(g, Mapping) and run.get("status") == "active"
-        and g.get("state") in expected and g.get("control_mode") == "deliberative"
-        and isinstance(g.get("context"), Mapping) and g["context"].get("ingress") == "mcp_elicitation"
-        and isinstance(reasons, list) and len(reasons) == 1 and isinstance(reasons[0], Mapping)
-        and reasons[0].get("code") == expected[g["state"]])
+    state = governance.state if governance is not None else None
+    context = governance.context if governance is not None else None
+    return (run is not None and governance is not None and run.status == "active"
+        and state in expected and governance.control_mode == "deliberative"
+        and context is not None and context.ingress == "mcp_elicitation"
+        and len(result.reasons) == 1 and result.reasons[0].code == expected[state])
 
 
 def stop_result(response: object) -> StopResult:
     """Settle human/async waits nonterminally; never convert their service Block to convergence."""
-    if not isinstance(response, dict) or not isinstance(response.get("result"), dict):
+    if not isinstance(response, Response):
         return StopResult(2, stderr="empirica completion gate returned a malformed response\n")
-    result = response["result"]
-    kind = result.get("type")
+    result = response.result
+    kind = result.type
     if kind == "Inert":
         return StopResult(0)
     if kind == "Allow":
@@ -108,14 +106,11 @@ def stop_result(response: object) -> StopResult:
                 message, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n")
         if _async_audit_wait(result):
             return StopResult(0, stdout=_hook_stdout(result))
-        reasons = result.get("reasons")
-        messages = [row.get("message") or row.get("code") for row in reasons
-                    if isinstance(row, dict)] if isinstance(reasons, list) else []
-        text = "\n".join(value for value in messages if isinstance(value, str) and value)
+        messages = [row.message or row.code for row in result.reasons]
+        text = "\n".join(value for value in messages if value)
         return StopResult(2, stderr=(text or "empirica run is not complete") + "\n")
     if kind == "Fault":
-        message = result.get("message")
-        text = message if isinstance(message, str) and message else "empirica completion gate fault"
+        text = result.message or "empirica completion gate fault"
         if blocks_on_failure(response, fallback=FailureDirection.CLOSED):
             return StopResult(2, stderr=text + "\n")
         return StopResult(0, stderr=text + "\n")

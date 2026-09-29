@@ -1,16 +1,22 @@
 ---
 number: 56
-title: "Align bootstrap admission and agent guidance"
+title: Align bootstrap admission and agent guidance
 status: accepted
 date: 2026-09-24
-tags: [empirica, governance, contracts, bootstrap]
+tags:
+- empirica
+- governance
+- contracts
+- bootstrap
 links:
-  - target: 53
-    kind: Refines
-  - target: 55
-    kind: Refines
-  - target: 60
-    kind: Amended by
+- target: 53
+  kind: Refines
+- target: 55
+  kind: Refines
+- target: 60
+  kind: Amended by
+- target: 57
+  kind: Refines
 ---
 
 # Align bootstrap admission and agent guidance

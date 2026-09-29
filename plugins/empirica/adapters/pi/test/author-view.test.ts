@@ -49,6 +49,54 @@ test("author-view fallback is total for undefined", () => {
   assert.equal(renderAuthorView(undefined), "null");
 });
 
+test("public read-operation enum cannot emit JSON", () => {
+  const toolsPath = path.resolve(import.meta.dirname, "..", "..", "..", "..", "..",
+    "contracts", "empirica", "v2", "public-tools.json");
+  const tools = JSON.parse(readFileSync(toolsPath, "utf8"));
+  const operations: string[] = tools.schemas.host_handle.empirica_read.properties.operation.enum;
+  const samples: Record<string, string> = {
+    GetRun: "start-bootstrap-allow.json",
+    GetArgument: "getargument-active.json",
+    GetContract: "getcontract-index.json",
+    RestoreRun: "governance-approved.json",
+  };
+  assert.deepEqual(new Set(Object.keys(samples)), new Set(operations));
+  for (const operation of operations) {
+    const golden = JSON.parse(readFileSync(path.join(GOLDEN_DIR, samples[operation]), "utf8"));
+    assert.throws(() => JSON.parse(renderAuthorView(golden.result, { strict: true })), operation);
+  }
+  for (const name of ["fault-closed.json", "fault-open.json", "inert.json"]) {
+    const golden = JSON.parse(readFileSync(path.join(GOLDEN_DIR, name), "utf8"));
+    assert.throws(() => JSON.parse(renderAuthorView(golden.result, { strict: true })), name);
+  }
+});
+
+test("argument author text round-trips every graph field", () => {
+  for (const name of ["getargument-active"]) {
+    const result = JSON.parse(readFileSync(path.join(
+      GOLDEN_DIR, `${name}.json`), "utf8")).result;
+    const rendered = renderAuthorView(result, { strict: true });
+    assert.throws(() => JSON.parse(rendered), name);
+    for (const value of [result.argument.goal, result.argument.root_claim_id])
+      assert.ok(rendered.includes(value), `${name}: missing ${value}`);
+    for (const claim of result.argument.claims)
+      for (const value of [claim.claim_id, claim.kind, claim.text, String(claim.gating)])
+        assert.ok(rendered.includes(value), `${name}: missing ${value}`);
+    for (const edge of result.argument.edges)
+      for (const value of [edge.from, edge.type, edge.to])
+        assert.ok(rendered.includes(value), `${name}: missing ${value}`);
+    assert.ok(!rendered.includes("sha256:"), name);
+  }
+});
+
+test("contract results require the full closed schema shape", () => {
+  const result = JSON.parse(readFileSync(path.join(
+    GOLDEN_DIR, "getcontract-index.json"), "utf8")).result;
+  const malformed = structuredClone(result);
+  malformed.contract_result.index.sections[0].title = 42;
+  assert.deepEqual(JSON.parse(renderAuthorView(malformed, { strict: true })), malformed);
+});
+
 // Verify every golden fixture is covered
 test("author-view golden: all files covered", () => {
   assert.ok(files.length >= 15, `expected at least 15 golden fixtures, got ${files.length}`);

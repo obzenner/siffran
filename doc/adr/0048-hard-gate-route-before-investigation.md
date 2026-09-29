@@ -1,16 +1,23 @@
 ---
 number: 48
-title: "Hard-gate route before investigation"
+title: Hard-gate route before investigation
 status: accepted
 date: 2026-09-21
-tags: [empirica, routing, enforcement, claude, pi]
+tags:
+- empirica
+- routing
+- enforcement
+- claude
+- pi
 links:
-  - target: 20
-    kind: Refines
-  - target: 35
-    kind: Supersedes
-  - target: 42
-    kind: Amends
+- target: 20
+  kind: Refines
+- target: 35
+  kind: Supersedes
+- target: 42
+  kind: Amends
+- target: 49
+  kind: Refines
 ---
 
 # Hard-gate route before investigation

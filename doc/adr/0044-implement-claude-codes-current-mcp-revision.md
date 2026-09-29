@@ -1,14 +1,18 @@
 ---
 number: 44
-title: "Implement Claude Code's current MCP revision"
+title: Implement Claude Code's current MCP revision
 status: accepted
 date: 2026-09-20
-tags: [empirica, mcp, claude, codex]
+tags:
+- empirica
+- mcp
+- claude
+- codex
 links:
-  - target: 42
-    kind: Amends
-  - target: 43
-    kind: Depends on
+- target: 42
+  kind: Amends
+- target: 43
+  kind: Depends on
 ---
 
 # Implement Claude Code's current MCP revision

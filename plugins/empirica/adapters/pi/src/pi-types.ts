@@ -1,6 +1,6 @@
 // Pi extension API types — the official surface the adapter registers against.
 // Retained from the Pi extension contract; only the event handlers the adapter
-// actually wires are typed. No removed-feature types (tool_result, agent_settled).
+// actually wires are typed, including the foreground subagent result boundary.
 
 export type NotifyType = "info" | "warning" | "error";
 

@@ -1,14 +1,20 @@
 ---
 number: 52
-title: "Separate harness compatibility from receipt provenance"
+title: Separate harness compatibility from receipt provenance
 status: accepted
 date: 2026-09-23
-tags: [empirica, hosts, compatibility, receipts, pi, audit]
+tags:
+- empirica
+- hosts
+- compatibility
+- receipts
+- pi
+- audit
 links:
-  - target: 42
-    kind: Amends
-  - target: 51
-    kind: Amends
+- target: 42
+  kind: Amends
+- target: 51
+  kind: Amends
 ---
 
 # Separate harness compatibility from receipt provenance

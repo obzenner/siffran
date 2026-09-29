@@ -48,8 +48,6 @@ Rules that follow from this:
 - `plugins/methodologist/adapters/codex/` — stateless MCP translation into the host-neutral bridge
 - `doc/adr/` — architecture decision records (MADR, via the `adrs` CLI)
 
-Plugins can also contain `commands/` alongside these.
-
 ## Conventions
 
 ### Versioning

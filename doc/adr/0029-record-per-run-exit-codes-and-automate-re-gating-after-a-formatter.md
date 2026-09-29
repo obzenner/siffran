@@ -1,20 +1,22 @@
 ---
 number: 29
-title: "Record per-run exit codes and automate re-gating after a formatter"
+title: Record per-run exit codes and automate re-gating after a formatter
 status: accepted
 date: 2026-08-11
 tags:
-  - evidence
-  - verification
-  - usability
-  - harness
+- evidence
+- verification
+- usability
+- harness
 links:
-  - target: 27
-    kind: Amends
-  - target: 13
-    kind: Depends on
-  - target: 21
-    kind: relatesto
+- target: 27
+  kind: Amends
+- target: 13
+  kind: Depends on
+- target: 21
+  kind: Relates to
+- target: 62
+  kind: Amended by
 ---
 
 # Record per-run exit codes and automate re-gating after a formatter

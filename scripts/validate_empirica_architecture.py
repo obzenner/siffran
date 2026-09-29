@@ -41,20 +41,6 @@ RULE_CONTRACT_REF = "ARCH-CONTRACT-REF"
 RULE_MAKE_LIFECYCLE = "ARCH-MAKE-LIFECYCLE"
 RULE_PARSE = "ARCH-PARSE"
 
-ALL_RULES = (
-    RULE_DEP_PY,
-    RULE_DEP_TS,
-    RULE_THIN_HOOK,
-    RULE_FORBIDDEN_PATH,
-    RULE_FORBIDDEN_SYMBOL,
-    RULE_V1_PROTOCOL,
-    RULE_ADAPTER_ADJUDICATOR,
-    RULE_CONTRACT_REF,
-    RULE_MAKE_LIFECYCLE,
-    RULE_PARSE,
-)
-
-
 @dataclass(frozen=True)
 class Diagnostic:
     """A single rule-coded, actionable finding with a stable path:line location."""

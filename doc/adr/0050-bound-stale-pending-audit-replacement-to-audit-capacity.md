@@ -1,14 +1,21 @@
 ---
 number: 50
-title: "Bound stale pending-audit replacement to audit capacity"
+title: Bound stale pending-audit replacement to audit capacity
 status: accepted
 date: 2026-09-21
-tags: [empirica, audit, children, retry, strict-v2]
+tags:
+- empirica
+- audit
+- children
+- retry
+- strict-v2
 links:
-  - target: 49
-    kind: Refines
-  - target: 42
-    kind: Amends
+- target: 49
+  kind: Refines
+- target: 42
+  kind: Amends
+- target: 51
+  kind: Refines
 ---
 
 # Bound stale pending-audit replacement to audit capacity

@@ -1,19 +1,21 @@
 ---
 number: 11
 title: SpikeHarness detects existing infra; new-check design selection is mode-gated
-status: accepted
+status: superseded
 date: 2026-07-17
 tags:
-  - architecture
-  - modes
-  - spike
+- architecture
+- modes
+- spike
 links:
-  - target: 6
-    kind: Refines
-  - target: 10
-    kind: relatesto
-  - target: 13
-    kind: relatesto
+- target: 6
+  kind: Refines
+- target: 10
+  kind: Relates to
+- target: 13
+  kind: Relates to
+- target: 62
+  kind: Superseded by
 ---
 
 # SpikeHarness detects existing infra; new-check design selection is mode-gated

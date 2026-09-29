@@ -112,10 +112,6 @@ def _import_application_v2():
             "compose() factory. " + str(exc)) from exc
 
 
-def _digest64(c: str = "0") -> str:
-    return "sha256:" + c * 64
-
-
 def _valid_request(command: dict, request_id: str = "r") -> dict:
     return {"protocol": _PROTOCOL, "request_id": request_id, "command": command}
 

@@ -88,6 +88,11 @@ class BridgeV2Tests(unittest.TestCase):
             {"code": "run.goal_required"}]}), "run.goal_required")
         self.assertEqual(bridge.start_refusal({"type": "Block", "reasons": [{}]}),
                          "start refused")
+        from adapters.claude.transport import Result
+        typed = Result.from_mapping({"type": "Block", "reasons": [{
+            "code": "run.goal_required", "parameters": {}, "next_actions": [], "sections": [],
+            "message": "remedy"}]})
+        self.assertEqual(bridge.start_refusal(typed), "remedy")
         self.assertIsNone(bridge.start_refusal({"type": "Block", "run": {},
                                                 "reasons": [{"code": "other"}]}))
 

@@ -1,16 +1,26 @@
 ---
 number: 55
-title: "Keep amendment confirmation host-owned and human waits nonterminal"
+title: Keep amendment confirmation host-owned and human waits nonterminal
 status: superseded
 date: 2026-09-24
-tags: [empirica, governance, claude, approval]
+tags:
+- empirica
+- governance
+- claude
+- approval
 links:
-  - target: 54
-    kind: Refines
-  - target: 51
-    kind: Refines
-  - target: 60
-    kind: Superseded by
+- target: 54
+  kind: Refines
+- target: 51
+  kind: Refines
+- target: 60
+  kind: Superseded by
+- target: 56
+  kind: Refines
+- target: 57
+  kind: Superseded by
+- target: 58
+  kind: Refines
 ---
 
 # Keep amendment confirmation host-owned and human waits nonterminal

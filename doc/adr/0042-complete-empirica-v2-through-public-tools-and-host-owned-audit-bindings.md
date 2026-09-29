@@ -1,16 +1,42 @@
 ---
 number: 42
-title: "Complete Empirica v2 through public tools and host-owned audit bindings"
+title: Complete Empirica v2 through public tools and host-owned audit bindings
 status: accepted
 date: 2026-09-13
-tags: [empirica, hosts, audit, mcp, pi, codex]
+tags:
+- empirica
+- hosts
+- audit
+- mcp
+- pi
+- codex
 links:
-  - target: 30
-    kind: Depends on
-  - target: 40
-    kind: Amends
-  - target: 41
-    kind: Amends
+- target: 30
+  kind: Depends on
+- target: 40
+  kind: Amends
+- target: 41
+  kind: Amends
+- target: 16
+  kind: Supersedes
+- target: 21
+  kind: Supersedes
+- target: 37
+  kind: Supersedes
+- target: 39
+  kind: Supersedes
+- target: 43
+  kind: Amended by
+- target: 44
+  kind: Amended by
+- target: 48
+  kind: Amended by
+- target: 50
+  kind: Amended by
+- target: 51
+  kind: Amended by
+- target: 52
+  kind: Amended by
 ---
 
 # Complete Empirica v2 through public tools and host-owned audit bindings

@@ -39,6 +39,7 @@ not already enforce.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 import json
 import os
 import sys
@@ -56,8 +57,8 @@ from adapters.git.artifact_repo import GitArtifactRepository  # noqa: E402
 from adapters.identity import POLICY_VERSION, observe  # noqa: E402
 from adapters.state.located import LocatedRunRepository  # noqa: E402
 
-_PROTOCOL = _proto._PROTOCOL
-_PROFILES = _proto._PROFILES
+_PROTOCOL = _proto.protocol_id()
+_PROFILES = _proto.profile_ids()
 _HOST_OBSERVER = "host"
 
 
@@ -69,10 +70,10 @@ def _unobserved(value: dict, source: object) -> dict:
 
 def start_refusal(result: object) -> str | None:
     """Return a StartRun refusal message, identified structurally by an absent run."""
-    if not isinstance(result, dict) or result.get("type") != "Block" or "run" in result:
+    if not isinstance(result, Mapping) or result.get("type") != "Block" or "run" in result:
         return None
     reasons = result.get("reasons")
-    if not isinstance(reasons, list) or not reasons or not isinstance(reasons[0], dict):
+    if not isinstance(reasons, (list, tuple)) or not reasons or not isinstance(reasons[0], Mapping):
         return None
     message = reasons[0].get("message")
     code = reasons[0].get("code")

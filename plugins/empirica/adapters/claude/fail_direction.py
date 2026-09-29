@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from enum import Enum
 
+from .transport import Response
+
 
 class FailureDirection(str, Enum):
     OPEN = "open"
@@ -21,12 +23,9 @@ def failure_direction(response: object, *, fallback: FailureDirection) -> Failur
     are not failures, but returning the fallback keeps this helper total and prevents callers from
     accidentally inventing a third policy.
     """
-    if not isinstance(response, dict):
+    if not isinstance(response, Response) or response.result.type != "Fault":
         return fallback
-    result = response.get("result")
-    if not isinstance(result, dict) or result.get("type") != "Fault":
-        return fallback
-    raw = result.get("fail_direction")
+    raw = response.result.fail_direction
     try:
         return FailureDirection(raw)
     except (TypeError, ValueError):

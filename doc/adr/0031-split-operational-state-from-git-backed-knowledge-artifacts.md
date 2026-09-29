@@ -1,19 +1,29 @@
 ---
 number: 31
-title: "Split operational state from Git-backed knowledge artifacts"
+title: Split operational state from Git-backed knowledge artifacts
 status: accepted
 date: 2026-09-04
 tags:
-  - storage
-  - git
-  - evidence
+- storage
+- git
+- evidence
 links:
-  - target: 14
-    kind: Supersedes
-  - target: 19
-    kind: Amends
-  - target: 22
-    kind: Depends on
+- target: 14
+  kind: Supersedes
+- target: 19
+  kind: Amends
+- target: 22
+  kind: Depends on
+- target: 16
+  kind: Supersedes
+- target: 33
+  kind: Depends on
+- target: 34
+  kind: Amended by
+- target: 39
+  kind: Relates to
+- target: 59
+  kind: Refines
 ---
 
 # Split operational state from Git-backed knowledge artifacts

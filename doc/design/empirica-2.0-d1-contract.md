@@ -1,5 +1,7 @@
 # Empirica 2.0 D1 public behavioral contract
 
+> Historical Empirica 2.0 design; superseded by public contract 3.0.0 and ADR 0060/0061.
+
 **Status:** Parent-frozen implementation specification; normative machine files are created in D2.
 
 **Protocol:** `empirica/v2` only. Every other wire identity is invalid and every other persisted identity is corrupt.

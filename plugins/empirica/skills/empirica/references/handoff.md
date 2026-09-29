@@ -36,9 +36,3 @@ weaker convergence claim.
 For an unsupported host, state the exact missing capability, observed tool/event
 surface, and whether an active handle was created but cannot progress.
 
-## Repository hygiene
-
-Commit only intended product files. Do not commit machine-local operational state,
-private ingress material, capability references, or transient audit output. Keep
-knowledge in `refs/empirica/*` and operational state under
-`~/.empirica-plugin/`.

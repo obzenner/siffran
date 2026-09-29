@@ -249,7 +249,9 @@ class GovernanceHostTests(unittest.TestCase):
             "action": {"kind": "route", "reason": "supplied context"}})
         stopped = self.dispatch({"type": "EvaluateRun", "run_id": self.run, "intent": "report_convergence"})
         self.assertEqual(stopped["result"]["type"], "Block")
-        self.assertEqual(stop_result(stopped).exit_code, 0)
+        from adapters.claude.transport import Response
+        typed = Response.from_envelope({"request_id": stopped["request_id"]}, stopped)
+        self.assertEqual(stop_result(typed).exit_code, 0)
         for command in ({"type": "ObserveAction", "action": {"kind": "investigate"}},
                         {"type": "ObserveAction", "action": {"kind": "child_reserve", "purpose": "test",
                          "role_profile": "worker", "execution": "foreground", "resource_class": "investigation"}},

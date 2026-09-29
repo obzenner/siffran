@@ -1,6 +1,6 @@
 # Empirica 2.0 D7/D7-W — application transactions and single-writer proof
 
-**Status:** Parent-frozen implementation specification; requires Terra/Sol acceptance before red tests.
+**Status:** Implemented; fields were extended in Empirica 4.0.0 by ADR 0055/0060.
 
 **Normative inputs:** D0, D1, D1-H, accepted D2/D2A/D2B/D2C/D2D/D2E, D3, D4, D5/D5-F, D6, final-DAG §5/§7/§9.
 

@@ -1,14 +1,25 @@
 ---
 number: 51
-title: "Separate managed-audit execution from the generic child tier"
+title: Separate managed-audit execution from the generic child tier
 status: accepted
 date: 2026-09-21
-tags: [empirica, audit, children, claude, pi, async, strict-v2]
+tags:
+- empirica
+- audit
+- children
+- claude
+- pi
+- async
+- strict-v2
 links:
-  - target: 50
-    kind: Refines
-  - target: 42
-    kind: Amends
+- target: 50
+  kind: Refines
+- target: 42
+  kind: Amends
+- target: 52
+  kind: Amended by
+- target: 55
+  kind: Refines
 ---
 
 # Separate managed-audit execution from the generic child tier

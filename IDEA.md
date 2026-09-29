@@ -121,8 +121,8 @@ survive contact with an author that can edit its own record.
 
 ## Where this came from
 
-The `empirica` plugin in this repo is one implementation, for one tool
-(Claude Code). The plugin is the proof it works. The two ideas above are the part
+The `empirica` plugin in this repo is one implementation for Claude Code and Pi,
+with an observational Codex profile. The plugin is the proof it works. The two ideas above are the part
 worth taking.
 
 Both were found the hard way. The plugin's own audit step failed its first real

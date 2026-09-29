@@ -32,9 +32,6 @@ def generated(path: Path) -> str:
         run["contract"]["digest"] = contract_digest()
     if isinstance(governed, dict) and "proposal_digest" in governed:
         goal = run["goal"]
-        # QUAL-1: review_text and scope moved off the author RunView into the private
-        # presentation object; the RunView governance never carries them.
-        governed.pop("review_text", None)
         governed.pop("scope", None)
         governed["proposal_digest"] = proposal_digest(goal, governed)
     return json.dumps(document, indent=2) + "\n"

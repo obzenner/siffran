@@ -62,11 +62,8 @@ const DIGEST_DEFS = new Set(["digest256", "nullableDigest256"]);
 const SURFACES = Object.fromEntries(
   Object.entries(PUBLIC_CONTRACT.next_actions as Json).map(([id, row]) => [id, row.surface]),
 ) as Json;
-const CEILINGS = [
-  ["max_passes", "passes_used"],
-  ["max_spawns", "spawns_used"],
-  ["max_audit_spawns", "audit_spawns_used"],
-] as const;
+const CEILINGS = Object.keys(PUBLIC_CONTRACT.governance_decisions.controls.budgets as Json)
+  .map((ceiling) => [ceiling, `${ceiling.slice("max_".length)}_used`] as const);
 
 /** Mark contract-owned text. */
 function trusted(value: unknown): Trusted { return String(value) as Trusted; }
@@ -120,8 +117,45 @@ function fallback(result: unknown): string {
   }
 }
 
-/** Validate with the same inbound guard used by Pi dispatch. */
+function objectWithKeys(value: unknown, keys: readonly string[]): value is Json {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    && Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
+}
+
+const text = (value: unknown, nonempty = false): value is string =>
+  typeof value === "string" && (!nonempty || value.length > 0);
+const unique = (value: unknown[]): boolean =>
+  new Set(value.map((item) => JSON.stringify(item))).size === value.length;
+const rows = (value: unknown, keys: readonly string[], fields: readonly string[]): boolean =>
+  Array.isArray(value) && unique(value) && value.every((item) =>
+    objectWithKeys(item, keys) && fields.every((field) => text(item[field])));
+
+function validContractResult(value: unknown): boolean {
+  if (!objectWithKeys(value, (value as Json | null)?.target === "index"
+    ? ["target", "digest", "index"] : ["target", "digest", "section_id", "section"])) return false;
+  if (!text(value.digest) || !/^sha256:[0-9a-f]{64}$/.test(value.digest)) return false;
+  if (value.target === "index") {
+    const index = value.index;
+    return objectWithKeys(index, ["id", "version", "sections", "reasons", "next_actions"])
+      && index.id === "empirica/public" && index.version === "3.0.0"
+      && rows(index.sections, ["id", "title"], ["id", "title"])
+      && Array.isArray(index.reasons) && unique(index.reasons) && index.reasons.every((reason) =>
+        objectWithKeys(reason, ["code", "sections"]) && text(reason.code)
+        && Array.isArray(reason.sections) && reason.sections.every((section) => text(section)))
+      && rows(index.next_actions, ["id", "description"], ["id", "description"]);
+  }
+  if (value.target !== "section" || !text(value.section_id, true)) return false;
+  const section = value.section;
+  return objectWithKeys(section, ["id", "title", "summary", "clauses"])
+    && text(section.id, true) && section.id === value.section_id && text(section.title, true)
+    && text(section.summary) && rows(section.clauses, ["id", "text"], ["id", "text"])
+    && section.clauses.every((clause: Json) => text(clause.id, true) && text(clause.text, true));
+}
+
+/** Validate with the same closed result shapes used by the public response schema. */
 function validResult(result: unknown): boolean {
+  if (objectWithKeys(result, ["type", "contract_result"]) && result.type === "Allow")
+    return validContractResult(result.contract_result);
   try {
     assertResponse({ protocol: PROTOCOL, request_id: "author-view", result } as Response,
       "author-view");
@@ -336,8 +370,59 @@ function render(view: AuthorView): string {
     .map(([title, lines]) => [title, ...lines].join("\n"))].join("\n\n");
 }
 
-/** Render one guarded, non-dossier public result. */
+/** Render the graph projection without private identity or artifact fields. */
+function argumentLines(argument: Json, safety: TextSafety): readonly string[] {
+  const claims = (argument.claims as Json[]).map((item) =>
+    `  ${untrusted(item.claim_id, safety)} kind=${item.kind} gating=${item.gating ? "true" : "false"} ` +
+    `state=${item.state} evidence=${item.active_evidence_ids.length ? "present" : "none"}: ` +
+    `${untrusted(item.text, safety)}`);
+  const edges = (argument.edges as Json[]).map((item) =>
+    `  ${untrusted(item.from, safety)} -${item.type}-> ${untrusted(item.to, safety)}`);
+  const citations = (argument.artifacts as Json[]).filter((item) => item.citation !== undefined)
+    .map((item) => `  ${untrusted(item.citation, safety)}`);
+  return [
+    `goal: ${untrusted(argument.goal, safety)}`,
+    `root_claim_id: ${untrusted(argument.root_claim_id, safety)}`,
+    "Claims:", ...claims,
+    ...(edges.length ? ["Edges:", ...edges] : []),
+    ...(citations.length ? ["Citations:", ...citations] : []),
+    `Audit status: ${argument.audit.state} (${argument.audit.independence})`,
+  ];
+}
+
+/** Render trusted mappings and lists recursively as deterministic text. */
+function trustedContractValue(value: unknown, indent = ""): readonly string[] {
+  if (Array.isArray(value)) return value.flatMap((item) =>
+    item !== null && typeof item === "object"
+      ? [`${indent}-`, ...trustedContractValue(item, `${indent}  `)]
+      : [`${indent}- ${String(item)}`]);
+  if (value !== null && typeof value === "object")
+    return Object.entries(value as Json).flatMap(([key, item]) =>
+      item !== null && typeof item === "object"
+        ? [`${indent}${key}:`, ...trustedContractValue(item, `${indent}  `)]
+        : [`${indent}${key}: ${String(item)}`]);
+  return [`${indent}${String(value)}`];
+}
+
+/** Render an index or section trusted contract projection. */
+function contractLines(contract: Json): readonly string[] {
+  if (contract.target === "index")
+    return (contract.index.sections as Json[]).map((item) => `${item.id} — ${item.title}`);
+  const section = contract.section as Json;
+  return [`${section.id} — ${section.title}`,
+    ...trustedContractValue({ summary: section.summary, clauses: section.clauses }, "  ")];
+}
+
+/** Render one guarded public result as text. */
 function renderValid(row: Json): string {
+  if (row.argument) {
+    const argument = row.argument as Json;
+    return `Argument\n${argumentLines(
+      argument, argument.untrusted_delimiters as TextSafety,
+    ).join("\n")}`;
+  }
+  if (row.contract_result)
+    return `Contract\n${contractLines(row.contract_result as Json).join("\n")}`;
   if (["Allow", "Block"].includes(row.type) && row.run) return render(parse(row));
   if (row.type === "Block") {
     const safety = PUBLIC_CONTRACT.untrusted_delimiters as TextSafety;
@@ -348,17 +433,10 @@ function renderValid(row: Json): string {
   return "Inert";
 }
 
-/**
- * Validate once, then render a public result; invalid input and dossiers use JSON.
- *
- * Pi calls this non-strictly so a renderer defect can never break a tool result: it degrades
- * to compact JSON. Tests pass `{ strict: true }` so any such defect on a guarded result throws
- * instead of hiding behind the fallback.
- */
+/** Validate once, then render every valid public result as plain text. */
 export function renderAuthorView(result: unknown, options: { strict?: boolean } = {}): string {
   if (!validResult(result)) return fallback(result);
   const row = result as Json;
-  if ("argument" in row || "contract_result" in row) return fallback(row);
   try {
     return renderValid(row);
   } catch (error) {

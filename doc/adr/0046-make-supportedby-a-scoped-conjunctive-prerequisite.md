@@ -1,16 +1,23 @@
 ---
 number: 46
-title: "Make SupportedBy a scoped conjunctive prerequisite"
+title: Make SupportedBy a scoped conjunctive prerequisite
 status: accepted
 date: 2026-09-20
-tags: [empirica, claims, graph, adjudication, freeze]
+tags:
+- empirica
+- claims
+- graph
+- adjudication
+- freeze
 links:
-  - target: 45
-    kind: Amends
-  - target: 26
-    kind: Refines
-  - target: 27
-    kind: Amends
+- target: 45
+  kind: Amends
+- target: 26
+  kind: Refines
+- target: 27
+  kind: Amends
+- target: 47
+  kind: Amended by
 ---
 
 # Make SupportedBy a scoped conjunctive prerequisite

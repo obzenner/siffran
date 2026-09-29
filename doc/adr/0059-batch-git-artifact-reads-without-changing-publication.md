@@ -1,14 +1,18 @@
 ---
 number: 59
-title: "Batch Git artifact reads without changing publication"
+title: Batch Git artifact reads without changing publication
 status: accepted
 date: 2026-09-26
-tags: [empirica, git, performance, integrity]
+tags:
+- empirica
+- git
+- performance
+- integrity
 links:
-  - target: 31
-    kind: Refines
-  - target: 57
-    kind: Refines
+- target: 31
+  kind: Refines
+- target: 57
+  kind: Refines
 ---
 
 # Batch Git artifact reads without changing publication

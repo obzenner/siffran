@@ -1,6 +1,6 @@
 # Empirica 2.0 D2C — canonical ArgumentView artifact provenance
 
-**Status:** Parent-frozen bounded observable-contract amendment exposed by D4-S2 review.
+**Status:** Implemented historical rationale for the current ArgumentView artifact projection.
 
 ## Why reopened
 

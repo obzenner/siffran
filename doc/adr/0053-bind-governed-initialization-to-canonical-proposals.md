@@ -1,14 +1,24 @@
 ---
 number: 53
-title: "Bind governed initialization to canonical proposals"
+title: Bind governed initialization to canonical proposals
 status: superseded
 date: 2026-09-21
-tags: [empirica, governance, approval, identity]
+tags:
+- empirica
+- governance
+- approval
+- identity
 links:
-  - target: 49
-    kind: Refines
-  - target: 60
-    kind: Superseded by
+- target: 49
+  kind: Refines
+- target: 60
+  kind: Superseded by
+- target: 54
+  kind: Refines
+- target: 56
+  kind: Refines
+- target: 58
+  kind: Superseded by
 ---
 
 # Bind governed initialization to canonical proposals

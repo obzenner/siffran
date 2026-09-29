@@ -43,12 +43,8 @@ reachable from the declared root by following `SupportedBy` edges.
 
 Within the effective scope, support is conjunctive: a claim can be approved only
 when its own evidence requirements and every direct in-scope supporting child are
-approved. Before freeze, effective scope is the claims marked `gating`; after
-freeze, it is the immutable frozen claim IDs. Freeze also binds each committed
-claim's exact record and the edge set whose endpoints are both frozen, so changing
-committed wording, kind, gating, or internal dependency requires a fresh run.
-A deferred child does not silently expand a frozen commitment, but adding its node
-or cross-scope edge still changes the argument and makes prior audit coverage stale.
+approved. Before freeze, effective scope is the claims marked `gating`; afterward,
+the frozen semantic identity described in [budget-freeze.md](budget-freeze.md) applies.
 
 A failed support prevents parent approval but does not refute the parent. The
 parent remains open unless its own evidence makes it blocked or discarded. A
@@ -57,7 +53,6 @@ remain active through other live paths. Blocking output identifies the unresolve
 supporting claim rather than claiming that an already evidenced parent lacks local
 evidence.
 
-Do not send the legacy `nodes`/confidence representation as the v2 graph.
 Confidence and terminal state are derived projections, never graph input.
 
 ## Construction rules
@@ -78,5 +73,5 @@ surface as the `payload` of `{"kind": "graph"}`. The service requires at least
 one valid claim. Trusted host actions are not part of graph submission.
 
 When resuming a run after host compaction or restore, recover the exact `root`, claim `kind`s,
-and `edges` needed to amend the graph from `empirica_read(operation="GetArgument")`; the reduced
-RunView does not carry the typed graph.
+and `edges` needed to amend the graph from the text returned by
+`empirica_read(operation="GetArgument")`; the reduced RunView does not carry the graph.

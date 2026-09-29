@@ -1,18 +1,26 @@
 ---
 number: 9
 title: Guarantee termination with specialization, threshold, and cap
-status: accepted
+status: superseded
 date: 2026-07-17
 tags:
-  - architecture
-  - termination
+- architecture
+- termination
 links:
-  - target: 8
-    kind: Depends on
-  - target: 7
-    kind: Depends on
-  - target: 19
-    kind: Refined by
+- target: 8
+  kind: Depends on
+- target: 7
+  kind: Depends on
+- target: 19
+  kind: Refined by
+- target: 62
+  kind: Superseded by
+- target: 17
+  kind: Depends on
+- target: 20
+  kind: Relates to
+- target: 26
+  kind: Amended by
 ---
 
 # Guarantee termination with specialization, threshold, and cap

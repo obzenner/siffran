@@ -134,7 +134,12 @@ function wire(
       };
       if (request.operation === "audit_verdict")
         return { type: "audit_verdict", admitted: true };
-      return { type: "ok" };
+      if (request.operation === "audit_start") return { type: "audit_started" };
+      if (request.operation === "audit_identity") return { type: "audit_identity" };
+      if (["audit_reject", "audit_failure"].includes(request.operation))
+        return { type: "audit_terminal" };
+      return { protocol: PROTOCOL, request_id: "trusted", result: {
+        type: "Inert", reason: "unsupported_host_event", run: run() } };
     },
     resolveAuditContract: async (input) => {
       auditResolutions.push({ ...input });
@@ -177,8 +182,7 @@ test("/empirica dispatches StartRun and persists the opaque handle", async () =>
   assert.match(w.pi.userMessages[0], /The user invocation is `build the thing`/);
   assert.match(w.pi.userMessages[0], /"kind":"route","reason":/);
   assert.match(w.pi.userMessages[0], /operation="GetRun"/);
-  assert.ok(w.pi.userMessages[0].includes(
-    '{"agent":"empirica.empirica-auditor","task":"Audit the host-provided dossier."}'));
+  assert.match(w.pi.userMessages[0], /Pi calls the\npackaged auditor/);
   assert.doesNotMatch(w.pi.userMessages[0], /\$ARGUMENTS/);
 });
 
@@ -401,9 +405,9 @@ test("gate: a well-formed Inert is denied (run gone but handle exists)", async (
 
 // --- bound foreground auditor lifecycle -------------------------------------
 
-test("canonical audit guidance uses the same two-field example on every surface", () => {
+test("canonical audit guidance keeps the exact two-field example in procedural references", () => {
   const example = '{"agent":"empirica.empirica-auditor","task":"Audit the host-provided dossier."}';
-  for (const file of ["empirica/SKILL.md", "empirica/references/audit.md", "../adapters/pi/README.md",
+  for (const file of ["empirica/references/audit.md",
     "../../../.claude/skills/native-qualification/SKILL.md"]) {
     assert.ok(readFileSync(resolve(DEFAULT_SKILLS_DIR, file), "utf8").includes(example), file);
   }
@@ -776,7 +780,12 @@ test("canonical auditor identity follows filesystem symlinks", async (t) => {
           argument: { argument_digest: `sha256:${"a".repeat(64)}`, claims: [] } } }
       : request.operation === "classify_identity"
       ? { identity: String((request.payload as { model_id?: unknown })?.model_id) }
-      : { type: "ok" },
+      : request.operation === "audit_start" ? { type: "audit_started" }
+      : request.operation === "audit_identity" ? { type: "audit_identity" }
+      : ["audit_reject", "audit_failure"].includes(request.operation) ? { type: "audit_terminal" }
+      : request.operation === "audit_verdict" ? { type: "audit_verdict", admitted: true }
+      : { protocol: PROTOCOL, request_id: "trusted", result: {
+          type: "Inert", reason: "unsupported_host_event", run: run() } },
     resolveAuditContract: async () => ({ agentFilePath: realAgent,
                                          model: "bedrock/auditor-model", agentScope: "project" }),
     skillsDir: join(aliasPackage, "skills"),

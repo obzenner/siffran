@@ -78,6 +78,17 @@ def _synthetic_results() -> list[tuple[str, object]]:
     hostile["run"]["children"] = [{"child_id": "ch-" + "0" * 64, "purpose": hostile_text,
                                    "resource_class": "audit", "state": "pending"}]
 
+    deferred = copy.deepcopy(json.loads((FIXTURES / "getargument-active.json").read_text())
+                             ["expected"]["result"])
+    deferred["argument"]["goal"] = hostile_text
+    deferred_claim = copy.deepcopy(deferred["argument"]["claims"][1])
+    deferred_claim.update({"claim_id": "C-deferred", "text": hostile_text,
+                           "state": "open", "gating": False, "kind": "ordinary",
+                           "active_evidence_ids": []})
+    deferred["argument"]["claims"].append(deferred_claim)
+    deferred["argument"]["edges"].append(
+        {"from": "G0", "to": "C-deferred", "type": "SupportedBy"})
+
     return [
         ("audit-stale-scope", audit_stale),
         ("hostile-author-strings", hostile),
@@ -88,6 +99,9 @@ def _synthetic_results() -> list[tuple[str, object]]:
         ("governance-approval-unavailable", unavailable),
         ("null", None),
         ("getcontract-index", {"type": "Allow", "contract_result": contract_result("index")}),
+        ("getcontract-section", {"type": "Allow", "contract_result":
+                                 contract_result("section", "claims/graph")}),
+        ("getargument-deferred-hostile", deferred),
         ("fault-closed", {"type": "Fault", "code": "unsupported",
                           "fail_direction": "closed", "message": "no eval"}),
         ("fault-open", {"type": "Fault", "code": "unavailable",

@@ -16,25 +16,32 @@ from adapters.invocation import provenance
 from .correlation import PROTOCOL, request_id as new_request_id
 from .invocation import parse_invocation
 from .selector import context_from_payload, selector_from_payload
-from .transport import CLAUDE_PROFILE_ID, BridgeTransport, Transport
+from .transport import CLAUDE_PROFILE_ID, Transport, dispatch_with
 
 
 _ENTRYPOINT_INTERACTIVE = {"cli": True, "sdk-cli": False}
 
 
+def _parse_transcript_entrypoint(path: object) -> str | None:
+    """Parse the first concrete entrypoint from untrusted transcript JSONL."""
+    if not isinstance(path, str):
+        return None
+    try:
+        with open(path, encoding="utf-8") as stream:
+            for line in stream:
+                row = json.loads(line)
+                if isinstance(row, dict) and isinstance(row.get("entrypoint"), str):
+                    return row["entrypoint"]
+    except (OSError, ValueError):
+        return None
+    return None
+
+
 def invocation_provenance(payload: Mapping[str, object], environ: Mapping[str, str]) -> dict[str, object]:
     entrypoint = environ.get("CLAUDE_CODE_ENTRYPOINT")
     signal = "CLAUDE_CODE_ENTRYPOINT" if entrypoint is not None else "transcript.entrypoint unavailable"
-    if entrypoint is None and isinstance(payload.get("transcript_path"), str):
-        try:
-            with open(payload["transcript_path"], encoding="utf-8") as stream:
-                for line in stream:
-                    row = json.loads(line)
-                    if isinstance(row.get("entrypoint"), str):
-                        entrypoint, signal = row["entrypoint"], "transcript.entrypoint"
-                        break
-        except (OSError, ValueError):
-            pass
+    if entrypoint is None and (observed := _parse_transcript_entrypoint(payload.get("transcript_path"))) is not None:
+        entrypoint, signal = observed, "transcript.entrypoint"
     return provenance("claude", _ENTRYPOINT_INTERACTIVE.get(entrypoint), signal, environ,
                       profile_id=CLAUDE_PROFILE_ID)
 
@@ -104,7 +111,7 @@ def dispatch_start_run(
     request = build_start_run_request(
         payload, correlation_id=correlation_id, environ=environ,
     )
-    return (transport if transport is not None else BridgeTransport()).dispatch(request)
+    return dispatch_with(transport, request)
 
 
 def dispatch_resolve(
@@ -112,4 +119,4 @@ def dispatch_resolve(
     correlation_id: str | None = None,
 ) -> dict:
     request = build_resolve_request(payload, correlation_id=correlation_id)
-    return (transport if transport is not None else BridgeTransport()).dispatch(request)
+    return dispatch_with(transport, request)

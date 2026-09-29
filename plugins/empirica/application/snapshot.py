@@ -6,10 +6,9 @@ import re
 from typing import Any
 
 from core.canonical import canonical_json
-from core.evaluation import (EvaluationSnapshot, claim_digest, digest,
+from core.evaluation import (EvaluationSnapshot, active_spike_heads, digest,
                              frozen_scope_invalid, valid_graph)
-from core.freshness import (ActiveSpikeHead, FileBinding, FileObservation, ObservationState,
-                            observations_digest)
+from core.freshness import FileObservation, ObservationState, observations_digest
 from core.records import Artifact
 from core.run import OperationalState
 from core.governance import proposal_digest
@@ -208,25 +207,6 @@ def graph_from_history(state: OperationalState, history: tuple[dict[str, Any], .
     return graph
 
 
-def active_spike_heads(history: tuple[dict[str, Any], ...], graph: dict[str, Any] | None) -> tuple[ActiveSpikeHead, ...]:
-    if graph is None:
-        return ()
-    claims = {c["id"]: c for c in graph["claims"]}
-    latest: dict[str, dict[str, Any]] = {}
-    for item in history:
-        claim = claims.get(item.get("claim_id"))
-        if (item.get("kind") == "spike" and claim is not None
-                and item.get("claim_digest") == claim_digest(claim)):
-            latest[claim["id"]] = item
-    heads = []
-    for claim_id in sorted(latest):
-        item = latest[claim_id]
-        bindings = tuple(FileBinding(b["path"], b["sha256"]) for b in item["file_bindings"])
-        heads.append(ActiveSpikeHead(item["artifact_id"], claim_id,
-                                     item["harness_request_id"], bindings))
-    return tuple(heads)
-
-
 def validate_investigation_history(state: OperationalState,
                                    history: tuple[dict[str, Any], ...]) -> None:
     evidence_kinds = {"research", "spike_request", "spike", "attribution", "audit_verdict"}
@@ -252,7 +232,7 @@ def assemble(state: OperationalState, stored: Any, workspace: Any, *, run_id: st
     if proposal_digest(state.goal, state.governance) != state.governance["proposal_digest"]:
         raise HistoryCorrupt("proposal digest conflicts with selected graph/context")
     observation = build_observation_snapshot(active_spike_heads(history, graph), workspace)
-    profile = _proto._PROFILES[profile_id]
+    profile = _proto.host_profile(profile_id)
     return EvaluationSnapshot(
         state=state, history=history, graph=graph, contract=_proto.CONTRACT_VIEW,
         observations=observation.observations, observation_basis_id=observation.basis_id,

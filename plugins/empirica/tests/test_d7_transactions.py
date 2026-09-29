@@ -26,8 +26,8 @@ from application.run_state import decode_state, encode_state  # noqa: E402
 from application.location import encode_handle, storage_id  # noqa: E402
 from application.transaction import Coordinator as ProductionCoordinator  # noqa: E402
 from core.evaluation import (  # noqa: E402
-    EvaluationSnapshot, artifact, audit_binding, audit_passes,
-    evaluate_snapshot, frozen_semantic_digest, independence)
+    EvaluationSnapshot, active_spike_heads, artifact, audit_binding, audit_passes,
+    claim_digest, evaluate_snapshot, frozen_semantic_digest, independence)
 from core.freshness import (FileObservation, ObservationState, canonical_digest,  # noqa: E402
                             observations_digest)
 
@@ -217,6 +217,19 @@ def chain(state: OperationalState, domain=()):
 
 
 class D7TransactionTests(unittest.TestCase):
+    def test_active_spike_heads_preserve_graph_order_for_freshness(self):
+        graph = {"claims": [
+            {"id": "Z", "text": "first", "kind": "needs-experiment", "gating": True},
+            {"id": "A", "text": "second", "kind": "needs-experiment", "gating": True},
+        ], "root": "Z", "edges": [{"from": "Z", "to": "A", "type": "SupportedBy"}]}
+        history = tuple({
+            "kind": "spike", "claim_id": claim["id"], "claim_digest": claim_digest(claim),
+            "artifact_id": "sha256:" + format(index, "x") * 64, "harness_request_id": f"request-{claim['id']}",
+            "file_bindings": [{"path": f"{claim['id']}.py", "sha256": "sha256:" + "a" * 64}],
+        } for index, claim in enumerate(reversed(graph["claims"]), start=1))
+        self.assertEqual(
+            tuple(head.claim_id for head in active_spike_heads(history, graph)), ("Z", "A"))
+
     def test_orphan_is_invisible_and_order_comes_from_manifest(self):
         first = artifact("research", {"n": 1})
         second = artifact("research", {"n": 2})

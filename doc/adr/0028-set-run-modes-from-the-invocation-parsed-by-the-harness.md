@@ -1,20 +1,24 @@
 ---
 number: 28
-title: "Set run modes from the invocation, parsed by the harness"
+title: Set run modes from the invocation, parsed by the harness
 status: accepted
 date: 2026-08-11
 tags:
-  - workflow
-  - harness
-  - usability
-  - configuration
+- workflow
+- harness
+- usability
+- configuration
 links:
-  - target: 24
-    kind: Amends
-  - target: 19
-    kind: Depends on
-  - target: 21
-    kind: relatesto
+- target: 24
+  kind: Amends
+- target: 19
+  kind: Depends on
+- target: 21
+  kind: Relates to
+- target: 36
+  kind: Relates to
+- target: 61
+  kind: Amended by
 ---
 
 # Set run modes from the invocation, parsed by the harness

@@ -229,17 +229,23 @@ def active_evidence(snapshot: EvaluationSnapshot, claim: dict[str, Any]) -> list
     return [a for a in evidence if a["kind"] == "research"] + active_spike
 
 
-def active_spike_heads(snapshot: EvaluationSnapshot) -> tuple[ActiveSpikeHead, ...]:
-    if snapshot.graph is None:
+def active_spike_heads(
+    history: tuple[dict[str, Any], ...], graph: dict[str, Any] | None,
+) -> tuple[ActiveSpikeHead, ...]:
+    """Return each claim's latest current spike in observable graph order."""
+    if graph is None:
         return ()
-    heads = []
-    for claim in snapshot.graph["claims"]:
-        spikes = [a for a in active_evidence(snapshot, claim) if a["kind"] == "spike"]
-        if spikes:
-            item = spikes[-1]
-            bindings = tuple(FileBinding(b["path"], b["sha256"]) for b in item["file_bindings"])
-            heads.append(ActiveSpikeHead(item["artifact_id"], claim["id"], item["harness_request_id"], bindings))
-    return tuple(heads)
+    return tuple(
+        ActiveSpikeHead(item["artifact_id"], claim["id"], item["harness_request_id"],
+                        tuple(FileBinding(row["path"], row["sha256"])
+                              for row in item["file_bindings"]))
+        for claim in graph["claims"]
+        if (spikes := [row for row in history
+                       if row.get("kind") == "spike"
+                       and row.get("claim_id") == claim["id"]
+                       and row.get("claim_digest") == claim_digest(claim)])
+        for item in spikes[-1:]
+    )
 
 
 def _freshness_sensitive(snapshot: EvaluationSnapshot, claim: Mapping[str, Any]) -> bool:
@@ -262,7 +268,9 @@ def evaluate_stale_heads(snapshot: EvaluationSnapshot) -> Mapping[str, ActiveSpi
     """Evaluate bound-file freshness independently of claim gate relevance."""
     if not snapshot.observations:
         return MappingProxyType({})
-    freshness = evaluate_freshness(active_spike_heads(snapshot), snapshot.observations)
+    freshness = evaluate_freshness(
+        active_spike_heads(snapshot.history, snapshot.graph), snapshot.observations
+    )
     return MappingProxyType({head.artifact_id: head for head in freshness.stale_heads})
 
 

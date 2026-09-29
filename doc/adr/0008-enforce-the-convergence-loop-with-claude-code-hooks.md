@@ -4,19 +4,27 @@ title: Enforce the convergence loop with Claude Code hooks
 status: accepted
 date: 2026-07-17
 tags:
-  - architecture
-  - hooks
+- architecture
+- hooks
 links:
-  - target: 7
-    kind: Depends on
-  - target: 9
-    kind: Depended on by
-  - target: 13
-    kind: Depended on by
-  - target: 14
-    kind: Depended on by
-  - target: 16
-    kind: Depended on by
+- target: 7
+  kind: Depends on
+- target: 9
+  kind: Depended on by
+- target: 13
+  kind: Depended on by
+- target: 14
+  kind: Depended on by
+- target: 16
+  kind: Depended on by
+- target: 17
+  kind: Relates to
+- target: 19
+  kind: Depends on
+- target: 30
+  kind: Amended by
+- target: 32
+  kind: Amended by
 ---
 
 # Enforce the convergence loop with Claude Code hooks

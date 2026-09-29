@@ -1,16 +1,20 @@
 ---
 number: 47
-title: "Bind frozen scope to semantic identity"
+title: Bind frozen scope to semantic identity
 status: accepted
 date: 2026-09-20
-tags: [empirica, claims, freeze, integrity]
+tags:
+- empirica
+- claims
+- freeze
+- integrity
 links:
-  - target: 26
-    kind: Refines
-  - target: 45
-    kind: Amends
-  - target: 46
-    kind: Amends
+- target: 26
+  kind: Refines
+- target: 45
+  kind: Amends
+- target: 46
+  kind: Amends
 ---
 
 # Bind frozen scope to semantic identity

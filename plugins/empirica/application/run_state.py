@@ -17,12 +17,12 @@ from core.run import OperationalState
 from core.governance import invariant
 from . import protocol as _proto
 
-_STATE_SCHEMA = _proto._STATE_SCHEMA
-_PROTOCOL = _proto._PROTOCOL
-_STATE_SCHEMA_ID = _proto._STATE_SCHEMA_ID
+_STATE_SCHEMA = dict(_proto.state_schema())
+_PROTOCOL = _proto.protocol_id()
+_STATE_SCHEMA_ID = _proto.state_schema_id()
 _AUDIT_DOSSIER = jsonschema.Draft202012Validator(
-    {"$ref": "#/$defs/argumentView", "$defs": _proto._RESPONSE_SCHEMA["$defs"]},
-    registry=_proto._SCHEMA_REGISTRY)
+    {"$ref": "#/$defs/argumentView", "$defs": _proto.response_schema()["$defs"]},
+    registry=_proto.schema_registry())
 
 
 def _thaw(value: Any) -> Any:

@@ -10,8 +10,7 @@ without resetting counters; auto cannot raise them. See [governance.md](governan
 
 Empirica is bounded by configured pass, investigation-spawn, and mandatory-audit-spawn
 ceilings. Passes are charged only when the current derivation changes; repeated identical
-evaluation does not spend another pass. Do not invent a scope-derived formula in the skill
-and do not lower a ceiling below already consumed work.
+evaluation does not spend another pass. Do not lower a ceiling below already consumed work.
 
 A pass is charged only according to the service's observed progress rules. Investigation
 children use `max_spawns`; the canonical host-owned auditor uses the independent
@@ -33,8 +32,6 @@ When no obligation or evidence changed:
    capability;
 4. either perform that distinct action or allow the service to terminate with an
    honest residual.
-
-Do not claim a wall-clock stall deadline unless the active contract exposes one.
 
 ## Freeze
 

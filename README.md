@@ -102,7 +102,7 @@ Restart Pi after installation, or run `/reload` in an existing session. Availabl
 /think <intent>                 # structured Methodologist workflow
 /think --simple <intent>        # original single-prompt Methodologist mode
 /empirica <goal>                # start a durable Empirica v2 workflow
-empirica_observe                 # tool: route, graph, research, spike, freeze
+empirica_observe                 # tool: route, graph, configure_run, investigate, research, spike_request, freeze
 empirica_read                    # tool: complete RunView, argument, contract
 report_convergence               # tool: guarded terminal decision
 ```

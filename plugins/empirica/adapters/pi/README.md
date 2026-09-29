@@ -34,7 +34,7 @@ that boundary.
 |---|---|---|
 | `/empirica <goal>` | `StartRun` | Starts a durable run, persists the opaque handle, and injects public-tool guidance. |
 | `empirica_observe` | `ObserveAction` | Accepts only canonical public author kinds. Trusted kinds are rejected locally and by schema. |
-| `empirica_read` | `GetRun`, `GetArgument`, `GetContract`, `RestoreRun` | Returns the complete typed result; resolves a session handle when needed. |
+| `empirica_read` | `GetRun`, `GetArgument`, `GetContract`, `RestoreRun` | Returns a deterministic plain-text author view; resolves a session handle when needed. |
 | `report_convergence` | `EvaluateRun(report_convergence | stop)` | Fails closed unless the guarded response is `Allow`; `intent: stop` records an honest non-converged terminal. |
 | `tool_call(subagent)` | `child_reserve` + private lifecycle | Binds the canonical auditor, forces foreground execution, injects the dossier, and records launching/pending facts. |
 | `tool_result(subagent)` | private `audit_identity` + `audit_verdict` | Correlates by `toolCallId`, redacts before the first await, binds the verdict to the final native assistant record in the host-generated child session, and admits only one exact fenced verdict. |
@@ -62,16 +62,8 @@ payloads.
 
 ## Canonical audit call
 
-After current evidence and approval, invoke the packaged auditor once through the structured
-`subagent` tool with exactly:
-
-```json
-{"agent":"empirica.empirica-auditor","task":"Audit the host-provided dossier."}
-```
-
-Send only `agent` and `task`; the host injects its configured model and foreground execution after
-validating the input. Rejection is not an audit, so do not retry a stopped qualification run. See
-[audit](../../skills/empirica/references/audit.md) for the complete invocation rules.
+Follow the complete packaged-auditor invocation and rejection rules in
+[audit](../../skills/empirica/references/audit.md).
 
 ## Hard gate
 

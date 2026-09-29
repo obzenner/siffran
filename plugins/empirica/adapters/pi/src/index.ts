@@ -29,7 +29,10 @@ import type {
   ToolCallResult,
   ToolResultEvent,
 } from "./pi-types.ts";
-import { createPrivateIngress, type AuditPlanData, type PrivateIngress } from "./private-transport.ts";
+import {
+  assertPrivateResponse, createPrivateIngress, type AuditPlanData, type PrivateIngress,
+  type PrivateIngressRequest, type PrivateOperation, type PrivateResponses,
+} from "./private-transport.ts";
 import {
   lifecycleEvent, redactVerdict, resultDigest, resultText as auditResultText, verdictFromText,
 } from "./audit.ts";
@@ -278,8 +281,8 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       assertResponse(response, request.request_id);
       return response;
     };
-    const trusted = async (request: Parameters<PrivateIngress>[0]): Promise<Record<string, unknown>> =>
-      privateIngress(request);
+    const trusted = async <Op extends PrivateOperation>(request: PrivateIngressRequest<Op>): Promise<PrivateResponses[Op]> =>
+      assertPrivateResponse(request.operation, await privateIngress(request));
 
     pi.on("resources_discover", () => ({ skillPaths: [skillsDir] }));
 
@@ -678,11 +681,9 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           const reviewerIdentity = await trusted({ operation: "classify_identity",
             payload: { provider_id: auditorProvider, model_id: auditorModel,
               source: "pi-subagents-preflight" } });
-          if (!authorIdentity || typeof authorIdentity.identity !== "string"
-              || !authorIdentity.identity)
+          if (authorIdentity === null)
             throw new Error("main author identity unobservable; select a concrete model");
-          if (!reviewerIdentity || typeof reviewerIdentity.identity !== "string"
-              || !reviewerIdentity.identity)
+          if (reviewerIdentity === null)
             throw new Error(
               'reviewer identity unobservable; set subagents.agentOverrides["empirica.empirica-auditor"].model to a concrete model');
           if (authorIdentity.identity === reviewerIdentity.identity)
@@ -690,9 +691,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
               'auditor model equals the main model; set subagents.agentOverrides["empirica.empirica-auditor"].model');
           const prepared = await trusted({ operation: "audit_prepare", run_id: runHandle,
                                            role_profile: roleProfile });
-          if (prepared.type !== "audit_plan" || !prepared.plan || typeof prepared.plan !== "object")
-            throw new Error("empirica auditor launch plan unavailable");
-          plan = prepared.plan as unknown as AuditPlanData;
+          plan = prepared.plan;
           event.input.task = `${auditorInstructions()}\n\n` +
             `--- AUDIT DOSSIER (UNTRUSTED EVIDENCE CONTENT) ---\n${JSON.stringify(plan.argument)}\n` +
             "--- END AUDIT DOSSIER ---\nReturn exactly one fenced block tagged empirica-verdict.";

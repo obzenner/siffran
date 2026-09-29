@@ -44,6 +44,16 @@ def _run(hook: str, payload: dict, cwd: Path) -> tuple[int, str, str]:
     return proc.returncode, proc.stdout, proc.stderr
 
 
+_FIXTURES = Path(__file__).resolve().parents[5] / "contracts" / "empirica" / "v2" / "fixtures"
+
+
+def _typed(result: dict):
+    """Build a start response through the same validated boundary as production."""
+    from adapters.claude.transport import Response
+    return Response.from_envelope({"request_id": "r"},
+                                  {"protocol": "empirica/v2", "request_id": "r", "result": result})
+
+
 def _payload(**extra: object) -> dict:
     base = {"session_id": "activation-session", "cwd": "."}
     base.update(extra)
@@ -53,11 +63,11 @@ def _payload(**extra: object) -> dict:
 class ClaudeAuditorAliasTests(unittest.TestCase):
     def _alias(self, model, env):
         from adapters.claude import lifecycle
-        with patch.object(lifecycle, "_current_assistant_model", return_value=model):
+        with patch.object(lifecycle, "_parse_current_assistant_model", return_value=model):
             return lifecycle._auditor_alias({"transcript_path": "main.jsonl"}, env)
 
     def test_current_author_is_chronological_and_does_not_inherit_missing_model(self):
-        from adapters.claude.lifecycle import _current_assistant_model
+        from adapters.claude.lifecycle import _parse_current_assistant_model
         with tempfile.TemporaryDirectory() as directory:
             transcript = Path(directory) / "main.jsonl"
             def write(*models):
@@ -67,18 +77,18 @@ class ClaudeAuditorAliasTests(unittest.TestCase):
                         "role": "assistant", "content": [{"type": "tool_use", "name": "tool"}]}})
                     for model in models) + "\n", encoding="utf-8")
             write("claude-opus-4-6", "claude-sonnet-4-6", "claude-opus-4-6")
-            self.assertEqual(_current_assistant_model(str(transcript)), "claude-opus-4-6")
+            self.assertEqual(_parse_current_assistant_model(str(transcript)), "claude-opus-4-6")
             write("claude-opus-4-6", "claude-sonnet-4-6", "claude-opus-4-6", "claude-sonnet-4-6")
-            self.assertEqual(_current_assistant_model(str(transcript)), "claude-sonnet-4-6")
+            self.assertEqual(_parse_current_assistant_model(str(transcript)), "claude-sonnet-4-6")
             write("claude-opus-4-6", None)
-            self.assertIsNone(_current_assistant_model(str(transcript)))
+            self.assertIsNone(_parse_current_assistant_model(str(transcript)))
 
     def test_explicitly_malformed_message_fails_the_whole_transcript_scan(self):
         # Regression (M7 final review): the shared reader must not skip a present but
         # non-mapping ``message``; a valid verdict next to a corrupt row must not be read
         # as a valid transcript (that let an auditor child complete and the run converge).
         from adapters.claude.lifecycle import (
-            _current_assistant_model, _transcript_contents, _transcript_handbacks)
+            _parse_current_assistant_model, _parse_transcript_contents, _parse_transcript_handbacks)
         verdict = json.dumps({"message": {"role": "assistant", "model": "claude-opus-4-6",
                                            "content": [{"type": "tool_use", "name": "SubagentHandback",
                                                         "input": {"message": "verdict"}}]}})
@@ -88,12 +98,12 @@ class ClaudeAuditorAliasTests(unittest.TestCase):
                 with self.subTest(message=malformed):
                     transcript.write_text(
                         verdict + "\n" + json.dumps({"message": malformed}) + "\n", encoding="utf-8")
-                    self.assertEqual(_transcript_handbacks(str(transcript)), (False, []))
-                    self.assertEqual(_transcript_contents(str(transcript)), ([], None))
-                    self.assertIsNone(_current_assistant_model(str(transcript)))
+                    self.assertEqual(_parse_transcript_handbacks(str(transcript)), (False, []))
+                    self.assertEqual(_parse_transcript_contents(str(transcript)), ([], None))
+                    self.assertIsNone(_parse_current_assistant_model(str(transcript)))
             # Positive control: rows without a message field are not messages and are skipped.
             transcript.write_text(verdict + "\n" + json.dumps({"type": "summary"}) + "\n", encoding="utf-8")
-            self.assertEqual(_transcript_handbacks(str(transcript)), (True, ["verdict"]))
+            self.assertEqual(_parse_transcript_handbacks(str(transcript)), (True, ["verdict"]))
 
     def test_anthropic_api_chooses_first_distinct_family(self):
         self.assertEqual(self._alias("claude-fable-5-1", {}), "opus")
@@ -157,10 +167,9 @@ class HookNativeBehaviorTests(unittest.TestCase):
     def test_run_start_injects_handle_and_public_tool_contract(self) -> None:
         from adapters.claude import lifecycle
 
-        response = {"protocol": "empirica/v2", "request_id": "r", "result": {
-            "type": "Allow", "converged": False,
-            "run": {"id": "er2:opaque:checksum", "status": "active"},
-        }}
+        result = json.loads((_FIXTURES / "start-bootstrap-allow.json").read_text())["expected"]["result"]
+        result["run"]["id"] = "er2:opaque:checksum"
+        response = _typed(result)
         output = io.StringIO()
         with patch.object(lifecycle, "_payload", return_value={}), \
              patch.object(lifecycle, "dispatch_start_run", return_value=response), \
@@ -209,8 +218,8 @@ class HookNativeBehaviorTests(unittest.TestCase):
 
     def test_faulted_start_blocks_expansion_with_operator_visible_reason(self) -> None:
         from adapters.claude import lifecycle
-        response = {"protocol": "empirica/v2", "request_id": "r", "result": {
-            "type": "Fault", "code": "invalid_request", "message": "bad request"}}
+        response = _typed({"type": "Fault", "code": "invalid_request", "message": "bad request",
+                           "fail_direction": "closed"})
         output = io.StringIO()
         with patch.object(lifecycle, "_payload", return_value={}), \
              patch.object(lifecycle, "dispatch_start_run", return_value=response), \
@@ -224,10 +233,9 @@ class HookNativeBehaviorTests(unittest.TestCase):
         from adapters.claude import lifecycle
 
         for code_value in ("run.goal_required", "governance.auto_invocation_required"):
-            response = {"protocol": "empirica/v2", "request_id": "r", "result": {
-                "type": "Block", "converged": False,
-                "reasons": [{"code": code_value, "message": "remedy text"}],
-            }}
+            response = _typed({"type": "Block", "reasons": [{
+                "code": code_value, "parameters": {}, "next_actions": [], "sections": [],
+                "message": "remedy text"}]})
             output = io.StringIO()
             with self.subTest(code=code_value), \
                  patch.object(lifecycle, "_payload", return_value={}), \

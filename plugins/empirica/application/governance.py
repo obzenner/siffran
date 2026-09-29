@@ -59,7 +59,7 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                 decision = payload
                 if "submission" in payload:
                     resolved, reason = policy.resolve_submission(
-                        governed, payload["submission"], _proto._GOVERNANCE_DECISIONS)
+                        governed, payload["submission"], _proto.governance_decisions())
                     if reason:
                         return c._block_from_snapshot(snapshot, rid, reason, presentation=True)
                     decision = {**payload, **resolved}

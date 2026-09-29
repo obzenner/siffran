@@ -11,7 +11,7 @@ preflight confirms a bound audit lifecycle.
 - Every in-scope gating claim is approved from real evidence.
 - Every experiment claim has a current passing spike.
 - Freeze scope, if any, is already committed.
-- The host can obtain `GetArgument`, bind one audit execution, observe its lifecycle,
+- The host can bind and inject `GetArgument`, observe one audit execution,
   and admit its output through private ingress.
 
 If the final condition is false, audit and true convergence are unsupported.
@@ -19,8 +19,8 @@ Ordinary conversation with another model is not a substitute.
 
 ## Procedure
 
-1. Request the current typed audit argument. It binds the goal, graph shape,
-   evidence, frozen/deferred scope, and reviewed claims by digest.
+1. Let the host bind and inject the current typed audit argument. It binds the goal, graph shape,
+   evidence, frozen/deferred scope, and reviewed claims by digest; the author does not fetch it.
 2. On Claude, invoke exactly one canonical plugin-scoped auditor and let its host-owned async
    execution settle the parent turn while pending; never poll or respawn. On Pi, invoke exactly
    one canonical plugin-scoped auditor in foreground mode. Do not submit `child_reserve`:
@@ -68,9 +68,6 @@ replaced by this path. Cancellation is logical, not proof that native execution 
 Audit is a blocker, not a machine approver. It cannot turn a missing research
 record or failing spike green. The deterministic harness exit code remains the
 sole machine authority.
-
-The author never submits `child_event`, `attribution`, or `audit_verdict`. A public
-request resembling one of those payloads must fail closed.
 
 ## Independence reporting
 

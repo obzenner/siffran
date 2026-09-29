@@ -325,8 +325,79 @@ def _render(view: AuthorView) -> str:
     return "\n\n".join(("\n".join(base), *blocks))
 
 
+def _argument_lines(argument: dict[str, Any], safety: TextSafety) -> tuple[str, ...]:
+    """Render the graph projection without private identity or artifact fields."""
+    claims = tuple(
+        f"  {safety.untrusted(row['claim_id'])} kind={row['kind']} "
+        f"gating={'true' if row['gating'] else 'false'} state={row['state']} "
+        f"evidence={'present' if row['active_evidence_ids'] else 'none'}: "
+        f"{safety.untrusted(row['text'])}"
+        for row in argument["claims"]
+    )
+    edges = tuple(
+        f"  {safety.untrusted(row['from'])} -{row['type']}-> {safety.untrusted(row['to'])}"
+        for row in argument["edges"]
+    )
+    citations = tuple(
+        f"  {safety.untrusted(row['citation'])}"
+        for row in argument["artifacts"] if row.get("citation")
+    )
+    audit = argument["audit"]
+    return (
+        f"goal: {safety.untrusted(argument['goal'])}",
+        f"root_claim_id: {safety.untrusted(argument['root_claim_id'])}",
+        "Claims:", *claims,
+        *(("Edges:", *edges) if edges else ()),
+        *(("Citations:", *citations) if citations else ()),
+        f"Audit status: {audit['state']} ({audit['independence']})",
+    )
+
+
+def _trusted_contract_value(value: Any, indent: str = "") -> tuple[str, ...]:
+    """Render trusted mappings and lists recursively as deterministic text."""
+    if isinstance(value, dict):
+        return tuple(
+            line
+            for key, item in value.items()
+            for line in (
+                (f"{indent}{key}:", *_trusted_contract_value(item, indent + "  "))
+                if isinstance(item, (dict, list)) else (f"{indent}{key}: {item}",)
+            )
+        )
+    if isinstance(value, list):
+        return tuple(
+            line
+            for item in value
+            for line in (
+                (f"{indent}-", *_trusted_contract_value(item, indent + "  "))
+                if isinstance(item, (dict, list)) else (f"{indent}- {item}",)
+            )
+        )
+    return (f"{indent}{value}",)
+
+
+def _contract_lines(contract: dict[str, Any]) -> tuple[str, ...]:
+    """Render an index or section trusted contract projection."""
+    if contract["target"] == "index":
+        return tuple(f"{row['id']} — {row['title']}" for row in contract["index"]["sections"])
+    section = contract["section"]
+    return (
+        f"{section['id']} — {section['title']}",
+        *_trusted_contract_value(
+            {"summary": section["summary"], "clauses": section["clauses"]}, "  "
+        ),
+    )
+
+
 def _render_valid(result: dict[str, Any]) -> str:
-    """Render one schema-valid, non-dossier public result."""
+    """Render one schema-valid public result as text."""
+    if "argument" in result:
+        argument = result["argument"]
+        return "Argument\n" + "\n".join(
+            _argument_lines(argument, TextSafety(**argument["untrusted_delimiters"]))
+        )
+    if "contract_result" in result:
+        return "Contract\n" + "\n".join(_contract_lines(result["contract_result"]))
     if result["type"] in {"Allow", "Block"} and "run" in result:
         return _render(_parse(result))
     if result["type"] == "Block":
@@ -340,15 +411,11 @@ def _render_valid(result: dict[str, Any]) -> str:
 
 
 def render_author_view(result: Any, *, strict: bool = False) -> str:
-    """Validate once, then render a public result; invalid input and dossiers use JSON.
+    """Validate once, then render every valid public result as plain text.
 
-    Hosts call this non-strictly so a renderer defect can never break a tool result: it
-    degrades to compact JSON. Tests and golden generation pass ``strict=True`` so any such
-    defect on a schema-valid result raises instead of hiding behind the fallback.
+    Hosts call this non-strictly so invalid input or a renderer defect degrades to compact JSON.
     """
     if not validate_public_result(result):
-        return _fallback(result)
-    if "argument" in result or "contract_result" in result:
         return _fallback(result)
     try:
         return _render_valid(result)

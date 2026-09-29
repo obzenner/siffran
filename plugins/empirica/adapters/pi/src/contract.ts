@@ -2,10 +2,8 @@
 //
 // The canonical contract is contracts/empirica/v2/{request,response}.schema.json.
 // This file is a *reduced projection* of that canonical schema: it models only the
-// outbound command subset the Pi adapter genuinely dispatches (StartRun, ResolveRun,
-// EvaluateRun, RestoreRun) and the minimum inbound result fields the central guard
-// validates. It carries no domain rules, no convergence judgement, and no host
-// policy — those live behind the transport in the host-neutral core (ADR-30/D6-C).
+// outbound commands the Pi adapter dispatches and the minimum inbound result fields
+// the central guard validates.
 //
 // This is NOT the contract; the schema is. If this file drifts, the guard still
 // rejects an invalid response, and the conformance suite still catches a bad
