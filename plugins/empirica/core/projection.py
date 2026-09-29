@@ -180,6 +180,21 @@ def project_presentation(snapshot: EvaluationSnapshot) -> dict:
             "scope": governance.canonical_graph(snapshot.graph)}
 
 
+_STOPPED_CHILD_STATES = frozenset({"launch_rejected", "failed", "cancelled", "timed_out", "orphaned"})
+
+
+def _child_summary(child: Mapping[str, Any], recovery_action: str) -> dict[str, Any]:
+    """Project one child. A stopped child always names its recovery (the schema requires it):
+    ``child.retry`` while the run is active, the terminal guidance once the run is terminal."""
+    row = {"child_id": child["child_id"], "purpose": child["purpose"],
+           "resource_class": child["resource_class"], "state": child["state"]}
+    if child.get("deadline") is not None:
+        row["deadline"] = str(child["deadline"])
+    if child["state"] in _STOPPED_CHILD_STATES:
+        row["recovery_action"] = recovery_action
+    return row
+
+
 def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] | None = None) -> dict[str, Any]:
     derivation = derive_claims_for_projection(snapshot)
     changes, stale = _freshness(derivation)
@@ -192,16 +207,8 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
     terminal_next = _reason_metadata(metadata, "run.terminal")[0] if terminal else None
     obligations = _obligations(snapshot, states, blockers, metadata, stale, terminal_next)
     residuals = _residuals(snapshot, derivation, blockers, metadata, terminal_next)
-    children = []
-    for child in snapshot.state.children:
-        row = {"child_id": child["child_id"], "purpose": child["purpose"],
-               "resource_class": child["resource_class"], "state": child["state"]}
-        if child.get("deadline") is not None:
-            row["deadline"] = str(child["deadline"])
-        if (not terminal
-                and child["state"] in {"launch_rejected", "failed", "cancelled", "timed_out", "orphaned"}):
-            row["recovery_action"] = "child.retry"
-        children.append(row)
+    recovery_action = terminal_next[0] if terminal else "child.retry"
+    children = [_child_summary(child, recovery_action) for child in snapshot.state.children]
     return {
         "id": snapshot.run_id, "goal": snapshot.state.goal,
         "invocation": governance.plain(snapshot.state.invocation), "status": snapshot.state.status,

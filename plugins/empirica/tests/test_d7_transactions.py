@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+import jsonschema  # noqa: E402
 from adapters.audit import child_event  # noqa: E402
 from adapters.git.artifact_repo import ArtifactCollision  # noqa: E402
 from application import protocol  # noqa: E402
@@ -48,6 +49,12 @@ from core.records import (ABSENT, Artifact, Conflict, Corrupt, Present, Revision
 from core.run import OperationalState  # noqa: E402
 from core.governance import initial as initial_governance  # noqa: E402
 from governance_setup import TEST_INVOCATION, AUTHOR, AUDITOR, approve_current  # noqa: E402
+
+# The response schema rooted at its RunView definition (same $id, so shared refs resolve).
+RUN_VIEW = jsonschema.validators.validator_for(protocol._RESPONSE_SCHEMA)(
+    {key: protocol._RESPONSE_SCHEMA[key] for key in ("$schema", "$id", "$defs")}
+    | {"$ref": "#/$defs/runView"},
+    registry=protocol._SCHEMA_REGISTRY)
 
 
 class Runs:
@@ -1104,7 +1111,11 @@ class D7TransactionTests(unittest.TestCase):
                                       before["status"]))
                 for row in projected["residuals"]:
                     self.assertEqual(row["next_actions"], terminal_next)
-                self.assertNotIn("recovery_action", projected["children"][0])
+                # A stopped child still names its recovery (the schema requires it), and a
+                # terminal run's only recovery is the terminal guidance. The whole terminal
+                # RunView must validate, so a projection/schema disagreement cannot hide here.
+                self.assertEqual(projected["children"][0]["recovery_action"], terminal_next[0])
+                RUN_VIEW.validate(projected)
         # stopped_residual and stopped_budget carry a real residual whose mutation guidance is
         # replaced by the terminal guidance, so removing residual suppression fails the test.
         for status, code in (("stopped_residual", "claim.research_missing"),
