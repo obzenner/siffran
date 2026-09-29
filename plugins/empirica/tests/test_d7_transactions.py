@@ -223,6 +223,43 @@ def chain(state: OperationalState, domain=()):
     return replace(state, committed_artifact_head_id=manifest.artifact_id), values + [manifest]
 
 
+def projection_snapshot(*, frozen: bool = False, deferred: bool = False):
+    """Build a production-coordinator snapshot with an unmet claim and optional real freeze.
+
+    ``deferred`` extends the graph after the freeze so projection derives a genuine deferred
+    scope; it is therefore invalid without ``frozen``.
+    """
+    if deferred and not frozen:
+        raise ValueError("deferred scope requires a frozen scope")
+    runs, artifacts_repo, workspace, harness = Runs(), Artifacts(), Workspace(), Harness()
+    coordinator = CoordinatorWithTestInvocation(
+        workspace, harness, runs, artifacts_repo, "pi@0.84.1+pi-subagents@0.50.0", {})
+    started = coordinator.handle(
+        {"type": "StartRun", "selector": {"project": "projection", "session": "base"},
+         "goal": "g"}, "start")
+    run_id = started["result"]["run"]["id"]
+    activate_investigation(coordinator, run_id)
+    root = {"id": "C0", "text": "unmet claim", "gating": True, "kind": "ordinary"}
+    graph = {"root": "C0", "claims": [root], "edges": []}
+    coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                        "action": {"kind": "graph", "payload": graph}}, "graph")
+    activate_investigation(coordinator, run_id)
+    if frozen:
+        coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                            "action": {"kind": "freeze"}}, "freeze")
+    if deferred:
+        graph = {"root": "C0", "claims": [root, {
+            "id": "C1", "text": "deferred claim", "gating": True, "kind": "ordinary",
+        }], "edges": [{"from": "C0", "to": "C1", "type": "SupportedBy"}]}
+        coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                            "action": {"kind": "graph", "payload": graph}}, "extend")
+    key = next(iter(runs.data))
+    state = decode_state(runs.data[key].value)
+    snapshot = coordinator._assemble(
+        key, state, {"type": "GetRun", "run_id": run_id}, require_graph=True)
+    return coordinator, snapshot
+
+
 class D7TransactionTests(unittest.TestCase):
     def test_active_spike_heads_preserve_graph_order_for_freshness(self):
         graph = {"claims": [
@@ -1055,29 +1092,13 @@ class D7TransactionTests(unittest.TestCase):
     def _active_snapshot_with_unmet_claim_and_child(self):
         """An active run with a real unmet ordinary claim (active next=research.record) and a
         recoverable failed child, so terminal suppression has non-trivial guidance to replace."""
-        runs, artifacts_repo, workspace, harness = Runs(), Artifacts(), Workspace(), Harness()
-        coordinator = CoordinatorWithTestInvocation(
-            workspace, harness, runs, artifacts_repo, "pi@0.84.1+pi-subagents@0.50.0", {})
-        started = coordinator.handle(
-            {"type": "StartRun", "selector": {"project": "p", "session": "s"},
-             "goal": "g"}, "start")
-        run_id = started["result"]["run"]["id"]
-        activate_investigation(coordinator, run_id)
-        graph = {"root": "C0", "claims": [
-            {"id": "C0", "text": "unmet claim", "gating": True, "kind": "ordinary"}],
-            "edges": []}
-        coordinator.handle({"type": "ObserveAction", "run_id": run_id,
-                            "action": {"kind": "graph", "payload": graph}}, "g")
-        activate_investigation(coordinator, run_id)
-        key = next(iter(runs.data))
-        state = decode_state(runs.data[key].value)
+        coordinator, snapshot = projection_snapshot()
         child = {"child_id": "child", "purpose": "audit", "role_profile": "auditor",
                  "execution": "foreground", "resource_class": "audit", "state": "failed",
                  "native_id": "native", "deadline": None, "refunded": False,
                  "audit_operation_id": None}
-        snapshot = coordinator._assemble(
-            key, state, {"type": "GetRun", "run_id": run_id}, require_graph=True)
-        return coordinator, replace(snapshot, state=replace(state, children=(child,)))
+        return coordinator, replace(
+            snapshot, state=replace(snapshot.state, children=(child,)))
 
     def test_every_terminal_projection_suppresses_nested_mutation_actions(self):
         _, active_snapshot = self._active_snapshot_with_unmet_claim_and_child()

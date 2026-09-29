@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
@@ -16,6 +17,8 @@ from referencing import Registry, Resource
 from core.canonical import canonical_digest
 from core.evaluation import ContractView
 from .history_records import POLICY_INPUT_KEYS
+
+_LOGGER = logging.getLogger("empirica.protocol")
 
 # Sole internal loader and canonical PublicContract digest.
 
@@ -249,6 +252,26 @@ def validate_trusted_payload(name: str, payload: object) -> bool:
     return True
 
 
+def _deepest(error: jsonschema.ValidationError) -> jsonschema.ValidationError:
+    """Descend through ``oneOf``/``anyOf``/``allOf`` sub-errors to the most informative failure.
+
+    A ``const`` mismatch usually means "a different envelope alternative" (for example
+    ``/result/type``), so it ranks below any other failure; among the rest, deeper wins. This names
+    the field that failed, not the enclosing alternative. It is a diagnostic heuristic only.
+    """
+    while error.context:
+        error = max(error.context,
+                    key=lambda sub: (sub.validator != "const", len(sub.absolute_path)))
+    return error
+
+
+def _validation_pointer(error: jsonschema.ValidationError) -> str:
+    """Return an RFC 6901 pointer without including any instance value."""
+    escaped = (str(part).replace("~", "~0").replace("/", "~1")
+               for part in error.absolute_path)
+    return "/" + "/".join(escaped)
+
+
 def dispatch_request(raw, handler):
     """Validate ``raw``, call ``handler`` once with the valid envelope, validate the
     response, require response request_id == request request_id, and apply the fallback.
@@ -266,12 +289,19 @@ def dispatch_request(raw, handler):
     request_id = raw["request_id"]
     try:
         resp = handler(raw)
-    except Exception:
+    except Exception as exc:
+        _LOGGER.warning("handler exception type=%s", type(exc).__name__)
         return _fault("unavailable", request_id)
     try:
         jsonschema.validators.validator_for(_RESPONSE_SCHEMA)(
             _RESPONSE_SCHEMA, registry=_SCHEMA_REGISTRY).validate(resp)
-    except (jsonschema.ValidationError, TypeError):
+    except jsonschema.ValidationError as exc:
+        failed = _deepest(exc)
+        _LOGGER.warning("response validation failed pointer=%s validator=%s",
+                        _validation_pointer(failed), failed.validator)
+        return _fault("unavailable", request_id)
+    except TypeError:
+        _LOGGER.warning("response validation failed pointer=/ validator=type")
         return _fault("unavailable", request_id)
     if resp.get("request_id") != request_id:
         return _fault("unavailable", request_id)

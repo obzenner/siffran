@@ -534,6 +534,44 @@ class D6StrictProtocolTests(unittest.TestCase):
         self.assertEqual(resp.get("request_id"), "fb-1",
                          "fallback must correlate to the supplied valid request ID")
 
+    def test_response_validation_warning_names_pointer_and_validator_without_value(self):
+        """A malformed response emits structural diagnostics but never its untrusted value."""
+        mod = _import_protocol()
+        env = _valid_request({"type": "GetRun", "run_id": "r1"}, request_id="log-1")
+        secret = "CANARY_UNTRUSTED_AUTHOR_TEXT"
+
+        with self.assertLogs("empirica.protocol", level="WARNING") as captured:
+            response = mod.dispatch_request(env, lambda envelope: {
+                "protocol": _PROTOCOL, "request_id": envelope["request_id"],
+                "result": {"type": "Fault", "code": "unavailable",
+                           "fail_direction": "closed", "message": secret, "extra": secret},
+            })
+
+        self.assertEqual(response["result"]["code"], "unavailable")
+        self.assertEqual(len(captured.records), 1)
+        message = captured.records[0].getMessage()
+        # The failing field inside the matching alternative, not the enclosing envelope oneOf.
+        self.assertEqual(message,
+                         "response validation failed pointer=/result validator=additionalProperties")
+        self.assertNotIn(secret, message)
+
+    def test_handler_exception_warning_names_type_without_value(self):
+        """A handler exception logs only its type and preserves the exact Fault response."""
+        mod = _import_protocol()
+        env = _valid_request({"type": "GetRun", "run_id": "r1"}, request_id="log-2")
+        secret = "CANARY_EXCEPTION_VALUE"
+
+        def failing_handler(_envelope):
+            raise LookupError(secret)
+
+        with self.assertLogs("empirica.protocol", level="WARNING") as captured:
+            response = mod.dispatch_request(env, failing_handler)
+
+        self.assertEqual(response["result"], {
+            "type": "Fault", "code": "unavailable", "fail_direction": "closed"})
+        self.assertEqual(captured.records[0].getMessage(), "handler exception type=LookupError")
+        self.assertNotIn(secret, captured.records[0].getMessage())
+
     def test_malformed_handler_no_recursion(self):
         """The malformed-handler fallback does not recurse: the handler is called exactly
         once even if its response is deeply malformed."""

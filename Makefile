@@ -173,7 +173,8 @@ empirica-git-check: ## Check Git artifact integrity, concurrency, and bounded bo
 	@$(PYTHON) $(EMPIRICA_GIT_IO_BOOTSTRAP_TESTS)
 
 empirica-transaction-check: ## Check transaction/projection invariants (ARGS="-k test_name" selects cases)
-	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_d7_transactions $(ARGS)
+	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q \
+		test_d7_transactions test_projection_conformance $(ARGS)
 
 empirica-core-integration: ## Diagnose governance, persistence, transaction, retry, and v2 behavior
 	@$(MAKE) --no-print-directory empirica-governance-check
