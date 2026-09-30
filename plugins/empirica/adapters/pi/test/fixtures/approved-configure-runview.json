@@ -114,6 +114,10 @@
       "changes": []
     },
     "children": [],
+    "audit": {
+      "state": "required",
+      "independence": "unverified"
+    },
     "next_actions": [
       "investigation.record"
     ],

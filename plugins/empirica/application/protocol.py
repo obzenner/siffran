@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import copy
+import functools
 import json
 import logging
 from pathlib import Path
@@ -33,6 +34,12 @@ _SCHEMA_REGISTRY = Registry().with_resource(
     _PUBLIC_CONTRACT_SCHEMA["$id"], Resource.from_contents(_PUBLIC_CONTRACT_SCHEMA))
 _STATE_SCHEMA = json.loads((_V2 / "state.schema.json").read_text(encoding="utf-8"))
 _HOST_PROFILES = json.loads((_V2 / "host-profiles.json").read_text(encoding="utf-8"))
+# The static contract documents a caller can validate against, with the registry each one needs.
+_SCHEMA_DOCUMENTS = {
+    "request": (_REQUEST_SCHEMA, None),
+    "response": (_RESPONSE_SCHEMA, _SCHEMA_REGISTRY),
+    "state": (_STATE_SCHEMA, None),
+}
 _PROTOCOL = _PUBLIC_CONTRACT["protocol"]
 _STATE_SCHEMA_ID = _STATE_SCHEMA["properties"]["state_schema"]["const"]
 _PROFILES = {p["profile_id"]: p for p in _HOST_PROFILES["profiles"]}
@@ -50,6 +57,8 @@ if (tuple(row["predicate"] for row in _bootstrap["requirements"]) != _BOOTSTRAP_
     raise RuntimeError("unknown or reordered bootstrap contract binding")
 _BOOTSTRAP_REQUIREMENTS = tuple((row["predicate"], row["obligation_id"], row["must"])
                                 for row in _bootstrap["requirements"])
+_AUDIT_OBLIGATION = (_bootstrap["audit_obligation"]["obligation_id"],
+                     _bootstrap["audit_obligation"]["must"])
 _BOOTSTRAP_OPERATIONS = tuple((name, tuple((step["predicate"], step["reason"])
                                            for step in operation["preconditions"]))
                               for name, operation in _bootstrap["operations"].items())
@@ -73,6 +82,7 @@ _DIGEST = canonical_digest(_PUBLIC_CONTRACT)
 CONTRACT_VIEW = ContractView(
     reason_metadata=_REASON_METADATA,
     bootstrap_requirements=_BOOTSTRAP_REQUIREMENTS,
+    audit_obligation=_AUDIT_OBLIGATION,
     bootstrap_operations=_BOOTSTRAP_OPERATIONS,
     governance_controls=_PROJECTION_CONTROLS,
     late_route_must=_LATE_ROUTE_MUST,
@@ -153,12 +163,28 @@ def response_schema_defs() -> dict[str, dict]:
 
 
 
+@functools.cache
+def schema_validator(document: str, definition: str | None = None):
+    """Return the process-wide validator for a contract document, or for one of its ``$defs``.
+
+    The documents are static, so each schema is checked against its metaschema once, here, and the
+    validator is reused. (``jsonschema.validate`` re-checks the schema on every call, which cost
+    about 60 ms per request, state decode and response.)
+    """
+    schema, registry = _SCHEMA_DOCUMENTS[document]
+    if definition is not None:
+        schema = {"$schema": schema.get("$schema", "https://json-schema.org/draft/2020-12/schema"),
+                  "$defs": schema.get("$defs", {}), "$ref": f"#/$defs/{definition}"}
+    cls = jsonschema.validators.validator_for(schema)
+    cls.check_schema(schema)
+    return cls(schema) if registry is None else cls(schema, registry=registry)
+
+
 def validate_public_result(result: object) -> bool:
     """Validate one public result with the canonical v2 response validator."""
     envelope = {"protocol": _PROTOCOL, "request_id": "author-view", "result": result}
     try:
-        jsonschema.validators.validator_for(_RESPONSE_SCHEMA)(
-            _RESPONSE_SCHEMA, registry=_SCHEMA_REGISTRY).validate(envelope)
+        schema_validator("response").validate(envelope)
     except (jsonschema.ValidationError, TypeError):
         return False
     return True
@@ -223,14 +249,8 @@ def validate_private_governance_response(response: object) -> bool:
     are validated here, never on the public wire. A mismatch lets the caller fail closed with
     the same Fault shape ``dispatch_request`` produces.
     """
-    schema = {
-        "$schema": _RESPONSE_SCHEMA.get("$schema", "https://json-schema.org/draft/2020-12/schema"),
-        "$defs": _RESPONSE_SCHEMA.get("$defs", {}),
-        "$ref": "#/$defs/privateGovernanceResponse",
-    }
     try:
-        jsonschema.validators.validator_for(_RESPONSE_SCHEMA)(
-            schema, registry=_SCHEMA_REGISTRY).validate(response)
+        schema_validator("response", "privateGovernanceResponse").validate(response)
     except (jsonschema.ValidationError, TypeError):
         return False
     return True
@@ -238,15 +258,10 @@ def validate_private_governance_response(response: object) -> bool:
 
 def validate_trusted_payload(name: str, payload: object) -> bool:
     """Validate one adapter-private payload against the canonical closed schema."""
-    schema = {
-        "$schema": _REQUEST_SCHEMA.get("$schema", "https://json-schema.org/draft/2020-12/schema"),
-        "$defs": _REQUEST_SCHEMA.get("$defs", {}),
-        "$ref": f"#/$defs/{name}",
-    }
-    if name not in schema["$defs"]:
+    if name not in _REQUEST_SCHEMA.get("$defs", {}):
         return False
     try:
-        jsonschema.validate(instance=payload, schema=schema)
+        schema_validator("request", name).validate(payload)
     except jsonschema.ValidationError:
         return False
     return True
@@ -283,7 +298,7 @@ def dispatch_request(raw, handler):
       ``unavailable``/closed Fault (the accepted D2 code), without recursive validation loops.
     """
     try:
-        jsonschema.validate(instance=raw, schema=_REQUEST_SCHEMA)
+        schema_validator("request").validate(raw)
     except jsonschema.ValidationError:
         return _fault("invalid_request", _safe_request_id(raw))
     request_id = raw["request_id"]
@@ -293,8 +308,7 @@ def dispatch_request(raw, handler):
         _LOGGER.warning("handler exception type=%s", type(exc).__name__)
         return _fault("unavailable", request_id)
     try:
-        jsonschema.validators.validator_for(_RESPONSE_SCHEMA)(
-            _RESPONSE_SCHEMA, registry=_SCHEMA_REGISTRY).validate(resp)
+        schema_validator("response").validate(resp)
     except jsonschema.ValidationError as exc:
         failed = _deepest(exc)
         _LOGGER.warning("response validation failed pointer=%s validator=%s",

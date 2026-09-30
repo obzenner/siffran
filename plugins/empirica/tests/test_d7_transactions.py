@@ -223,8 +223,9 @@ def chain(state: OperationalState, domain=()):
     return replace(state, committed_artifact_head_id=manifest.artifact_id), values + [manifest]
 
 
-def projection_snapshot(*, frozen: bool = False, deferred: bool = False):
-    """Build a production-coordinator snapshot with an unmet claim and optional real freeze.
+def projection_snapshot(*, frozen: bool = False, deferred: bool = False,
+                        approved: bool = False):
+    """Build a production-coordinator snapshot with a claim and optional approval/freeze.
 
     ``deferred`` extends the graph after the freeze so projection derives a genuine deferred
     scope; it is therefore invalid without ``frozen``.
@@ -244,6 +245,13 @@ def projection_snapshot(*, frozen: bool = False, deferred: bool = False):
     coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                         "action": {"kind": "graph", "payload": graph}}, "graph")
     activate_investigation(coordinator, run_id)
+    if approved:
+        coordinator.handle({"type": "ObserveAction", "run_id": run_id, "action": {
+            "kind": "research", "claim_id": "C0", "source_kind": "code",
+            "result": "supports", "payload": {
+                "source_ref": "plugins/empirica/tests/test_d7_transactions.py",
+                "citation": "The projection fixture records real supporting evidence.",
+            }}}, "research")
     if frozen:
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "freeze"}}, "freeze")

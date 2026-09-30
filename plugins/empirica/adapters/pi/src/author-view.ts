@@ -40,8 +40,13 @@ interface Freshness {
   readonly path: Untrusted;
   readonly state: Trusted;
 }
+interface AuditSummary {
+  readonly state: Trusted;
+  readonly independence: Trusted;
+}
 interface AuthorView {
   readonly header: Header;
+  readonly audit: AuditSummary;
   readonly reasons: readonly Reason[];
   readonly obligations: readonly Obligation[];
   readonly satisfied: readonly Trusted[];
@@ -354,7 +359,9 @@ function parse(result: Json): AuthorView {
     path: untrusted(row.path, safety), state: trusted(row.state),
   }));
   return {
-    header, reasons: (result.reasons ?? []).map((row: Json) => reason(row, safety)),
+    header,
+    audit: { state: trusted(run.audit.state), independence: trusted(run.audit.independence) },
+    reasons: (result.reasons ?? []).map((row: Json) => reason(row, safety)),
     obligations, satisfied, residuals, children, freshness,
     nextActions: terminal ? [] : terminalNext,
   };
@@ -389,11 +396,18 @@ function freshnessLines(rows: readonly Freshness[]): readonly string[] {
   return rows.map((row) => `  ${row.path}: ${row.state}`);
 }
 
+/** Render independence only once an audit verdict exists. */
+function auditLine(audit: AuditSummary): string {
+  const suffix = ["passed", "failed"].includes(audit.state) ? ` (${audit.independence})` : "";
+  return `Audit: ${audit.state}${suffix}`;
+}
+
 /** Render a parsed view through one ordered, empty-dropping section table. */
 function render(view: AuthorView): string {
   const base = [
     `${view.header.resultType} ${view.header.status} — ${view.header.governance}`,
     `run_id: ${view.header.runId}`,
+    auditLine(view.audit),
   ].join("\n");
   const sections: readonly [string, readonly string[]][] = [
     ["Reasons:", reasonLines(view.reasons)],

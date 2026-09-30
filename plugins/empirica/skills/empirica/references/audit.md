@@ -34,8 +34,9 @@ Ordinary conversation with another model is not a substitute.
    structured pass/fail verdict.
 5. The host observes child start and first terminal result. It privately records
    lifecycle, attribution, and a verdict only for the bound pending child.
-6. Reread the run. Any changed graph, evidence, or scope invalidates stale audit
-   coverage and requires a new bound audit.
+6. Reread the run. `GetRun` shows `obligation.audit` once every scoped gating claim is approved,
+   including its current blocker and honest next actions. Any changed graph, evidence, or scope
+   invalidates stale audit coverage and requires a new bound audit.
 
 ## Pi invocation shape
 
@@ -78,9 +79,13 @@ Report only what the host observed:
 - `mixed` when covered evidence has more than one producer identity class;
 - `unverified` when any required producer or reviewer identity cannot be established.
 
-Only `distinct` is eligible for convergence. `same_model` means the same identity class; `mixed`
-and `unverified` fail closed. Do not promise independence from role names, prompts, provider tiers,
-requested models, or unknown aliases.
+Only `distinct` is eligible for convergence. `same_model` means the same identity class; spawn a
+new distinct auditor or accept the residual. `unverified` has the same two honest actions. `mixed`
+covered producers cannot be repaired by another auditor or by re-recording research, because all
+current research remains active. Only a spike head is superseded: if the sole differing producer is a
+claim's latest spike, re-running that spike under the research producer clears `mixed`. Otherwise
+accept the residual. All three outcomes fail closed. Do not promise
+independence from role names, prompts, provider tiers, requested models, or unknown aliases.
 
 ## Terminal replay
 

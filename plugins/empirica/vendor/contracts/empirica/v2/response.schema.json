@@ -1125,6 +1125,7 @@
         "id",
         "goal",
         "status",
+        "audit",
         "contract",
         "obligations",
         "residuals",
@@ -1155,6 +1156,9 @@
             "stopped_frozen",
             "stopped_budget"
           ]
+        },
+        "audit": {
+          "$ref": "#/$defs/auditSummary"
         },
         "contract": {
           "$ref": "#/$defs/contractIdentity"
@@ -2319,6 +2323,32 @@
         },
         "sha256": {
           "$ref": "#/$defs/digest256"
+        }
+      }
+    },
+    "auditSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "independence"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "required",
+            "pending",
+            "passed",
+            "failed"
+          ]
+        },
+        "independence": {
+          "enum": [
+            "distinct",
+            "mixed",
+            "same_model",
+            "unverified"
+          ]
         }
       }
     },

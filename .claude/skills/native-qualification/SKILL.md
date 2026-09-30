@@ -24,7 +24,7 @@ authoritative. Use an already prepared supported executable; an out-of-range ins
 **BLOCKED**, not permission to upgrade global tools. Codex Empirica is unsupported for convergence.
 
 Agree with the human on the host, exact candidate checkout, small falsifiable goal and claims,
-initial limits `8/0/1`, modes, host reviewer configuration, host decision timeout, and a fresh
+initial limits `8/0/1`, host reviewer configuration, host decision timeout, and a fresh
 evidence directory **outside the source checkout**. Omit Empirica `--auto` in the primary scenario.
 Choose a non-destructive spike against an existing file; no source edits are needed. Git worktrees
 share durable Git shadow refs: `EMPIRICA_HOME` isolates operational files, not Git storage. Use a
@@ -41,6 +41,9 @@ Before launch:
   reconciliation, not deletion. Record the chosen command and a launch-requested marker before
   sending it. Preserve normal HOME, provider/auth configuration, unrelated plugins, and permissions.
   Set `EMPIRICA_HOME` to the evidence directory's `state` child.
+- Model switches persist: Claude `/model` rewrites `model` in `~/.claude/settings.json`, and Pi
+  `/model` updates `defaultModel`/`defaultProvider` in `~/.pi/agent/settings.json`. Snapshot these
+  settings before the session and restore them during cleanup.
 - Claude needs native MCP form elicitation. The primary checklist verifies settings `env` propagation
   and the entrypoint signal. Configure its reviewer as described in the
   [governance guide](../../../plugins/empirica/skills/empirica/references/governance.md).
@@ -66,7 +69,7 @@ through public tools and never edit operational state. Execute rows in table ord
 |---|---|---|---|---|
 | `settings_env_and_entrypoint` | Before activation | Inspect the retained Claude hook/MCP log, or Pi host context. | Claude settings `env` reaches hooks and MCP; the recorded entrypoint is `cli`. Pi records `ctx.mode=tui\|rpc` with `interactive=true`. | Hook log or host context |
 | `activation_verbatim_goal` | Start | Human invokes Claude `/empirica:empirica <goal>` or Pi `/empirica <goal>`. | User-command expansion, exact verbatim goal, trusted invocation provenance, and fresh run binding. A model-invoked skill/read or ordinary pasted chat does not activate. | RunView and transcript |
-| `configuration_pending` | After route and graph | Route, propose the graph from supplied context, then in the same turn submit `configure_run` with `8/0/1` and modes so the host opens the configuration dialog. Human CANCELS that first dialog. | Human review shows goal read-only and configuration edits only; graph and reviewer fields are absent; the cancellation records a dismissal (presentation count visible), the run stays pending and non-terminal with zero investigation usage, and nothing is approved. | Pending RunView and dialog |
+| `configuration_pending` | After route and graph | Route, propose the graph from supplied context, then in the same turn submit `configure_run` with budgets `8/0/1` so the host opens the configuration dialog. Human CANCELS that first dialog. | Human review shows goal read-only and configuration edits only; graph and reviewer fields are absent; the cancellation records a dismissal (presentation count visible), the run stays pending and non-terminal with zero investigation usage, and nothing is approved. | Pending RunView and dialog |
 | `sentinel_blocked_before_approval` | While configuration is still pending after the dismissal | Attempt one benign, uniquely named write in the evidence directory. | Host blocks before execution; operator-side inspection confirms the file is absent. Unexpected execution is FAIL: preserve evidence and stop. | Denial plus operator file listing |
 | `locked_approval_at_6` | After the sentinel, the author re-proposes `configure_run` to reopen the dialog | Human edits passes `8 → 6` and confirms the host-owned locked summary. | One FINAL CONFIRMATION occurs in the same call, read-only, with no author action between forms. Effective limit is 6 and digest, configuration epoch, and human provenance match. Host decision timeout is read-only, not a total run deadline. | Dialog transcript and RunView |
 | `graph_change_keeps_configuration_approval` | After approval | Amend the claim graph from supplied context. | Configuration approval remains current and no configuration dialog opens. | RunView before/after |

@@ -50,7 +50,7 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:1022d7635d42d050a4f829d0a8a5809fba88d3839a5566d90bfd1a0fd314dbe5"
+REVIEWED_REGISTRY_DIGEST = "sha256:594cdf20d76d2eeb21494629058184e0a52efe3a38aeaed887424602d01a31f8"
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:9b17d44746e8c4e2981d14575a970a5de286c8262fbdf7e5499faf9ad83a17c2"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
@@ -2847,6 +2847,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
 
     # D2A §8/§9 negatives: one mutation each with its own expected diagnostic substring.
     full_rv = {"governance": None, "id": "r", "goal": "g", "status": "active",
+               "audit": {"state": "required", "independence": "unverified"},
                "contract": {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
                "obligations": {"active": [], "deferred": []}, "residuals": [],
                "freshness": {"changes": []}, "children": [], "next_actions": [],

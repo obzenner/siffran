@@ -19,7 +19,7 @@
           "roles",
           "hosts/capabilities"
         ],
-        "digest": "sha256:1022d7635d42d050a4f829d0a8a5809fba88d3839a5566d90bfd1a0fd314dbe5"
+        "digest": "sha256:594cdf20d76d2eeb21494629058184e0a52efe3a38aeaed887424602d01a31f8"
       },
       "obligations": {
         "active": [
@@ -102,6 +102,10 @@
         },
         "prompt_error": null,
         "next_action": "governance.propose"
+      },
+      "audit": {
+        "state": "required",
+        "independence": "unverified"
       }
     },
     "reasons": [
@@ -119,5 +123,5 @@
       }
     ]
   },
-  "text": "Block active — governance: pending; passes/spawns/audits: 3/10 0/5 1/1\nrun_id: run-fx\n\nReasons:\n  governance.approval_unavailable: Host approval UI unavailable/cancelled. Keep pending; use supported UI or start an explicitly auto fresh run.\n    next: host: governance_context; report_convergence intent=stop\n\nOpen obligations:\n  obligation.route: Record routing before investigation.\n  obligation.graph: Propose a valid claim graph from supplied context before requesting review.\n\nNext:\n  empirica_observe kind=route\n  empirica_observe kind=graph"
+  "text": "Block active — governance: pending; passes/spawns/audits: 3/10 0/5 1/1\nrun_id: run-fx\nAudit: required\n\nReasons:\n  governance.approval_unavailable: Host approval UI unavailable/cancelled. Keep pending; use supported UI or start an explicitly auto fresh run.\n    next: host: governance_context; report_convergence intent=stop\n\nOpen obligations:\n  obligation.route: Record routing before investigation.\n  obligation.graph: Propose a valid claim graph from supplied context before requesting review.\n\nNext:\n  empirica_observe kind=route\n  empirica_observe kind=graph"
 }

@@ -19,6 +19,20 @@ FIXTURES = ROOT / "contracts" / "empirica" / "v2" / "fixtures"
 STATE_FIXTURES = ROOT / "contracts" / "empirica" / "v2" / "state-fixtures"
 
 
+def _audit_summary(result: dict, run: dict) -> dict[str, str]:
+    """Derive the bounded RunView audit summary for hand-authored conformance fixtures."""
+    argument_audit = result.get("argument", {}).get("audit", {})
+    state = argument_audit.get("state")
+    if run.get("status") == "converged":
+        return {"state": "passed", "independence": "distinct"}
+    if state not in {"passed", "failed"}:
+        state = ("pending" if any(child.get("resource_class") == "audit"
+                                  and child.get("state") in {"reserved", "launching", "pending"}
+                                  for child in run.get("children", ())) else "required")
+    return {"state": state,
+            "independence": argument_audit.get("independence", "unverified")}
+
+
 def generated(path: Path) -> str:
     document = json.loads(path.read_text(encoding="utf-8"))
     command = document.get("request", {}).get("command", {})
@@ -26,8 +40,11 @@ def generated(path: Path) -> str:
             and not document.get("refused")):
         document["expected"]["result"]["contract_result"] = contract_result(
             command["target"], command.get("section_id"))
-    run = document.get("expected", {}).get("result", {}).get("run", {})
+    result = document.get("expected", {}).get("result", {})
+    run = result.get("run", {})
     governed = run.get("governance") if isinstance(run, dict) else None
+    if isinstance(run, dict) and run:
+        run["audit"] = _audit_summary(result, run)
     if isinstance(run.get("contract"), dict):
         run["contract"]["digest"] = contract_digest()
     if isinstance(governed, dict) and "proposal_digest" in governed:

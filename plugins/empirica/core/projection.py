@@ -8,7 +8,7 @@ from typing import Any
 from . import governance
 
 from .evaluation import (EvaluationSnapshot, HOST_TIER_UNSUPPORTED, active_evidence, audit_blocker,
-                         bootstrap_status,
+                         audit_operation_current, audit_passes, bootstrap_status,
                          claim_blockers, claim_digest, derive_claims,
                          derive_claims_for_projection, digest,
                          effective_scope_ids, independence)
@@ -59,7 +59,7 @@ def _residual(metadata, code: str, parameters: dict[str, Any],
             "next_actions": next_actions, "sections": sections}
 
 
-def _obligations(snapshot: EvaluationSnapshot, states: Mapping[str, str],
+def _obligations(snapshot: EvaluationSnapshot, derivation: Any, states: Mapping[str, str],
                  blockers: tuple[dict[str, Any], ...],
                  metadata: Mapping[str, tuple[tuple[str, ...], tuple[str, ...]]],
                  stale: set[str], terminal_next: list[str] | None = None,
@@ -94,6 +94,15 @@ def _obligations(snapshot: EvaluationSnapshot, states: Mapping[str, str],
             if claim["id"] in deferred:
                 row["hold"] = "deferred"
             active.append(row)
+        if not blockers:
+            blocker = audit_blocker(snapshot, derivation)
+            obligation_id, required = snapshot.audit_obligation
+            missing = (None if blocker is None else {
+                "code": blocker["reason"], "target_claim_id": None,
+                "parameters": blocker["parameters"]})
+            active.append(_obligation(
+                obligation_id, required, [], missing, metadata,
+                "satisfied" if blocker is None else "residual", terminal_next))
     return {"active": active, "deferred": []}
 
 
@@ -205,13 +214,15 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
     bootstrap = bootstrap_status(snapshot)
     terminal = snapshot.state.status != "active"
     terminal_next = _reason_metadata(metadata, "run.terminal")[0] if terminal else None
-    obligations = _obligations(snapshot, states, blockers, metadata, stale, terminal_next)
+    obligations = _obligations(snapshot, derivation, states, blockers, metadata, stale, terminal_next)
     residuals = _residuals(snapshot, derivation, blockers, metadata, terminal_next)
     recovery_action = terminal_next[0] if terminal else "child.retry"
     children = [_child_summary(child, recovery_action) for child in snapshot.state.children]
+    audit = _audit(snapshot)
     return {
         "id": snapshot.run_id, "goal": snapshot.state.goal,
         "invocation": governance.plain(snapshot.state.invocation), "status": snapshot.state.status,
+        "audit": {key: audit[key] for key in ("state", "independence")},
         "governance": project_governance(snapshot),
         "contract": {"id": snapshot.contract_id, "version": snapshot.contract_version,
                      "digest": snapshot.contract_digest,
@@ -229,13 +240,18 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
 
 
 def _audit(snapshot: EvaluationSnapshot) -> dict[str, Any]:
+    """Summarize the audit with the predicates ``audit_blocker`` uses, so the summary line and the
+    audit obligation row cannot disagree: a current pending child wins, and a pass counts only while
+    it is bound to the current argument (a stale pass reads ``failed``, like ``audit.failed``). Only a
+    settled audit reports what it reviewed; a pending re-audit supersedes the previous verdict."""
     audits = [a for a in snapshot.history if a.get("kind") == "audit_verdict"]
-    audit_children = [c for c in snapshot.state.children if c["resource_class"] == "audit"]
-    state = ("passed" if audits and audits[-1]["verdict"] == "pass" else
-             "failed" if audits else
-             "pending" if any(c["state"] in {"reserved", "launching", "pending"}
-                              for c in audit_children) else "required")
-    verdict = audits[-1] if audits else {}
+    pending = any(child["resource_class"] == "audit"
+                  and child["state"] in {"reserved", "launching", "pending"}
+                  and audit_operation_current(snapshot, child)
+                  for child in snapshot.state.children)
+    state = ("pending" if pending else "required" if not audits else
+             "passed" if audit_passes(snapshot, audits[-1]) else "failed")
+    verdict = audits[-1] if state in {"passed", "failed"} else {}
     classification = independence(snapshot, verdict)
     return {"state": state, "independence": classification,
             "reviewed_argument_digest": verdict.get("argument_digest"),

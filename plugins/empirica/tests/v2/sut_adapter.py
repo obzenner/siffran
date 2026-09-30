@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import importlib
 
-import jsonschema
 
 # The v2 application composition seam D6/D7 introduce. Only this module knows these names.
 _V2_SEAM_MODULE = "application.v2"
@@ -169,7 +168,7 @@ class LiveDriver:
     def _validate_trusted_response(self, resp: dict) -> None:
         """Validate a trusted-ingress response against the v2 response schema."""
         import assertions
-        jsonschema.validate(instance=resp, schema=assertions._RESPONSE_SCHEMA)
+        assertions.RESPONSE_VALIDATOR.validate(resp)
 
     def trusted_child_event(self, run_id: str, child_id: str, event: dict) -> dict:
         """Deliver a trusted child event through the private composition ingress.

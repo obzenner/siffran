@@ -25,7 +25,7 @@
             "audit",
             "audit/independence"
           ],
-          "digest": "sha256:1022d7635d42d050a4f829d0a8a5809fba88d3839a5566d90bfd1a0fd314dbe5"
+          "digest": "sha256:594cdf20d76d2eeb21494629058184e0a52efe3a38aeaed887424602d01a31f8"
         },
         "obligations": {
           "active": [],
@@ -55,7 +55,11 @@
           "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
           "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
         },
-        "governance": null
+        "governance": null,
+        "audit": {
+          "state": "passed",
+          "independence": "distinct"
+        }
       },
       "argument": {
         "root_claim_id": "G0",

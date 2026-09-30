@@ -70,6 +70,13 @@ def _author_action_schema() -> dict:
     return {"oneOf": choices}
 
 
+def _checked_validator(schema: dict):
+    """Check one tool input schema against its metaschema once and return its validator."""
+    cls = jsonschema.validators.validator_for(schema)
+    cls.check_schema(schema)
+    return cls(schema)
+
+
 def _project_schemas() -> dict[str, dict]:
     run_id = {
         "type": "string",
@@ -187,6 +194,8 @@ class PublicTools:
         self._govern = govern
         self._artifact = _load_artifact()
         self._schemas = copy.deepcopy(self._artifact["schemas"]["model"])
+        # Built once per server: jsonschema.validate would re-check each schema on every call.
+        self._validators = {name: _checked_validator(schema) for name, schema in self._schemas.items()}
 
     def definitions(self) -> list[dict[str, object]]:
         metadata = self._artifact["definitions"]
@@ -223,7 +232,7 @@ class PublicTools:
         if schema is None:
             return self._error("Unknown public Empirica tool.")
         try:
-            jsonschema.validate(arguments, schema)
+            self._validators[name].validate(arguments)
         except jsonschema.ValidationError as exc:
             return self._error(f"Invalid {name} arguments: {exc.message}")
         assert isinstance(arguments, Mapping)

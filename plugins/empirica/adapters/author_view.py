@@ -91,10 +91,19 @@ class Freshness:
 
 
 @dataclass(frozen=True)
+class AuditSummary:
+    """Contract-owned audit state and host-observed independence classification."""
+
+    state: Trusted
+    independence: Trusted
+
+
+@dataclass(frozen=True)
 class AuthorView:
     """Parsed author view consumed by the declarative renderer."""
 
     header: Header
+    audit: AuditSummary
     reasons: tuple[Reason, ...]
     obligations: tuple[Obligation, ...]
     satisfied: tuple[Trusted, ...]
@@ -294,7 +303,9 @@ def _parse(result: dict[str, Any]) -> AuthorView:
         Freshness(safety.untrusted(row["path"]), Trusted(row["state"]))
         for row in run["freshness"]["changes"])
     return AuthorView(
-        header, tuple(_reason(row, safety) for row in result.get("reasons", [])),
+        header, AuditSummary(Trusted(run["audit"]["state"]),
+                             Trusted(run["audit"]["independence"])),
+        tuple(_reason(row, safety) for row in result.get("reasons", [])),
         obligations, satisfied, residuals, children, freshness,
         () if terminal else terminal_next,
     )
@@ -339,10 +350,16 @@ def _freshness_lines(rows: tuple[Freshness, ...]) -> tuple[str, ...]:
     return tuple(f"  {row.path}: {row.state}" for row in rows)
 
 
+def _audit_line(audit: AuditSummary) -> str:
+    """Render independence only once an audit verdict exists."""
+    suffix = f" ({audit.independence})" if audit.state in {"passed", "failed"} else ""
+    return f"Audit: {audit.state}{suffix}"
+
+
 def _render(view: AuthorView) -> str:
     """Render a parsed view through one ordered, empty-dropping section table."""
     base = (f"{view.header.result_type} {view.header.status} — {view.header.governance}",
-            f"run_id: {view.header.run_id}")
+            f"run_id: {view.header.run_id}", _audit_line(view.audit))
     sections = (
         ("Reasons:", _reason_lines(view.reasons)),
         ("Open obligations:", _obligation_lines(view.obligations)),

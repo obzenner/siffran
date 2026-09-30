@@ -16,6 +16,28 @@ from assertions import (
 
 
 class BlockerProjectionTests(ConformanceCase):
+    def _audit_row(self, run):
+        rows = [row for row in run["obligations"]["active"]
+                if row["id"] == "obligation.audit"]
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0]["required"])
+        return rows[0]
+
+    def _assert_audit_parity(self, drv, run_id, expected):
+        gate = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
+        self.assert_block_reason(gate, expected)
+        reason = gate["result"]["reasons"][0]
+        self.assertEqual(reason["affected"], {"obligation_id": "obligation.audit"})
+        row = self._audit_row(gate["result"]["run"])
+        self.assertEqual(row["status"], "residual")
+        self.assertEqual(row["missing"]["code"], expected)
+        self.assertEqual(row["missing"]["parameters"], reason["parameters"])
+        self.assertEqual(row["next"], reason["next_actions"])
+        stopped = self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))["result"]["run"]
+        terminal = self._audit_row(stopped)
+        self.assertEqual(terminal["missing"]["code"], expected)
+        self.assertEqual(terminal["next"], stopped["next_actions"])
+
     def _stop_and_assert_parity(self, drv, run_id, expected):
         gate = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
         self.assert_block_reason(gate, expected)
@@ -64,6 +86,9 @@ class BlockerProjectionTests(ConformanceCase):
                     self.assert_block_reason(
                         self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence")),
                         "audit.required")
+                    audit = self._audit_row(run)
+                    self.assertEqual(audit["status"], "residual")
+                    self.assertEqual(audit["missing"]["code"], "audit.required")
                     stopped = self.dispatch(
                         drv, evaluate(run_id=run_id, intent="stop"))["result"]["run"]
                     residual_codes = [row["code"] for row in stopped["residuals"]]
@@ -96,6 +121,46 @@ class BlockerProjectionTests(ConformanceCase):
                     drv, evaluate(run_id=run_id, intent="stop"))["result"]["run"]
                 self.assertEqual(stopped["status"], "stopped_residual")
                 self.assertEqual([row["code"] for row in stopped["residuals"]], [expected])
+
+    def test_audit_obligation_pending_failed_identity_and_satisfied(self):
+        for verdict, identity_variant, expected in (
+            (None, None, "audit.pending"),
+            ("fail", "distinct", "audit.failed"),
+            ("pass", "same_model", "audit.same_model"),
+            ("pass", "unverified", "audit.independence_unverified"),
+        ):
+            with self.subTest(expected=expected):
+                drv = self.bind_driver("blocker-projection", expected,
+                                       "Audit obligation shares the convergence blocker")
+                run_id = self.start_run(drv)
+                self.require_audit_scope(drv, run_id)
+                child_id = self.require_pending_audit_child(drv, run_id)
+                if verdict is not None:
+                    self.require_trusted_audit_attribution(
+                        drv, run_id, child_id, variant=identity_variant)
+                    payload = self.build_audit_verdict_payload(
+                        drv, run_id, verdict=verdict, scope_review="pass")
+                    self.assertEqual(
+                        drv.trusted_audit_verdict(run_id, child_id, payload)["result"]["type"],
+                        "Allow")
+                self._assert_audit_parity(drv, run_id, expected)
+
+        drv = self.bind_driver("blocker-projection", "satisfied",
+                               "Distinct current audit satisfies the audit obligation")
+        run_id = self.start_run(drv)
+        self.require_audit_scope(drv, run_id)
+        child_id = self.require_pending_audit_child(drv, run_id)
+        self.require_trusted_audit_attribution(drv, run_id, child_id, variant="distinct")
+        payload = self.build_audit_verdict_payload(
+            drv, run_id, verdict="pass", scope_review="pass")
+        admitted = drv.trusted_audit_verdict(run_id, child_id, payload)["result"]["run"]
+        row = self._audit_row(admitted)
+        self.assertEqual(row["status"], "satisfied")
+        self.assertIsNone(row["missing"])
+        converged = self.dispatch(
+            drv, evaluate(run_id=run_id, intent="report_convergence"))["result"]
+        self.assertTrue(converged["converged"])
+        self.assertEqual(self._audit_row(converged["run"])["status"], "satisfied")
 
     def test_gate_and_terminal_projection_share_every_claim_reason(self):
         cases = []

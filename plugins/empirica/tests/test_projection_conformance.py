@@ -115,6 +115,18 @@ def _governance(base: dict, phase: str, mode: str, budgets: dict) -> dict:
 class ProjectionConformanceTests(unittest.TestCase):
     """Validate 190 pairwise cases (including every status × child-variant pair)."""
 
+    def test_contract_declared_audit_obligation_conforms(self):
+        """The generated projection suite covers the contract-owned audit row."""
+        declaration = protocol.public_contract()["bootstrap"]["audit_obligation"]
+        _, snapshot = projection_snapshot(approved=True)
+        run = project_runview(snapshot)
+        RUN_VIEW.validate(run)
+        rows = [row for row in run["obligations"]["active"]
+                if row["id"] == declaration["obligation_id"]]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["required"], declaration["must"])
+        self.assertEqual(rows[0]["missing"]["code"], "audit.required")
+
     def test_generated_reachable_states_conform(self):
         fixtures = {
             "open": projection_snapshot(),
@@ -165,6 +177,15 @@ class ProjectionConformanceTests(unittest.TestCase):
                     json.dumps(envelope["result"], sort_keys=True, separators=(",", ":"),
                                ensure_ascii=False))
         self.assertEqual(rejected, [])
+
+    def test_safe_block_views_conform(self):
+        """The unreadable-run view is built outside the projection, so validate it separately."""
+        coordinator, snapshot = projection_snapshot()
+        for code in ("run.corrupt",):
+            with self.subTest(code=code):
+                envelope = coordinator._safe_block(snapshot.run_id, "safe-block", code)
+                RESPONSE.validate(envelope)
+                self.assertIn("\nAudit: required\n", render_author_view(envelope["result"], strict=True))
 
 
 if __name__ == "__main__":

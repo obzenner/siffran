@@ -293,6 +293,10 @@
         "must": "Record investigation only after routing and current approval."
       }
     ],
+    "audit_obligation": {
+      "obligation_id": "obligation.audit",
+      "must": "Obtain a current independent audit of every approved gating claim."
+    },
     "actions": {
       "route": {
         "description": "Record the chosen reasoning route before investigation; graph declaration may occur first.",
@@ -1250,12 +1254,13 @@
         "properties": {}
       },
       "next_actions": [
-        "child.spawn_auditor"
+        "child.spawn_auditor",
+        "residual.accept"
       ],
       "sections": [
         "audit/independence"
       ],
-      "message": "Auditor is the same model as covered evidence; spawn a distinct auditor."
+      "message": "Auditor is the same model as covered evidence; spawn a distinct auditor or accept the residual."
     },
     "audit.independence_unverified": {
       "params": {
@@ -1264,12 +1269,13 @@
         "properties": {}
       },
       "next_actions": [
-        "child.spawn_auditor"
+        "child.spawn_auditor",
+        "residual.accept"
       ],
       "sections": [
         "audit/independence"
       ],
-      "message": "Audit independence is unverified; spawn a distinct auditor."
+      "message": "Audit independence is unverified; spawn a distinct auditor or accept the residual."
     },
     "child.terminal": {
       "params": {
@@ -1519,12 +1525,12 @@
         "properties": {}
       },
       "next_actions": [
-        "child.spawn_auditor"
+        "residual.accept"
       ],
       "sections": [
         "audit/independence"
       ],
-      "message": "Covered evidence has mixed producer identities; audit independence fails closed."
+      "message": "Covered evidence has mixed producer identities. Research is never superseded; if the only differing producer is a latest spike, re-run that spike under the research producer, otherwise accept the residual."
     }
   },
   "sections": {

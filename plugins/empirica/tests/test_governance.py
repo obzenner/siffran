@@ -462,7 +462,7 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertEqual(result["type"], "Block")
         self.assertEqual(result["reasons"][0]["code"], "audit.same_model")
 
-    def test_mixed_covered_producers_are_blocked(self):
+    def test_mixed_covered_producers_are_blocked_and_research_does_not_supersede(self):
         from governance_setup import approve_current
         from adapters.audit_protocol import AuditProtocol
         from adapters.identity import observe
@@ -491,6 +491,24 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertEqual(argument["type"], "Allow")
         self.assertEqual(argument["argument"]["audit"]["independence"], "mixed")
         self.assertEqual(result["reasons"][0]["code"], "audit.producers_mixed")
+        audit_row = next(row for row in result["run"]["obligations"]["active"]
+                         if row["id"] == "obligation.audit")
+        self.assertEqual(audit_row["missing"]["code"], "audit.producers_mixed")
+        self.assertEqual(audit_row["next"], result["reasons"][0]["next_actions"])
+
+        # Research artifacts remain active as an accumulated source set. Recording the same
+        # claim again under one producer therefore cannot erase the earlier mixed producer.
+        self.assertIn(self.service.trusted_governance_context(
+            run_id=self.run_id, payload={"author": AUTHOR, "ingress": "pi_ui"})
+            ["result"]["type"], {"Allow", "Inert"})
+        self.assertEqual(self.action(
+            "research", claim_id="C0", source_kind="code", result="supports",
+            payload={"source_ref": "third", "citation": "first observer again"})["type"],
+            "Allow")
+        recovered = self.request({"type": "GetArgument", "run_id": self.run_id})["argument"]
+        claim = next(row for row in recovered["claims"] if row["claim_id"] == "C0")
+        self.assertEqual(len(claim["active_evidence_ids"]), 3)
+        self.assertEqual(recovered["audit"]["independence"], "mixed")
 
     def test_private_bridge_audit_reject_refunds_and_relaunches(self):
         """quality #8: exercise the Pi private bridge audit_prepare -> audit_reject path through the

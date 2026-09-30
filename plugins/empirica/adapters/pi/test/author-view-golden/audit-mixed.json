@@ -1,0 +1,84 @@
+{
+  "result": {
+    "type": "Block",
+    "run": {
+      "id": "run-fx",
+      "goal": "Prove the public contract is internally consistent.",
+      "status": "active",
+      "contract": {
+        "id": "empirica/public",
+        "version": "3.0.0",
+        "relevant_sections": [
+          "audit",
+          "children"
+        ],
+        "digest": "sha256:594cdf20d76d2eeb21494629058184e0a52efe3a38aeaed887424602d01a31f8"
+      },
+      "obligations": {
+        "active": [
+          {
+            "id": "obligation.audit",
+            "required": "Obtain a current independent audit of every approved gating claim.",
+            "observed": [],
+            "status": "residual",
+            "missing": {
+              "code": "audit.producers_mixed",
+              "target_claim_id": null,
+              "parameters": {}
+            },
+            "next": [
+              "residual.accept"
+            ]
+          }
+        ],
+        "deferred": []
+      },
+      "residuals": [],
+      "freshness": {
+        "changes": []
+      },
+      "children": [
+        {
+          "child_id": "ch-audit-1",
+          "purpose": "audit",
+          "resource_class": "audit",
+          "state": "completed"
+        }
+      ],
+      "host": {
+        "profile_id": "claude-code@2.1.278",
+        "tier": "foreground_only",
+        "missing_capabilities": [
+          "host.async_unsupported"
+        ]
+      },
+      "next_actions": [],
+      "untrusted_delimiters": {
+        "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+        "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+      },
+      "governance": null,
+      "audit": {
+        "state": "passed",
+        "independence": "mixed"
+      }
+    },
+    "reasons": [
+      {
+        "code": "audit.producers_mixed",
+        "parameters": {},
+        "message": "Covered evidence has mixed producer identities. Research is never superseded; if the only differing producer is a latest spike, re-run that spike under the research producer, otherwise accept the residual.",
+        "next_actions": [
+          "residual.accept"
+        ],
+        "sections": [
+          "audit/independence"
+        ],
+        "affected": {
+          "obligation_id": "obligation.audit"
+        }
+      }
+    ]
+  },
+  "text": "Block active — no governance\nrun_id: run-fx\nAudit: passed (mixed)\n\nReasons:\n  audit.producers_mixed: Covered evidence has mixed producer identities. Research is never superseded; if the only differing producer is a latest spike, re-run that spike under the research producer, otherwise accept the residual. — affected: obligation.audit\n    next: report_convergence intent=stop\n\nOpen obligations:\n  obligation.audit: Obtain a current independent audit of every approved gating claim.\n    missing: audit.producers_mixed\n    next: report_convergence intent=stop\n\nChildren:\n  audit: completed"
+}

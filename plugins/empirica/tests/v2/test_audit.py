@@ -236,6 +236,12 @@ class AuditTests(ConformanceCase):
             payload={"source_ref": "https://example.test/new-support"})))
         stale = self.dispatch(drv2, evaluate(run_id=run2, intent="report_convergence"))
         self.assert_block_only(stale, ["audit.failed"])
+        # The summary follows the gate: a pass bound to superseded evidence no longer reads passed.
+        self.assertEqual(self.dispatch(drv2, get_run(run_id=run2))["result"]["run"]["audit"]["state"],
+                         "failed")
+        self.assertEqual(
+            self.dispatch(drv2, get_argument(run_id=run2))["result"]["argument"]["audit"]["state"],
+            "failed")
 
     def test_deferred_support_change_preserves_scope_and_stales_old_audit(self):
         drv = self.bind_driver("D7", "seam-4b",
@@ -263,7 +269,18 @@ class AuditTests(ConformanceCase):
         self.assertEqual(rows[expanded["root"]]["state"], "approved")
         self.assertFalse(rows["C1"]["gating"])
         stale = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
-        self.assert_block_only(stale, ["audit.failed"])
+        stale_result = self.assert_block_only(stale, ["audit.failed"])
+        audit_row = next(row for row in stale_result["run"]["obligations"]["active"]
+                         if row["id"] == "obligation.audit")
+        self.assertEqual(audit_row["missing"]["code"], "audit.failed")
+        self.assertEqual(audit_row["missing"]["parameters"],
+                         stale_result["reasons"][0]["parameters"])
+        self.assertEqual(audit_row["next"], stale_result["reasons"][0]["next_actions"])
+        terminal = self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))["result"]["run"]
+        terminal_audit = next(row for row in terminal["obligations"]["active"]
+                              if row["id"] == "obligation.audit")
+        self.assertEqual(terminal_audit["missing"]["code"], "audit.failed")
+        self.assertEqual(terminal_audit["next"], terminal["next_actions"])
 
     # 33 — Independence derived from trusted observed attribution only; reported honestly
     def test_independence_derived_reported_honestly(self):
@@ -386,6 +403,12 @@ class AuditTests(ConformanceCase):
         # prior failed verdict so Claude can settle the parent turn without respawning.
         blocked = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
         self.assert_block_only(blocked, ["audit.pending"])
+        # The pending re-audit supersedes child A's verdict in both views: nothing is reported reviewed.
+        self.assertEqual(self.dispatch(drv, get_run(run_id=run_id))["result"]["run"]["audit"]["state"],
+                         "pending")
+        pending_audit = self.dispatch(drv, get_argument(run_id=run_id))["result"]["argument"]["audit"]
+        self.assertEqual((pending_audit["state"], pending_audit["reviewed_argument_digest"],
+                          pending_audit["reviewed_claims"]), ("pending", None, []))
 
         # Once child B supplies its own exact verdict, its bound identity may satisfy the audit.
         verdict_b = self.build_audit_verdict_payload(

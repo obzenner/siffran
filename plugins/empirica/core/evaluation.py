@@ -55,6 +55,7 @@ def _producer(state: OperationalState) -> dict[str, Any] | None:
 class ContractView:
     reason_metadata: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...]
     bootstrap_requirements: tuple[tuple[str, str, str], ...]
+    audit_obligation: tuple[str, str]
     bootstrap_operations: tuple[tuple[str, tuple[tuple[str, str], ...]], ...]
     governance_controls: Mapping[str, Any]
     late_route_must: str
@@ -95,6 +96,10 @@ class EvaluationSnapshot:
     @property
     def bootstrap_operations(self):
         return self.contract.bootstrap_operations
+
+    @property
+    def audit_obligation(self):
+        return self.contract.audit_obligation
 
     @property
     def reason_metadata(self):
@@ -874,7 +879,7 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
         blocker = audit_blocker(snapshot, derivation)
         if blocker:
             return decide(state, "Block", reason=blocker["reason"],
-                          parameters=blocker["parameters"])
+                          parameters=blocker["parameters"], affected="obligation.audit")
         deferred = [c for c, _ in states if c["id"] not in gating]
         if deferred:
             return decide(replace(state, status="stopped_frozen"))

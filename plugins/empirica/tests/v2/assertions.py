@@ -68,6 +68,17 @@ _HOST_PROFILES = _load_json("host-profiles.json")
 _REQUEST_SCHEMA = _load_json("request.schema.json")
 _RESPONSE_SCHEMA = _load_json("response.schema.json")
 
+
+def _checked_validator(schema: dict):
+    """Check a static schema against its metaschema once; ``jsonschema.validate`` re-checks per call."""
+    cls = jsonschema.validators.validator_for(schema)
+    cls.check_schema(schema)
+    return cls(schema)
+
+
+REQUEST_VALIDATOR = _checked_validator(_REQUEST_SCHEMA)
+RESPONSE_VALIDATOR = _checked_validator(_RESPONSE_SCHEMA)
+
 # Canonical protocol/contract identity DERIVED from the registry (SSOT), never copied as constants.
 _PROTOCOL = _PUBLIC_CONTRACT["protocol"]
 _CONTRACT_ID = _PUBLIC_CONTRACT["id"]
@@ -529,10 +540,10 @@ class ConformanceCase(unittest.TestCase):
     # ---- schema validation -------------------------------------------------
 
     def assert_valid_request(self, envelope: dict) -> None:
-        jsonschema.validate(instance=envelope, schema=_REQUEST_SCHEMA)
+        REQUEST_VALIDATOR.validate(envelope)
 
     def assert_valid_response(self, resp: dict) -> None:
-        jsonschema.validate(instance=resp, schema=_RESPONSE_SCHEMA)
+        RESPONSE_VALIDATOR.validate(resp)
 
     def assert_protocol_identity(self, env: dict, request_id: str) -> None:
         self.assertEqual(env.get("protocol"), _PROTOCOL, "protocol must be empirica/v2")

@@ -17,7 +17,6 @@ from core.run import OperationalState
 from core.governance import invariant
 from . import protocol as _proto
 
-_STATE_SCHEMA = dict(_proto.state_schema())
 _PROTOCOL = _proto.protocol_id()
 _STATE_SCHEMA_ID = _proto.state_schema_id()
 _AUDIT_DOSSIER = jsonschema.Draft202012Validator(
@@ -135,7 +134,7 @@ def classify_and_decode(raw: Any) -> Classification:
             or raw.get("state_schema") != _STATE_SCHEMA_ID):
         return Classification("current_corrupt")
     try:
-        jsonschema.validate(instance=raw, schema=_STATE_SCHEMA)
+        _proto.schema_validator("state").validate(raw)
     except jsonschema.ValidationError:
         return Classification("current_corrupt")
     if not _procedural_ok(raw):

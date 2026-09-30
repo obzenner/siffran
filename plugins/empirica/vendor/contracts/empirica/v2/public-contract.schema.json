@@ -391,6 +391,7 @@
       "additionalProperties": false,
       "required": [
         "requirements",
+        "audit_obligation",
         "operations",
         "actions",
         "tools",
@@ -400,6 +401,23 @@
         "late_route_must": {
           "type": "string",
           "minLength": 1
+        },
+        "audit_obligation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "obligation_id",
+            "must"
+          ],
+          "properties": {
+            "obligation_id": {
+              "const": "obligation.audit"
+            },
+            "must": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
         },
         "requirements": {
           "type": "array",

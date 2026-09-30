@@ -146,6 +146,15 @@ test("contract results require the full closed schema shape", () => {
   assert.deepEqual(JSON.parse(renderAuthorView(malformed, { strict: true })), malformed);
 });
 
+test("mixed audit summary and obligation are byte-identical", () => {
+  const golden = JSON.parse(readFileSync(path.join(GOLDEN_DIR, "audit-mixed.json"), "utf8"));
+  const rendered = renderAuthorView(golden.result, { strict: true });
+  assert.equal(rendered, golden.text);
+  assert.ok(rendered.includes("\nAudit: passed (mixed)\n"));
+  assert.ok(rendered.includes("\n  obligation.audit: "));
+  assert.ok(rendered.includes("\n    missing: audit.producers_mixed\n"));
+});
+
 // Verify every golden fixture is covered
 test("author-view golden: all files covered", () => {
   assert.ok(files.length >= 15, `expected at least 15 golden fixtures, got ${files.length}`);

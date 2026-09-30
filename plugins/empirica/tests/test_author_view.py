@@ -242,6 +242,16 @@ class DelimiterTests(unittest.TestCase):
 class ContentCompletenessTests(unittest.TestCase):
     """Every directive/reason/open obligation in the JSON appears in the text."""
 
+    def test_audit_summary_line_appears_on_every_run_view(self):
+        """GetRun, Allow, and Block views render the shared audit summary (a start refusal has no run)."""
+        views = {name: result for name in RUNVIEW_FIXTURES
+                 if "run" in (result := _load_fixture(name))}
+        self.assertIn("block-pending-audit", views)
+        for name, result in views.items():
+            audit = result["run"]["audit"]
+            suffix = f" ({audit['independence']})" if audit["state"] in {"passed", "failed"} else ""
+            self.assertIn(f"\nAudit: {audit['state']}{suffix}\n", render_author_view(result), name)
+
     def test_every_reason_code_and_message_appears(self):
         for name in RUNVIEW_FIXTURES:
             result = _load_fixture(name)

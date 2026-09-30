@@ -20,7 +20,7 @@
           "roles",
           "hosts/capabilities"
         ],
-        "digest": "sha256:1022d7635d42d050a4f829d0a8a5809fba88d3839a5566d90bfd1a0fd314dbe5"
+        "digest": "sha256:594cdf20d76d2eeb21494629058184e0a52efe3a38aeaed887424602d01a31f8"
       },
       "obligations": {
         "active": [
@@ -117,8 +117,12 @@
         },
         "prompt_error": null,
         "next_action": "governance.propose"
+      },
+      "audit": {
+        "state": "required",
+        "independence": "unverified"
       }
     }
   },
-  "text": "Allow (converged=false) active — governance: pending; passes/spawns/audits: 3/10 0/5 1/1\nrun_id: run-fx\n\nOpen obligations:\n  obligation.route: Record routing before investigation.\n  obligation.graph: Propose a valid claim graph from supplied context before requesting review.\n\nNext:\n  host: StartRun\n  empirica_observe kind=graph\n  empirica_read GetRun\n  empirica_observe kind=route\n  empirica_observe kind=investigate\n  empirica_observe kind=research\n  empirica_observe kind=spike_request\n  empirica_observe kind=spike_request\n  human: decision\n  empirica_observe kind=configure_run\n  host: child_reserve\n  host: child_event\n  host: child_reserve\n  report_convergence intent=stop\n  host: governance_context\n  empirica_observe kind=configure_run"
+  "text": "Allow (converged=false) active — governance: pending; passes/spawns/audits: 3/10 0/5 1/1\nrun_id: run-fx\nAudit: required\n\nOpen obligations:\n  obligation.route: Record routing before investigation.\n  obligation.graph: Propose a valid claim graph from supplied context before requesting review.\n\nNext:\n  host: StartRun\n  empirica_observe kind=graph\n  empirica_read GetRun\n  empirica_observe kind=route\n  empirica_observe kind=investigate\n  empirica_observe kind=research\n  empirica_observe kind=spike_request\n  empirica_observe kind=spike_request\n  human: decision\n  empirica_observe kind=configure_run\n  host: child_reserve\n  host: child_event\n  host: child_reserve\n  report_convergence intent=stop\n  host: governance_context\n  empirica_observe kind=configure_run"
 }
