@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 import unittest
 
@@ -27,6 +28,18 @@ class IdentityPolicyTests(unittest.TestCase):
         self.assertTrue(found)
         self.assertEqual(set(found), {POLICY_VERSION})
 
+    def test_every_pinned_pi_thinking_level_is_normalized(self):
+        """The identity policy strips each level pinned pi-subagents may append (P1-D1)."""
+        source = (Path(__file__).resolve().parents[3] / "node_modules" / "pi-subagents" / "src" / "shared"
+                  / "model-info.ts")
+        if not source.exists():
+            self.skipTest("pi-subagents is not installed (make node_modules)")
+        levels = re.search(r"THINKING_LEVELS = \[([^\]]*)\]", source.read_text()).group(1)
+        for level in re.findall(r'"([a-z]+)"', levels):
+            with self.subTest(level=level):
+                self.assertEqual(observe("amazon-bedrock-us", f"us.openai.gpt-5.6-sol:{level}",
+                                         source="test")["identity"], "openai/gpt-5.6-sol")
+
     def test_equivalent_deployment_spellings_share_classes(self):
         rows = [
             (("anthropic", "claude-opus-4-8"), "anthropic/claude-opus-4-8"),
@@ -36,6 +49,9 @@ class IdentityPolicyTests(unittest.TestCase):
             (("amazon-bedrock-eu", "eu.anthropic.claude-haiku-4-5-20251001-v1:0"),
              "anthropic/claude-haiku-4-5-20251001"),
             (("amazon-bedrock-us", "us.openai.gpt-6-astra:high"), "openai/gpt-6-astra"),
+            (("amazon-bedrock-us", "us.openai.gpt-5.6-sol:off"), "openai/gpt-5.6-sol"),
+            (("amazon-bedrock-us", "us.openai.gpt-5.6-sol:minimal"), "openai/gpt-5.6-sol"),
+            (("amazon-bedrock-us", "us.openai.gpt-5.6-sol:max"), "openai/gpt-5.6-sol"),
             (("openai", "gpt-6-astra"), "openai/gpt-6-astra"),
             (("anthropic", "Claude-Opus-4-8 [1m]"), "anthropic/claude-opus-4-8"),
         ]

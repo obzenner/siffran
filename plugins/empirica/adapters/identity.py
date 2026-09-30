@@ -28,7 +28,8 @@ _GEO = re.compile(
     r"^(?:af|ap|apac|asia|au|ca|eu|europe|global|in|jp|kr|me|sa|uk|us)(?:-[a-z0-9]+)?\.",
     re.IGNORECASE,
 )
-_THINKING = re.compile(r":(?:low|medium|high|xhigh)$", re.IGNORECASE)
+# Every thinking level a host may append to a model spelling (Pi: off|minimal|low|medium|high|xhigh|max).
+_THINKING = re.compile(r":(?:off|minimal|low|medium|high|xhigh|max)$", re.IGNORECASE)
 _CLAUDE_DURATION = re.compile(r"\s*\[\d+m\]$", re.IGNORECASE)
 _BEDROCK_VERSION = re.compile(r"-v\d+(?::\d+)?$", re.IGNORECASE)
 _CONCRETE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")

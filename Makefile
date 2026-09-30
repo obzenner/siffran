@@ -339,8 +339,8 @@ pi-validator-unit-check: ## Test Pi validator test selection and bounded async t
 empirica-pi-auditor-resolution: node_modules ## Report the effective Pi auditor file for DIR (default: here); STRICT=1 fails when shadowed
 	@node $(SCRIPTS)/pi_auditor_resolution.mjs --project "$(or $(DIR),$(CURDIR))" $(if $(filter 1,$(STRICT)),--require-candidate)
 
-pi-auditor-resolution-unit-check: node_modules ## Test the Pi auditor-resolution probe in an isolated HOME (includes a shadowing negative control)
-	@node --test $(SCRIPTS)/tests/pi_auditor_resolution.test.mjs
+pi-auditor-resolution-unit-check: node_modules ## Test the Pi auditor resolution and real preflight admission in an isolated HOME (includes negative controls)
+	@node --test $(SCRIPTS)/tests/pi_auditor_resolution.test.mjs $(SCRIPTS)/tests/pi_auditor_preflight.test.mjs
 
 .PHONY: empirica-codex-check
 empirica-codex-check: ## Validate the Empirica Codex manifest, hooks, and package layout (no host execution)

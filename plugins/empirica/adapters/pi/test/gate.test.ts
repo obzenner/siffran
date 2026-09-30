@@ -10,6 +10,7 @@ import { PROTOCOL, type Request, type Response, type Result } from "../src/contr
 import { REPORT_CONVERGENCE_TOOL, SUBAGENT_TOOL } from "../src/translate.ts";
 import {
   createEmpiricaExtension, DEFAULT_SKILLS_DIR, defaultAuditContractResolver, resolvePiAuditorModel,
+  withoutThinkingLevel,
 } from "../src/index.ts";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -58,6 +59,50 @@ test("production Pi auditor resolver tries project then user scope", async () =>
   );
   assert.deepEqual(scopes, ["project", "user"]);
   assert.equal(resolved.agentScope, "user");
+});
+
+// P1-D1 (native Pi qualification): preflight appends the auditor file's `thinking` level to the candidate.
+function suffixedResolver(candidate: string | string[], configured = "audit/model") {
+  const candidates = typeof candidate === "string" ? [candidate] : candidate;
+  const expectedAgent = resolve(DEFAULT_SKILLS_DIR, "..", "agents", "pi", "empirica-auditor.md");
+  const ctx = fakeCtx("/work");
+  ctx.model = { provider: "main", id: "model" };
+  ctx.modelRegistry = { getAvailable: () => [{ provider: "audit", id: "model" }] };
+  return defaultAuditContractResolver(
+    { agent: "empirica.empirica-auditor", task: "audit", expectedAgent }, ctx,
+    {
+      settings: {
+        getAgentDir: () => "/agent",
+        SettingsManager: { create: () => ({
+          getGlobalSettings: () => ({ subagents: { defaultModel: configured } }),
+          getProjectSettings: () => ({}),
+        }) },
+      },
+      preflight: { resolveSubagentLaunchContract: async () => ({ ok: true, contract: {
+        agent: { filePath: expectedAgent }, model: candidates[0], modelCandidates: candidates,
+      } }) },
+    },
+  );
+}
+
+test("production Pi auditor resolver accepts the configured model with the agent's thinking level", async () => {
+  assert.equal((await suffixedResolver("audit/model:high")).model, "audit/model");
+});
+
+test("production Pi auditor resolver keeps a configured thinking level for the launch", async () => {
+  assert.equal((await suffixedResolver("audit/model:max", "audit/model:max")).model, "audit/model:max");
+  assert.equal((await suffixedResolver("audit/model:high", "audit/model:max")).model, "audit/model:max");
+});
+
+test("production Pi auditor resolver still refuses any substituted model carrying a thinking level", async () => {
+  for (const candidates of [["other/model:high"], ["audit/other:high"], ["fallback/model:high", "audit/model:high"]])
+    await assert.rejects(suffixedResolver(candidates), /substituted by preflight/, candidates.join(","));
+  await assert.rejects(suffixedResolver("audit/other:max", "audit/model:max"), /substituted by preflight/);
+});
+
+test("withoutThinkingLevel strips only a known thinking level", () => {
+  assert.deepEqual(["a/b:high", "a/b:max", "a/b", "a/b:v1:0", "a/b:v1:0:low"].map(withoutThinkingLevel),
+                   ["a/b", "a/b", "a/b", "a/b:v1:0", "a/b:v1:0"]);
 });
 
 test("production Pi auditor resolver blocks a registry-unavailable configured model", async () => {

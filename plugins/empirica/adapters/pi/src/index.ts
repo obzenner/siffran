@@ -130,6 +130,15 @@ export type AuditContractResolver = (
   input: Record<string, unknown>, ctx: ExtensionContext,
 ) => Promise<ResolvedAuditContract>;
 
+/** Thinking levels pi-subagents may append to a launch model as ``:<level>`` (its ``THINKING_LEVELS``). */
+const THINKING_LEVELS: ReadonlySet<string> = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+
+/** The model a launch candidate names, without the thinking level the agent file contributed. */
+export function withoutThinkingLevel(model: string): string {
+  const colon = model.lastIndexOf(":");
+  return colon >= 0 && THINKING_LEVELS.has(model.slice(colon + 1)) ? model.slice(0, colon) : model;
+}
+
 export function resolvePiAuditorModel(global: Record<string, unknown>, project: Record<string, unknown>,
                                        main?: string): string {
   const configured = (scope: Record<string, unknown>, key: "override" | "default"): string | undefined => {
@@ -178,10 +187,14 @@ export async function defaultAuditContractResolver(
       availableModels: ctx.modelRegistry?.getAvailable(),
     });
     if (!result.ok || canonicalPath(result.contract.agent.filePath) !== canonicalPath(expectedAgent)) continue;
+    // The packaged auditor declares a thinking level, which preflight appends to the candidate; only
+    // the model identity must match the configured one.
     const resolvedModel = result.contract.modelCandidates[0] ?? result.contract.model;
-    if (resolvedModel !== model) throw new Error("configured auditor model was substituted by preflight");
+    const identity = withoutThinkingLevel(model);
+    if (resolvedModel === undefined || withoutThinkingLevel(resolvedModel) !== identity)
+      throw new Error("configured auditor model was substituted by preflight");
     const available = ctx.modelRegistry?.getAvailable() ?? [];
-    if (!available.some((item) => `${item.provider}/${item.id}` === model || item.fullId === model))
+    if (!available.some((item) => `${item.provider}/${item.id}` === identity || item.fullId === identity))
       throw new Error(`configured auditor model is unavailable: ${model}`);
     return { agentFilePath: result.contract.agent.filePath, model, agentScope };
   }
