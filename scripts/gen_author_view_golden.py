@@ -70,7 +70,7 @@ def _synthetic_results() -> list[tuple[str, object]]:
                            "public-contract.json").read_text())
     mixed_metadata = contract["reasons"]["audit.producers_mixed"]
     audit_mixed = copy.deepcopy(pending)
-    audit_mixed["run"]["audit"] = {"state": "passed", "independence": "mixed"}
+    audit_mixed["run"]["audit"] = {"state": "passed", "independence": "mixed", "findings": []}
     audit_mixed["run"]["children"][0] = {
         key: value for key, value in audit_mixed["run"]["children"][0].items()
         if key != "deadline"
@@ -116,9 +116,27 @@ def _synthetic_results() -> list[tuple[str, object]]:
     deferred["argument"]["edges"].append(
         {"from": "G0", "to": "C-deferred", "type": "SupportedBy"})
 
+    # A failed audit shows its findings, fenced, under the Audit line (P1c: the Pi author never saw them).
+    failed_metadata = contract["reasons"]["audit.failed"]
+    audit_failed = copy.deepcopy(audit_mixed)
+    audit_failed["run"]["audit"] = {"state": "failed", "independence": "distinct", "findings": [
+        "C4's research does not support that the checker fails on a dangling reference.",
+        hostile_text]}
+    audit_failed["reasons"] = [{"code": "audit.failed", "parameters": {},
+                                "message": failed_metadata["message"],
+                                "next_actions": failed_metadata["next_actions"],
+                                "sections": failed_metadata["sections"],
+                                "affected": {"obligation_id": "obligation.audit"}}]
+    for row in audit_failed["run"]["obligations"]["active"]:
+        if row["id"] == audit_row["id"]:
+            row.update(status="violated", missing={"code": "audit.failed", "target_claim_id": None,
+                                                  "parameters": {}},
+                       next=list(failed_metadata["next_actions"]))
+
     return [
         ("audit-stale-scope", audit_stale),
         ("audit-mixed", audit_mixed),
+        ("audit-failed-findings", audit_failed),
         ("hostile-author-strings", hostile),
         ("fault-no-message", json.loads((FIXTURES / "getcontract-full.json").read_text())
          ["expected"]["result"]),

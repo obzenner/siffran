@@ -749,7 +749,7 @@ class Coordinator:
             "obligations": {"active": [], "deferred": []}, "residuals": [],
             "freshness": {"changes": []}, "children": [], "next_actions": [],
             # Nothing about an unreadable run is known, so no audit can be claimed for it.
-            "audit": {"state": "required", "independence": "unverified"},
+            "audit": {"state": "required", "independence": "unverified", "findings": []},
             "untrusted_delimiters": dict(_proto.untrusted_delimiters()),
             "host": {"profile_id": self.profile_id, "tier": profile["current_tier"],
                      "missing_capabilities": list(profile["unsupported_reason_ids"])},

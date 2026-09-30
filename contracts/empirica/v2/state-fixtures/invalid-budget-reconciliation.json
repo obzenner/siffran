@@ -71,7 +71,8 @@
           "reviewed_goal_digest": null,
           "reviewed_frozen_scope_digest": null,
           "reviewed_deferred_scope_digest": null,
-          "reviewed_claims": []
+          "reviewed_claims": [],
+          "findings": []
         }
       },
       "audit_role_profile": "empirica:empirica-auditor"

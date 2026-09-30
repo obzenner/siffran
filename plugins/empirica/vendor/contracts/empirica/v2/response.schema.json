@@ -2331,7 +2331,8 @@
       "additionalProperties": false,
       "required": [
         "state",
-        "independence"
+        "independence",
+        "findings"
       ],
       "properties": {
         "state": {
@@ -2349,8 +2350,41 @@
             "same_model",
             "unverified"
           ]
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Findings of a failed verdict; empty otherwise, including a stale pass."
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "required",
+                  "pending",
+                  "passed"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "findings": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
     },
     "auditView": {
       "type": "object",
@@ -2362,7 +2396,8 @@
         "reviewed_goal_digest",
         "reviewed_frozen_scope_digest",
         "reviewed_deferred_scope_digest",
-        "reviewed_claims"
+        "reviewed_claims",
+        "findings"
       ],
       "properties": {
         "state": {
@@ -2401,6 +2436,14 @@
             "$ref": "#/$defs/reviewedClaimItem"
           },
           "uniqueItems": true
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Findings of the latest settled verdict, while it still matches the audit state; empty for a stale pass or while a re-audit is pending."
         }
       },
       "allOf": [
@@ -2435,6 +2478,9 @@
               },
               "reviewed_claims": {
                 "maxItems": 0
+              },
+              "findings": {
+                "maxItems": 0
               }
             },
             "required": [
@@ -2442,7 +2488,8 @@
               "reviewed_goal_digest",
               "reviewed_frozen_scope_digest",
               "reviewed_deferred_scope_digest",
-              "reviewed_claims"
+              "reviewed_claims",
+              "findings"
             ]
           }
         },

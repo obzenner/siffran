@@ -88,7 +88,7 @@ class StaleAuditRetryTests(unittest.TestCase):
 
     def verdict(self):
         self.coordinator.handle({"type": "GetArgument", "run_id": self.run_id}, "argument")
-        return {"verdict": "pass", **audit_binding(self.coordinator.last_snapshot)}
+        return {"verdict": "pass", "findings": [], **audit_binding(self.coordinator.last_snapshot)}
 
     def test_current_pending_is_not_replaced_or_charged(self):
         self.pending()

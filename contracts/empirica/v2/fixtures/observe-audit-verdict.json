@@ -48,7 +48,7 @@
             "audit",
             "audit/independence"
           ],
-          "digest": "sha256:594cdf20d76d2eeb21494629058184e0a52efe3a38aeaed887424602d01a31f8"
+          "digest": "sha256:bd03b3d979f9ec83716ac22961c12f28977d8437e640e27ef984b98fff64adfb"
         },
         "obligations": {
           "active": [],
@@ -81,7 +81,8 @@
         "governance": null,
         "audit": {
           "state": "passed",
-          "independence": "distinct"
+          "independence": "distinct",
+          "findings": []
         }
       },
       "argument": {
@@ -187,7 +188,8 @@
               "claim_id": "G0",
               "evidence_digest": "sha256:19bb853825d02234b33f1bc5a6eec6d6486a22b7af28669447c8aaaf9ec78756"
             }
-          ]
+          ],
+          "findings": []
         }
       }
     }

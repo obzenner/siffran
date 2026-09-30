@@ -19,18 +19,22 @@ FIXTURES = ROOT / "contracts" / "empirica" / "v2" / "fixtures"
 STATE_FIXTURES = ROOT / "contracts" / "empirica" / "v2" / "state-fixtures"
 
 
-def _audit_summary(result: dict, run: dict) -> dict[str, str]:
-    """Derive the bounded RunView audit summary for hand-authored conformance fixtures."""
+def _audit_summary(result: dict, run: dict) -> dict[str, object]:
+    """Derive the bounded RunView audit summary for hand-authored conformance fixtures.
+
+    Like the projection, only a failed audit carries its findings into the RunView.
+    """
     argument_audit = result.get("argument", {}).get("audit", {})
     state = argument_audit.get("state")
     if run.get("status") == "converged":
-        return {"state": "passed", "independence": "distinct"}
+        return {"state": "passed", "independence": "distinct", "findings": []}
     if state not in {"passed", "failed"}:
         state = ("pending" if any(child.get("resource_class") == "audit"
                                   and child.get("state") in {"reserved", "launching", "pending"}
                                   for child in run.get("children", ())) else "required")
     return {"state": state,
-            "independence": argument_audit.get("independence", "unverified")}
+            "independence": argument_audit.get("independence", "unverified"),
+            "findings": list(argument_audit.get("findings", [])) if state == "failed" else []}
 
 
 def generated(path: Path) -> str:
@@ -43,6 +47,15 @@ def generated(path: Path) -> str:
     result = document.get("expected", {}).get("result", {})
     run = result.get("run", {})
     governed = run.get("governance") if isinstance(run, dict) else None
+    for child in document.get("children", ()):
+        dossier = child.get("audit_argument") if isinstance(child, dict) else None
+        if isinstance(dossier, dict) and isinstance(dossier.get("audit"), dict):
+            # Persisted audit dossiers are argument views, so they carry findings too.
+            dossier["audit"].setdefault("findings", [])
+    argument_audit = result.get("argument", {}).get("audit") if isinstance(result, dict) else None
+    if isinstance(argument_audit, dict):
+        # Hand-authored argument fixtures record no verdict findings unless they say so.
+        argument_audit.setdefault("findings", [])
     if isinstance(run, dict) and run:
         run["audit"] = _audit_summary(result, run)
     if isinstance(run.get("contract"), dict):

@@ -43,6 +43,7 @@ interface Freshness {
 interface AuditSummary {
   readonly state: Trusted;
   readonly independence: Trusted;
+  readonly findings: readonly Untrusted[];
 }
 interface AuthorView {
   readonly header: Header;
@@ -360,7 +361,10 @@ function parse(result: Json): AuthorView {
   }));
   return {
     header,
-    audit: { state: trusted(run.audit.state), independence: trusted(run.audit.independence) },
+    audit: {
+      state: trusted(run.audit.state), independence: trusted(run.audit.independence),
+      findings: (run.audit.findings as unknown[]).map((item) => untrusted(item, safety)),
+    },
     reasons: (result.reasons ?? []).map((row: Json) => reason(row, safety)),
     obligations, satisfied, residuals, children, freshness,
     nextActions: terminal ? [] : terminalNext,
@@ -397,9 +401,9 @@ function freshnessLines(rows: readonly Freshness[]): readonly string[] {
 }
 
 /** Render independence only once an audit verdict exists. */
-function auditLine(audit: AuditSummary): string {
+function auditLines(audit: AuditSummary): string[] {
   const suffix = ["passed", "failed"].includes(audit.state) ? ` (${audit.independence})` : "";
-  return `Audit: ${audit.state}${suffix}`;
+  return [`Audit: ${audit.state}${suffix}`, ...audit.findings.map((item) => `  finding: ${item}`)];
 }
 
 /** Render a parsed view through one ordered, empty-dropping section table. */
@@ -407,7 +411,7 @@ function render(view: AuthorView): string {
   const base = [
     `${view.header.resultType} ${view.header.status} — ${view.header.governance}`,
     `run_id: ${view.header.runId}`,
-    auditLine(view.audit),
+    ...auditLines(view.audit),
   ].join("\n");
   const sections: readonly [string, readonly string[]][] = [
     ["Reasons:", reasonLines(view.reasons)],
@@ -439,6 +443,7 @@ function argumentLines(argument: Json, safety: TextSafety): readonly string[] {
     ...(edges.length ? ["Edges:", ...edges] : []),
     ...(citations.length ? ["Citations:", ...citations] : []),
     `Audit status: ${argument.audit.state} (${argument.audit.independence})`,
+    ...(argument.audit.findings as unknown[]).map((item) => `  finding: ${untrusted(item, safety)}`),
   ];
 }
 

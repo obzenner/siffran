@@ -1216,7 +1216,7 @@
       "sections": [
         "audit"
       ],
-      "message": "Audit failed; inspect or retry."
+      "message": "Audit failed or its coverage went stale; address any findings listed under Audit, then retry."
     },
     "audit.stale": {
       "params": {

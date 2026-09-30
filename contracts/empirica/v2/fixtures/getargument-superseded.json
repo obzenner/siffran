@@ -24,7 +24,7 @@
             "evidence/spike",
             "evidence/freshness"
           ],
-          "digest": "sha256:594cdf20d76d2eeb21494629058184e0a52efe3a38aeaed887424602d01a31f8"
+          "digest": "sha256:bd03b3d979f9ec83716ac22961c12f28977d8437e640e27ef984b98fff64adfb"
         },
         "obligations": {
           "active": [],
@@ -50,7 +50,8 @@
         "governance": null,
         "audit": {
           "state": "required",
-          "independence": "unverified"
+          "independence": "unverified",
+          "findings": []
         }
       },
       "argument": {
@@ -198,7 +199,8 @@
           "reviewed_goal_digest": null,
           "reviewed_frozen_scope_digest": null,
           "reviewed_deferred_scope_digest": null,
-          "reviewed_claims": []
+          "reviewed_claims": [],
+          "findings": []
         }
       }
     }

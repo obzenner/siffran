@@ -222,7 +222,9 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
     return {
         "id": snapshot.run_id, "goal": snapshot.state.goal,
         "invocation": governance.plain(snapshot.state.invocation), "status": snapshot.state.status,
-        "audit": {key: audit[key] for key in ("state", "independence")},
+        # A failed verdict's findings are what the author must act on; pass findings stay in GetArgument.
+        "audit": {"state": audit["state"], "independence": audit["independence"],
+                  "findings": audit["findings"] if audit["state"] == "failed" else []},
         "governance": project_governance(snapshot),
         "contract": {"id": snapshot.contract_id, "version": snapshot.contract_version,
                      "digest": snapshot.contract_digest,
@@ -258,7 +260,12 @@ def _audit(snapshot: EvaluationSnapshot) -> dict[str, Any]:
             "reviewed_goal_digest": verdict.get("goal_digest"),
             "reviewed_frozen_scope_digest": verdict.get("frozen_scope_digest"),
             "reviewed_deferred_scope_digest": verdict.get("deferred_scope_digest"),
-            "reviewed_claims": governance.plain(verdict.get("reviewed_claims", []))}
+            "reviewed_claims": governance.plain(verdict.get("reviewed_claims", [])),
+            # Findings belong to the verdict that produced them: a stale pass reads ``failed`` but has
+            # nothing to address, so it reports none.
+            "findings": governance.plain(verdict["findings"]
+                                         if (state == "failed") == (verdict.get("verdict") == "fail")
+                                         and verdict else [])}
 
 
 def project_argument(snapshot: EvaluationSnapshot) -> dict[str, Any]:

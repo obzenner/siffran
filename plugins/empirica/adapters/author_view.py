@@ -96,6 +96,7 @@ class AuditSummary:
 
     state: Trusted
     independence: Trusted
+    findings: tuple[Untrusted, ...]
 
 
 @dataclass(frozen=True)
@@ -304,7 +305,8 @@ def _parse(result: dict[str, Any]) -> AuthorView:
         for row in run["freshness"]["changes"])
     return AuthorView(
         header, AuditSummary(Trusted(run["audit"]["state"]),
-                             Trusted(run["audit"]["independence"])),
+                             Trusted(run["audit"]["independence"]),
+                             tuple(safety.untrusted(item) for item in run["audit"]["findings"])),
         tuple(_reason(row, safety) for row in result.get("reasons", [])),
         obligations, satisfied, residuals, children, freshness,
         () if terminal else terminal_next,
@@ -350,16 +352,16 @@ def _freshness_lines(rows: tuple[Freshness, ...]) -> tuple[str, ...]:
     return tuple(f"  {row.path}: {row.state}" for row in rows)
 
 
-def _audit_line(audit: AuditSummary) -> str:
-    """Render independence only once an audit verdict exists."""
+def _audit_lines(audit: AuditSummary) -> tuple[str, ...]:
+    """Render independence once a verdict exists, then the findings a failed audit reported."""
     suffix = f" ({audit.independence})" if audit.state in {"passed", "failed"} else ""
-    return f"Audit: {audit.state}{suffix}"
+    return (f"Audit: {audit.state}{suffix}", *(f"  finding: {item}" for item in audit.findings))
 
 
 def _render(view: AuthorView) -> str:
     """Render a parsed view through one ordered, empty-dropping section table."""
     base = (f"{view.header.result_type} {view.header.status} — {view.header.governance}",
-            f"run_id: {view.header.run_id}", _audit_line(view.audit))
+            f"run_id: {view.header.run_id}", *_audit_lines(view.audit))
     sections = (
         ("Reasons:", _reason_lines(view.reasons)),
         ("Open obligations:", _obligation_lines(view.obligations)),
@@ -398,6 +400,7 @@ def _argument_lines(argument: dict[str, Any], safety: TextSafety) -> tuple[str, 
         *(("Edges:", *edges) if edges else ()),
         *(("Citations:", *citations) if citations else ()),
         f"Audit status: {audit['state']} ({audit['independence']})",
+        *(f"  finding: {safety.untrusted(item)}" for item in audit["findings"]),
     )
 
 

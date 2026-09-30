@@ -236,12 +236,12 @@ class AuditTests(ConformanceCase):
             payload={"source_ref": "https://example.test/new-support"})))
         stale = self.dispatch(drv2, evaluate(run_id=run2, intent="report_convergence"))
         self.assert_block_only(stale, ["audit.failed"])
-        # The summary follows the gate: a pass bound to superseded evidence no longer reads passed.
-        self.assertEqual(self.dispatch(drv2, get_run(run_id=run2))["result"]["run"]["audit"]["state"],
-                         "failed")
-        self.assertEqual(
-            self.dispatch(drv2, get_argument(run_id=run2))["result"]["argument"]["audit"]["state"],
-            "failed")
+        # The summary follows the gate: a pass bound to superseded evidence no longer reads passed,
+        # and its pass findings are not presented as something to address.
+        self.assertEqual(self.dispatch(drv2, get_run(run_id=run2))["result"]["run"]["audit"],
+                         {"state": "failed", "independence": "distinct", "findings": []})
+        stale_audit = self.dispatch(drv2, get_argument(run_id=run2))["result"]["argument"]["audit"]
+        self.assertEqual((stale_audit["state"], stale_audit["findings"]), ("failed", []))
 
     def test_deferred_support_change_preserves_scope_and_stales_old_audit(self):
         drv = self.bind_driver("D7", "seam-4b",
@@ -391,9 +391,17 @@ class AuditTests(ConformanceCase):
         self.require_trusted_audit_attribution(
             drv, run_id, child_a, variant="distinct")
         verdict_a = self.build_audit_verdict_payload(
-            drv, run_id, verdict="fail", scope_review="pass")
+            drv, run_id, verdict="fail", scope_review="pass",
+            findings=["C0's research does not support the failure path."])
         self.assertEqual(
             drv.trusted_audit_verdict(run_id, child_a, verdict_a)["result"]["type"], "Allow")
+        # The author reads a failed audit's findings in both views (P1c: Pi redacts the child result).
+        self.assertEqual(self.dispatch(drv, get_run(run_id=run_id))["result"]["run"]["audit"],
+                         {"state": "failed", "independence": "distinct",
+                          "findings": ["C0's research does not support the failure path."]})
+        self.assertEqual(
+            self.dispatch(drv, get_argument(run_id=run_id))["result"]["argument"]["audit"]["findings"],
+            ["C0's research does not support the failure path."])
 
         # A later child's identity cannot retroactively pass child A's failed verdict.
         child_b = self.require_pending_audit_child(drv, run_id)
@@ -415,6 +423,11 @@ class AuditTests(ConformanceCase):
             drv, run_id, verdict="pass", scope_review="pass")
         self.assertEqual(
             drv.trusted_audit_verdict(run_id, child_b, verdict_b)["result"]["type"], "Allow")
+        # A passing verdict keeps its findings in GetArgument only; the RunView stays lean.
+        self.assertEqual(self.dispatch(drv, get_run(run_id=run_id))["result"]["run"]["audit"]["findings"], [])
+        self.assertEqual(
+            self.dispatch(drv, get_argument(run_id=run_id))["result"]["argument"]["audit"]["findings"],
+            ["audit complete"])
         allowed = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
         self.assert_allow(allowed, converged=True)
 

@@ -35,8 +35,11 @@ Ordinary conversation with another model is not a substitute.
 5. The host observes child start and first terminal result. It privately records
    lifecycle, attribution, and a verdict only for the bound pending child.
 6. Reread the run. `GetRun` shows `obligation.audit` once every scoped gating claim is approved,
-   including its current blocker and honest next actions. Any changed graph, evidence, or scope
-   invalidates stale audit coverage and requires a new bound audit.
+   including its current blocker and honest next actions. A failed verdict lists any findings under
+   the `Audit:` line (`GetArgument` keeps the latest settled verdict's findings unless a re-audit is
+   pending); address them before requesting another audit, because hosts may withhold the child's
+   raw output. A stale pass reads `failed` with no findings: re-audit the current evidence. Any changed graph,
+   evidence, or scope invalidates stale audit coverage and requires a new bound audit.
 
 ## Pi invocation shape
 

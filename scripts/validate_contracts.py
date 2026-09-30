@@ -50,7 +50,7 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:594cdf20d76d2eeb21494629058184e0a52efe3a38aeaed887424602d01a31f8"
+REVIEWED_REGISTRY_DIGEST = "sha256:bd03b3d979f9ec83716ac22961c12f28977d8437e640e27ef984b98fff64adfb"
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:9b17d44746e8c4e2981d14575a970a5de286c8262fbdf7e5499faf9ad83a17c2"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
@@ -2847,7 +2847,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
 
     # D2A §8/§9 negatives: one mutation each with its own expected diagnostic substring.
     full_rv = {"governance": None, "id": "r", "goal": "g", "status": "active",
-               "audit": {"state": "required", "independence": "unverified"},
+               "audit": {"state": "required", "independence": "unverified", "findings": []},
                "contract": {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
                "obligations": {"active": [], "deferred": []}, "residuals": [],
                "freshness": {"changes": []}, "children": [], "next_actions": [],
@@ -2948,7 +2948,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                         "audit": {"state": "not_required", "independence": "unverified",
                             "reviewed_argument_digest": None, "reviewed_goal_digest": None,
                             "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": None,
-                            "reviewed_claims": []}}}
+                            "reviewed_claims": [], "findings": []}}}
     expect(lambda e: check_argument_view(arg_bad_root, registry, e, "neg"),
            "root_claim_id", "argument root not in claims")
     arg_unresolved_ev = copy.deepcopy(arg_bad_root)
@@ -2984,7 +2984,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_audit_bad["argument"]["audit"] = {"state": "passed", "independence": "distinct",
         "reviewed_argument_digest": None, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
-        "reviewed_claims": []}
+        "reviewed_claims": [], "findings": []}
     expect(lambda e: check_argument_view(arg_audit_bad, registry, e, "neg"),
            "reviewed_argument_digest must be non-null", "audit passed missing reviewed digest")
     # frozen reviewed digest non-null when current frozen is null.
@@ -2994,7 +2994,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_audit_frozen["argument"]["audit"] = {"state": "passed", "independence": "distinct",
         "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": d64, "reviewed_deferred_scope_digest": d64,
-        "reviewed_claims": [{"claim_id": "G0", "evidence_digest": d64}]}
+        "reviewed_claims": [{"claim_id": "G0", "evidence_digest": d64}], "findings": []}
     expect(lambda e: check_argument_view(arg_audit_frozen, registry, e, "neg"),
            "reviewed_frozen_scope_digest must be null", "audit frozen digest when scope null")
 
@@ -3038,7 +3038,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_audit_empty["argument"]["audit"] = {"state": "passed", "independence": "distinct",
         "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
-        "reviewed_claims": []}
+        "reviewed_claims": [], "findings": []}
     expect(lambda e: check_argument_view(arg_audit_empty, registry, e, "neg"),
            "missing gating-claim coverage", "audit passed empty reviewed_claims")
     # passed audit with stale reviewed evidence digest.
@@ -3048,7 +3048,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_audit_stale["argument"]["audit"] = {"state": "passed", "independence": "distinct",
         "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
-        "reviewed_claims": [{"claim_id": "G0", "evidence_digest": "sha256:" + "e" * 64}]}
+        "reviewed_claims": [{"claim_id": "G0", "evidence_digest": "sha256:" + "e" * 64}], "findings": []}
     expect(lambda e: check_argument_view(arg_audit_stale, registry, e, "neg"),
            "!= current", "audit passed stale reviewed evidence")
     # passed audit with extra non-gating reviewed claim.
@@ -3062,7 +3062,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
         "reviewed_claims": [{"claim_id": "G0", "evidence_digest": d64},
-                            {"claim_id": "G1", "evidence_digest": d64}]}
+                            {"claim_id": "G1", "evidence_digest": d64}], "findings": []}
     expect(lambda e: check_argument_view(arg_audit_extra, registry, e, "neg"),
            "extra non-gating coverage", "audit passed extra non-gating reviewed claim")
     # passed audit with non-null reviewed digest where schema requires null (not_required state).
@@ -3072,7 +3072,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_audit_nonnull["argument"]["audit"] = {"state": "not_required", "independence": "unverified",
         "reviewed_argument_digest": d64, "reviewed_goal_digest": None,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": None,
-        "reviewed_claims": []}
+        "reviewed_claims": [], "findings": []}
     if not schema_rejects({"protocol": "empirica/v2", "request_id": "x",
             "result": {"type": "Allow", "converged": False, "run": full_rv,
                         "argument": arg_audit_nonnull["argument"]}}, "response"):
@@ -3140,7 +3140,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
             "audit": {"state": "passed", "independence": "distinct",
                 "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
                 "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
-                "reviewed_claims": [{"claim_id": "G0", "evidence_digest": _ed}]}}
+                "reviewed_claims": [{"claim_id": "G0", "evidence_digest": _ed}],
+                "findings": []}}
 
     def _arg_env(argument: dict) -> dict:
         return {"type": "Allow", "converged": False, "run": full_rv, "argument": argument}
@@ -3346,7 +3347,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
             "audit": {"state": "passed", "independence": "distinct",
                 "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
                 "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
-                "reviewed_claims": [{"claim_id": "G0", "evidence_digest": _ed}]}}
+                "reviewed_claims": [{"claim_id": "G0", "evidence_digest": _ed}],
+                "findings": []}}
 
     # The superseded base must pass both the raw schema and the procedural check.
     if schema_rejects(_full_env(_d2c_super_arg()), "response"):
@@ -3459,7 +3461,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         "audit": {"state": "not_required", "independence": "unverified",
             "reviewed_argument_digest": None, "reviewed_goal_digest": None,
             "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": None,
-            "reviewed_claims": []}}
+            "reviewed_claims": [], "findings": []}}
     _ord_local: list[str] = []
     check_argument_view(_arg_env(arg_ord), registry, _ord_local, "neg")
     if _ord_local:
@@ -3525,7 +3527,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         "audit": {"state": "not_required", "independence": "unverified",
             "reviewed_argument_digest": None, "reviewed_goal_digest": None,
             "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": None,
-            "reviewed_claims": []}}
+            "reviewed_claims": [], "findings": []}}
     # The valid two-claim/same-digest base must pass.
     _leak_local: list[str] = []
     check_argument_view(_arg_env(arg_leak), registry, _leak_local, "neg")
@@ -3840,7 +3842,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                     "reviewed_goal_digest": GOAL if covered else None,
                     "reviewed_frozen_scope_digest": (frozen if (covered and frozen) else None),
                     "reviewed_deferred_scope_digest": ARG if covered else None,
-                    "reviewed_claims": [{"claim_id": "G0", "evidence_digest": EV}] if covered else []}}
+                    "reviewed_claims": [{"claim_id": "G0", "evidence_digest": EV}] if covered else [], "findings": []}}
 
     # child_event wrong child (no matching run child).
     req = _req_cmd(_trusted("child_event", "ch-missing", _child_event_payload()))
