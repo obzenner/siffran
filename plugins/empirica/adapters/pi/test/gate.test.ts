@@ -292,6 +292,22 @@ test("/empirica refuses unknown flags (including withdrawn modes) without starti
   assert.equal(ui.notifications[0].type, "error");
 });
 
+test("/empirica refuses to start when the pi-subagents tool is not active (P1b)", async () => {
+  for (const hide of [(pi: FakePi) => { pi.activeTools = []; },
+                      (pi: FakePi) => { Object.assign(pi, { getActiveTools: undefined }); }]) {
+    const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+    hide(w.pi);
+    const ui = new FakeUi();
+    await w.pi.command("empirica").handler("build the thing", { ui });
+    assert.equal(w.requests.length, 0);
+    assert.equal(w.pi.entries.length, 0);
+    assert.equal(w.pi.userMessages.length, 0);
+    assert.equal(w.pi.modelMessages.length, 0);
+    assert.match(ui.notifications[0].message, /not started — the `subagent` tool is not active/);
+    assert.equal(ui.notifications[0].type, "error");
+  }
+});
+
 // --- tool_call gate ----------------------------------------------------------
 
 test("gate: report_convergence tool is blocked with the reason on Block", async () => {

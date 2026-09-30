@@ -104,6 +104,8 @@ export interface ToolDefinition {
 export interface ExtensionAPI {
   registerCommand(name: string, def: CommandDefinition): void;
   registerTool?(def: ToolDefinition): void;
+  /** Names of the tools the model can call now (Pi ``pi.getActiveTools()``). */
+  getActiveTools?(): string[];
   appendEntry?(customType: string, data?: unknown): void;
   sendMessage?(
     message: { customType: string; content: string; display?: boolean },

@@ -32,7 +32,7 @@ that boundary.
 
 | Pi surface | v2 operation | Behaviour |
 |---|---|---|
-| `/empirica <goal>` | `StartRun` | Starts a durable run, persists the opaque handle, and injects public-tool guidance. |
+| `/empirica <goal>` | `StartRun` | Starts a durable run, persists the opaque handle, and injects public-tool guidance. Refuses before creating a run when the bundled pi-subagents `subagent` tool is not active, because no independent audit could launch. |
 | `empirica_observe` | `ObserveAction` | Accepts only canonical public author kinds. Trusted kinds are rejected locally and by schema. |
 | `empirica_read` | `GetRun`, `GetArgument`, `GetContract`, `RestoreRun` | Returns a deterministic plain-text author view; resolves a session handle when needed. |
 | `report_convergence` | `EvaluateRun(report_convergence | stop)` | Fails closed unless the guarded response is `Allow`; `intent: stop` records an honest non-converged terminal. |

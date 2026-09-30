@@ -45,6 +45,7 @@ import { PUBLIC_TOOLS } from "./public-tools.ts";
 import {
   REPORT_CONVERGENCE_INTENT,
   REPORT_CONVERGENCE_TOOL,
+  SUBAGENT_TOOL,
   evaluateRunRequest,
   gateFromDecision,
   getArgumentRequest,
@@ -488,6 +489,15 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         const goal = parsed.goal;
         if (parsed.unknownFlags.length) {
           ctx.ui.notify(`empirica: not started — unknown flags: ${parsed.unknownFlags.join(" ")}`, "error");
+          return;
+        }
+        // Convergence needs the independent audit, which Pi can only launch through pi-subagents'
+        // tool. Refuse before creating a run rather than discovering the gap at audit time.
+        if (!(pi.getActiveTools?.() ?? []).includes(SUBAGENT_TOOL)) {
+          ctx.ui.notify(`empirica: not started — the \`${SUBAGENT_TOOL}\` tool is not active, so no independent `
+            + `audit could run. Enable \`${SUBAGENT_TOOL}\` if pi-subagents is loaded; otherwise load the `
+            + "pi-subagents extension bundled with this package and restart Pi.",
+            "error");
           return;
         }
         try {

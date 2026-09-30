@@ -471,7 +471,7 @@ claude-dev: ## Run interactive Claude from this checkout: CLAUDE=/path/to/claude
 
 PI ?= pi
 .PHONY: pi-dev
-pi-dev: ## Run Pi with this checkout override: PI=/path/to/pi [ARGS="..."] (other packages unchanged)
+pi-dev: node_modules ## Run Pi with this checkout override: PI=/path/to/pi [ARGS="..."] (other packages unchanged)
 	@command -v $(PI) >/dev/null 2>&1 || { printf 'pi-dev: `$(PI)` not found on PATH (set PI=/path/to/pi)\n' >&2; exit 2; }
 	@test -f .pi/settings.json || { printf 'pi-dev: .pi/settings.json is missing (it is committed; restore it)\n' >&2; exit 2; }
 	@printf '$(BOLD)==> dev pi$(RESET) siffran from %s (project override); answer YES if pi asks to trust this folder\n' "$(CURDIR)"

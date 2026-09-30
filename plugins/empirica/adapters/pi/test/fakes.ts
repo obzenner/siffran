@@ -51,7 +51,12 @@ export class FakePi implements ExtensionAPI {
   readonly userMessages: string[] = [];
   readonly userMessageOptions: Array<{ deliverAs?: "steer" | "followUp" } | undefined> = [];
   readonly entries: Array<{ customType: string; data?: unknown }> = [];
+  /** Pi-subagents' tool is active unless a test removes it. */
+  activeTools: string[] = ["subagent"];
 
+  getActiveTools(): string[] {
+    return [...this.activeTools, ...this.tools.keys()];
+  }
   registerTool(def: ToolDefinition): void {
     this.tools.set(def.name, def);
   }
