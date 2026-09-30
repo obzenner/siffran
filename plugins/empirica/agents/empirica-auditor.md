@@ -41,7 +41,9 @@ Return exactly one fenced block and no prose outside it:
 
 `reviewed_claims` must contain every approved gating claim in dossier order. Use the exact
 digests supplied by the dossier. If any rubric item cannot be established, return `fail` and
-state the concrete finding.
+state the concrete finding. The author sees only your `findings`, not your reasoning, so make
+each one self-contained: begin with the claim id it concerns, name the artifact, citation, or
+source it examined, and say what evidence would close it.
 
 If the host provides a handback or return tool (e.g. `SubagentHandback`), the tool message must
 be exactly that fenced block — the same fence you would return as text. Do not write the fence
