@@ -114,6 +114,74 @@ class LiveReceiptTests(unittest.TestCase):
             receipt[f"{name}_sha256"] = digest(path)
         return receipt
 
+    def with_retried_audit(self, receipt: dict, host: str, *, earlier_state: str = "completed",
+                           earlier_last: bool = False) -> dict:
+        """Add an earlier failed audit (child, launch, and a blocked report) to a receipt."""
+        state_path = Path(receipt["run_state_path"])
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        earlier = {**state["children"][0], "child_id": "child-0", "native_id": "native-0",
+                   "state": earlier_state, "audit_operation_id": "sha256:" + "5" * 64}
+        state["children"].insert(0, earlier)
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        block = {"type": "Block", "run": {"status": "active", "children": []}}
+        if host == "pi":
+            launch = [
+                {"type": "message", "message": {"role": "assistant", "provider": "evroc",
+                 "model": "author", "content": [{"type": "toolCall", "id": "native-0",
+                    "name": "subagent", "arguments": {
+                        "agent": "empirica.empirica-auditor", "task": "audit"}}]}},
+                {"type": "message", "message": {"role": "toolResult", "toolName": "subagent",
+                    "toolCallId": "native-0", "content": [{"type": "text", "text": "[recorded]"}],
+                    "details": {"results": [{"sessionFile": "earlier.jsonl"}]}}},
+                {"type": "message", "message": {"role": "assistant", "provider": "evroc",
+                    "model": "author", "content": [{"type": "toolCall", "id": "report-0",
+                        "name": "report_convergence", "arguments": {}}]}},
+                {"type": "message", "message": {"role": "toolResult",
+                    "toolName": "report_convergence", "toolCallId": "report-0",
+                    "content": [{"type": "text", "text": json.dumps(block)}], "details": block}},
+            ]
+        else:
+            hook = {"hookSpecificOutput": {"updatedInput": {
+                "subagent_type": "empirica:empirica-auditor", "run_in_background": True}}}
+            launch = [
+                {"type": "attachment", "attachment": {"hookName": "PreToolUse:Agent",
+                 "toolUseID": "tool-0", "stdout": json.dumps(hook)}},
+                {"type": "user", "message": {"content": [{"type": "tool_result",
+                 "tool_use_id": "tool-0",
+                 "content": "Async agent launched successfully…\nagentId: native-0"}]}},
+                {"type": "assistant", "message": {"role": "assistant", "model": "author",
+                 "content": [{"type": "tool_use", "name": "report_convergence",
+                              "id": "report-0", "input": {}}]}},
+                {"type": "user", "message": {"content": [{"type": "tool_result",
+                 "tool_use_id": "report-0", "content": json.dumps(block)}]}},
+            ]
+        transcript = Path(receipt["transcript_path"])
+        rows = [json.loads(line) for line in transcript.read_text(encoding="utf-8").splitlines()]
+        # Claude's first row is the author's opening text; Pi's first row is the bound launch.
+        head = 1 if host == "claude" else 0
+        rows = rows + launch if earlier_last else rows[:head] + launch + rows[head:]
+        write_jsonl(transcript, rows)
+        for name in ("transcript", "run_state"):
+            receipt[f"{name}_sha256"] = digest(Path(receipt[f"{name}_path"]))
+        return receipt
+
+    def test_a_retried_audit_binds_the_latest_child(self):
+        for host in EXPECTED:
+            with self.subTest(host=host), tempfile.TemporaryDirectory() as directory:
+                receipt = self.with_retried_audit(self.receipt(Path(directory), host), host)
+                self.assertEqual(inspect(receipt, host, "commit", "2.0.0"), [])
+
+    def test_a_retried_audit_must_be_settled_and_superseded(self):
+        cases = {**{f"unsettled {state}": {"earlier_state": state}
+                    for state in ("reserved", "launching", "pending")},
+                 "not last": {"earlier_last": True}}
+        for host in EXPECTED:
+            for name, options in cases.items():
+                with self.subTest(host=host, case=name), tempfile.TemporaryDirectory() as directory:
+                    receipt = self.with_retried_audit(
+                        self.receipt(Path(directory), host), host, **options)
+                    self.assertNotEqual(inspect(receipt, host, "commit", "2.0.0"), [])
+
     def test_structural_receipts_pass_for_supported_hosts(self):
         for host in EXPECTED:
             with self.subTest(host=host), tempfile.TemporaryDirectory() as directory:

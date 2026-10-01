@@ -153,21 +153,35 @@ def converged_result(value: Any) -> bool:
             and value["run"].get("status") == "converged")
 
 
+_LIVE_CHILD_STATES = frozenset({"reserved", "launching", "pending"})
+
+
 def state_facts(path: Path, expected_role: str) -> tuple[dict, dict]:
     state = json.loads(safe_read(path))
     if not isinstance(state, dict) or state.get("status") != "converged":
         raise ValueError("durable state is not converged")
     children = [row for row in state.get("children", [])
                 if isinstance(row, dict) and row.get("purpose") == "audit"]
-    if len(children) != 1:
-        raise ValueError("durable state must contain exactly one audit child")
-    child = children[0]
+    if not children:
+        raise ValueError("durable state contains no audit child")
+    # A failed audit may be retried. The receipt binds the latest reservation, the audit that
+    # the convergence relied on; every earlier audit must already be settled.
+    if any(row.get("state") in _LIVE_CHILD_STATES for row in children):
+        raise ValueError("durable state retains an unsettled audit child")
+    child = children[-1]
     if child.get("state") != "completed" or child.get("audit_role_profile") != expected_role:
         raise ValueError("durable audit child is not completed with the canonical role")
     for key in ("child_id", "native_id", "audit_operation_id"):
         if not isinstance(child.get(key), str) or not child[key]:
             raise ValueError(f"durable audit child lacks {key}")
     return state, child
+
+
+def _json_or_none(text: str) -> Any:
+    try:
+        return json.loads(text)
+    except ValueError:
+        return None
 
 
 def _tool_result_text(item: dict) -> str:
@@ -205,9 +219,20 @@ def inspect_claude(parent: list[dict], child_rows: list[dict], child: dict) -> d
         if (updated.get("subagent_type") == "empirica:empirica-auditor"
                 and updated.get("run_in_background") is True):
             launches.append((index, attachment.get("toolUseID"), updated))
-    if len(launches) != 1:
-        raise ValueError("claude: expected one bound background canonical Agent launch")
-    launch_index, tool_id, _ = launches[0]
+    acknowledged = {
+        item.get("tool_use_id"): _tool_result_text(item)
+        for row in parent
+        for item in (row.get("message", {}).get("content") or []
+                     if isinstance(row.get("message"), dict)
+                     and isinstance(row["message"].get("content"), list) else [])
+        if isinstance(item, dict) and item.get("type") == "tool_result"
+    }
+    bound = [launch for launch in launches
+             if (match := _AGENT_ID.search(acknowledged.get(launch[1], ""))) is not None
+             and match.group(1) == child["native_id"]]
+    if len(bound) != 1 or bound[0] != launches[-1]:
+        raise ValueError("claude: the durable audit child is not the last canonical Agent launch")
+    launch_index, tool_id, _ = bound[0]
     report_uses = []
     settlements = []
     for index, row in enumerate(parent):
@@ -234,8 +259,18 @@ def inspect_claude(parent: list[dict], child_rows: list[dict], child: dict) -> d
                     and item["name"].endswith("report_convergence")
                     and isinstance(item.get("id"), str)):
                 report_uses.append((index, item["id"]))
+    converged_ids = {
+        item.get("tool_use_id")
+        for row in parent
+        for item in (row.get("message", {}).get("content") or []
+                     if isinstance(row.get("message"), dict)
+                     and isinstance(row["message"].get("content"), list) else [])
+        if isinstance(item, dict) and item.get("type") == "tool_result"
+        and converged_result(_json_or_none(_tool_result_text(item)))
+    }
+    report_uses = [use for use in report_uses if use[1] in converged_ids]
     if len(report_uses) != 1 or len(settlements) != 1:
-        raise ValueError("claude: expected one pending Stop settlement and convergence tool use")
+        raise ValueError("claude: expected one pending Stop settlement and converged report")
     report_use_index, report_id = report_uses[0]
     settlement_index = settlements[0]
     agent_results = []
@@ -323,9 +358,16 @@ def inspect_pi(parent: list[dict], child_rows: list[dict], child: dict,
             launch_calls.append((index, message, item))
         if item.get("name") == "report_convergence":
             report_calls.append((index, message, item))
-    if len(launch_calls) != 1 or len(report_calls) != 1:
-        raise ValueError("pi: expected one canonical child call and one convergence call")
-    launch_index, author_message, launch_call = launch_calls[0]
+    bound = [call for call in launch_calls if call[2].get("id") == child["native_id"]]
+    if len(bound) != 1 or bound[0] is not launch_calls[-1]:
+        raise ValueError("pi: the durable audit child is not the last canonical child call")
+    converged_ids = {message.get("toolCallId") for _, message in results
+                     if message.get("toolName") == "report_convergence"
+                     and converged_result(message.get("details"))}
+    report_calls = [call for call in report_calls if call[2].get("id") in converged_ids]
+    if len(report_calls) != 1:
+        raise ValueError("pi: expected one converged convergence call")
+    launch_index, author_message, launch_call = bound[0]
     report_index, _, report_call = report_calls[0]
     launch_id = launch_call.get("id")
     report_id = report_call.get("id")
