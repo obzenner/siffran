@@ -13,10 +13,11 @@ import unittest
 
 from assertions import (  # noqa: E402
     ConformanceCase, UNTRUSTED_CLOSE, UNTRUSTED_OPEN,
-    action_attribution, action_audit_verdict, action_configure_run, action_graph, action_research,
+    action_attribution, action_audit_verdict, action_graph, action_research,
     build_attribution_payload, canonical_graph,
     evaluate, get_argument, get_run, observe_action,
 )
+from governance_setup import SIZED_RATIONALE, sized_configure_run  # noqa: E402
 
 
 class AuditTests(ConformanceCase):
@@ -385,7 +386,9 @@ class AuditTests(ConformanceCase):
         run_id = self.start_run(drv, goal=self.GOAL)
         self.require_audit_scope(drv, run_id)
         self.dispatch(drv, observe_action(
-            run_id=run_id, action=action_configure_run(budgets={"max_audit_spawns": 2})))
+            run_id=run_id, action=sized_configure_run(
+                budgets={"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2},
+                rationale=SIZED_RATIONALE)))
 
         child_a = self.require_pending_audit_child(drv, run_id)
         self.require_trusted_audit_attribution(

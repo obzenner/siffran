@@ -74,8 +74,21 @@ _GOVERNANCE_DECISIONS = tuple((name, copy.deepcopy(row))
                               for name, row in _decisions["actions"].items())
 _GOVERNANCE_CONTROLS = copy.deepcopy(_decisions)
 _PROJECTION_CONTROLS = _GOVERNANCE_CONTROLS["controls"]
-APPROVAL_CAPABILITY = {ingress: row["capability"]
-                      for ingress, row in _PUBLIC_CONTRACT["approval_ingress"].items()}
+_RECOVERY_EXCLUSIONS = {
+    mode: tuple(actions)
+    for mode, actions in _GOVERNANCE_CONTROLS["recovery_exclusions"].items()
+}
+APPROVAL_CAPABILITY = MappingProxyType({
+    ingress: row["capability"]
+    for ingress, row in _PUBLIC_CONTRACT["approval_ingress"].items()
+})
+_configure_ceilings = _REQUEST_SCHEMA["$defs"]["actionConfigureRun"]["properties"][
+    "budgets"
+]["properties"]
+CEILING_BOUNDS = MappingProxyType({
+    name: (schema["minimum"], schema["maximum"])
+    for name, schema in _configure_ceilings.items()
+})
 _LATE_ROUTE_MUST = _bootstrap["late_route_must"]
 _UNTRUSTED_DELIMITERS = copy.deepcopy(_PUBLIC_CONTRACT["untrusted_delimiters"])
 _DIGEST = canonical_digest(_PUBLIC_CONTRACT)
@@ -85,6 +98,7 @@ CONTRACT_VIEW = ContractView(
     audit_obligation=_AUDIT_OBLIGATION,
     bootstrap_operations=_BOOTSTRAP_OPERATIONS,
     governance_controls=_PROJECTION_CONTROLS,
+    recovery_exclusions=_RECOVERY_EXCLUSIONS,
     late_route_must=_LATE_ROUTE_MUST,
     untrusted_delimiters=_UNTRUSTED_DELIMITERS,
 )

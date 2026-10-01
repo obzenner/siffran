@@ -7,7 +7,7 @@ Host  test · interactive · signal operator
 
 ❯ Investigation passes  8  used 0 · allowed 1–1024
   Child spawns          1  used 0 · allowed 0–128
-  Audit spawns          1  used 0 · allowed 0–128
+  Audit spawns          2  used 0 · allowed 0–128
 
     Approve     Reject
 ↑↓ move · type to edit · ←→ choose · enter confirm · esc later

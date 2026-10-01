@@ -388,14 +388,17 @@ class IsolatedHookResolutionTests(unittest.TestCase):
             context = {"author": {"provider_id": "anthropic", "model_id": "claude-sonnet-4-6"},
                 "ingress": "mcp_elicitation"}
             bridge.handle({"protocol": "empirica/v2", "request_id": "config", "command": {
-                "type": "ObserveAction", "run_id": handle, "action": {"kind": "configure_run"}}}, CLAUDE_PROFILE_ID)
+                "type": "ObserveAction", "run_id": handle, "action": {"kind": "configure_run",
+                    "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2},
+                    "rationale": "sized for the model-switch lifecycle regression"}}}, CLAUDE_PROFILE_ID)
             g = bridge.trusted_governance_context(CLAUDE_PROFILE_ID, handle, context)["result"]["run"]["governance"]
             decision = {"run_id": handle, "receipt_id": "test-ui", "proposal_digest": g["proposal_digest"],
                 "plan_revision": g["plan_revision"], "approval_kind": "host_ui"}
             presented = bridge.trusted_governance_decision(CLAUDE_PROFILE_ID, handle, {**decision, "outcome": "present"})
             self.assertEqual(presented["result"]["type"], "Allow")
             approved = bridge.trusted_governance_decision(CLAUDE_PROFILE_ID, handle, {**decision,
-                "submission": {"action": "approve", "configuration": g["proposal"]}})
+                "submission": {"action": "approve", "configuration": {
+                    "budgets": g["proposal"]["budgets"]}}})
             self.assertEqual(approved["result"]["type"], "Allow")
             self.assertEqual(approved["result"]["run"]["governance"]["state"], "approved")
             before_digest = g["proposal_digest"]

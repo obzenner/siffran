@@ -58,11 +58,13 @@ class ContractView:
     audit_obligation: tuple[str, str]
     bootstrap_operations: tuple[tuple[str, tuple[tuple[str, str], ...]], ...]
     governance_controls: Mapping[str, Any]
+    recovery_exclusions: Mapping[str, tuple[str, ...]]
     late_route_must: str
     untrusted_delimiters: Mapping[str, str]
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "governance_controls", _freeze(self.governance_controls))
+        object.__setattr__(self, "recovery_exclusions", _freeze(self.recovery_exclusions))
         object.__setattr__(self, "untrusted_delimiters", _freeze(self.untrusted_delimiters))
 
 
@@ -473,7 +475,8 @@ def bootstrap_status(snapshot: EvaluationSnapshot) -> dict[str, Any]:
             actions.append("investigation.record")
     request_ready = active_run and bootstrap_precondition(snapshot, "configure_run") is None
     display_ready = (active_run and bootstrap_precondition(snapshot, "governance.present") is None
-                     and governance.interaction_error(governed) is None)
+                     and governance.interaction_error(governed) is None
+                     and governance.sized(governed))
     return {"active": active, "next_actions": actions,
             "request_ready": request_ready, "display_ready": display_ready}
 
@@ -784,12 +787,15 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                                                 frozen_semantic_digest=semantic_digest))
         if akind == "configure_run":
             proposed = governance.plain(state.governance["proposal"])
-            proposed["budgets"].update(action.get("budgets", {}))
+            proposed["budgets"] = {**proposed["budgets"], **action["budgets"]}
+            proposed["rationale"] = action["rationale"]
             if reason := governance.configuration_error(state, proposed):
                 if reason == "governance.budget_invalid":
                     ceiling = next(k for k, used in governance.CEILINGS.items() if proposed["budgets"][k] < state.budgets[used])
                     resource = governance.BUDGETS[ceiling].resource
                     return _decision(snapshot, state, "Block", reason="budget.exhausted", parameters={"resource": resource})
+                return _decision(snapshot, state, "Block", reason=reason)
+            if reason := governance.revision_error(state.governance, state.goal, proposed):
                 return _decision(snapshot, state, "Block", reason=reason)
             try:
                 governed = governance.revise(state.goal, state.governance, proposal=proposed)

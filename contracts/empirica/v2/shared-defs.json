@@ -196,6 +196,7 @@
             "state",
             "reviews_left",
             "goal",
+            "rationale",
             "invocation",
             "budgets"
           ],
@@ -230,6 +231,19 @@
             },
             "goal": {
               "type": "string"
+            },
+            "rationale": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 3600,
+                  "pattern": "\\S"
+                }
+              ]
             },
             "invocation": {
               "oneOf": [

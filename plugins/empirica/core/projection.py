@@ -145,7 +145,11 @@ def safe_text(item: object) -> str:
 
 def governance_dialog(goal: str, value: Mapping, controls: Mapping,
                       invocation: Mapping | None = None) -> dict[str, Any]:
-    """Project governance state into host-neutral, display-safe dialog data."""
+    """Project governance state into host-neutral, display-safe dialog data.
+
+    The author sizing rationale is carried as neutral escaped text; hosts render it
+    under the unverified label (ADR-0063). It is not a command, authority claim, or
+    approvable conclusion."""
     proposal = value["proposal"]
     budgets = [
         {"key": key, "label": controls["budgets"][key]["label"],
@@ -155,11 +159,13 @@ def governance_dialog(goal: str, value: Mapping, controls: Mapping,
          "maximum": controls["budgets"][key]["maximum"]}
         for key, used_key in governance.CEILINGS.items()
     ]
+    rationale = proposal["rationale"]
     return {"epoch": value["plan_revision"], "control_mode": value["control_mode"],
             "state": value["state"], "reviews_left": {
                 "proposal": value["interactions_remaining"]["proposal"],
                 "total": value["interactions_remaining"]["total"]},
             "goal": safe_text(goal),
+            "rationale": None if rationale is None else safe_text(rationale),
             "invocation": None if invocation is None else {
                 key: safe_text(invocation[key]) if key in {"host", "signal"} else invocation[key]
                 for key in ("host", "interactive", "signal", "delegation")},
@@ -172,6 +178,7 @@ def project_governance(snapshot: EvaluationSnapshot) -> dict:
     value.update(interactions_remaining=governance.interactions_remaining(snapshot.state.governance),
                  prompt_error=governance.interaction_error(snapshot.state.governance))
     value.pop("receipts")
+    value.pop("delegation_envelope")
     value.update(budgets=dict(snapshot.state.budgets),
                  remaining={ceiling: snapshot.state.budgets[ceiling] - snapshot.state.budgets[used]
                             for ceiling, used in governance.CEILINGS.items()},
@@ -204,6 +211,11 @@ def _child_summary(child: Mapping[str, Any], recovery_action: str) -> dict[str, 
     return row
 
 
+def recovery_actions(excluded_actions: tuple[str, ...], actions: list[str]) -> list[str]:
+    """Apply an admitted neutral exclusion policy to one recovery-action list."""
+    return [action for action in actions if action not in excluded_actions]
+
+
 def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] | None = None) -> dict[str, Any]:
     derivation = derive_claims_for_projection(snapshot)
     changes, stale = _freshness(derivation)
@@ -216,6 +228,12 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
     terminal_next = _reason_metadata(metadata, "run.terminal")[0] if terminal else None
     obligations = _obligations(snapshot, derivation, states, blockers, metadata, stale, terminal_next)
     residuals = _residuals(snapshot, derivation, blockers, metadata, terminal_next)
+    control_mode = snapshot.state.governance["control_mode"]
+    exclusions = snapshot.contract.recovery_exclusions[control_mode]
+    for residual in residuals:
+        residual["next_actions"] = recovery_actions(exclusions, residual["next_actions"])
+    for obligation in obligations["active"]:
+        obligation["next"] = recovery_actions(exclusions, obligation["next"])
     recovery_action = terminal_next[0] if terminal else "child.retry"
     children = [_child_summary(child, recovery_action) for child in snapshot.state.children]
     audit = _audit(snapshot)

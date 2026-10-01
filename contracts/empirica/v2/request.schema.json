@@ -635,14 +635,46 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "kind"
+        "kind",
+        "budgets",
+        "rationale"
       ],
       "properties": {
         "kind": {
           "const": "configure_run"
         },
         "budgets": {
-          "$ref": "#/$defs/budgets"
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "max_passes",
+            "max_spawns",
+            "max_audit_spawns"
+          ],
+          "properties": {
+            "max_passes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024
+            },
+            "max_spawns": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_audit_spawns": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 128
+            }
+          }
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600,
+          "pattern": "\\S",
+          "description": "Nonblank author sizing rationale bound by the proposal digest; not a command, authority claim, or approvable conclusion."
         }
       }
     },

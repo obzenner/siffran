@@ -6,15 +6,16 @@ import copy
 import unittest
 from dataclasses import replace
 
-from test_d7_transactions import (Artifacts, CoordinatorWithTestInvocation, Harness, Runs, Workspace,
+from test_d7_transactions import (Artifacts, Harness, Runs, Workspace,
                                   activate_investigation, chain, decode_state, encode_state,
                                   traverse_history)
+from application.transaction import Coordinator as ProductionCoordinator
 from adapters.audit import child_event
 from adapters.audit_protocol import AuditProtocol, AuditProtocolError, IdentityObservation
 from adapters.identity import POLICY_VERSION, observe
 from core.evaluation import audit_binding
 from core.records import Corrupt, Present, Revision
-from governance_setup import approve_current
+from governance_setup import SIZED_RATIONALE, TEST_INVOCATION, approve_current
 
 PROFILE = "pi@0.84.1+pi-subagents@0.50.0"
 
@@ -22,8 +23,9 @@ PROFILE = "pi@0.84.1+pi-subagents@0.50.0"
 class StaleAuditRetryTests(unittest.TestCase):
     def setUp(self):
         self.runs, self.artifacts, self.workspace = Runs(), Artifacts(), Workspace()
-        self.coordinator = CoordinatorWithTestInvocation(self.workspace, Harness(), self.runs, self.artifacts, PROFILE)
-        result = self.coordinator.handle({"type": "StartRun", "selector": {
+        self.coordinator = ProductionCoordinator(
+            self.workspace, Harness(), self.runs, self.artifacts, PROFILE, {})
+        result = self.coordinator.handle({"type": "StartRun", "invocation": dict(TEST_INVOCATION), "selector": {
             "project": "stale", "session": "retry"}, "goal": "stale audit retry",
             "budgets": {"max_spawns": 1, "max_audit_spawns": 2}}, "start")["result"]
         self.run_id = result["run"]["id"]
@@ -50,7 +52,8 @@ class StaleAuditRetryTests(unittest.TestCase):
             run, {**payload, **identity, "observed_by": "host"})
 
     def restore(self):
-        self.coordinator = CoordinatorWithTestInvocation(self.workspace, Harness(), self.runs, self.artifacts, PROFILE)
+        self.coordinator = ProductionCoordinator(
+            self.workspace, Harness(), self.runs, self.artifacts, PROFILE, {})
         self.protocol = AuditProtocol(PROFILE,
             dispatch=lambda request, _profile: self.coordinator.handle(request["command"], "protocol"),
             child_event_ingress=lambda _p, run, child, event:
@@ -135,7 +138,7 @@ class StaleAuditRetryTests(unittest.TestCase):
             self.assertEqual(self.runs.data[self.key], before)
 
     def test_exhaustion_never_retires_refunds_or_raises_budget(self):
-        self.action({"kind": "configure_run", "budgets": {"max_audit_spawns": 1}})
+        self.action({"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 1}, "rationale": SIZED_RATIONALE})
         approve_current(self.coordinator, self.run_id)
         self.pending()
         self.change_argument()
@@ -154,7 +157,7 @@ class StaleAuditRetryTests(unittest.TestCase):
         self.assertEqual(result["reasons"][0]["parameters"], {"resource": "audit_spawn"})
         self.assertEqual(self.runs.data[self.key], before)
         self.assertEqual(self.artifacts.append_calls, writes)
-        self.action({"kind": "configure_run", "budgets": {"max_audit_spawns": 2}})
+        self.action({"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}, "rationale": SIZED_RATIONALE})
         approve_current(self.coordinator, self.run_id)
         self.prepare()
         self.assertEqual(self.state().budgets["audit_spawns_used"], 2)

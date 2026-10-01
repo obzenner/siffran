@@ -5,19 +5,55 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from . import governance
 
-def start_admission(command: Mapping[str, Any]) -> str | None:
-    """Return the typed refusal reason for a StartRun command, if any."""
-    goal = command.get("goal")
-    if not isinstance(goal, str) or not goal.strip():
+
+def delegated_auto(command: Mapping[str, Any]) -> bool:
+    """Whether admitted invocation facts select delegated automatic authority."""
+    invocation = command["invocation"]
+    return (command.get("control_mode", "deliberative") == "auto"
+            and invocation["delegation"] is True
+            and invocation["interactive"] is not True)
+
+
+def start_admission(command: Mapping[str, Any], limits: Mapping[str, int]) -> str | None:
+    """Admit each authority-bearing StartRun source without last-writer-wins merging.
+
+    ``limits`` is the single normalized application-boundary ceiling mapping. In delegated
+    auto, each supplied source must fit the fixed policy and StartRun may only narrow an
+    operator-supplied value.
+    """
+    goal = command["goal"]
+    if not goal.strip():
         return "run.goal_required"
-    invocation = command.get("invocation")
-    if (command.get("control_mode") == "auto"
-            and not (isinstance(invocation, Mapping)
-                     and (invocation.get("interactive") is True
-                          or invocation.get("delegation") is True))):
+    invocation = command["invocation"]
+    if (command.get("control_mode", "deliberative") == "auto"
+            and not (invocation["interactive"] is True
+                     or invocation["delegation"] is True)):
         return "governance.auto_invocation_required"
+    if not delegated_auto(command):
+        return None
+    start_budgets = command.get("budgets", {})
+    for source in (limits, start_budgets):
+        for ceiling, value in source.items():
+            if ceiling in governance.CEILINGS and value > governance.DEFAULT_CEILINGS[ceiling]:
+                return "governance.budget_contradictory"
+    for ceiling in governance.CEILINGS:
+        if ceiling in limits and ceiling in start_budgets:
+            if start_budgets[ceiling] > limits[ceiling]:
+                return "governance.budget_contradictory"
     return None
+
+
+def effective_ceilings(command: Mapping[str, Any], limits: Mapping[str, int]) -> dict[str, int]:
+    """Return the componentwise-narrowed operational seed after successful admission."""
+    start_budgets = command.get("budgets", {})
+    return {
+        ceiling: min(governance.DEFAULT_CEILINGS[ceiling],
+                     limits.get(ceiling, governance.DEFAULT_CEILINGS[ceiling]),
+                     start_budgets.get(ceiling, governance.DEFAULT_CEILINGS[ceiling]))
+        for ceiling in governance.CEILINGS
+    }
 
 
 def _immutable(value: Any) -> Any:

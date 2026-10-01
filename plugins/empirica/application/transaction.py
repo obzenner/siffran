@@ -12,9 +12,9 @@ from core.evaluation import (READ_COMMANDS, SPAWN_BUDGET, Decision, EvaluationSn
                              audit_operation_current, digest,
                              evaluate_snapshot, frozen_scope_invalid, plan_spike_request,
                              plan_spike_result, valid_attribution)
-from core.projection import project_argument, project_runview, project_presentation
+from core.projection import project_argument, project_runview, project_presentation, recovery_actions
 from core.records import Conflict, Corrupt, RunKey
-from core.run import OperationalState, start_admission
+from core.run import OperationalState, delegated_auto, effective_ceilings, start_admission
 from . import protocol as _proto
 from . import run_state
 from .history_records import MANIFEST_KEYS, MANIFEST_KIND, MANIFEST_VERSION
@@ -60,9 +60,9 @@ class AbsentLoad:
 
 class Coordinator:
     def __init__(self, workspace: Any, harness: Any, runs: Any, artifacts: Any,
-                 profile_id: str, limits: dict[str, Any] | None = None):
+                 profile_id: str, limits: Mapping[str, int]):
         self.workspace, self.harness, self.runs, self.artifacts = workspace, harness, runs, artifacts
-        self.profile_id, self.limits = profile_id, dict(limits or {})
+        self.profile_id, self.limits = profile_id, limits
         self.last_state: OperationalState | None = None
         self.last_snapshot: EvaluationSnapshot | None = None
         self.injected_run_ids: set[str] = set()
@@ -103,17 +103,17 @@ class Coordinator:
         return RunKey(project, session, generations[-1]) if generations else None
 
     def _initial_state(self, command: dict[str, Any], observation_basis_digest: str) -> OperationalState:
-        budgets = {"max_passes": 8, "passes_used": 0, "max_spawns": 1, "spawns_used": 0,
-                   "max_audit_spawns": 1, "audit_spawns_used": 0}
-        supplied_limits = self.limits.get("budgets", self.limits)
-        budgets.update({k: v for k, v in supplied_limits.items()
-                        if k in {"max_passes", "max_spawns", "max_audit_spawns"}})
-        budgets.update(command.get("budgets", {}))
+        ceilings = effective_ceilings(command, self.limits)
+        budgets = {**ceilings, "passes_used": 0, "spawns_used": 0,
+                   "audit_spawns_used": 0}
         invocation = command["invocation"]
+        envelope = ceilings if delegated_auto(command) else None
         return OperationalState(
             protocol=_proto.protocol_id(), state_schema=_proto.state_schema_id(),
             goal=command["goal"], invocation=invocation, status="active", budgets=budgets,
-            governance=governance.initial(command["goal"], budgets, command.get("control_mode", "deliberative")),
+            governance=governance.initial(command["goal"], budgets,
+                                          command.get("control_mode", "deliberative"),
+                                          invocation, envelope),
             selected_graph_artifact_id=None, frozen_claim_ids=None, frozen_semantic_digest=None,
             route_stamp=None,
             investigation_stamp=None, stamp_seq=0, last_derivation_digest=None,
@@ -151,7 +151,7 @@ class Coordinator:
     def start(self, command: dict[str, Any], request_id: str) -> dict[str, Any]:
         if self.artifacts is None:
             return self._fault(request_id, "unsupported")
-        rejected = start_admission(command)
+        rejected = start_admission(command, self.limits)
         if rejected:
             return {"protocol": _proto.protocol_id(), "request_id": request_id,
                     "result": {"type": "Block", "reasons": [self._reason(rejected)]}}
@@ -699,10 +699,11 @@ class Coordinator:
         return {"protocol": _proto.protocol_id(), "request_id": request_id, "result": result}
 
     def _reason(self, code: str, parameters: dict[str, Any] | None = None,
-                affected: str | None = None):
+                affected: str | None = None, *, exclusions: tuple[str, ...] = ()):
         spec = _proto.public_contract()["reasons"][code]
+        next_actions = recovery_actions(exclusions, list(spec["next_actions"]))
         row = {"code": code, "parameters": parameters or {},
-               "next_actions": list(spec["next_actions"]), "sections": list(spec["sections"]),
+               "next_actions": next_actions, "sections": list(spec["sections"]),
                "message": spec["message"]}
         if affected:
             row["affected"] = {"obligation_id": affected}
@@ -712,7 +713,11 @@ class Coordinator:
                              parameters: dict[str, Any] | None = None, affected: str | None = None,
                              *, presentation: bool = False):
         self.last_snapshot = snapshot
-        reason = self._reason(code, parameters, affected)
+        control_mode = snapshot.state.governance["control_mode"]
+        reason = self._reason(
+            code, parameters, affected,
+            exclusions=snapshot.contract.recovery_exclusions[control_mode],
+        )
         run = project_runview(snapshot, select_sections(
             _proto.public_contract(), "block", [code],
             snapshot.state.status if snapshot.state.status != "active" else None))

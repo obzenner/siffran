@@ -44,6 +44,8 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                                                   presentation=True)
                 payload = policy.plain(payload)
                 payload["approval_capability"] = _proto.APPROVAL_CAPABILITY[payload["ingress"]]
+                payload["delegation"] = state.invocation["delegation"]
+                payload["interactive"] = state.invocation["interactive"]
                 governed = policy.revise(state.goal, governed, context=payload)
                 if governed == policy.plain(state.governance):
                     return c._inert_with_run(rid, snapshot, presentation=True)
@@ -71,12 +73,16 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                     if reason:
                         return c._block_from_snapshot(snapshot, rid, reason, presentation=True)
                     governed.update(state="approved", approved_digest=governed["proposal_digest"],
-                                    approval_kind=payload["approval_kind"])
+                                    approval_kind=payload["approval_kind"], first_approval=True)
                     next_state = replace(state,
                                          budgets={**state.budgets, **governed["proposal"]["budgets"]})
                 elif outcome == "amend" and "amendment" in decision:
-                    proposed = decision["amendment"]
+                    # A human amendment changes ceilings only and keeps the rationale (ADR-0063).
+                    proposed = {**decision["amendment"],
+                                "rationale": governed["proposal"]["rationale"]}
                     if reason := policy.configuration_error(state, proposed):
+                        return c._block_from_snapshot(snapshot, rid, reason, presentation=True)
+                    if reason := policy.revision_error(governed, state.goal, proposed):
                         return c._block_from_snapshot(snapshot, rid, reason, presentation=True)
                     governed = policy.revise(state.goal, governed, proposal=proposed)
                 if outcome == "reject":
@@ -86,7 +92,9 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                 if prior is None:
                     governed["receipts"].append({"id": payload["receipt_id"], "fingerprint": fingerprint,
                         "presentation_fingerprint": fingerprint if outcome == "present" else None,
-                        "outcome": outcome, "plan_revision": payload["plan_revision"]})
+                        "outcome": outcome, "plan_revision": payload["plan_revision"],
+                        "proposal_digest": payload["proposal_digest"],
+                        "approval_kind": payload["approval_kind"]})
                 else:
                     prior.update(fingerprint=fingerprint, outcome=outcome)
             next_state = replace(next_state, governance=governed)

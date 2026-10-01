@@ -156,7 +156,11 @@
         "proposal_digest",
         "proposal",
         "context",
-        "receipts"
+        "delegation_envelope",
+        "receipts",
+        "first_approval",
+        "pre_approval_revisions",
+        "post_approval_revisions"
       ],
       "properties": {
         "state": {
@@ -199,7 +203,8 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "budgets"
+            "budgets",
+            "rationale"
           ],
           "properties": {
             "budgets": {
@@ -227,6 +232,20 @@
                   "maximum": 128
                 }
               }
+            },
+            "rationale": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 600,
+                  "pattern": "\\S"
+                }
+              ],
+              "description": "Author sizing rationale (null for the unapprovable StartRun placeholder)."
             }
           }
         },
@@ -236,7 +255,9 @@
           "required": [
             "author",
             "ingress",
-            "approval_capability"
+            "approval_capability",
+            "delegation",
+            "interactive"
           ],
           "properties": {
             "author": {
@@ -262,8 +283,67 @@
                 "unavailable",
                 "human_configuration"
               ]
+            },
+            "delegation": {
+              "type": "boolean",
+              "description": "Operator-recorded delegation provenance admitted as a neutral fact."
+            },
+            "interactive": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Interactive invocation provenance admitted as a neutral fact."
             }
           }
+        },
+        "delegation_envelope": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "max_passes",
+                "max_spawns",
+                "max_audit_spawns"
+              ],
+              "properties": {
+                "max_passes": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                },
+                "max_spawns": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "max_audit_spawns": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 2
+                }
+              }
+            }
+          ],
+          "description": "Durable componentwise-narrowed delegated-auto authority envelope; null outside delegated auto."
+        },
+        "first_approval": {
+          "type": "boolean",
+          "description": "Durable fact: whether this run has had a first successful approval; never inferred from revision, pending state, or latest approval kind."
+        },
+        "pre_approval_revisions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8
+        },
+        "post_approval_revisions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8
         },
         "receipts": {
           "type": "array",
@@ -276,7 +356,9 @@
               "fingerprint",
               "presentation_fingerprint",
               "outcome",
-              "plan_revision"
+              "plan_revision",
+              "proposal_digest",
+              "approval_kind"
             ],
             "properties": {
               "id": {
@@ -307,6 +389,18 @@
               "plan_revision": {
                 "type": "integer",
                 "minimum": 0
+              },
+              "proposal_digest": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$",
+                "description": "Immutable exact proposal binding for this receipt."
+              },
+              "approval_kind": {
+                "enum": [
+                  "host_ui",
+                  "auto"
+                ],
+                "description": "Immutable per-receipt approval kind; host_ui requires a prior exact presentation, auto has none."
               }
             }
           }

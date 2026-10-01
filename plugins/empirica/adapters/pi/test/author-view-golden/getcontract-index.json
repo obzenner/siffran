@@ -3,7 +3,7 @@
     "type": "Allow",
     "contract_result": {
       "target": "index",
-      "digest": "sha256:bd03b3d979f9ec83716ac22961c12f28977d8437e640e27ef984b98fff64adfb",
+      "digest": "sha256:5ea626b1bb1ae36eb788e7717a1ecf9e9463a8ef7454c973b4d7f3d68d3d13ab",
       "index": {
         "id": "empirica/public",
         "version": "3.0.0",
@@ -307,6 +307,18 @@
             ]
           },
           {
+            "code": "governance.budget_contradictory",
+            "sections": [
+              "governance"
+            ]
+          },
+          {
+            "code": "governance.revision_exhausted",
+            "sections": [
+              "governance"
+            ]
+          },
+          {
             "code": "governance.budget_invalid",
             "sections": [
               "governance"
@@ -382,7 +394,7 @@
           },
           {
             "id": "budget.raise",
-            "description": "Propose a ceiling change through configure_run; only renewed host approval can apply it, never auto."
+            "description": "Propose a sized ceiling change through configure_run; only renewed host approval can apply it, never auto (auto projections drop this recovery)."
           },
           {
             "id": "child.spawn_auditor",
@@ -406,7 +418,7 @@
           },
           {
             "id": "governance.propose",
-            "description": "Correct the configure_run proposal and request a host-mediated configuration decision; cannot self-approve."
+            "description": "Issue a task-sized configure_run (all three ceilings plus a nonblank rationale) and request a host-mediated configuration decision; cannot self-approve."
           }
         ]
       }

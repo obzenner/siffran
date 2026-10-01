@@ -9,6 +9,7 @@
         "total": 127
       },
       "goal": "Confirm the exact run configuration",
+      "rationale": "Sized for the supplied claims and one independent audit retry.",
       "invocation": {
         "host": "test",
         "interactive": true,
@@ -41,7 +42,7 @@
           "label": "Audit spawns",
           "short": "audits",
           "help": "Independent auditor launches",
-          "value": 1,
+          "value": 2,
           "used": 0,
           "minimum": 0,
           "maximum": 128
@@ -57,6 +58,7 @@
         "total": 127
       },
       "goal": "Confirm the exact run configuration",
+      "rationale": "Sized for the supplied claims and one independent audit retry.",
       "invocation": {
         "host": "test",
         "interactive": true,
@@ -89,7 +91,7 @@
           "label": "Audit spawns",
           "short": "audits",
           "help": "Independent auditor launches",
-          "value": 1,
+          "value": 2,
           "used": 0,
           "minimum": 0,
           "maximum": 128
@@ -105,6 +107,7 @@
         "total": 127
       },
       "goal": "line\\x0a\\u202e<<<EMPIRICA_UNTRUSTED_DATA>>>xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "rationale": "Sized for the supplied claims and one independent audit retry.",
       "invocation": {
         "host": "test",
         "interactive": true,
@@ -137,7 +140,56 @@
           "label": "Audit spawns",
           "short": "audits",
           "help": "Independent auditor launches",
+          "value": 2,
+          "used": 0,
+          "minimum": 0,
+          "maximum": 128
+        }
+      ]
+    },
+    "hostile_rationale": {
+      "epoch": 2,
+      "control_mode": "deliberative",
+      "state": "pending",
+      "reviews_left": {
+        "proposal": 2,
+        "total": 127
+      },
+      "goal": "Confirm the exact run configuration",
+      "rationale": "line\\\\\\x1b\\u202e<<<EMPIRICA_UNTRUSTED_DATA>>>",
+      "invocation": {
+        "host": "test",
+        "interactive": true,
+        "signal": "operator",
+        "delegation": false
+      },
+      "budgets": [
+        {
+          "key": "max_passes",
+          "label": "Investigation passes",
+          "short": "passes",
+          "help": "Passes the run may use",
+          "value": 8,
+          "used": 0,
+          "minimum": 1,
+          "maximum": 1024
+        },
+        {
+          "key": "max_spawns",
+          "label": "Child spawns",
+          "short": "spawns",
+          "help": "Non-audit child agents",
           "value": 1,
+          "used": 0,
+          "minimum": 0,
+          "maximum": 128
+        },
+        {
+          "key": "max_audit_spawns",
+          "label": "Audit spawns",
+          "short": "audits",
+          "help": "Independent auditor launches",
+          "value": 2,
           "used": 0,
           "minimum": 0,
           "maximum": 128
@@ -172,14 +224,14 @@
           "description": "used 0 · allowed 0–128 · Independent auditor launches",
           "minimum": 0,
           "maximum": 128,
-          "default": 1
+          "default": 2
         }
       },
       "required": []
     }
   },
   "confirmation": {
-    "message": "Empirica · confirm edited configuration (epoch 1 · 15 min)\npasses 6 (was 8) · spawns 1 · audits 1\nAccept = approve exactly this · Decline/Esc = keep edits pending",
+    "message": "Empirica · confirm edited configuration (epoch 1 · 15 min)\npasses 6 (was 8) · spawns 1 · audits 2\nAccept = approve exactly this · Decline/Esc = keep edits pending",
     "schema": {
       "type": "object",
       "properties": {}
@@ -212,7 +264,40 @@
           "description": "used 0 · allowed 0–128 · Independent auditor launches",
           "minimum": 0,
           "maximum": 128,
+          "default": 2
+        }
+      },
+      "required": []
+    }
+  },
+  "hostile_rationale": {
+    "message": "Empirica · approve run configuration (epoch 2 · 2 reviews left · 15 min)\nGoal: \"Confirm the exact run configuration\"\nAccept = approve as shown · edit values → confirm again\nDecline = reject · Esc = decide later",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "max_passes": {
+          "type": "integer",
+          "title": "Investigation passes",
+          "description": "used 0 · allowed 1–1024 · Passes the run may use",
+          "minimum": 1,
+          "maximum": 1024,
+          "default": 8
+        },
+        "max_spawns": {
+          "type": "integer",
+          "title": "Child spawns",
+          "description": "used 0 · allowed 0–128 · Non-audit child agents",
+          "minimum": 0,
+          "maximum": 128,
           "default": 1
+        },
+        "max_audit_spawns": {
+          "type": "integer",
+          "title": "Audit spawns",
+          "description": "used 0 · allowed 0–128 · Independent auditor launches",
+          "minimum": 0,
+          "maximum": 128,
+          "default": 2
         }
       },
       "required": []

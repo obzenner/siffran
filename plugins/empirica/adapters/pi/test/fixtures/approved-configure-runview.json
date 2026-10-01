@@ -15,21 +15,24 @@
       "state": "approved",
       "control_mode": "deliberative",
       "plan_revision": 0,
-      "approved_digest": "sha256:f505662d26d752a18b3f81a5e1b92f7530d3d1b616d6a13eec321600fcafcb82",
+      "approved_digest": "sha256:401ebe634c8dec141904f52be4c79f08c913ba58c9c752924ed557cf6b143ffd",
       "approval_kind": "host_ui",
       "proposal": {
         "budgets": {
           "max_passes": 8,
           "max_spawns": 1,
-          "max_audit_spawns": 1
-        }
+          "max_audit_spawns": 2
+        },
+        "rationale": "One gating claim, no experiments; one audit plus one retry."
       },
       "context": {
         "author": null,
         "ingress": "pi_ui",
-        "approval_capability": "human_configuration"
+        "approval_capability": "human_configuration",
+        "delegation": false,
+        "interactive": true
       },
-      "proposal_digest": "sha256:f505662d26d752a18b3f81a5e1b92f7530d3d1b616d6a13eec321600fcafcb82",
+      "proposal_digest": "sha256:401ebe634c8dec141904f52be4c79f08c913ba58c9c752924ed557cf6b143ffd",
       "interactions_remaining": {
         "proposal": 2,
         "total": 127
@@ -40,17 +43,20 @@
         "passes_used": 0,
         "max_spawns": 1,
         "spawns_used": 0,
-        "max_audit_spawns": 1,
+        "max_audit_spawns": 2,
         "audit_spawns_used": 0
       },
       "remaining": {
         "max_passes": 8,
         "max_spawns": 1,
-        "max_audit_spawns": 1
+        "max_audit_spawns": 2
       },
       "request_ready": true,
       "display_ready": true,
-      "next_action": "investigation.record"
+      "next_action": "investigation.record",
+      "first_approval": true,
+      "pre_approval_revisions": 0,
+      "post_approval_revisions": 0
     },
     "contract": {
       "id": "empirica/public",

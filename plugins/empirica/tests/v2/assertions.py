@@ -243,7 +243,8 @@ def start_run(*, goal: str, project: str = "demo", session: str = "s1",
     cmd: dict = {"type": "StartRun",
                  "selector": {"project": project, "session": session},
                  "goal": goal, "control_mode": control_mode,
-                 "invocation": invocation or {**TEST_INVOCATION, "signal": "v2 harness"}}
+                 "invocation": (invocation if invocation is not None else
+                                {**TEST_INVOCATION, "signal": "v2 harness"})}
     if budgets is not None:
         cmd["budgets"] = budgets
     return _envelope(request_id or _rid("start"), cmd)
@@ -313,13 +314,6 @@ def action_spike_request(*, claim_id: str, command: str, dependent_files: list[s
     current observations (D4 spec §4). There is no separate ``regate`` wire action kind."""
     return {"kind": "spike_request", "claim_id": claim_id,
             "command": command, "dependent_files": list(dependent_files)}
-
-
-def action_configure_run(*, budgets: dict | None = None) -> dict:
-    a: dict = {"kind": "configure_run"}
-    if budgets is not None:
-        a["budgets"] = budgets
-    return a
 
 
 def action_route(*, reason: str) -> dict:

@@ -75,7 +75,8 @@ test("Pi raw edit and locked approval cross the actual private Python service", 
     root: "C0", claims: [{ id: "C0", text: "The supplied goal is achievable.", gating: true, kind: "ordinary" }], edges: [],
   } }, "decision-graph")));
   runOf(await dispatch(observeActionRequest(run.id, { kind: "configure_run",
-    budgets: { max_passes: 8, max_spawns: 0, max_audit_spawns: 1 } }, "decision-proposal")));
+    budgets: { max_passes: 8, max_spawns: 0, max_audit_spawns: 1 },
+    rationale: "sized for the supplied claim and one audit attempt" }, "decision-proposal")));
   const ctx = fakeCtx(testRepo); ctx.hasUI = true; ctx.model = author;
   ctx.modelRegistry = { getAvailable: () => { throw new Error("governance must not enumerate models"); } };
   const ui: string[] = [], payloads: Array<Record<string, unknown>> = [];

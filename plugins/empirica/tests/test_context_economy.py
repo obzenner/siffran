@@ -25,7 +25,8 @@ from application.v2 import compose
 from core.evaluation import valid_graph
 from core.projection import project_presentation
 from test_d7_transactions import Runs, Artifacts, Workspace, Harness
-from governance_setup import AUTHOR, TEST_INVOCATION, approve_current
+from governance_setup import (AUTHOR, TEST_INVOCATION, SIZED_RATIONALE, approve_current,
+                              sized_configure_run)
 from core.canonical import canonical_digest
 
 
@@ -237,22 +238,24 @@ class _ServiceHarness(unittest.TestCase):
         self.runs, self.artifacts = Runs(), Artifacts()
         self.service = compose(Workspace(), Harness(), self.runs, self.artifacts, None, PROFILE, {}, None)
         self.run_id = self.req({"type": "StartRun", "goal": "governed task",
+                                "invocation": dict(TEST_INVOCATION),
                                 "selector": {"project": "p", "session": "s"}})["run"]["id"]
 
     def req(self, command):
-        if command.get("type") == "StartRun":
-            command = {"invocation": dict(TEST_INVOCATION), **command}
         return self.service.dispatch({"protocol": "empirica/v2", "request_id": "t",
                                       "command": command})["result"]
 
     def action(self, kind, **kwargs):
+        action = {"kind": kind, **kwargs}
         return self.req({"type": "ObserveAction", "run_id": self.run_id,
-                         "action": {"kind": kind, **kwargs}})
+                         "action": action})
 
     def to_pending(self):
         self.action("route", reason="supplied context")
         self.action("graph", payload=copy.deepcopy(GRAPH))
-        self.action("configure_run")
+        self.action(**sized_configure_run(
+            budgets={"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2},
+            rationale=SIZED_RATIONALE))
 
 
 class AudienceTests(_ServiceHarness):
@@ -309,7 +312,7 @@ class AudienceTests(_ServiceHarness):
         good = PublicTools(PROFILE, dispatch=self._observe_dispatch,
                            govern=lambda result: result)
         out = good.call_internal("empirica_observe", {"run_id": self.run_id,
-                                             "action": {"kind": "configure_run"}})
+                                             "action": {"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}, "rationale": SIZED_RATIONALE}})
         self.assertFalse(out["isError"])
         self.assertPublic(out["structuredContent"], "configure_run after govern")
         self.assertNotIn("presentation", out["structuredContent"])
@@ -319,7 +322,7 @@ class AudienceTests(_ServiceHarness):
             return result
         bad = PublicTools(PROFILE, dispatch=self._observe_dispatch, govern=leak)
         leaked = bad.call("empirica_observe", {"run_id": self.run_id,
-                                              "action": {"kind": "configure_run"}})
+                                              "action": {"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}, "rationale": SIZED_RATIONALE}})
         self.assertTrue(leaked["isError"])
         self.assertNotIn("structuredContent", leaked)
         self.assertNotIn("presentation", json.dumps(leaked))
@@ -337,7 +340,7 @@ class AudienceTests(_ServiceHarness):
         # The shared public tool wrapper reprojects a govern result to the author view.
         tools = PublicTools(CODEX, dispatch=self._observe_dispatch, govern=lambda r: r)
         out = tools.call_internal("empirica_observe", {"run_id": self.run_id,
-                                             "action": {"kind": "configure_run"}})
+                                             "action": {"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}, "rationale": SIZED_RATIONALE}})
         self.assertFalse(contains_private(out.get("structuredContent", {})))
 
     def _observe_dispatch(self, request, profile_id):
@@ -442,7 +445,7 @@ class SizeBudgetTests(_ServiceHarness):
 
         tools = PublicTools(PROFILE, dispatch=self._observe_dispatch, govern=self._mediator(counted))
         out = tools.call_internal("empirica_observe",
-                         {"run_id": self.run_id, "action": {"kind": "configure_run"}})
+                         {"run_id": self.run_id, "action": {"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}, "rationale": SIZED_RATIONALE}})
         self.assertFalse(contains_private(out.get("structuredContent", {})))
         return out, calls["n"]
 
@@ -721,7 +724,7 @@ class NextActionReachabilityTests(_ServiceHarness):
         act({"kind": "graph", "payload": {"root": "C0", "claims": [{
             "id": "C0", "text": "a human decides", "gating": True,
             "kind": "needs-decision"}], "edges": []}})
-        act({"kind": "configure_run"})
+        act({"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}, "rationale": SIZED_RATIONALE})
         approve_current(service._coordinator, run_id)
         act({"kind": "investigate"})
         result = service.dispatch({"protocol": "empirica/v2", "request_id": "t",
@@ -896,7 +899,7 @@ class NextActionReachabilityTests(_ServiceHarness):
                              "gating": True, "kind": "needs-experiment"}], "edges": []}}}})
         spike_service.dispatch({"protocol": "empirica/v2", "request_id": "t",
             "command": {"type": "ObserveAction", "run_id": spike_run,
-                        "action": {"kind": "configure_run"}}})
+                        "action": {"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}, "rationale": SIZED_RATIONALE}}})
         approve_current(spike_service._coordinator, spike_run)
         spike_service.dispatch({"protocol": "empirica/v2", "request_id": "t",
             "command": {"type": "ObserveAction", "run_id": spike_run,

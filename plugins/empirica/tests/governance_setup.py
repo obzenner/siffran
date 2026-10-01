@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from application.governance import transact
 from adapters.identity import observe
+from core.governance import expected_approval_kind
 
 TEST_INVOCATION = {"host": "test", "interactive": True,
                    "signal": "test", "delegation": False}
@@ -14,6 +15,12 @@ AUTHOR = {**observe("anthropic", "claude-sonnet-4-6", source="test-host"),
           "observed_by": "host"}
 AUDITOR = {**observe("anthropic", "claude-opus-4-6", source="test-host"),
            "observed_by": "host"}
+SIZED_RATIONALE = "sized for the gating claims and one audit retry"
+
+
+def sized_configure_run(*, budgets, rationale):
+    """Build one complete request exactly from explicit caller-supplied fields."""
+    return {"kind": "configure_run", "budgets": dict(budgets), "rationale": rationale}
 
 
 def approve_current(coordinator, run_id, *, author=None, auditor=None):
@@ -28,9 +35,16 @@ def approve_current(coordinator, run_id, *, author=None, auditor=None):
         raise AssertionError("explicit test consent requires its actual graph first")
     if g["state"] == "approved":
         return
-    configured = c.handle({"type": "ObserveAction", "run_id": run_id, "action": {
-        "kind": "configure_run"}}, "test-consent-configure")
-    assert configured["result"]["type"] == "Allow", configured
+    # Only size the placeholder; a test that has already issued a sized
+    # configure_run keeps its own task-sized ceilings (ADR-0063).
+    if g["proposal"]["rationale"] is None:
+        # Size the placeholder with the seeded ceilings (which StartRun/limits may have
+        # narrowed) plus a rationale; never overwrite a test's own task-sized proposal.
+        configured = c.handle({"type": "ObserveAction", "run_id": run_id, "action":
+                               sized_configure_run(
+                                   budgets=g["proposal"]["budgets"],
+                                   rationale=SIZED_RATIONALE)}, "test-consent-configure")
+        assert configured["result"]["type"] == "Allow", configured
     ingress = "pi_ui" if c.profile_id.startswith("pi@") else "mcp_elicitation"
     if c.profile_id.startswith("codex"):
         ingress = "unavailable"
@@ -38,12 +52,14 @@ def approve_current(coordinator, run_id, *, author=None, auditor=None):
     response = transact(c, run_id, context, context=True)
     assert response["result"]["type"] in {"Allow", "Inert"}, response
     g = response["result"]["run"]["governance"]
+    approval_kind = expected_approval_kind(g)
     decision = {"run_id": run_id, "receipt_id": uuid4().hex, "proposal_digest": g["proposal_digest"],
-                "plan_revision": g["plan_revision"], "approval_kind": "auto" if g["control_mode"] == "auto" else "host_ui"}
+                "plan_revision": g["plan_revision"], "approval_kind": approval_kind}
     if decision["approval_kind"] == "host_ui":
         presented = transact(c, run_id, {**decision, "outcome": "present"})
         assert presented["result"]["type"] == "Allow", presented
-        decision["submission"] = {"action": "approve", "configuration": g["proposal"]}
+        decision["submission"] = {"action": "approve", "configuration": {
+            "budgets": g["proposal"]["budgets"]}}
     else:
         decision["outcome"] = "approve"
     approved = transact(c, run_id, decision)

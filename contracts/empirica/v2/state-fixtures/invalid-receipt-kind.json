@@ -1,0 +1,146 @@
+{
+  "protocol": "empirica/v2",
+  "state_schema": "empirica.run/2",
+  "goal": "Prove strict v2 state codec roundtrip with terminal children.",
+  "invocation": {
+    "host": "test",
+    "interactive": true,
+    "signal": "fixture",
+    "delegation": false
+  },
+  "status": "converged",
+  "budgets": {
+    "max_passes": 20,
+    "passes_used": 8,
+    "max_spawns": 3,
+    "spawns_used": 0,
+    "max_audit_spawns": 1,
+    "audit_spawns_used": 1
+  },
+  "selected_graph_artifact_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "frozen_claim_ids": [
+    "C0",
+    "C1"
+  ],
+  "frozen_semantic_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+  "route_stamp": 1,
+  "investigation_stamp": 4,
+  "stamp_seq": 6,
+  "last_derivation_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+  "children": [
+    {
+      "child_id": "child-auditor",
+      "purpose": "audit",
+      "state": "completed",
+      "spent": true,
+      "refunded": false,
+      "deadline": 1700000000.0,
+      "native_id": "native-auditor-1",
+      "first_terminal_fingerprint": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "capability_ref": "cap-auditor",
+      "audit_operation_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "audit_argument": {
+        "argument_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "root_claim_id": "G0",
+        "goal": "Prove strict v2 state codec roundtrip with terminal children.",
+        "goal_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "frozen_scope_digest": null,
+        "deferred_scope_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "untrusted_delimiters": {
+          "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+          "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+        },
+        "claims": [
+          {
+            "claim_id": "G0",
+            "text": "Codec fixture claim",
+            "kind": "ordinary",
+            "gating": true,
+            "state": "open",
+            "wording_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "evidence_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+            "active_evidence_ids": []
+          }
+        ],
+        "edges": [],
+        "artifacts": [],
+        "route_stamp": 1,
+        "investigation_stamp": 4,
+        "audit": {
+          "state": "required",
+          "independence": "unverified",
+          "reviewed_argument_digest": null,
+          "reviewed_goal_digest": null,
+          "reviewed_frozen_scope_digest": null,
+          "reviewed_deferred_scope_digest": null,
+          "reviewed_claims": [],
+          "findings": []
+        }
+      },
+      "audit_role_profile": "empirica:empirica-auditor",
+      "resource_class": "audit"
+    },
+    {
+      "child_id": "child-rejected",
+      "purpose": "spike",
+      "state": "launch_rejected",
+      "spent": false,
+      "refunded": true,
+      "deadline": null,
+      "native_id": null,
+      "first_terminal_fingerprint": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+      "capability_ref": "cap-spike",
+      "audit_operation_id": null,
+      "audit_argument": null,
+      "audit_role_profile": null,
+      "resource_class": "investigation"
+    }
+  ],
+  "observation_basis_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+  "committed_artifact_head_id": null,
+  "governance": {
+    "state": "approved",
+    "control_mode": "deliberative",
+    "plan_revision": 1,
+    "approved_digest": "sha256:b8ac41179cdf99e474e4ddbfad1f888738a03669b67c588ffd556ecb9879c226",
+    "approval_kind": "host_ui",
+    "receipts": [
+      {
+        "id": "fixture-approval",
+        "fingerprint": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+        "presentation_fingerprint": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+        "outcome": "approve",
+        "plan_revision": 1,
+        "proposal_digest": "sha256:b8ac41179cdf99e474e4ddbfad1f888738a03669b67c588ffd556ecb9879c226",
+        "approval_kind": "legacy"
+      }
+    ],
+    "proposal": {
+      "budgets": {
+        "max_passes": 20,
+        "max_spawns": 3,
+        "max_audit_spawns": 1
+      },
+      "rationale": "Sized for the codec convergence fixture and one completed audit."
+    },
+    "context": {
+      "author": {
+        "identity": "anthropic/claude-sonnet-4-6",
+        "provider_id": "anthropic",
+        "model_id": "claude-sonnet-4-6",
+        "policy_version": "model-identity/1",
+        "source": "fixture-host",
+        "observed_by": "host"
+      },
+      "ingress": "mcp_elicitation",
+      "approval_capability": "human_configuration",
+      "delegation": false,
+      "interactive": true
+    },
+    "delegation_envelope": null,
+    "proposal_digest": "sha256:b8ac41179cdf99e474e4ddbfad1f888738a03669b67c588ffd556ecb9879c226",
+    "first_approval": true,
+    "pre_approval_revisions": 0,
+    "post_approval_revisions": 0
+  }
+}

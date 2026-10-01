@@ -72,9 +72,26 @@ class Classification:
     state: OperationalState | None = None
 
 
+def governed_progress_is_valid(doc: Mapping[str, Any]) -> bool:
+    """Require successful configuration approval before governed work can exist."""
+    governance = doc["governance"]
+    governed_progress = (doc["investigation_stamp"] is not None
+                         or bool(doc["children"])
+                         or doc["status"] == "converged")
+    successful_approval = (governance["first_approval"] is True
+                           and any(receipt["outcome"] == "approve"
+                                   for receipt in governance["receipts"]))
+    return not governed_progress or successful_approval
+
+
 def _procedural_ok(doc: dict) -> bool:
-    """Check unique child IDs, counter bounds, stamp bounds, and finite deadlines."""
+    """Check governance, capability, progress, counters, stamps, and deadlines."""
     if not invariant(doc):
+        return False
+    context = doc["governance"]["context"]
+    if _proto.APPROVAL_CAPABILITY.get(context["ingress"]) != context["approval_capability"]:
+        return False
+    if not governed_progress_is_valid(doc):
         return False
     seen: set[str] = set()
     charged = {"investigation": 0, "audit": 0}

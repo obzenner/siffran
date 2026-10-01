@@ -338,12 +338,15 @@
         "operation": "graph"
       },
       "configure_run": {
-        "description": "After a graph exists, propose bounded configuration and request host mediation. It never self-approves or changes effective budgets before consent.",
+        "description": "After a graph exists, propose a task-sized configuration (all three ceilings plus a nonblank rationale) and request host-mediated approval before investigation in both control modes. It never self-approves or changes effective budgets before consent.",
         "example": {
           "kind": "configure_run",
           "budgets": {
-            "max_passes": 5
-          }
+            "max_passes": 5,
+            "max_spawns": 1,
+            "max_audit_spawns": 2
+          },
+          "rationale": "Five gating claims, two needing experiments; one audit plus one retry."
         },
         "operation": "configure_run"
       },
@@ -699,7 +702,7 @@
       }
     },
     "budget.raise": {
-      "description": "Propose a ceiling change through configure_run; only renewed host approval can apply it, never auto.",
+      "description": "Propose a sized ceiling change through configure_run; only renewed host approval can apply it, never auto (auto projections drop this recovery).",
       "surface": {
         "tool": "empirica_observe",
         "action": "configure_run"
@@ -708,12 +711,18 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "budgets"
+          "budgets",
+          "rationale"
         ],
         "properties": {
           "budgets": {
             "type": "object",
             "additionalProperties": false,
+            "required": [
+              "max_passes",
+              "max_spawns",
+              "max_audit_spawns"
+            ],
             "properties": {
               "max_passes": {
                 "type": "integer",
@@ -731,6 +740,13 @@
                 "maximum": 128
               }
             }
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 600,
+            "pattern": "\\S",
+            "description": "Nonblank author sizing rationale bound by the proposal digest."
           }
         }
       }
@@ -822,7 +838,7 @@
       }
     },
     "governance.propose": {
-      "description": "Correct the configure_run proposal and request a host-mediated configuration decision; cannot self-approve.",
+      "description": "Issue a task-sized configure_run (all three ceilings plus a nonblank rationale) and request a host-mediated configuration decision; cannot self-approve.",
       "surface": {
         "tool": "empirica_observe",
         "action": "configure_run"
@@ -831,12 +847,18 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "budgets"
+          "budgets",
+          "rationale"
         ],
         "properties": {
           "budgets": {
             "type": "object",
             "additionalProperties": false,
+            "required": [
+              "max_passes",
+              "max_spawns",
+              "max_audit_spawns"
+            ],
             "properties": {
               "max_passes": {
                 "type": "integer",
@@ -854,6 +876,13 @@
                 "maximum": 128
               }
             }
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 600,
+            "pattern": "\\S",
+            "description": "Nonblank author sizing rationale bound by the proposal digest."
           }
         }
       }
@@ -1154,6 +1183,7 @@
       },
       "next_actions": [
         "budget.raise",
+        "run.start_fresh",
         "residual.accept"
       ],
       "sections": [
@@ -1393,7 +1423,7 @@
       "sections": [
         "governance"
       ],
-      "message": "Supply a complete run-configuration proposal, then request host approval with configure_run. No investigation is authorized."
+      "message": "Issue a task-sized configure_run with all three ceilings and a nonblank rationale, then request host approval. The StartRun placeholder is unapprovable; no investigation is authorized."
     },
     "governance.revision_required": {
       "params": {
@@ -1433,13 +1463,43 @@
         "properties": {}
       },
       "next_actions": [
-        "governance.propose",
+        "run.start_fresh",
         "residual.accept"
       ],
       "sections": [
         "governance"
       ],
-      "message": "Auto cannot increase operational ceilings, including audit retries. Stop honestly."
+      "message": "Auto cannot increase operational ceilings, including audit retries, and a delegated proposal cannot exceed the 8/1/2 policy envelope. Start a fresh run with a larger approved size, or use deliberative mode."
+    },
+    "governance.budget_contradictory": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "run.start_fresh"
+      ],
+      "sections": [
+        "governance"
+      ],
+      "message": "StartRun budgets or operator limits exceed the 8/1/2 delegated-auto ceiling policy. They may only narrow it; reduce them and start a fresh run.",
+      "disposition": "start_refused"
+    },
+    "governance.revision_exhausted": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "run.start_fresh",
+        "residual.accept"
+      ],
+      "sections": [
+        "governance"
+      ],
+      "message": "Auto material-revision allowance (eight before and eight after the first approval) is exhausted. Start a new run with a larger approved size, or use deliberative mode."
     },
     "governance.budget_invalid": {
       "params": {
@@ -1822,7 +1882,7 @@
         },
         {
           "id": "budget/exhausted",
-          "text": "An exhausted investigation-spawn, audit-spawn, or pass budget yields budget.exhausted with budget.raise and residual.accept; exhaustion never borrows from another account."
+          "text": "An exhausted investigation-spawn, audit-spawn, or pass budget yields budget.exhausted. Deliberative runs may recover with budget.raise or residual.accept; automatic runs exclude budget.raise and recover only by residual.accept or by starting a fresh run. Exhaustion never borrows from another account."
         }
       ]
     },
@@ -2024,7 +2084,7 @@
         },
         {
           "id": "governance/auto",
-          "text": "Explicit auto accepts only configuration within existing budgets. It cannot raise ceilings and is admitted only from an interactive invocation or recorded operator delegation. Reviewer configuration is host-owned, and actual host-observed reviewer distinctness from the covered evidence producer is checked at convergence."
+          "text": "Every run starts with author-sized ceilings and rationale. Deliberative and interactive-auto runs require one initial human-approved sizing episode; delegated auto instead accepts initial sizing only inside the persisted operator-narrowed 8/1/2 envelope. After the first successful approval, automatic revisions are componentwise monotone and cannot raise installed ceilings; deliberative human locked confirmation may amend them. Automatic exhaustion is restart-only rather than budget.raise. Auto is admitted only from an interactive invocation or recorded operator delegation. Reviewer configuration is host-owned, and actual host-observed reviewer distinctness from the covered evidence producer is checked at convergence."
         },
         {
           "id": "governance/limits",
@@ -2090,6 +2150,12 @@
       "actions": [
         "approve",
         "decline"
+      ]
+    },
+    "recovery_exclusions": {
+      "deliberative": [],
+      "auto": [
+        "budget.raise"
       ]
     }
   }

@@ -55,12 +55,15 @@
       "operation": "graph"
     },
     "configure_run": {
-      "description": "After a graph exists, propose bounded configuration and request host mediation. It never self-approves or changes effective budgets before consent.",
+      "description": "After a graph exists, propose a task-sized configuration (all three ceilings plus a nonblank rationale) and request host-mediated approval before investigation in both control modes. It never self-approves or changes effective budgets before consent.",
       "example": {
         "kind": "configure_run",
         "budgets": {
-          "max_passes": 5
-        }
+          "max_passes": 5,
+          "max_spawns": 1,
+          "max_audit_spawns": 2
+        },
+        "rationale": "Five gating claims, two needing experiments; one audit plus one retry."
       },
       "operation": "configure_run"
     },
@@ -118,6 +121,12 @@
         "approve",
         "decline"
       ]
+    },
+    "recovery_exclusions": {
+      "deliberative": [],
+      "auto": [
+        "budget.raise"
+      ]
     }
   },
   "host_profiles": {
@@ -133,6 +142,7 @@
   },
   "start_refusal_codes": [
     "governance.auto_invocation_required",
+    "governance.budget_contradictory",
     "run.goal_required"
   ],
   "recovery": {
@@ -453,7 +463,9 @@
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
-                  "kind"
+                  "kind",
+                  "budgets",
+                  "rationale"
                 ],
                 "properties": {
                   "kind": {
@@ -462,6 +474,11 @@
                   "budgets": {
                     "type": "object",
                     "additionalProperties": false,
+                    "required": [
+                      "max_passes",
+                      "max_spawns",
+                      "max_audit_spawns"
+                    ],
                     "properties": {
                       "max_passes": {
                         "type": "integer",
@@ -479,15 +496,25 @@
                         "maximum": 128
                       }
                     }
+                  },
+                  "rationale": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 600,
+                    "pattern": "\\S",
+                    "description": "Nonblank author sizing rationale bound by the proposal digest; not a command, authority claim, or approvable conclusion."
                   }
                 },
-                "description": "After a graph exists, propose bounded configuration and request host mediation. It never self-approves or changes effective budgets before consent.",
+                "description": "After a graph exists, propose a task-sized configuration (all three ceilings plus a nonblank rationale) and request host-mediated approval before investigation in both control modes. It never self-approves or changes effective budgets before consent.",
                 "examples": [
                   {
                     "kind": "configure_run",
                     "budgets": {
-                      "max_passes": 5
-                    }
+                      "max_passes": 5,
+                      "max_spawns": 1,
+                      "max_audit_spawns": 2
+                    },
+                    "rationale": "Five gating claims, two needing experiments; one audit plus one retry."
                   }
                 ]
               },
@@ -828,7 +855,9 @@
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
-                  "kind"
+                  "kind",
+                  "budgets",
+                  "rationale"
                 ],
                 "properties": {
                   "kind": {
@@ -837,6 +866,11 @@
                   "budgets": {
                     "type": "object",
                     "additionalProperties": false,
+                    "required": [
+                      "max_passes",
+                      "max_spawns",
+                      "max_audit_spawns"
+                    ],
                     "properties": {
                       "max_passes": {
                         "type": "integer",
@@ -854,15 +888,25 @@
                         "maximum": 128
                       }
                     }
+                  },
+                  "rationale": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 600,
+                    "pattern": "\\S",
+                    "description": "Nonblank author sizing rationale bound by the proposal digest; not a command, authority claim, or approvable conclusion."
                   }
                 },
-                "description": "After a graph exists, propose bounded configuration and request host mediation. It never self-approves or changes effective budgets before consent.",
+                "description": "After a graph exists, propose a task-sized configuration (all three ceilings plus a nonblank rationale) and request host-mediated approval before investigation in both control modes. It never self-approves or changes effective budgets before consent.",
                 "examples": [
                   {
                     "kind": "configure_run",
                     "budgets": {
-                      "max_passes": 5
-                    }
+                      "max_passes": 5,
+                      "max_spawns": 1,
+                      "max_audit_spawns": 2
+                    },
+                    "rationale": "Five gating claims, two needing experiments; one audit plus one retry."
                   }
                 ]
               },

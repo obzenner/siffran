@@ -55,7 +55,12 @@ class CodexAdapterConformanceTests(unittest.TestCase):
                 tools.call_internal("empirica_observe", {"run_id": handle, "action": {"kind": "route", "reason": "route first"}})
                 tools.call_internal("empirica_observe", {"run_id": handle, "action": {"kind": "graph", "payload": {
                     "root": "G0", "claims": [{"id": "G0", "text": "identity", "gating": True, "kind": "ordinary"}], "edges": []}}})
-                result = tools.call_internal("empirica_observe", {"run_id": handle, "action": {"kind": "configure_run"}})["structuredContent"]
+                sizing = {"kind": "configure_run",
+                          "budgets": {"max_passes": 8, "max_spawns": 1,
+                                      "max_audit_spawns": 2},
+                          "rationale": "sized for one claim and an audit retry"}
+                result = tools.call_internal("empirica_observe", {"run_id": handle,
+                    "action": sizing})["structuredContent"]
                 self.assertEqual(result["run"]["governance"]["approval_kind"], "auto")
 
     def test_public_mcp_surface_runs_managed_auditor_but_blocks_unobserved_identity(self) -> None:
@@ -94,7 +99,10 @@ class CodexAdapterConformanceTests(unittest.TestCase):
                                 "gating": True, "kind": "needs-experiment"}],
                     "edges": [],
                 }})
-                approved = observe({"kind": "configure_run"})
+                approved = observe({"kind": "configure_run",
+                    "budgets": {"max_passes": 8, "max_spawns": 1,
+                                "max_audit_spawns": 2},
+                    "rationale": "sized for one claim and an audit retry"})
                 self.assertEqual(approved["run"]["governance"]["approval_kind"], "auto")
                 observe({"kind": "investigate"})
                 observe({"kind": "research", "claim_id": "G0", "source_kind": "code",

@@ -19,7 +19,7 @@
           "roles",
           "hosts/capabilities"
         ],
-        "digest": "sha256:bd03b3d979f9ec83716ac22961c12f28977d8437e640e27ef984b98fff64adfb"
+        "digest": "sha256:5ea626b1bb1ae36eb788e7717a1ecf9e9463a8ef7454c973b4d7f3d68d3d13ab"
       },
       "obligations": {
         "active": [
@@ -73,14 +73,17 @@
             "max_passes": 10,
             "max_spawns": 5,
             "max_audit_spawns": 1
-          }
+          },
+          "rationale": null
         },
         "context": {
           "author": null,
           "ingress": "unavailable",
-          "approval_capability": "unavailable"
+          "approval_capability": "unavailable",
+          "delegation": false,
+          "interactive": true
         },
-        "proposal_digest": "sha256:f2cd925381687e56f3bc97866b54e33e279f5aed380821e345779641ef5fade0",
+        "proposal_digest": "sha256:86d74b272ea96a0196615b8f2954b19a16fc19b3441afe4894ba8d2898d189f8",
         "budgets": {
           "max_passes": 10,
           "passes_used": 3,
@@ -101,7 +104,10 @@
           "total": 128
         },
         "prompt_error": null,
-        "next_action": "governance.propose"
+        "next_action": "governance.propose",
+        "first_approval": false,
+        "pre_approval_revisions": 0,
+        "post_approval_revisions": 0
       },
       "audit": {
         "state": "required",

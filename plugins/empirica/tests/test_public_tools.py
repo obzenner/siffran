@@ -17,6 +17,8 @@ import jsonschema
 PLUGIN = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN))
 
+from governance_setup import SIZED_RATIONALE  # noqa: E402
+
 
 class PublicToolContractTests(unittest.TestCase):
     def _tools(self):
@@ -150,7 +152,7 @@ class PublicToolContractTests(unittest.TestCase):
         tools = self._tools()
         result = tools.call("empirica_observe", {
             "run_id": "r",
-            "action": {"kind": "configure_run", "modes": {"cli_exec": True}},
+            "action": {"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}, "rationale": SIZED_RATIONALE, "modes": {"cli_exec": True}},
         })
         self.assertTrue(result["isError"])
         self.assertEqual(self.requests, [])

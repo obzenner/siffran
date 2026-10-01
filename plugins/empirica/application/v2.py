@@ -1,6 +1,10 @@
 """Thin Empirica v2 application dispatch shell."""
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
+
+from core import governance
 from core.projection import project_runview
 from . import protocol as _proto
 from .location import decode_handle
@@ -14,6 +18,26 @@ from .transaction import Coordinator
 PRIVATE_GOVERNANCE_OPERATIONS = ("governance_context", "governance_decision")
 
 
+def _admit_limits(limits: object) -> Mapping[str, int]:
+    """Validate operator limits once at composition and return immutable admitted data."""
+    if not isinstance(limits, Mapping):
+        raise ValueError("application limits must be a mapping")
+    unknown = set(limits) - set(governance.CEILINGS)
+    if unknown:
+        raise ValueError(f"application limits contain unknown keys: {', '.join(sorted(unknown))}")
+    admitted = {}
+    for key, value in limits.items():
+        if type(value) is not int:
+            raise ValueError(f"application limit {key} must be an integer")
+        minimum, maximum = _proto.CEILING_BOUNDS[key]
+        if not minimum <= value <= maximum:
+            raise ValueError(
+                f"application limit {key} must be between {minimum} and {maximum}"
+            )
+        admitted[key] = value
+    return MappingProxyType(admitted)
+
+
 class _Service:
     __slots__ = ("_workspace", "_harness", "_runs", "_artifacts", "_host", "_profile_id",
                  "_limits", "_clock", "_coordinator")
@@ -21,8 +45,8 @@ class _Service:
     def __init__(self, workspace, harness, runs, artifacts, host, profile_id, limits, clock):
         self._workspace, self._harness, self._runs = workspace, harness, runs
         self._artifacts, self._host, self._profile_id = artifacts, host, profile_id
-        self._limits, self._clock = limits or {}, clock
-        self._coordinator = Coordinator(workspace, harness, runs, artifacts, profile_id, limits)
+        self._limits, self._clock = _admit_limits(limits), clock
+        self._coordinator = Coordinator(workspace, harness, runs, artifacts, profile_id, self._limits)
 
     def dispatch(self, raw: dict) -> dict:
         return _proto.dispatch_request(raw, self._handler)

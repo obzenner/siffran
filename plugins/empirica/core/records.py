@@ -2,7 +2,7 @@
 
 These types are the vocabulary the persistence *ports* (see ``ports.py``) speak in. They are
 deliberately free of any storage mechanism: nothing here knows about a filesystem path, a Git
-object, a database row, or a Claude/Pi run. An adapter translates between these records and a
+object, a database row, or a host run. An adapter translates between these records and a
 concrete store; the domain only ever holds these.
 
 Every record is a frozen dataclass or singleton, so persistence passes state by value.

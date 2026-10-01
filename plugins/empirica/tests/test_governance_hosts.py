@@ -16,7 +16,7 @@ from adapters.public_tools import PublicTools
 from application import protocol as _proto
 from application.v2 import compose
 from test_governance import CONTEXT, GRAPH, AUTHOR
-from governance_setup import TEST_INVOCATION
+from governance_setup import TEST_INVOCATION, SIZED_RATIONALE
 from test_d7_transactions import Runs, Artifacts, Workspace, Harness
 
 
@@ -26,6 +26,7 @@ class GovernanceHostTests(unittest.TestCase):
         self.service = compose(Workspace(), Harness(), Runs(), Artifacts(), None, self.profile, {}, None)
         self.sequence = 0
         response = self.dispatch({"type": "StartRun", "goal": "supplied task",
+                                  "invocation": dict(TEST_INVOCATION),
                                   "selector": {"project": "p", "session": "ui"}})
         self.run = response["result"]["run"]["id"]
         self.dispatch({"type": "ObserveAction", "run_id": self.run,
@@ -46,8 +47,6 @@ class GovernanceHostTests(unittest.TestCase):
         self.wrong_id = False
 
     def dispatch(self, command):
-        if command.get("type") == "StartRun":
-            command = {"invocation": dict(TEST_INVOCATION), **command}
         self.sequence += 1
         return self.service.dispatch({"protocol": "empirica/v2", "request_id": str(self.sequence), "command": command})
 
@@ -73,7 +72,7 @@ class GovernanceHostTests(unittest.TestCase):
         with patch.dict("os.environ", {}):
             return self.session.process_internal({"jsonrpc": "2.0", "id": "call", "method": "tools/call",
                 "params": {"name": "empirica_observe", "arguments": {"run_id": self.run,
-                            "action": {"kind": "configure_run"}}}})
+                            "action": {"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}, "rationale": SIZED_RATIONALE}}}})
 
     def test_host_owned_decision_table_is_fail_closed(self):
         dialog = self.service.trusted_governance_context(
@@ -160,12 +159,12 @@ class GovernanceHostTests(unittest.TestCase):
             self.assertEqual(len(seen), 2)
             self.assertIn("confirm edited configuration", message)
             self.assertIn("spawns 2 (was 1)", message)
-            self.assertIn("audits 3 (was 1)", message)
+            self.assertIn("audits 3 (was 2)", message)
             self.assertNotIn("max_spawns", schema["properties"])
             self.assertNotIn("cli_exec", schema["properties"])
             current = self.dispatch({"type": "GetRun", "run_id": self.run})["result"]["run"]
             self.assertEqual(current["governance"]["state"], "pending")
-            self.assertEqual(current["governance"]["budgets"]["max_audit_spawns"], 1)
+            self.assertEqual(current["governance"]["budgets"]["max_audit_spawns"], 2)
             return {"action": "accept", "content": {}}
         self.mediator.elicit = answer
         result = self.propose()["result"]["structuredContent"]
@@ -230,7 +229,7 @@ class GovernanceHostTests(unittest.TestCase):
             if calls == 1:
                 return {"action": "accept", "content": {"max_passes": 6}}
             self.dispatch({"type": "ObserveAction", "run_id": self.run,
-                           "action": {"kind": "configure_run", "budgets": {"max_passes": 7}}})
+                           "action": {"kind": "configure_run", "budgets": {"max_passes": 7, "max_spawns": 1, "max_audit_spawns": 2}, "rationale": SIZED_RATIONALE}})
             return {"action": "accept", "content": {}}
 
         self.mediator.elicit = answer
@@ -272,7 +271,7 @@ class GovernanceHostTests(unittest.TestCase):
         self.mediator.elicit = lambda message, schema: (seen.append((message, schema)), next(replies))[1]
         with patch.dict("os.environ", {}):
             result = self.mediator(self.dispatch({"type": "ObserveAction", "run_id": self.run,
-                "action": {"kind": "configure_run"}})["result"])
+                "action": {"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}, "rationale": SIZED_RATIONALE}})["result"])
         g = result["run"]["governance"]
         self.assertEqual(len(seen), 2)
         self.assertIn("confirm edited configuration", seen[1][0])
@@ -288,7 +287,7 @@ class GovernanceHostTests(unittest.TestCase):
         self.mediator.elicit = lambda *_: {"action": "decline"}
         with patch.dict("os.environ", {}):
             rejected = self.mediator(self.dispatch({"type": "ObserveAction", "run_id": self.run,
-                "action": {"kind": "configure_run"}})["result"])
+                "action": {"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}, "rationale": SIZED_RATIONALE}})["result"])
         self.assertEqual(rejected["run"]["governance"]["state"], "rejected")
         from core.projection import safe_text as safe
         self.assertEqual(safe("actual\x1b literal \\x1b \u202e emoji 😀 中"),
@@ -446,7 +445,7 @@ class GovernanceHostTests(unittest.TestCase):
                     self.assertEqual(receive()["id"], "init")
                     send({"id": "proposal", "method": "tools/call", "params": {
                         "name": "empirica_observe", "arguments": {"run_id": run,
-                        "action": {"kind": "configure_run"}}}})
+                        "action": {"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}, "rationale": SIZED_RATIONALE}}}})
                     dialog = receive()
                     self.assertEqual(dialog["method"], "elicitation/create")
                     send({"id": dialog["id"], "result": {"action": "accept", "content": {}}})
@@ -491,7 +490,9 @@ class GovernancePresentationTests(unittest.TestCase):
     def view(self):
         from core.governance import initial
         budgets = {"max_passes": 8, "max_spawns": 0, "max_audit_spawns": 1}
-        g = initial("Exact goal", budgets)
+        invocation = {"host": "test", "interactive": True,
+                      "signal": "operator", "delegation": False}
+        g = initial("Exact goal", budgets, "deliberative", invocation, None)
         g.update(scope=copy.deepcopy(GRAPH), context=copy.deepcopy(CONTEXT),
                  budgets={**budgets, "passes_used": 2, "spawns_used": 0, "audit_spawns_used": 0},
                  interactions_remaining={"proposal": 3, "total": 128})

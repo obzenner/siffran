@@ -45,7 +45,7 @@ if _REPO_ROOT is None:
 
 _PLUGIN_ROOT = _REPO_ROOT / "plugins" / "empirica"
 sys.path.insert(0, str(_PLUGIN_ROOT))
-from governance_setup import TEST_INVOCATION  # noqa: E402
+from governance_setup import TEST_INVOCATION, SIZED_RATIONALE  # noqa: E402
 
 _V2 = _REPO_ROOT / "contracts" / "empirica" / "v2"
 _PUBLIC_CONTRACT = json.loads((_V2 / "public-contract.json").read_text(encoding="utf-8"))
@@ -305,7 +305,9 @@ def _build_action_sample(kind: str) -> dict:
         return {"kind": "spike_request", "claim_id": "C0", "command": "pytest",
                 "dependent_files": ["f.py"]}
     if kind == "configure_run":
-        return {"kind": "configure_run", "budgets": {"max_passes": 1}}
+        return {"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1,
+                                                       "max_audit_spawns": 2},
+                "rationale": SIZED_RATIONALE}
     if kind == "route":
         return {"kind": "route", "reason": "primary"}
     if kind == "investigate":
@@ -730,9 +732,7 @@ class D6StrictRunStateTests(unittest.TestCase):
     def test_split_spawn_accounts_and_child_class_reconcile_exactly(self):
         mod = _import_run_state()
         split = json.loads(json.dumps(_VALID_ACTIVE_STATE))
-        split["budgets"].update({"spawns_used": 0, "max_audit_spawns": 1,
-                                  "audit_spawns_used": 1})
-        split["children"][0]["resource_class"] = "audit"
+        self.assertEqual(split["children"][0]["resource_class"], "audit")
         self.assertEqual(mod.classify_and_decode(split).kind, "valid")
         self.assertEqual(mod.encode_state(mod.classify_and_decode(split).state), split)
         investigation = json.loads(json.dumps(split))
@@ -827,7 +827,7 @@ class D6StrictRunStateTests(unittest.TestCase):
         """reserved child with spent=true is a schema violation → current-corrupt."""
         mod = _import_run_state()
         bad = json.loads(json.dumps(_VALID_ACTIVE_STATE))
-        bad["children"][0]["spent"] = True  # reserved requires spent=false
+        bad["children"][0].update(state="reserved", spent=True, native_id=None)
         classification = mod.classify_and_decode(bad)
         self.assertEqual(classification.kind, "current_corrupt")
 
@@ -885,7 +885,7 @@ class D6MinimalServiceTests(unittest.TestCase):
         mod = _import_application_v2()
         runs = runs or RecordingRunRepository()
         service = mod.compose(workspace=None, harness=None, runs=runs, artifacts=None,
-                              host=None, profile_id=_DEFAULT_PROFILE, limits=None, clock=None)
+                              host=None, profile_id=_DEFAULT_PROFILE, limits={}, clock=None)
         return service, runs
 
     # ---- valid-current unsupported ----

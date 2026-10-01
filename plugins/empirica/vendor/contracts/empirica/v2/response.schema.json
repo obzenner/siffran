@@ -704,6 +704,21 @@
           ],
           "properties": {
             "code": {
+              "const": "governance.budget_contradictory"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
               "const": "governance.auto_invocation_required"
             },
             "parameters": {
@@ -780,6 +795,21 @@
           "properties": {
             "code": {
               "const": "governance.decision_conflict"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.revision_exhausted"
             },
             "parameters": {
               "$ref": "#/$defs/emptyParams"
@@ -1212,6 +1242,9 @@
                 "proposal_digest",
                 "proposal",
                 "context",
+                "first_approval",
+                "pre_approval_revisions",
+                "post_approval_revisions",
                 "budgets",
                 "remaining",
                 "request_ready",
@@ -1261,7 +1294,8 @@
                   "type": "object",
                   "additionalProperties": false,
                   "required": [
-                    "budgets"
+                    "budgets",
+                    "rationale"
                   ],
                   "properties": {
                     "budgets": {
@@ -1289,6 +1323,19 @@
                           "maximum": 128
                         }
                       }
+                    },
+                    "rationale": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 600,
+                          "pattern": "\\S"
+                        }
+                      ]
                     }
                   }
                 },
@@ -1298,7 +1345,9 @@
                   "required": [
                     "author",
                     "ingress",
-                    "approval_capability"
+                    "approval_capability",
+                    "delegation",
+                    "interactive"
                   ],
                   "properties": {
                     "author": {
@@ -1324,8 +1373,30 @@
                         "unavailable",
                         "human_configuration"
                       ]
+                    },
+                    "delegation": {
+                      "type": "boolean"
+                    },
+                    "interactive": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
                     }
                   }
+                },
+                "first_approval": {
+                  "type": "boolean"
+                },
+                "pre_approval_revisions": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8
+                },
+                "post_approval_revisions": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8
                 },
                 "budgets": {
                   "type": "object",
@@ -2593,7 +2664,8 @@
                         "code": {
                           "enum": [
                             "run.goal_required",
-                            "governance.auto_invocation_required"
+                            "governance.auto_invocation_required",
+                            "governance.budget_contradictory"
                           ]
                         }
                       }
@@ -2986,6 +3058,7 @@
             "state",
             "reviews_left",
             "goal",
+            "rationale",
             "invocation",
             "budgets"
           ],
@@ -3020,6 +3093,19 @@
             },
             "goal": {
               "type": "string"
+            },
+            "rationale": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 3600,
+                  "pattern": "\\S"
+                }
+              ]
             },
             "invocation": {
               "oneOf": [

@@ -655,7 +655,8 @@
       "required": [
         "actions",
         "controls",
-        "confirmation"
+        "confirmation",
+        "recovery_exclusions"
       ],
       "properties": {
         "actions": {
@@ -727,6 +728,34 @@
               "items": false,
               "minItems": 2,
               "maxItems": 2
+            }
+          }
+        },
+        "recovery_exclusions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "deliberative",
+            "auto"
+          ],
+          "properties": {
+            "deliberative": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 0
+            },
+            "auto": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "const": "budget.raise"
+                }
+              ],
+              "items": false,
+              "minItems": 1,
+              "maxItems": 1
             }
           }
         }

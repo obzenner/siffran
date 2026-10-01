@@ -50,7 +50,7 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:bd03b3d979f9ec83716ac22961c12f28977d8437e640e27ef984b98fff64adfb"
+REVIEWED_REGISTRY_DIGEST = "sha256:5ea626b1bb1ae36eb788e7717a1ecf9e9463a8ef7454c973b4d7f3d68d3d13ab"
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:159c1a777884e2c797164b629583686b4b4f6904c5ded31c70247a9baa3c7faf"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
@@ -1622,6 +1622,27 @@ def check_state_invariants(state: dict, errors: list[str], where: str) -> None:
         if isinstance(investigation_stamp, int) and investigation_stamp > stamp_seq:
             errors.append(f"{where}: investigation_stamp {investigation_stamp} > "
                           f"stamp_seq {stamp_seq}")
+    governance = state.get("governance", {})
+    if isinstance(governance, dict) and isinstance(state.get("goal"), str):
+        from core.governance import proposal_digest as canonical_proposal_digest
+        try:
+            observed_digest = canonical_proposal_digest(state["goal"], governance)
+        except (KeyError, TypeError, ValueError) as exc:
+            errors.append(f"{where}: governance proposal digest cannot be recomputed: {exc}")
+        else:
+            if governance.get("proposal_digest") != observed_digest:
+                errors.append(f"{where}: governance proposal_digest does not match canonical digest")
+    if (isinstance(governance, dict) and governance.get("state") == "approved"
+            and isinstance(governance.get("proposal"), dict)
+            and governance["proposal"].get("rationale") is None):
+        errors.append(f"{where}: approved placeholder governance is invalid")
+    from application.run_state import governed_progress_is_valid
+    progress_keys = {"investigation_stamp", "children", "status", "governance"}
+    governance_keys = {"first_approval", "receipts"}
+    if (progress_keys <= state.keys() and isinstance(governance, dict)
+            and governance_keys <= governance.keys()
+            and not governed_progress_is_valid(state)):
+        errors.append(f"{where}: investigation, children, and convergence require a prior successful approval receipt")
     seen: set[str] = set()
     for i, child in enumerate(state.get("children", []) or []):
         if not isinstance(child, dict):
@@ -2375,7 +2396,8 @@ def main() -> int:
         "invalid-missing-goal", "invalid-missing-invocation", "invalid-extra-field", "invalid-status",
         "invalid-child-duplicate-id", "invalid-counter", "invalid-stamp",
         "invalid-child-branch", "invalid-deadline-nan", "invalid-refund-mismatch",
-        "invalid-budget-reconciliation",
+        "invalid-budget-reconciliation", "invalid-governance-legacy-shape",
+        "invalid-receipt-kind", "invalid-approved-placeholder",
     }
     state_names = {p.name.removesuffix(".json") for p in state_fixture_paths}
     for name in sorted(REQUIRED_STATE_FIXTURES - state_names):
@@ -2395,6 +2417,9 @@ def main() -> int:
         "invalid-deadline-nan": (False, "finite number"),
         "invalid-refund-mismatch": (False, "launch_rejected"),
         "invalid-budget-reconciliation": (False, "reconcile"),
+        "invalid-governance-legacy-shape": (False, "first_approval"),
+        "invalid-receipt-kind": (False, "legacy"),
+        "invalid-approved-placeholder": (False, "approved placeholder"),
     }
     for path in state_fixture_paths:
         name = path.name.removesuffix(".json")
@@ -4112,6 +4137,16 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         {"child_id": "dup"}, {"child_id": "dup"}]}
     expect(lambda e: check_state_invariants(bad_state, e, "neg"),
            "duplicate child_id", "state: duplicate child_id")
+    reachable_state = json.loads((V2 / "state-fixtures/valid-active.json").read_text())
+    bad_state = copy.deepcopy(reachable_state)
+    bad_state["governance"]["proposal_digest"] = "sha256:" + "0" * 64
+    expect(lambda e: check_state_invariants(bad_state, e, "neg"),
+           "canonical digest", "state: governance proposal digest mismatch")
+    bad_state = copy.deepcopy(reachable_state)
+    bad_state["governance"]["first_approval"] = False
+    bad_state["governance"]["receipts"] = []
+    expect(lambda e: check_state_invariants(bad_state, e, "neg"),
+           "prior successful approval receipt", "state: governed progress without approval")
     # non-finite deadline rejection (NaN, +Inf, -Inf)
     for bad_dl in (float("nan"), float("inf"), float("-inf")):
         bad_state = {"children": [{"child_id": "c1", "deadline": bad_dl}]}
