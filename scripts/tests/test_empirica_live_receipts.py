@@ -133,7 +133,7 @@ class LiveReceiptTests(unittest.TestCase):
                 self.assertEqual(inspect(receipt, host, "commit", "2.0.0"), [])
 
     def test_incompatible_or_misreported_harness_versions_fail(self):
-        cases = {"claude": "2.2.0", "pi": "0.85.0"}
+        cases = {"claude": "2.2.0", "pi": "0.90.0"}
         for host, version in cases.items():
             with self.subTest(host=host), tempfile.TemporaryDirectory() as directory:
                 receipt = self.receipt(Path(directory), host)

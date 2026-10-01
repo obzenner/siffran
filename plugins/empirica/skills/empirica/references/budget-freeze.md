@@ -53,7 +53,11 @@ Freeze is an explicit scope commitment, not convergence.
   coverage stale even when frozen IDs do not change.
 - Every committed claim still needs its evidence and passing audit.
 - Deferred claims remain visible in the terminal handoff.
-- A frozen result is never relabeled `converged:true`.
+- A frozen run with deferred claims ends `stopped_frozen` and is never relabeled
+  `converged:true`. A freeze that defers nothing converges normally: request convergence,
+  not `intent=stop`.
+- Deferring means keeping the claim in the graph outside the committed scope. Deleting a
+  claim is not deferring it.
 
 Freeze requires current configuration approval. It does not approve graph content. Graph changes
 preserve configuration authority but invalidate prior audit coverage. Before submitting

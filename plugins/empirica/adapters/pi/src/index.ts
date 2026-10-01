@@ -265,6 +265,9 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
 
   return function empiricaExtension(pi: ExtensionAPI): void {
     let runHandle: string | null = null;
+    // The last retired run stays readable: its terminal view's only next action is run.inspect.
+    // Writes still require an active runHandle.
+    let retiredHandle: string | null = null;
     type AuditCorrelation = {
       runHandle: string;
       nativeId: string;
@@ -284,6 +287,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     const retireTerminal = (response: Response): void => {
       if (!runHandle || !terminalStatus(response)) return;
       pi.appendEntry?.("empirica.run.done", { runHandle });
+      retiredHandle = runHandle;
       runHandle = null;
     };
 
@@ -315,9 +319,10 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           runHandle?: unknown; toolCallId?: unknown; nativeId?: unknown;
           plan?: unknown; childId?: unknown;
         } | undefined;
-        if (entry.customType === "empirica.run" && typeof data?.runHandle === "string"
-            && !terminalRuns.has(data.runHandle))
-          runHandle = data.runHandle;
+        if (entry.customType === "empirica.run" && typeof data?.runHandle === "string") {
+          if (terminalRuns.has(data.runHandle)) retiredHandle = data.runHandle;
+          else runHandle = data.runHandle;
+        }
         if (entry.customType === "empirica.audit" && !completedAudits.has(String(data?.toolCallId))
             && typeof data?.runHandle === "string"
             && typeof data.toolCallId === "string" && typeof data.nativeId === "string"
@@ -434,11 +439,12 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
                 ? resolved.result.run : undefined;
               runHandle = run?.id ?? null;
             }
-            if (!runHandle)
+            const readHandle = runHandle ?? retiredHandle;
+            if (!readHandle)
               return { content: [{ type: "text", text: "No active Empirica run." }] };
-            if (operation === "GetRun") request = getRunRequest(runHandle, randomUUID());
-            else if (operation === "GetArgument") request = getArgumentRequest(runHandle, randomUUID());
-            else if (operation === "RestoreRun") request = restoreRunRequest(runHandle, randomUUID());
+            if (operation === "GetRun") request = getRunRequest(readHandle, randomUUID());
+            else if (operation === "GetArgument") request = getArgumentRequest(readHandle, randomUUID());
+            else if (operation === "RestoreRun") request = restoreRunRequest(readHandle, randomUUID());
             else throw new Error("unknown Empirica read operation");
           }
           const response = await dispatch(request);

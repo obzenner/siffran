@@ -999,6 +999,41 @@ test("session restore keeps a verified terminal run inactive", async () => {
   assert.equal(w.requests.length, 0);
 });
 
+test("a retired run stays readable but not writable", async () => {
+  const w = wire((req) => req.command.type === "StartRun"
+    ? envelope({ type: "Allow", converged: false, run: run() })
+    : req.command.type === "ResolveRun" ? envelope({ type: "Inert", reason: "no_run" })
+    : envelope({ type: "Allow", converged: true, run: run("converged") }));
+  await startRun(w);
+  await execTool(w, "report_convergence");
+  const result = await execTool(w, "empirica_read", { operation: "GetRun" });
+  const read = w.requests.at(-1)!;
+  assert.equal(read.command.type, "GetRun");
+  assert.equal(read.command.type === "GetRun" ? read.command.run_id : null, HANDLE);
+  assert.match(result.content[0].text, /converged/);
+  const before = w.requests.length;
+  const observed = await execTool(w, "empirica_observe", { action: { kind: "investigate" } });
+  assert.match(observed.content[0].text, /No active Empirica run/);
+  assert.equal(w.requests.length, before);
+});
+
+test("session restore keeps a retired run readable", async () => {
+  const w = wire((req) => {
+    // No active run resolves for the selector, so the read falls back to the retired handle.
+    if (req.command.type === "ResolveRun") return envelope({ type: "Inert", reason: "no_run" });
+    assert.equal(req.command.type, "GetRun");
+    assert.equal(req.command.type === "GetRun" ? req.command.run_id : null, HANDLE);
+    return envelope({ type: "Allow", converged: true, run: run("converged") });
+  });
+  const ctx = fakeCtx("/work", [
+    { customType: "empirica.run", data: { runHandle: HANDLE } },
+    { customType: "empirica.run.done", data: { runHandle: HANDLE } },
+  ]);
+  await (w.pi.handlers.get("session_start") as (e: unknown, c: unknown) => unknown)({}, ctx);
+  const result = await execTool(w, "empirica_read", { operation: "GetRun" });
+  assert.match(result.content[0].text, /converged/);
+});
+
 test("empirica_read uses the restored opaque handle", async () => {
   const w = wire((req) => {
     assert.equal(req.command.type, "GetRun");

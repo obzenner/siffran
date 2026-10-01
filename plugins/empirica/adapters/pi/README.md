@@ -6,7 +6,7 @@ surface as the Claude and Codex adapters and owns no convergence policy.
 ## Capability profile
 
 The promoted profile is qualified on Pi `0.84.1` and admits compatible Pi releases
-`>=0.84.1,<0.85.0`; receipts still record the exact observed Pi version. The controlled
+`>=0.84.1,<0.90.0`; receipts still record the exact observed Pi version. The controlled
 `pi-subagents` dependency remains pinned at `0.50.0`. The profile tier is `foreground_only`, with
 `promotion_status=promoted` after an installed-host foreground trace reached guarded
 `Allow(converged=true)`. `pi-subagents` must provide its structured `subagent` tool.
