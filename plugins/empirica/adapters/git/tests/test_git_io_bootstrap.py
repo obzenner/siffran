@@ -67,7 +67,7 @@ class GitIoBootstrapTest(unittest.TestCase):
 
     def test_graph_bootstrap_uses_four_batched_tree_reads_and_keeps_governance_pending(self):
         started = self.call({
-            "type": "StartRun", "selector": {"project": "io", "session": "bootstrap"},
+            "type": "StartRun", "control_mode": "deliberative", "selector": {"project": "io", "session": "bootstrap"},
             "goal": "Verify deterministic output.",
             "invocation": dict(TEST_INVOCATION),
         })

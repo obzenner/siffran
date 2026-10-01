@@ -432,10 +432,25 @@ class ResponseMappingTests(unittest.TestCase):
                    side_effect=AssertionError("systemMessage must bypass author renderer")):
             notice = json.loads(stop_result(_typed(result())).stdout)
             self.assertIn("systemMessage", notice)
-        for changed in ("auto", "approved", "missing_context", "mixed", "terminal", "mismatched_reason"):
+        initial_auto = result()
+        initial_auto["run"]["governance"].update({"control_mode": "auto", "first_approval": False})
+        initial_auto["run"]["governance"]["context"]["interactive"] = True
+        self.assertEqual(stop_result(_typed(initial_auto)).exit_code, 0)
+        for changed in ("auto", "delegated", "proposal_exhausted", "total_exhausted",
+                        "prompt_error", "approved", "missing_context", "mixed", "terminal",
+                        "mismatched_reason"):
             blocked = result()
             if changed == "auto":
-                blocked["run"]["governance"]["control_mode"] = "auto"
+                blocked["run"]["governance"].update({"control_mode": "auto", "first_approval": True})
+            elif changed == "delegated":
+                blocked["run"]["governance"].update({"control_mode": "auto", "first_approval": False})
+                blocked["run"]["governance"]["context"].update({"interactive": False,
+                                                                "delegation": True})
+            elif changed in ("proposal_exhausted", "total_exhausted"):
+                key = changed.split("_")[0]
+                blocked["run"]["governance"]["interactions_remaining"][key] = 0
+            elif changed == "prompt_error":
+                blocked["run"]["governance"]["prompt_error"] = "governance.interaction_limit"
             elif changed == "approved":
                 blocked["run"]["governance"]["state"] = "approved"
             elif changed == "missing_context":

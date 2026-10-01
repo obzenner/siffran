@@ -43,12 +43,13 @@ class TextSafety:
 
 @dataclass(frozen=True)
 class Header:
-    """First-line result, run, and governance summary."""
+    """First-line result, run, governance summary, and public proposal rationale."""
 
     result_type: Trusted
     status: Trusted
     governance: Trusted
     run_id: Trusted
+    proposal_rationale: Untrusted | None
 
 
 @dataclass(frozen=True)
@@ -273,8 +274,10 @@ def _parse(result: dict[str, Any]) -> AuthorView:
     result_type = result["type"]
     if result_type == "Allow":
         result_type += f" (converged={'true' if result['converged'] else 'false'})"
+    rationale = run["governance"]["proposal"]["rationale"] if run["governance"] is not None else None
     header = Header(Trusted(result_type), Trusted(run["status"]), _governance(run),
-                    Trusted(run["id"]))
+                    Trusted(run["id"]),
+                    safety.untrusted(rationale) if rationale is not None else None)
     terminal_next = tuple(_surface(action) for action in run["next_actions"])
     terminal = run["status"] != "active"
     obligations = tuple(
@@ -361,7 +364,10 @@ def _audit_lines(audit: AuditSummary) -> tuple[str, ...]:
 def _render(view: AuthorView) -> str:
     """Render a parsed view through one ordered, empty-dropping section table."""
     base = (f"{view.header.result_type} {view.header.status} — {view.header.governance}",
-            f"run_id: {view.header.run_id}", *_audit_lines(view.audit))
+            f"run_id: {view.header.run_id}",
+            *((f"proposal rationale: {view.header.proposal_rationale}",)
+              if view.header.proposal_rationale is not None else ()),
+            *_audit_lines(view.audit))
     sections = (
         ("Reasons:", _reason_lines(view.reasons)),
         ("Open obligations:", _obligation_lines(view.obligations)),

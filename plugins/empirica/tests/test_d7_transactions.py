@@ -232,7 +232,7 @@ def projection_snapshot(*, frozen: bool = False, deferred: bool = False,
     coordinator = ProductionCoordinator(
         workspace, harness, runs, artifacts_repo, "pi@0.84.1+pi-subagents@0.50.0", {})
     started = coordinator.handle(
-        {"type": "StartRun", "invocation": dict(TEST_INVOCATION), "selector": {"project": "projection", "session": "base"},
+        {"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "projection", "session": "base"},
          "goal": "g"}, "start")
     run_id = started["result"]["run"]["id"]
     activate_investigation(coordinator, run_id)
@@ -370,7 +370,7 @@ class D7TransactionTests(unittest.TestCase):
         runs, artifacts_repo, workspace = Runs(), Artifacts(), Workspace()
         coordinator = ProductionCoordinator(workspace, Harness(), runs, artifacts_repo,
                                   "pi@0.84.1+pi-subagents@0.50.0", {})
-        start = coordinator.handle({"type": "StartRun", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
+        start = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                     "goal": "g"}, "start")
         run_id = start["result"]["run"]["id"]
         key = next(iter(runs.data))
@@ -422,7 +422,7 @@ class D7TransactionTests(unittest.TestCase):
         coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo,
                                   "pi@0.84.1+pi-subagents@0.50.0", {})
         started = coordinator.handle({
-            "type": "StartRun", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"}, "goal": "g",
+            "type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"}, "goal": "g",
         }, "start")
         run_id = started["result"]["run"]["id"]
         key = next(iter(runs.data))
@@ -445,7 +445,7 @@ class D7TransactionTests(unittest.TestCase):
     def test_repeated_domain_artifacts_are_idempotent_not_corrupting(self):
         runs, artifacts_repo, workspace = Runs(), Artifacts(), Workspace()
         coordinator = ProductionCoordinator(workspace, Harness(), runs, artifacts_repo, "pi@0.84.1+pi-subagents@0.50.0", {})
-        started = coordinator.handle({"type": "StartRun", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
+        started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                       "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
         graph = {"root": "C0", "claims": [{"id": "C0", "text": "t", "gating": True,
@@ -471,7 +471,7 @@ class D7TransactionTests(unittest.TestCase):
     def test_deduplicated_noop_retries_if_revision_changed(self):
         runs, artifacts_repo = Runs(), Artifacts()
         coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo, "pi@0.84.1+pi-subagents@0.50.0", {})
-        started = coordinator.handle({"type": "StartRun", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
+        started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                       "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
         graph = {"root": "C0", "claims": [{"id": "C0", "text": "t", "gating": True,
@@ -488,7 +488,7 @@ class D7TransactionTests(unittest.TestCase):
     def test_identical_derivation_does_not_double_consume_pass(self):
         runs, artifacts_repo, workspace = Runs(), Artifacts(), Workspace()
         coordinator = ProductionCoordinator(workspace, Harness(), runs, artifacts_repo, "pi@0.84.1+pi-subagents@0.50.0", {})
-        started = coordinator.handle({"type": "StartRun", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
+        started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                       "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
         activate_investigation(coordinator, run_id)
@@ -525,7 +525,7 @@ class D7TransactionTests(unittest.TestCase):
         runs, artifacts_repo = Runs(), Artifacts()
         coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo,
                                   "pi@0.84.1+pi-subagents@0.50.0", {})
-        started = coordinator.handle({"type": "StartRun", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
+        started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                       "goal": "CANARY_REJECTED_GOAL"}, "start")
         run_id = started["result"]["run"]["id"]
         graph = {"root": "C0", "claims": [{"id": "C0", "text": "t", "gating": True,
@@ -559,7 +559,7 @@ class D7TransactionTests(unittest.TestCase):
         runs, artifacts_repo = Runs(), Artifacts()
         coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo,
                                   "pi@0.84.1+pi-subagents@0.50.0", {})
-        started = coordinator.handle({"type": "StartRun", "invocation": dict(TEST_INVOCATION),
+        started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION),
             "selector": {"project": "p", "session": "s"},
             "goal": "CANARY_MISSING_SELECTION"}, "start")
         run_id = started["result"]["run"]["id"]
@@ -597,7 +597,7 @@ class D7TransactionTests(unittest.TestCase):
     def test_read_revision_change_retries_before_projection(self):
         runs, artifacts_repo, workspace = Runs(), Artifacts(), Workspace()
         coordinator = ProductionCoordinator(workspace, Harness(), runs, artifacts_repo, "pi@0.84.1+pi-subagents@0.50.0", {})
-        started = coordinator.handle({"type": "StartRun", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
+        started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                       "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
         baseline = runs.read_calls
@@ -610,7 +610,7 @@ class D7TransactionTests(unittest.TestCase):
         runs, artifacts_repo, harness = Runs(), Artifacts(), Harness()
         coordinator = ProductionCoordinator(Workspace(), harness, runs, artifacts_repo,
                                   "pi@0.84.1+pi-subagents@0.50.0", {})
-        started = coordinator.handle({"type": "StartRun", "invocation": dict(TEST_INVOCATION),
+        started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION),
             "selector": {"project": "p", "session": "route"}, "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
         graph = {"root": "C0", "claims": [{"id": "C0", "text": "t",
@@ -698,7 +698,7 @@ class D7TransactionTests(unittest.TestCase):
             runs, artifacts_repo = Runs(), Artifacts()
             coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo,
                                       "pi@0.84.1+pi-subagents@0.50.0", {})
-            started = coordinator.handle({"type": "StartRun", "invocation": dict(TEST_INVOCATION),
+            started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION),
                 "selector": {"project": "p", "session": session}, "goal": "split",
                 "budgets": {"max_spawns": 1, "max_audit_spawns": audit_limit}}, "start")
             self.assertEqual(started["result"]["type"], "Allow")
@@ -773,7 +773,7 @@ class D7TransactionTests(unittest.TestCase):
                 runs, artifacts_repo = Runs(), Artifacts()
                 coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo,
                                           "pi@0.84.1+pi-subagents@0.50.0", {})
-                started = coordinator.handle({"type": "StartRun", "invocation": dict(TEST_INVOCATION),
+                started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION),
                     "selector": {"project": "p", "session": "s"}, "goal": "g"}, "start")
                 key = next(iter(runs.data))
                 writes = (runs.cas_calls, len(artifacts_repo.values[key]))
@@ -787,7 +787,7 @@ class D7TransactionTests(unittest.TestCase):
         runs, artifacts_repo = Runs(), Artifacts()
         coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo,
                                   "pi@0.84.1+pi-subagents@0.50.0", {})
-        started = coordinator.handle({"type": "StartRun", "invocation": dict(TEST_INVOCATION),
+        started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION),
             "selector": {"project": "p", "session": "s"}, "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
         graph = {"root": "C0", "claims": [
@@ -821,7 +821,7 @@ class D7TransactionTests(unittest.TestCase):
     def test_post_plan_capture_tracks_disjoint_graph_heads(self):
         runs, artifacts_repo, workspace, harness = Runs(), Artifacts(), Workspace(), Harness()
         coordinator = ProductionCoordinator(workspace, harness, runs, artifacts_repo, "pi@0.84.1+pi-subagents@0.50.0", {})
-        started = coordinator.handle({"type": "StartRun", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
+        started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                       "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
         activate_investigation(coordinator, run_id)
@@ -867,7 +867,7 @@ class D7TransactionTests(unittest.TestCase):
                 runs, artifacts_repo = Runs(), Artifacts()
                 coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo,
                                           "pi@0.84.1+pi-subagents@0.50.0", {})
-                coordinator.handle({"type": "StartRun", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
+                coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                     "goal": "g"}, "start")
                 key = next(iter(runs.data))
                 value = dict(runs.data[key].value)
@@ -887,7 +887,7 @@ class D7TransactionTests(unittest.TestCase):
         runs, artifacts_repo = Runs(), Artifacts()
         coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo,
                                   "pi@0.84.1+pi-subagents@0.50.0", {})
-        started = coordinator.handle({"type": "StartRun", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
+        started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                       "goal": "CANARY_TERMINAL_GOAL"}, "start")
         run_id = started["result"]["run"]["id"]
         graph = {"root": "C0", "claims": [{"id": "C0", "text": "t", "gating": True,
@@ -914,7 +914,7 @@ class D7TransactionTests(unittest.TestCase):
                 runs, artifacts_repo = Runs(), Artifacts()
                 coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo,
                                           "pi@0.84.1+pi-subagents@0.50.0", {})
-                started = coordinator.handle({"type": "StartRun", "invocation": dict(TEST_INVOCATION),
+                started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION),
                                               "selector": {"project": "p", "session": "s"},
                                               "goal": "CANARY_SELECTED_GRAPH_GOAL"}, "start")
                 run_id = started["result"]["run"]["id"]
@@ -963,7 +963,7 @@ class D7TransactionTests(unittest.TestCase):
                     runs, artifacts_repo = Runs(), Artifacts()
                     coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo,
                                               "pi@0.84.1+pi-subagents@0.50.0", {})
-                    started = coordinator.handle({"type": "StartRun", "invocation": dict(TEST_INVOCATION),
+                    started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION),
                         "selector": {"project": "p", "session": "s"},
                         "goal": "CANARY_TRUSTED_GOAL"}, "start")
                     run_id = started["result"]["run"]["id"]
@@ -1000,7 +1000,7 @@ class D7TransactionTests(unittest.TestCase):
         coordinator = ProductionCoordinator(
             workspace, harness, runs, artifacts_repo, "pi@0.84.1+pi-subagents@0.50.0", {})
         started = coordinator.handle(
-            {"type": "StartRun", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
+            {"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
              "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
         activate_investigation(coordinator, run_id)

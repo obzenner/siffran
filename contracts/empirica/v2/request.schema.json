@@ -916,7 +916,8 @@
         "type",
         "selector",
         "goal",
-        "invocation"
+        "invocation",
+        "control_mode"
       ],
       "properties": {
         "type": {

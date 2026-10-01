@@ -2,23 +2,27 @@
 
 ## Prepare without investigating
 
-The default control mode is **deliberative**. Route, then propose a root-connected claim DAG from supplied context. The claim graph defines the work but is not part of human approval. The approval digest binds the immutable goal as read-only context plus run configuration: budget ceilings and control mode.
+The default control mode is **deliberative**. Route, then propose a root-connected claim DAG from supplied context. The claim graph defines the work but is not part of human approval. Size the run from that graph and the task: count gating claims, estimate how many need deterministic experiments, and budget the expected audit rounds (normally 2: an initial audit and one retry). The author agent chooses the ceilings; adapters and core only transport, display, and enforce them. The approval digest binds the immutable goal as read-only context plus run configuration: all three budget ceilings, control mode, and the exact rationale.
 
-Submit `configure_run` with proposed `budgets`. Omitted budget fields retain the current configuration. This requests host review; it is not approval. The schema rejects reviewer fields because reviewer selection belongs to host configuration. Only the exact current approved configuration permits `investigate`.
+Submit `configure_run` with **all three** proposed ceilings and a nonblank 1–600 character `rationale`. Explain why the graph and task need that size; do not write a command, authority claim, evidence claim, or approvable conclusion. This requests host review and never approves itself. The schema rejects missing ceilings and reviewer fields because reviewer selection belongs to host configuration. Only the exact current approved configuration permits `investigate`.
 
-The ordinary host review displays the goal read-only and the three budget ceilings in native fields. Claude uses its built-in **Accept** button to approve the displayed values, **Decline** to reject, and Esc to decide later; editing any value and accepting submits an amendment. Pi presents the same model in one host-native component. Amendments immediately open one host-owned locked confirmation in the same call. It is read-only: Accept/Approve approves exactly that revision, while Decline/Esc/Keep pending retains the edits without consent. No author action runs between amendment and confirmation. The original timeout, raw receipt fingerprinting, CAS, and exact epoch/digest checks apply across both forms.
+The ordinary host review displays the goal read-only, the three budget ceilings, and escaped literal rationale under **Agent sizing rationale — unverified**. Claude uses its built-in **Accept** button to approve the displayed values, **Decline** to reject, and Esc to decide later; editing any value and accepting submits a ceiling-only amendment. Pi presents the same model in one host-native component. Amendments immediately open one host-owned locked confirmation in the same call. It shows original versus amended ceilings and warns **Written for the original proposal; not regenerated for these human-edited values**. It is read-only: Accept/Approve approves exactly that revision, while Decline/Esc/Keep pending retains the edits without consent. No author action runs between amendment and confirmation. The original timeout, raw receipt fingerprinting, CAS, and exact epoch/digest checks apply across both forms.
 
 Cancel, timeout, invalid content, stale/conflicting replies, and missing UI never grant authority. Presentations are CAS-reserved before UI and bounded to three per configuration epoch and 128 per run. Exact current-schema receipt replay is inert; conflicting replay blocks.
 
-## Explicit auto
+## Modes
 
-`/empirica --auto <goal>` (Codex: `$empirica --auto <goal>`) is visibly automatic acceptance, not human approval. It is admitted only for an interactive invocation or with operator-recorded `EMPIRICA_AUTO_DELEGATION=1`; otherwise StartRun refuses structurally without creating a run. Existing budget gates remain: auto cannot increase an operational ceiling. Reviewer configuration still comes from the host, and observed audit independence remains required for convergence.
+- **Deliberative:** every material configuration change returns to the human for review and locked confirmation when amended.
+- **Interactive auto:** the initial complete sized proposal has one human approval episode before investigation. Dismissal, timeout, cancellation, rejection, a declined confirmation, or unavailable UI grants nothing and never falls back to delegation. After the first successful approval, non-raising changes are accepted automatically without another dialog; raises are refused. Exhaustion requires a fresh run rather than a prompt or `budget.raise` loop.
+- **Delegated auto:** with no human present and operator-recorded `EMPIRICA_AUTO_DELEGATION=1`, proposals may be accepted only inside the fixed 8/1/2 envelope. StartRun budgets and `EMPIRICA_MAX_*` may narrow but never enlarge it. Oversize work must reduce scope or move to an approval-capable host interactively.
+
+Reviewer configuration still comes from the host, and observed audit independence remains required for convergence.
 
 ## Host mediation and reviewer configuration
 
 - **Claude:** requires client-advertised MCP form elicitation. If `CLAUDE_CODE_SUBAGENT_MODEL` is explicitly set (other than `inherit`), the host resolves it. Otherwise the adapter supplies only a resolvable alias from a family different from the observed main family. Third-party providers require the corresponding `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` pin.
 - **Pi:** requires `ctx.hasUI` for approval. Package-scope and reviewer-model derivation are owned by the [Pi adapter guide](../../../adapters/pi/README.md#governed-initialization); unavailable or same-identity-class reviewers block before launch.
-- **Codex:** deliberative approval and audit remain unavailable.
+- **Codex:** no approval UI; deliberative and non-delegated auto sizing cannot be approved. Delegated auto remains inside 8/1/2, while audit remains unavailable.
 
 Reviewer configuration is not itself evidence of independence. Audit identity classification and its fail-closed cases are owned by the [audit guide](audit.md#independence-reporting). Only exact documented model/version mappings establish identity equivalence across providers; moving/private aliases remain unknown.
 

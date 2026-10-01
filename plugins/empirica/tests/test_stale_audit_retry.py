@@ -25,7 +25,7 @@ class StaleAuditRetryTests(unittest.TestCase):
         self.runs, self.artifacts, self.workspace = Runs(), Artifacts(), Workspace()
         self.coordinator = ProductionCoordinator(
             self.workspace, Harness(), self.runs, self.artifacts, PROFILE, {})
-        result = self.coordinator.handle({"type": "StartRun", "invocation": dict(TEST_INVOCATION), "selector": {
+        result = self.coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {
             "project": "stale", "session": "retry"}, "goal": "stale audit retry",
             "budgets": {"max_spawns": 1, "max_audit_spawns": 2}}, "start")["result"]
         self.run_id = result["run"]["id"]

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import math
 import os
 import re
+import textwrap
 from typing import Any, Mapping
 from uuid import uuid4
 
@@ -12,6 +13,7 @@ import jsonschema
 
 from adapters import bridge
 from application import protocol
+from core.governance import expected_approval_kind
 
 
 @dataclass(frozen=True)
@@ -68,6 +70,13 @@ def _budget_property(row: Mapping[str, Any]) -> dict[str, Any]:
             "minimum": row["minimum"], "maximum": row["maximum"], "default": row["value"]}
 
 
+def _rationale_lines(dialog: Mapping[str, Any]) -> tuple[str, ...]:
+    """Render the already-escaped rationale completely beneath its contract-owned label."""
+    return (dialog["rationale_label"], *textwrap.wrap(dialog["rationale"], width=72,
+                                                       break_long_words=True,
+                                                       break_on_hyphens=False))
+
+
 def review_form(dialog: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
     """Map a validated dialog model to Claude's editable elicitation form."""
     reviews = dialog["reviews_left"]["proposal"]
@@ -75,6 +84,7 @@ def review_form(dialog: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
     message = "\n".join((
         _line(f"Empirica · approve run configuration (epoch {dialog['epoch']} · {count} · {_duration(timeout)})"),
         _line(f'Goal: "{dialog["goal"]}"', closing='"'),
+        *_rationale_lines(dialog),
         "Accept = approve as shown · edit values → confirm again",
         "Decline = reject · Esc = decide later",
     ))
@@ -97,6 +107,9 @@ def confirm_form(dialog: Mapping[str, Any], before: Mapping[str, Any], timeout: 
     message = "\n".join((
         _line(f"Empirica · confirm edited configuration (epoch {dialog['epoch']} · {_duration(timeout)})"),
         _line(" · ".join(budget_parts)),
+        *_rationale_lines(dialog),
+        *textwrap.wrap(dialog["amendment_warning"], width=72,
+                       break_long_words=False, break_on_hyphens=False),
         "Accept = approve exactly this · Decline/Esc = keep edits pending",
     ))
     return message, {"type": "object", "properties": {}}
@@ -170,9 +183,9 @@ class HostGovernance:
         expected = (g["plan_revision"], g["proposal_digest"])
         if run["status"] != "active" or g["state"] == "approved":
             return result
-        auto = g["control_mode"] == "auto"
+        approval_kind = expected_approval_kind(g)
         approval_ingress = protocol.host_profile(self.profile)["approval_ingress"]
-        if not auto and (approval_ingress == "unavailable" or self.elicit is None):
+        if approval_kind == "host_ui" and (approval_ingress == "unavailable" or self.elicit is None):
             return unavailable(result)
         context = {"author": g["context"]["author"], "ingress": approval_ingress}
         result = self.context_ingress(self.profile, run["id"], context).get("result", {})
@@ -184,13 +197,13 @@ class HostGovernance:
         if g["prompt_error"]:
             return unavailable(result, g["prompt_error"])
         envelope = {"run_id": run["id"], "receipt_id": uuid4().hex, "proposal_digest": g["proposal_digest"],
-                    "plan_revision": g["plan_revision"], "approval_kind": "auto" if auto else "host_ui"}
+                    "plan_revision": g["plan_revision"], "approval_kind": approval_kind}
 
         def dismiss(message=None):
             stored = self.decision_ingress(self.profile, run["id"], {**envelope, "outcome": "dismiss"})["result"]
             return unavailable(stored, message=message) if stored.get("type") in {"Allow", "Inert"} else stored
 
-        if auto:
+        if approval_kind == "auto":
             decision_envelope = {**envelope, "outcome": "approve"}
             action = "approve"
             dialog = None
@@ -211,7 +224,7 @@ class HostGovernance:
             configuration = _configuration(dialog, {}) if isinstance(resolved, Reject) else resolved.configuration
             decision_envelope = {**envelope, "submission": {"action": action, "configuration": configuration}}
         admitted = self.decision_ingress(self.profile, run["id"], decision_envelope)["result"]
-        if not auto and admitted.get("type") in {"Fault", "Block"}:
+        if approval_kind == "host_ui" and admitted.get("type") in {"Fault", "Block"}:
             stored = dismiss()
             if admitted.get("type") == "Block" and stored.get("run"):
                 admitted["run"] = stored["run"]

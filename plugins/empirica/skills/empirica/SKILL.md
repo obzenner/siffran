@@ -85,11 +85,7 @@ Do this before reading files, searching, browsing, or running commands.
    tool input schema, which carries every closed action shape (including the graph
    payload); do not guess field names or nesting. Contract reads are optional
    explanation, never the source of a shape.
-5. Read `empirica_read(operation="GetRun")`, then call `configure_run` to request approval of
-   run configuration only: budget ceilings and control mode. The goal is displayed read-only;
-   the claim graph and reviewer are not approvable. Preserve the human's edited values rather than
-   resending stale fields, and note explicit `--auto` stays within existing budgets and
-   cannot raise ceilings.
+5. Read `empirica_read(operation="GetRun")`, then size the run from the supplied task and selected graph. Count the gating claims, identify how many need experiments, and allow for expected audit rounds (normally 2: an initial audit and one retry). Propose all three ceilings explicitly with `configure_run`; the author agent chooses these ceilings, never the adapter or core. Include a 1–600 character nonblank rationale explaining that sizing. The rationale is explanation only—not a command, authority claim, evidence, or approvable conclusion. This requests approval of run configuration only: budget ceilings and control mode. The goal is displayed read-only; the claim graph and reviewer are not approvable. Preserve the human's edited values rather than resending stale fields, and note explicit `--auto` has one up-front human approval episode and then stays within approved ceilings. Delegated auto has no dialog and stays within the fixed 8/1/2 envelope.
    The host-owned timeout and presentation limits are fixed by the contract and displayed read-only.
    Timeout is dismissal, not rejection. Do not loop on refusal or exhaustion. The optional
    [governance reference](references/governance.md) documents host-owned recovery details; it is

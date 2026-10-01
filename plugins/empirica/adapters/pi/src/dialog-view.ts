@@ -8,6 +8,9 @@ export interface Dialog {
   epoch: number; control_mode: string; state: string;
   reviews_left: { proposal: number; total: number };
   goal: string;
+  rationale: string | null;
+  rationale_label: string;
+  amendment_warning: string;
   invocation: { host: string; interactive: boolean | null; signal: string; delegation: boolean } | null;
   budgets: BudgetControl[];
 }
@@ -128,6 +131,14 @@ function goalLines(dialog: Dialog, width: number, theme: DialogTheme): string[] 
   return shown.map((line, index) => (index ? INDENT : "Goal  ") + line);
 }
 
+function rationaleLines(dialog: Dialog, options: RenderOptions, width: number,
+                        theme: DialogTheme): string[] {
+  if (dialog.rationale === null) return [];
+  const wrap = (text: string, indent = 0) => wrapTextWithAnsi(text, Math.max(10, width - indent));
+  return [...wrap(dialog.rationale_label), ...wrap(dialog.rationale, 2).map(line => `  ${line}`),
+    ...(options.confirmation ? wrap(dialog.amendment_warning).map(line => theme.warning(line)) : [])];
+}
+
 function hostLine(dialog: Dialog): string[] {
   if (!dialog.invocation) return [];
   const { host, interactive, signal } = dialog.invocation;
@@ -200,6 +211,8 @@ export function renderLines(dialog: Dialog, state: DialogState, width: number, t
     ...header(dialog, options, width, theme),
     ...goalLines(dialog, width, theme),
     ...hostLine(dialog),
+    "",
+    ...rationaleLines(dialog, options, width, theme),
     "",
     ...controlLines(dialog, state, options, width, theme),
     "",

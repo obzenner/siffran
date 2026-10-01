@@ -17,13 +17,16 @@ model behind a child process. Audit therefore remains `unverified` and convergen
 execution is also unsupported. Codex is excluded from the supported installed-host release receipt
 set until a native resolved-model observation can be bound to an execution.
 
-There is no default auditor model or `EMPIRICA_CODEX_AUDITOR_MODEL` override. Deliberative
-approval is explicitly unavailable on this profile. Explicit `$empirica --auto <goal>` requires
-operator-recorded `EMPIRICA_AUTO_DELEGATION=1` because Codex has no established interactive
-activation signal. It can approve bounded run configuration, but Codex audit remains unsupported
-because the adapter cannot observe the verdict-producing reviewer identity. It does not read host model configuration or claim an
-identity mismatch. Bounded automatic acceptance is not human approval and cannot prove the actual
-auditor model.
+There is no default auditor model or `EMPIRICA_CODEX_AUDITOR_MODEL` override. Codex has no
+approval UI, so non-delegated auto and deliberative runs are refused. Explicit
+`$empirica --auto <goal>` requires operator-recorded `EMPIRICA_AUTO_DELEGATION=1` and uses the
+fixed delegation envelope **8 passes / 1 investigation spawn / 2 audit spawns**. The author still
+supplies all three task-sized ceilings and a 1–600 character rationale; StartRun budgets and
+`EMPIRICA_MAX_*` may only narrow the envelope. A proposal outside it is refused: reduce scope or
+use an approval-capable host interactively. Acceptance inside the envelope is delegated policy,
+not human approval. Codex audit remains unsupported because the adapter cannot observe the
+verdict-producing reviewer identity. It does not read host model configuration or claim an
+identity mismatch, and delegated acceptance cannot prove the actual auditor model.
 See [governance](../../skills/empirica/references/governance.md) for configuration and limitations.
 
 ## Surface

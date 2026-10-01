@@ -23,7 +23,7 @@
           "relevant_sections": [
             "hosts/capabilities"
           ],
-          "digest": "sha256:5ea626b1bb1ae36eb788e7717a1ecf9e9463a8ef7454c973b4d7f3d68d3d13ab"
+          "digest": "sha256:f66e19ae17ace178457a33f8222e767dbbf91f949292b8584777634cd1cae8a3"
         },
         "obligations": {
           "active": [],

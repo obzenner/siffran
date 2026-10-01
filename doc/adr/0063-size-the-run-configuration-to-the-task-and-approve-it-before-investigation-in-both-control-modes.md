@@ -1,7 +1,7 @@
 ---
 number: 63
 title: Size the run configuration to the task and approve it before investigation in both control modes
-status: proposed
+status: accepted
 date: 2026-10-01
 tags:
 - empirica

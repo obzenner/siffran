@@ -67,7 +67,7 @@ def main() -> int:
             return 1
         for name in ("review", "confirmation", "hostile", "hostile_rationale"):
             lines = generated[name]["message"].splitlines()
-            if len(lines) > 4 or any(len(line) > 72 for line in lines) or "sha256:" in generated[name]["message"]:
+            if len(lines) > 8 or any(len(line) > 72 for line in lines) or "sha256:" in generated[name]["message"]:
                 print("governance dialog bounds violated", file=sys.stderr)
                 return 1
         return 0

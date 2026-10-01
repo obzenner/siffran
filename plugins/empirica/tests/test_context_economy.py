@@ -237,7 +237,7 @@ class _ServiceHarness(unittest.TestCase):
     def setUp(self):
         self.runs, self.artifacts = Runs(), Artifacts()
         self.service = compose(Workspace(), Harness(), self.runs, self.artifacts, None, PROFILE, {}, None)
-        self.run_id = self.req({"type": "StartRun", "goal": "governed task",
+        self.run_id = self.req({"type": "StartRun", "control_mode": "deliberative", "goal": "governed task",
                                 "invocation": dict(TEST_INVOCATION),
                                 "selector": {"project": "p", "session": "s"}})["run"]["id"]
 
@@ -837,7 +837,7 @@ class NextActionReachabilityTests(_ServiceHarness):
         runs, artifacts = Runs(), Artifacts()
         service = compose(Workspace(), Harness(), runs, artifacts, None, PROFILE, {}, None)
         run_id = service.dispatch({"protocol": "empirica/v2", "request_id": "t",
-            "command": {"invocation": dict(TEST_INVOCATION), "type": "StartRun",
+            "command": {"invocation": dict(TEST_INVOCATION), "type": "StartRun", "control_mode": "deliberative",
                         "goal": "governed task",
                         "selector": {"project": "p", "session": "s"}}})["result"]["run"]["id"]
         return service, run_id

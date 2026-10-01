@@ -166,6 +166,8 @@ def governance_dialog(goal: str, value: Mapping, controls: Mapping,
                 "total": value["interactions_remaining"]["total"]},
             "goal": safe_text(goal),
             "rationale": None if rationale is None else safe_text(rationale),
+            "rationale_label": controls["rationale_label"],
+            "amendment_warning": controls["amendment_warning"],
             "invocation": None if invocation is None else {
                 key: safe_text(invocation[key]) if key in {"host", "signal"} else invocation[key]
                 for key in ("host", "interactive", "signal", "delegation")},

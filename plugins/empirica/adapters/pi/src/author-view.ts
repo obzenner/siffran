@@ -16,6 +16,7 @@ interface Header {
   readonly status: Trusted;
   readonly governance: Trusted;
   readonly runId: Trusted;
+  readonly proposalRationale: Untrusted | null;
 }
 interface Reason {
   readonly code: Trusted;
@@ -321,15 +322,24 @@ function childLabel(row: Json, safety: TextSafety): Trusted | Untrusted {
     ? trusted(row.purpose) : untrusted(row.purpose, safety);
 }
 
+/** The proposal rationale: required, explicitly null only for the unsized placeholder. */
+function requiredRationale(governance: Json): string | null {
+  if (!("proposal" in governance) || !("rationale" in governance.proposal))
+    throw new Error("empirica author view: governance proposal rationale is required");
+  return governance.proposal.rationale as string | null;
+}
+
 /** Parse one guarded run-bearing Allow or Block result. */
 function parse(result: Json): AuthorView {
   const run = result.run as Json;
   const safety = run.untrusted_delimiters as TextSafety;
   let resultType = String(result.type);
   if (result.type === "Allow") resultType += ` (converged=${result.converged ? "true" : "false"})`;
+  const governanceValue = run.governance as Json | null;
+  const rationale = governanceValue === null ? null : requiredRationale(governanceValue);
   const header: Header = {
     resultType: trusted(resultType), status: trusted(run.status), governance: governance(run),
-    runId: trusted(run.id),
+    runId: trusted(run.id), proposalRationale: rationale === null ? null : untrusted(rationale, safety),
   };
   const terminalNext = (run.next_actions as string[]).map(surface);
   const terminal = run.status !== "active";
@@ -411,6 +421,8 @@ function render(view: AuthorView): string {
   const base = [
     `${view.header.resultType} ${view.header.status} — ${view.header.governance}`,
     `run_id: ${view.header.runId}`,
+    ...(view.header.proposalRationale === null
+      ? [] : [`proposal rationale: ${view.header.proposalRationale}`]),
     ...auditLines(view.audit),
   ].join("\n");
   const sections: readonly [string, readonly string[]][] = [

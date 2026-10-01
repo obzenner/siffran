@@ -3059,6 +3059,8 @@
             "reviews_left",
             "goal",
             "rationale",
+            "rationale_label",
+            "amendment_warning",
             "invocation",
             "budgets"
           ],
@@ -3106,6 +3108,14 @@
                   "pattern": "\\S"
                 }
               ]
+            },
+            "rationale_label": {
+              "type": "string",
+              "minLength": 1
+            },
+            "amendment_warning": {
+              "type": "string",
+              "minLength": 1
             },
             "invocation": {
               "oneOf": [

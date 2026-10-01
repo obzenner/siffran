@@ -14,14 +14,19 @@ Asynchronous audit execution is not supported and is never silently downgraded.
 
 ## Governed initialization
 
-4.0.0 adds exact run-configuration approval before investigation. Deliberative mode uses
-`ctx.hasUI` and one documented `ctx.ui.custom()` component; cancel/no custom UI fails closed. ↑/↓
+4.0.0 adds exact author-sized run-configuration approval before investigation. The author chooses
+all three ceilings from the task and selected graph and supplies the bounded rationale; this adapter
+never chooses ceilings. Deliberative mode uses `ctx.hasUI` and one documented `ctx.ui.custom()`
+component for every change; cancel/no custom UI fails closed. ↑/↓
 moves through controls, digits edit budgets, ←/→ chooses the action, Enter
 activates it, and Esc dismisses. Approval covers
 budget ceilings and control mode while showing the goal read-only; graph content and reviewer
-configuration are not approvable. `configure_run` opens the component, and configuration amendments
-need a second read-only confirmation in the same component frame. Explicit `--auto` is bounded automatic acceptance, not a
-human decision, and requires an interactive invocation or recorded operator delegation. See
+configuration are not approvable. The review renders the escaped rationale as **Agent sizing
+rationale — unverified**. A human amendment changes ceilings only and opens a read-only locked
+confirmation showing original versus amended values plus the warning that the rationale was not
+regenerated. Interactive `--auto` opens this same dialog exactly once before investigation, then
+accepts only non-raising revisions without another dialog. Missing UI never downgrades to delegation.
+Delegated auto requires recorded operator provenance and remains inside 8/1/2. See
 [governance](../../skills/empirica/references/governance.md) for limits, identity classes,
 and fresh-generation compatibility. These UI flows have fast simulated-control coverage and
 real-service governance coverage; the historical profile receipt does not certify native human

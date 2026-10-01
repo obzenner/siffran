@@ -4,6 +4,7 @@
     "request_id": "fx-start-refused",
     "command": {
       "type": "StartRun",
+      "control_mode": "deliberative",
       "selector": {
         "project": "p",
         "session": "s"

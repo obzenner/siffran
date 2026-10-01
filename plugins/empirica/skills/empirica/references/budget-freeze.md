@@ -19,8 +19,10 @@ selects audit capacity. Each spawn is reserved through the service before child 
 Only a launch rejected before observed start refunds the child's recorded account; denied or
 unsupported launches must not happen outside a reservation.
 
-When a budget is exhausted, accept the typed non-converged terminal result. Never
-remove a claim, forge evidence, or bypass audit to fit the budget.
+When a budget is exhausted, accept the typed non-converged terminal result. In auto mode,
+exhaustion requires a fresh run with a larger up-front approved size (or a deliberative run); it
+never authorizes `budget.raise` or another automatic approval prompt. Never remove a claim, forge
+evidence, or bypass audit to fit the budget.
 
 ## Stall handling
 

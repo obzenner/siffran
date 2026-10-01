@@ -69,9 +69,8 @@ def build_start_run_request(
         "selector": selector_from_payload(payload),
         "goal": invocation.goal,
         "invocation": invocation_provenance(payload, env),
+        "control_mode": invocation.control_mode,
     }
-    if invocation.control_mode == "auto":
-        command["control_mode"] = "auto"
     budgets: dict[str, int] = {}
     for field, env_name, minimum in (
         ("max_passes", "EMPIRICA_MAX_PASSES", 1),

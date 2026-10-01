@@ -112,7 +112,7 @@ class Coordinator:
             protocol=_proto.protocol_id(), state_schema=_proto.state_schema_id(),
             goal=command["goal"], invocation=invocation, status="active", budgets=budgets,
             governance=governance.initial(command["goal"], budgets,
-                                          command.get("control_mode", "deliberative"),
+                                          command["control_mode"],
                                           invocation, envelope),
             selected_graph_artifact_id=None, frozen_claim_ids=None, frozen_semantic_digest=None,
             route_stamp=None,

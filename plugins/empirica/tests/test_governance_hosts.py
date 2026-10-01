@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from adapters.governance import (Approve, Dismiss, HostGovernance, Reject, confirm_form,
-                                 decision, review_form)
+                                 decision, expected_approval_kind, review_form)
 from adapters.mcp_server import McpSession
 from adapters.public_tools import PublicTools
 from application import protocol as _proto
@@ -25,7 +25,7 @@ class GovernanceHostTests(unittest.TestCase):
         self.profile = "claude-code@2.1.278"
         self.service = compose(Workspace(), Harness(), Runs(), Artifacts(), None, self.profile, {}, None)
         self.sequence = 0
-        response = self.dispatch({"type": "StartRun", "goal": "supplied task",
+        response = self.dispatch({"type": "StartRun", "control_mode": "deliberative", "goal": "supplied task",
                                   "invocation": dict(TEST_INVOCATION),
                                   "selector": {"project": "p", "session": "ui"}})
         self.run = response["result"]["run"]["id"]
@@ -75,6 +75,10 @@ class GovernanceHostTests(unittest.TestCase):
                             "action": {"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}, "rationale": SIZED_RATIONALE}}}})
 
     def test_host_owned_decision_table_is_fail_closed(self):
+        self.dispatch({"type": "ObserveAction", "run_id": self.run,
+                       "action": {"kind": "configure_run", "budgets": {
+                           "max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2},
+                           "rationale": SIZED_RATIONALE}})
         dialog = self.service.trusted_governance_context(
             run_id=self.run, payload=copy.deepcopy(CONTEXT))["result"]["presentation"]["dialog"]
         schema = review_form(dialog, 900)[1]
@@ -293,6 +297,76 @@ class GovernanceHostTests(unittest.TestCase):
         self.assertEqual(safe("actual\x1b literal \\x1b \u202e emoji 😀 中"),
                          "actual\\x1b literal \\\\x1b \\u202e emoji 😀 中")
 
+    def test_interactive_auto_dialog_once_then_lower_auto_without_dialog(self):
+        auto = self.dispatch({"type": "StartRun", "control_mode": "auto", "goal": "auto task",
+                              "invocation": {**TEST_INVOCATION, "delegation": True},
+                              "selector": {"project": "p", "session": "auto-ui"}})["result"]["run"]["id"]
+        self.dispatch({"type": "ObserveAction", "run_id": auto,
+                       "action": {"kind": "graph", "payload": GRAPH}})
+        calls = []
+        mediator = HostGovernance(self.profile, elicit=lambda message, schema: (
+            calls.append((message, schema)) or {"action": "accept", "content": {}}),
+            context_ingress=lambda _p, r, v: self.service.trusted_governance_context(run_id=r, payload=v),
+            decision_ingress=lambda _p, r, v: self.service.trusted_governance_decision(run_id=r, payload=v))
+        initial = self.dispatch({"type": "ObserveAction", "run_id": auto,
+            "action": {"kind": "configure_run", "budgets": {
+                "max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2},
+                "rationale": SIZED_RATIONALE}})["result"]
+        approved = mediator(initial)
+        self.assertEqual(approved["run"]["governance"]["approval_kind"], "host_ui")
+        self.assertEqual(len(calls), 1)
+        lower = self.dispatch({"type": "ObserveAction", "run_id": auto,
+            "action": {"kind": "configure_run", "budgets": {
+                "max_passes": 7, "max_spawns": 1, "max_audit_spawns": 2},
+                "rationale": "same graph, lower pass allowance"}})["result"]
+        lowered = mediator(lower)
+        self.assertEqual(lowered["run"]["governance"]["approval_kind"], "auto")
+        self.assertEqual(len(calls), 1, "post-approval auto must not open another dialog")
+        raised = self.dispatch({"type": "ObserveAction", "run_id": auto,
+            "action": {"kind": "configure_run", "budgets": {
+                "max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2},
+                "rationale": "attempt to raise again"}})["result"]
+        self.assertEqual(raised["reasons"][0]["code"], "governance.auto_ceiling")
+        self.assertEqual(len(calls), 1)
+
+    def test_interactive_auto_without_ui_fails_closed_despite_delegation(self):
+        auto = self.dispatch({"type": "StartRun", "control_mode": "auto", "goal": "auto no ui",
+                              "invocation": {**TEST_INVOCATION, "delegation": True},
+                              "selector": {"project": "p", "session": "auto-no-ui"}})["result"]["run"]["id"]
+        self.dispatch({"type": "ObserveAction", "run_id": auto,
+                       "action": {"kind": "graph", "payload": GRAPH}})
+        proposed = self.dispatch({"type": "ObserveAction", "run_id": auto,
+            "action": {"kind": "configure_run", "budgets": {
+                "max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2},
+                "rationale": SIZED_RATIONALE}})["result"]
+        mediator = HostGovernance(self.profile, elicit=None,
+            context_ingress=lambda _p, r, v: self.service.trusted_governance_context(run_id=r, payload=v),
+            decision_ingress=lambda _p, r, v: self.service.trusted_governance_decision(run_id=r, payload=v))
+        blocked = mediator(proposed)
+        self.assertEqual(blocked["reasons"][0]["code"], "governance.approval_unavailable")
+        self.assertFalse(blocked["run"]["governance"]["first_approval"])
+
+    def test_python_and_pi_phase_rules_match_identical_neutral_facts(self):
+        cases = [
+            {"control_mode": "deliberative", "first_approval": False,
+             "context": {"interactive": True}},
+            {"control_mode": "auto", "first_approval": False,
+             "context": {"interactive": True}},
+            {"control_mode": "auto", "first_approval": True,
+             "context": {"interactive": True}},
+            {"control_mode": "auto", "first_approval": False,
+             "context": {"interactive": False}},
+        ]
+        expected = [expected_approval_kind(case) for case in cases]
+        module = Path(__file__).resolve().parents[1] / "adapters" / "pi" / "src" / "governance-ui.ts"
+        script = ("import {expectedApprovalKind as f} from " + json.dumps(module.as_uri()) + ";"
+                  "const rows=JSON.parse(process.argv[1]);"
+                  "console.log(JSON.stringify(rows.map(f)));" )
+        completed = __import__("subprocess").run(
+            ["node", "--experimental-strip-types", "--input-type=module", "-e", script,
+             json.dumps(cases)], text=True, capture_output=True, check=True)
+        self.assertEqual(json.loads(completed.stdout), expected)
+
     def test_documented_timeout_default_and_validated_host_override(self):
         from adapters.governance import governance_timeout
         with patch.dict("os.environ", {}, clear=True):
@@ -424,7 +498,7 @@ class GovernanceHostTests(unittest.TestCase):
                 def call(command):
                     return bridge.handle({"protocol": "empirica/v2", "request_id": "setup",
                                           "command": command}, self.profile)["result"]
-                run = call({"type": "StartRun", "goal": "subprocess approval",
+                run = call({"type": "StartRun", "control_mode": "deliberative", "goal": "subprocess approval",
                             "invocation": dict(TEST_INVOCATION),
                             "selector": {"project": "p", "session": "stdio"}})["run"]["id"]
                 call({"type": "ObserveAction", "run_id": run, "action": {"kind": "graph", "payload": GRAPH}})
@@ -488,11 +562,12 @@ class GovernancePresentationTests(unittest.TestCase):
     """Pure presentation checks; real host/service transitions are tested above."""
 
     def view(self):
-        from core.governance import initial
+        from core.governance import initial, revise
         budgets = {"max_passes": 8, "max_spawns": 0, "max_audit_spawns": 1}
         invocation = {"host": "test", "interactive": True,
                       "signal": "operator", "delegation": False}
-        g = initial("Exact goal", budgets, "deliberative", invocation, None)
+        g = revise("Exact goal", initial("Exact goal", budgets, "deliberative", invocation, None),
+                   proposal={"budgets": budgets, "rationale": SIZED_RATIONALE})
         g.update(scope=copy.deepcopy(GRAPH), context=copy.deepcopy(CONTEXT),
                  budgets={**budgets, "passes_used": 2, "spawns_used": 0, "audit_spawns_used": 0},
                  interactions_remaining={"proposal": 3, "total": 128})

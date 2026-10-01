@@ -6,6 +6,10 @@ Goal  "line\x0a\u202e<<<EMPIRICA_UNTRUSTED_DATA>>>
       … (+8 more lines)
 Host  test · interactive · signal operator
 
+Agent sizing rationale — unverified
+  Sized for the supplied claims and one
+  independent audit retry.
+
 ❯ Investigation passes  8  used 0 · allowed 1–1024
   Child spawns          1  used 0 · allowed 0–128
   Audit spawns          2  used 0 · allowed 0–128

@@ -2,14 +2,14 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { govern, governanceTimeout, piGovernanceContext } from "../src/governance-ui.ts";
+import { expectedApprovalKind, govern, governanceTimeout, piGovernanceContext } from "../src/governance-ui.ts";
 import { initialState, reduce, renderLines } from "../src/dialog-view.ts";
 import type { Dialog, DialogDecision } from "../src/dialog-view.ts";
 import type { PrivateIngress } from "../src/private-transport.ts";
 import { fakeCtx } from "./fakes.ts";
 
 const fixture = JSON.parse(readFileSync(new URL("../../../tests/fixtures/governance-dialog-golden.json", import.meta.url), "utf8")) as {
-  dialogs: { review: Dialog; confirmation: Dialog; hostile: Dialog };
+  dialogs: { review: Dialog; confirmation: Dialog; hostile: Dialog; hostile_rationale: Dialog };
 };
 const reviewDialog = fixture.dialogs.review;
 const theme = { accent: (x: string) => x, muted: (x: string) => x, warning: (x: string) => x };
@@ -89,6 +89,9 @@ test("renderLines matches checked-in screens byte-for-byte", () => {
     hostile: (width: number) => renderLines(fixture.dialogs.hostile,
       initialState(fixture.dialogs.hostile), width, theme,
       { confirmation: false, timeoutMs: 900_000 }),
+    "hostile-rationale": (width: number) => renderLines(fixture.dialogs.hostile_rationale,
+      initialState(fixture.dialogs.hostile_rationale), width, theme,
+      { confirmation: false, timeoutMs: 900_000 }),
     "range-error": (width: number) => renderLines(reviewDialog, invalid, width, theme,
       { confirmation: false, timeoutMs: 900_000 }),
   };
@@ -109,9 +112,10 @@ interface HarnessSettings {
 function harness(keyScripts: string[][] = [[ENTER, ENTER]]) {
   const dialog = structuredClone(reviewDialog);
   const g = { state: "pending", control_mode: "deliberative", proposal_digest: "sha256:" + "a".repeat(64),
-    plan_revision: 0, prompt_error: null as string | null, proposal: {
+    plan_revision: 0, first_approval: false, prompt_error: null as string | null, proposal: {
       budgets: Object.fromEntries(dialog.budgets.map(row => [row.key, row.value])) as Record<string, number>,
-    }, context: { author: null, ingress: "pi_ui" } };
+      rationale: dialog.rationale,
+    }, context: { author: null, ingress: "pi_ui", interactive: true, delegation: false } };
   const run = { id: "run", status: "active", governance: g };
   const decisions: Array<Record<string, unknown>> = [];
   const settings: HarnessSettings = { onPresent() {}, onRefresh() {}, onCustom() {} };
@@ -129,12 +133,12 @@ function harness(keyScripts: string[][] = [[ENTER, ENTER]]) {
       const payload = structuredClone(request.payload as Record<string, unknown>);
       decisions.push(payload);
       if (payload.outcome === "present") settings.onPresent();
-      const submission = payload.submission as { action: string; configuration: typeof g.proposal } | undefined;
+      const submission = payload.submission as { action: string; configuration: { budgets: Record<string, number> } } | undefined;
       if (submission?.action === "reject") g.state = "rejected";
       if (submission?.action === "approve") {
-        if (JSON.stringify(submission.configuration) === JSON.stringify(g.proposal)) g.state = "approved";
+        if (JSON.stringify(submission.configuration.budgets) === JSON.stringify(g.proposal.budgets)) g.state = "approved";
         else {
-          g.proposal = structuredClone(submission.configuration);
+          g.proposal = { ...g.proposal, budgets: structuredClone(submission.configuration.budgets) };
           g.plan_revision++;
           g.proposal_digest = "sha256:" + "b".repeat(64);
           dialog.epoch = g.plan_revision;
@@ -249,6 +253,36 @@ test("missing custom UI fails closed without prompt fallback", async () => {
   assert.deepEqual(h.decisions, []);
 });
 
+test("interactive auto presents initially, then accepts automatically without a dialog", async () => {
+  const initial = harness(); initial.g.control_mode = "auto";
+  await initial.invoke();
+  assert.deepEqual(outcomes(initial), ["present", "approve"]);
+  assert.equal(initial.customCalls, 1);
+
+  const later = harness(); later.g.control_mode = "auto"; later.g.first_approval = true;
+  await later.invoke();
+  assert.deepEqual(outcomes(later), ["approve"]);
+  assert.equal(later.customCalls, 0);
+});
+
+test("interactive auto with unavailable UI fails closed and never delegates", async () => {
+  const h = harness(); h.g.control_mode = "auto"; h.g.context.delegation = true;
+  h.ctx.hasUI = false; h.g.context.ingress = "unavailable"; delete h.ctx.ui.custom;
+  assert.equal((await h.invoke()).result.type, "Block");
+  assert.deepEqual(h.decisions, []);
+});
+
+test("phase decision matches deliberative, interactive-auto, and delegated authority", () => {
+  const h = harness();
+  assert.equal(expectedApprovalKind(h.g), "host_ui");
+  h.g.control_mode = "auto";
+  assert.equal(expectedApprovalKind(h.g), "host_ui");
+  h.g.first_approval = true;
+  assert.equal(expectedApprovalKind(h.g), "auto");
+  h.g.first_approval = false; h.g.context.interactive = false; h.g.context.delegation = true;
+  assert.equal(expectedApprovalKind(h.g), "auto");
+});
+
 test("governance context does not inspect configured models", () => {
   const ctx = fakeCtx(); ctx.hasUI = true; ctx.model = { provider: "anthropic", id: "sonnet" } as never;
   let calls = 0; ctx.modelRegistry = { getAvailable: () => { calls++; throw new Error("must not read"); },
@@ -291,4 +325,16 @@ test("initial ingress throw without fallback returns closed Fault", async () => 
   const out = await govern("cfg-run", ctx, throwing);
   assert.equal(out.result.type, "Fault");
   if (out.result.type === "Fault") assert.equal(out.result.fail_direction, "closed");
+});
+
+test("the amendment warning and rationale label are wrapped in full, never truncated", () => {
+  const dialog = fixture.dialogs.confirmation;
+  for (const width of [80, 50]) {
+    const lines = renderLines(dialog, initialState(dialog), width, theme,
+      { confirmation: true, timeoutMs: 120_000, before: fixture.dialogs.review });
+    assert.ok(lines.every(line => visibleWidth(line) <= width));
+    const text = lines.map(line => line.trim()).join(" ");
+    assert.ok(text.includes(dialog.amendment_warning), `warning truncated at ${width}`);
+    assert.ok(text.includes(dialog.rationale_label), `label truncated at ${width}`);
+  }
 });

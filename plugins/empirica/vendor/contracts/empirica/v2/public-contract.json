@@ -1469,7 +1469,7 @@
       "sections": [
         "governance"
       ],
-      "message": "Auto cannot increase operational ceilings, including audit retries, and a delegated proposal cannot exceed the 8/1/2 policy envelope. Start a fresh run with a larger approved size, or use deliberative mode."
+      "message": "Auto cannot increase operational ceilings, including audit retries, and a delegated proposal cannot exceed the 8/1/2 policy envelope. Reduce scope or use an approval-capable host interactively; after exhaustion, start a fresh run with the larger approved size."
     },
     "governance.budget_contradictory": {
       "params": {
@@ -2125,6 +2125,8 @@
       }
     },
     "controls": {
+      "rationale_label": "Agent sizing rationale — unverified",
+      "amendment_warning": "Written for the original proposal; not regenerated for these human-edited values",
       "budgets": {
         "max_passes": {
           "label": "Investigation passes",
@@ -2152,6 +2154,7 @@
         "decline"
       ]
     },
+    "human_wait_notice": "Empirica is paused for human governance input, not converged. Investigation remains blocked; no approval was granted by this pause.",
     "recovery_exclusions": {
       "deliberative": [],
       "auto": [

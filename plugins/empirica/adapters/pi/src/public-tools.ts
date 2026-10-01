@@ -16,6 +16,7 @@ export interface PublicToolsProjection {
   governance_decisions: {
     controls: DecisionControls;
     confirmation: { title: string; actions: string[] };
+    human_wait_notice: string;
   };
 }
 

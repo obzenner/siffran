@@ -95,6 +95,8 @@
       }
     },
     "controls": {
+      "rationale_label": "Agent sizing rationale \u2014 unverified",
+      "amendment_warning": "Written for the original proposal; not regenerated for these human-edited values",
       "budgets": {
         "max_passes": {
           "label": "Investigation passes",
@@ -122,6 +124,7 @@
         "decline"
       ]
     },
+    "human_wait_notice": "Empirica is paused for human governance input, not converged. Investigation remains blocked; no approval was granted by this pause.",
     "recovery_exclusions": {
       "deliberative": [],
       "auto": [

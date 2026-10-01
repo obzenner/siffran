@@ -159,3 +159,16 @@ test("mixed audit summary and obligation are byte-identical", () => {
 test("author-view golden: all files covered", () => {
   assert.ok(files.length >= 15, `expected at least 15 golden fixtures, got ${files.length}`);
 });
+
+test("a governance proposal without its required rationale never renders as a view", () => {
+  const golden = JSON.parse(readFileSync(path.join(GOLDEN_DIR, "governance-approved.json"), "utf8"));
+  const placeholder = structuredClone(golden.result);
+  placeholder.run.governance.proposal.rationale = null;
+  assert.doesNotThrow(() => renderAuthorView(placeholder, { strict: true }));
+  const omitted = structuredClone(golden.result);
+  delete omitted.run.governance.proposal.rationale;
+  const rendered = (() => {
+    try { return renderAuthorView(omitted, { strict: true }); } catch { return null; }
+  })();
+  assert.ok(rendered === null || rendered.startsWith("{"), `rendered an old shape: ${rendered}`);
+});

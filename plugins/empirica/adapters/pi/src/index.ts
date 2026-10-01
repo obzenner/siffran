@@ -21,7 +21,8 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type { Dispatch, Request, Response, RunSelector } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
-import { govern, piGovernanceContext, refreshGovernance } from "./governance-ui.ts";
+import { govern, HUMAN_WAIT_NOTICE, humanApprovalWait, opensGovernanceDialog, piGovernanceContext,
+  refreshGovernance } from "./governance-ui.ts";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -407,6 +408,9 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           const response = prepared?.intent === intent ? prepared.response : await dispatch(
             evaluateRunRequest(runHandle!, intent, randomUUID()),
           );
+          if (humanApprovalWait(response.result))
+            return { content: [{ type: "text", text: `${HUMAN_WAIT_NOTICE}\n${resultText(response)}` }],
+              details: response.result };
           const decision = gateFromDecision(response.result);
           if (decision.kind === "deny")
             throw new Error(`${decision.reason}\nhandle: ${runHandle ?? "terminal"}`);
@@ -467,18 +471,21 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           if (typeof action.kind !== "string" || !AUTHOR_ACTION_KIND_SET.has(action.kind))
             throw new Error("trusted or unknown Empirica action kind");
           if (governanceDialog) throw new Error("Governance dialog in progress; retry after completion");
-          governanceDialog = action.kind === "configure_run";
+          let dialogOpened = false;
           try {
             let response = await dispatch(observeActionRequest(
               runHandle, action as { kind: string; [key: string]: unknown }, randomUUID()));
-            if (governanceDialog && response.result.type === "Allow")
+            if (action.kind === "configure_run" && response.result.type === "Allow") {
+              dialogOpened = opensGovernanceDialog(response);
+              governanceDialog = dialogOpened;
               response = await govern(runHandle, ctx, trusted, signal, undefined, undefined, response);
+            }
             // QUAL-1 final public-result guard: the model-facing observe result must never carry
             // a private governance presentation field, even if host mediation reintroduced one.
             if (containsPrivateResult(response.result))
               throw new Error("Empirica returned a non-public result.");
             return { content: [{ type: "text", text: resultText(response) }], details: response.result };
-          } finally { governanceDialog = false; }
+          } finally { if (dialogOpened) governanceDialog = false; }
         },
       });
     }
@@ -759,7 +766,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           evaluateRunRequest(runHandle, intent, randomUUID()),
         );
         const decision = gateFromDecision(response.result);
-        if (decision.kind === "deny")
+        if (decision.kind === "deny" && !humanApprovalWait(response.result))
           return { block: true, reason: `${decision.reason}\nhandle: ${runHandle}` };
         reportEvaluations.set(event.toolCallId, { intent, response });
         return; // permit; execute consumes this exact guarded result

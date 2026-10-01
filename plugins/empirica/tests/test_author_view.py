@@ -83,6 +83,16 @@ class NoFallbackTests(unittest.TestCase):
                 text, _fallback(result),
                 f"{name}: renderer fell back to compact JSON")
 
+    def test_governance_proposal_without_rationale_never_renders_as_a_view(self):
+        golden = json.loads((PLUGIN / "adapters/pi/test/author-view-golden/governance-approved.json")
+                            .read_text())["result"]
+        placeholder = json.loads(json.dumps(golden))
+        placeholder["run"]["governance"]["proposal"]["rationale"] = None
+        self.assertNotEqual(render_author_view(placeholder, strict=True), _fallback(placeholder))
+        omitted = json.loads(json.dumps(golden))
+        del omitted["run"]["governance"]["proposal"]["rationale"]
+        self.assertEqual(render_author_view(omitted, strict=True), _fallback(omitted))
+
     def test_every_schema_valid_fixture_renders_strictly(self):
         """Every schema-valid, non-dossier result in the v2 fixtures renders as text in strict
         mode: a renderer/schema disagreement raises instead of hiding behind the fallback."""
@@ -362,7 +372,7 @@ class InjectionSafetyTests(unittest.TestCase):
             return svc.dispatch({"protocol": "empirica/v2", "request_id": "injection",
                                  "command": command})["result"]
 
-        run_id = request({"type": "StartRun", "goal": "g",
+        run_id = request({"type": "StartRun", "control_mode": "deliberative", "goal": "g",
                           "invocation": dict(TEST_INVOCATION),
                           "selector": {"project": "p", "session": "s"}})["run"]["id"]
 

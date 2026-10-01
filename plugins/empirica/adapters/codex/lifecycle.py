@@ -111,13 +111,12 @@ def build_start_run_request(
         "type": "StartRun",
         "selector": selector_from_payload(payload),
         "goal": goal,
+        "control_mode": "auto" if "--auto" in leading else "deliberative",
         "invocation": provenance(
             "codex", None, "codex hook has no interactive signal", env,
             profile_id=CODEX_PROFILE_ID,
         ),
     }
-    if "--auto" in leading:
-        command["control_mode"] = "auto"
     budgets: dict[str, int] = {}
     if (passes := _positive_env(env, "EMPIRICA_MAX_PASSES")) is not None:
         budgets["max_passes"] = passes

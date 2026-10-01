@@ -11,7 +11,7 @@ from . import governance
 def delegated_auto(command: Mapping[str, Any]) -> bool:
     """Whether admitted invocation facts select delegated automatic authority."""
     invocation = command["invocation"]
-    return (command.get("control_mode", "deliberative") == "auto"
+    return (command["control_mode"] == "auto"
             and invocation["delegation"] is True
             and invocation["interactive"] is not True)
 
@@ -27,7 +27,7 @@ def start_admission(command: Mapping[str, Any], limits: Mapping[str, int]) -> st
     if not goal.strip():
         return "run.goal_required"
     invocation = command["invocation"]
-    if (command.get("control_mode", "deliberative") == "auto"
+    if (command["control_mode"] == "auto"
             and not (invocation["interactive"] is True
                      or invocation["delegation"] is True)):
         return "governance.auto_invocation_required"

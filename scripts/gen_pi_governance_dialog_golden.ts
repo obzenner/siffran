@@ -6,7 +6,7 @@ import type { Dialog, DialogState } from "../plugins/empirica/adapters/pi/src/di
 
 const root = resolve(import.meta.dirname, "..");
 const fixture = JSON.parse(readFileSync(resolve(root, "plugins/empirica/tests/fixtures/governance-dialog-golden.json"), "utf8")) as {
-  dialogs: { review: Dialog; confirmation: Dialog; hostile: Dialog };
+  dialogs: { review: Dialog; confirmation: Dialog; hostile: Dialog; hostile_rationale: Dialog };
 };
 const out = resolve(root, "plugins/empirica/adapters/pi/test/dialog-view-golden");
 const theme = { accent: (text: string) => text, muted: (text: string) => text,
@@ -26,6 +26,8 @@ const cases: Record<string, (width: number) => string> = {
   confirmation: width => screen(fixture.dialogs.confirmation,
     initialState(fixture.dialogs.confirmation, true), width, true, fixture.dialogs.review),
   hostile: width => screen(fixture.dialogs.hostile, initialState(fixture.dialogs.hostile), width),
+  "hostile-rationale": width => screen(fixture.dialogs.hostile_rationale,
+    initialState(fixture.dialogs.hostile_rationale), width),
   "range-error": width => screen(fixture.dialogs.review, invalid, width),
 };
 

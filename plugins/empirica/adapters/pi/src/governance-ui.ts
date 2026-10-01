@@ -9,11 +9,13 @@ import { initialState, reduce, renderLines } from "./dialog-view.ts";
 import type { Dialog, DialogDecision, DialogState, DialogTheme } from "./dialog-view.ts";
 
 const RECOVERY = PUBLIC_TOOLS.recovery;
-interface Proposal { budgets: Record<string, number> }
+interface Proposal { budgets: Record<string, number>; rationale: string | null }
 interface Governance {
   state: string; control_mode: string; proposal_digest: string; plan_revision: number;
+  first_approval: boolean;
   proposal: Proposal; prompt_error: string | null;
-  context: { author: { provider_id: string; model_id: string } | null; ingress: string };
+  context: { author: { provider_id: string; model_id: string } | null; ingress: string;
+    interactive: boolean | null; delegation: boolean };
 }
 interface Presentation { dialog: Dialog; scope: unknown }
 
@@ -108,6 +110,42 @@ async function showDialog(ctx: ExtensionContext, dialog: Dialog, deadline: numbe
   });
 }
 
+export function expectedApprovalKind(governance: Governance): "host_ui" | "auto" {
+  if (governance.control_mode === "deliberative") return "host_ui";
+  if (governance.context.interactive === true)
+    return governance.first_approval ? "auto" : "host_ui";
+  return "auto";
+}
+
+const HUMAN_WAIT_REASON: Readonly<Record<string, string>> = {
+  pending: "governance.approval_required", rejected: "governance.approval_required",
+  revision_pending: "governance.revision_required",
+};
+
+/** True only for the sole legitimate human-approval blocker of an active run (ADR-0063);
+ * mirrors Python `completion._human_approval_wait` with the Pi ingress. */
+export function humanApprovalWait(result: Response["result"]): boolean {
+  if (result.type !== "Block" || !("run" in result) || !result.run || result.run.status !== "active")
+    return false;
+  const g = result.run.governance as (Governance & {
+    interactions_remaining: { proposal: number; total: number } }) | null;
+  if (g === null) return false;
+  const reasons = result.reasons;
+  return g.state in HUMAN_WAIT_REASON && expectedApprovalKind(g) === "host_ui"
+    && g.context.ingress === "pi_ui" && g.prompt_error === null
+    && g.interactions_remaining.proposal > 0 && g.interactions_remaining.total > 0
+    && reasons.length === 1 && reasons[0].code === HUMAN_WAIT_REASON[g.state];
+}
+
+export const HUMAN_WAIT_NOTICE = PUBLIC_TOOLS.governance_decisions.human_wait_notice;
+
+export function opensGovernanceDialog(response: Response): boolean {
+  if (!("run" in response.result) || !response.result.run || response.result.type !== "Allow") return false;
+  const governance = response.result.run.governance as Governance | null;
+  return governance !== null && governance.state !== "approved"
+    && !governance.prompt_error && expectedApprovalKind(governance) === "host_ui";
+}
+
 export async function govern(runId: string, ctx: ExtensionContext, trusted: PrivateIngress,
                              signal?: AbortSignal, confirmation?: { revision: number; digest: string; before: Dialog },
                              deadline = Date.now() + governanceTimeout(), fallback?: Response): Promise<Response> {
@@ -129,23 +167,24 @@ async function mediateGovernance(response: Response, runId: string, ctx: Extensi
   if (confirmation && (g.plan_revision !== confirmation.revision || g.proposal_digest !== confirmation.digest))
     return unavailable(response, "governance.stale_proposal");
   if (g.state === "approved") return response;
-  const auto = g.control_mode === "auto";
+  const approvalKind = expectedApprovalKind(g);
   if (g.prompt_error) return unavailable(response, g.prompt_error);
   const envelope = { run_id: runId, receipt_id: randomUUID(), proposal_digest: g.proposal_digest,
-    plan_revision: g.plan_revision, approval_kind: auto ? "auto" : "host_ui" };
+    plan_revision: g.plan_revision, approval_kind: approvalKind };
   const dismiss = async (): Promise<Response> => {
     const stored = await trusted({ operation: "governance_decision", run_id: runId,
       payload: { ...envelope, outcome: "dismiss" } });
     assertResponse(stored, "trusted-governance");
     return ["Allow", "Inert"].includes(stored.result.type) ? unavailable(stored) : stored;
   };
-  if (auto) {
+  if (approvalKind === "auto") {
     const admitted = await trusted({ operation: "governance_decision", run_id: runId,
       payload: { ...envelope, outcome: "approve" } });
     assertResponse(admitted, "trusted-governance");
     return admitted;
   }
-  if (!ctx.hasUI || !ctx.ui.custom || signal?.aborted || Date.now() >= deadline) return unavailable(response);
+  if (!ctx.hasUI || !ctx.ui.custom || g.context.ingress === "unavailable"
+      || signal?.aborted || Date.now() >= deadline) return unavailable(response);
   const presented = await trusted({ operation: "governance_decision", run_id: runId,
     payload: { ...envelope, outcome: "present" } });
   assertResponse(presented, "trusted-governance");
@@ -156,7 +195,8 @@ async function mediateGovernance(response: Response, runId: string, ctx: Extensi
     confirmation?.before);
   if (signal?.aborted || Date.now() >= deadline || selected.type === "dismiss") return dismiss();
   const action = selected.type === "reject" ? "reject" : "approve";
-  const configuration = selected.type === "approve" ? selected.configuration : g.proposal;
+  const configuration = selected.type === "approve" ? selected.configuration
+    : { budgets: g.proposal.budgets };
   const admitted = await trusted({ operation: "governance_decision", run_id: runId,
     payload: { ...envelope, submission: { action, configuration } } });
   assertResponse(admitted, "trusted-governance");

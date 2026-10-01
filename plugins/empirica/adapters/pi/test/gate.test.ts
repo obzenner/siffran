@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 
 import { PROTOCOL, type Request, type Response, type Result } from "../src/contract.ts";
 import { REPORT_CONVERGENCE_TOOL, SUBAGENT_TOOL } from "../src/translate.ts";
+import { HUMAN_WAIT_NOTICE, humanApprovalWait } from "../src/governance-ui.ts";
 import {
   createEmpiricaExtension, DEFAULT_SKILLS_DIR, defaultAuditContractResolver, resolvePiAuditorModel,
   withoutThinkingLevel,
@@ -327,6 +328,58 @@ test("gate: report_convergence tool is blocked with the reason on Block", async 
     gate.command.type === "EvaluateRun" ? gate.command.intent : null,
     "report_convergence",
   );
+});
+
+function waitingRun(overrides: Record<string, unknown> = {}, context: Record<string, unknown> = {},
+                    controlMode = "deliberative") {
+  return { id: HANDLE, status: "active" as never, governance: {
+    state: "pending", control_mode: controlMode, first_approval: false, prompt_error: null,
+    interactions_remaining: { proposal: 3, total: 128 },
+    proposal: { budgets: {}, rationale: "sized" },
+    context: { ingress: "pi_ui", interactive: true, delegation: false, author: null, ...context },
+    ...overrides } };
+}
+
+const APPROVAL_REQUIRED = { code: "governance.approval_required", message: "approval required" };
+
+for (const controlMode of ["deliberative", "auto"]) {
+  test(`gate: the sole initial-approval blocker pauses report_convergence without converging (${controlMode})`,
+    async () => {
+      const blocked = { type: "Block" as const, run: waitingRun({}, {}, controlMode), reasons: [APPROVAL_REQUIRED] };
+      const w = wire((req) => req.command.type === "StartRun"
+        ? envelope({ type: "Allow", converged: false, run: run() }) : envelope(blocked as never));
+      await startRun(w);
+      const event = toolEvent(REPORT_CONVERGENCE_TOOL);
+      assert.equal(await w.pi.toolCall()(event, { ui: new FakeUi() }), undefined);
+      const output = await w.pi.tools.get(REPORT_CONVERGENCE_TOOL)!.execute(
+        event.toolCallId, event.input, new AbortController().signal, () => {}, fakeCtx());
+      const text = (output.content[0] as { text: string }).text;
+      assert.ok(text.startsWith(HUMAN_WAIT_NOTICE), text);
+      assert.equal((output.details as { type: string }).type, "Block");
+    });
+}
+
+test("gate: only the legitimate initial-approval blocker is a human wait", async () => {
+  const cases: Array<[string, Record<string, unknown>]> = [
+    ["mixed reasons", { reasons: [APPROVAL_REQUIRED, { code: "run.corrupt", message: "corrupt" }] }],
+    ["proposal exhausted", { run: waitingRun({ interactions_remaining: { proposal: 0, total: 128 } }) }],
+    ["total exhausted", { run: waitingRun({ interactions_remaining: { proposal: 3, total: 0 } }) }],
+    ["prompt error", { run: waitingRun({ prompt_error: "governance.interaction_limit" }) }],
+    ["ui unavailable", { run: waitingRun({}, { ingress: "unavailable" }) }],
+    ["delegated auto", { run: waitingRun({}, { interactive: false, delegation: true }, "auto") }],
+    ["post-approval auto", { run: waitingRun({ first_approval: true, state: "revision_pending" }, {}, "auto"),
+      reasons: [{ code: "governance.revision_required", message: "revision required" }] }],
+    ["malformed reason", { reasons: [{ code: "governance.revision_required", message: "mismatch" }] }],
+  ];
+  for (const [name, changed] of cases) {
+    const blocked = { type: "Block" as const, run: waitingRun(), reasons: [APPROVAL_REQUIRED], ...changed };
+    assert.equal(humanApprovalWait(blocked as never), false, name);
+    const w = wire((req) => req.command.type === "StartRun"
+      ? envelope({ type: "Allow", converged: false, run: run() }) : envelope(blocked as never));
+    await startRun(w);
+    const decision = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), { ui: new FakeUi() });
+    assert.equal((decision as { block?: boolean } | undefined)?.block, true, name);
+  }
 });
 
 test("gate: report_convergence tool is permitted on Allow", async () => {

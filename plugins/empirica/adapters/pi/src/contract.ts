@@ -34,7 +34,7 @@ export interface InvocationProvenance {
 
 export interface StartRunCommand {
   type: "StartRun";
-  control_mode?: "auto" | "deliberative";
+  control_mode: "auto" | "deliberative";
   selector: RunSelector;
   goal: string;
   invocation: InvocationProvenance;

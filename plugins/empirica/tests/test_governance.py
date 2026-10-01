@@ -45,7 +45,7 @@ class HostProfileApprovalTests(unittest.TestCase):
             service = compose(Workspace(), Harness(), Runs(), Artifacts(), None,
                               profile["profile_id"], {}, None)
             result = service.dispatch({"protocol": "empirica/v2", "request_id": "start",
-                "command": {"type": "StartRun", "goal": "synthetic profile",
+                "command": {"type": "StartRun", "control_mode": "deliberative", "goal": "synthetic profile",
                 "invocation": TEST_INVOCATION,
                 "selector": {"project": "p", "session": "s"}}})["result"]
             run_id = result["run"]["id"]
@@ -343,7 +343,7 @@ class GovernanceServiceTests(unittest.TestCase):
     def setUp(self):
         self.runs, self.artifacts = Runs(), Artifacts()
         self.service = compose(Workspace(), Harness(), self.runs, self.artifacts, None, PROFILE, {}, None)
-        self.run_id = self.request({"type": "StartRun", "goal": "governed task",
+        self.run_id = self.request({"type": "StartRun", "control_mode": "deliberative", "goal": "governed task",
                                     "invocation": dict(TEST_INVOCATION),
                                     "selector": {"project": "p", "session": "s"}})["run"]["id"]
 
@@ -351,7 +351,7 @@ class GovernanceServiceTests(unittest.TestCase):
         return self.service.dispatch({"protocol": "empirica/v2", "request_id": "test", "command": command})["result"]
 
     def test_missing_start_invocation_fails_through_normal_dispatch(self):
-        result = self.request({"type": "StartRun", "goal": "missing provenance",
+        result = self.request({"type": "StartRun", "control_mode": "deliberative", "goal": "missing provenance",
                                "selector": {"project": "p", "session": "missing"}})
         self.assertEqual(result["type"], "Fault")
         self.assertEqual(result["code"], "invalid_request")
@@ -944,7 +944,7 @@ class GovernanceServiceTests(unittest.TestCase):
         old["governance"]["context"]["inventory"] = bad_context["inventory"]
         self.runs.data[key] = type(self.runs.data[key])(self.runs.data[key].revision, old)
         self.assertEqual(self.request({"type": "GetRun", "run_id": self.run_id})["reasons"][0]["code"], "run.corrupt")
-        fresh = self.request({"type": "StartRun", "goal": "fresh",
+        fresh = self.request({"type": "StartRun", "control_mode": "deliberative", "goal": "fresh",
                               "invocation": dict(TEST_INVOCATION),
                               "selector": {"project": "p", "session": "s"}})
         self.assertEqual(fresh["type"], "Allow")
@@ -1105,7 +1105,7 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertIsNone(self.view()["governance"]["approved_digest"])
 
     def test_start_requires_goal_and_attested_auto_authority(self):
-        base = {"type": "StartRun", "selector": {"project": "p", "session": "provenance"},
+        base = {"type": "StartRun", "control_mode": "deliberative", "selector": {"project": "p", "session": "provenance"},
                 "invocation": {"host": "test", "interactive": False,
                                "signal": "test noninteractive", "delegation": False}}
         for goal in ("", "   "):

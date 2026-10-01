@@ -656,7 +656,8 @@
         "actions",
         "controls",
         "confirmation",
-        "recovery_exclusions"
+        "recovery_exclusions",
+        "human_wait_notice"
       ],
       "properties": {
         "actions": {
@@ -683,9 +684,19 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
+            "rationale_label",
+            "amendment_warning",
             "budgets"
           ],
           "properties": {
+            "rationale_label": {
+              "type": "string",
+              "minLength": 1
+            },
+            "amendment_warning": {
+              "type": "string",
+              "minLength": 1
+            },
             "budgets": {
               "type": "object",
               "additionalProperties": false,
@@ -758,6 +769,10 @@
               "maxItems": 1
             }
           }
+        },
+        "human_wait_notice": {
+          "type": "string",
+          "minLength": 1
         }
       }
     }

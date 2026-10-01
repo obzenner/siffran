@@ -67,6 +67,7 @@ export function startRunRequest(
     selector,
     goal,
     invocation,
+    control_mode: options.controlMode ?? "deliberative",
   };
   if (options.maxPasses !== undefined || options.maxSpawns !== undefined
       || options.maxAuditSpawns !== undefined) {
@@ -77,7 +78,6 @@ export function startRunRequest(
       budgets.max_audit_spawns = options.maxAuditSpawns;
     command.budgets = budgets;
   }
-  if (options.controlMode !== undefined) command.control_mode = options.controlMode;
   return { protocol: PROTOCOL, request_id: requestId, command };
 }
 

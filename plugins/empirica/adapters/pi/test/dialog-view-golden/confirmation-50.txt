@@ -3,6 +3,12 @@ epoch 1 · 15 min
 Goal  "Confirm the exact run configuration"
 Host  test · interactive · signal operator
 
+Agent sizing rationale — unverified
+  Sized for the supplied claims and one
+  independent audit retry.
+Written for the original proposal; not regenerated
+for these human-edited values
+
   Investigation passes  6 (was 8)
     used 0 · allowed 1–1024
   Child spawns          1

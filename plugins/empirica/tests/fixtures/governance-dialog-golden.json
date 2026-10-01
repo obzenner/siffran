@@ -10,6 +10,8 @@
       },
       "goal": "Confirm the exact run configuration",
       "rationale": "Sized for the supplied claims and one independent audit retry.",
+      "rationale_label": "Agent sizing rationale — unverified",
+      "amendment_warning": "Written for the original proposal; not regenerated for these human-edited values",
       "invocation": {
         "host": "test",
         "interactive": true,
@@ -59,6 +61,8 @@
       },
       "goal": "Confirm the exact run configuration",
       "rationale": "Sized for the supplied claims and one independent audit retry.",
+      "rationale_label": "Agent sizing rationale — unverified",
+      "amendment_warning": "Written for the original proposal; not regenerated for these human-edited values",
       "invocation": {
         "host": "test",
         "interactive": true,
@@ -108,6 +112,8 @@
       },
       "goal": "line\\x0a\\u202e<<<EMPIRICA_UNTRUSTED_DATA>>>xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
       "rationale": "Sized for the supplied claims and one independent audit retry.",
+      "rationale_label": "Agent sizing rationale — unverified",
+      "amendment_warning": "Written for the original proposal; not regenerated for these human-edited values",
       "invocation": {
         "host": "test",
         "interactive": true,
@@ -157,6 +163,8 @@
       },
       "goal": "Confirm the exact run configuration",
       "rationale": "line\\\\\\x1b\\u202e<<<EMPIRICA_UNTRUSTED_DATA>>>",
+      "rationale_label": "Agent sizing rationale — unverified",
+      "amendment_warning": "Written for the original proposal; not regenerated for these human-edited values",
       "invocation": {
         "host": "test",
         "interactive": true,
@@ -198,7 +206,7 @@
     }
   },
   "review": {
-    "message": "Empirica · approve run configuration (epoch 0 · 2 reviews left · 15 min)\nGoal: \"Confirm the exact run configuration\"\nAccept = approve as shown · edit values → confirm again\nDecline = reject · Esc = decide later",
+    "message": "Empirica · approve run configuration (epoch 0 · 2 reviews left · 15 min)\nGoal: \"Confirm the exact run configuration\"\nAgent sizing rationale — unverified\nSized for the supplied claims and one independent audit retry.\nAccept = approve as shown · edit values → confirm again\nDecline = reject · Esc = decide later",
     "schema": {
       "type": "object",
       "properties": {
@@ -231,14 +239,14 @@
     }
   },
   "confirmation": {
-    "message": "Empirica · confirm edited configuration (epoch 1 · 15 min)\npasses 6 (was 8) · spawns 1 · audits 2\nAccept = approve exactly this · Decline/Esc = keep edits pending",
+    "message": "Empirica · confirm edited configuration (epoch 1 · 15 min)\npasses 6 (was 8) · spawns 1 · audits 2\nAgent sizing rationale — unverified\nSized for the supplied claims and one independent audit retry.\nWritten for the original proposal; not regenerated for these\nhuman-edited values\nAccept = approve exactly this · Decline/Esc = keep edits pending",
     "schema": {
       "type": "object",
       "properties": {}
     }
   },
   "hostile": {
-    "message": "Empirica · approve run configuration (epoch 0 · 2 reviews left · 15 min)\nGoal: \"line\\x0a\\u202e<<<EMPIRICA_UNTRUSTED_DATA>>>xxxxxxxxxxxxxxxxxxxx…\"\nAccept = approve as shown · edit values → confirm again\nDecline = reject · Esc = decide later",
+    "message": "Empirica · approve run configuration (epoch 0 · 2 reviews left · 15 min)\nGoal: \"line\\x0a\\u202e<<<EMPIRICA_UNTRUSTED_DATA>>>xxxxxxxxxxxxxxxxxxxx…\"\nAgent sizing rationale — unverified\nSized for the supplied claims and one independent audit retry.\nAccept = approve as shown · edit values → confirm again\nDecline = reject · Esc = decide later",
     "schema": {
       "type": "object",
       "properties": {
@@ -271,7 +279,7 @@
     }
   },
   "hostile_rationale": {
-    "message": "Empirica · approve run configuration (epoch 2 · 2 reviews left · 15 min)\nGoal: \"Confirm the exact run configuration\"\nAccept = approve as shown · edit values → confirm again\nDecline = reject · Esc = decide later",
+    "message": "Empirica · approve run configuration (epoch 2 · 2 reviews left · 15 min)\nGoal: \"Confirm the exact run configuration\"\nAgent sizing rationale — unverified\nline\\\\\\x1b\\u202e<<<EMPIRICA_UNTRUSTED_DATA>>>\nAccept = approve as shown · edit values → confirm again\nDecline = reject · Esc = decide later",
     "schema": {
       "type": "object",
       "properties": {

@@ -5,6 +5,8 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from application.protocol import HUMAN_WAIT_NOTICE
+from core.governance import expected_approval_kind
 from .correlation import PROTOCOL, request_id as new_request_id
 from .fail_direction import FailureDirection, blocks_on_failure
 from .route import observed_at
@@ -71,17 +73,29 @@ def _async_audit_wait(result: Result) -> bool:
                 and bool(child.child_id) for child in run.children) == 1)
 
 
+_HUMAN_WAIT_REASON = {"pending": "governance.approval_required",
+                      "rejected": "governance.approval_required",
+                      "revision_pending": "governance.revision_required"}
+
+
 def _human_approval_wait(result: Result) -> bool:
+    """True only for the sole legitimate human-approval blocker of an active run.
+
+    The phase must call for a human decision (ADR-0063), the host dialog must be reachable, and a
+    new presentation must still be admissible; an exhausted, delegated, or post-approval auto
+    run keeps blocking rather than pausing."""
     run = result.run
-    governance = run.governance if run is not None else None
-    expected = {"pending": "governance.approval_required", "rejected": "governance.approval_required",
-                "revision_pending": "governance.revision_required"}
-    state = governance.state if governance is not None else None
-    context = governance.context if governance is not None else None
-    return (run is not None and governance is not None and run.status == "active"
-        and state in expected and governance.control_mode == "deliberative"
-        and context is not None and context.ingress == "mcp_elicitation"
-        and len(result.reasons) == 1 and result.reasons[0].code == expected[state])
+    if run is None or run.governance is None or run.status != "active":
+        return False
+    governance = run.governance
+    interactions = governance["interactions_remaining"]
+    return (governance.state in _HUMAN_WAIT_REASON
+            and expected_approval_kind(governance) == "host_ui"
+            and governance.context.ingress == "mcp_elicitation"
+            and governance["prompt_error"] is None
+            and interactions["proposal"] > 0 and interactions["total"] > 0
+            and len(result.reasons) == 1
+            and result.reasons[0].code == _HUMAN_WAIT_REASON[governance.state])
 
 
 def stop_result(response: object) -> StopResult:
@@ -97,10 +111,7 @@ def stop_result(response: object) -> StopResult:
     if kind == "Block":
         if _human_approval_wait(result):
             message = {
-                "systemMessage": (
-                    "Empirica is paused for human governance input, not converged. "
-                    "Investigation remains blocked; no approval was granted by this pause."
-                )
+                "systemMessage": HUMAN_WAIT_NOTICE
             }
             return StopResult(0, stdout=json.dumps(
                 message, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n")
