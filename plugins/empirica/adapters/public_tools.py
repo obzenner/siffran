@@ -157,6 +157,7 @@ def _project_public_tools() -> dict:
                 kind for kind, metadata in _protocol.public_contract()["actions"]["metadata"].items()
                 if metadata["evidence"]),
             "governance_decisions": copy.deepcopy(_protocol.public_contract()["governance_decisions"]),
+            "settlement_notices": copy.deepcopy(_protocol.public_contract()["settlement_notices"]),
             "host_profiles": {profile_id: {
                 "delegation_env": _protocol.host_profile(profile_id)["delegation_env"],
             } for profile_id in _protocol.profile_ids()},

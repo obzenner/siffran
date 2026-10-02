@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionContext } from "./pi-types.ts";
 import type { PrivateIngress } from "./private-transport.ts";
-import type { Response } from "./contract.ts";
+import type { Block, Response } from "./contract.ts";
 import { PROTOCOL } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
 import { PUBLIC_TOOLS } from "./public-tools.ts";
@@ -137,7 +137,26 @@ export function humanApprovalWait(result: Response["result"]): boolean {
     && reasons.length === 1 && reasons[0].code === HUMAN_WAIT_REASON[g.state];
 }
 
-export const HUMAN_WAIT_NOTICE = PUBLIC_TOOLS.governance_decisions.human_wait_notice;
+/** True only for the sole `budget.exhausted` blocker of an active run (ADR-0064 interim); mirrors
+ * Python `completion._budget_exhausted_wait`. The core already refused the only recovery the Block
+ * once listed, so denying the report again cannot help. */
+export function budgetExhaustedWait(result: Response["result"]): boolean {
+  return result.type === "Block" && "run" in result && !!result.run && result.run.status === "active"
+    && result.reasons.length === 1 && result.reasons[0].code === "budget.exhausted";
+}
+
+export const HUMAN_WAIT_NOTICE = PUBLIC_TOOLS.settlement_notices.human_wait;
+/** Contract-owned template; `{resource}` is its only placeholder. */
+export const BUDGET_EXHAUSTED_NOTICE = PUBLIC_TOOLS.settlement_notices.budget_exhausted;
+
+/** The nonterminal settlement notice for a Block the host must not repeat, or null when the
+ * generic gate applies. */
+export function settlementNotice(result: Response["result"]): string | null {
+  if (humanApprovalWait(result)) return HUMAN_WAIT_NOTICE;
+  if (!budgetExhaustedWait(result)) return null;
+  const { resource } = (result as Block).reasons[0].parameters as { resource: string };
+  return BUDGET_EXHAUSTED_NOTICE.replace("{resource}", () => resource);
+}
 
 export async function govern(runId: string, ctx: ExtensionContext, trusted: PrivateIngress,
                              signal?: AbortSignal, confirmation?: { revision: number; digest: string; before: Dialog },

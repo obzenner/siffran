@@ -16,8 +16,8 @@ export interface PublicToolsProjection {
   governance_decisions: {
     controls: DecisionControls;
     confirmation: { title: string; actions: string[] };
-    human_wait_notice: string;
   };
+  settlement_notices: { human_wait: string; budget_exhausted: string };
 }
 
 const PUBLIC_TOOLS_PATH = path.resolve(

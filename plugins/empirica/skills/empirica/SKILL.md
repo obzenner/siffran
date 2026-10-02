@@ -195,7 +195,10 @@ residual/deferred scope or an exhausted pass budget, call it once with `intent: 
 resulting `Allow(converged=false)` authorizes an honest stopped report.
 
 Do not repeatedly call the gate hoping for a different answer. Follow the typed
-residual obligation or next action returned by the service.
+residual obligation or next action returned by the service. A sole `budget.exhausted` blocker on
+an active run settles the turn with a host notice rather than blocking it: stop honestly with
+`intent: "stop"` (or, in deliberative mode, propose a raise for human approval) instead of
+retrying the gate.
 
 ## 7. Finalize and hand off
 

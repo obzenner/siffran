@@ -19,10 +19,17 @@ selects audit capacity. Each spawn is reserved through the service before child 
 Only a launch rejected before observed start refunds the child's recorded account; denied or
 unsupported launches must not happen outside a reservation.
 
-When a budget is exhausted, accept the typed non-converged terminal result. In auto mode,
-exhaustion requires a fresh run with a larger up-front approved size (or a deliberative run); it
-never authorizes `budget.raise` or another automatic approval prompt. Never remove a claim, forge
-evidence, or bypass audit to fit the budget.
+When a budget is exhausted the service names it where it bites: once `audit_spawns_used` reaches
+`max_audit_spawns`, a missing, failed, or stale-independence audit is reported as
+`budget.exhausted` (`resource: audit_spawn`) rather than as an audit retry the service would
+refuse; the audit findings stay in the run view's Audit section. The host then settles a sole
+`budget.exhausted` blocker on an active run with a contract-owned notice instead of blocking the
+turn end, and the run stays active. Stop honestly (`report_convergence` with `intent: "stop"`) and
+accept the typed non-converged terminal result, or, in deliberative mode, propose a raise with
+`configure_run` for human approval. Auto mode still requires a fresh run with a larger up-front
+approved size (or a deliberative run) and never authorizes `budget.raise` or another automatic
+approval prompt until ADR-64 (`doc/adr/0064-let-auto-mode-ask-the-human-to-raise-an-exhausted-ceiling.md`)
+is accepted. Never remove a claim, forge evidence, or bypass audit to fit the budget.
 
 ## Stall handling
 

@@ -124,13 +124,16 @@
         "decline"
       ]
     },
-    "human_wait_notice": "Empirica is paused for human governance input, not converged. Investigation remains blocked; no approval was granted by this pause.",
     "recovery_exclusions": {
       "deliberative": [],
       "auto": [
         "budget.raise"
       ]
     }
+  },
+  "settlement_notices": {
+    "human_wait": "Empirica is paused for human governance input, not converged. Investigation remains blocked; no approval was granted by this pause.",
+    "budget_exhausted": "Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this pause. Stop honestly (report_convergence intent=stop), or in deliberative mode propose a raise for human approval; in auto mode start a fresh run."
   },
   "host_profiles": {
     "claude-code@2.1.278": {

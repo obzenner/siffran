@@ -15,6 +15,8 @@ links:
   kind: Amends
 - target: 61
   kind: Amends
+- target: 64
+  kind: amendedby
 ---
 
 # Size the run configuration to the task and approve it before investigation in both control modes

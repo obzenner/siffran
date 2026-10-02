@@ -35,7 +35,8 @@
     "reasons",
     "sections",
     "bootstrap",
-    "governance_decisions"
+    "governance_decisions",
+    "settlement_notices"
   ],
   "properties": {
     "id": {
@@ -656,8 +657,7 @@
         "actions",
         "controls",
         "confirmation",
-        "recovery_exclusions",
-        "human_wait_notice"
+        "recovery_exclusions"
       ],
       "properties": {
         "actions": {
@@ -769,10 +769,25 @@
               "maxItems": 1
             }
           }
-        },
-        "human_wait_notice": {
+        }
+      }
+    },
+    "settlement_notices": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "human_wait",
+        "budget_exhausted"
+      ],
+      "properties": {
+        "human_wait": {
           "type": "string",
           "minLength": 1
+        },
+        "budget_exhausted": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^{}]*\\{resource\\}[^{}]*$"
         }
       }
     }

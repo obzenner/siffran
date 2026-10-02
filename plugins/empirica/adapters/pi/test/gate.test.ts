@@ -8,7 +8,9 @@ import assert from "node:assert/strict";
 
 import { PROTOCOL, type Request, type Response, type Result } from "../src/contract.ts";
 import { REPORT_CONVERGENCE_TOOL, SUBAGENT_TOOL } from "../src/translate.ts";
-import { HUMAN_WAIT_NOTICE, humanApprovalWait } from "../src/governance-ui.ts";
+import {
+  BUDGET_EXHAUSTED_NOTICE, budgetExhaustedWait, HUMAN_WAIT_NOTICE, humanApprovalWait,
+} from "../src/governance-ui.ts";
 import {
   createEmpiricaExtension, DEFAULT_SKILLS_DIR, defaultAuditContractResolver, resolvePiAuditorModel,
   withoutThinkingLevel,
@@ -389,6 +391,59 @@ test("gate: only the legitimate initial-approval blocker is a human wait", async
   for (const [name, changed] of cases) {
     const blocked = { type: "Block" as const, run: waitingRun(), reasons: [APPROVAL_REQUIRED], ...changed };
     assert.equal(humanApprovalWait(blocked as never), false, name);
+    const w = wire((req) => req.command.type === "StartRun"
+      ? envelope({ type: "Allow", converged: false, run: run() }) : envelope(blocked as never));
+    await startRun(w);
+    const decision = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), { ui: new FakeUi() });
+    assert.equal((decision as { block?: boolean } | undefined)?.block, true, name);
+  }
+});
+
+function exhausted(resource: string) {
+  return { code: "budget.exhausted", parameters: { resource }, message: "budget exhausted" };
+}
+
+for (const resource of ["audit_spawn", "pass"]) {
+  test(`gate: the sole budget.exhausted blocker settles report_convergence nonterminally (${resource})`,
+    async () => {
+      const blocked = { type: "Block" as const, run: run(), reasons: [exhausted(resource)] };
+      const w = wire((req) => req.command.type === "StartRun"
+        ? envelope({ type: "Allow", converged: false, run: run() }) : envelope(blocked as never));
+      await startRun(w);
+      const event = toolEvent(REPORT_CONVERGENCE_TOOL);
+      const privateBefore = w.privateRequests.length;
+      const ctx = fakeCtx();
+      let customCalls = 0;
+      ctx.ui.custom = async () => { customCalls += 1; return undefined as never; };
+      assert.equal(await w.pi.toolCall()(event, { ui: new FakeUi() }), undefined);
+      const output = await w.pi.tools.get(REPORT_CONVERGENCE_TOOL)!.execute(
+        event.toolCallId, event.input, new AbortController().signal, () => {}, ctx);
+      const text = (output.content[0] as { text: string }).text;
+      assert.ok(text.startsWith(BUDGET_EXHAUSTED_NOTICE.replace("{resource}", resource)), text);
+      assert.ok(text.includes(resource));
+      // The original Block is preserved; the pause is settlement only.
+      assert.equal((output.details as { type: string }).type, "Block");
+      assert.equal(w.privateRequests.length, privateBefore, "no governance decision or audit ingress call");
+      assert.equal(customCalls, 0, "no dialog opened");
+      // The run stays active: a follow-up report dispatches against the same handle.
+      const evaluations = w.requests.length;
+      await w.pi.tools.get(REPORT_CONVERGENCE_TOOL)!.execute(
+        "tc-2", event.input, new AbortController().signal, () => {}, ctx);
+      const last = w.requests.at(-1)!;
+      assert.equal(w.requests.length, evaluations + 1);
+      assert.equal((last.command as { run_id: string }).run_id, HANDLE);
+    });
+}
+
+test("gate: only a sole budget.exhausted blocker on an active run is settled", async () => {
+  const cases: Array<[string, Record<string, unknown>]> = [
+    ["mixed reasons", { reasons: [exhausted("pass"), { code: "run.corrupt", message: "corrupt" }] }],
+    ["terminal run", { run: run("stopped_budget") }],
+    ["other reason", { reasons: [{ code: "audit.failed", parameters: {}, message: "failed" }] }],
+  ];
+  for (const [name, changed] of cases) {
+    const blocked = { type: "Block" as const, run: run(), reasons: [exhausted("pass")], ...changed };
+    assert.equal(budgetExhaustedWait(blocked as never), false, name);
     const w = wire((req) => req.command.type === "StartRun"
       ? envelope({ type: "Allow", converged: false, run: run() }) : envelope(blocked as never));
     await startRun(w);

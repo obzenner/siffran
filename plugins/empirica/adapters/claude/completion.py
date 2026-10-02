@@ -5,7 +5,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from application.protocol import HUMAN_WAIT_NOTICE
+from application.protocol import BUDGET_EXHAUSTED_NOTICE, HUMAN_WAIT_NOTICE
 from core.governance import expected_approval_kind
 from .correlation import PROTOCOL, request_id as new_request_id
 from .fail_direction import FailureDirection, blocks_on_failure
@@ -98,8 +98,25 @@ def _human_approval_wait(result: Result) -> bool:
             and result.reasons[0].code == _HUMAN_WAIT_REASON[governance.state])
 
 
+def _budget_exhausted_wait(result: Result) -> bool:
+    """True only for the sole ``budget.exhausted`` blocker of an active run (ADR-0064 interim).
+
+    The core already refused the only recovery the Block once listed, so blocking the turn again
+    cannot help; mixed reasons and non-active runs keep blocking."""
+    run = result.run
+    return (run is not None and run.status == "active" and len(result.reasons) == 1
+            and result.reasons[0].code == "budget.exhausted")
+
+
+def _settlement(notice: str) -> StopResult:
+    """Exit 0 with a contract-owned ``systemMessage`` and no claim of convergence."""
+    return StopResult(0, stdout=json.dumps(
+        {"systemMessage": notice}, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n")
+
+
 def stop_result(response: object) -> StopResult:
-    """Settle human/async waits nonterminally; never convert their service Block to convergence."""
+    """Settle human/async waits and budget exhaustion nonterminally; never convert their service
+    Block to convergence."""
     if not isinstance(response, Response):
         return StopResult(2, stderr="empirica completion gate returned a malformed response\n")
     result = response.result
@@ -110,11 +127,10 @@ def stop_result(response: object) -> StopResult:
         return StopResult(0, stdout=_hook_stdout(result))
     if kind == "Block":
         if _human_approval_wait(result):
-            message = {
-                "systemMessage": HUMAN_WAIT_NOTICE
-            }
-            return StopResult(0, stdout=json.dumps(
-                message, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n")
+            return _settlement(HUMAN_WAIT_NOTICE)
+        if _budget_exhausted_wait(result):
+            return _settlement(BUDGET_EXHAUSTED_NOTICE.format(
+                resource=result.reasons[0]["parameters"]["resource"]))
         if _async_audit_wait(result):
             return StopResult(0, stdout=_hook_stdout(result))
         messages = [row.message or row.code for row in result.reasons]

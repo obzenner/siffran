@@ -323,6 +323,9 @@ class StaleAuditRetryTests(unittest.TestCase):
             self.assertEqual(self.artifacts.append_calls, writes)
 
     def test_retry_does_not_inherit_the_cancelled_auditors_identity(self):
+        # Headroom for the retry: at the ceiling the core names audit-spawn exhaustion instead.
+        self.action({"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 3}, "rationale": SIZED_RATIONALE})
+        approve_current(self.coordinator, self.run_id)
         old = self.pending()
         self.identities(old)
         self.action({"kind": "freeze"})

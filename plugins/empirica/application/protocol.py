@@ -74,7 +74,10 @@ _GOVERNANCE_DECISIONS = tuple((name, copy.deepcopy(row))
                               for name, row in _decisions["actions"].items())
 _GOVERNANCE_CONTROLS = copy.deepcopy(_decisions)
 _PROJECTION_CONTROLS = _GOVERNANCE_CONTROLS["controls"]
-HUMAN_WAIT_NOTICE: str = _GOVERNANCE_CONTROLS["human_wait_notice"]
+_NOTICES = _PUBLIC_CONTRACT["settlement_notices"]
+HUMAN_WAIT_NOTICE: str = _NOTICES["human_wait"]
+#: Template with the single ``{resource}`` placeholder, formatted with the reason's resource.
+BUDGET_EXHAUSTED_NOTICE: str = _NOTICES["budget_exhausted"]
 _RECOVERY_EXCLUSIONS = {
     mode: tuple(actions)
     for mode, actions in _GOVERNANCE_CONTROLS["recovery_exclusions"].items()

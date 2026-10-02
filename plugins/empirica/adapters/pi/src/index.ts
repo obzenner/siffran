@@ -21,7 +21,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type { Dispatch, Request, Response, RunSelector } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
-import { govern, HUMAN_WAIT_NOTICE, humanApprovalWait, piGovernanceContext, refreshGovernance } from "./governance-ui.ts";
+import { govern, piGovernanceContext, refreshGovernance, settlementNotice } from "./governance-ui.ts";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -407,8 +407,9 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           const response = prepared?.intent === intent ? prepared.response : await dispatch(
             evaluateRunRequest(runHandle!, intent, randomUUID()),
           );
-          if (humanApprovalWait(response.result))
-            return { content: [{ type: "text", text: `${HUMAN_WAIT_NOTICE}\n${resultText(response)}` }],
+          const notice = settlementNotice(response.result);
+          if (notice !== null)
+            return { content: [{ type: "text", text: `${notice}\n${resultText(response)}` }],
               details: response.result };
           const decision = gateFromDecision(response.result);
           if (decision.kind === "deny")
@@ -765,7 +766,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           evaluateRunRequest(runHandle, intent, randomUUID()),
         );
         const decision = gateFromDecision(response.result);
-        if (decision.kind === "deny" && !humanApprovalWait(response.result))
+        if (decision.kind === "deny" && settlementNotice(response.result) === null)
           return { block: true, reason: `${decision.reason}\nhandle: ${runHandle}` };
         reportEvaluations.set(event.toolCallId, { intent, response });
         return; // permit; execute consumes this exact guarded result

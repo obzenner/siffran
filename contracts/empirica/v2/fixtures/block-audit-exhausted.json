@@ -1,0 +1,211 @@
+{
+  "request": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-audit-exhausted",
+    "command": {
+      "type": "EvaluateRun",
+      "run_id": "run-fx",
+      "intent": "report_convergence"
+    }
+  },
+  "expected": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-audit-exhausted",
+    "result": {
+      "type": "Block",
+      "run": {
+        "id": "run-fx",
+        "goal": "Prove the public contract is internally consistent.",
+        "invocation": {
+          "host": "test",
+          "interactive": true,
+          "signal": "fixture",
+          "delegation": false
+        },
+        "status": "active",
+        "contract": {
+          "id": "empirica/public",
+          "version": "3.0.0",
+          "digest": "sha256:2d09206a7d31d3cced1167db052aaae3efe08025ed964187725f9fd759d94201",
+          "relevant_sections": [
+            "budget"
+          ]
+        },
+        "obligations": {
+          "active": [
+            {
+              "id": "obligation.route",
+              "required": "Record routing before investigation.",
+              "observed": [],
+              "missing": null,
+              "next": [],
+              "status": "satisfied"
+            },
+            {
+              "id": "obligation.graph",
+              "required": "Propose a valid claim graph from supplied context before requesting review.",
+              "observed": [],
+              "missing": null,
+              "next": [],
+              "status": "satisfied"
+            },
+            {
+              "id": "obligation.approval",
+              "required": "Obtain exact host-mediated approval for the current run configuration.",
+              "observed": [],
+              "missing": null,
+              "next": [],
+              "status": "satisfied"
+            },
+            {
+              "id": "obligation.investigation",
+              "required": "Record investigation only after routing and current approval.",
+              "observed": [],
+              "missing": null,
+              "next": [],
+              "status": "satisfied"
+            },
+            {
+              "id": "claim:C0",
+              "required": "supplied uncertainty",
+              "observed": [
+                {
+                  "artifact_id": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                  "kind": "research",
+                  "outcome": "supporting",
+                  "stale": false
+                }
+              ],
+              "missing": null,
+              "next": [],
+              "status": "satisfied"
+            },
+            {
+              "id": "obligation.audit",
+              "required": "Obtain a current independent audit of every approved gating claim.",
+              "observed": [],
+              "missing": {
+                "code": "budget.exhausted",
+                "target_claim_id": null,
+                "parameters": {
+                  "resource": "audit_spawn"
+                }
+              },
+              "next": [
+                "budget.raise",
+                "run.start_fresh",
+                "residual.accept"
+              ],
+              "status": "residual"
+            }
+          ],
+          "deferred": []
+        },
+        "residuals": [],
+        "freshness": {
+          "changes": []
+        },
+        "children": [
+          {
+            "child_id": "ch-audit-1",
+            "purpose": "audit",
+            "resource_class": "audit",
+            "state": "completed"
+          },
+          {
+            "child_id": "ch-audit-2",
+            "purpose": "audit",
+            "resource_class": "audit",
+            "state": "completed"
+          }
+        ],
+        "host": {
+          "profile_id": "claude-code@2.1.278",
+          "tier": "foreground_only",
+          "missing_capabilities": [
+            "host.async_unsupported"
+          ]
+        },
+        "next_actions": [],
+        "untrusted_delimiters": {
+          "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+          "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+        },
+        "governance": {
+          "state": "approved",
+          "control_mode": "deliberative",
+          "plan_revision": 1,
+          "approved_digest": "sha256:5246d5773a2c3c031aac783c8aae5bb72475511259779279493c6e859d7000ea",
+          "approval_kind": "host_ui",
+          "proposal": {
+            "budgets": {
+              "max_passes": 8,
+              "max_spawns": 1,
+              "max_audit_spawns": 2
+            },
+            "rationale": "sized for the gating claims and one audit retry"
+          },
+          "context": {
+            "author": null,
+            "ingress": "mcp_elicitation",
+            "approval_capability": "human_configuration",
+            "delegation": false,
+            "interactive": true
+          },
+          "first_approval": true,
+          "pre_approval_revisions": 0,
+          "post_approval_revisions": 0,
+          "proposal_digest": "sha256:3513fa7cc5931333b94fe8428c71d66fab83ed88df627ca5e127d619504d773a",
+          "interactions_remaining": {
+            "proposal": 2,
+            "total": 127
+          },
+          "prompt_error": null,
+          "budgets": {
+            "max_passes": 8,
+            "max_spawns": 1,
+            "max_audit_spawns": 2,
+            "passes_used": 1,
+            "spawns_used": 0,
+            "audit_spawns_used": 2
+          },
+          "remaining": {
+            "max_passes": 7,
+            "max_spawns": 1,
+            "max_audit_spawns": 0
+          },
+          "request_ready": true,
+          "display_ready": true,
+          "next_action": "run.inspect"
+        },
+        "audit": {
+          "state": "failed",
+          "independence": "distinct",
+          "findings": [
+            "citation names line 895, not 891"
+          ]
+        }
+      },
+      "reasons": [
+        {
+          "code": "budget.exhausted",
+          "parameters": {
+            "resource": "audit_spawn"
+          },
+          "next_actions": [
+            "budget.raise",
+            "run.start_fresh",
+            "residual.accept"
+          ],
+          "sections": [
+            "budget"
+          ],
+          "message": "{resource} budget exhausted.",
+          "affected": {
+            "obligation_id": "obligation.audit"
+          }
+        }
+      ]
+    }
+  }
+}

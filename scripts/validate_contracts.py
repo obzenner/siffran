@@ -50,7 +50,7 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:f66e19ae17ace178457a33f8222e767dbbf91f949292b8584777634cd1cae8a3"
+REVIEWED_REGISTRY_DIGEST = "sha256:2d09206a7d31d3cced1167db052aaae3efe08025ed964187725f9fd759d94201"
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:159c1a777884e2c797164b629583686b4b4f6904c5ded31c70247a9baa3c7faf"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
@@ -2444,7 +2444,7 @@ def main() -> int:
     # --- v2 fixtures ---
     REQUIRED_V2_FIXTURES = {
         "start-bootstrap-allow", "block-open-claim", "block-stale-spike",
-        "block-pending-audit", "block-child-terminal", "allow-stopped-frozen",
+        "block-pending-audit", "block-audit-exhausted", "block-child-terminal", "allow-stopped-frozen",
         "allow-stopped-budget", "allow-converged", "block-corrupt-state",
         "getcontract-index", "getcontract-section", "getcontract-full",
         # QUAL-1: getcontract-full is now a refusal fixture (target: full → invalid_request).

@@ -475,6 +475,37 @@ class ResponseMappingTests(unittest.TestCase):
             with self.subTest(changed=changed):
                 self.assertEqual(stop_result(_typed(blocked)).exit_code, 2)
 
+    def test_sole_budget_exhausted_settles_turn_with_the_contract_notice(self) -> None:
+        from application.protocol import BUDGET_EXHAUSTED_NOTICE
+
+        def result(resource):
+            run = json.loads(json.dumps(_valid_active_allow()["run"]))
+            return {"type": "Block", "run": run, "reasons": [{
+                "code": "budget.exhausted", "parameters": {"resource": resource},
+                "next_actions": ["run.start_fresh", "residual.accept"],
+                "sections": ["budget"], "message": f"{resource} budget exhausted."}]}
+        for resource in ("audit_spawn", "pass", "spawn"):
+            with self.subTest(resource=resource):
+                settled = stop_result(_typed(result(resource)))
+                self.assertEqual(settled.exit_code, 0)
+                self.assertEqual(settled.stderr, "")
+                notice = json.loads(settled.stdout)
+                self.assertEqual(notice, {"systemMessage":
+                                          BUDGET_EXHAUSTED_NOTICE.format(resource=resource)})
+                self.assertIn(resource, notice["systemMessage"])
+                self.assertNotIn("{resource}", notice["systemMessage"])
+        mixed = result("audit_spawn")
+        mixed["reasons"].append({"code": "run.corrupt", "parameters": {}, "next_actions": [],
+                                 "sections": [], "message": "corrupt"})
+        self.assertEqual(stop_result(_typed(mixed)).exit_code, 2)
+        terminal = result("audit_spawn")
+        terminal["run"]["status"] = "stopped_residual"
+        self.assertEqual(stop_result(_typed(terminal)).exit_code, 2)
+        unrelated = result("audit_spawn")
+        unrelated["reasons"][0].update({"code": "audit.failed", "parameters": {},
+                                        "sections": ["audit"], "message": "audit failed"})
+        self.assertEqual(stop_result(_typed(unrelated)).exit_code, 2)
+
     def test_stop_result_inert_allow_block_and_faults(self) -> None:
         self.assertEqual(stop_result(_typed({"type": "Inert", "reason": "no_run"})).exit_code, 0)
         fixture_root = PLUGIN_ROOT.parents[1] / "contracts" / "empirica" / "v2" / "fixtures"

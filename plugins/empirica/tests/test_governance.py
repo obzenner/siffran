@@ -776,28 +776,32 @@ class GovernanceServiceTests(unittest.TestCase):
         del raw["governance"]
         self.assertEqual(classify_and_decode(raw).kind, "current_corrupt")
 
-    def audit_ready(self):
-        from governance_setup import approve_current
+    def audit_protocol(self):
         from adapters.audit_protocol import AuditProtocol
         from adapters.identity import observe
-        self.prepare()
-        approve_current(self.service._coordinator, self.run_id)
-        self.assertEqual(self.action("investigate")["type"], "Allow")
-        self.assertEqual(self.action("research", claim_id="C0", source_kind="code", result="supports",
-                                    payload={"source_ref": "supplied", "citation": "observed"})["type"], "Allow")
         c = self.service._coordinator
-        protocol = AuditProtocol(PROFILE, dispatch=lambda r, _p: self.service.dispatch(r),
+        return AuditProtocol(PROFILE, dispatch=lambda r, _p: self.service.dispatch(r),
             child_event_ingress=lambda _p, r, ch, v: c.trusted_child_event(r, ch, v),
             attribution_ingress=lambda _p, r, v: c.trusted_attribution(
                 r, {**v, **observe(v.get("provider_id"), v.get("model_id"), source=v["source"]),
                     "observed_by": "host"}),
             verdict_ingress=lambda _p, r, ch, v: c.trusted_audit_verdict(r, ch, v),
             plan_ingress=lambda _p, r, ch: c.trusted_audit_plan(r, ch))
+
+    def audit_ready(self):
+        from governance_setup import approve_current
+        self.prepare()
+        approve_current(self.service._coordinator, self.run_id)
+        self.assertEqual(self.action("investigate")["type"], "Allow")
+        self.assertEqual(self.action("research", claim_id="C0", source_kind="code", result="supports",
+                                    payload={"source_ref": "supplied", "citation": "observed"})["type"], "Allow")
+        protocol = self.audit_protocol()
         plan = protocol.prepare(self.run_id, role_profile="empirica:empirica-auditor")
         protocol.observe_started(plan, "native-test")
         return protocol, plan
 
-    def finish_audit(self, protocol, plan, provider, model):
+    def finish_audit(self, protocol, plan, provider, model, *, verdict="pass",
+                     findings=("bound audit",)):
         from adapters.audit_protocol import IdentityObservation
         from core.evaluation import audit_binding
         protocol.observe_reviewer(plan, "native-test",
@@ -806,7 +810,7 @@ class GovernanceServiceTests(unittest.TestCase):
         key = next(iter(self.runs.data))
         state = classify_and_decode(self.runs.data[key].value).state
         snapshot = c._assemble(key, state, {"type": "GetArgument", "run_id": self.run_id}, require_graph=True)
-        verdict = {"verdict": "pass", "findings": ["bound audit"], **audit_binding(snapshot)}
+        verdict = {"verdict": verdict, "findings": list(findings), **audit_binding(snapshot)}
         self.assertTrue(protocol.observe_verdict(plan, "native-test", verdict))
         return self.request({"type": "EvaluateRun", "run_id": self.run_id,
                              "intent": "report_convergence"})
@@ -822,6 +826,55 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertTrue(any(a.get("model_id") == "eu.anthropic.claude-opus-4-6-v1" for a in history))
         research = next(a for a in history if a.get("kind") == "research")
         self.assertEqual(research["producer"]["identity"], AUTHOR["identity"])
+
+    def fail_audit(self, protocol, plan):
+        return self.finish_audit(protocol, plan, "bedrock", "eu.anthropic.claude-opus-4-6-v1",
+                                 verdict="fail", findings=("citation names line 895, not 891",))
+
+    def relaunch_audit(self, protocol):
+        plan = protocol.prepare(self.run_id, role_profile="empirica:empirica-auditor")
+        protocol.observe_started(plan, "native-test")
+        return plan
+
+    def assert_exhausted_audit(self, result):
+        self.assertEqual(result["type"], "Block")
+        self.assertEqual([(r["code"], r["parameters"]) for r in result["reasons"]],
+                         [("budget.exhausted", {"resource": "audit_spawn"})])
+        audit_row = next(row for row in result["run"]["obligations"]["active"]
+                         if row["id"] == "obligation.audit")
+        self.assertEqual(audit_row["missing"]["code"], "budget.exhausted")
+
+    def test_failed_audit_names_audit_spawn_exhaustion_and_keeps_findings_visible(self):
+        protocol, plan = self.audit_ready()
+        result = self.fail_audit(protocol, plan)
+        self.assertEqual(result["reasons"][0]["code"], "audit.failed")  # budget left: unchanged
+        self.assertIn("child.retry", result["reasons"][0]["next_actions"])
+        self.assert_exhausted_audit(self.fail_audit(protocol, self.relaunch_audit(protocol)))
+        budgets = self.view()["governance"]["budgets"]
+        self.assertEqual(budgets["audit_spawns_used"], budgets["max_audit_spawns"])
+        audit = self.view()["audit"]
+        self.assertEqual(audit["state"], "failed")
+        self.assertEqual(audit["findings"], ["citation names line 895, not 891"])
+
+    def test_required_audit_with_exhausted_budget_names_audit_spawn_exhaustion(self):
+        protocol, plan = self.audit_ready()
+        protocol.observe_failure(plan, "native-test", "timed_out")
+        protocol.observe_failure(self.relaunch_audit(protocol), "native-test", "timed_out")
+        budgets = self.view()["governance"]["budgets"]
+        self.assertEqual(budgets["audit_spawns_used"], budgets["max_audit_spawns"])
+        self.assertEqual(self.view()["audit"]["state"], "required")
+        self.assert_exhausted_audit(self.request({
+            "type": "EvaluateRun", "run_id": self.run_id, "intent": "report_convergence"}))
+
+    def test_pending_audit_is_never_converted_to_exhaustion(self):
+        protocol, plan = self.audit_ready()
+        protocol.observe_failure(plan, "native-test", "timed_out")
+        self.relaunch_audit(protocol)
+        budgets = self.view()["governance"]["budgets"]
+        self.assertEqual(budgets["audit_spawns_used"], budgets["max_audit_spawns"])
+        result = self.request({"type": "EvaluateRun", "run_id": self.run_id,
+                               "intent": "report_convergence"})
+        self.assertEqual([r["code"] for r in result["reasons"]], ["audit.pending"])
 
     def test_same_class_reviewer_across_bedrock_spelling_is_blocked(self):
         protocol, plan = self.audit_ready()
@@ -1772,7 +1825,9 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertIn("budget.raise", denied["reasons"][0]["next_actions"])
         audit_row = next(row for row in denied["run"]["obligations"]["active"]
                          if row["id"] == "obligation.audit")
-        self.assertNotIn("budget.raise", audit_row["next"])
+        # The audit row names the same exhaustion as the reason, so both offer the same recovery.
+        self.assertEqual(audit_row["missing"]["code"], "budget.exhausted")
+        self.assertEqual(audit_row["next"], denied["reasons"][0]["next_actions"])
         self.assertEqual(denied["reasons"][0]["parameters"], {"resource": "audit_spawn"})
 
     def test_human_submission_cannot_inject_or_tamper_rationale(self):

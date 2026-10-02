@@ -659,6 +659,11 @@ def independence(snapshot: EvaluationSnapshot, verdict: Mapping[str, Any]) -> st
     return "same_model" if auditor_class == producer_classes[0] else "distinct"
 
 
+#: Audit blockers whose recovery launches a new audit child; ``audit.pending`` is absent because a
+#: pending audit needs no further spawn. These name audit-spawn exhaustion when no budget remains.
+AUDIT_SPAWN_REASONS = frozenset({"audit.required", "audit.failed", *INDEPENDENCE_REASONS.values()})
+
+
 def derivation_digest(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> str:
     """Identify the current claim derivation for pass charging and residuals."""
     return digest({"graph": snapshot.graph,
@@ -677,7 +682,19 @@ def pass_budget_blocker(snapshot: EvaluationSnapshot, digest_value: str) -> dict
 
 
 def audit_blocker(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> dict[str, Any] | None:
-    """Derive the first audit blocker after every scoped claim is approved."""
+    """Derive the first audit blocker after every scoped claim is approved.
+
+    A blocker whose recovery needs a new audit spawn is named ``budget.exhausted`` once the audit
+    spawn ceiling is reached, so the author is never told to retry what the core would refuse."""
+    blocker = _audit_reason(snapshot, derivation)
+    budgets = snapshot.state.budgets
+    if (blocker is not None and blocker["reason"] in AUDIT_SPAWN_REASONS
+            and budgets["audit_spawns_used"] >= budgets["max_audit_spawns"]):
+        return {"reason": "budget.exhausted", "parameters": {"resource": "audit_spawn"}}
+    return blocker
+
+
+def _audit_reason(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> dict[str, Any] | None:
     state = snapshot.state
     if any(child["resource_class"] == "audit"
            and child["state"] in {"reserved", "launching", "pending"}

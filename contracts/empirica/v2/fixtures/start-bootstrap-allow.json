@@ -46,7 +46,7 @@
             "roles",
             "hosts/capabilities"
           ],
-          "digest": "sha256:f66e19ae17ace178457a33f8222e767dbbf91f949292b8584777634cd1cae8a3"
+          "digest": "sha256:2d09206a7d31d3cced1167db052aaae3efe08025ed964187725f9fd759d94201"
         },
         "obligations": {
           "active": [

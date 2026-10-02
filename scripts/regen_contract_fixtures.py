@@ -24,7 +24,9 @@ def _audit_summary(result: dict, run: dict) -> dict[str, object]:
 
     Like the projection, only a failed audit carries its findings into the RunView.
     """
-    argument_audit = result.get("argument", {}).get("audit", {})
+    # A settled verdict is not derivable from children, so a Block fixture (which has no argument)
+    # authors it on the run view; required/pending stay derived from the children below.
+    argument_audit = result.get("argument", {}).get("audit") or run.get("audit", {})
     state = argument_audit.get("state")
     if run.get("status") == "converged":
         return {"state": "passed", "independence": "distinct", "findings": []}
