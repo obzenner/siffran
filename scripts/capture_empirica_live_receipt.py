@@ -8,7 +8,8 @@ import subprocess
 from pathlib import Path
 
 from empirica_live_receipts import (EXPECTED, FORMAT, digest, inspect_claude, inspect_pi, jsonl,
-                                    native_version, require_compatible_version, state_facts)
+                                    native_version, require_compatible_version, run_handle,
+                                    state_facts)
 
 
 def main() -> int:
@@ -33,7 +34,9 @@ def main() -> int:
     state, child = state_facts(args.state, role)
     parent = jsonl(args.transcript)
     child_rows = jsonl(args.child_session)
-    facts = (inspect_claude(parent, child_rows, child) if args.host == "claude"
+    facts = (inspect_claude(parent, child_rows, child, run_handle(args.state.resolve()),
+                           host_version)
+             if args.host == "claude"
              else inspect_pi(parent, child_rows, child, args.child_session))
     receipt = {
         "format": FORMAT,
