@@ -13,8 +13,9 @@ import {
 } from "../src/governance-ui.ts";
 import {
   createEmpiricaExtension, DEFAULT_SKILLS_DIR, defaultAuditContractResolver, resolvePiAuditorModel,
-  withoutThinkingLevel,
 } from "../src/index.ts";
+import { loadInventory, type SubagentInventory } from "../src/subagent-inventory.ts";
+import { bound, FIXTURES, fixtureFor } from "./preflight-fixtures.ts";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -40,97 +41,106 @@ test("Pi auditor model follows host settings precedence; identity policy owns eq
   assert.equal(resolvePiAuditorModel({}, {}, "main/model"), "main/model");
 });
 
-test("production Pi auditor resolver tries project then user scope", async () => {
-  const expectedAgent = resolve(DEFAULT_SKILLS_DIR, "..", "agents", "pi", "empirica-auditor.md");
-  const scopes: unknown[] = [];
-  const ctx = fakeCtx("/work");
-  ctx.model = { provider: "main", id: "model" };
-  ctx.modelRegistry = { getAvailable: () => [{ provider: "audit", id: "model" }] };
-  const resolved = await defaultAuditContractResolver(
-    { agent: "empirica.empirica-auditor", task: "audit", expectedAgent }, ctx,
-    {
-      settings: {
-        getAgentDir: () => "/agent",
-        SettingsManager: { create: () => ({
-          getGlobalSettings: () => ({}),
-          getProjectSettings: () => ({ subagents: { defaultModel: "audit/model" } }),
-        }) },
-      },
-      preflight: { resolveSubagentLaunchContract: async input => {
-        scopes.push(input.agentScope);
-        return { ok: true, contract: { agent: { filePath: input.agentScope === "project"
-          ? "/shadow/auditor.md" : expectedAgent }, model: "audit/model", modelCandidates: ["audit/model"] } };
-      } },
-    },
-  );
-  assert.deepEqual(scopes, ["project", "user"]);
-  assert.equal(resolved.agentScope, "user");
-});
+// The production resolver runs the owner's preflight and admits its answer through the seam
+// (preflight-seam.ts). These tests feed it answers captured from real packages, v2 and v3.
 
-// P1-D1 (native Pi qualification): preflight appends the auditor file's `thinking` level to the candidate.
-function suffixedResolver(candidate: string | string[], configured = "audit/model") {
-  const candidates = typeof candidate === "string" ? [candidate] : candidate;
-  const expectedAgent = resolve(DEFAULT_SKILLS_DIR, "..", "agents", "pi", "empirica-auditor.md");
+const EXPECTED_AUDITOR = resolve(DEFAULT_SKILLS_DIR, "..", "agents", "pi", "empirica-auditor.md");
+
+function resolverFor(version: string, options: {
+  configured?: string; available?: Array<{ provider: string; id: string }>;
+  respond?: (input: Record<string, unknown>) => unknown;
+} = {}) {
+  const scopes: unknown[] = [];
+  const inventory = loadInventory(version);
+  assert.ok(inventory, version);
+  const canonical = () => bound(fixtureFor(version).cases.canonical_auditor);
   const ctx = fakeCtx("/work");
   ctx.model = { provider: "main", id: "model" };
-  ctx.modelRegistry = { getAvailable: () => [{ provider: "audit", id: "model" }] };
-  return defaultAuditContractResolver(
-    { agent: "empirica.empirica-auditor", task: "audit", expectedAgent }, ctx,
+  ctx.modelRegistry = { getAvailable: () => options.available ?? [{ provider: "audit", id: "reviewer" }] };
+  const resolve_ = () => defaultAuditContractResolver(
+    { agent: "empirica.empirica-auditor", task: "audit", expectedAgent: EXPECTED_AUDITOR }, ctx,
     {
       settings: {
         getAgentDir: () => "/agent",
         SettingsManager: { create: () => ({
-          getGlobalSettings: () => ({ subagents: { defaultModel: configured } }),
+          getGlobalSettings: () => ({ subagents: { defaultModel: options.configured ?? "audit/reviewer" } }),
           getProjectSettings: () => ({}),
         }) },
       },
-      preflight: { resolveSubagentLaunchContract: async () => ({ ok: true, contract: {
-        agent: { filePath: expectedAgent }, model: candidates[0], modelCandidates: candidates,
-      } }) },
+      runtime: { version, inventory, preflight: { resolveSubagentLaunchContract: async (input) => {
+        scopes.push(input.agentScope);
+        return options.respond ? options.respond(input) : canonical();
+      } } },
     },
   );
+  return { resolve: resolve_, scopes, canonical };
 }
 
+test("production Pi auditor resolver tries project then user scope", async () => {
+  for (const { version } of FIXTURES) {
+    const r = resolverFor(version, { respond: (input) => {
+      const response = bound(fixtureFor(version).cases.canonical_auditor);
+      if (input.agentScope === "project") response.contract.agent.filePath = "/shadow/auditor.md";
+      return response;
+    } });
+    const resolved = await r.resolve();
+    assert.deepEqual(r.scopes, ["project", "user"], version);
+    assert.equal(resolved.agentScope, "user", version);
+    assert.equal(resolved.agentFilePath, EXPECTED_AUDITOR, version);
+  }
+});
+
 test("production Pi auditor resolver accepts the configured model with the agent's thinking level", async () => {
-  assert.equal((await suffixedResolver("audit/model:high")).model, "audit/model");
+  for (const { version } of FIXTURES)
+    assert.equal((await resolverFor(version).resolve()).model, "audit/reviewer", version);
 });
 
 test("production Pi auditor resolver keeps a configured thinking level for the launch", async () => {
-  assert.equal((await suffixedResolver("audit/model:max", "audit/model:max")).model, "audit/model:max");
-  assert.equal((await suffixedResolver("audit/model:high", "audit/model:max")).model, "audit/model:max");
+  for (const { version } of FIXTURES)
+    assert.equal((await resolverFor(version, { configured: "audit/reviewer:max" }).resolve()).model,
+      "audit/reviewer:max", version);
 });
 
 test("production Pi auditor resolver still refuses any substituted model carrying a thinking level", async () => {
-  for (const candidates of [["other/model:high"], ["audit/other:high"], ["fallback/model:high", "audit/model:high"]])
-    await assert.rejects(suffixedResolver(candidates), /substituted by preflight/, candidates.join(","));
-  await assert.rejects(suffixedResolver("audit/other:max", "audit/model:max"), /substituted by preflight/);
-});
-
-test("withoutThinkingLevel strips only a known thinking level", () => {
-  assert.deepEqual(["a/b:high", "a/b:max", "a/b", "a/b:v1:0", "a/b:v1:0:low"].map(withoutThinkingLevel),
-                   ["a/b", "a/b", "a/b", "a/b:v1:0", "a/b:v1:0"]);
+  for (const { version } of FIXTURES) {
+    for (const substitute of ["other/reviewer:high", "audit/other:high", "audit/reviewer:0"]) {
+      const r = resolverFor(version, { respond: () => {
+        const response = bound(fixtureFor(version).cases.canonical_auditor);
+        response.contract.model = substitute;
+        if (response.contract.modelCandidates) response.contract.modelCandidates = [substitute];
+        return response;
+      } });
+      await assert.rejects(r.resolve(), /substituted by preflight/, `${version} ${substitute}`);
+    }
+  }
 });
 
 test("production Pi auditor resolver blocks a registry-unavailable configured model", async () => {
-  const expectedAgent = resolve(DEFAULT_SKILLS_DIR, "..", "agents", "pi", "empirica-auditor.md");
-  const ctx = fakeCtx("/work");
-  ctx.model = { provider: "main", id: "model" };
-  ctx.modelRegistry = { getAvailable: () => [] };
-  await assert.rejects(defaultAuditContractResolver(
-    { agent: "empirica.empirica-auditor", task: "audit", expectedAgent }, ctx,
-    {
-      settings: {
-        getAgentDir: () => "/agent",
-        SettingsManager: { create: () => ({
-          getGlobalSettings: () => ({ subagents: { defaultModel: "stale/model" } }),
-          getProjectSettings: () => ({}),
-        }) },
-      },
-      preflight: { resolveSubagentLaunchContract: async () => ({ ok: true, contract: {
-        agent: { filePath: expectedAgent }, model: "stale/model", modelCandidates: ["stale/model"],
-      } }) },
-    },
-  ), /configured auditor model is unavailable/);
+  for (const { version } of FIXTURES)
+    await assert.rejects(resolverFor(version, { available: [] }).resolve(), /configured auditor model is unavailable/, version);
+});
+
+test("production Pi auditor resolver reports an unresolvable auditor with the runtime's own refusal", async () => {
+  for (const { version } of FIXTURES) {
+    const r = resolverFor(version, { respond: () => bound(fixtureFor(version).cases.unknown_agent) });
+    await assert.rejects(r.resolve(), /auditor package unresolvable \(preflight-refused: Unknown agent: empirica\.empirica-auditor/, version);
+    assert.deepEqual(r.scopes, ["project", "user"], version);
+  }
+});
+
+test("production Pi auditor resolver stops on an unvouched launch contract instead of trying the next scope", async () => {
+  const r = resolverFor("0.75.0", { respond: () => {
+    const response = bound(fixtureFor("0.75.0").cases.canonical_auditor);
+    response.contract.version = 4;
+    return response;
+  } });
+  await assert.rejects(r.resolve(), /pi-subagents preflight refused \(launch-contract-version\)/);
+  assert.deepEqual(r.scopes, ["project"]);
+});
+
+test("a preflight that throws (unservable model) propagates: there is nothing to admit", async () => {
+  const r = resolverFor("0.75.0", { respond: () => { throw new Error(fixtureFor("0.75.0").cases.unservable_model.threw); } });
+  await assert.rejects(r.resolve(), /Unknown subagent model 'missing\/reviewer'/);
 });
 
 function envelope(result: Result, requestId = "x"): Response {
@@ -153,6 +163,10 @@ interface WireOptions {
   owners?: ToolInfo[];
   /** Environment the owner resolver sees (default: none set). */
   env?: OwnerEnv;
+  /** Replaces the reviewed-inventory lookup (default: the checked-in compat/ files). */
+  inventoryFor?: (version: string) => SubagentInventory | undefined;
+  /** The adapter's configured subagent tool name (default: `subagent`). */
+  subagentToolName?: string;
 }
 
 async function wire(
@@ -202,10 +216,13 @@ async function wire(
         type: "Inert", reason: "unsupported_host_event", run: run() } };
     },
     ownerEnv: options.env ?? {},
-    resolveAuditContract: async (input, _ctx, preflight) => {
+    ...(options.inventoryFor ? { inventoryFor: options.inventoryFor } : {}),
+    ...(options.subagentToolName ? { subagentToolName: options.subagentToolName } : {}),
+    resolveAuditContract: async (input, _ctx, runtime) => {
       // Which package's preflight the adapter handed over: the owner's own sentinel answer.
-      const answer = await preflight.resolveSubagentLaunchContract({});
-      auditResolutions.push({ ...input, preflightAnswer: answer.ok ? "ok" : answer.message });
+      const answer = await runtime.preflight.resolveSubagentLaunchContract({}) as { ok: boolean; message?: string };
+      auditResolutions.push({ ...input, preflightAnswer: answer.ok ? "ok" : answer.message,
+        runtimeVersion: runtime.version, inventoryVersion: runtime.inventory.version });
       return { agentFilePath: resolve(DEFAULT_SKILLS_DIR, "..", "agents", "pi", "empirica-auditor.md"),
         model: "bedrock/auditor-model", agentScope: "project" };
     },
@@ -324,9 +341,11 @@ test("/empirica refuses to start when the pi-subagents tool is not active (P1b)"
     assert.equal(w.pi.entries.length, 0);
     assert.equal(w.pi.userMessages.length, 0);
     assert.equal(w.pi.modelMessages.length, 0);
-    assert.ok(ui.notifications[0].message.includes(reasonMessage("host.subagents_missing")),
+    assert.ok(ui.notifications[0].message.includes(reasonMessage("host.subagents_tool_inactive")),
       ui.notifications[0].message);
-    assert.match(ui.notifications[0].message, /missing-tool: the `subagent` tool is registered but not active/);
+    assert.match(ui.notifications[0].message, /tool-inactive: the `subagent` tool is registered but not active/);
+    assert.match(ui.notifications[0].message, /Enable the `subagent` tool \(`subagents_enable`, or `toolActivation: eager`\)/);
+    assert.match(ui.notifications[0].message, /a host restart does not change this/);
     assert.equal(ui.notifications[0].type, "error");
   }
 });
@@ -494,9 +513,8 @@ test("an owner that changes after the snapshot refuses the audit before any rese
   assert.match(decision?.reason ?? "", /owner changed from .*@0\.74\.0 to .*@0\.64\.0/);
   assert.equal(w.auditResolutions.length, 0, "the replacement's preflight must never be consulted");
   assert.deepEqual(w.privateRequests, [], "no audit plan, identity, or start may be requested");
-  // Only the investigation witness every subagent launch records; never a child reservation.
-  assert.deepEqual(w.requests.slice(before).map((request) => request.command.type === "ObserveAction"
-    ? request.command.action.kind : request.command.type), ["investigate"]);
+  // Refused at classification: not even the investigation witness is recorded, let alone a reservation.
+  assert.deepEqual(w.requests.slice(before), []);
   // The invalidation is sticky: restoring the original registration cannot revive this snapshot
   // (a fresh resolution would now equal the binding), and configure_run refuses with the contract reason.
   w.pi.subagentOwners = [original];
@@ -520,7 +538,7 @@ test("a deactivated subagent tool refuses the audit without poisoning the sessio
   w.pi.activeTools = [];
   const refused = await launchAuditor(w, "tc-off");
   assert.equal(refused?.block, true);
-  assert.ok(refused?.reason?.includes(reasonMessage("host.subagents_missing")), refused?.reason);
+  assert.ok(refused?.reason?.includes(reasonMessage("host.subagents_tool_inactive")), refused?.reason);
   w.pi.activeTools = ["subagent"];
   assert.equal(await launchAuditor(w, "tc-on"), undefined, "the unchanged owner is admitted again");
   assert.equal(w.auditResolutions.length, 1);
@@ -546,7 +564,7 @@ test("a vanished, deactivated, or duplicated owner refuses the audit at admissio
   inactive.pi.activeTools = [];
   const decision = await launchAuditor(inactive, "tc-inactive");
   assert.equal(decision?.block, true);
-  assert.ok(decision?.reason?.includes(reasonMessage("host.subagents_missing")), decision?.reason);
+  assert.ok(decision?.reason?.includes(reasonMessage("host.subagents_tool_inactive")), decision?.reason);
 });
 
 // --- tool_call gate ----------------------------------------------------------
@@ -901,9 +919,13 @@ test("subagent: canonical auditor is reserved, bound, attributed, and prompt-inj
   assert.equal(input.async, false);
   assert.deepEqual(input.acceptance, { level: "none",
     reason: "Empirica's bound canonical auditor is read-only and has its own verdict contract." });
+  // The bound is the contract's audit_launch_policy (host-profiles.json); pi-subagents ≥0.59 has no
+  // turn budget, so a turnBudget key would be ignored rather than enforced and must not be sent.
   assert.equal(input.timeoutMs, 900_000);
-  assert.deepEqual(input.turnBudget, { maxTurns: 8, graceTurns: 1 });
   assert.deepEqual(input.toolBudget, { soft: 20, hard: 30, block: ["write", "edit"] });
+  assert.equal("turnBudget" in input, false);
+  assert.deepEqual(Object.keys(input).sort(),
+    ["acceptance", "agent", "agentScope", "async", "model", "task", "timeoutMs", "toolBudget"]);
   assert.match(String(input.task), /AUDIT DOSSIER/);
   assert.doesNotMatch(String(input.task), /AUTHOR_TASK_IS_NOT_AUTHORITY/);
   assert.equal(input.model, "bedrock/auditor-model");
@@ -1276,19 +1298,137 @@ test("subagent: executable launch with no handle is inert (nothing to deny)", as
   assert.equal(w.requests.length, 0);
 });
 
-test("subagent: malformed multi-key launch with a real handle is inert", async () => {
-  const w = await wire((req) =>
-    req.command.type === "StartRun"
-      ? envelope({ type: "Allow", converged: false, run: run() })
-      : envelope({ type: "Allow", converged: true, run: run("converged") }),
-  );
+// --- subagent call classification at the gate (Empirica 4.1, D4) -------------------------------
+// The owner fixture is pi-subagents 0.74.0: launch forms are agent and workflow only.
+
+const refusalReason = reasonMessage("host.subagents_launch_unsupported");
+const allowRun = () => envelope({ type: "Allow", converged: false, run: run() });
+/** Allows everything and answers every child reservation with a matching reserved author child. */
+const allowWithChild = (req: Request): Response => req.command.type === "ObserveAction"
+  ? envelope({ type: "Allow", converged: false, run: { ...run(), children: [
+      { child_id: "ch-1", purpose: "author child", resource_class: "investigation", state: "reserved" }] } as never })
+  : allowRun();
+
+test("subagent: a call with two launch forms is refused as unsupported before anything is recorded", async () => {
+  const w = await wire(allowRun);
   await startRun(w);
   const before = w.requests.length;
   const decision = await w.pi.toolCall()(
-    { toolName: SUBAGENT_TOOL, toolCallId: "tc-multi", input: { agent: "x", workflowScript: "y" } },
-    { ui: new FakeUi() },
-  );
-  assert.equal(decision, undefined);
+    { toolName: SUBAGENT_TOOL, toolCallId: "tc-multi", input: { agent: "x", workflow: true } }, fakeCtx());
+  assert.equal(decision?.block, true);
+  assert.ok(decision?.reason?.includes(refusalReason), decision?.reason);
+  assert.match(decision?.reason ?? "", /malformed: more than one launch form: agent, workflow/);
+  assert.equal(w.requests.length, before, "no investigation witness, no reservation");
+  assert.deepEqual(w.privateRequests, []);
+});
+
+test("subagent: a workflow launch is an executable launch, recorded as investigation", async () => {
+  for (const [id, input] of [["tc-wf", { workflow: true }], ["tc-wf-path", { workflow: "./w/review.js" }]] as const) {
+    const w = await wire(allowWithChild);
+    await startRun(w);
+    const before = w.requests.length;
+    assert.equal(await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: id, input: { ...input } }, fakeCtx()), undefined);
+    assert.deepEqual(w.requests.slice(before).map((request) => request.command.type === "ObserveAction"
+      ? request.command.action.kind : request.command.type), ["investigate", "child_reserve"], id);
+  }
+});
+
+test("subagent: a launch form the owner's version removed is refused, not silently inert", async () => {
+  const w = await wire(allowRun);
+  await startRun(w);
+  const before = w.requests.length;
+  for (const input of [{ workflowScript: "return 1" }, { workflowScriptPath: "w.js" }, { resume: "child-1" }, {}]) {
+    const decision = await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "tc-removed", input: { ...input } }, fakeCtx());
+    assert.equal(decision?.block, true, JSON.stringify(input));
+    assert.ok(decision?.reason?.includes(refusalReason), decision?.reason);
+  }
+  assert.equal(w.requests.length, before);
+});
+
+test("subagent: control and mutation actions are refused as unsupported during an active run", async () => {
+  const w = await wire(allowRun);
+  await startRun(w);
+  const before = w.requests.length;
+  for (const action of ["steer", "stop", "resume", "schedule.create", "worktree.discard", "create", "frobnicate"]) {
+    const decision = await w.pi.toolCall()(
+      { toolName: SUBAGENT_TOOL, toolCallId: `tc-${action}`, input: { action, id: "x" } }, fakeCtx());
+    assert.equal(decision?.block, true, action);
+    assert.ok(decision?.reason?.includes(refusalReason), decision?.reason);
+    assert.match(decision?.reason ?? "", new RegExp(`unsupported: action "${action}"`), action);
+  }
+  assert.equal(w.requests.length, before, "none of them is an investigation witness");
+});
+
+test("subagent: every reviewed management action is inert", async () => {
+  const w = await wire(allowRun);
+  await startRun(w);
+  const before = w.requests.length;
+  for (const action of ["list", "status", "models", "guide", "doctor", "children.list", "project.status", "lane.status",
+    "watchdog.status", "inspector.status", "refine.show", "validate"])
+    assert.equal(await w.pi.toolCall()(
+      { toolName: SUBAGENT_TOOL, toolCallId: `tc-${action}`, input: { action } }, fakeCtx()), undefined, action);
+  assert.equal(w.requests.length, before);
+});
+
+test("subagent: without a run, an unsupported call is not refused (nothing to protect)", async () => {
+  const w = await wire(() => { throw new Error("should not dispatch without a handle"); });
+  assert.equal(await w.pi.toolCall()(
+    { toolName: SUBAGENT_TOOL, toolCallId: "tc-norun", input: { action: "stop", id: "x" } }, fakeCtx()), undefined);
+  assert.equal(w.requests.length, 0);
+});
+
+test("subagent: the classification uses the inventory of the owner's exact version", async () => {
+  // 0.64.0: workflowScriptPath is a launch form (executable); at the 0.74.0 default it is refused.
+  const w = await wire(allowWithChild, true, undefined, { owners: [otherOwner("0.64.0")] });
+  await startRun(w);
+  const before = w.requests.length;
+  assert.equal(await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "tc-064",
+    input: { workflowScriptPath: "w.js" } }, fakeCtx()), undefined);
+  assert.equal(w.requests.length, before + 2, "investigate + child_reserve");
+});
+
+test("subagent: an owner version with no reviewed inventory is refused at binding (host.subagents_version_unsupported)", async () => {
+  const w = await wire(allowRun, true, undefined,
+    { owners: [makeSubagentsPackage(tempParent(), { version: "9.9.9" }).tool()] });
+  const ui = new FakeUi();
+  await w.pi.command("empirica").handler("goal", { ui });
+  assert.equal(w.requests.length, 0);
+  assert.ok(ui.notifications[0].message.includes(reasonMessage("host.subagents_version_unsupported")), ui.notifications[0].message);
+  assert.match(ui.notifications[0].message, /version-unreviewed: pi-subagents 9\.9\.9 has no reviewed launch\/action inventory/);
+});
+
+test("subagent: an unreadable inventory is an unobservable owner, a mismatched one an unreviewed version", async () => {
+  const cases: Array<[(version: string) => SubagentInventory | undefined, string, RegExp]> = [
+    [() => { throw new Error("inventory corrupt"); }, "host.subagents_owner_unverified", /owner-unobservable: .*inventory corrupt/],
+    [(version) => ({ ...loadInventory("0.74.0")!, version: `${version}-other` }), "host.subagents_version_unsupported",
+      /version-unreviewed: the inventory selected for 0\.74\.0 describes 0\.74\.0-other/],
+  ];
+  for (const [inventoryFor, reason, pattern] of cases) {
+    const w = await wire(allowRun, true, undefined, { inventoryFor });
+    const ui = new FakeUi();
+    await w.pi.command("empirica").handler("goal", { ui });
+    assert.equal(w.requests.length, 0);
+    assert.ok(ui.notifications[0].message.includes(reasonMessage(reason)), ui.notifications[0].message);
+    assert.match(ui.notifications[0].message, pattern);
+  }
+});
+
+test("subagent: a version whose inventory cannot carry the audit bound is refused at binding", async () => {
+  const noBudget = { ...loadInventory("0.74.0")!, supports: { ...loadInventory("0.74.0")!.supports, toolBudget: false } };
+  const w = await wire(allowRun, true, undefined, { inventoryFor: () => noBudget });
+  const ui = new FakeUi();
+  await w.pi.command("empirica").handler("goal", { ui });
+  assert.equal(w.requests.length, 0);
+  assert.ok(ui.notifications[0].message.includes(reasonMessage("host.subagents_version_unsupported")), ui.notifications[0].message);
+  assert.match(ui.notifications[0].message, /cannot carry the audit bound/);
+});
+
+test("subagent: with a differently named subagent tool, the default name is an unrecognised surface", async () => {
+  const w = await wire(allowRun, true, undefined, { subagentToolName: "run_agent" });
+  await startRun(w);
+  const before = w.requests.length;
+  const decision = await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "x", input: { agent: "a" } }, fakeCtx());
+  assert.deepEqual(decision, { block: true, reason: "empirica: unrecognized child execution surface" });
   assert.equal(w.requests.length, before);
 });
 

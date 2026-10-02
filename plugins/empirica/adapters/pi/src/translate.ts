@@ -16,6 +16,7 @@ import {
   type Result,
   type RunSelector,
 } from "./contract.ts";
+import type { SubagentInventory } from "./subagent-inventory.ts";
 
 // The convergence gate's intent and the tool/command name it guards. A run may
 // report convergence only through EvaluateRun(report_convergence) (ADR-32).
@@ -258,26 +259,83 @@ export function statusNotice(result: Result): Notice {
 
 // --- native subagent launch classification ----------------------------------
 //
-// Only structured executions enter the bound-auditor adapter path. Management
-// calls and malformed multi-key requests are inert.
+// Every `subagent` tool call is exactly one of four things, decided against the reviewed inventory
+// of the pi-subagents version that owns the tool (compat/pi-subagents-<version>.json):
+//   executable  - starts exactly one child through one launch form; enters investigation + binding
+//   management  - a reviewed read-only action; inert
+//   unsupported - any other action (control, mutation, schedule, mission, worktree, unknown)
+//   malformed   - ambiguous: zero or several launch forms, or a launch form beside an action
+// Only `executable` and `management` may proceed; the other two are refused while a run is active.
 
 /** The Pi subagent tool name. */
 export const SUBAGENT_TOOL = "subagent";
 
-const LAUNCH_KEYS = ["agent", "workflowScript", "resume"] as const;
+export type SubagentCallKind = "management" | "executable" | "unsupported" | "malformed";
+
+export interface SubagentCallClassification {
+  readonly kind: SubagentCallKind;
+  /** Why, for the operator and the refusal text (names the launch form or action involved). */
+  readonly detail: string;
+}
 
 /**
- * Classify a Pi `subagent` tool call. Returns true only for a *fresh, structured
- * executable launch* — exactly one of `agent`, `workflowScript`, or `resume` is
- * present and non-null. Management calls (list/status) and malformed
- * multi-key launches return false (they are inert, never denied).
+ * The reviewed read-only management actions (L2 brief; PLAN D4). An action is management only if it
+ * is listed here AND present in the version's inventory - a release can add or drop actions without
+ * widening this set. ``agentTarget``: the action takes an ``agent`` argument as its target rather
+ * than as a launch.
  */
-export function isExecutableSubagentLaunch(
-  toolName: string,
-  input: Record<string, unknown> | undefined,
-): boolean {
-  if (toolName !== SUBAGENT_TOOL) return false;
-  const inp = input ?? {};
-  const present = LAUNCH_KEYS.filter((k) => k in inp && inp[k] != null);
-  return present.length === 1;
+export const MANAGEMENT_ACTIONS: ReadonlyMap<string, { readonly agentTarget: boolean }> = new Map([
+  ["list", { agentTarget: false }],
+  ["status", { agentTarget: false }],
+  ["models", { agentTarget: false }],
+  ["guide", { agentTarget: false }],
+  ["doctor", { agentTarget: false }],
+  ["children.list", { agentTarget: false }],
+  ["project.status", { agentTarget: false }],
+  ["lane.status", { agentTarget: false }],
+  ["watchdog.status", { agentTarget: false }],
+  ["inspector.status", { agentTarget: false }],
+  ["refine.show", { agentTarget: true }],
+  ["validate", { agentTarget: false }],
+]);
+
+/** The launch forms ``validate`` takes as the workflow it statically checks (it launches nothing). */
+const VALIDATE_WORKFLOW_FORMS: readonly string[] = ["workflow", "workflowScript", "workflowScriptPath"];
+
+/**
+ * Classify a `subagent` call's input against the owner version's inventory.
+ *
+ * A launch form counts when present and non-null. With no `action`, exactly one launch form is an
+ * executable launch. With an `action`, the action must be in the version's inventory and in the
+ * reviewed management allowlist (``validate`` additionally only where the version documents it as
+ * offline), and must not be accompanied by a launch form it does not take (``agent`` for a
+ * target-taking action, the workflow forms for ``validate``).
+ */
+export function classifySubagentCall(input: unknown, inventory: SubagentInventory): SubagentCallClassification {
+  if (input === null || typeof input !== "object" || Array.isArray(input))
+    return { kind: "malformed", detail: "the call input is not an object" };
+  const record = input as Record<string, unknown>;
+  const present = inventory.launch_forms.filter((form) => record[form] != null);
+  const action = record.action;
+  if (action == null) {
+    if (present.length === 1) return { kind: "executable", detail: `launch form ${present[0]}` };
+    return present.length === 0
+      ? { kind: "malformed", detail: `no action and no launch form (${inventory.launch_forms.join(", ")})` }
+      : { kind: "malformed", detail: `more than one launch form: ${present.join(", ")}` };
+  }
+  if (typeof action !== "string" || action.trim() === "")
+    return { kind: "malformed", detail: "action must be a nonempty string" };
+  const name = action.trim();
+  if (!inventory.actions.includes(name))
+    return { kind: "unsupported", detail: `action ${JSON.stringify(name)} is not in the pi-subagents ${inventory.version} inventory` };
+  const management = MANAGEMENT_ACTIONS.get(name);
+  if (management === undefined)
+    return { kind: "unsupported", detail: `action ${JSON.stringify(name)} is not in the reviewed read-only allowlist` };
+  if (name === "validate" && !inventory.supports.validateOffline)
+    return { kind: "unsupported", detail: `pi-subagents ${inventory.version} does not document validate as offline` };
+  const stray = present.filter((form) => !(name === "validate" ? VALIDATE_WORKFLOW_FORMS.includes(form)
+    : form === "agent" && management.agentTarget));
+  if (stray.length > 0)
+    return { kind: "malformed", detail: `launch form ${stray.join(", ")} alongside action ${JSON.stringify(name)}` };
+  return { kind: "management", detail: `action ${name}` };
 }

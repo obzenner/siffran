@@ -27,7 +27,7 @@ export interface ExtensionContext {
   model?: { id: string; provider: string };
   modelRegistry?: {
     getError?(): string | undefined;
-    getAvailable(): Array<{ id: string; provider: string; fullId?: string; reasoning?: boolean }>;
+    getAvailable(): Array<{ id: string; provider: string }>;
   };
   sessionManager?: {
     getEntries(): Array<{ type?: string; customType?: string; data?: unknown }>;
@@ -92,11 +92,15 @@ export interface ToolDefinition {
   label?: string;
   description: string;
   parameters?: unknown;
+  /**
+   * Pi declares ``signal: AbortSignal | undefined`` and ``onUpdate`` optional in every version from
+   * 0.84.1 (``types.d.ts:371``) to 1.0.0 (``:492``); a tool must not assume either is present.
+   */
   execute: (
     toolCallId: string,
     params: unknown,
-    signal: AbortSignal,
-    onUpdate: (u: unknown) => void,
+    signal: AbortSignal | undefined,
+    onUpdate: ((u: unknown) => void) | undefined,
     ctx: ExtensionContext,
   ) => Promise<{ content: Array<{ type: "text"; text: string }>; details?: unknown }>;
 }

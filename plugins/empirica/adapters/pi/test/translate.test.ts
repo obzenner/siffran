@@ -21,11 +21,13 @@ import {
   convergenceNotice,
   statusNotice,
   startRunNotice,
-  isExecutableSubagentLaunch,
-  SUBAGENT_TOOL,
+  MANAGEMENT_ACTIONS,
+  classifySubagentCall,
   REPORT_CONVERGENCE_INTENT,
   REPORT_CONVERGENCE_TOOL,
+  type SubagentCallKind,
 } from "../src/translate.ts";
+import { loadInventory, type SubagentInventory } from "../src/subagent-inventory.ts";
 import { type Result } from "../src/contract.ts";
 
 const SEL = { project: "p", session: "s" };
@@ -155,27 +157,134 @@ for (const c of START_NOTICE_CASES) {
   });
 }
 
-// --- isExecutableSubagentLaunch (table-driven D8 classifier) -----------------
+// --- classifySubagentCall (table-driven D4 classifier) ------------------------
+//
+// Each row is proven for every reviewed inventory it names: the expectation differs by version only
+// where the package's surface differs (0.74 removed workflowScript/workflowScriptPath and made
+// `workflow` boolean|path|name; 0.50 has a top-level `resume` and no `validate`/`lane.status`).
 
-const SUBAGENT_CASES: Array<{
-  label: string;
-  toolName: string;
-  input: Record<string, unknown> | undefined;
-  expected: boolean;
+const inventory = (version: string): SubagentInventory => {
+  const found = loadInventory(version);
+  assert.ok(found, `no reviewed inventory for ${version}`);
+  return found;
+};
+const V050 = "0.50.0", V064 = "0.64.0", V074 = "0.74.0", V075 = "0.75.0";
+const ALL = [V050, V064, V074, V075];
+
+const CLASSIFY_CASES: Array<{
+  label: string; input: unknown; expected: Partial<Record<string, SubagentCallKind>> | SubagentCallKind;
 }> = [
-  { label: "agent launch is executable", toolName: SUBAGENT_TOOL, input: { agent: "empirica:empirica-auditor" }, expected: true },
-  { label: "workflowScript launch is executable", toolName: SUBAGENT_TOOL, input: { workflowScript: "audit-flow.ts" }, expected: true },
-  { label: "resume launch is executable", toolName: SUBAGENT_TOOL, input: { resume: "child-1" }, expected: true },
-  { label: "management list is NOT executable (inert)", toolName: SUBAGENT_TOOL, input: { action: "list" }, expected: false },
-  { label: "management status is NOT executable (inert)", toolName: SUBAGENT_TOOL, input: { action: "status" }, expected: false },
-  { label: "malformed multi-key launch is NOT executable (inert)", toolName: SUBAGENT_TOOL, input: { agent: "x", workflowScript: "y" }, expected: false },
-  { label: "empty input {} is NOT executable", toolName: SUBAGENT_TOOL, input: {}, expected: false },
-  { label: "undefined input is NOT executable", toolName: SUBAGENT_TOOL, input: undefined, expected: false },
-  { label: "non-subagent tool is NOT executable", toolName: "bash", input: { agent: "x" }, expected: false },
+  { label: "agent + task launch", input: { agent: "scout", task: "look" }, expected: "executable" },
+  { label: "agent alone", input: { agent: "empirica.empirica-auditor" }, expected: "executable" },
+  { label: "agent with a null action", input: { agent: "scout", action: null }, expected: "executable" },
+  { label: "workflow: true", input: { workflow: true }, expected: { [V050]: "malformed", [V064]: "executable", [V074]: "executable", [V075]: "executable" } },
+  { label: "workflow by path", input: { workflow: "./w/review.js" }, expected: { [V050]: "malformed", [V064]: "executable", [V074]: "executable", [V075]: "executable" } },
+  { label: "workflow by name", input: { workflow: "run-ci", args: { command: "npm test" } }, expected: { [V050]: "malformed", [V064]: "executable", [V074]: "executable", [V075]: "executable" } },
+  { label: "workflowScript (removed in 0.74)", input: { workflowScript: "return 1" }, expected: { [V050]: "executable", [V064]: "executable", [V074]: "malformed", [V075]: "malformed" } },
+  { label: "workflowScriptPath (removed in 0.74)", input: { workflowScriptPath: "w.js" }, expected: { [V050]: "malformed", [V064]: "executable", [V074]: "malformed", [V075]: "malformed" } },
+  { label: "top-level resume (0.50 only)", input: { resume: "child-1" }, expected: { [V050]: "executable", [V064]: "malformed", [V074]: "malformed", [V075]: "malformed" } },
+  { label: "agent + workflow is two launch forms", input: { agent: "x", workflow: true }, expected: { [V050]: "executable", [V064]: "malformed", [V074]: "malformed", [V075]: "malformed" } },
+  { label: "agent + workflowScript is two launch forms", input: { agent: "x", workflowScript: "y" }, expected: { [V050]: "malformed", [V064]: "malformed", [V074]: "executable", [V075]: "executable" } },
+  { label: "agent + resume (0.50)", input: { agent: "x", resume: "c" }, expected: { [V050]: "malformed", [V064]: "executable", [V074]: "executable", [V075]: "executable" } },
+  { label: "null launch forms do not count", input: { agent: "x", workflow: null, resume: null }, expected: "executable" },
+  { label: "empty input", input: {}, expected: "malformed" },
+  { label: "input that is not an object", input: undefined, expected: "malformed" },
+  { label: "null input", input: null, expected: "malformed" },
+  { label: "array input", input: [{ agent: "x" }], expected: "malformed" },
+  { label: "string input", input: "agent", expected: "malformed" },
+  { label: "unknown field only (chain/tasks are not launch forms)", input: { tasks: [{ agent: "x", task: "y" }] }, expected: "malformed" },
+  // --- management: the reviewed read-only allowlist
+  { label: "action list", input: { action: "list" }, expected: "management" },
+  { label: "action status with an id", input: { action: "status", id: "run-1" }, expected: "management" },
+  { label: "action models", input: { action: "models" }, expected: "management" },
+  { label: "action guide", input: { action: "guide", topic: "tool-reference" }, expected: "management" },
+  { label: "action doctor", input: { action: "doctor" }, expected: "management" },
+  { label: "action children.list", input: { action: "children.list" }, expected: "management" },
+  { label: "action project.status", input: { action: "project.status" }, expected: "management" },
+  { label: "action lane.status (absent in 0.50)", input: { action: "lane.status", laneId: "l" }, expected: { [V050]: "unsupported", [V064]: "management", [V074]: "management", [V075]: "management" } },
+  { label: "action watchdog.status", input: { action: "watchdog.status" }, expected: "management" },
+  { label: "action inspector.status", input: { action: "inspector.status" }, expected: "management" },
+  { label: "action refine.show takes its agent as target", input: { action: "refine.show", agent: "reviewer" }, expected: "management" },
+  { label: "action list with surrounding whitespace", input: { action: " list " }, expected: "management" },
+  // A field the version's schema no longer declares is not a launch form for it (the executor rejects it).
+  { label: "validate a workflow script (offline; absent in 0.50)", input: { action: "validate", workflowScript: "return 1" },
+    expected: { [V050]: "unsupported", [V064]: "management", [V074]: "management", [V075]: "management" } },
+  { label: "validate workflow: true (0.74 form)", input: { action: "validate", workflow: true },
+    expected: { [V050]: "unsupported", [V064]: "management", [V074]: "management", [V075]: "management" } },
+  { label: "validate a script path", input: { action: "validate", workflowScriptPath: "w.js" },
+    expected: { [V050]: "unsupported", [V064]: "management", [V074]: "management", [V075]: "management" } },
+  // --- a launch form beside an action is ambiguous
+  { label: "list beside an agent (not a target-taking action)", input: { action: "list", agent: "x" }, expected: "malformed" },
+  { label: "validate beside an agent", input: { action: "validate", agent: "x", workflow: true }, expected: { [V050]: "unsupported", [V064]: "malformed", [V074]: "malformed", [V075]: "malformed" } },
+  { label: "status beside workflow", input: { action: "status", workflow: true }, expected: { [V050]: "management", [V064]: "malformed", [V074]: "malformed", [V075]: "malformed" } },
+  { label: "refine.show beside a workflow", input: { action: "refine.show", agent: "x", workflow: "w" }, expected: { [V050]: "management", [V064]: "malformed", [V074]: "malformed", [V075]: "malformed" } },
+  { label: "status beside the 0.50 top-level resume", input: { action: "status", resume: "c" }, expected: { [V050]: "malformed", [V064]: "management", [V074]: "management", [V075]: "management" } },
+  // --- everything else is unsupported, never inert
+  ...["steer", "stop", "interrupt", "resume", "reset", "schedule.create", "schedule.run-due", "mission.create", "mission.close",
+    "worktree.discard", "worktree.cleanup", "project.open", "project.close", "inspector.open", "inspector.command",
+    "watchdog.configure", "watchdog.check", "watchdog.recommend-model", "create", "update", "delete", "eject", "disable",
+    "enable", "refine", "refine.rollback", "debug.run", "grant-spawn-budget", "dismiss", "get", "lane.recordMerge",
+    "command.yield"].map((action) => ({ label: `action ${action}`, input: { action },
+    expected: { [V050]: "unsupported", [V064]: "unsupported", [V074]: "unsupported", [V075]: "unsupported" } as Record<string, SubagentCallKind> })),
+  { label: "resume as an action spawns a follow-up child", input: { action: "resume", id: "r", message: "go" }, expected: "unsupported" },
+  { label: "unknown action", input: { action: "frobnicate" }, expected: "unsupported" },
+  { label: "action spelled in another case", input: { action: "LIST" }, expected: "unsupported" },
+  { label: "action from a future version", input: { action: "swarm.start" }, expected: "unsupported" },
+  { label: "empty action", input: { action: "" }, expected: "malformed" },
+  { label: "blank action", input: { action: "   " }, expected: "malformed" },
+  { label: "numeric action", input: { action: 5 }, expected: "malformed" },
+  { label: "object action", input: { action: { kind: "list" } }, expected: "malformed" },
 ];
 
-for (const c of SUBAGENT_CASES) {
-  test(`isExecutableSubagentLaunch: ${c.label}`, () => {
-    assert.equal(isExecutableSubagentLaunch(c.toolName, c.input), c.expected);
+for (const row of CLASSIFY_CASES) {
+  test(`classifySubagentCall: ${row.label}`, () => {
+    for (const version of ALL) {
+      const expected = typeof row.expected === "string" ? row.expected : row.expected[version];
+      assert.ok(expected, `${version} has no expectation`);
+      const classified = classifySubagentCall(row.input, inventory(version));
+      assert.equal(classified.kind, expected, `${version}: ${classified.detail}`);
+      assert.ok(classified.detail.length > 0);
+    }
   });
 }
+
+test("classifySubagentCall: every inventory action is management iff it is in the reviewed allowlist", () => {
+  for (const version of ALL) {
+    const inv = inventory(version);
+    assert.ok(inv.actions.length > 40, version);
+    for (const action of inv.actions) {
+      const kind = classifySubagentCall({ action }, inv).kind;
+      const expected = MANAGEMENT_ACTIONS.has(action) && !(action === "validate" && !inv.supports.validateOffline)
+        ? "management" : "unsupported";
+      assert.equal(kind, expected, `${version} ${action}`);
+    }
+  }
+});
+
+test("classifySubagentCall: the reviewed allowlist is exactly the read-only set, each entry in some inventory", () => {
+  assert.deepEqual([...MANAGEMENT_ACTIONS.keys()].sort(), ["children.list", "doctor", "guide", "inspector.status", "lane.status",
+    "list", "models", "project.status", "refine.show", "status", "validate", "watchdog.status"]);
+  for (const action of MANAGEMENT_ACTIONS.keys())
+    assert.ok(ALL.some((version) => inventory(version).actions.includes(action)), action);
+});
+
+test("classifySubagentCall: validate is management only where the version documents it as offline", () => {
+  const offline: SubagentInventory = { ...inventory(V075), supports: { ...inventory(V075).supports, validateOffline: false } };
+  assert.equal(classifySubagentCall({ action: "validate", workflow: true }, inventory(V075)).kind, "management");
+  const refused = classifySubagentCall({ action: "validate", workflow: true }, offline);
+  assert.equal(refused.kind, "unsupported");
+  assert.match(refused.detail, /does not document validate as offline/);
+});
+
+test("classifySubagentCall: an action beyond the allowlist is unsupported even if the inventory lists it", () => {
+  const widened: SubagentInventory = { ...inventory(V075), actions: [...inventory(V075).actions, "frobnicate"] };
+  assert.equal(classifySubagentCall({ action: "frobnicate" }, widened).kind, "unsupported");
+  assert.match(classifySubagentCall({ action: "frobnicate" }, widened).detail, /allowlist/);
+  assert.match(classifySubagentCall({ action: "frobnicate" }, inventory(V075)).detail, /inventory/);
+});
+
+test("classifySubagentCall: the launch forms come from the inventory, not from a built-in list", () => {
+  const custom: SubagentInventory = { ...inventory(V075), launch_forms: ["agent"] };
+  assert.equal(classifySubagentCall({ workflow: true }, custom).kind, "malformed");
+  assert.equal(classifySubagentCall({ workflow: true }, inventory(V075)).kind, "executable");
+});

@@ -50,8 +50,8 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:a41da3bcbf6ffe635e4d4fc99c614f83238992ab717175bf6c62e76f3703425f"
-REVIEWED_HOST_PROFILES_DIGEST = "sha256:159c1a777884e2c797164b629583686b4b4f6904c5ded31c70247a9baa3c7faf"
+REVIEWED_REGISTRY_DIGEST = "sha256:de4a4afc8339172bc2d80540c9ce4cdc1528fb729bf58ef543378c6988c30848"
+REVIEWED_HOST_PROFILES_DIGEST = "sha256:f459d7b74dc948ef3a76b2548d486f0a92b630cbe9997ae35b4d348c7490f403"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
 REGISTRY_VERSION = "3.0.0"
@@ -574,6 +574,20 @@ def check_host_profiles(profiles_doc: dict, contract: dict, known_fixture_ids: s
             errors.append(f"{pwhere}: required_live_probe_ids must be nonempty")
         if "candidate_tier" in profile and not (profile.get("candidate_probe_ids") or []):
             errors.append(f"{pwhere}: candidate_tier requires candidate_probe_ids")
+        policy = profile.get("audit_launch_policy")
+        if audit_execution == "foreground" and policy is None:
+            errors.append(f"{pwhere}: a foreground-audit host must declare audit_launch_policy")
+        if audit_execution != "foreground" and policy is not None:
+            errors.append(f"{pwhere}: audit_launch_policy applies only to foreground-audit hosts")
+        if isinstance(policy, dict):
+            budget = policy.get("tool_budget")
+            if isinstance(budget, dict) and isinstance(budget.get("soft"), int) \
+                    and isinstance(budget.get("hard"), int) and budget["soft"] > budget["hard"]:
+                errors.append(f"{pwhere}: audit_launch_policy.tool_budget.soft must not exceed hard")
+    levels = profiles_doc.get("thinking_levels")
+    if not isinstance(levels, list) or not levels or len(set(levels)) != len(levels) \
+            or not all(isinstance(level, str) and re.fullmatch(r"[a-z]+", level) for level in levels):
+        errors.append(f"{where}: thinking_levels must be a nonempty list of unique lowercase words")
     delegation_envs = {profile.get("delegation_env") for profile in profiles
                        if isinstance(profile, dict)}
     auto_message = contract.get("reasons", {}).get(
@@ -2715,6 +2729,25 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     bad_probe["profiles"][0]["required_live_probe_ids"] = ["WRONG_PROBE"]
     expect(lambda e: check_host_profiles(bad_probe, registry, required_fixtures, e, "neg"),
            "host-profiles digest", "host profile live_probe drift")
+
+    # (f) audit bound policy: dropped from the foreground host, inverted budget, generic level list.
+    bad_policy = copy.deepcopy(host_profiles_doc)
+    next(p for p in bad_policy["profiles"] if p.get("host_id") == "pi").pop("audit_launch_policy")
+    expect(lambda e: check_host_profiles(bad_policy, registry, required_fixtures, e, "neg"),
+           "must declare audit_launch_policy", "foreground host without audit_launch_policy")
+    bad_budget = copy.deepcopy(host_profiles_doc)
+    next(p for p in bad_budget["profiles"] if p.get("host_id") == "pi")[
+        "audit_launch_policy"]["tool_budget"]["soft"] = 31
+    expect(lambda e: check_host_profiles(bad_budget, registry, required_fixtures, e, "neg"),
+           "soft must not exceed hard", "tool budget soft above hard")
+    bad_levels = copy.deepcopy(host_profiles_doc)
+    bad_levels["thinking_levels"] = ["high", "high"]
+    expect(lambda e: check_host_profiles(bad_levels, registry, required_fixtures, e, "neg"),
+           "thinking_levels must be", "duplicate thinking levels")
+    bad_colon = copy.deepcopy(host_profiles_doc)
+    bad_colon["thinking_levels"] = ["high", "0:custom"]
+    expect(lambda e: check_host_profiles(bad_colon, registry, required_fixtures, e, "neg"),
+           "thinking_levels must be", "generic colon suffix as a thinking level")
 
     # Response reason mutations.
     expect(lambda e: check_response_reasons(

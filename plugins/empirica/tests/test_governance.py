@@ -34,10 +34,17 @@ DELEGATED_INVOCATION = {"host": "test", "interactive": False,
 
 
 class HostProfileApprovalTests(unittest.TestCase):
-    def _profile(self, host_id):
+    def _profiles_document(self):
         root = Path(__file__).resolve().parents[3]
-        profiles = json.loads((root / "contracts/empirica/v2/host-profiles.json").read_text())
-        return next(p for p in profiles["profiles"] if p["host_id"] == host_id)
+        return json.loads((root / "contracts/empirica/v2/host-profiles.json").read_text())
+
+    def _profile(self, host_id):
+        return next(p for p in self._profiles_document()["profiles"] if p["host_id"] == host_id)
+
+    def _document_of(self, profile):
+        """A schema-complete host-profiles document holding only ``profile`` (levels from the contract)."""
+        return {"protocol": "empirica/v2", "thinking_levels": self._profiles_document()["thinking_levels"],
+                "profiles": [profile]}
 
     def _admit_context(self, profile, ingress):
         """Compose a real service for ``profile`` and submit one governance context."""
@@ -59,7 +66,7 @@ class HostProfileApprovalTests(unittest.TestCase):
         synthetic.update(host_id="synthetic", profile_id="synthetic-transport@9.9.9",
                          version="9.9.9", compatibility={"minimum": "9.9.9",
                          "maximum_exclusive": "10.0.0"})
-        jsonschema.validate({"protocol": "empirica/v2", "profiles": [synthetic]}, schema)
+        jsonschema.validate(self._document_of(synthetic), schema)
         admitted = self._admit_context(synthetic, synthetic["approval_ingress"])
         self.assertEqual(admitted["type"], "Allow")
         self.assertEqual(admitted["run"]["governance"]["context"]["approval_capability"],
@@ -87,7 +94,7 @@ class HostProfileApprovalTests(unittest.TestCase):
         synthetic.update(host_id="synthetic", profile_id="synthetic-headless@9.9.9",
                          version="9.9.9", approval_ingress="unavailable",
                          compatibility={"minimum": "9.9.9", "maximum_exclusive": "10.0.0"})
-        jsonschema.validate({"protocol": "empirica/v2", "profiles": [synthetic]}, schema)
+        jsonschema.validate(self._document_of(synthetic), schema)
         admitted = self._admit_context(synthetic, "unavailable")
         self.assertEqual(admitted["type"], "Allow", admitted)
         self.assertEqual(admitted["run"]["governance"]["context"]["approval_capability"],

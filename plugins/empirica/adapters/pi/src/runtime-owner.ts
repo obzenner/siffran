@@ -22,6 +22,7 @@ import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import type { SlashCommandInfo, ToolInfo } from "./pi-types.ts";
+import type { SubagentInventory } from "./subagent-inventory.ts";
 import { SUBAGENT_TOOL } from "./translate.ts";
 
 export const SUBAGENTS_PACKAGE = "pi-subagents";
@@ -41,6 +42,10 @@ export type OwnerRefusalCode =
   | "version-unobservable"
   | "child-process"
   | "preflight-unavailable"
+  /** The owner's exact version has no reviewed inventory, or one that cannot enforce the audit bound. */
+  | "version-unreviewed"
+  /** The `subagent` tool is registered but not active (pi-subagents `toolActivation: auto|dynamic`). */
+  | "tool-inactive"
   /** The session's cached owner no longer matches a fresh resolution (adapter-level invariant). */
   | "owner-changed";
 
@@ -203,12 +208,40 @@ export function sameOwner(a: SubagentOwner, b: SubagentOwner): boolean {
     && a.version === b.version && a.source === b.source;
 }
 
-/** The slice of pi-subagents' `preflight` module Empirica consumes. */
+/**
+ * The slice of pi-subagents' `preflight` module Empirica consumes. The response is deliberately
+ * `unknown`: only `admitAuditPreflight` (preflight-seam.ts) interprets it, and it validates every
+ * field it reads.
+ */
 export interface AuditorPreflightApi {
-  resolveSubagentLaunchContract(input: Record<string, unknown>): Promise<
-    { ok: true; contract: { agent: { filePath: string }; model?: string; modelCandidates: string[] } }
-    | { ok: false; message: string }
-  >;
+  resolveSubagentLaunchContract(input: Record<string, unknown>): Promise<unknown>;
+}
+
+/** Everything the audit launch needs from the bound owner: its preflight, exact version, and reviewed inventory. */
+export interface AuditRuntime {
+  readonly preflight: AuditorPreflightApi;
+  readonly version: string;
+  readonly inventory: SubagentInventory;
+}
+
+/**
+ * The reviewed inventory of the owner's exact version. Refuses `version-unreviewed` when none is
+ * checked in (before any code of that package is loaded) or when the inventory shows the version
+ * cannot carry the audit bound (`timeoutMs` and `toolBudget` launch fields).
+ */
+export function resolveOwnerInventory(
+  owner: SubagentOwner, inventoryFor: (version: string) => SubagentInventory | undefined,
+): { readonly ok: true; readonly inventory: SubagentInventory } | OwnerRefusal {
+  const inventory = inventoryFor(owner.version);
+  if (inventory === undefined)
+    return refuse("version-unreviewed", `pi-subagents ${owner.version} has no reviewed launch/action inventory`);
+  if (inventory.version !== owner.version)
+    return refuse("version-unreviewed", `the inventory selected for ${owner.version} describes ${inventory.version}`);
+  if (!inventory.supports.timeoutMs || !inventory.supports.toolBudget)
+    return refuse("version-unreviewed",
+      `pi-subagents ${owner.version} cannot carry the audit bound (timeoutMs: ${inventory.supports.timeoutMs}, `
+      + `toolBudget: ${inventory.supports.toolBudget})`);
+  return { ok: true, inventory };
 }
 
 /** Module resolution and loading, injected so the binding can be proven with sentinel packages. */

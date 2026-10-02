@@ -1379,6 +1379,21 @@
       "message": "No external pi-subagents `subagent` tool is active, so no independent audit can launch. Install one supported pi-subagents runtime and restart the host, or accept the residual.",
       "disposition": "host_recovery"
     },
+    "host.subagents_tool_inactive": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "residual.accept"
+      ],
+      "sections": [
+        "hosts/capabilities"
+      ],
+      "message": "The pi-subagents `subagent` tool is registered but not active, so no independent audit can launch. Enable the `subagent` tool (`subagents_enable`, or `toolActivation: eager`) and retry; a host restart does not change this. Or accept the residual.",
+      "disposition": "host_recovery"
+    },
     "host.subagents_owner_unverified": {
       "params": {
         "type": "object",

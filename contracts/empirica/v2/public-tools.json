@@ -212,6 +212,15 @@
         "residual.accept"
       ]
     },
+    "host.subagents_tool_inactive": {
+      "message": "The pi-subagents `subagent` tool is registered but not active, so no independent audit can launch. Enable the `subagent` tool (`subagents_enable`, or `toolActivation: eager`) and retry; a host restart does not change this. Or accept the residual.",
+      "sections": [
+        "hosts/capabilities"
+      ],
+      "next_actions": [
+        "residual.accept"
+      ]
+    },
     "host.subagents_owner_unverified": {
       "message": "The active pi-subagents owner, package, or version cannot be verified (or this is a pi-subagents child process). Do not retry blindly: restart the host with one supported pi-subagents runtime, or accept the residual.",
       "sections": [

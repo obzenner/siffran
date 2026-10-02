@@ -644,6 +644,21 @@
           ],
           "properties": {
             "code": {
+              "const": "host.subagents_tool_inactive"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
               "const": "host.subagents_owner_unverified"
             },
             "parameters": {

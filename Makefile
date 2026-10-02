@@ -344,12 +344,18 @@ pi-validator-unit-check: ## Test Pi validator test selection and bounded async t
 # Which auditor file does the pinned pi-subagents resolve for a project? pi-subagents lets a later
 # (user-level) package shadow a project package of the same agent name, which makes the adapter
 # block audits as "package identity was shadowed". Read-only; run before any Pi qualification.
-.PHONY: empirica-pi-auditor-resolution pi-auditor-resolution-unit-check
-empirica-pi-auditor-resolution: node_modules ## Report the effective Pi auditor file for DIR (default: here); STRICT=1 fails when shadowed
-	@node $(SCRIPTS)/pi_auditor_resolution.mjs --project "$(or $(DIR),$(CURDIR))" $(if $(filter 1,$(STRICT)),--require-candidate)
+.PHONY: empirica-pi-auditor-resolution pi-auditor-resolution-unit-check pi-subagents-inventory pi-preflight-fixture
+empirica-pi-auditor-resolution: node_modules ## Report the effective Pi auditor file for DIR (default: here); STRICT=1 fails when shadowed; PACKAGE_ROOT= (installed pi-subagents, default: the devDependency) and SETTINGS= (a settings.json, default: ~/.pi/agent)
+	@node $(SCRIPTS)/pi_auditor_resolution.mjs --project "$(or $(DIR),$(CURDIR))" $(if $(PACKAGE_ROOT),--package-root "$(PACKAGE_ROOT)") $(if $(SETTINGS),--settings "$(SETTINGS)") $(if $(filter 1,$(STRICT)),--require-candidate)
 
-pi-auditor-resolution-unit-check: node_modules ## Test the Pi auditor resolution and real preflight admission in an isolated HOME (includes negative controls)
-	@node --test $(SCRIPTS)/tests/pi_auditor_resolution.test.mjs $(SCRIPTS)/tests/pi_auditor_preflight.test.mjs
+pi-auditor-resolution-unit-check: node_modules ## Test the Pi auditor resolution, real preflight admission, and the reviewed pi-subagents inventories in an isolated HOME (includes negative controls)
+	@node --test $(SCRIPTS)/tests/pi_auditor_resolution.test.mjs $(SCRIPTS)/tests/pi_auditor_preflight.test.mjs $(SCRIPTS)/tests/pi_subagents_inventory.test.mjs
+
+pi-subagents-inventory: node_modules ## Regenerate the reviewed inventory of the pi-subagents at PACKAGE_ROOT (default: the devDependency) into adapters/pi/compat/
+	@node $(SCRIPTS)/gen_pi_subagents_inventory.mjs --package-root "$(or $(PACKAGE_ROOT),$(CURDIR)/node_modules/pi-subagents)"
+
+pi-preflight-fixture: node_modules ## Re-capture the real preflight fixture of the pi-subagents at PACKAGE_ROOT (default: the devDependency)
+	@node $(SCRIPTS)/capture_pi_preflight_fixture.mjs --package-root "$(or $(PACKAGE_ROOT),$(CURDIR)/node_modules/pi-subagents)"
 
 .PHONY: empirica-codex-check
 empirica-codex-check: ## Validate the Empirica Codex manifest, hooks, and package layout (no host execution)
@@ -371,7 +377,7 @@ empirica-architecture-unit-check: ## Test the architecture validator against syn
 	@$(PYTHON) $(EMPIRICA_ARCHITECTURE_TESTS)
 
 .PHONY: empirica-identity-pi-levels-check
-empirica-identity-pi-levels-check: node_modules ## Check the identity policy strips every thinking level the pinned pi-subagents can append — needs Node
+empirica-identity-pi-levels-check: ## Check the identity policy strips exactly the contract's thinking levels (shared fixture cases; no Node needed)
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_IDENTITY_PI_LEVEL_TESTS)
 
 .PHONY: empirica-claude-mcp-log-unit-check

@@ -1,5 +1,14 @@
 {
   "protocol": "empirica/v2",
+  "thinking_levels": [
+    "off",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
   "profiles": [
     {
       "host_id": "claude-code",
@@ -70,7 +79,18 @@
         "doc/design/empirica-2.0-d1h-host-capabilities.md §4"
       ],
       "delegation_env": "EMPIRICA_AUTO_DELEGATION",
-      "approval_ingress": "pi_ui"
+      "approval_ingress": "pi_ui",
+      "audit_launch_policy": {
+        "timeout_ms": 900000,
+        "tool_budget": {
+          "soft": 20,
+          "hard": 30,
+          "block": [
+            "write",
+            "edit"
+          ]
+        }
+      }
     },
     {
       "host_id": "codex-cli",

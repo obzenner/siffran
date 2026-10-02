@@ -36,6 +36,7 @@ text view renders them.
 | `host.async_unsupported` | `report_convergence intent=stop` | This host cannot run the audit asynchronously: run it in the foreground, or accept the residual and stop. |
 | `host.audit_output_unobservable` | `report_convergence intent=stop` | This host cannot observe the auditor's output, so the audit cannot pass: accept the residual and stop. |
 | `host.subagents_missing` | `report_convergence intent=stop` | No external pi-subagents runtime is active: install one supported runtime and restart the host, or accept the residual and stop. |
+| `host.subagents_tool_inactive` | `report_convergence intent=stop` | The `subagent` tool is registered but not active: enable it (`subagents_enable`, or `toolActivation: eager`) and retry; a host restart does not change this. Or accept the residual. |
 | `host.subagents_owner_unverified` | `report_convergence intent=stop` | The active audit runtime cannot be proven (owner, package, or version unobservable, or a subagent child process): do not retry blindly; restart the host with one supported runtime, or accept the residual. |
 | `host.subagents_duplicate_owner` | `report_convergence intent=stop` | Two extensions register the `subagent` tool: remove the duplicate, restart the host, and start a fresh run, or accept the residual. |
 | `host.subagents_version_unsupported` | `report_convergence intent=stop` | The active pi-subagents is not a reviewed version or lacks the launch preflight: install a reviewed version and restart, or accept the residual. |

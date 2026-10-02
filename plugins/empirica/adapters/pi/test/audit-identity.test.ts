@@ -163,3 +163,62 @@ test("accepts a string-valued final assistant content", () => {
     source: "pi-child-session",
   });
 });
+
+// --- Pi 1.0 session format (docs/session-format.md, session version 3) -----------------------
+// Rows below are shaped after the 1.0.0 docs: a session header, a leading system message, assistant
+// messages that also record the `thinkingLevel` requested for that response, `model_change` and
+// `thinking_level_change` entries, a `usage` entry, and the virtual-model router state stored as a
+// `custom` entry. Only the final verdict-bearing assistant message's own provider/model is identity.
+
+const pi1Row = (id: string, message: Record<string, unknown>): string =>
+  line({ type: "message", id, parentId: null, timestamp: "2026-01-01T00:00:00.000Z", message });
+const pi1Assistant = (id: string, text: string, extra: Record<string, unknown> = {}): string =>
+  pi1Row(id, { role: "assistant", content: [{ type: "text", text }], api: "anthropic-messages",
+    provider: "anthropic", model: "claude-sonnet-4-5", usage: {}, stopReason: "stop", thinkingLevel: "high",
+    timestamp: 1_767_225_600_000, ...extra });
+const PI1_HEADER = line({ type: "session", version: 3, id: "s1", timestamp: "2026-01-01T00:00:00.000Z", cwd: "/p" });
+const PI1_EXPECTED = { provider_id: "anthropic", model_id: "claude-sonnet-4-5", observed_by: "host", source: "pi-child-session" };
+
+test("a Pi 1.0 child transcript binds identity to the final assistant row, ignoring thinkingLevel", () => {
+  const transcript = [
+    PI1_HEADER,
+    pi1Row("a0", { role: "system", content: "", sections: { preamble: "p" }, toolsAdded: [], timestamp: 1 }),
+    line({ type: "model_change", id: "m1", parentId: "a0", timestamp: "t", provider: "openai", modelId: "gpt-4o" }),
+    line({ type: "thinking_level_change", id: "t1", parentId: "m1", timestamp: "t", thinkingLevel: "low" }),
+    pi1Row("u1", { role: "user", content: "audit", timestamp: 2 }),
+    pi1Assistant("a1", "inspecting", { thinkingLevel: "low" }),
+    line({ type: "usage", id: "us1", parentId: "a1", timestamp: "t", kind: "cache_warm", provider: "openai", model: "gpt-4o", usage: {} }),
+    line({ type: "custom", id: "c1", parentId: "a1", timestamp: "t", customType: "pi.virtual-model-state",
+      data: { provider: "openai", modelId: "gpt-4o", state: {} } }),
+    pi1Assistant("a2", BLOCK, { thinkingLevel: "xhigh" }),
+    // A selection recorded after the answer is still only a selection.
+    line({ type: "model_change", id: "m2", parentId: "a2", timestamp: "t", provider: "google", modelId: "gemini" }),
+  ].join("\n") + "\n";
+  assert.deepEqual(identityFromSessionJsonl(transcript, VERDICT), PI1_EXPECTED);
+});
+
+test("a Pi 1.0 model_change or virtual-model state cannot supply or replace identity", () => {
+  const onlySelections = [
+    PI1_HEADER,
+    line({ type: "model_change", id: "m1", parentId: null, timestamp: "t", provider: "anthropic", modelId: "claude-sonnet-4-5" }),
+    line({ type: "custom", id: "c1", parentId: "m1", timestamp: "t", customType: "pi.virtual-model-state",
+      data: { provider: "anthropic", modelId: "claude-sonnet-4-5", state: {} } }),
+  ].join("\n") + "\n";
+  assert.equal(identityFromSessionJsonl(onlySelections, VERDICT), null, "no assistant row, no identity");
+  const stripped = [PI1_HEADER, pi1Assistant("a1", BLOCK, { provider: undefined }),
+    line({ type: "model_change", id: "m1", parentId: "a1", timestamp: "t", provider: "anthropic", modelId: "claude-sonnet-4-5" }),
+  ].join("\n") + "\n";
+  assert.equal(identityFromSessionJsonl(stripped, VERDICT), null, "a selection cannot fill a missing native provider");
+  const blankModel = [PI1_HEADER, pi1Assistant("a1", BLOCK, { model: " " })].join("\n") + "\n";
+  assert.equal(identityFromSessionJsonl(blankModel, VERDICT), null);
+});
+
+test("a Pi 1.0 transcript whose assistant rows name two physical models is not an identity", () => {
+  // thinkingLevel differing between rows is not a second identity; a second provider/model is.
+  const sameModelTwoLevels = [PI1_HEADER, pi1Assistant("a1", "x", { thinkingLevel: "low" }),
+    pi1Assistant("a2", BLOCK, { thinkingLevel: "max" })].join("\n") + "\n";
+  assert.deepEqual(identityFromSessionJsonl(sameModelTwoLevels, VERDICT), PI1_EXPECTED);
+  const routed = [PI1_HEADER, pi1Assistant("a1", "x", { provider: "openai", model: "gpt-4o" }),
+    pi1Assistant("a2", BLOCK)].join("\n") + "\n";
+  assert.equal(identityFromSessionJsonl(routed, VERDICT), null);
+});

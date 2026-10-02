@@ -9,10 +9,11 @@ import * as path from "node:path";
 
 import type { SlashCommandInfo, ToolInfo } from "../src/pi-types.ts";
 import {
-  nodeOwnerIo, nodePreflightImporter, resolveOwnerPreflight, resolveSubagentOwner, sameOwner,
+  nodeOwnerIo, nodePreflightImporter, resolveOwnerInventory, resolveOwnerPreflight, resolveSubagentOwner, sameOwner,
   subagentsProvenance, type OwnerIo, type OwnerRefusalCode, type PreflightImporter,
 } from "../src/runtime-owner.ts";
-import { OWNER_REFUSAL_REASON, ownerRefusalBlock, ownerRefusalReason } from "../src/owner-refusal.ts";
+import { launchUnsupportedReason, OWNER_REFUSAL_REASON, ownerRefusalBlock, ownerRefusalReason } from "../src/owner-refusal.ts";
+import { loadInventory } from "../src/subagent-inventory.ts";
 import { PUBLIC_TOOLS } from "../src/public-tools.ts";
 import { makeSubagentsPackage, tempParent } from "./owner-fixture.ts";
 
@@ -349,7 +350,8 @@ test("provenance records exactly what was observed, with the loaded preflight pa
 test("every refusal code maps to a host.subagents_* reason the contract carries, with its own message", () => {
   const codes = Object.keys(OWNER_REFUSAL_REASON) as OwnerRefusalCode[];
   assert.deepEqual([...codes].sort(), ["child-process", "missing-tool", "multiple-owners", "owner-changed",
-    "owner-unobservable", "package-not-pi-subagents", "preflight-unavailable", "version-unobservable"]);
+    "owner-unobservable", "package-not-pi-subagents", "preflight-unavailable", "tool-inactive", "version-unobservable",
+    "version-unreviewed"]);
   for (const code of codes) {
     const reason = ownerRefusalReason(code);
     assert.match(reason.code, /^host\.subagents_/, code);
@@ -360,6 +362,22 @@ test("every refusal code maps to a host.subagents_* reason the contract carries,
   assert.equal(ownerRefusalReason("multiple-owners").code, "host.subagents_duplicate_owner");
   assert.equal(ownerRefusalReason("child-process").code, "host.subagents_owner_unverified");
   assert.equal(ownerRefusalReason("preflight-unavailable").code, "host.subagents_version_unsupported");
+  assert.equal(ownerRefusalReason("version-unreviewed").code, "host.subagents_version_unsupported");
+  assert.equal(ownerRefusalReason("tool-inactive").code, "host.subagents_tool_inactive");
+});
+
+test("a registered-but-inactive tool has its own guidance, distinct from a missing install", () => {
+  const inactive = String(ownerRefusalReason("tool-inactive").message);
+  assert.notEqual(inactive, String(ownerRefusalReason("missing-tool").message));
+  assert.match(inactive, /Enable the `subagent` tool \(`subagents_enable`, or `toolActivation: eager`\) and retry/);
+  assert.match(inactive, /a host restart does not change this/);
+  assert.doesNotMatch(inactive, /install/i);
+});
+
+test("the launch-unsupported reason is read from the contract projection", () => {
+  const reason = launchUnsupportedReason();
+  assert.equal(reason.code, "host.subagents_launch_unsupported");
+  assert.equal(reason.message, PUBLIC_TOOLS.recovery["host.subagents_launch_unsupported"].message);
 });
 
 test("a refusal block carries the reason, and the run only when one exists", () => {
@@ -373,6 +391,43 @@ test("the contract defines every host.subagents_* reason once, each offering res
   const codes = Object.keys(PUBLIC_TOOLS.recovery).filter((code) => code.startsWith("host.subagents_")).sort();
   assert.deepEqual(codes, ["host.subagents_duplicate_owner", "host.subagents_launch_unsupported",
     "host.subagents_missing", "host.subagents_owner_unverified", "host.subagents_provenance_missing",
-    "host.subagents_version_unsupported"]);
+    "host.subagents_tool_inactive", "host.subagents_version_unsupported"]);
   for (const code of codes) assert.deepEqual(PUBLIC_TOOLS.recovery[code].next_actions, ["residual.accept"], code);
+});
+
+// --- reviewed inventory binding ---------------------------------------------------------------
+
+const ownerAt = (version: string) => ({ ok: true as const, tool: "subagent", package_root: "/p", package_name: "pi-subagents",
+  version, source: "x" } as never);
+
+test("resolveOwnerInventory selects the inventory of the exact version", () => {
+  for (const version of ["0.50.0", "0.64.0", "0.74.0", "0.75.0"]) {
+    const bound = resolveOwnerInventory(ownerAt(version), (v) => loadInventory(v));
+    assert.equal(bound.ok, true, version);
+    if (bound.ok) assert.equal(bound.inventory.version, version);
+  }
+});
+
+test("resolveOwnerInventory refuses an unreviewed version, a wrong inventory, and a version that cannot carry the bound", () => {
+  const refused = (owner: never, lookup: Parameters<typeof resolveOwnerInventory>[1]) => {
+    const result = resolveOwnerInventory(owner, lookup);
+    return result.ok ? "ok" : result.code;
+  };
+  assert.equal(refused(ownerAt("9.9.9"), (v) => loadInventory(v)), "version-unreviewed");
+  assert.equal(refused(ownerAt("0.75.0-beta.1"), (v) => loadInventory(v)), "version-unreviewed", "non-exact versions are not approximated");
+  assert.equal(refused(ownerAt("0.75.0"), () => loadInventory("0.74.0")), "version-unreviewed");
+  const noTimeout = { ...loadInventory("0.75.0")!, supports: { ...loadInventory("0.75.0")!.supports, timeoutMs: false } };
+  assert.equal(refused(ownerAt("0.75.0"), () => noTimeout), "version-unreviewed");
+});
+
+// Pi 1.0 reports built-in tools and extensions with a `builtin:<name>` path (source-info.d.ts
+// BUILTIN_PATH_PREFIX); it names no file, so it can never identify a pi-subagents package.
+test("a Pi 1.0 built-in `subagent` tool (builtin:<name> path) is not a package owner", () => {
+  const result = resolve([{ name: "subagent", sourceInfo: { path: "builtin:subagent", source: "builtin", scope: "user",
+    origin: "top-level" } }], nodeOwnerIo, NO_ENV);
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.code, "owner-unobservable");
+    assert.match(result.message, /no absolute source path/);
+  }
 });
