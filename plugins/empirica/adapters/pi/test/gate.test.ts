@@ -350,12 +350,27 @@ for (const controlMode of ["deliberative", "auto"]) {
         ? envelope({ type: "Allow", converged: false, run: run() }) : envelope(blocked as never));
       await startRun(w);
       const event = toolEvent(REPORT_CONVERGENCE_TOOL);
+      const privateBefore = w.privateRequests.length;
+      const ctx = fakeCtx();
+      let customCalls = 0;
+      ctx.ui.custom = async () => { customCalls += 1; return undefined as never; };
       assert.equal(await w.pi.toolCall()(event, { ui: new FakeUi() }), undefined);
-      const output = await w.pi.tools.get(REPORT_CONVERGENCE_TOOL)!.execute(
-        event.toolCallId, event.input, new AbortController().signal, () => {}, fakeCtx());
+      const execute = (toolCallId: string) => w.pi.tools.get(REPORT_CONVERGENCE_TOOL)!.execute(
+        toolCallId, event.input, new AbortController().signal, () => {}, ctx);
+      const output = await execute(event.toolCallId);
       const text = (output.content[0] as { text: string }).text;
       assert.ok(text.startsWith(HUMAN_WAIT_NOTICE), text);
       assert.equal((output.details as { type: string }).type, "Block");
+      // The wait is settlement only: no decision ingress, no dialog, and the run handle stays active.
+      assert.equal(w.privateRequests.length, privateBefore, "no governance decision or audit ingress call");
+      assert.equal(customCalls, 0, "no dialog opened");
+      const evaluations = w.requests.length;
+      const again = await execute("tc-2");
+      assert.ok(((again.content[0] as { text: string }).text).startsWith(HUMAN_WAIT_NOTICE));
+      const last = w.requests.at(-1)!;
+      assert.equal(w.requests.length, evaluations + 1, "a follow-up report_convergence dispatches");
+      assert.equal(last.command.type, "EvaluateRun");
+      assert.equal((last.command as { run_id: string }).run_id, HANDLE);
     });
 }
 

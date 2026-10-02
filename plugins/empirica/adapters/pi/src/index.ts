@@ -21,8 +21,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type { Dispatch, Request, Response, RunSelector } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
-import { govern, HUMAN_WAIT_NOTICE, humanApprovalWait, opensGovernanceDialog, piGovernanceContext,
-  refreshGovernance } from "./governance-ui.ts";
+import { govern, HUMAN_WAIT_NOTICE, humanApprovalWait, piGovernanceContext, refreshGovernance } from "./governance-ui.ts";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -471,13 +470,13 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           if (typeof action.kind !== "string" || !AUTHOR_ACTION_KIND_SET.has(action.kind))
             throw new Error("trusted or unknown Empirica action kind");
           if (governanceDialog) throw new Error("Governance dialog in progress; retry after completion");
-          let dialogOpened = false;
+          // Take the lock before the first await so concurrent configure_run observes cannot both open a dialog.
+          const owns = action.kind === "configure_run";
+          if (owns) governanceDialog = true;
           try {
             let response = await dispatch(observeActionRequest(
               runHandle, action as { kind: string; [key: string]: unknown }, randomUUID()));
             if (action.kind === "configure_run" && response.result.type === "Allow") {
-              dialogOpened = opensGovernanceDialog(response);
-              governanceDialog = dialogOpened;
               response = await govern(runHandle, ctx, trusted, signal, undefined, undefined, response);
             }
             // QUAL-1 final public-result guard: the model-facing observe result must never carry
@@ -485,7 +484,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             if (containsPrivateResult(response.result))
               throw new Error("Empirica returned a non-public result.");
             return { content: [{ type: "text", text: resultText(response) }], details: response.result };
-          } finally { if (dialogOpened) governanceDialog = false; }
+          } finally { if (owns) governanceDialog = false; }
         },
       });
     }

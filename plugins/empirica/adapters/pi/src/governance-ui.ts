@@ -139,13 +139,6 @@ export function humanApprovalWait(result: Response["result"]): boolean {
 
 export const HUMAN_WAIT_NOTICE = PUBLIC_TOOLS.governance_decisions.human_wait_notice;
 
-export function opensGovernanceDialog(response: Response): boolean {
-  if (!("run" in response.result) || !response.result.run || response.result.type !== "Allow") return false;
-  const governance = response.result.run.governance as Governance | null;
-  return governance !== null && governance.state !== "approved"
-    && !governance.prompt_error && expectedApprovalKind(governance) === "host_ui";
-}
-
 export async function govern(runId: string, ctx: ExtensionContext, trusted: PrivateIngress,
                              signal?: AbortSignal, confirmation?: { revision: number; digest: string; before: Dialog },
                              deadline = Date.now() + governanceTimeout(), fallback?: Response): Promise<Response> {

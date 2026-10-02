@@ -308,11 +308,9 @@ function governance(run: Json): Trusted {
   const value = run.governance as Json | null;
   if (value === null) return trusted("no governance");
   const parts = [`governance: ${value.state}`];
-  if (value.proposal !== null && value.proposal !== undefined && value.budgets) {
-    parts.push(`passes/spawns/audits: ${CEILINGS.map(
-      ([ceiling, used]) => `${value.budgets[used]}/${value.proposal.budgets[ceiling]}`,
-    ).join(" ")}`);
-  }
+  parts.push(`passes/spawns/audits: ${CEILINGS.map(
+    ([ceiling, used]) => `${value.budgets[used]}/${value.proposal.budgets[ceiling]}`,
+  ).join(" ")}`);
   return trusted(parts.join("; "));
 }
 

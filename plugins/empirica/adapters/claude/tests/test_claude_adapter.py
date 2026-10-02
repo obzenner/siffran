@@ -436,6 +436,15 @@ class ResponseMappingTests(unittest.TestCase):
         initial_auto["run"]["governance"].update({"control_mode": "auto", "first_approval": False})
         initial_auto["run"]["governance"]["context"]["interactive"] = True
         self.assertEqual(stop_result(_typed(initial_auto)).exit_code, 0)
+        for changed in ("proposal_exhausted", "total_exhausted", "prompt_error"):
+            blocked = json.loads(json.dumps(initial_auto))
+            governance = blocked["run"]["governance"]
+            if changed == "prompt_error":
+                governance["prompt_error"] = "governance.interaction_limit"
+            else:
+                governance["interactions_remaining"][changed.split("_")[0]] = 0
+            with self.subTest(initial_auto=changed):
+                self.assertEqual(stop_result(_typed(blocked)).exit_code, 2)
         for changed in ("auto", "delegated", "proposal_exhausted", "total_exhausted",
                         "prompt_error", "approved", "missing_context", "mixed", "terminal",
                         "mismatched_reason"):

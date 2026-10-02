@@ -230,3 +230,110 @@ test("empirica_observe configure_run dismiss: pending Block model-visible size s
   assert.ok(text.length < POST_MEDIATION_CEILING,
     `post-mediation dismiss text ${text.length} must stay under ${POST_MEDIATION_CEILING}`);
 });
+
+// Dialog lock: Pi runs tool calls in parallel, so the lock must be taken before the first await.
+function lockHarness() {
+  const pi = new FakePi();
+  const approvedRun = structuredClone(APPROVED_CONFIGURE.run);
+  const pendingRun = structuredClone(APPROVED_CONFIGURE.run);
+  (pendingRun.governance as { state: string }).state = "pending";
+  const autoRun = structuredClone(APPROVED_CONFIGURE.run);
+  Object.assign(autoRun.governance, { state: "revision_pending", control_mode: "auto", first_approval: true });
+  let current: unknown = pendingRun;
+  const deferred: Array<{ resolve: (run: unknown) => void }> = [];
+  const allow = (run: unknown, withPresentation: boolean): Record<string, unknown> => ({
+    protocol: "empirica/v2", request_id: "trusted-governance",
+    result: withPresentation
+      ? { type: "Allow", converged: false, run, presentation: PRESENTATION }
+      : { type: "Allow", converged: false, run },
+  });
+  const dispatch = (request: Request): Promise<Response> | Response => {
+    const respond = (run: unknown): Response => ({ protocol: "empirica/v2", request_id: request.request_id,
+      result: { type: "Allow", converged: false, run: run as never } });
+    if (request.command.type !== "ObserveAction") return respond(pendingRun);
+    return new Promise<Response>(resolve => deferred.push({ resolve: run => {
+      current = run; resolve(respond(run));
+    } }));
+  };
+  const trusted: PrivateIngress = async (request) => {
+    if (request.operation === "governance_context") return allow(current, true);
+    const payload = request.payload as { outcome?: string; submission?: { action: string } };
+    if (payload.outcome === "present") return allow(pendingRun, true);
+    if (payload.submission?.action === "approve") return allow(approvedRun, true);
+    return allow(approvedRun, false); // outcome "approve": auto-approval, no dialog
+  };
+  createEmpiricaExtension({ dispatch, privateIngress: trusted })(pi);
+  const ctx = fakeCtx("/work/repo",
+    [{ customType: "empirica.run", data: { runHandle: APPROVED_CONFIGURE.run.id } }]);
+  ctx.hasUI = true;
+  const dialogs: Array<{ handleInput(data: string): void }> = [];
+  ctx.ui.custom = async factory => await new Promise(resolve => {
+    dialogs.push(factory({ requestRender() {} }, { fg: (_color, text) => text }, {}, resolve));
+  });
+  const observe = async () => {
+    const sessionStart = pi.handlers.get("session_start") as (e: unknown, c: unknown) => Promise<void>;
+    await sessionStart({}, ctx).catch(() => {});
+    const tool = pi.tools.get("empirica_observe");
+    assert.ok(tool, "empirica_observe must be registered");
+    return () => tool!.execute("call", { action: { kind: "configure_run" } },
+      new AbortController().signal, () => {}, ctx);
+  };
+  return { dialogs, deferred, pendingRun, autoRun, observe,
+    approveDialog: (index: number) => { dialogs[index].handleInput("\r"); dialogs[index].handleInput("\r"); } };
+}
+
+async function settle(until: () => boolean): Promise<void> {
+  for (let i = 0; i < 200 && !until(); i += 1) await new Promise(resolve => setImmediate(resolve));
+  assert.ok(until(), "condition was not reached");
+}
+
+test("empirica_observe: concurrent configure_run opens exactly one dialog and rejects the second", async () => {
+  const h = lockHarness();
+  const execute = await h.observe();
+  const first = execute();
+  // The second call arrives while the first is still awaiting dispatch.
+  await assert.rejects(execute(), /Governance dialog in progress/);
+  assert.equal(h.deferred.length, 1, "the rejected call must not dispatch");
+  h.deferred[0].resolve(h.pendingRun);
+  await settle(() => h.dialogs.length === 1);
+  await assert.rejects(execute(), /Governance dialog in progress/);
+  assert.equal(h.dialogs.length, 1, "exactly one dialog may be open");
+  h.approveDialog(0);
+  const out = await first;
+  assert.equal((out.details as Response["result"]).type, "Allow");
+  assert.equal(h.dialogs.length, 1);
+  // Released once the owner finishes: the next configure_run reaches dispatch.
+  const next = execute();
+  await settle(() => h.deferred.length === 2);
+  h.deferred[1].resolve(h.pendingRun);
+  await settle(() => h.dialogs.length === 2);
+  h.approveDialog(1);
+  await next;
+});
+
+test("empirica_observe: a configure_run that opens no dialog never clears a held dialog lock", async () => {
+  const h = lockHarness();
+  const execute = await h.observe();
+  const owner = execute();
+  h.deferred[0].resolve(h.pendingRun);
+  await settle(() => h.dialogs.length === 1);
+  // Post-approval auto (no dialog) while the dialog is held: rejected, and the lock stays held.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await assert.rejects(execute(), /Governance dialog in progress/);
+    assert.equal(h.deferred.length, 1, "a rejected call must not dispatch");
+  }
+  h.approveDialog(0);
+  await owner;
+  // The owner released the lock exactly once; the auto configure_run now runs to completion
+  // without a dialog, and releases the lock itself.
+  const auto = execute();
+  await settle(() => h.deferred.length === 2);
+  h.deferred[1].resolve(h.autoRun);
+  const out = await auto;
+  assert.equal((out.details as Response["result"]).type, "Allow");
+  assert.equal(h.dialogs.length, 1, "auto approval must not open a dialog");
+  const after = execute();
+  await settle(() => h.deferred.length === 3);
+  h.deferred[2].resolve(h.autoRun);
+  await after;
+});

@@ -356,8 +356,13 @@ class GovernanceHostTests(unittest.TestCase):
              "context": {"interactive": True}},
             {"control_mode": "auto", "first_approval": False,
              "context": {"interactive": False}},
+            {"control_mode": "auto", "first_approval": False,
+             "context": {"interactive": None}},
+            {"control_mode": "deliberative", "first_approval": False,
+             "context": {"interactive": False}},
         ]
         expected = [expected_approval_kind(case) for case in cases]
+        self.assertEqual(expected[-2:], ["auto", "host_ui"])
         module = Path(__file__).resolve().parents[1] / "adapters" / "pi" / "src" / "governance-ui.ts"
         script = ("import {expectedApprovalKind as f} from " + json.dumps(module.as_uri()) + ";"
                   "const rows=JSON.parse(process.argv[1]);"

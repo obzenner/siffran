@@ -249,13 +249,10 @@ def _governance(run: dict[str, Any]) -> Trusted:
     if governance is None:
         return Trusted("no governance")
     parts = [f"governance: {governance['state']}"]
-    proposal = governance.get("proposal")
-    budgets = governance.get("budgets")
-    if proposal is not None and budgets is not None:
-        usage = " ".join(
-            f"{budgets[used]}/{proposal['budgets'][ceiling]}"
-            for ceiling, used in CEILINGS.items())
-        parts.append(f"passes/spawns/audits: {usage}")
+    usage = " ".join(
+        f"{governance['budgets'][used]}/{governance['proposal']['budgets'][ceiling]}"
+        for ceiling, used in CEILINGS.items())
+    parts.append(f"passes/spawns/audits: {usage}")
     return Trusted("; ".join(parts))
 
 
