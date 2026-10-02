@@ -29,7 +29,7 @@
             "deferred_scope_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
           },
           "next_actions": [
-            "residual.accept"
+            "run.inspect"
           ],
           "sections": [
             "freeze"
@@ -55,7 +55,9 @@
         ]
       },
       "terminal_note": "Frozen scope discharged; deferred claims remain residual.",
-      "next_actions": [],
+      "next_actions": [
+        "run.inspect"
+      ],
       "untrusted_delimiters": {
         "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
         "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
@@ -68,5 +70,5 @@
       }
     }
   },
-  "text": "Allow (converged=false) stopped_frozen — no governance\nrun_id: run-fx\nAudit: required\n\nResiduals:\n  freeze.deferred\n    params: claim_ids=G-later\n    next: report_convergence intent=stop\n\nChildren:\n  audit: completed"
+  "text": "Allow (converged=false) stopped_frozen — no governance\nrun_id: run-fx\nAudit: required\n\nResiduals:\n  freeze.deferred\n    params: claim_ids=G-later\n    next: empirica_read GetRun\n\nChildren:\n  audit: completed"
 }

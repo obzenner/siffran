@@ -25,6 +25,12 @@ export function sessionFileFromDetails(details: unknown): string | null {
     ? sessionFile : null;
 }
 
+const SYNTHETIC_MODEL = "<synthetic>";
+
+function nonBlank(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "";
+}
+
 function messageText(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -41,8 +47,9 @@ function messageText(content: unknown): string {
  * message in a complete host-generated Pi child transcript.
  *
  * Any malformed or ambiguous transcript returns null so independence remains
- * unverified. Model-change records and configured result metadata are not
- * identity evidence.
+ * unverified, including any non-synthetic assistant message missing a native
+ * provider or model. Model-change records and configured result metadata are
+ * not identity evidence.
  */
 export function identityFromSessionJsonl(
   jsonl: string,
@@ -71,10 +78,12 @@ export function identityFromSessionJsonl(
     const message = candidate as Record<string, unknown>;
     if (message.role !== "assistant") continue;
     assistantMessages.push(message);
-    if (typeof message.provider === "string" && message.provider.trim()
-        && typeof message.model === "string" && message.model.trim()
-        && message.model !== "<synthetic>")
+    // Host-synthesised error rows are the only identity-less assistant form; they served nothing.
+    // Any other assistant message must carry both native facts, or the reviewer is unobservable.
+    if (message.model !== SYNTHETIC_MODEL) {
+      if (!nonBlank(message.provider) || !nonBlank(message.model)) return null;
       served.add(`${message.provider}\u0000${message.model}`);
+    }
     const verdict = verdictFromText(messageText(message.content));
     if (verdict) verdictMessages.push({ message, verdict });
   }
@@ -86,8 +95,7 @@ export function identityFromSessionJsonl(
 
   const provider = observed.message.provider;
   const model = observed.message.model;
-  if (typeof provider !== "string" || !provider.trim()
-      || typeof model !== "string" || !model.trim()) return null;
+  if (!nonBlank(provider) || !nonBlank(model) || model === SYNTHETIC_MODEL) return null;
   return {
     provider_id: provider,
     model_id: model,

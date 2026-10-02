@@ -707,6 +707,36 @@ def check_response_run_view(result: dict, contract: dict, host_tiers_by_profile:
                                  f"{where}: run.residuals[{code}]", errors)
 
 
+def check_terminal_run_next_actions(result: dict, contract: dict, errors: list[str],
+                                   where: str) -> None:
+    """A terminal run offers only ``run.terminal``'s next actions. ``core/projection.py`` writes them
+    to the top level, every residual, every obligation row and every stopped child's recovery action,
+    so a hand-authored fixture that keeps active-run guidance for a terminal run has drifted."""
+    run = result.get("run")
+    if not isinstance(run, dict) or run.get("status") == "active":
+        return
+    terminal = contract.get("reasons", {}).get("run.terminal", {}).get("next_actions")
+    if not isinstance(terminal, list) or not terminal:
+        errors.append(f"{where}: registry reason run.terminal must declare next_actions")
+        return
+    if run.get("next_actions") != terminal:
+        errors.append(f"{where}: terminal run.next_actions {run.get('next_actions')!r} "
+                      f"!= run.terminal next_actions {terminal!r}")
+    for i, residual in enumerate(run.get("residuals", []) or []):
+        if residual.get("next_actions") != terminal:
+            errors.append(f"{where}: terminal run.residuals[{i}] next_actions "
+                          f"{residual.get('next_actions')!r} != run.terminal next_actions {terminal!r}")
+    for group, rows in (run.get("obligations") or {}).items():
+        for i, row in enumerate(rows or []):
+            if row.get("next") != terminal:
+                errors.append(f"{where}: terminal run.obligations.{group}[{i}] next "
+                              f"{row.get('next')!r} != run.terminal next_actions {terminal!r}")
+    for i, child in enumerate(run.get("children", []) or []):
+        if "recovery_action" in child and child["recovery_action"] != terminal[0]:
+            errors.append(f"{where}: terminal run.children[{i}] recovery_action "
+                          f"{child['recovery_action']!r} != run.terminal next action {terminal[0]!r}")
+
+
 def _check_freshness_changes(changes: list, freshness_states: set, where: str,
                             errors: list[str]) -> None:
     """Closed items, canonical states, lexical path ordering, unique paths, no hashes."""
@@ -2530,6 +2560,7 @@ def main() -> int:
         check_run_view_fields(result, registry, errors, f"{where}:expected")
         check_stale_freshness_match(result, errors, f"{where}:expected")
         check_response_run_view(result, registry, host_tiers_by_profile, digest, errors, f"{where}:expected")
+        check_terminal_run_next_actions(result, registry, errors, f"{where}:expected")
         check_argument_view(result, registry, errors, f"{where}:expected")
         check_getargument_exclusivity(request, result, errors, f"{where}:expected")
         command = request.get("command", {})
@@ -2757,6 +2788,33 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
          "contract": {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
          "residuals": [{"code": "budget.exhausted", "parameters": {}}]}},
         registry, {}, d64, e, "neg"), "parameters invalid", "residual params not validated")
+
+    # Terminal run: every next-action surface must equal run.terminal's; an active run is exempt.
+    terminal_run = {"id": "r", "goal": "g", "status": "stopped_budget",
+                    "next_actions": ["run.inspect"],
+                    "residuals": [{"code": "budget.exhausted", "parameters": {},
+                                   "next_actions": ["run.inspect"], "sections": []}],
+                    "obligations": {"active": [{"id": "o", "next": ["run.inspect"]}], "deferred": []},
+                    "children": [{"child_id": "c", "state": "timeout", "recovery_action": "run.inspect"}]}
+    for label, run in (("projection-shaped terminal run", terminal_run),
+                       ("active run with empty next_actions",
+                        {**terminal_run, "status": "active", "next_actions": []})):
+        control: list[str] = []
+        check_terminal_run_next_actions({"type": "Allow", "run": run}, registry, control, "neg")
+        if control:
+            errors.append(f"NEG control: {label} was rejected: {control}")
+    for label, mutate, expected in (
+            ("top-level next_actions", lambda r: r.update(next_actions=[]), "terminal run.next_actions"),
+            ("residual next_actions", lambda r: r["residuals"][0].update(next_actions=["budget.raise"]),
+             "run.residuals[0] next_actions"),
+            ("obligation next", lambda r: r["obligations"]["active"][0].update(next=[]),
+             "run.obligations.active[0] next"),
+            ("child recovery_action", lambda r: r["children"][0].update(recovery_action="child.retry"),
+             "run.children[0] recovery_action")):
+        bad_run = copy.deepcopy(terminal_run)
+        mutate(bad_run)
+        expect(lambda e, run=bad_run: check_terminal_run_next_actions(
+            {"type": "Allow", "run": run}, registry, e, "neg"), expected, f"terminal {label} drift")
 
     # Direct schema negatives: convergence contradictions both directions.
     def schema_rejects(envelope: dict, kind: str) -> bool:

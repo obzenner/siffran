@@ -50,7 +50,9 @@
             "host.async_unsupported"
           ]
         },
-        "next_actions": [],
+        "next_actions": [
+          "run.inspect"
+        ],
         "untrusted_delimiters": {
           "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
           "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"

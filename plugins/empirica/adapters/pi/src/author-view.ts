@@ -1,11 +1,10 @@
 // Schema-guarded, byte-identical TypeScript port of adapters/author_view.py.
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import * as path from "node:path";
 
 import { PROTOCOL, type Response } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
-import { PUBLIC_TOOLS } from "./public-tools.ts";
+import { PUBLIC_TOOLS, VENDORED_CONTRACT_DIR } from "./public-tools.ts";
 
 type Trusted = string & { readonly __trusted: unique symbol };
 type Untrusted = string & { readonly __untrusted: unique symbol };
@@ -59,13 +58,10 @@ interface AuthorView {
   readonly nextActions: readonly Trusted[];
 }
 
-const CONTRACT_PATH = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "..",
-  "contracts", "empirica", "v2", "public-contract.json",
-);
-const PUBLIC_CONTRACT = JSON.parse(readFileSync(CONTRACT_PATH, "utf8")) as Json;
+const PUBLIC_CONTRACT = JSON.parse(readFileSync(
+  path.join(VENDORED_CONTRACT_DIR, "public-contract.json"), "utf8")) as Json;
 const RESPONSE_DEFS = (JSON.parse(readFileSync(
-  path.join(path.dirname(CONTRACT_PATH), "response.schema.json"), "utf8",
+  path.join(VENDORED_CONTRACT_DIR, "response.schema.json"), "utf8",
 )) as Json).$defs as Json;
 const LABELS = PUBLIC_TOOLS.author_view.labels;
 const DIGEST_DEFS = new Set(["digest256", "nullableDigest256"]);

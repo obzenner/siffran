@@ -38,8 +38,7 @@
               "resource": "pass"
             },
             "next_actions": [
-              "budget.raise",
-              "residual.accept"
+              "run.inspect"
             ],
             "sections": [
               "budget"
@@ -58,7 +57,9 @@
           ]
         },
         "terminal_note": "Derivation budget exhausted.",
-        "next_actions": [],
+        "next_actions": [
+          "run.inspect"
+        ],
         "untrusted_delimiters": {
           "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
           "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"

@@ -327,16 +327,18 @@ class ContentCompletenessTests(unittest.TestCase):
 
     def test_every_directive_surface_appears(self):
         """Every directive a view emits (run, reasons, obligations, residuals, child recovery)
-        appears in the text as its contract surface."""
+        appears in the text as its contract surface. A terminal run's guidance is carried by its
+        open obligation and residual rows (never a separate top-level section), and satisfied
+        obligations are listed by id only."""
         self.assertEqual(set(author_view._SURFACES), set(next_action_surfaces()))
         for name in RUNVIEW_FIXTURES:
             result = _load_fixture(name)
             run = result.get("run", {})
             emitted = {
-                *run.get("next_actions", ()),
+                *(run.get("next_actions", ()) if run.get("status") == "active" else ()),
                 *(action for row in result.get("reasons", ()) for action in row["next_actions"]),
                 *(action for row in run.get("obligations", {}).get("active", ())
-                  for action in row["next"]),
+                  if row["status"] != "satisfied" for action in row["next"]),
                 *(action for row in run.get("residuals", ()) for action in row["next_actions"]),
                 *(row["recovery_action"] for row in run.get("children", ())
                   if row.get("recovery_action")),

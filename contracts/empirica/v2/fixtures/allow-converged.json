@@ -35,7 +35,9 @@
               "required": "record research",
               "observed": [],
               "missing": null,
-              "next": [],
+              "next": [
+                "run.inspect"
+              ],
               "status": "satisfied"
             }
           ],
@@ -61,7 +63,9 @@
           ]
         },
         "terminal_note": "All committed claims approved and fresh; independent audit current and passing.",
-        "next_actions": [],
+        "next_actions": [
+          "run.inspect"
+        ],
         "untrusted_delimiters": {
           "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
           "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"

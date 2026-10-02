@@ -64,10 +64,17 @@ export interface PublicToolsProjection {
   author_view: { labels: AuthorViewLabels };
 }
 
-const PUBLIC_TOOLS_PATH = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "..",
-  "contracts", "empirica", "v2", "public-tools.json",
+/**
+ * The plugin-local contract copy (`make vendor-contracts`, byte-identical to the repository SSOT).
+ * Three directories up from `src/` is the plugin root, so an installed `plugins/empirica/` alone
+ * carries every document the adapter reads. Every other reader imports this one directory.
+ */
+export const VENDORED_CONTRACT_DIR = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..",
+  "vendor", "contracts", "empirica", "v2",
 );
+
+const PUBLIC_TOOLS_PATH = path.join(VENDORED_CONTRACT_DIR, "public-tools.json");
 
 export const PUBLIC_TOOLS = JSON.parse(
   readFileSync(PUBLIC_TOOLS_PATH, "utf8"),
