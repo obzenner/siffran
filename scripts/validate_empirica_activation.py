@@ -13,7 +13,6 @@ ENTRYPOINTS = {
     "run_start.py": "run_start_main",
     "spawn_gate.py": "spawn_main",
     "route_stamp.py": "route_main",
-    "dispatch_gate.py": "dispatch_main",
     "convergence_gate.py": "completion_main",
     "state_restore.py": "restore_main",
     "agent_failure.py": "agent_failure_main",
@@ -23,6 +22,7 @@ ENTRYPOINTS = {
 FORBIDDEN = re.compile(r"(?:^|[/'\"`])\.(?:claude|pi)(?:/|[\"'`])")
 SKILL = ROOT / "skills/empirica/SKILL.md"
 REQUIRED_SKILL_REFERENCES = {
+    "governance.md",
     "host-capabilities.md",
     "claim-graph.md",
     "evidence.md",
@@ -80,7 +80,7 @@ def main() -> int:
     hooks = json.loads((HOOKS / "hooks.json").read_text(encoding="utf-8"))
     # Validate the invariant (only registered thin entrypoints), rather than freezing hook config.
     if set(hooks["hooks"]) != {"UserPromptExpansion", "PreToolUse", "PostToolUseFailure",
-                                  "Stop", "SubagentStart", "SubagentStop", "SessionStart"}:
+                                  "Stop", "SubagentStart", "SubagentStop", "SessionStart", "PostModelSwitch"}:
         fail("hooks.json lifecycle events changed")
     for groups in hooks["hooks"].values():
         for group in groups:
@@ -106,7 +106,7 @@ def main() -> int:
         if term in skill_text:
             fail(f"SKILL.md retains stale runtime term: {term}")
     for required in (
-        ">=2.1.278,<2.2.0", ">=0.84.1,<0.85.0", "pi-subagents@0.50.0",
+        ">=2.1.278,<2.2.0", ">=0.84.1,<0.90.0", "pi-subagents@0.50.0",
         ">=0.146.0,<0.147.0", "empirica_observe", "empirica_read", "report_convergence",
     ):
         if required not in skill_text:

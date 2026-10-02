@@ -1,76 +1,144 @@
 {
   "protocol": "empirica/v2",
   "state_schema": "empirica.run/2",
-  "goal": "Prove strict v2 state codec roundtrip with terminal children.",
-  "status": "converged",
-  "modes": {
-    "multi_provider": true,
-    "cli_exec": true
+  "goal": "governed task",
+  "invocation": {
+    "host": "test",
+    "interactive": true,
+    "signal": "test",
+    "delegation": false
   },
+  "status": "converged",
   "budgets": {
-    "max_passes": 20,
-    "passes_used": 8,
-    "max_spawns": 3,
+    "max_passes": 8,
+    "max_spawns": 1,
+    "max_audit_spawns": 2,
+    "passes_used": 1,
     "spawns_used": 0,
-    "max_audit_spawns": 1,
     "audit_spawns_used": 1
   },
-  "selected_graph_artifact_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-  "frozen_claim_ids": [
-    "C0",
-    "C1"
-  ],
-  "frozen_semantic_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+  "governance": {
+    "state": "approved",
+    "control_mode": "deliberative",
+    "plan_revision": 1,
+    "approved_digest": "sha256:5246d5773a2c3c031aac783c8aae5bb72475511259779279493c6e859d7000ea",
+    "approval_kind": "host_ui",
+    "receipts": [
+      {
+        "id": "f03197f7f07144fe826259b8644f7ede",
+        "fingerprint": "sha256:4e4f4adc2a56d0a279e2e17dbd474602e88eb9ed77bbf0e0cd5da3f811d5566d",
+        "presentation_fingerprint": "sha256:6e543a2078ffcfb5b37eb4818d5559a3fcc4689fe6b2d8e0b8cfbda62e803e8f",
+        "outcome": "approve",
+        "plan_revision": 1,
+        "proposal_digest": "sha256:5246d5773a2c3c031aac783c8aae5bb72475511259779279493c6e859d7000ea",
+        "approval_kind": "host_ui"
+      }
+    ],
+    "proposal": {
+      "budgets": {
+        "max_passes": 8,
+        "max_spawns": 1,
+        "max_audit_spawns": 2
+      },
+      "rationale": "sized for the gating claims and one audit retry"
+    },
+    "context": {
+      "author": {
+        "identity": "anthropic/claude-sonnet-4-6",
+        "provider_id": "anthropic",
+        "model_id": "claude-sonnet-4-6",
+        "policy_version": "model-identity/1",
+        "source": "test-host",
+        "observed_by": "host"
+      },
+      "ingress": "pi_ui",
+      "approval_capability": "human_configuration",
+      "delegation": false,
+      "interactive": true
+    },
+    "delegation_envelope": null,
+    "first_approval": true,
+    "pre_approval_revisions": 0,
+    "post_approval_revisions": 0,
+    "proposal_digest": "sha256:5246d5773a2c3c031aac783c8aae5bb72475511259779279493c6e859d7000ea"
+  },
+  "selected_graph_artifact_id": "sha256:b26ce65c4a17cb77fe50755affa574db169af69317d7383dd4dc89302a2d649f",
+  "frozen_claim_ids": null,
+  "frozen_semantic_digest": null,
   "route_stamp": 1,
-  "investigation_stamp": 4,
-  "stamp_seq": 6,
-  "last_derivation_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+  "investigation_stamp": 2,
+  "stamp_seq": 2,
+  "last_derivation_digest": "sha256:36505074d58ddc2fc3c1e1dd1d561e33bf2908b01814b05b0e676187606f69ab",
   "children": [
     {
-      "child_id": "child-auditor",
+      "child_id": "ch-276875de5a5195041cf8a5ca6d61a137f383c31a8f552e1361c5350406ec3ea9",
       "purpose": "audit",
+      "resource_class": "audit",
       "state": "completed",
       "spent": true,
       "refunded": false,
-      "deadline": 1700000000.0,
-      "native_id": "native-auditor-1",
-      "first_terminal_fingerprint": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
-      "capability_ref": "cap-auditor",
-      "audit_operation_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "deadline": null,
+      "native_id": "native-test",
+      "first_terminal_fingerprint": "sha256:9bd6e368ac201659bb1c617f08c07427478a2e9b84b38719338813ca4cd29dfd",
+      "capability_ref": "sha256:0d9b5d656f1c2616e48545f06e7f00cc1daa07a58ac1988139c10deec23b78d8",
+      "audit_operation_id": "sha256:2e0debf3533632029e5ee84526d3f8fb5250f79b104922d59c5a8e4418cd290d",
       "audit_argument": {
-        "argument_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        "root_claim_id": "G0",
-        "goal_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "root_claim_id": "C0",
+        "argument_digest": "sha256:9b13893e83ef1cb82c91be012aa9c6c2026f0353744a564b3b8f73e5e0187844",
+        "goal": "governed task",
+        "goal_digest": "sha256:f37644171731ae4aeb7de99c7979621418f8d872248fb7f3b158bb4f1af4312e",
         "frozen_scope_digest": null,
         "deferred_scope_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-        "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>", "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
-        "claims": [{"claim_id": "G0", "text": "Codec fixture claim", "kind": "ordinary", "gating": true,
-          "state": "open", "wording_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "evidence_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945", "active_evidence_ids": []}],
+        "untrusted_delimiters": {
+          "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+          "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+        },
+        "claims": [
+          {
+            "claim_id": "C0",
+            "text": "supplied uncertainty",
+            "wording_digest": "sha256:9635e834cbca0a03248874f209923c0b1101b2fd8f6abd0edf6513e0cb34e492",
+            "state": "approved",
+            "kind": "ordinary",
+            "gating": true,
+            "evidence_digest": "sha256:f70c777a1972150bfd720ea72a91322599b7d69fc15117bacd8b78111b016e7f",
+            "active_evidence_ids": [
+              "sha256:bab77e15dbba5341f588623d07a914ee6c2fb2a89a24ccd742b7d819ecc213cf"
+            ]
+          }
+        ],
         "edges": [],
-        "artifacts": [],
-        "audit": {"state": "required", "independence": "unverified", "reviewed_argument_digest": null,
-          "reviewed_goal_digest": null, "reviewed_frozen_scope_digest": null,
-          "reviewed_deferred_scope_digest": null, "reviewed_claims": []}
+        "artifacts": [
+          {
+            "sequence": 2,
+            "artifact_id": "sha256:bab77e15dbba5341f588623d07a914ee6c2fb2a89a24ccd742b7d819ecc213cf",
+            "claim_id": "C0",
+            "claim_digest": "sha256:9635e834cbca0a03248874f209923c0b1101b2fd8f6abd0edf6513e0cb34e492",
+            "kind": "research",
+            "statement_digest": "sha256:50389c44baf245aacfbec3f621cc104fbcebeef3dfbe40d376ac56b5ff26398c",
+            "active": true,
+            "outcome": "supporting",
+            "source_kind": "code",
+            "source_ref": "supplied",
+            "citation": "observed"
+          }
+        ],
+        "route_stamp": 1,
+        "investigation_stamp": 2,
+        "audit": {
+          "state": "required",
+          "independence": "unverified",
+          "reviewed_argument_digest": null,
+          "reviewed_goal_digest": null,
+          "reviewed_frozen_scope_digest": null,
+          "reviewed_deferred_scope_digest": null,
+          "reviewed_claims": [],
+          "findings": []
+        }
       },
-      "audit_role_profile": "empirica:empirica-auditor",
-      "resource_class": "audit"
-    },
-    {
-      "child_id": "child-rejected",
-      "purpose": "spike",
-      "state": "launch_rejected",
-      "spent": false,
-      "refunded": true,
-      "deadline": null,
-      "native_id": null,
-      "first_terminal_fingerprint": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
-      "capability_ref": "cap-spike",
-      "audit_operation_id": null,
-      "audit_argument": null,
-      "audit_role_profile": null,
-      "resource_class": "investigation"
+      "audit_role_profile": "empirica:empirica-auditor"
     }
   ],
-  "committed_artifact_head_id": null
+  "observation_basis_digest": "sha256:d0ab2b75f9473424954b6638a5eb0af9f4c74849e849f9431d10c5a4dfd00249",
+  "committed_artifact_head_id": "sha256:c25304b5de05c8da2827590145e27290ace4b7c608a6a106798c86e1b5d75ead"
 }

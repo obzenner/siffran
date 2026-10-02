@@ -3,20 +3,30 @@
 from __future__ import annotations
 
 import hashlib
-import json
-import math
 import re
 from dataclasses import dataclass
 from enum import Enum
 
+from .canonical import CanonicalJSONError, canonical_digest
 
-class FreshnessContractError(ValueError): ...
+
+FreshnessContractError = CanonicalJSONError
 class PathContractError(FreshnessContractError): ...
-class DigestContractError(FreshnessContractError): ...
+DigestContractError = CanonicalJSONError
 class ObservationContractError(FreshnessContractError): ...
 class ExecutionContractError(FreshnessContractError): ...
 
 _DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
+# The one claim-identifier pattern; the literal mirrors shared-defs.json#/$defs/claimId (a test
+# pins the equality). The final lookahead means absolute end under both Python ``re.search`` and
+# ECMA-262 (``$`` would also match before a trailing newline in Python).
+CLAIM_ID_PATTERN = r"^[A-Za-z0-9._-]{1,64}(?![\s\S])"
+_CLAIM_ID_RE = re.compile(CLAIM_ID_PATTERN)
+
+
+def valid_claim_id(value) -> bool:
+    """Return whether ``value`` is a claim identifier (safe by construction to render raw)."""
+    return isinstance(value, str) and _CLAIM_ID_RE.fullmatch(value) is not None
 
 
 def validate_relative_posix_path(value) -> str:
@@ -37,27 +47,6 @@ def validate_digest256(value) -> str:
     if not isinstance(value, str) or not _DIGEST_RE.fullmatch(value):
         raise DigestContractError("digest must be exact lowercase sha256:<64 hex>")
     return value
-
-def _canonical_json(value) -> str:
-    if isinstance(value, float) and not math.isfinite(value):
-        raise DigestContractError("canonical JSON rejects non-finite floats")
-    if value is None or isinstance(value, bool) or isinstance(value, (int, float, str)):
-        return json.dumps(value, ensure_ascii=False)
-    if isinstance(value, dict):
-        keys = list(value.keys())
-        if any(not isinstance(k, str) for k in keys):
-            raise DigestContractError("canonical JSON mapping keys must be strings")
-        return "{" + ",".join(json.dumps(k, ensure_ascii=False) + ":" + _canonical_json(value[k])
-                              for k in sorted(keys)) + "}"
-    if isinstance(value, (list, tuple)):
-        return "[" + ",".join(_canonical_json(v) for v in value) + "]"
-    if isinstance(value, (set, frozenset)):
-        raise DigestContractError("canonical JSON rejects unordered containers")
-    raise DigestContractError(f"canonical JSON rejects unsupported type {type(value).__name__}")
-
-def canonical_digest(value) -> str:
-    """sha256:<64 hex> of the canonical JSON (sorted keys, preserved order, no sets)."""
-    return "sha256:" + hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
 
 def command_digest(command) -> str:
     """sha256:<64 hex> of the exact UTF-8 command bytes (no trimming/normalizing)."""
@@ -100,6 +89,13 @@ class FileObservation:
         elif self.sha256 is not None:
             raise DigestContractError("non-present observation requires null digest")
 
+
+def observations_digest(observations) -> str:
+    """Digest canonical file observations using the core's sole JSON canonicalizer."""
+    return canonical_digest([(item.path, item.state.value, item.sha256)
+                             for item in observations])
+
+
 @dataclass(frozen=True)
 class ActiveSpikeHead:
     artifact_id: str
@@ -108,8 +104,8 @@ class ActiveSpikeHead:
     file_bindings: tuple[FileBinding, ...]
     def __post_init__(self):
         validate_digest256(self.artifact_id)
-        if not isinstance(self.claim_id, str) or not self.claim_id:
-            raise FreshnessContractError("claim_id must be a nonempty string")
+        if not valid_claim_id(self.claim_id):
+            raise FreshnessContractError("claim_id must match " + CLAIM_ID_PATTERN)
         if not isinstance(self.harness_request_id, str) or not self.harness_request_id:
             raise FreshnessContractError("harness_request_id must be a nonempty string")
         if not isinstance(self.file_bindings, tuple) or not self.file_bindings:

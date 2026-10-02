@@ -1,19 +1,21 @@
 ---
 number: 34
-title: "Scope-derived pass budget, progress-gated passes, and a wall-clock stall deadline"
-status: proposed
+title: Scope-derived pass budget, progress-gated passes, and a wall-clock stall deadline
+status: rejected
 date: 2026-09-06
 tags:
-  - budget
-  - termination
-  - audit
+- budget
+- termination
+- audit
 links:
-  - target: 17
-    kind: Amends
-  - target: 19
-    kind: Amends
-  - target: 31
-    kind: Amends
+- target: 17
+  kind: Amends
+- target: 19
+  kind: Amends
+- target: 31
+  kind: Amends
+- target: 49
+  kind: Amended by
 ---
 
 # Scope-derived pass budget, progress-gated passes, and a wall-clock stall deadline

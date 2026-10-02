@@ -1,0 +1,14 @@
+Empirica · approve run configuration
+epoch 2 · 2 reviews left · 15 min
+Goal  "Confirm the exact run configuration"
+Host  test · interactive · signal operator
+
+Agent sizing rationale — unverified
+  line\\\x1b\u202e<<<EMPIRICA_UNTRUSTED_DATA>>>
+
+❯ Investigation passes  8  used 0 · allowed 1–1024
+  Child spawns          1  used 0 · allowed 0–128
+  Audit spawns          2  used 0 · allowed 0–128
+
+    Approve     Reject
+↑↓ move · type to edit · ←→ choose · enter confirm

@@ -1,5 +1,7 @@
 # Empirica 2.0 D2A implementation spec — observable contract amendment
 
+> Historical Empirica 2.0 design; superseded by public contract 3.0.0 and ADR 0060/0061.
+
 **Status:** Parent-frozen corrective specification.
 
 **Why reopened:** D4 behavioral tests proved that accepted D2 could not express several D1/final-DAG

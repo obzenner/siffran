@@ -27,15 +27,16 @@ class PublicHostPathTests(ConformanceCase):
                             dispatch=lambda request, _profile: drv.request(request))
 
         def observe(action: dict) -> dict:
-            out = tools.call("empirica_observe", {"run_id": run_id, "action": action})
+            out = tools.call_internal("empirica_observe", {"run_id": run_id, "action": action})
             self.assertFalse(out["isError"], out)
             return out["structuredContent"]
 
         observe(action_route(reason="route before investigation"))
-        observe(action_investigate())
         graph = canonical_graph(n_claims=1)
         root_id = graph["root"]
         observe(action_graph(graph))
+        self.require_governance_approved(drv, run_id)
+        observe(action_investigate())
         observe(action_research(
             claim_id=root_id, source_kind="code", result="supports",
             payload={"source_ref": "plugins/empirica/core/evaluation.py"}))
@@ -71,20 +72,14 @@ class PublicHostPathTests(ConformanceCase):
             "Allow",
         )
 
-        argument_result = tools.call(
-            "empirica_read", {"run_id": run_id, "operation": "GetArgument"}
-        )["structuredContent"]
-        argument = argument_result["argument"]
-        evidence_ids = [artifact_id for claim in argument["claims"] if claim["gating"]
-                        for artifact_id in claim["active_evidence_ids"]]
         self.require_trusted_audit_attribution(
-            drv, run_id, child_id, evidence_ids, variant="decorrelated")
+            drv, run_id, child_id, variant="distinct")
         verdict = self.build_audit_verdict_payload(
             drv, run_id, verdict="pass", scope_review="pass")
         admitted = drv.trusted_audit_verdict(run_id, child_id, verdict)
         self.assertEqual(admitted["result"]["type"], "Allow")
 
-        final = tools.call("report_convergence", {"run_id": run_id})
+        final = tools.call_internal("report_convergence", {"run_id": run_id})
         self.assertFalse(final["isError"], final)
         result = final["structuredContent"]
         self.assertEqual(result["type"], "Allow")

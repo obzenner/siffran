@@ -1,23 +1,25 @@
 ---
 number: 14
 title: Split artifacts into transient scratch and committable records
-status: accepted
+status: superseded
 date: 2026-07-22
 tags:
-  - architecture
-  - artifacts
-  - state
+- architecture
+- artifacts
+- state
 links:
-  - target: 7
-    kind: Depends on
-  - target: 8
-    kind: Depends on
-  - target: 12
-    kind: relatesto
-  - target: 15
-    kind: relatesto
-  - target: 16
-    kind: Depended on by
+- target: 7
+  kind: Depends on
+- target: 8
+  kind: Depends on
+- target: 12
+  kind: Relates to
+- target: 15
+  kind: Relates to
+- target: 16
+  kind: Depended on by
+- target: 31
+  kind: Superseded by
 ---
 
 # Split artifacts into transient scratch and committable records

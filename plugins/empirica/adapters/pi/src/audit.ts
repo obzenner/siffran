@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { ToolResultEvent } from "./pi-types.ts";
 
 const BLOCK = /```empirica-verdict\s*\n([\s\S]*?)\n```/g;
+const OPENER = /```empirica-verdict\b/g;
 
 export function resultText(event: ToolResultEvent): string {
   let value = event.content ?? event.details ?? event.error ?? "";
@@ -26,8 +27,12 @@ export function resultText(event: ToolResultEvent): string {
 }
 
 export function verdictFromText(text: string): Record<string, unknown> | null {
+  // Same rule as the Python parser: exactly one opener, and it yields the single match, so an
+  // unclosed draft fence can never borrow a later fence's body.
+  const openers = [...text.matchAll(OPENER)];
   const matches = [...text.matchAll(BLOCK)];
-  if (matches.length !== 1) return null;
+  if (openers.length !== 1 || matches.length !== 1 || matches[0].index !== openers[0].index)
+    return null;
   try {
     const value = JSON.parse(matches[0][1]);
     return value && typeof value === "object" && !Array.isArray(value)

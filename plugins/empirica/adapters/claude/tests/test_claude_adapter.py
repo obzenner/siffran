@@ -28,8 +28,6 @@ from adapters.claude import (  # noqa: E402
     CLAUDE_PROFILE_ID,
     PROTOCOL,
     build_child_reserve_request,
-    build_configure_run_request,
-    build_dispatch_request,
     build_get_argument_request,
     build_investigation_request,
     build_resolve_request,
@@ -47,10 +45,11 @@ from adapters.claude.fail_direction import (  # noqa: E402
     failure_direction,
 )
 from adapters.claude.invocation import parse_invocation  # noqa: E402
+from adapters.invocation import split_leading_flags  # noqa: E402
 from adapters.claude.restore import restore_context  # noqa: E402
 from adapters.claude.selector import SelectorError  # noqa: E402
 from adapters.claude.spawn import spawn_decision  # noqa: E402
-from adapters.claude.transport import BridgeTransport  # noqa: E402
+from adapters.claude.transport import BridgeTransport, Response  # noqa: E402
 
 _REQUEST_SCHEMA = json.loads(
     (PLUGIN_ROOT.parent.parent / "contracts" / "empirica" / "v2" / "request.schema.json").read_text(
@@ -68,6 +67,26 @@ def _payload(**extra: object) -> dict:
     return base
 
 
+_FIXTURES = PLUGIN_ROOT.parent.parent / "contracts" / "empirica" / "v2" / "fixtures"
+
+
+def _valid_active_allow() -> dict:
+    return json.loads((_FIXTURES / "start-bootstrap-allow.json").read_text())["expected"]["result"]
+
+
+def _typed(result: dict, request_id: str = "typed-test") -> Response:
+    request = {"request_id": request_id}
+    return Response.from_envelope(request, {
+        "protocol": PROTOCOL, "request_id": request_id, "result": result})
+
+
+def _active_result(*, children: list[dict] | None = None) -> dict:
+    result = json.loads(json.dumps(_valid_active_allow()))
+    if children is not None:
+        result["run"]["children"] = children
+    return result
+
+
 class ExactV2ProfileTests(unittest.TestCase):
     """The transport reaches the shared bridge with the fixed exact Claude profile and no cwd."""
 
@@ -81,7 +100,7 @@ class ExactV2ProfileTests(unittest.TestCase):
             captured["request"] = request
             captured["profile_id"] = profile_id
             return {"protocol": PROTOCOL, "request_id": request["request_id"],
-                    "result": {"type": "Inert", "reason": "recorded"}}
+                    "result": {"type": "Inert", "reason": "no_run"}}
 
         with patch.object(bridge, "handle", side_effect=fake_handle):
             resp = BridgeTransport().dispatch(
@@ -129,12 +148,14 @@ class CorrelationTests(unittest.TestCase):
 class StartRunTests(unittest.TestCase):
     def test_minimal_start_run_is_schema_valid_with_no_actor_or_budgets(self) -> None:
         request = build_start_run_request(
-            _payload(command_name="empirica:empirica"), correlation_id="start-1", environ={},
+            _payload(command_name="empirica:empirica"),
+            correlation_id="start-1", environ={},
         )
         _assert_valid(request)
         self.assertEqual(request["protocol"], PROTOCOL)
         self.assertEqual(request["request_id"], "start-1")
         self.assertEqual(request["command"]["type"], "StartRun")
+        self.assertEqual(request["command"]["goal"], "")
         self.assertNotIn("actor", request["command"])
         self.assertNotIn("budgets", request["command"])
         self.assertNotIn("modes", request["command"])
@@ -167,12 +188,34 @@ class StartRunTests(unittest.TestCase):
         self.assertEqual(request_both["command"]["budgets"],
                          {"max_passes": 5, "max_spawns": 3, "max_audit_spawns": 2})
 
-    def test_modes_emitted_only_when_resolved(self) -> None:
-        request = build_start_run_request(
-            _payload(command_args="--cli-exec prove X"), correlation_id="start-5", environ={},
-        )
-        _assert_valid(request)
-        self.assertEqual(request["command"]["modes"], {"cli_exec": True})
+    def test_goal_is_verbatim_and_provenance_uses_env_then_transcript(self) -> None:
+        with TemporaryDirectory() as td:
+            transcript = Path(td) / "session.jsonl"
+            payload = _payload(command_args="  exact goal  ", transcript_path=str(transcript))
+            for entrypoint, interactive in (("cli", True), ("sdk-cli", False)):
+                transcript.write_text(json.dumps({"entrypoint": entrypoint}) + "\n", encoding="utf-8")
+                command = build_start_run_request(payload, environ={})["command"]
+                self.assertEqual(command["goal"], "  exact goal  ")
+                self.assertEqual(command["invocation"], {
+                    "host": "claude", "interactive": interactive,
+                    "signal": "transcript.entrypoint", "delegation": False})
+            unknown = build_start_run_request(_payload(command_args="goal"), environ={})["command"]
+            self.assertIsNone(unknown["invocation"]["interactive"])
+            self.assertEqual(unknown["invocation"]["signal"], "transcript.entrypoint unavailable")
+            for entrypoint, interactive in (("cli", True), ("sdk-cli", False), ("other", None)):
+                env = {"CLAUDE_CODE_ENTRYPOINT": entrypoint, "EMPIRICA_AUTO_DELEGATION": "1"}
+                provenance = build_start_run_request(payload, environ=env)["command"]["invocation"]
+                self.assertEqual(provenance["interactive"], interactive)
+                self.assertEqual(provenance["signal"], "CLAUDE_CODE_ENTRYPOINT")
+                self.assertTrue(provenance["delegation"])
+
+    def test_shared_invocation_split_cases(self) -> None:
+        cases = json.loads((PLUGIN_ROOT.parents[1] / "contracts/empirica/v2/invocation-split-cases.json").read_text())
+        for case in cases:
+            with self.subTest(args=case["args"]):
+                flags, goal = split_leading_flags(case["args"])
+                self.assertEqual({"flags": flags, "goal": goal},
+                                 {"flags": case["flags"], "goal": case["goal"]})
 
     def test_missing_session_is_rejected_before_transport(self) -> None:
         with self.assertRaises(SelectorError):
@@ -229,23 +272,20 @@ class RestoreAndGetArgumentTests(unittest.TestCase):
 class RouteAndInvestigateTests(unittest.TestCase):
     def test_investigation_hook_fails_closed_for_active_run(self) -> None:
         payload = _payload(tool_name="Read", tool_input={"file_path": "package.json"})
-        block = {"protocol": PROTOCOL, "request_id": "r", "result": {
-            "type": "Block", "run": {"id": "run", "status": "active"},
-            "reasons": [{"code": "route.required", "parameters": {},
-                         "next_actions": ["route.record"], "sections": ["route"]}]}}
-        allow = {"protocol": PROTOCOL, "request_id": "r", "result": {
-            "type": "Allow", "converged": False,
-            "run": {"id": "run", "status": "active"}}}
+        block = _typed(json.loads(
+            (_FIXTURES / "block-open-claim.json").read_text())["expected"]["result"])
+        allow = _typed(_valid_active_allow())
+        resolved = allow.result
         with patch.object(lifecycle, "_payload", return_value=payload), \
-             patch.object(lifecycle, "_resolve", return_value=("run", {})), \
+             patch.object(lifecycle, "_resolve", return_value=("run", resolved)), \
              patch.object(lifecycle, "dispatch_investigation", return_value=block):
             self.assertEqual(lifecycle.route_main(), 2)
         with patch.object(lifecycle, "_payload", return_value=payload), \
-             patch.object(lifecycle, "_resolve", return_value=("run", {})), \
+             patch.object(lifecycle, "_resolve", return_value=("run", resolved)), \
              patch.object(lifecycle, "dispatch_investigation", return_value=allow):
             self.assertEqual(lifecycle.route_main(), 0)
         with patch.object(lifecycle, "_payload", return_value=payload), \
-             patch.object(lifecycle, "_resolve", return_value=("run", {})), \
+             patch.object(lifecycle, "_resolve", return_value=("run", resolved)), \
              patch.object(lifecycle, "dispatch_investigation", side_effect=RuntimeError("down")):
             self.assertEqual(lifecycle.route_main(), 2)
 
@@ -260,14 +300,12 @@ class RouteAndInvestigateTests(unittest.TestCase):
         read = _payload(tool_name="Read", tool_input={"file_path": "package.json"})
         agent = _payload(tool_name="Agent", tool_input={
             "subagent_type": "worker", "prompt": "investigate"})
-        for failure in (
-            RuntimeError("transport down"),
-            {"protocol": PROTOCOL, "request_id": "claude-resolve", "result": {
-                "type": "Fault", "code": "internal", "message": "unavailable",
-                "fail_direction": "closed"}},
-            {"protocol": PROTOCOL, "request_id": "claude-resolve", "result": {
-                "type": "Allow", "converged": False}},
-        ):
+        failures = [RuntimeError("transport down"), _typed({
+            "type": "Fault", "code": "unavailable", "message": "unavailable",
+            "fail_direction": "closed"})]
+        with self.assertRaises(ValueError):
+            _typed({"type": "Allow", "converged": False})
+        for failure in failures:
             effect = failure if isinstance(failure, Exception) else None
             value = None if effect is not None else failure
             with self.subTest(failure=failure), \
@@ -282,11 +320,10 @@ class RouteAndInvestigateTests(unittest.TestCase):
                 self.assertEqual(lifecycle.spawn_main(), 2)
 
     def test_strict_resolution_distinguishes_exact_no_run_from_unavailability(self) -> None:
-        response = {"protocol": PROTOCOL, "request_id": "claude-resolve",
-                    "result": {"type": "Inert", "reason": "no_run"}}
+        response = _typed({"type": "Inert", "reason": "no_run"}, "claude-resolve")
         with patch.object(lifecycle, "dispatch_resolve", return_value=response):
             self.assertEqual(lifecycle._resolve(_payload(), strict=True),
-                             (None, response["result"]))
+                             (None, response.result))
 
     def test_investigation_is_exact_v2_and_marker_text_cannot_bypass_it(self) -> None:
         request = build_investigation_request(
@@ -302,6 +339,17 @@ class RouteAndInvestigateTests(unittest.TestCase):
         self.assertEqual(build_investigation_request(own, "run")["command"]["action"],
                          {"kind": "investigate"})
 
+    def test_unknown_mcp_research_and_writers_require_admission_but_public_preparation_does_not(self):
+        for name in ("mcp__web__search", "Write", "Edit", "custom_tool",
+                     "mcp__other__empirica_read"):
+            with self.subTest(tool=name):
+                request = build_investigation_request(_payload(tool_name=name), "run")
+                self.assertEqual(request["command"]["action"], {"kind": "investigate"})
+        for name in ("mcp__plugin_empirica_empirica__empirica_read",
+                     "mcp__plugin_empirica_empirica__empirica_observe",
+                     "mcp__plugin_empirica_empirica__report_convergence", "ToolSearch", "AskUserQuestion"):
+            self.assertIsNone(build_investigation_request(_payload(tool_name=name), "run"))
+
     def test_route_announcement_is_exact_v2(self) -> None:
         request = build_route_announcement_request(
             _payload(tool_name="Bash", tool_input={"command": "announce"}),
@@ -313,45 +361,14 @@ class RouteAndInvestigateTests(unittest.TestCase):
         self.assertNotIn("observed_at", request["command"])
 
 
-class DispatchTests(unittest.TestCase):
-    def test_dispatch_emits_only_target_and_optional_claim(self) -> None:
-        payload = _payload(tool_name="Bash",
-                           tool_input={"command": "codex exec --model openai.gpt-5.6-sol resolve G4"},
-                           ts="2026-09-05T20:01:00Z")
-        request = build_dispatch_request(payload, "run", claim_id="G4", correlation_id="dispatch-1")
-        _assert_valid(request)
-        self.assertEqual(request["command"]["action"],
-                         {"kind": "dispatch", "target": "codex", "claim_id": "G4"})
-        self.assertEqual(request["command"]["observed_at"], "2026-09-05T20:01:00Z")
-
-    def test_dispatch_omits_claim_id_when_absent_and_is_inert_for_plain_bash(self) -> None:
-        payload = _payload(tool_name="Bash", tool_input={"command": "grep -rn claude src/"})
-        self.assertIsNone(build_dispatch_request(payload, "run"))
-        dispatched = _payload(tool_name="Bash",
-                              tool_input={"command": "pi -p prove X"})
-        request = build_dispatch_request(dispatched, "run", correlation_id="dispatch-2")
-        _assert_valid(request)
-        self.assertEqual(request["command"]["action"], {"kind": "dispatch", "target": "pi"})
-
-
-class ConfigureRunTests(unittest.TestCase):
-    def test_mode_becomes_exact_configure_run(self) -> None:
+class RemovedInvocationFlagTests(unittest.TestCase):
+    def test_removed_flags_surface_as_unknown(self) -> None:
         invocation = parse_invocation(
-            {"command_args": "--cli-exec --multi-provider prove X"}, environ={}, fallback_goal="g",
+            {"command_args": "--auto --cli-exec --multi-provider prove X"}, environ={},
         )
-        request = build_configure_run_request("opaque-run", invocation.modes,
-                                               correlation_id="configure-1")
-        _assert_valid(request)
-        self.assertEqual(request["command"]["action"],
-                         {"kind": "configure_run",
-                          "modes": {"multi_provider": True, "cli_exec": True}})
-
-    def test_configure_run_rejects_unknown_and_empty_modes(self) -> None:
-        with self.assertRaises(ValueError):
-            build_configure_run_request("opaque-run", {"cli_exex": True}, correlation_id="bad")
-        with self.assertRaises(ValueError):
-            build_configure_run_request("opaque-run", {}, correlation_id="empty")
-
+        self.assertEqual(invocation.control_mode, "auto")
+        self.assertEqual(invocation.unknown_flags, ("--cli-exec", "--multi-provider"))
+        self.assertEqual(invocation.goal, "prove X")
 
 class ChildReserveTests(unittest.TestCase):
     def _payload(self, tool_input: dict) -> dict:
@@ -393,20 +410,116 @@ class ChildReserveTests(unittest.TestCase):
 class ResponseMappingTests(unittest.TestCase):
     """Honest native fail-closed response mapping for the gate events."""
 
+    def test_human_governance_wait_settles_turn_without_convergence(self) -> None:
+        def result(state="pending", code="governance.approval_required"):
+            run = json.loads(json.dumps(_valid_active_allow()["run"]))
+            run["governance"].update({
+                "state": state, "control_mode": "deliberative"})
+            run["governance"]["context"]["ingress"] = "mcp_elicitation"
+            return {"type": "Block", "run": run, "reasons": [{
+                "code": code, "parameters": {}, "next_actions": [],
+                "sections": ["governance"], "message": "approval required"}]}
+        for state, code in (("pending", "governance.approval_required"),
+                            ("revision_pending", "governance.revision_required"),
+                            ("rejected", "governance.approval_required")):
+            mapped = stop_result(_typed(result(state, code)))
+            self.assertEqual(mapped.exit_code, 0)
+            notice = json.loads(mapped.stdout)
+            self.assertIn("not converged", notice["systemMessage"])
+            self.assertNotIn("converged", notice)
+            self.assertNotIn("decision", notice)
+        with patch("adapters.author_view.render_author_view",
+                   side_effect=AssertionError("systemMessage must bypass author renderer")):
+            notice = json.loads(stop_result(_typed(result())).stdout)
+            self.assertIn("systemMessage", notice)
+        initial_auto = result()
+        initial_auto["run"]["governance"].update({"control_mode": "auto", "first_approval": False})
+        initial_auto["run"]["governance"]["context"]["interactive"] = True
+        self.assertEqual(stop_result(_typed(initial_auto)).exit_code, 0)
+        for changed in ("proposal_exhausted", "total_exhausted", "prompt_error"):
+            blocked = json.loads(json.dumps(initial_auto))
+            governance = blocked["run"]["governance"]
+            if changed == "prompt_error":
+                governance["prompt_error"] = "governance.interaction_limit"
+            else:
+                governance["interactions_remaining"][changed.split("_")[0]] = 0
+            with self.subTest(initial_auto=changed):
+                self.assertEqual(stop_result(_typed(blocked)).exit_code, 2)
+        for changed in ("auto", "delegated", "proposal_exhausted", "total_exhausted",
+                        "prompt_error", "approved", "missing_context", "mixed", "terminal",
+                        "mismatched_reason"):
+            blocked = result()
+            if changed == "auto":
+                blocked["run"]["governance"].update({"control_mode": "auto", "first_approval": True})
+            elif changed == "delegated":
+                blocked["run"]["governance"].update({"control_mode": "auto", "first_approval": False})
+                blocked["run"]["governance"]["context"].update({"interactive": False,
+                                                                "delegation": True})
+            elif changed in ("proposal_exhausted", "total_exhausted"):
+                key = changed.split("_")[0]
+                blocked["run"]["governance"]["interactions_remaining"][key] = 0
+            elif changed == "prompt_error":
+                blocked["run"]["governance"]["prompt_error"] = "governance.interaction_limit"
+            elif changed == "approved":
+                blocked["run"]["governance"]["state"] = "approved"
+            elif changed == "missing_context":
+                blocked["run"]["governance"]["context"]["ingress"] = "unavailable"
+            elif changed == "mixed":
+                blocked["reasons"].append({"code": "run.corrupt", "parameters": {},
+                                           "next_actions": [], "sections": [],
+                                           "message": "corrupt"})
+            elif changed == "terminal":
+                blocked["run"]["status"] = "converged"
+            elif changed == "mismatched_reason":
+                blocked["reasons"][0]["code"] = "governance.revision_required"
+            with self.subTest(changed=changed):
+                self.assertEqual(stop_result(_typed(blocked)).exit_code, 2)
+
+    def test_sole_budget_exhausted_settles_turn_with_the_contract_notice(self) -> None:
+        from application.protocol import BUDGET_EXHAUSTED_NOTICE
+
+        def result(resource):
+            run = json.loads(json.dumps(_valid_active_allow()["run"]))
+            return {"type": "Block", "run": run, "reasons": [{
+                "code": "budget.exhausted", "parameters": {"resource": resource},
+                "next_actions": ["run.start_fresh", "residual.accept"],
+                "sections": ["budget"], "message": f"{resource} budget exhausted."}]}
+        for resource in ("audit_spawn", "pass", "spawn"):
+            with self.subTest(resource=resource):
+                settled = stop_result(_typed(result(resource)))
+                self.assertEqual(settled.exit_code, 0)
+                self.assertEqual(settled.stderr, "")
+                notice = json.loads(settled.stdout)
+                self.assertEqual(notice, {"systemMessage":
+                                          BUDGET_EXHAUSTED_NOTICE.format(resource=resource)})
+                self.assertIn(resource, notice["systemMessage"])
+                self.assertNotIn("{resource}", notice["systemMessage"])
+        mixed = result("audit_spawn")
+        mixed["reasons"].append({"code": "run.corrupt", "parameters": {}, "next_actions": [],
+                                 "sections": [], "message": "corrupt"})
+        self.assertEqual(stop_result(_typed(mixed)).exit_code, 2)
+        terminal = result("audit_spawn")
+        terminal["run"]["status"] = "stopped_residual"
+        self.assertEqual(stop_result(_typed(terminal)).exit_code, 2)
+        unrelated = result("audit_spawn")
+        unrelated["reasons"][0].update({"code": "audit.failed", "parameters": {},
+                                        "sections": ["audit"], "message": "audit failed"})
+        self.assertEqual(stop_result(_typed(unrelated)).exit_code, 2)
+
     def test_stop_result_inert_allow_block_and_faults(self) -> None:
-        self.assertEqual(stop_result({"result": {"type": "Inert", "reason": "no_run"}}).exit_code, 0)
-        allow = stop_result({"result": {"type": "Allow", "converged": True,
-                                        "run": {"id": "r", "status": "converged"}}})
+        self.assertEqual(stop_result(_typed({"type": "Inert", "reason": "no_run"})).exit_code, 0)
+        fixture_root = PLUGIN_ROOT.parents[1] / "contracts" / "empirica" / "v2" / "fixtures"
+        allow_result = json.loads(
+            (fixture_root / "allow-converged.json").read_text())["expected"]["result"]
+        allow = stop_result(_typed(allow_result))
         self.assertEqual(allow.exit_code, 0)
-        self.assertEqual(json.loads(allow.stdout)["type"], "Allow")
-        pending_result = {"type": "Block", "run": {"status": "active", "children": [
-            {"child_id": "ch-audit", "resource_class": "audit", "state": "pending"},
-        ]}, "reasons": [
-            {"code": "audit.pending", "message": "Audit child is pending; wait."},
-        ]}
-        pending = stop_result({"result": pending_result})
+        self.assertIn("Allow (converged=true)", allow.stdout)
+        self.assertIn("run_id: run-fx", allow.stdout)
+        pending_result = json.loads(
+            (fixture_root / "block-pending-audit.json").read_text())["expected"]["result"]
+        pending = stop_result(_typed(pending_result))
         self.assertEqual(pending.exit_code, 0)
-        self.assertEqual(json.loads(pending.stdout)["reasons"][0]["code"], "audit.pending")
+        self.assertIn("audit.pending", pending.stdout)
         self.assertEqual(pending.stderr, "")
         for malformed in (
             {**pending_result, "run": {"status": "active", "children": []}},
@@ -415,54 +528,58 @@ class ResponseMappingTests(unittest.TestCase):
             {**pending_result, "reasons": [*pending_result["reasons"],
                                            {"code": "graph.missing", "message": "missing"}]},
         ):
-            with self.subTest(malformed=malformed):
-                self.assertEqual(stop_result({"result": malformed}).exit_code, 2)
-        block = stop_result({"result": {"type": "Block", "reasons": [
-            {"code": "graph.missing", "message": "not converged"},
-            {"code": "route.required", "message": "route first"},
-        ]}})
+            with self.subTest(malformed=malformed), self.assertRaises(ValueError):
+                _typed(malformed)
+        block_result = json.loads(
+            (fixture_root / "block-open-claim.json").read_text())["expected"]["result"]
+        block_result["reasons"].append({
+            "code": "route.required", "parameters": {}, "next_actions": [],
+            "sections": [], "message": "route first"})
+        block_result["reasons"][0]["message"] = "not converged"
+        block = stop_result(_typed(block_result))
         self.assertEqual((block.exit_code, block.stdout), (2, ""))
         self.assertEqual(block.stderr, "not converged\nroute first\n")
-        closed = stop_result({"result": {"type": "Fault", "code": "unsupported",
-                                         "fail_direction": "closed", "message": "no eval"}})
+        closed = stop_result(_typed({"type": "Fault", "code": "unsupported",
+                                     "fail_direction": "closed", "message": "no eval"}))
         self.assertEqual((closed.exit_code, closed.stdout), (2, ""))
-        open_fault = stop_result({"result": {"type": "Fault", "code": "unavailable",
-                                             "fail_direction": "open", "message": "bridge"}})
+        open_fault = stop_result(_typed({"type": "Fault", "code": "unavailable",
+                                         "fail_direction": "open", "message": "bridge"}))
         self.assertEqual((open_fault.exit_code, open_fault.stderr), (0, "bridge\n"))
         self.assertEqual(stop_result({"not": "a response"}).exit_code, 2)
 
     def test_restore_context_renders_bounded_v2_runview(self) -> None:
         fixture = json.loads((PLUGIN_ROOT.parent.parent / "contracts" / "empirica" / "v2" /
                               "fixtures" / "restore-active.json").read_text(encoding="utf-8"))
-        context = restore_context(fixture["expected"])
+        context = restore_context(_typed(fixture["expected"]["result"]))
         self.assertIn("BEGIN UNTRUSTED EMPIRICA RUN DATA", context)
         body = context.split("-----\n", 1)[1].split("\n----- END", 1)[0]
-        self.assertEqual(json.loads(body), {"run": fixture["expected"]["result"]["run"]})
-        terminal = json.loads(json.dumps(fixture["expected"]))
-        terminal["result"]["run"]["status"] = "converged"
-        self.assertEqual(restore_context(terminal), "")
+        run = fixture["expected"]["result"]["run"]
+        self.assertIn(f"run_id: {run['id']}", body)
+        self.assertIn(run["status"], body)
+        terminal = json.loads((_FIXTURES / "allow-converged.json").read_text())["expected"]
+        self.assertEqual(restore_context(_typed(terminal["result"])), "")
 
     def test_spawn_decision_block_closed_fault_and_malformed(self) -> None:
-        self.assertEqual(spawn_decision(
-            {"result": {"type": "Block", "reason": "cap exhausted"}}).exit_code, 2)
-        self.assertEqual(spawn_decision(
-            {"result": {"type": "Fault", "code": "unsupported",
-                        "fail_direction": "closed", "message": "no cap"}}).exit_code, 2)
-        self.assertEqual(spawn_decision(
-            {"result": {"type": "Allow", "run": {"status": "converged"}}}).exit_code, 0)
-        self.assertEqual(spawn_decision(
-            {"result": {"type": "Fault", "fail_direction": "open"}}).exit_code, 0)
-        self.assertEqual(spawn_decision(
-            {"result": {"type": "Inert", "reason": "no_run"}}).exit_code, 2)
-        self.assertEqual(spawn_decision(
-            {"result": {"type": "Surprise"}}).exit_code, 2)
+        block = json.loads((_FIXTURES / "block-open-claim.json").read_text())["expected"]["result"]
+        self.assertEqual(spawn_decision(_typed(block)).exit_code, 2)
+        self.assertEqual(spawn_decision(_typed(
+            {"type": "Fault", "code": "unsupported",
+             "fail_direction": "closed", "message": "no cap"})).exit_code, 2)
+        self.assertEqual(spawn_decision(_typed(_valid_active_allow())).exit_code, 0)
+        self.assertEqual(spawn_decision(_typed(
+            {"type": "Fault", "code": "unavailable", "fail_direction": "open"})).exit_code, 0)
+        self.assertEqual(spawn_decision(_typed(
+            {"type": "Inert", "reason": "no_run"})).exit_code, 2)
+        with self.assertRaises(ValueError):
+            _typed({"type": "Surprise"})
         # malformed/non-object/mismatched deny the native launch
         self.assertEqual(spawn_decision({"not": "a response"}).exit_code, 2)
         self.assertEqual(spawn_decision({"result": "not-a-dict"}).exit_code, 2)
         self.assertEqual(spawn_decision([]).exit_code, 2)
 
     def test_fail_direction_explicit_wins_and_malformed_uses_fallback(self) -> None:
-        fault = {"result": {"type": "Fault", "fail_direction": "closed"}}
+        fault = _typed({"type": "Fault", "code": "unavailable",
+                        "fail_direction": "closed"})
         self.assertEqual(failure_direction(fault, fallback=FailureDirection.OPEN),
                          FailureDirection.CLOSED)
         self.assertTrue(blocks_on_failure(fault, fallback=FailureDirection.OPEN))
@@ -484,6 +601,10 @@ class AuditBoundaryTests(unittest.TestCase):
         text = "```empirica-verdict\n" + json.dumps(payload) + "\n```"
         self.assertEqual(verdict_from_final_output(text), payload)
         self.assertIsNone(verdict_from_final_output(text + "\n" + text))
+        unclosed = "```empirica-verdict\n" + json.dumps({"verdict": "fail"})
+        self.assertIsNone(verdict_from_final_output(unclosed + "\n" + text))
+        no_newline = "```empirica-verdict " + json.dumps({"verdict": "fail"}) + "```"
+        self.assertIsNone(verdict_from_final_output(text + "\n" + no_newline))
         self.assertIsNone(verdict_from_final_output("not a verdict"))
 
 
@@ -539,12 +660,15 @@ class SpawnLifecycleTests(unittest.TestCase):
         def fake_handle(request, profile_id=None):
             cmd = request["command"]
             if cmd.get("type") == "ResolveRun":
-                return {"protocol": PROTOCOL, "request_id": request["request_id"],
-                        "result": {"type": "Allow", "run": {"id": "active-run"}}}
-            if raises:
+                result = _valid_active_allow()
+            elif child_result and child_result.get("type") == "Allow":
+                result = _valid_active_allow()
+            else:
+                result = child_result
+            if raises and cmd.get("type") != "ResolveRun":
                 raise RuntimeError("bridge exploded")
             return {"protocol": PROTOCOL, "request_id": request["request_id"],
-                    "result": child_result}
+                    "result": result}
         return patch.object(bridge, "handle", side_effect=fake_handle)
 
     def test_auditor_reservation_replaces_author_prompt_and_defers_lifecycle(self) -> None:
@@ -556,13 +680,13 @@ class SpawnLifecycleTests(unittest.TestCase):
         payload = self._stdin({"subagent_type": "empirica:empirica-auditor",
                                "prompt": "author-controlled prompt"})
         out = StringIO()
-        investigation = {"protocol": PROTOCOL, "request_id": "investigate", "result": {
-            "type": "Allow", "converged": False,
-            "run": {"id": "active-run", "status": "active"}}}
+        investigation = _typed(_active_result(), "investigate")
         with patch("adapters.claude.lifecycle._resolve", return_value=("active-run", {})), \
              patch("adapters.claude.lifecycle.dispatch_investigation",
                    return_value=investigation), \
              patch("adapters.claude.lifecycle.AuditProtocol.prepare", return_value=plan), \
+             patch("adapters.claude.lifecycle._auditor_alias", return_value="fable"), \
+             patch("adapters.claude.lifecycle._governance_context"), \
              patch("sys.stdin", new=payload), patch("sys.stdout", new=out):
             self.assertEqual(spawn_main(), 0)
         updated = json.loads(out.getvalue())["hookSpecificOutput"]["updatedInput"]
@@ -572,10 +696,64 @@ class SpawnLifecycleTests(unittest.TestCase):
         self.assertIs(updated["run_in_background"], True)
         self.assertEqual(updated["max_turns"], 8)
         self.assertEqual(set(updated), {"subagent_type", "description", "prompt",
-                                        "run_in_background", "max_turns"})
+                                        "run_in_background", "max_turns", "model"})
+        self.assertEqual(updated["model"], "fable")
+
+    def test_auditor_preflight_failure_does_not_reserve(self) -> None:
+        from adapters.audit_protocol import AuditProtocolError
+        from adapters.claude.lifecycle import spawn_main
+        payload = self._stdin({"subagent_type": "empirica:empirica-auditor", "prompt": "audit"})
+        investigation = _typed(_active_result(), "investigate")
+        with patch("adapters.claude.lifecycle._resolve", return_value=("active-run", {})), \
+             patch("adapters.claude.lifecycle.dispatch_investigation", return_value=investigation), \
+             patch("adapters.claude.lifecycle._governance_context"), \
+             patch("adapters.claude.lifecycle._auditor_alias",
+                   side_effect=AuditProtocolError("main identity unknown")), \
+             patch("adapters.claude.lifecycle.AuditProtocol.prepare") as prepare, \
+             patch("sys.stdin", new=payload):
+            self.assertEqual(spawn_main(), 2)
+        prepare.assert_not_called()
+
+    def test_auditor_post_reservation_failure_rejects_exact_plan(self) -> None:
+        from adapters.audit_protocol import AuditLaunchPlan
+        from adapters.claude.lifecycle import spawn_main
+        plan = AuditLaunchPlan("claude-code@2.1.278", "active-run", "ch-audit",
+                               "empirica:empirica-auditor", {"claims": []})
+        payload = self._stdin({"subagent_type": "empirica:empirica-auditor", "prompt": "audit"})
+        investigation = _typed(_active_result(), "investigate")
+        with patch("adapters.claude.lifecycle._resolve", return_value=("active-run", {})), \
+             patch("adapters.claude.lifecycle.dispatch_investigation", return_value=investigation), \
+             patch("adapters.claude.lifecycle._governance_context"), \
+             patch("adapters.claude.lifecycle._auditor_alias", return_value="fable"), \
+             patch("adapters.claude.lifecycle.AuditProtocol.prepare", return_value=plan), \
+             patch("adapters.claude.lifecycle.AuditProtocol.reject") as reject, \
+             patch("adapters.claude.lifecycle.child_prompt", side_effect=RuntimeError("late failure")), \
+             patch("sys.stdin", new=payload):
+            self.assertEqual(spawn_main(), 2)
+        reject.assert_called_once_with(plan)
+
+    def test_auditor_reject_failure_of_any_kind_still_denies(self) -> None:
+        """A rollback that raises a non-AuditProtocolError must still deny (quality #4)."""
+        from adapters.audit_protocol import AuditLaunchPlan
+        from adapters.claude.lifecycle import spawn_main
+        plan = AuditLaunchPlan("claude-code@2.1.278", "active-run", "ch-audit",
+                               "empirica:empirica-auditor", {"claims": []})
+        payload = self._stdin({"subagent_type": "empirica:empirica-auditor", "prompt": "audit"})
+        investigation = _typed(_active_result(), "investigate")
+        with patch("adapters.claude.lifecycle._resolve", return_value=("active-run", {})), \
+             patch("adapters.claude.lifecycle.dispatch_investigation", return_value=investigation), \
+             patch("adapters.claude.lifecycle._governance_context"), \
+             patch("adapters.claude.lifecycle._auditor_alias", return_value="fable"), \
+             patch("adapters.claude.lifecycle.AuditProtocol.prepare", return_value=plan), \
+             patch("adapters.claude.lifecycle.AuditProtocol.reject",
+                   side_effect=RuntimeError("bridge I/O down")) as reject, \
+             patch("adapters.claude.lifecycle.child_prompt", side_effect=RuntimeError("late failure")), \
+             patch("sys.stdin", new=payload):
+            self.assertEqual(spawn_main(), 2)
+        reject.assert_called_once_with(plan)
 
     def test_durable_plan_rejects_missing_operation_or_wrong_role(self) -> None:
-        from adapters.claude.lifecycle import _durable_plan
+        from adapters.claude.lifecycle import _parse_durable_plan
         for operation in (
             {"role_profile": "empirica:empirica-auditor", "argument": {}},
             {"operation_id": "sha256:" + "2" * 64, "role_profile": "other", "argument": {}},
@@ -584,17 +762,17 @@ class SpawnLifecycleTests(unittest.TestCase):
                 "adapters.claude.lifecycle.application_bridge.trusted_audit_plan",
                 return_value=operation,
             ):
-                self.assertIsNone(_durable_plan("run", "child"))
+                self.assertIsNone(_parse_durable_plan("run", "child"))
 
     def test_subagent_stop_delivers_handback_verdict_before_trailing_prose(self) -> None:
         from adapters.claude.lifecycle import subagent_stop_main
         verdict = {"verdict": "pass", "findings": ["ok"]}
         text = "```empirica-verdict\n" + json.dumps(verdict) + "\n```"
-        resolved = ("active-run", {"run": {"children": [
+        resolved = ("active-run", _typed(_active_result(children=[
             {"child_id": "ordinary", "purpose": "audit",
              "resource_class": "investigation", "state": "pending"},
             {"child_id": "ch-audit", "purpose": "audit",
-             "resource_class": "audit", "state": "pending"}]}})
+             "resource_class": "audit", "state": "pending"}])).result)
         argument = {"argument_digest": "sha256:" + "1" * 64, "claims": []}
         with TemporaryDirectory() as directory:
             transcript = Path(directory) / "child.jsonl"
@@ -613,7 +791,7 @@ class SpawnLifecycleTests(unittest.TestCase):
                                      "argument": argument}), \
                  patch("adapters.claude.lifecycle.application_bridge.trusted_resolve_child",
                        return_value="ch-audit"), \
-                 patch("adapters.claude.lifecycle.AuditProtocol.observe_identities"), \
+                 patch("adapters.claude.lifecycle.AuditProtocol.observe_reviewer"), \
                  patch("adapters.claude.lifecycle.AuditProtocol.observe_verdict",
                        return_value=True) as deliver, \
                  patch("sys.stdin", new=payload):
@@ -621,26 +799,26 @@ class SpawnLifecycleTests(unittest.TestCase):
         self.assertEqual(deliver.call_args.args[2], verdict)
 
     def test_handback_extraction_preserves_legacy_and_rejects_ambiguity(self) -> None:
-        from adapters.claude.lifecycle import _transcript_handbacks
+        from adapters.claude.lifecycle import _parse_transcript_handbacks
         with TemporaryDirectory() as directory:
             transcript = Path(directory) / "child.jsonl"
             transcript.write_text(json.dumps({"message": {"role": "assistant", "content": [
                 {"type": "text", "text": "legacy final output"}]}}) + "\n")
-            self.assertEqual(_transcript_handbacks(str(transcript)), (True, []))
+            self.assertEqual(_parse_transcript_handbacks(str(transcript)), (True, []))
             transcript.write_text("\n".join(json.dumps({"message": {
                 "role": "assistant", "content": [{"type": "tool_use",
                     "name": "SubagentHandback", "input": {"message": value}}]}})
                 for value in ("first", "second")) + "\n")
-            self.assertEqual(_transcript_handbacks(str(transcript)),
+            self.assertEqual(_parse_transcript_handbacks(str(transcript)),
                              (True, ["first", "second"]))
             transcript.write_text(transcript.read_text() + "{")
-            self.assertEqual(_transcript_handbacks(str(transcript)), (False, []))
+            self.assertEqual(_parse_transcript_handbacks(str(transcript)), (False, []))
 
     def test_subagent_stop_does_not_fallback_past_an_unreadable_handback_transcript(self) -> None:
         from adapters.claude.lifecycle import subagent_stop_main
         valid = "```empirica-verdict\n" + json.dumps({"verdict": "pass"}) + "\n```"
-        resolved = ("active-run", {"run": {"children": [{
-            "child_id": "ch-audit", "resource_class": "audit", "state": "pending"}]}})
+        resolved = ("active-run", _typed(_active_result(children=[{
+            "child_id": "ch-audit", "purpose": "audit", "resource_class": "audit", "state": "pending"}])).result)
         with TemporaryDirectory() as directory:
             transcript = Path(directory) / "child.jsonl"
             transcript.write_text(json.dumps({"message": {"role": "assistant",
@@ -650,6 +828,100 @@ class SpawnLifecycleTests(unittest.TestCase):
             payload = StringIO(json.dumps({"agent_type": "empirica:empirica-auditor",
                 "agent_id": "native-1", "agent_transcript_path": str(transcript),
                 "last_assistant_message": valid}))
+            with patch("adapters.claude.lifecycle._resolve", return_value=resolved), \
+                 patch("adapters.claude.lifecycle.application_bridge.trusted_audit_plan",
+                       return_value={"operation_id": "sha256:" + "2" * 64,
+                                     "role_profile": "empirica:empirica-auditor",
+                                     "argument": {}}), \
+                 patch("adapters.claude.lifecycle.application_bridge.trusted_resolve_child",
+                       return_value="ch-audit"), \
+                 patch("adapters.claude.lifecycle.AuditProtocol.observe_failure") as failed, \
+                 patch("adapters.claude.lifecycle.AuditProtocol.observe_verdict") as deliver, \
+                 patch("sys.stdin", new=payload):
+                self.assertEqual(subagent_stop_main(), 0)
+        failed.assert_called_once()
+        deliver.assert_not_called()
+
+    def test_subagent_stop_accepts_transcript_verdict_when_handback_has_no_fence(self) -> None:
+        """S1 shape: auditor wrote the verdict fence in assistant text, then
+        called SubagentHandback with prose only. The transcript verdict wins."""
+        from adapters.claude.lifecycle import subagent_stop_main
+        verdict = {"verdict": "fail", "findings": ["dossier gap"]}
+        fence = "```empirica-verdict\n" + json.dumps(verdict) + "\n```"
+        resolved = ("active-run", _typed(_active_result(children=[{
+            "child_id": "ch-audit", "purpose": "audit", "resource_class": "audit", "state": "pending"}])).result)
+        argument = {"argument_digest": "sha256:" + "1" * 64, "claims": []}
+        with TemporaryDirectory() as directory:
+            transcript = Path(directory) / "child.jsonl"
+            transcript.write_text(json.dumps({"message": {"role": "assistant",
+                "model": "auditor", "content": [
+                    {"type": "text", "text": fence},
+                    {"type": "tool_use", "name": "SubagentHandback",
+                     "input": {"message": "verdict delivered above"}}]}}) + "\n")
+            payload = StringIO(json.dumps({"agent_type": "empirica:empirica-auditor",
+                "agent_id": "native-1", "agent_transcript_path": str(transcript),
+                "last_assistant_message": "verdict delivered above"}))
+            with patch("adapters.claude.lifecycle._resolve", return_value=resolved), \
+                 patch("adapters.claude.lifecycle.application_bridge.trusted_audit_plan",
+                       return_value={"operation_id": "sha256:" + "2" * 64,
+                                     "role_profile": "empirica:empirica-auditor",
+                                     "argument": argument}), \
+                 patch("adapters.claude.lifecycle.application_bridge.trusted_resolve_child",
+                       return_value="ch-audit"), \
+                 patch("adapters.claude.lifecycle.AuditProtocol.observe_reviewer"), \
+                 patch("adapters.claude.lifecycle.AuditProtocol.observe_verdict",
+                       return_value=True) as deliver, \
+                 patch("sys.stdin", new=payload):
+                self.assertEqual(subagent_stop_main(), 0)
+        self.assertEqual(deliver.call_args.args[2], verdict)
+
+    def test_subagent_stop_fails_closed_on_two_conflicting_verdict_fences(self) -> None:
+        """Negative control: two different valid fences in assistant text, handback
+        prose only → two different verdicts in the fallback scan → fail closed."""
+        from adapters.claude.lifecycle import subagent_stop_main
+        verdict_a = {"verdict": "pass", "findings": ["ok"]}
+        verdict_b = {"verdict": "fail", "findings": ["nope"]}
+        fence_a = "```empirica-verdict\n" + json.dumps(verdict_a) + "\n```"
+        fence_b = "```empirica-verdict\n" + json.dumps(verdict_b) + "\n```"
+        resolved = ("active-run", _typed(_active_result(children=[{
+            "child_id": "ch-audit", "purpose": "audit", "resource_class": "audit", "state": "pending"}])).result)
+        with TemporaryDirectory() as directory:
+            transcript = Path(directory) / "child.jsonl"
+            transcript.write_text(json.dumps({"message": {"role": "assistant",
+                "model": "auditor", "content": [
+                    {"type": "text", "text": fence_a + "\n" + fence_b},
+                    {"type": "tool_use", "name": "SubagentHandback",
+                     "input": {"message": "verdict delivered above"}}]}}) + "\n")
+            payload = StringIO(json.dumps({"agent_type": "empirica:empirica-auditor",
+                "agent_id": "native-1", "agent_transcript_path": str(transcript)}))
+            with patch("adapters.claude.lifecycle._resolve", return_value=resolved), \
+                 patch("adapters.claude.lifecycle.application_bridge.trusted_audit_plan",
+                       return_value={"operation_id": "sha256:" + "2" * 64,
+                                     "role_profile": "empirica:empirica-auditor",
+                                     "argument": {}}), \
+                 patch("adapters.claude.lifecycle.application_bridge.trusted_resolve_child",
+                       return_value="ch-audit"), \
+                 patch("adapters.claude.lifecycle.AuditProtocol.observe_failure") as failed, \
+                 patch("adapters.claude.lifecycle.AuditProtocol.observe_verdict") as deliver, \
+                 patch("sys.stdin", new=payload):
+                self.assertEqual(subagent_stop_main(), 0)
+        failed.assert_called_once()
+        deliver.assert_not_called()
+
+    def test_subagent_stop_fails_closed_when_handback_prose_and_no_fence_anywhere(self) -> None:
+        """Negative control: handback has prose, no fence in transcript or handback."""
+        from adapters.claude.lifecycle import subagent_stop_main
+        resolved = ("active-run", _typed(_active_result(children=[{
+            "child_id": "ch-audit", "purpose": "audit", "resource_class": "audit", "state": "pending"}])).result)
+        with TemporaryDirectory() as directory:
+            transcript = Path(directory) / "child.jsonl"
+            transcript.write_text(json.dumps({"message": {"role": "assistant",
+                "model": "auditor", "content": [
+                    {"type": "text", "text": "Some analysis."},
+                    {"type": "tool_use", "name": "SubagentHandback",
+                     "input": {"message": "verdict delivered above"}}]}}) + "\n")
+            payload = StringIO(json.dumps({"agent_type": "empirica:empirica-auditor",
+                "agent_id": "native-1", "agent_transcript_path": str(transcript)}))
             with patch("adapters.claude.lifecycle._resolve", return_value=resolved), \
                  patch("adapters.claude.lifecycle.application_bridge.trusted_audit_plan",
                        return_value={"operation_id": "sha256:" + "2" * 64,
@@ -707,6 +979,127 @@ class SpawnLifecycleTests(unittest.TestCase):
         }))
         with patch("sys.stdin", new=payload):
             self.assertEqual(spawn_main(), 0)
+
+
+class ObservationalHookDiagnosticTests(unittest.TestCase):
+    """Host-observational hooks exit 0 on failure and say so on stderr (Stop still gates)."""
+
+    AUDITOR = "empirica:empirica-auditor"
+
+    CASES = (
+        ("restore_main", {}, "SessionStart:compact restore"),
+        ("agent_failure_main",
+         {"tool_input": {"subagent_type": AUDITOR}}, "PostToolUseFailure"),
+        ("subagent_start_main",
+         {"agent_type": AUDITOR, "agent_id": "native-1"}, "SubagentStart"),
+        ("subagent_stop_main",
+         {"agent_type": AUDITOR, "agent_id": "native-1"}, "SubagentStop"),
+    )
+
+    def _run_hook(self, hook: str, payload: dict, **patches) -> tuple[int, str, str]:
+        err, out = StringIO(), StringIO()
+        with patch("sys.stdin", new=StringIO(json.dumps(payload))), \
+                patch("sys.stderr", new=err), patch("sys.stdout", new=out):
+            if "resolve" in patches:
+                with patch.object(lifecycle, "dispatch_resolve", **patches["resolve"]):
+                    code = getattr(lifecycle, hook)()
+            else:
+                with patch("adapters.claude.lifecycle._resolve", **patches["_resolve"]):
+                    code = getattr(lifecycle, hook)()
+        return code, err.getvalue(), out.getvalue()
+
+    def test_real_resolution_failure_reports_one_diagnostic_line_and_exits_zero(self) -> None:
+        """Patch dispatch_resolve (not _resolve) so the resolution layer cannot swallow the failure."""
+        for hook, payload, name in self.CASES:
+            with self.subTest(hook=hook):
+                code, stderr, stdout = self._run_hook(
+                    hook, payload,
+                    resolve={"side_effect": RuntimeError("transport broke\nwith   spaces")})
+                self.assertEqual(code, 0)
+                self.assertEqual(
+                    stderr,
+                    f"empirica {name} hook failed: RuntimeError: transport broke with spaces\n")
+                self.assertEqual(stdout, "")
+
+    def test_genuine_no_run_stays_silent(self) -> None:
+        response = _typed({"type": "Inert", "reason": "no_run"}, "claude-resolve")
+        for hook, payload, _ in self.CASES:
+            with self.subTest(hook=hook):
+                code, stderr, stdout = self._run_hook(
+                    hook, payload, resolve={"return_value": response})
+                self.assertEqual((code, stderr, stdout), (0, "", ""))
+
+    def test_each_observational_hook_reports_one_diagnostic_line_and_exits_zero(self) -> None:
+        """Downstream (post-resolution) failures reach the same single handler."""
+        for hook, payload, name in self.CASES:
+            with self.subTest(hook=hook):
+                code, stderr, _ = self._run_hook(
+                    hook, payload, _resolve={"side_effect": RuntimeError("boom\nwith   spaces")})
+                self.assertEqual(code, 0)
+                self.assertEqual(
+                    stderr,
+                    f"empirica {name} hook failed: RuntimeError: boom with spaces\n")
+
+    def test_diagnostic_is_one_line_without_traceback(self) -> None:
+        line = lifecycle.observational_diagnostic("SubagentStart", ValueError("a\n b"))
+        self.assertEqual(line, "empirica SubagentStart hook failed: ValueError: a b")
+        self.assertNotIn("\n", line)
+
+
+class TranscriptIdentityTests(unittest.TestCase):
+    def _observe(self, rows):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "child.jsonl"
+            path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+            models, final = lifecycle._parse_transcript_contents(str(path))
+            return (models[0] if len(models) == 1 else None), final
+
+    def test_single_served_model_ignores_synthetic_rows(self):
+        rows = [
+            {"message": {"role": "assistant", "model": "<synthetic>", "content": "retry"}},
+            {"message": {"role": "assistant", "model": "eu.anthropic.claude-opus-4-8",
+                         "content": "verdict"}},
+        ]
+        self.assertEqual(self._observe(rows), ("eu.anthropic.claude-opus-4-8", "verdict"))
+
+    def test_empty_string_model_rows_are_not_served_models(self):
+        rows = [
+            {"message": {"role": "assistant", "model": "", "content": "retry"}},
+            {"message": {"role": "assistant", "model": "eu.anthropic.claude-opus-4-8",
+                         "content": "verdict"}},
+        ]
+        self.assertEqual(self._observe(rows), ("eu.anthropic.claude-opus-4-8", "verdict"))
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "child.jsonl"
+            path.write_text(json.dumps(rows[0]) + "\n")
+            self.assertEqual(lifecycle._parse_transcript_contents(str(path)), ([], "retry"))
+
+    def test_synthetic_only_and_mid_transcript_switch_are_unobservable(self):
+        synthetic = [{"message": {"role": "assistant", "model": "<synthetic>",
+                                    "content": "error"}}]
+        self.assertEqual(self._observe(synthetic), (None, "error"))
+        switched = [
+            {"message": {"role": "assistant", "model": "model-a", "content": "a"}},
+            {"message": {"role": "assistant", "model": "model-b", "content": "b"}},
+        ]
+        self.assertEqual(self._observe(switched), (None, "b"))
+
+    def test_malformed_transcript_discards_partial_observation(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "child.jsonl"
+            path.write_text(json.dumps({"message": {"role": "assistant", "model": "model-a"}})
+                            + "\n{broken\n")
+            self.assertEqual(lifecycle._parse_transcript_contents(str(path)), ([], None))
+
+    def test_subagent_cannot_admit_main_author_evidence(self):
+        payload = StringIO(json.dumps({
+            "agent_id": "child-1", "tool_name": "mcp__empirica__empirica_observe",
+            "tool_input": {"action": {"kind": "research"}},
+        }))
+        stderr = StringIO()
+        with patch("sys.stdin", new=payload), patch("sys.stderr", new=stderr):
+            self.assertEqual(lifecycle.route_main(), 2)
+        self.assertIn("subagent producer is not the main author", stderr.getvalue())
 
 
 if __name__ == "__main__":

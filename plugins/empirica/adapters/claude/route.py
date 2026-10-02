@@ -8,9 +8,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from adapters.public_tools import TOOL_NAMES
+
 from .correlation import PROTOCOL, request_id as new_request_id
 from .selector import context_from_payload
-from .transport import BridgeTransport, Transport
+from .transport import Transport, dispatch_with
 
 INVESTIGATIVE_TOOLS = frozenset({
     "Read", "Glob", "Grep", "Bash", "WebFetch", "WebSearch", "NotebookRead", "LSP",
@@ -58,7 +60,12 @@ def build_investigation_request(
 ) -> dict | None:
     """Build the first-investigation operation for every investigative native tool."""
     context_from_payload(payload)
-    if payload.get("tool_name") not in INVESTIGATIVE_TOOLS:
+    name = payload.get("tool_name")
+    # Unknown tools (including third-party MCP research and writers) fail closed.
+    # Only exact preparation/public names are exempt; suffix matching can spoof a server.
+    public = {prefix + tool for prefix in ("", "mcp__plugin_empirica_empirica__")
+              for tool in TOOL_NAMES}
+    if not isinstance(name, str) or name in public | {"ToolSearch", "AskUserQuestion"}:
         return None
     return _request(
         payload, run_id, {"kind": "investigate"}, "investigate", correlation_id,
@@ -84,7 +91,7 @@ def dispatch_investigation(
     request = build_investigation_request(payload, run_id, correlation_id=correlation_id)
     if request is None:
         return None
-    return (transport if transport is not None else BridgeTransport()).dispatch(request)
+    return dispatch_with(transport, request)
 
 
 def dispatch_route_announcement(
@@ -94,4 +101,4 @@ def dispatch_route_announcement(
     request = build_route_announcement_request(
         payload, run_id, reason=reason, correlation_id=correlation_id,
     )
-    return (transport if transport is not None else BridgeTransport()).dispatch(request)
+    return dispatch_with(transport, request)

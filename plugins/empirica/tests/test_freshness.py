@@ -13,6 +13,7 @@ AST/import no-I/O proof (14), and the historical 2F5 reversal without core I/O (
 import ast
 import dataclasses
 import hashlib
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -352,6 +353,23 @@ class CoreFactsImmutability(unittest.TestCase):
             ActiveSpikeHead(_d("h"), "c", "", (FileBinding("a", _d("x")),))
         with self.assertRaises(DigestContractError):
             ActiveSpikeHead("not-a-digest", "c", "r", (FileBinding("a", _d("x")),))
+
+
+    def test_head_claim_id_uses_the_one_claim_id_pattern(self):
+        binding = (FileBinding("a", _d("x")),)
+        for accepted in ("A", "a.b-C_9", "x" * 64):
+            with self.subTest(accepted=accepted):
+                self.assertEqual(ActiveSpikeHead(_d("h"), accepted, "r", binding).claim_id, accepted)
+        for rejected in ("", "x" * 65, "a b", "claim:C0", "caf\u00e9", "a\nb", "C0\n",
+                         "<<<EMPIRICA_UNTRUSTED_DATA>>>", None, 7):
+            with self.subTest(rejected=rejected), self.assertRaises(FreshnessContractError):
+                ActiveSpikeHead(_d("h"), rejected, "r", binding)
+
+    def test_core_claim_id_literal_is_the_contract_pattern(self):
+        shared = json.loads((PLUGIN.parents[1] / "contracts" / "empirica" / "v2"
+                             / "shared-defs.json").read_text(encoding="utf-8"))
+        self.assertEqual(shared["$defs"]["claimId"],
+                         {"type": "string", "pattern": fr.CLAIM_ID_PATTERN})
 
 
 # --- proof 13: exit code is sole gate authority --------------------------------

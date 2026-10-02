@@ -1,0 +1,329 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://siffran.local/empirica/v2/shared-defs.json",
+  "$defs": {
+    "approvalIngress": {
+      "enum": [
+        "unavailable",
+        "mcp_elicitation",
+        "pi_ui"
+      ]
+    },
+    "approvalCapability": {
+      "enum": [
+        "unavailable",
+        "human_configuration"
+      ]
+    },
+    "claimId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+    },
+    "invocationProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host",
+        "interactive",
+        "signal",
+        "delegation"
+      ],
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "interactive": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "signal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "delegation": {
+          "type": "boolean"
+        }
+      }
+    },
+    "identityObservation": {
+      "type": "object",
+      "required": [
+        "identity",
+        "provider_id",
+        "model_id",
+        "policy_version",
+        "source",
+        "observed_by"
+      ],
+      "properties": {
+        "identity": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "provider_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "model_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "policy_version": {
+          "const": "model-identity/1"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "observed_by": {
+          "const": "host"
+        }
+      },
+      "description": "Open only for allOf extension; every direct $ref use must set unevaluatedProperties: false."
+    },
+    "graphClaimItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "text",
+        "kind",
+        "gating"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/claimId"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "kind": {
+          "enum": [
+            "ordinary",
+            "needs-experiment",
+            "needs-decision"
+          ]
+        },
+        "gating": {
+          "type": "boolean"
+        }
+      },
+      "description": "Closed author-supplied claim vertex for a graph action; matches core.evaluation.valid_graph. Uniqueness, root membership, acyclicity and reachability stay core-only."
+    },
+    "graphEdgeItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "to",
+        "type"
+      ],
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/claimId"
+        },
+        "to": {
+          "$ref": "#/$defs/claimId"
+        },
+        "type": {
+          "const": "SupportedBy"
+        }
+      },
+      "description": "Closed author-supplied support edge for a graph action."
+    },
+    "graphPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "root",
+        "claims",
+        "edges"
+      ],
+      "properties": {
+        "root": {
+          "$ref": "#/$defs/claimId"
+        },
+        "claims": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/graphClaimItem"
+          }
+        },
+        "edges": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/graphEdgeItem"
+          }
+        }
+      },
+      "description": "Closed graph action payload owned by the SSOT and projected into the model-facing tool schema. Defence in depth; core.evaluation.valid_graph remains authoritative."
+    },
+    "governancePresentation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dialog",
+        "scope"
+      ],
+      "properties": {
+        "dialog": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "epoch",
+            "control_mode",
+            "state",
+            "reviews_left",
+            "goal",
+            "rationale",
+            "rationale_label",
+            "amendment_warning",
+            "invocation",
+            "budgets"
+          ],
+          "properties": {
+            "epoch": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "control_mode": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            },
+            "reviews_left": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "proposal",
+                "total"
+              ],
+              "properties": {
+                "proposal": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "total": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "goal": {
+              "type": "string"
+            },
+            "rationale": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 3600,
+                  "pattern": "\\S"
+                }
+              ]
+            },
+            "rationale_label": {
+              "type": "string",
+              "minLength": 1
+            },
+            "amendment_warning": {
+              "type": "string",
+              "minLength": 1
+            },
+            "invocation": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/invocationProvenance"
+                }
+              ]
+            },
+            "budgets": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "key",
+                  "label",
+                  "short",
+                  "help",
+                  "value",
+                  "used",
+                  "minimum",
+                  "maximum"
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "short": {
+                    "type": "string"
+                  },
+                  "help": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "integer"
+                  },
+                  "used": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "minimum": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "maximum": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/graphPayload"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

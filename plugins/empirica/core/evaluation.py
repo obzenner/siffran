@@ -1,19 +1,23 @@
 """Pure command evaluation over immutable Empirica snapshots."""
 from __future__ import annotations
 
-import hashlib
-import json
 from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from functools import partial
 from types import MappingProxyType
 from typing import Any
 
-from .freshness import ActiveSpikeHead, FileBinding, evaluate_freshness
+from .canonical import canonical_digest
+from .freshness import ActiveSpikeHead, FileBinding, evaluate_freshness, valid_claim_id
 from .run import OperationalState
+from . import governance
 
-SPAWN_BUDGET = {"investigation": ("max_spawns", "spawns_used", "spawn"),
-                "audit": ("max_audit_spawns", "audit_spawns_used", "audit_spawn")}
+SPAWN_BUDGET = {"investigation": ("max_spawns", *governance.BUDGETS["max_spawns"]),
+                "audit": ("max_audit_spawns", *governance.BUDGETS["max_audit_spawns"])}
+HOST_TIER_UNSUPPORTED = {"foreground_only": "host.async_unsupported",
+                         "observational": "host.audit_output_unobservable"}
+READ_COMMANDS = frozenset({"GetRun", "GetArgument", "RestoreRun"})
 
 
 def _plain(value: Any) -> Any:
@@ -33,8 +37,7 @@ def _freeze(value: Any) -> Any:
 
 
 def digest(value: Any) -> str:
-    raw = json.dumps(_plain(value), sort_keys=True, separators=(",", ":")).encode()
-    return "sha256:" + hashlib.sha256(raw).hexdigest()
+    return canonical_digest(_plain(value))
 
 
 def artifact(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -42,11 +45,37 @@ def artifact(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
     return {"artifact_id": digest(body), "body": body}
 
 
+def _producer(state: OperationalState) -> dict[str, Any] | None:
+    """Copy the trusted current author observation without interpreting identity."""
+    author = state.governance.get("context", {}).get("author")
+    return _plain(author) if isinstance(author, Mapping) else None
+
+
+@dataclass(frozen=True)
+class ContractView:
+    reason_metadata: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...]
+    bootstrap_requirements: tuple[tuple[str, str, str], ...]
+    audit_obligation: tuple[str, str]
+    bootstrap_operations: tuple[tuple[str, tuple[tuple[str, str], ...]], ...]
+    governance_controls: Mapping[str, Any]
+    recovery_exclusions: Mapping[str, tuple[str, ...]]
+    late_route_must: str
+    default_next_action: str
+    untrusted_delimiters: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "governance_controls", _freeze(self.governance_controls))
+        object.__setattr__(self, "recovery_exclusions", _freeze(self.recovery_exclusions))
+        object.__setattr__(self, "untrusted_delimiters", _freeze(self.untrusted_delimiters))
+
+
 @dataclass(frozen=True)
 class EvaluationSnapshot:
     state: OperationalState
     history: tuple[dict[str, Any], ...]
     graph: dict[str, Any] | None
+    contract: ContractView
+    command: dict[str, Any]
     observations: tuple[Any, ...] = ()
     observation_basis_id: str = ""
     observation_digest: str = ""
@@ -57,12 +86,43 @@ class EvaluationSnapshot:
     profile_id: str = ""
     host_tier: str = "observational"
     host_audit_execution: str = "unavailable"
-    command: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "history", _freeze(self.history))
         object.__setattr__(self, "graph", _freeze(self.graph))
         object.__setattr__(self, "command", _freeze(self.command))
+
+    @property
+    def bootstrap_requirements(self):
+        return self.contract.bootstrap_requirements
+
+    @property
+    def bootstrap_operations(self):
+        return self.contract.bootstrap_operations
+
+    @property
+    def audit_obligation(self):
+        return self.contract.audit_obligation
+
+    @property
+    def reason_metadata(self):
+        return self.contract.reason_metadata
+
+    @property
+    def governance_controls(self):
+        return self.contract.governance_controls
+
+    @property
+    def late_route_must(self):
+        return self.contract.late_route_must
+
+    @property
+    def default_next_action(self):
+        return self.contract.default_next_action
+
+    @property
+    def untrusted_delimiters(self):
+        return self.contract.untrusted_delimiters
 
 
 @dataclass(frozen=True)
@@ -76,6 +136,8 @@ class ClaimDerivation:
     states: Mapping[str, str]
     blockers: Mapping[str, str]
     scope: tuple[str, ...]
+    stale_heads: Mapping[str, ActiveSpikeHead]
+    freshness_heads: Mapping[str, ActiveSpikeHead]
 
 
 @dataclass(frozen=True)
@@ -85,23 +147,28 @@ class Decision:
     reason_code: str | None = None
     parameters: tuple[tuple[str, Any], ...] = ()
     affected_obligation_id: str | None = None
+    observations_consulted: bool = False
 
 
 def valid_graph(value: Any) -> bool:
+    """Whether ``value`` is a well-formed claim graph (closed shape, bounded claims, edges)."""
     if not isinstance(value, Mapping) or set(value) != {"root", "claims", "edges"}:
         return False
     claims = value.get("claims")
-    if not isinstance(value.get("root"), str) or not isinstance(claims, (list, tuple)) or not claims:
+    if not isinstance(value.get("root"), str) or not isinstance(claims, (list, tuple)) or not 1 <= len(claims) <= 32:
         return False
     ids: list[str] = []
     for claim in claims:
         if (not isinstance(claim, Mapping) or set(claim) != {"id", "text", "gating", "kind"}
-                or not isinstance(claim["id"], str) or not claim["id"] or not isinstance(claim["text"], str)
+                or not valid_claim_id(claim["id"]) or not isinstance(claim["text"], str)
+                or not 1 <= len(claim["text"]) <= 2048
                 or type(claim["gating"]) is not bool
                 or claim["kind"] not in {"ordinary", "needs-experiment", "needs-decision"}):
             return False
         ids.append(claim["id"])
     if len(ids) != len(set(ids)) or value["root"] not in ids or not isinstance(value["edges"], (list, tuple)):
+        return False
+    if len(value["edges"]) > 128:
         return False
     children: dict[str, list[str]] = {claim_id: [] for claim_id in ids}
     seen_edges: set[tuple[str, str]] = set()
@@ -164,10 +231,12 @@ def frozen_scope_invalid(state: OperationalState, graph: Mapping[str, Any] | Non
 
 
 def claim_digest(claim: dict[str, Any]) -> str:
+    """Digest binding a claim's id and text; evidence for an edited claim no longer matches it."""
     return digest({"claim_id": claim["id"], "text": claim["text"]})
 
 
 def active_evidence(snapshot: EvaluationSnapshot, claim: dict[str, Any]) -> list[dict[str, Any]]:
+    """Research and spike artifacts bound to the claim's current digest; only the latest spike is active."""
     cd = claim_digest(claim)
     evidence = [a for a in snapshot.history if a.get("kind") in {"research", "spike"} and a.get("claim_id") == claim["id"] and a.get("claim_digest") == cd]
     spikes = [a for a in evidence if a["kind"] == "spike"]
@@ -175,23 +244,49 @@ def active_evidence(snapshot: EvaluationSnapshot, claim: dict[str, Any]) -> list
     return [a for a in evidence if a["kind"] == "research"] + active_spike
 
 
-def active_spike_heads(snapshot: EvaluationSnapshot) -> tuple[ActiveSpikeHead, ...]:
-    if snapshot.graph is None:
+def active_spike_heads(
+    history: tuple[dict[str, Any], ...], graph: dict[str, Any] | None,
+) -> tuple[ActiveSpikeHead, ...]:
+    """Return each claim's latest current spike in observable graph order."""
+    if graph is None:
         return ()
-    heads = []
-    for claim in snapshot.graph["claims"]:
-        spikes = [a for a in active_evidence(snapshot, claim) if a["kind"] == "spike"]
-        if spikes:
-            item = spikes[-1]
-            bindings = tuple(FileBinding(b["path"], b["sha256"]) for b in item["file_bindings"])
-            heads.append(ActiveSpikeHead(item["artifact_id"], claim["id"], item["harness_request_id"], bindings))
-    return tuple(heads)
+    return tuple(
+        ActiveSpikeHead(item["artifact_id"], claim["id"], item["harness_request_id"],
+                        tuple(FileBinding(row["path"], row["sha256"])
+                              for row in item["file_bindings"]))
+        for claim in graph["claims"]
+        if (spikes := [row for row in history
+                       if row.get("kind") == "spike"
+                       and row.get("claim_id") == claim["id"]
+                       and row.get("claim_digest") == claim_digest(claim)])
+        for item in spikes[-1:]
+    )
 
 
-def stale_artifact_ids(snapshot: EvaluationSnapshot) -> set[str]:
+def _freshness_sensitive(snapshot: EvaluationSnapshot, claim: Mapping[str, Any]) -> bool:
+    """Whether this claim's current state depends on workspace freshness."""
+    if claim["kind"] != "needs-experiment":
+        return False
+    evidence = active_evidence(snapshot, claim)
+    outcomes = {item["outcome"] for item in evidence if item["kind"] == "research"}
+    spikes = [item for item in evidence if item["kind"] == "spike"]
+    return outcomes == {"supporting"} and bool(spikes and spikes[-1]["outcome"] == "pass")
+
+
+def claim_freshness_relevant(snapshot: EvaluationSnapshot) -> bool:
+    """Whether deriving current claim state must consult workspace observations."""
+    return snapshot.graph is not None and any(
+        _freshness_sensitive(snapshot, claim) for claim in snapshot.graph["claims"])
+
+
+def evaluate_stale_heads(snapshot: EvaluationSnapshot) -> Mapping[str, ActiveSpikeHead]:
+    """Evaluate bound-file freshness independently of claim gate relevance."""
     if not snapshot.observations:
-        return set()
-    return {head.artifact_id for head in evaluate_freshness(active_spike_heads(snapshot), snapshot.observations).stale_heads}
+        return MappingProxyType({})
+    freshness = evaluate_freshness(
+        active_spike_heads(snapshot.history, snapshot.graph), snapshot.observations
+    )
+    return MappingProxyType({head.artifact_id: head for head in freshness.stale_heads})
 
 
 def claim_conflicted(snapshot: EvaluationSnapshot, claim: dict[str, Any]) -> bool:
@@ -207,16 +302,15 @@ def effective_scope_ids(snapshot: EvaluationSnapshot) -> tuple[str, ...]:
 
 
 def local_claim_state(snapshot: EvaluationSnapshot, claim: dict[str, Any],
-                      stale: set[str] | None = None) -> str:
+                      stale: set[str]) -> str:
     evidence = active_evidence(snapshot, claim)
     research = [a for a in evidence if a["kind"] == "research"]
     supporting = any(a["outcome"] == "supporting" for a in research)
     refuting = any(a["outcome"] == "refuting" for a in research)
     spikes = [a for a in evidence if a["kind"] == "spike"]
     spike_failed = bool(spikes and spikes[-1]["outcome"] == "fail")
-    spike_ok = bool(spikes and spikes[-1]["outcome"] == "pass"
-                    and spikes[-1]["artifact_id"] not in (
-                        stale_artifact_ids(snapshot) if stale is None else stale))
+    sensitive = _freshness_sensitive(snapshot, claim)
+    spike_ok = bool(sensitive and spikes[-1]["artifact_id"] not in stale)
     if supporting and refuting and not spike_failed:
         return "open"
     if spike_failed or refuting:
@@ -228,9 +322,63 @@ def local_claim_state(snapshot: EvaluationSnapshot, claim: dict[str, Any],
     return "approved" if approved else "open"
 
 
-def derive_claims(snapshot: EvaluationSnapshot) -> ClaimDerivation:
+def claim_blockers(snapshot: EvaluationSnapshot,
+                   derivation: ClaimDerivation | None = None) -> tuple[dict[str, Any], ...]:
+    """Derive every scoped claim blocker in stable graph order.
+
+    ``claim_id`` is the scoped claim whose approval is blocked; ``target_claim_id``
+    follows dependency redirection to the claim that must actually be discharged.
+    This is the sole claim-level blocker classification used by both the gate and
+    public projections.
+    """
     if snapshot.graph is None:
-        return ClaimDerivation(MappingProxyType({}), MappingProxyType({}), ())
+        return ()
+    derivation = derive_claims(snapshot) if derivation is None else derivation
+    unresolved = [claim_id for claim_id in derivation.scope
+                  if derivation.states[claim_id] != "approved"]
+    if not unresolved:
+        return ()
+    claims = {claim["id"]: claim for claim in snapshot.graph["claims"]}
+    blockers: list[dict[str, Any]] = []
+    for claim_id in unresolved:
+        target_id = derivation.blockers.get(claim_id, claim_id)
+        claim = claims[target_id]
+        state = derivation.states[target_id]
+        evidence = active_evidence(snapshot, claim)
+        research = [item for item in evidence if item["kind"] == "research"]
+        spikes = [item for item in evidence if item["kind"] == "spike"]
+        parameters: dict[str, Any] = {}
+        if state == "discarded":
+            reason = "claim.refuted"
+        elif state == "blocked":
+            reason = "claim.human_decision"
+        elif claim_conflicted(snapshot, claim):
+            reason = "evidence.conflict"
+        elif (any(item["outcome"] == "supporting" for item in research)
+              and claim["kind"] == "needs-experiment"):
+            sensitive = _freshness_sensitive(snapshot, claim)
+            stale_head = (derivation.stale_heads.get(spikes[-1]["artifact_id"])
+                          if sensitive else None)
+            if stale_head is not None:
+                parameters = {"changes": [{"path": change.path, "state": change.state.value}
+                                           for change in stale_head.changes]}
+            reason = "claim.spike_stale" if stale_head is not None else "claim.spike_missing"
+        else:
+            historical_research = any(
+                item.get("kind") == "research" and item.get("claim_id") == target_id
+                for item in snapshot.history)
+            reason = ("claim.research_unbound" if historical_research
+                      else "claim.research_missing")
+        blockers.append({"claim_id": claim_id, "target_claim_id": target_id,
+                         "reason": reason, "parameters": parameters})
+    return tuple(blockers)
+
+
+def _derive_claims(snapshot: EvaluationSnapshot,
+                   freshness_heads: Mapping[str, ActiveSpikeHead]) -> ClaimDerivation:
+    if snapshot.graph is None:
+        empty = MappingProxyType({})
+        return ClaimDerivation(empty, empty, (), empty, empty)
     claims = snapshot.graph["claims"]
     ids = [claim["id"] for claim in claims]
     index = {claim_id: position for position, claim_id in enumerate(ids)}
@@ -248,7 +396,10 @@ def derive_claims(snapshot: EvaluationSnapshot) -> ClaimDerivation:
             indegree[child] -= 1
             if indegree[child] == 0:
                 ready.append(child)
-    stale = stale_artifact_ids(snapshot)
+    # Freshness changes are always carried when requested for projection; only relevant claims
+    # consume them when deriving gate state.
+    stale_heads = freshness_heads if claim_freshness_relevant(snapshot) else MappingProxyType({})
+    stale = set(stale_heads)
     local = {claim["id"]: local_claim_state(snapshot, claim, stale) for claim in claims}
     scoped = effective_scope_ids(snapshot)
     scope = set(scoped)
@@ -268,20 +419,89 @@ def derive_claims(snapshot: EvaluationSnapshot) -> ClaimDerivation:
         else:
             states[claim_id] = "open"
             blockers[claim_id] = blockers.get(failed, failed)
-    return ClaimDerivation(MappingProxyType(states), MappingProxyType(blockers), scoped)
+    return ClaimDerivation(MappingProxyType(states), MappingProxyType(blockers), scoped,
+                           stale_heads, freshness_heads)
 
 
-def _decision(snapshot: EvaluationSnapshot, state: OperationalState, result: str = "Allow", artifacts: tuple[dict[str, Any], ...] = (), reason: str | None = None, parameters: dict[str, Any] | None = None, affected: str | None = None) -> Decision:
-    return Decision(result, StateIntent(state, artifacts), reason, tuple((parameters or {}).items()), affected)
+def derive_claims(snapshot: EvaluationSnapshot) -> ClaimDerivation:
+    """Derive gate state, consulting freshness only when claim state depends on it."""
+    heads = (evaluate_stale_heads(snapshot) if claim_freshness_relevant(snapshot)
+             else MappingProxyType({}))
+    return _derive_claims(snapshot, heads)
+
+
+def derive_claims_for_projection(snapshot: EvaluationSnapshot) -> ClaimDerivation:
+    """Derive claims while always carrying observable freshness for an honest RunView."""
+    return _derive_claims(snapshot, evaluate_stale_heads(snapshot))
+
+
+def _bootstrap_facts(snapshot: EvaluationSnapshot) -> dict[str, bool]:
+    """Primitive bootstrap facts: pure core code, never contract expressions."""
+    state, governed = snapshot.state, snapshot.state.governance
+    return {
+        "route.recorded": state.route_stamp is not None,
+        "graph.selected": snapshot.graph is not None,
+        "governance.approved": snapshot.graph is not None and governance.admission(governed) is None,
+        "investigation.recorded": state.investigation_stamp is not None,
+    }
+
+
+def bootstrap_precondition(snapshot: EvaluationSnapshot, operation: str) -> tuple[str, str] | None:
+    """Return the first unmet member of the finite, application-supplied operation binding."""
+    operations = dict(snapshot.bootstrap_operations)
+    if operation not in operations:
+        raise ValueError(f"unknown bootstrap operation: {operation}")
+    facts = _bootstrap_facts(snapshot)
+    return next(((predicate, (governance.admission(snapshot.state.governance) or reason)
+                  if predicate == "governance.approved" else reason)
+                 for predicate, reason in operations[operation] if not facts[predicate]), None)
+
+
+def bootstrap_status(snapshot: EvaluationSnapshot) -> dict[str, Any]:
+    """Bootstrap obligations, ordered ``next_actions`` (empty for a terminal run or once bootstrap is complete), and readiness flags."""
+    facts = _bootstrap_facts(snapshot)
+    state, governed = snapshot.state, snapshot.state.governance
+    active = []
+    for predicate, obligation_id, must in snapshot.bootstrap_requirements:
+        if ((predicate == "governance.approved" and not facts["graph.selected"])
+                or (predicate == "investigation.recorded" and not facts["governance.approved"])):
+            continue
+        active.append({"id": obligation_id, "must": must,
+                       "status": "satisfied" if facts[predicate] else "residual"})
+    actions = []
+    active_run = state.status == "active"
+    if active_run:
+        if not facts["route.recorded"]:
+            actions.append("route.record")
+        if not facts["graph.selected"]:
+            actions.append("graph.record")
+        elif not facts["governance.approved"]:
+            if governance.interaction_error(governed):
+                actions.append("residual.accept")
+            else:
+                actions.append("governance.propose")
+        elif facts["route.recorded"] and not facts["investigation.recorded"]:
+            actions.append("investigation.record")
+    request_ready = active_run and bootstrap_precondition(snapshot, "configure_run") is None
+    display_ready = (active_run and bootstrap_precondition(snapshot, "governance.present") is None
+                     and governance.interaction_error(governed) is None
+                     and governance.sized(governed))
+    return {"active": active, "next_actions": actions,
+            "request_ready": request_ready, "display_ready": display_ready}
+
+
+def _decision(snapshot: EvaluationSnapshot, state: OperationalState, result: str = "Allow", artifacts: tuple[dict[str, Any], ...] = (), reason: str | None = None, parameters: dict[str, Any] | None = None, affected: str | None = None, *, observations_consulted: bool = False) -> Decision:
+    return Decision(result, StateIntent(state, artifacts), reason, tuple((parameters or {}).items()),
+                    affected, observations_consulted)
 
 
 def _investigation_block(snapshot: EvaluationSnapshot) -> Decision | None:
-    state = snapshot.state
-    if state.route_stamp is None:
-        return _decision(snapshot, state, "Block", reason="route.required",
-                         affected="obligation.route")
-    if state.investigation_stamp is None:
-        return _decision(snapshot, state, "Block", reason="investigation.required",
+    if missing := bootstrap_precondition(snapshot, "investigate"):
+        predicate, reason = missing
+        affected = "obligation.route" if predicate == "route.recorded" else None
+        return _decision(snapshot, snapshot.state, "Block", reason=reason, affected=affected)
+    if snapshot.state.investigation_stamp is None:
+        return _decision(snapshot, snapshot.state, "Block", reason="investigation.required",
                          affected="obligation.investigation")
     return None
 
@@ -306,6 +526,7 @@ def plan_spike_request(snapshot: EvaluationSnapshot, action: Mapping[str, Any]) 
         "command": action["command"], "command_digest": digest(action["command"]),
         "dependent_files": sorted(action["dependent_files"]),
         "prerequisite_research_ids": [a["artifact_id"] for a in research],
+        "producer": _producer(state),
         "route_stamp": state.route_stamp, "investigation_stamp": state.investigation_stamp,
     })
     return _decision(snapshot, state, artifacts=(sealed,))
@@ -333,6 +554,7 @@ def plan_spike_result(snapshot: EvaluationSnapshot, request_body: Mapping[str, A
         "exit_code": facts.exit_code, "spike_gate": facts.gate.value,
         "outcome": "pass" if facts.exit_code == 0 else "fail",
         "supersedes": prior[-1]["artifact_id"] if prior else None,
+        "producer": request_body["producer"],
         "route_stamp": state.route_stamp, "investigation_stamp": state.investigation_stamp,
     })
     return _decision(snapshot, state, artifacts=(result,))
@@ -350,53 +572,34 @@ def covered_artifact_ids(snapshot: EvaluationSnapshot) -> list[str]:
 
 
 def valid_attribution(snapshot: EvaluationSnapshot, payload: Mapping[str, Any]) -> bool:
-    """Validate trusted identity facts against the exact current audit operation."""
-    subject = payload.get("subject_kind")
-    if subject == "covered_actor":
-        covered = list(payload.get("covered_artifact_ids", []))
-        active = set(covered_artifact_ids(snapshot))
-        return (payload.get("child_id") is None and bool(covered)
-                and len(covered) == len(set(covered)) and set(covered) == active)
-    if subject == "auditor":
-        child_id = payload.get("child_id")
-        return (payload.get("covered_artifact_ids") == []
-                and isinstance(child_id, str)
-                and any(child["child_id"] == child_id and child["resource_class"] == "audit"
-                        and child["state"] == "pending" for child in snapshot.state.children))
-    return False
+    """Validate the trusted reviewer identity against the exact audit operation."""
+    if payload.get("subject_kind") != "auditor":
+        return False
+    child_id = payload.get("child_id")
+    return (payload.get("covered_artifact_ids") == []
+            and isinstance(child_id, str)
+            and any(child["child_id"] == child_id and child["resource_class"] == "audit"
+                    and child["state"] == "pending" for child in snapshot.state.children))
 
 
-_MODEL_ALIASES = {"default", "latest", "opus", "sonnet", "haiku", "fable", "mini"}
-
-
-def identity_pair(value: Mapping[str, Any] | None) -> tuple[str, str] | None:
-    """Return a concrete dispatcher identity; tier/latest aliases are never identities."""
-    if not value or value.get("observed_by") != "host":
-        return None
-    provider, model = value.get("provider_id"), value.get("model_id")
-    if (not isinstance(provider, str) or not provider or not isinstance(model, str)
-            or not model or model.lower() in _MODEL_ALIASES):
-        return None
-    return provider, model
+def identity_pair(value: Mapping[str, Any] | None) -> str | None:
+    """Return an opaque host-observed identity class without interpreting it."""
+    identity = value.get("identity") if value and value.get("observed_by") == "host" else None
+    return identity if isinstance(identity, str) and identity else None
 
 
 def audit_attributions(
     snapshot: EvaluationSnapshot, verdict: Mapping[str, Any],
-) -> tuple[Mapping[str, Any] | None, Mapping[str, Any] | None]:
-    """Select only identities bound to this verdict child and current evidence set."""
+) -> tuple[Mapping[str, Any] | None, list[Mapping[str, Any] | None]]:
+    """Select the reviewer and per-artifact producers covered by this verdict."""
     attrs = [item for item in snapshot.history if item.get("kind") == "attribution"]
     auditor = next((item for item in reversed(attrs)
                     if item.get("subject_kind") == "auditor"
                     and item.get("child_id") == verdict.get("child_id")), None)
-    active = set(covered_artifact_ids(snapshot))
-    covered = next((item for item in reversed(attrs)
-                    if item.get("subject_kind") == "covered_actor"
-                    and item.get("child_id") is None
-                    and bool(item.get("covered_artifact_ids"))
-                    and len(item.get("covered_artifact_ids", []))
-                    == len(set(item.get("covered_artifact_ids", [])))
-                    and set(item.get("covered_artifact_ids", [])) == active), None)
-    return auditor, covered
+    by_id = {item.get("artifact_id"): item for item in snapshot.history}
+    producers = [by_id.get(artifact_id, {}).get("producer")
+                 for artifact_id in covered_artifact_ids(snapshot)]
+    return auditor, producers
 
 
 def audit_binding(snapshot: EvaluationSnapshot) -> dict[str, Any]:
@@ -430,33 +633,139 @@ def audit_operation_current(snapshot: EvaluationSnapshot, child: Mapping[str, An
     dossier = child["audit_argument"]
     reviewed = [{"claim_id": c["claim_id"], "evidence_digest": c["evidence_digest"]}
                 for c in dossier["claims"] if c["gating"] and c["state"] == "approved"]
-    return (bool(expected) and reviewed == expected["reviewed_claims"]
+    operation = digest({"run_id": snapshot.run_id, "child_id": child["child_id"],
+                        "argument_digest": dossier["argument_digest"],
+                        "governance_digest": snapshot.state.governance["proposal_digest"],
+                        "plan_revision": snapshot.state.governance["plan_revision"]})
+    return (child["audit_operation_id"] == operation and bool(expected) and reviewed == expected["reviewed_claims"]
             and all(dossier[key] == expected[key] for key in (
                 "argument_digest", "goal_digest", "frozen_scope_digest", "deferred_scope_digest")))
 
 
 def audit_passes(snapshot: EvaluationSnapshot, verdict: Mapping[str, Any]) -> bool:
     expected = audit_binding(snapshot)
-    return (bool(expected) and verdict.get("verdict") == "pass" and
+    child = next((c for c in snapshot.state.children if c["child_id"] == verdict.get("child_id")), None)
+    return (child is not None and audit_operation_current(snapshot, child) and bool(expected) and verdict.get("verdict") == "pass" and
             all(_plain(verdict.get(key)) == value for key, value in expected.items()))
 
 
+INDEPENDENCE_REASONS = {
+    "unverified": "audit.independence_unverified",
+    "mixed": "audit.producers_mixed",
+    "same_model": "audit.same_model",
+}
+
+
+def independence(snapshot: EvaluationSnapshot, verdict: Mapping[str, Any]) -> str:
+    """Classify reviewer/producer independence from opaque host identities."""
+    auditor, producers = audit_attributions(snapshot, verdict)
+    auditor_class = identity_pair(auditor)
+    producer_classes = [identity_pair(producer) for producer in producers]
+    if auditor_class is None or not producer_classes or any(value is None for value in producer_classes):
+        return "unverified"
+    if len(set(producer_classes)) != 1:
+        return "mixed"
+    return "same_model" if auditor_class == producer_classes[0] else "distinct"
+
+
+#: Audit blockers whose recovery launches a new audit child; ``audit.pending`` is absent because a
+#: pending audit needs no further spawn. These name audit-spawn exhaustion when no budget remains.
+AUDIT_SPAWN_REASONS = frozenset({"audit.required", "audit.failed", *INDEPENDENCE_REASONS.values()})
+
+
+def derivation_digest(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> str:
+    """Identify the current claim derivation for pass charging and residuals."""
+    return digest({"graph": snapshot.graph,
+                   "claims": [(claim["id"], derivation.states[claim["id"]],
+                               [item["artifact_id"] for item in active_evidence(snapshot, claim)])
+                              for claim in snapshot.graph["claims"]],
+                   "frozen": snapshot.state.frozen_claim_ids})
+
+
+def pass_budget_blocker(snapshot: EvaluationSnapshot, digest_value: str) -> dict[str, Any] | None:
+    state = snapshot.state
+    if (digest_value != state.last_derivation_digest
+            and state.budgets["passes_used"] >= state.budgets["max_passes"]):
+        return {"reason": "budget.exhausted", "parameters": {"resource": "pass"}}
+    return None
+
+
+def audit_blocker(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> dict[str, Any] | None:
+    """Derive the first audit blocker after every scoped claim is approved.
+
+    A blocker whose recovery needs a new audit spawn is named ``budget.exhausted`` once the audit
+    spawn ceiling is reached, so the author is never told to retry what the core would refuse."""
+    blocker = _audit_reason(snapshot, derivation)
+    budgets = snapshot.state.budgets
+    if (blocker is not None and blocker["reason"] in AUDIT_SPAWN_REASONS
+            and budgets["audit_spawns_used"] >= budgets["max_audit_spawns"]):
+        return {"reason": "budget.exhausted", "parameters": {"resource": "audit_spawn"}}
+    return blocker
+
+
+def _audit_reason(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> dict[str, Any] | None:
+    state = snapshot.state
+    if any(child["resource_class"] == "audit"
+           and child["state"] in {"reserved", "launching", "pending"}
+           and audit_operation_current(snapshot, child) for child in state.children):
+        return {"reason": "audit.pending", "parameters": {}}
+    audits = [item for item in snapshot.history if item.get("kind") == "audit_verdict"]
+    if not audits:
+        return {"reason": "audit.required", "parameters": {}}
+    audit = audits[-1]
+    if not audit_passes(snapshot, audit):
+        return {"reason": "audit.failed", "parameters": {}}
+    if any(claim_id not in set(derivation.scope)
+           for claim_id in (claim["id"] for claim in snapshot.graph["claims"])):
+        return None
+    classification = independence(snapshot, audit)
+    reason = INDEPENDENCE_REASONS.get(classification)
+    return None if reason is None else {"reason": reason, "parameters": {}}
+
+
 def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> Decision:
-    """Apply one validated command without performing I/O."""
+    """Apply one validated command to the snapshot without performing I/O.
+
+    Branches, in order: an invalid frozen scope blocks; a non-active (terminal) run allows only
+    reads and ``stop``/``report_convergence`` evaluation and is otherwise ``Inert``; read commands
+    are allowed; a graphless ``stop`` ends ``stopped_residual``; an operation whose bootstrap
+    precondition is unmet blocks with that reason; governed work is blocked until the current
+    proposal is approved (preparation actions excepted); then each ``ObserveAction`` kind
+    (route, investigate, graph, research, freeze, configure_run, child_reserve; any other is
+    a ``Fault``) and each
+    ``EvaluateRun`` intent (continue, report_convergence, stop) yields its state transition,
+    artifacts, or ``Block``.
+    """
     state, kind = snapshot.state, command["type"]
     if frozen_scope_invalid(state, snapshot.graph):
         return _decision(snapshot, state, "Block", reason="graph.invalid")
     if state.status != "active":
-        if kind in {"GetRun", "GetArgument", "RestoreRun"} or (
+        if kind in READ_COMMANDS or (
                 kind == "EvaluateRun" and command["intent"] in {"stop", "report_convergence"}):
             return _decision(snapshot, state)
         return _decision(snapshot, state, "Inert")
 
-    if kind in {"GetRun", "RestoreRun"}:
-        return _decision(snapshot, state)
     if kind == "GetArgument":
         return (_decision(snapshot, state) if snapshot.graph is not None
                 else _decision(snapshot, state, "Block", reason="graph.invalid"))
+    if kind in READ_COMMANDS:
+        return _decision(snapshot, state)
+
+    if kind == "EvaluateRun" and command["intent"] == "stop" and snapshot.graph is None:
+        return _decision(snapshot, replace(state, status="stopped_residual"))
+    operation = (command["action"]["kind"] if kind == "ObserveAction"
+                 and command["action"]["kind"] in {"route", "graph", "configure_run", "investigate"}
+                 else "report_convergence" if kind == "EvaluateRun"
+                 and command["intent"] == "report_convergence" else None)
+    if operation and (missing := bootstrap_precondition(snapshot, operation)):
+        predicate, reason = missing
+        affected = {"route.recorded": "obligation.route",
+                    "investigation.recorded": "obligation.investigation"}.get(predicate)
+        return _decision(snapshot, state, "Block", reason=reason, affected=affected)
+    preparation = (kind == "ObserveAction" and command["action"]["kind"] in {"route", "graph", "configure_run"})
+    honest_stop = kind == "EvaluateRun" and command["intent"] == "stop"
+    if not preparation and not honest_stop and (reason := governance.admission(state.governance)):
+        return _decision(snapshot, state, "Block", reason=reason)
 
     if kind == "ObserveAction":
         action = command["action"]
@@ -470,9 +779,6 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             return _decision(snapshot, replace(state, stamp_seq=state.stamp_seq + 1,
                                                 route_stamp=state.stamp_seq + 1))
         if akind == "investigate":
-            if state.route_stamp is None:
-                return _decision(snapshot, state, "Block", reason="route.required",
-                                 affected="obligation.route")
             if state.investigation_stamp is not None:
                 return _decision(snapshot, state)
             return _decision(snapshot, replace(state, stamp_seq=state.stamp_seq + 1,
@@ -481,6 +787,7 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             graph = action.get("payload")
             if not valid_graph(graph) or frozen_scope_invalid(state, graph):
                 return _decision(snapshot, state, "Block", reason="graph.invalid")
+            graph = governance.canonical_graph(graph)
             art = artifact("graph", {"graph": graph})
             return _decision(snapshot, replace(state, selected_graph_artifact_id=art["artifact_id"]),
                              artifacts=(art,))
@@ -503,6 +810,7 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                 "citation": payload["citation"],
                 "route_stamp": state.route_stamp,
                 "investigation_stamp": state.investigation_stamp,
+                "producer": _producer(state),
                 **({"observed_content_digest": payload["observed_content_digest"]} if
                    "observed_content_digest" in payload else {}),
             })
@@ -515,17 +823,22 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             return _decision(snapshot, replace(state, frozen_claim_ids=ids,
                                                 frozen_semantic_digest=semantic_digest))
         if akind == "configure_run":
-            modes, budgets = dict(state.modes), dict(state.budgets)
-            modes.update(action.get("modes", {}))
-            for key, value in action.get("budgets", {}).items():
-                used_key, resource = {"max_passes": ("passes_used", "pass"),
-                                      "max_spawns": ("spawns_used", "spawn"),
-                                      "max_audit_spawns": ("audit_spawns_used", "audit_spawn")}[key]
-                if value < budgets[used_key]:
-                    return _decision(snapshot, state, "Block", reason="budget.exhausted",
-                                     parameters={"resource": resource})
-                budgets[key] = value
-            return _decision(snapshot, replace(state, modes=modes, budgets=budgets))
+            proposed = governance.plain(state.governance["proposal"])
+            proposed["budgets"] = {**proposed["budgets"], **action["budgets"]}
+            proposed["rationale"] = action["rationale"]
+            if reason := governance.configuration_error(state, proposed):
+                if reason == "governance.budget_invalid":
+                    ceiling = next(k for k, used in governance.CEILINGS.items() if proposed["budgets"][k] < state.budgets[used])
+                    resource = governance.BUDGETS[ceiling].resource
+                    return _decision(snapshot, state, "Block", reason="budget.exhausted", parameters={"resource": resource})
+                return _decision(snapshot, state, "Block", reason=reason)
+            if reason := governance.revision_error(state.governance, state.goal, proposed):
+                return _decision(snapshot, state, "Block", reason=reason)
+            try:
+                governed = governance.revise(state.goal, state.governance, proposal=proposed)
+            except ValueError as exc:
+                return _decision(snapshot, state, "Block", reason=str(exc))
+            return _decision(snapshot, replace(state, governance=governed))
         if akind == "child_reserve":
             blocked = _investigation_block(snapshot)
             if blocked is not None:
@@ -535,8 +848,7 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             if (execution == "async" and snapshot.host_tier != "full_async"
                     and not (resource_class == "audit"
                              and snapshot.host_audit_execution == "async")):
-                reason = ("host.audit_output_unobservable" if snapshot.host_tier == "observational"
-                          else "host.async_unsupported")
+                reason = HOST_TIER_UNSUPPORTED.get(snapshot.host_tier, "host.async_unsupported")
                 return _decision(snapshot, state, "Block", reason=reason)
             if resource_class == "audit":
                 children = list(state.children)
@@ -574,87 +886,46 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
         return _decision(snapshot, state, "Fault", reason="unsupported")
 
     if kind == "EvaluateRun":
-        if snapshot.graph is None:
-            return _decision(snapshot, state, "Block", reason="graph.missing")
         intent = command["intent"]
         if intent == "continue":
             return _decision(snapshot, state)
+        if intent == "report_convergence":
+            blocked = _investigation_block(snapshot)
+            if blocked is not None:
+                return blocked
+        observations_consulted = claim_freshness_relevant(snapshot)
+        decide = partial(_decision, snapshot, observations_consulted=observations_consulted)
         derivation = derive_claims(snapshot)
         states = [(c, derivation.states[c["id"]]) for c in snapshot.graph["claims"]]
         gating = set(derivation.scope)
-        scoped = [(c, cs) for c, cs in states if c["id"] in gating]
         if intent == "stop":
             if state.budgets["passes_used"] >= state.budgets["max_passes"]:
-                return _decision(snapshot, replace(state, status="stopped_budget"))
+                return decide(replace(state, status="stopped_budget"))
             deferred = [c for c, _ in states if c["id"] not in gating]
             status = "stopped_frozen" if deferred else "stopped_residual"
-            return _decision(snapshot, replace(state, status=status))
-        blocked = _investigation_block(snapshot)
-        if blocked is not None:
-            return blocked
-        missing = next(((c, cs) for c, cs in scoped if cs != "approved"), None)
-        if missing:
-            c, _ = missing
-            target_id = derivation.blockers.get(c["id"], c["id"])
-            c = next(claim for claim in snapshot.graph["claims"] if claim["id"] == target_id)
-            cs = derivation.states[target_id]
-            evidence = active_evidence(snapshot, c)
-            research = [a for a in evidence if a["kind"] == "research"]
-            spikes = [a for a in evidence if a["kind"] == "spike"]
-            if cs == "discarded":
-                reason, parameters = "claim.refuted", {}
-            elif cs == "blocked":
-                reason, parameters = "claim.human_decision", {}
-            elif claim_conflicted(snapshot, c):
-                reason, parameters = "evidence.conflict", {}
-            elif any(a["outcome"] == "supporting" for a in research) and c["kind"] == "needs-experiment":
-                stale = stale_artifact_ids(snapshot)
-                if spikes and spikes[-1]["artifact_id"] in stale:
-                    stale_head = next(h for h in evaluate_freshness(
-                        active_spike_heads(snapshot), snapshot.observations).stale_heads
-                                      if h.artifact_id == spikes[-1]["artifact_id"])
-                    parameters = {"changes": [{"path": change.path, "state": change.state.value}
-                                               for change in stale_head.changes]}
-                    reason = "claim.spike_stale"
-                else:
-                    reason, parameters = "claim.spike_missing", {}
-            else:
-                historical_research = any(a.get("kind") == "research" and a.get("claim_id") == c["id"]
-                                          for a in snapshot.history)
-                reason = "claim.research_unbound" if historical_research else "claim.research_missing"
-                parameters = {}
-            return _decision(snapshot, state, "Block", reason=reason, parameters=parameters,
-                             affected="claim:" + c["id"])
-        derivation_digest = digest({"graph": snapshot.graph,
-                                    "claims": [(c["id"], derivation.states[c["id"]],
-                                                [a["artifact_id"] for a in active_evidence(snapshot, c)])
-                                               for c in snapshot.graph["claims"]],
-                                    "frozen": state.frozen_claim_ids})
-        if derivation_digest != state.last_derivation_digest:
-            if state.budgets["passes_used"] >= state.budgets["max_passes"]:
-                return _decision(snapshot, state, "Block", reason="budget.exhausted",
-                                 parameters={"resource": "pass"})
+            return decide(replace(state, status=status))
+        blockers = claim_blockers(snapshot, derivation)
+        if blockers:
+            blocker = blockers[0]
+            return decide(state, "Block", reason=blocker["reason"],
+                          parameters=blocker["parameters"],
+                          affected="claim:" + blocker["target_claim_id"])
+        current_digest = derivation_digest(snapshot, derivation)
+        blocker = pass_budget_blocker(snapshot, current_digest)
+        if blocker:
+            return decide(state, "Block", reason=blocker["reason"],
+                          parameters=blocker["parameters"])
+        if current_digest != state.last_derivation_digest:
             budgets = dict(state.budgets)
             budgets["passes_used"] += 1
-            state = replace(state, budgets=budgets, last_derivation_digest=derivation_digest)
-        if any(child["resource_class"] == "audit" and child["state"] in {"reserved", "launching", "pending"}
-               and audit_operation_current(snapshot, child) for child in state.children):
-            return _decision(snapshot, state, "Block", reason="audit.pending")
-        audits = [a for a in snapshot.history if a.get("kind") == "audit_verdict"]
-        if not audits:
-            return _decision(snapshot, state, "Block", reason="audit.required")
-        audit = audits[-1]
-        if not audit_passes(snapshot, audit):
-            return _decision(snapshot, state, "Block", reason="audit.failed")
+            state = replace(state, budgets=budgets, last_derivation_digest=current_digest)
+        blocker = audit_blocker(snapshot, derivation)
+        if blocker:
+            return decide(state, "Block", reason=blocker["reason"],
+                          parameters=blocker["parameters"], affected="obligation.audit")
         deferred = [c for c, _ in states if c["id"] not in gating]
         if deferred:
-            return _decision(snapshot, replace(state, status="stopped_frozen"))
-        auditor, covered = audit_attributions(snapshot, audit)
-        auditor_pair, covered_pair = identity_pair(auditor), identity_pair(covered)
-        if auditor_pair is None or covered_pair is None:
-            return _decision(snapshot, state, "Block", reason="audit.independence_unverified")
-        if auditor_pair == covered_pair:
-            return _decision(snapshot, state, "Block", reason="audit.same_model")
-        return _decision(snapshot, replace(state, status="converged"))
+            return decide(replace(state, status="stopped_frozen"))
+        return decide(replace(state, status="converged"))
 
     return _decision(snapshot, state, "Fault", reason="unsupported")

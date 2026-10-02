@@ -1,16 +1,25 @@
 ---
 number: 49
-title: "Isolate investigation and mandatory-audit spawn budgets"
+title: Isolate investigation and mandatory-audit spawn budgets
 status: accepted
 date: 2026-09-21
-tags: [empirica, budget, audit, children, strict-v2]
+tags:
+- empirica
+- budget
+- audit
+- children
+- strict-v2
 links:
-  - target: 34
-    kind: Amends
-  - target: 41
-    kind: Amends
-  - target: 48
-    kind: Refines
+- target: 34
+  kind: Amends
+- target: 41
+  kind: Amends
+- target: 48
+  kind: Refines
+- target: 50
+  kind: Refines
+- target: 53
+  kind: Refines
 ---
 
 # Isolate investigation and mandatory-audit spawn budgets

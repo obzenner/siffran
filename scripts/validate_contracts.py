@@ -8,7 +8,8 @@ functions. No runtime contract engine is created here.
 Validated:
   * every ``*.schema.json`` under ``contracts/<protocol>/<version>/``;
   * v1 substrate-neutral fixtures under ``contracts/fixtures/``;
-  * the v2 public contract registry, host profiles, and v2 fixtures:
+  * the v2 public contract registry, host profiles, and generated wire exemplars
+    under ``contracts/empirica/v2/fixtures`` (checked by ``regen_contract_fixtures.py``):
     referential integrity, closed values, exact key sets, child transitions,
     host profile facts, response reason/residual parameters and exact ordered
     next-action/section lists, child recovery actions, schema↔registry mirror,
@@ -33,6 +34,7 @@ except ImportError:  # Structural gates still validate required wire fields.
     Registry = Resource = DRAFT202012 = None
 
 ROOT = Path(__file__).resolve().parents[1]
+
 CONTRACTS = ROOT / "contracts"
 V2 = CONTRACTS / "empirica" / "v2"
 
@@ -48,11 +50,11 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:525fa2359be90b80df00b3a50b6863367d3911cc6bc76e91c76debcb04de89ff"
-REVIEWED_HOST_PROFILES_DIGEST = "sha256:41ef8b89da3f880fb5d256202d9ee5b6e28301b75e52490a41e65d16e09b8caa"
+REVIEWED_REGISTRY_DIGEST = "sha256:c322c3df3584ee0e8ad740c7de58d56478c59dcbdc7ac0ee58d785f2ceb39a8c"
+REVIEWED_HOST_PROFILES_DIGEST = "sha256:159c1a777884e2c797164b629583686b4b4f6904c5ded31c70247a9baa3c7faf"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
-REGISTRY_VERSION = "2.0.0"
+REGISTRY_VERSION = "3.0.0"
 PROTOCOL = "empirica/v2"
 # Structural D1 constants that have no canonical-JSON vocabulary of their own: edge
 # types and research source kinds. Artifact kind/outcome/spike-gate vocabularies ARE
@@ -96,9 +98,13 @@ def _as_set(value: Any, where: str, errors: list[str], name: str) -> set:
 
 
 def registry_digest(registry: dict) -> str:
-    """Deterministic canonical SHA-256 of the registry (placeholder; D9 owns runtime digest)."""
-    canonical = json.dumps(registry, sort_keys=True, separators=(",", ":")).encode()
-    return "sha256:" + hashlib.sha256(canonical).hexdigest()
+    """Compute canonical JSON identity without importing runtime code.
+
+    Keep this byte algorithm aligned with ``core.canonical.canonical_json``.
+    """
+    payload = json.dumps(registry, sort_keys=True, separators=(",", ":"),
+                         ensure_ascii=False, allow_nan=False).encode("utf-8")
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
 def materialize_contract_result(registry: dict, target: str, section_id: str | None = None) -> dict:
@@ -123,7 +129,7 @@ def materialize_contract_result(registry: dict, target: str, section_id: str | N
         return {"target": "section", "digest": digest, "section_id": section_id,
                 "section": {"id": section_id, "title": s["title"], "summary": s["summary"],
                             "clauses": s["clauses"]}}
-    return {"target": "full", "digest": digest, "full": registry}
+    raise ValueError(f"GetContract target {target!r} is not a public projection")
 
 
 def check_getcontract_digest(contract_result: dict, registry: dict, errors: list[str], where: str) -> None:
@@ -178,6 +184,14 @@ def check_key_sets(contract: dict, errors: list[str], where: str) -> None:
     for key in ("next_actions", "reasons", "sections"):
         if not isinstance(contract.get(key), dict) or not contract[key]:
             errors.append(f"{where}: {key} must be a non-empty object keyed by ID")
+    actions = contract.get("actions", {})
+    if isinstance(actions, dict) and set(actions.get("metadata", {})) != set(actions.get("author", ())):
+        errors.append(f"{where}: actions.metadata must cover actions.author exactly")
+    dispositions = {row.get("disposition") for row in contract.get("reasons", {}).values()
+                    if isinstance(row, dict)}
+    for disposition in ("start_refused", "host_recovery"):
+        if disposition not in dispositions:
+            errors.append(f"{where}: reason disposition {disposition!r} must be non-empty")
 
 
 def check_referential(contract: dict, errors: list[str], where: str) -> None:
@@ -222,6 +236,167 @@ def check_referential(contract: dict, errors: list[str], where: str) -> None:
     if not _as_set(contract.get("claim_kinds", []), where, errors, "claim_kinds"):
         errors.append(f"{where}: claim_kinds must be a nonempty array")
 
+
+def _projected_tool_surfaces(public_tools: dict) -> tuple[set, set, set]:
+    """Extract the author-action kinds, read operations and report intents from the projected
+    model-facing tool schemas (public-tools.json). These are the exact surfaces a model can act
+    on; a directive surface that names any name absent here is unreachable."""
+    model = public_tools.get("schemas", {}).get("model", {})
+    observe = model.get("empirica_observe", {}).get("properties", {}).get("action", {})
+    author_kinds = {row.get("properties", {}).get("kind", {}).get("const")
+                    for row in observe.get("oneOf", [])
+                    if isinstance(row, dict)}
+    author_kinds.discard(None)
+    read_ops = set(model.get("empirica_read", {}).get("properties", {})
+                   .get("operation", {}).get("enum", []))
+    report_intents = set(model.get("report_convergence", {}).get("properties", {})
+                         .get("intent", {}).get("enum", []))
+    return author_kinds, read_ops, report_intents
+
+
+def check_next_action_surfaces(contract: dict, public_tools: dict, errors: list[str],
+                               where: str,
+                               private_governance_ops: tuple[str, ...] = ()) -> None:
+    """Every next_actions directive carries exactly one machine-readable execution surface
+    (D1a). The raw schema enforces the closed one-of shape; this procedural check binds every
+    tool-owned surface to the projected model tool schemas so a renamed/removed action, read
+    operation or report intent fails, and confirms host/human-owned surfaces name a real
+    operation without claiming a model tool.
+
+    Host-owned operations must be one of: contract ``commands``, ``actions.host``,
+    ``actions.trusted``, or the private governance operations.  Human-owned operations
+    must be exactly ``decision``, and only on a claim-scoped decision directive: its params
+    require ``claim_id`` and every reason that lists it lists only human-owned directives.
+    (The runtime tie to the ``needs-decision`` claim kind is asserted in C3 from the core's
+    own blocker derivation.)"""
+    next_actions = contract.get("next_actions", {})
+    if not isinstance(next_actions, dict):
+        return
+    author_kinds, read_ops, report_intents = _projected_tool_surfaces(public_tools)
+    allowed_host_ops: set[str] = set()
+    allowed_host_ops |= set(contract.get("commands", []))
+    _actions = contract.get("actions", {})
+    allowed_host_ops |= set(_actions.get("host", {}))
+    allowed_host_ops |= set(_actions.get("trusted", {}))
+    allowed_host_ops |= set(private_governance_ops)
+    human_owned = {name for name, row in next_actions.items()
+                   if isinstance(row, dict) and isinstance(row.get("surface"), dict)
+                   and row["surface"].get("owner") == "human"}
+    for directive, entry in sorted(next_actions.items()):
+        if not isinstance(entry, dict):
+            continue
+        surface = entry.get("surface")
+        if not isinstance(surface, dict):
+            errors.append(f"{where}: next_actions.{directive} must carry a surface object")
+            continue
+        tool = surface.get("tool")
+        owner = surface.get("owner")
+        if tool == "empirica_observe":
+            action = surface.get("action")
+            if action not in author_kinds:
+                errors.append(f"{where}: next_actions.{directive} surface action {action!r} "
+                              f"is not a projected empirica_observe author action")
+        elif tool == "empirica_read":
+            operation = surface.get("operation")
+            if operation not in read_ops:
+                errors.append(f"{where}: next_actions.{directive} surface operation {operation!r} "
+                              f"is not a projected empirica_read operation")
+        elif tool == "report_convergence":
+            intent = surface.get("intent")
+            if intent not in report_intents:
+                errors.append(f"{where}: next_actions.{directive} surface intent {intent!r} "
+                              f"is not a projected report_convergence intent")
+        elif owner == "host":
+            operation = surface.get("operation")
+            if not isinstance(operation, str) or not operation:
+                errors.append(f"{where}: next_actions.{directive} host-owned surface "
+                              f"must name an operation")
+            elif operation not in allowed_host_ops:
+                errors.append(f"{where}: next_actions.{directive} host-owned surface "
+                              f"operation {operation!r} is not a known host operation")
+        elif owner == "human":
+            operation = surface.get("operation")
+            if operation != "decision":
+                errors.append(f"{where}: next_actions.{directive} human-owned surface "
+                              f"operation {operation!r} must be 'decision'")
+            params = entry.get("params")
+            required = params.get("required", []) if isinstance(params, dict) else []
+            listing = [code for code, reason in contract.get("reasons", {}).items()
+                       if directive in reason.get("next_actions", [])]
+            if "claim_id" not in required or not listing or any(
+                    set(contract["reasons"][code]["next_actions"]) - human_owned
+                    for code in listing):
+                errors.append(f"{where}: next_actions.{directive} human-owned surface is "
+                              f"not a claim-scoped decision directive")
+        else:
+            errors.append(f"{where}: next_actions.{directive} surface is not a valid "
+                          f"tool/owner binding: {surface!r}")
+    _check_params_subset(contract, public_tools, errors, where)
+
+
+def _tool_property_names(action_shape: dict) -> set[str]:
+    """Collect all parameter names a directive ``params`` may legitimately use for one
+    observe action: top-level properties (minus ``kind``) plus, when the action carries a
+    ``payload`` object, the nested payload property names.  This lets ``graph.record``
+    describe the payload contents (root/claims/edges) while ``research.record`` uses the
+    top-level shape directly."""
+    props: set[str] = set()
+    top = action_shape.get("properties", {})
+    for name in top:
+        if name != "kind":
+            props.add(name)
+    payload = top.get("payload", {})
+    if isinstance(payload, dict):
+        for name in payload.get("properties", {}):
+            props.add(name)
+    return props
+
+
+def _check_params_subset(contract: dict, public_tools: dict, errors: list[str],
+                          where: str) -> None:
+    """Every ``params`` of an observe/report-bound directive must be a subset of the bound
+    tool shape: for ``empirica_observe`` the action's top-level properties (minus ``kind``)
+    plus any nested ``payload`` properties; for ``report_convergence`` the report tool's
+    properties minus the fixed ``intent`` and the host-supplied ``run_id``."""
+    next_actions = contract.get("next_actions", {})
+    if not isinstance(next_actions, dict):
+        return
+    model = public_tools.get("schemas", {}).get("model", {})
+    observe_one_of = model.get("empirica_observe", {}).get("properties", {}).get(
+        "action", {}).get("oneOf", [])
+    action_shapes: dict[str, dict] = {}
+    for row in observe_one_of:
+        if not isinstance(row, dict):
+            continue
+        kind = row.get("properties", {}).get("kind", {}).get("const")
+        if isinstance(kind, str):
+            action_shapes[kind] = row
+    report_props = set(model.get("report_convergence", {}).get("properties", {}).keys())
+    report_props.discard("intent")
+    report_props.discard("run_id")
+    for directive, entry in sorted(next_actions.items()):
+        if not isinstance(entry, dict):
+            continue
+        surface = entry.get("surface")
+        if not isinstance(surface, dict):
+            continue
+        params = entry.get("params")
+        if not isinstance(params, dict):
+            continue
+        param_props = set(params.get("properties", {}).keys())
+        tool = surface.get("tool")
+        if tool == "empirica_observe":
+            action = surface.get("action")
+            allowed = _tool_property_names(action_shapes.get(action, {}))
+            extra = param_props - allowed
+            if extra:
+                errors.append(f"{where}: next_actions.{directive} params {sorted(extra)} "
+                              f"are not in the bound {action!r} tool shape")
+        elif tool == "report_convergence":
+            extra = param_props - report_props
+            if extra:
+                errors.append(f"{where}: next_actions.{directive} params {sorted(extra)} "
+                              f"are not in the bound report_convergence tool shape")
 
 
 def check_clauses(contract: dict, errors: list[str], where: str) -> None:
@@ -399,6 +574,13 @@ def check_host_profiles(profiles_doc: dict, contract: dict, known_fixture_ids: s
             errors.append(f"{pwhere}: required_live_probe_ids must be nonempty")
         if "candidate_tier" in profile and not (profile.get("candidate_probe_ids") or []):
             errors.append(f"{pwhere}: candidate_tier requires candidate_probe_ids")
+    delegation_envs = {profile.get("delegation_env") for profile in profiles
+                       if isinstance(profile, dict)}
+    auto_message = contract.get("reasons", {}).get(
+        "governance.auto_invocation_required", {}).get("message", "")
+    for delegation_env in delegation_envs:
+        if not isinstance(delegation_env, str) or delegation_env not in auto_message:
+            errors.append(f"{where}: auto-invocation refusal must mention configured delegation_env {delegation_env!r}")
     # Compact reviewed digest freezes the exact profile inventory and every field value.
     actual = registry_digest(profiles_doc)
     if actual != REVIEWED_HOST_PROFILES_DIGEST:
@@ -525,6 +707,36 @@ def check_response_run_view(result: dict, contract: dict, host_tiers_by_profile:
                                  f"{where}: run.residuals[{code}]", errors)
 
 
+def check_terminal_run_next_actions(result: dict, contract: dict, errors: list[str],
+                                   where: str) -> None:
+    """A terminal run offers only ``run.terminal``'s next actions. ``core/projection.py`` writes them
+    to the top level, every residual, every obligation row and every stopped child's recovery action,
+    so a hand-authored fixture that keeps active-run guidance for a terminal run has drifted."""
+    run = result.get("run")
+    if not isinstance(run, dict) or run.get("status") == "active":
+        return
+    terminal = contract.get("reasons", {}).get("run.terminal", {}).get("next_actions")
+    if not isinstance(terminal, list) or not terminal:
+        errors.append(f"{where}: registry reason run.terminal must declare next_actions")
+        return
+    if run.get("next_actions") != terminal:
+        errors.append(f"{where}: terminal run.next_actions {run.get('next_actions')!r} "
+                      f"!= run.terminal next_actions {terminal!r}")
+    for i, residual in enumerate(run.get("residuals", []) or []):
+        if residual.get("next_actions") != terminal:
+            errors.append(f"{where}: terminal run.residuals[{i}] next_actions "
+                          f"{residual.get('next_actions')!r} != run.terminal next_actions {terminal!r}")
+    for group, rows in (run.get("obligations") or {}).items():
+        for i, row in enumerate(rows or []):
+            if row.get("next") != terminal:
+                errors.append(f"{where}: terminal run.obligations.{group}[{i}] next "
+                              f"{row.get('next')!r} != run.terminal next_actions {terminal!r}")
+    for i, child in enumerate(run.get("children", []) or []):
+        if "recovery_action" in child and child["recovery_action"] != terminal[0]:
+            errors.append(f"{where}: terminal run.children[{i}] recovery_action "
+                          f"{child['recovery_action']!r} != run.terminal next action {terminal[0]!r}")
+
+
 def _check_freshness_changes(changes: list, freshness_states: set, where: str,
                             errors: list[str]) -> None:
     """Closed items, canonical states, lexical path ordering, unique paths, no hashes."""
@@ -558,7 +770,7 @@ def check_run_view_fields(result: dict, contract: dict, errors: list[str], where
     run = result.get("run")
     if not isinstance(run, dict):
         return
-    required = ["id", "goal", "status", "modes", "contract", "obligations",
+    required = ["id", "goal", "status", "contract", "obligations",
                 "residuals", "freshness", "children", "host"]
     for field in required:
         if field not in run:
@@ -572,17 +784,6 @@ def check_run_view_fields(result: dict, contract: dict, errors: list[str], where
                                  f"{where}: run.freshness", errors)
     elif "freshness" in run:
         errors.append(f"{where}: run.freshness must be an object")
-    modes = run.get("modes")
-    mode_fields = set(contract.get("mode_fields", []))
-    if isinstance(modes, dict):
-        if set(modes.keys()) != mode_fields:
-            errors.append(f"{where}: run.modes keys {sorted(modes.keys())} != canonical "
-                          f"{sorted(mode_fields)}")
-        for mf in mode_fields:
-            if not isinstance(modes.get(mf), bool):
-                errors.append(f"{where}: run.modes.{mf} must be a boolean")
-    elif "modes" in run:
-        errors.append(f"{where}: run.modes must be an object")
     obligations = run.get("obligations")
     if isinstance(obligations, dict):
         if set(obligations.keys()) != {"active", "deferred"}:
@@ -1341,13 +1542,16 @@ def _minimal_valid_state() -> dict:
     return {
         "protocol": "empirica/v2",
         "state_schema": "empirica.run/2",
+        "governance": json.loads((V2 / "state-fixtures/valid-active.json").read_text())["governance"],
         "goal": "g",
+        "invocation": {"host": "test", "interactive": True,
+                       "signal": "validator fixture", "delegation": False},
         "status": "active",
-        "modes": {"multi_provider": False, "cli_exec": False},
         "budgets": {"max_passes": 1, "passes_used": 0,
                     "max_spawns": 1, "spawns_used": 0,
                     "max_audit_spawns": 1, "audit_spawns_used": 0},
         "selected_graph_artifact_id": None,
+        "observation_basis_digest": "sha256:" + "f" * 64,
         "committed_artifact_head_id": None,
         "frozen_claim_ids": None,
         "frozen_semantic_digest": None,
@@ -1448,6 +1652,27 @@ def check_state_invariants(state: dict, errors: list[str], where: str) -> None:
         if isinstance(investigation_stamp, int) and investigation_stamp > stamp_seq:
             errors.append(f"{where}: investigation_stamp {investigation_stamp} > "
                           f"stamp_seq {stamp_seq}")
+    governance = state.get("governance", {})
+    if isinstance(governance, dict) and isinstance(state.get("goal"), str):
+        from core.governance import proposal_digest as canonical_proposal_digest
+        try:
+            observed_digest = canonical_proposal_digest(state["goal"], governance)
+        except (KeyError, TypeError, ValueError) as exc:
+            errors.append(f"{where}: governance proposal digest cannot be recomputed: {exc}")
+        else:
+            if governance.get("proposal_digest") != observed_digest:
+                errors.append(f"{where}: governance proposal_digest does not match canonical digest")
+    if (isinstance(governance, dict) and governance.get("state") == "approved"
+            and isinstance(governance.get("proposal"), dict)
+            and governance["proposal"].get("rationale") is None):
+        errors.append(f"{where}: approved placeholder governance is invalid")
+    from application.run_state import governed_progress_is_valid
+    progress_keys = {"investigation_stamp", "children", "status", "governance"}
+    governance_keys = {"first_approval", "receipts"}
+    if (progress_keys <= state.keys() and isinstance(governance, dict)
+            and governance_keys <= governance.keys()
+            and not governed_progress_is_valid(state)):
+        errors.append(f"{where}: investigation, children, and convergence require a prior successful approval receipt")
     seen: set[str] = set()
     for i, child in enumerate(state.get("children", []) or []):
         if not isinstance(child, dict):
@@ -1855,13 +2080,6 @@ def check_schema_mirror(request_schema: dict, response_schema: dict, contract: d
     reg_tiers = set(contract.get("host_tiers", []))
     if set(ht.get("enum", [])) != reg_tiers:
         errors.append(f"{where}: response hostView.tier enum {ht.get('enum')} != registry {sorted(reg_tiers)}")
-    reg_modes = set(contract.get("mode_fields", []))
-    req_modes = request_schema.get("$defs", {}).get("modes", {}).get("properties", {})
-    if set(req_modes.keys()) != reg_modes:
-        errors.append(f"{where}: request modes keys {sorted(req_modes.keys())} != registry {sorted(reg_modes)}")
-    rm = defs.get("runModes", {}).get("properties", {})
-    if set(rm.keys()) != reg_modes:
-        errors.append(f"{where}: response runModes keys {sorted(rm.keys())} != registry {sorted(reg_modes)}")
     fci = set(defs.get("freshnessChangeItem", {}).get("properties", {}).get("state", {}).get("enum", []))
     if fci != set(contract.get("freshness_states", [])):
         errors.append(f"{where}: response freshnessChangeItem.state enum {sorted(fci)} != registry {sorted(contract.get('freshness_states', []))}")
@@ -1934,14 +2152,21 @@ def check_schema_mirror(request_schema: dict, response_schema: dict, contract: d
     if ce_state != expected_ce_states:
         errors.append(f"{where}: request childEventPayload.state enum {sorted(ce_state)} != "
                       f"registry child_lifecycle.states minus reserved {sorted(expected_ce_states)}")
-    # attribution subject_kind / observed_by enums.
-    ask = set(req_defs.get("attributionPayload", {}).get("properties", {})
-             .get("subject_kind", {}).get("enum", []))
+    # attribution subject_kind / observed_by enums, including generated allOf shared defs.
+    attribution = req_defs.get("attributionPayload", {})
+    attribution_properties = dict(attribution.get("properties", {}))
+    for branch in attribution.get("allOf", []):
+        resolved = (req_defs.get(branch.get("$ref", "").split("/")[-1], {})
+                    if "$ref" in branch else branch)
+        attribution_properties.update(resolved.get("properties", {}))
+    ask = set(attribution_properties.get("subject_kind", {}).get("enum", []))
     if ask != set(contract.get("attribution_subject_kinds", [])):
         errors.append(f"{where}: request attributionPayload.subject_kind enum {sorted(ask)} != "
                       f"registry attribution_subject_kinds {sorted(contract.get('attribution_subject_kinds', []))}")
-    aob = set(req_defs.get("attributionPayload", {}).get("properties", {})
-             .get("observed_by", {}).get("enum", []))
+    observed_schema = attribution_properties.get("observed_by", {})
+    aob = set(observed_schema.get("enum", []))
+    if "const" in observed_schema:
+        aob.add(observed_schema["const"])
     if aob != set(contract.get("attribution_observers", [])):
         errors.append(f"{where}: request attributionPayload.observed_by enum {sorted(aob)} != "
                       f"registry attribution_observers {sorted(contract.get('attribution_observers', []))}")
@@ -2083,6 +2308,37 @@ def main() -> int:
         check_clauses(registry, errors, "public-contract")
         check_child_lifecycle(registry, errors, "public-contract")
         check_presentation_selector(registry, errors, "public-contract")
+        expected_predicates = ["route.recorded", "graph.selected", "governance.approved",
+                               "investigation.recorded"]
+        requirements = registry.get("bootstrap", {}).get("requirements", [])
+        if [row.get("predicate") for row in requirements] != expected_predicates:
+            errors.append("public-contract: bootstrap predicates must be the finite ordered bindings")
+        decisions = registry.get("governance_decisions", {}).get("actions", {})
+        public_tools = load(V2 / "public-tools.json")
+        private_gov_ops: tuple[str, ...] = ()
+        try:
+            sys.path.insert(0, str(ROOT / "plugins" / "empirica"))
+            from application.v2 import PRIVATE_GOVERNANCE_OPERATIONS
+            private_gov_ops = PRIVATE_GOVERNANCE_OPERATIONS
+        except ImportError:
+            pass
+        check_next_action_surfaces(registry, public_tools, errors, "public-contract",
+                                   private_gov_ops)
+        expected_refusals = sorted(code for code, row in registry["reasons"].items()
+                                   if row.get("disposition") == "start_refused")
+        if not expected_refusals or public_tools.get("start_refusal_codes") != expected_refusals:
+            errors.append("public-tools: start_refusal_codes must be the non-empty disposition projection")
+        expected_recovery = {code for code, row in registry["reasons"].items()
+                             if row.get("disposition") == "host_recovery"}
+        if set(public_tools.get("recovery", {})) != expected_recovery:
+            errors.append("public-tools: recovery must match host_recovery dispositions")
+        if list(decisions) != ["approve", "edit", "reject"]:
+            errors.append("public-contract: governance decisions must be the finite ordered bindings")
+        for kind, row in registry.get("bootstrap", {}).get("actions", {}).items():
+            validate_schema_instance({"protocol": "empirica/v2", "request_id": "bootstrap-example",
+                "command": {"type": "ObserveAction", "run_id": "run-example",
+                            "action": row.get("example")}},
+                "empirica/v2", "request", f"public-contract:bootstrap.actions.{kind}.example")
         try:
             sys.path.insert(0, str(ROOT / "plugins" / "empirica"))
             from core.context_selector import select_sections
@@ -2101,6 +2357,47 @@ def main() -> int:
             errors.append(f"context-selector: unavailable: {exc}")
     else:
         errors.append("contracts/empirica/v2/public-contract.json: required v2 registry is missing")
+
+    # #6: the approval ingress/capability vocabularies live once in shared-defs.json.
+    # Assert every schema copy and the public-contract ingress→capability table agree with it.
+    shared_defs = load(V2 / "shared-defs.json").get("$defs", {})
+    ingress_enum = shared_defs.get("approvalIngress", {}).get("enum")
+    capability_enum = shared_defs.get("approvalCapability", {}).get("enum")
+    if not ingress_enum or not capability_enum:
+        errors.append("shared-defs.json: approvalIngress/approvalCapability enums are required")
+    else:
+        def _enums_named(node, name):
+            found = []
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if (key == name and isinstance(value, dict)
+                            and isinstance(value.get("enum"), list)):
+                        found.append(value["enum"])
+                    found.extend(_enums_named(value, name))
+            elif isinstance(node, list):
+                for item in node:
+                    found.extend(_enums_named(item, name))
+            return found
+        for (proto, kind), schema in schemas.items():
+            if proto != "empirica/v2":
+                continue
+            for enum in _enums_named(schema, "ingress") + _enums_named(schema, "approval_ingress"):
+                if enum != ingress_enum:
+                    errors.append(f"{kind}.schema: approval ingress enum {enum} != shared-defs "
+                                  f"{ingress_enum}")
+            for enum in _enums_named(schema, "approval_capability"):
+                if enum != capability_enum:
+                    errors.append(f"{kind}.schema: approval capability enum {enum} != shared-defs "
+                                  f"{capability_enum}")
+        if registry:
+            table = registry.get("approval_ingress", {})
+            if set(table) != set(ingress_enum):
+                errors.append(f"public-contract: approval_ingress keys {sorted(table)} != "
+                              f"shared-defs ingress {sorted(ingress_enum)}")
+            for ingress, row in table.items():
+                if row.get("capability") not in capability_enum:
+                    errors.append(f"public-contract: approval_ingress[{ingress!r}].capability "
+                                  f"{row.get('capability')!r} not in shared-defs capabilities")
 
     # --- host profiles ---
     host_profiles_doc = load(V2 / "host-profiles.json")
@@ -2126,10 +2423,11 @@ def main() -> int:
     state_fixture_paths = sorted(state_fixture_dir.glob("*.json")) if state_fixture_dir.is_dir() else []
     REQUIRED_STATE_FIXTURES = {
         "valid-active", "valid-converged",
-        "invalid-missing-goal", "invalid-extra-field", "invalid-status",
+        "invalid-missing-goal", "invalid-missing-invocation", "invalid-extra-field", "invalid-status",
         "invalid-child-duplicate-id", "invalid-counter", "invalid-stamp",
         "invalid-child-branch", "invalid-deadline-nan", "invalid-refund-mismatch",
-        "invalid-budget-reconciliation",
+        "invalid-budget-reconciliation", "invalid-governance-legacy-shape",
+        "invalid-receipt-kind", "invalid-approved-placeholder",
     }
     state_names = {p.name.removesuffix(".json") for p in state_fixture_paths}
     for name in sorted(REQUIRED_STATE_FIXTURES - state_names):
@@ -2139,6 +2437,7 @@ def main() -> int:
         "valid-active": (True, None),
         "valid-converged": (True, None),
         "invalid-missing-goal": (False, "goal"),
+        "invalid-missing-invocation": (False, "invocation"),
         "invalid-extra-field": (False, "Additional properties"),
         "invalid-status": (False, "not_a_status"),
         "invalid-child-duplicate-id": (False, "duplicate child_id"),
@@ -2148,6 +2447,9 @@ def main() -> int:
         "invalid-deadline-nan": (False, "finite number"),
         "invalid-refund-mismatch": (False, "launch_rejected"),
         "invalid-budget-reconciliation": (False, "reconcile"),
+        "invalid-governance-legacy-shape": (False, "first_approval"),
+        "invalid-receipt-kind": (False, "legacy"),
+        "invalid-approved-placeholder": (False, "approved placeholder"),
     }
     for path in state_fixture_paths:
         name = path.name.removesuffix(".json")
@@ -2172,9 +2474,10 @@ def main() -> int:
     # --- v2 fixtures ---
     REQUIRED_V2_FIXTURES = {
         "start-bootstrap-allow", "block-open-claim", "block-stale-spike",
-        "block-pending-audit", "block-child-terminal", "allow-stopped-frozen",
+        "block-pending-audit", "block-audit-exhausted", "block-child-terminal", "allow-stopped-frozen",
         "allow-stopped-budget", "allow-converged", "block-corrupt-state",
         "getcontract-index", "getcontract-section", "getcontract-full",
+        # QUAL-1: getcontract-full is now a refusal fixture (target: full → invalid_request).
         # D2E added presentation_selector GetContract section fixture.
         "getcontract-presentation-selector",
         "block-host-async-unsupported",
@@ -2185,10 +2488,7 @@ def main() -> int:
         "block-child-cancelled", "block-child-timeout", "block-child-orphaned",
         # D2C added GetArgument provenance fixtures.
         "getargument-spike-approved", "getargument-superseded",
-        # D2D added closed trusted-ingress payload fixtures.
-        "observe-attribution-covered-actor",
-        "observe-attribution-covered-actor-same-model",
-        "observe-attribution-covered-actor-unverified",
+        # Trusted reviewer ingress; covered producers live on evidence artifacts.
         "observe-attribution-auditor",
         "observe-audit-verdict", "observe-audit-verdict-frozen",
         "observe-evidence-leaf",
@@ -2205,12 +2505,40 @@ def main() -> int:
                 host_tiers_by_profile[p.get("profile_id")] = p.get("current_tier")
         check_host_profiles(host_profiles_doc, registry, v2_names, errors, "host-profiles")
 
+    # #7: the Pi adapter still submits a literal approval ingress. Freeze it against the Pi
+    # profile so a profile change cannot silently strand headless/UI approval.
+    pi_profile = next((p for p in host_profiles_doc.get("profiles", [])
+                       if isinstance(p, dict) and p.get("host_id") == "pi"), None)
+    governance_ui = ROOT / "plugins/empirica/adapters/pi/src/governance-ui.ts"
+    if pi_profile and governance_ui.exists():
+        source = governance_ui.read_text(encoding="utf-8")
+        expected_ingress = pi_profile.get("approval_ingress")
+        if f'"{expected_ingress}"' not in source:
+            errors.append(
+                f"pi governance-ui.ts must submit the Pi profile approval_ingress "
+                f"{expected_ingress!r}")
+
     digest = registry_digest(registry) if registry else ""
 
     for path in v2_fixture_paths:
         fx = load(path)
         where = str(path.relative_to(ROOT))
         request = fx.get("request", {})
+        # QUAL-1: `target: full` and any removed public surface must be refused at the request
+        # wire. A refusal fixture asserts schema rejection and a Fault invalid_request expectation.
+        if fx.get("refused"):
+            before = len(errors)
+            validate_schema_instance(request, "empirica/v2", "request", f"{where}:request")
+            if len(errors) == before:
+                errors.append(f"{where}: refusal fixture request was NOT rejected by the request schema")
+            else:
+                del errors[before:]
+            expected = fx.get("expected", {})
+            validate_schema_instance(expected, "empirica/v2", "response", f"{where}:expected")
+            result = expected.get("result", {})
+            if result.get("type") != "Fault" or result.get("code") != "invalid_request":
+                errors.append(f"{where}: refusal fixture must expect a Fault invalid_request")
+            continue
         # GetContract fixtures use expected_from_registry (no hand-copied registry).
         if "expected_from_registry" in fx:
             validate_schema_instance(request, "empirica/v2", "request", f"{where}:request")
@@ -2232,6 +2560,7 @@ def main() -> int:
         check_run_view_fields(result, registry, errors, f"{where}:expected")
         check_stale_freshness_match(result, errors, f"{where}:expected")
         check_response_run_view(result, registry, host_tiers_by_profile, digest, errors, f"{where}:expected")
+        check_terminal_run_next_actions(result, registry, errors, f"{where}:expected")
         check_argument_view(result, registry, errors, f"{where}:expected")
         check_getargument_exclusivity(request, result, errors, f"{where}:expected")
         command = request.get("command", {})
@@ -2246,7 +2575,8 @@ def main() -> int:
 
     # --- in-memory negative cases: one mutation each, expected substring ---
     run_negatives(registry, host_profiles_doc, v2_names, res_schema, req_schema,
-                  state_schema, errors, validate_schema_instance)
+                  state_schema, load(V2 / "public-tools.json"), errors, validate_schema_instance,
+                  private_gov_ops)
 
     if errors:
         print("\n".join(f"ERROR: {e}" for e in errors), file=sys.stderr)
@@ -2258,7 +2588,9 @@ def main() -> int:
 
 def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: set,
                   res_schema: dict, req_schema: dict, state_schema: dict,
-                  errors: list[str], validate_schema: Callable) -> None:
+                  public_tools_doc: dict,
+                  errors: list[str], validate_schema: Callable,
+                  private_gov_ops: tuple[str, ...] = ()) -> None:
     """Each case: one mutation + expected diagnostic substring (cannot pass for wrong reason).
 
     ``expect`` takes a thunk that receives a fresh error list and runs one check,
@@ -2307,6 +2639,40 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     bad = copy.deepcopy(registry)
     bad["next_actions"].pop("run.start_fresh", None)
     expect(lambda e: check_registry_digest(bad, e, "neg"), "registry digest", "remove next_action id")
+    # Directive surface must resolve against the projected model tool schemas.
+    bad = copy.deepcopy(registry)
+    bad["next_actions"]["graph.record"]["surface"] = {"tool": "empirica_observe",
+                                                      "action": "nonexistent_action"}
+    expect(lambda e: check_next_action_surfaces(bad, public_tools_doc, e, "neg",
+                                              private_gov_ops),
+           "not a projected empirica_observe author action", "surface names missing action")
+    bad = copy.deepcopy(registry)
+    del bad["next_actions"]["run.inspect"]["surface"]
+    expect(lambda e: check_next_action_surfaces(bad, public_tools_doc, e, "neg",
+                                              private_gov_ops),
+           "must carry a surface object", "surface missing")
+    bad = copy.deepcopy(registry)
+    bad["next_actions"]["host.repair_context"]["surface"]["operation"] = "nonexistent_operation"
+    expect(lambda e: check_next_action_surfaces(bad, public_tools_doc, e, "neg",
+                                              private_gov_ops),
+           "not a known host operation", "surface names nonexistent host operation")
+    bad = copy.deepcopy(registry)
+    bad["next_actions"]["human.request_decision"]["surface"]["operation"] = "reject"
+    expect(lambda e: check_next_action_surfaces(bad, public_tools_doc, e, "neg",
+                                              private_gov_ops),
+           "must be 'decision'", "human op other than decision")
+    bad = copy.deepcopy(registry)
+    bad["next_actions"]["route.record"]["surface"] = {"owner": "human", "operation": "decision"}
+    expect(lambda e: check_next_action_surfaces(bad, public_tools_doc, e, "neg",
+                                              private_gov_ops),
+           "not a claim-scoped decision directive", "human ownership on an unrelated directive")
+    bad = copy.deepcopy(registry)
+    bad["next_actions"]["residual.accept"]["params"]["properties"] = {
+        "note": {"type": "string"}}
+    expect(lambda e: check_next_action_surfaces(bad, public_tools_doc, e, "neg",
+                                              private_gov_ops),
+           "not in the bound report_convergence tool shape",
+           "params outside report tool shape")
     bad = copy.deepcopy(registry)
     bad["claim_states"] = ["open", "approved"]
     expect(lambda e: check_registry_digest(bad, e, "neg"), "registry digest", "canonical claim_states drift")
@@ -2372,11 +2738,11 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     # Allow.converged / RunView.converged duplication.
     expect(lambda e: check_allow_cross_field(
         {"type": "Allow", "converged": True, "run": {"id": "r", "goal": "g", "status": "active",
-         "contract": {"id": "empirica/public", "version": "2.0.0", "digest": d64, "relevant_sections": []}}},
+         "contract": {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []}}},
         e, "neg"), "Allow.converged=True must equal", "converged/status contradiction")
     expect(lambda e: check_allow_cross_field(
         {"type": "Allow", "converged": False, "run": {"id": "r", "goal": "g", "status": "active",
-         "converged": False, "contract": {"id": "empirica/public", "version": "2.0.0",
+         "converged": False, "contract": {"id": "empirica/public", "version": REGISTRY_VERSION,
          "digest": d64, "relevant_sections": []}}},
         e, "neg"), "RunView must not duplicate converged", "RunView converged duplication")
 
@@ -2384,7 +2750,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     expect(lambda e: check_banned_fields(
         {"protocol": "empirica/v2", "request_id": "x", "result": {"type": "Allow", "converged": False,
          "run": {"id": "r", "goal": "g", "status": "active", "contract": {"id": "empirica/public",
-         "version": "2.0.0", "digest": d64, "relevant_sections": []},
+         "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
          "nonce": "abc", "phase": "investigate"}}},
         e, "neg"), "banned field", "banned v1 fields in response")
 
@@ -2408,20 +2774,47 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     # Run-view digest mismatch + residual params + child recovery action.
     expect(lambda e: check_response_run_view(
         {"type": "Allow", "converged": False, "run": {"id": "r", "goal": "g", "status": "active",
-         "contract": {"id": "empirica/public", "version": "2.0.0", "digest": "sha256:" + "0"*64,
+         "contract": {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": "sha256:" + "0"*64,
          "relevant_sections": []}}},
         registry, {}, d64, e, "neg"), "run.contract.digest", "run view digest mismatch")
     expect(lambda e: check_response_run_view(
         {"type": "Block", "run": {"id": "r", "goal": "g", "status": "active",
-         "contract": {"id": "empirica/public", "version": "2.0.0", "digest": d64, "relevant_sections": []},
+         "contract": {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
          "children": [{"child_id": "c", "purpose": "audit", "state": "completed",
          "recovery_action": "bogus.action"}]}},
         registry, {}, d64, e, "neg"), "recovery_action", "child recovery action unknown")
     expect(lambda e: check_response_run_view(
         {"type": "Block", "run": {"id": "r", "goal": "g", "status": "active",
-         "contract": {"id": "empirica/public", "version": "2.0.0", "digest": d64, "relevant_sections": []},
+         "contract": {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
          "residuals": [{"code": "budget.exhausted", "parameters": {}}]}},
         registry, {}, d64, e, "neg"), "parameters invalid", "residual params not validated")
+
+    # Terminal run: every next-action surface must equal run.terminal's; an active run is exempt.
+    terminal_run = {"id": "r", "goal": "g", "status": "stopped_budget",
+                    "next_actions": ["run.inspect"],
+                    "residuals": [{"code": "budget.exhausted", "parameters": {},
+                                   "next_actions": ["run.inspect"], "sections": []}],
+                    "obligations": {"active": [{"id": "o", "next": ["run.inspect"]}], "deferred": []},
+                    "children": [{"child_id": "c", "state": "timeout", "recovery_action": "run.inspect"}]}
+    for label, run in (("projection-shaped terminal run", terminal_run),
+                       ("active run with empty next_actions",
+                        {**terminal_run, "status": "active", "next_actions": []})):
+        control: list[str] = []
+        check_terminal_run_next_actions({"type": "Allow", "run": run}, registry, control, "neg")
+        if control:
+            errors.append(f"NEG control: {label} was rejected: {control}")
+    for label, mutate, expected in (
+            ("top-level next_actions", lambda r: r.update(next_actions=[]), "terminal run.next_actions"),
+            ("residual next_actions", lambda r: r["residuals"][0].update(next_actions=["budget.raise"]),
+             "run.residuals[0] next_actions"),
+            ("obligation next", lambda r: r["obligations"]["active"][0].update(next=[]),
+             "run.obligations.active[0] next"),
+            ("child recovery_action", lambda r: r["children"][0].update(recovery_action="child.retry"),
+             "run.children[0] recovery_action")):
+        bad_run = copy.deepcopy(terminal_run)
+        mutate(bad_run)
+        expect(lambda e, run=bad_run: check_terminal_run_next_actions(
+            {"type": "Allow", "run": run}, registry, e, "neg"), expected, f"terminal {label} drift")
 
     # Direct schema negatives: convergence contradictions both directions.
     def schema_rejects(envelope: dict, kind: str) -> bool:
@@ -2431,7 +2824,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         produced = errors[before:]
         del errors[before:]
         return bool(produced)
-    ci = {"id": "empirica/public", "version": "2.0.0", "digest": d64, "relevant_sections": []}
+    ci = {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []}
     conv_true_active = {"protocol": "empirica/v2", "request_id": "x",
                         "result": {"type": "Allow", "converged": True,
                                    "run": {"id": "r", "goal": "g", "status": "active", "contract": ci}}}
@@ -2453,10 +2846,40 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     if not schema_rejects(gc_section_no_id, "request"):
         errors.append("NEG schema GetContract section without section_id: expected schema rejection but none")
 
+    # Direct schema boundaries: every claim id is [A-Za-z0-9._-]{1,64} (graph id/root/from/to
+    # and action claim_id). Accepted ids must validate, so a rejection cannot pass for the wrong reason.
+    def graph_action(root: str, vertex: str, edge_from: str, edge_to: str) -> dict:
+        return {"protocol": "empirica/v2", "request_id": "x", "command": {
+            "type": "ObserveAction", "run_id": "r", "action": {"kind": "graph", "payload": {
+                "root": root, "edges": [{"from": edge_from, "to": edge_to, "type": "SupportedBy"}],
+                "claims": [{"id": vertex, "text": "t", "kind": "ordinary", "gating": True},
+                           {"id": "L", "text": "t", "kind": "ordinary", "gating": True}]}}}}
+
+    def research_action(claim_id: str) -> dict:
+        return {"protocol": "empirica/v2", "request_id": "x", "command": {
+            "type": "ObserveAction", "run_id": "r", "action": {
+                "kind": "research", "claim_id": claim_id, "source_kind": "code",
+                "result": "supports", "payload": {"source_ref": "a.py:1", "citation": "c"}}}}
+
+    for good in ("A", "a.b-C_9", "x" * 64):
+        if schema_rejects(graph_action(good, good, good, "L"), "request"):
+            errors.append(f"NEG schema claim id {good!r}: graph unexpectedly rejected")
+        if schema_rejects(research_action(good), "request"):
+            errors.append(f"NEG schema claim id {good!r}: research unexpectedly rejected")
+    for bad in ("", "x" * 65, "a b", "claim:C0", "caf\u00e9", "a\nb", "C0\n",
+                "<<<EMPIRICA_UNTRUSTED_DATA>>>"):
+        for position, envelope in (("id", graph_action("R", bad, "R", "L")),
+                                   ("root", graph_action(bad, "R", "R", "L")),
+                                   ("from", graph_action("R", "R", bad, "L")),
+                                   ("to", graph_action("R", "R", "R", bad)),
+                                   ("claim_id", research_action(bad))):
+            if not schema_rejects(envelope, "request"):
+                errors.append(f"NEG schema claim {position} {bad!r}: expected schema rejection")
+
     # Direct schema negatives: GetContract response closed branches reject sibling target payloads.
     # Each sibling case carries a well-formed digest so the only mutation is the sibling payload;
     # this preserves the sibling-target rejection semantics after the D2B required-digest change.
-    idx = {"id": "empirica/public", "version": "2.0.0", "sections": [], "reasons": [], "next_actions": []}
+    idx = {"id": "empirica/public", "version": REGISTRY_VERSION, "sections": [], "reasons": [], "next_actions": []}
     sec = {"id": "core", "title": "t", "summary": "", "clauses": []}
     res_index_full = {"protocol": "empirica/v2", "request_id": "x",
                       "result": {"type": "Allow", "contract_result": {"target": "index", "digest": d64,
@@ -2506,8 +2929,9 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         "contract_result.digest", "GetContract wrong-but-well-formed digest")
 
     # D2A §8/§9 negatives: one mutation each with its own expected diagnostic substring.
-    full_rv = {"id": "r", "goal": "g", "status": "active", "modes": {"multi_provider": False, "cli_exec": False},
-               "contract": {"id": "empirica/public", "version": "2.0.0", "digest": d64, "relevant_sections": []},
+    full_rv = {"governance": None, "id": "r", "goal": "g", "status": "active",
+               "audit": {"state": "required", "independence": "unverified", "findings": []},
+               "contract": {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
                "obligations": {"active": [], "deferred": []}, "residuals": [],
                "freshness": {"changes": []}, "children": [], "next_actions": [],
                "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
@@ -2520,15 +2944,11 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                "result": {"type": "Allow", "converged": False,
                           "run": {"id": "r", "goal": "g", "status": "active", "contract": ci}}}
     if not schema_rejects(partial, "response"):
-        errors.append("NEG partial RunView missing modes/freshness/host: expected schema rejection")
+        errors.append("NEG partial RunView missing freshness/host: expected schema rejection")
 
     # (b) canonical additions drift is covered by the registry-digest negatives above.
 
     # (c) complete RunView required fields missing -> check_run_view_fields rejects.
-    no_modes = copy.deepcopy(full_rv)
-    no_modes.pop("modes")
-    expect(lambda e: check_run_view_fields({"type": "Allow", "run": no_modes}, registry, e, "neg"),
-           "run.modes is required", "RunView missing modes")
     no_host = copy.deepcopy(full_rv)
     no_host.pop("host")
     expect(lambda e: check_run_view_fields({"type": "Allow", "run": no_host}, registry, e, "neg"),
@@ -2611,7 +3031,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                         "audit": {"state": "not_required", "independence": "unverified",
                             "reviewed_argument_digest": None, "reviewed_goal_digest": None,
                             "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": None,
-                            "reviewed_claims": []}}}
+                            "reviewed_claims": [], "findings": []}}}
     expect(lambda e: check_argument_view(arg_bad_root, registry, e, "neg"),
            "root_claim_id", "argument root not in claims")
     arg_unresolved_ev = copy.deepcopy(arg_bad_root)
@@ -2644,20 +3064,20 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_audit_bad = copy.deepcopy(arg_bad_root)
     arg_audit_bad["argument"]["claims"] = [{"claim_id": "G0", "text": "t", "wording_digest": d64,
         "kind": "ordinary", "state": "approved", "gating": True, "evidence_digest": d64, "active_evidence_ids": []}]
-    arg_audit_bad["argument"]["audit"] = {"state": "passed", "independence": "decorrelated",
+    arg_audit_bad["argument"]["audit"] = {"state": "passed", "independence": "distinct",
         "reviewed_argument_digest": None, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
-        "reviewed_claims": []}
+        "reviewed_claims": [], "findings": []}
     expect(lambda e: check_argument_view(arg_audit_bad, registry, e, "neg"),
            "reviewed_argument_digest must be non-null", "audit passed missing reviewed digest")
     # frozen reviewed digest non-null when current frozen is null.
     arg_audit_frozen = copy.deepcopy(arg_bad_root)
     arg_audit_frozen["argument"]["claims"] = [{"claim_id": "G0", "text": "t", "wording_digest": d64,
         "kind": "ordinary", "state": "approved", "gating": True, "evidence_digest": d64, "active_evidence_ids": []}]
-    arg_audit_frozen["argument"]["audit"] = {"state": "passed", "independence": "decorrelated",
+    arg_audit_frozen["argument"]["audit"] = {"state": "passed", "independence": "distinct",
         "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": d64, "reviewed_deferred_scope_digest": d64,
-        "reviewed_claims": [{"claim_id": "G0", "evidence_digest": d64}]}
+        "reviewed_claims": [{"claim_id": "G0", "evidence_digest": d64}], "findings": []}
     expect(lambda e: check_argument_view(arg_audit_frozen, registry, e, "neg"),
            "reviewed_frozen_scope_digest must be null", "audit frozen digest when scope null")
 
@@ -2698,20 +3118,20 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_audit_empty = copy.deepcopy(arg_bad_root)
     arg_audit_empty["argument"]["claims"] = [{"claim_id": "G0", "text": "t", "wording_digest": d64,
         "kind": "ordinary", "state": "approved", "gating": True, "evidence_digest": d64, "active_evidence_ids": []}]
-    arg_audit_empty["argument"]["audit"] = {"state": "passed", "independence": "decorrelated",
+    arg_audit_empty["argument"]["audit"] = {"state": "passed", "independence": "distinct",
         "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
-        "reviewed_claims": []}
+        "reviewed_claims": [], "findings": []}
     expect(lambda e: check_argument_view(arg_audit_empty, registry, e, "neg"),
            "missing gating-claim coverage", "audit passed empty reviewed_claims")
     # passed audit with stale reviewed evidence digest.
     arg_audit_stale = copy.deepcopy(arg_bad_root)
     arg_audit_stale["argument"]["claims"] = [{"claim_id": "G0", "text": "t", "wording_digest": d64,
         "kind": "ordinary", "state": "approved", "gating": True, "evidence_digest": d64, "active_evidence_ids": []}]
-    arg_audit_stale["argument"]["audit"] = {"state": "passed", "independence": "decorrelated",
+    arg_audit_stale["argument"]["audit"] = {"state": "passed", "independence": "distinct",
         "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
-        "reviewed_claims": [{"claim_id": "G0", "evidence_digest": "sha256:" + "e" * 64}]}
+        "reviewed_claims": [{"claim_id": "G0", "evidence_digest": "sha256:" + "e" * 64}], "findings": []}
     expect(lambda e: check_argument_view(arg_audit_stale, registry, e, "neg"),
            "!= current", "audit passed stale reviewed evidence")
     # passed audit with extra non-gating reviewed claim.
@@ -2721,11 +3141,11 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
          "kind": "ordinary", "state": "approved", "gating": True, "evidence_digest": d64, "active_evidence_ids": []},
         {"claim_id": "G1", "text": "t", "wording_digest": d64,
          "kind": "ordinary", "state": "open", "gating": False, "evidence_digest": d64, "active_evidence_ids": []}]
-    arg_audit_extra["argument"]["audit"] = {"state": "passed", "independence": "decorrelated",
+    arg_audit_extra["argument"]["audit"] = {"state": "passed", "independence": "distinct",
         "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
         "reviewed_claims": [{"claim_id": "G0", "evidence_digest": d64},
-                            {"claim_id": "G1", "evidence_digest": d64}]}
+                            {"claim_id": "G1", "evidence_digest": d64}], "findings": []}
     expect(lambda e: check_argument_view(arg_audit_extra, registry, e, "neg"),
            "extra non-gating coverage", "audit passed extra non-gating reviewed claim")
     # passed audit with non-null reviewed digest where schema requires null (not_required state).
@@ -2735,7 +3155,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_audit_nonnull["argument"]["audit"] = {"state": "not_required", "independence": "unverified",
         "reviewed_argument_digest": d64, "reviewed_goal_digest": None,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": None,
-        "reviewed_claims": []}
+        "reviewed_claims": [], "findings": []}
     if not schema_rejects({"protocol": "empirica/v2", "request_id": "x",
             "result": {"type": "Allow", "converged": False, "run": full_rv,
                         "argument": arg_audit_nonnull["argument"]}}, "response"):
@@ -2770,7 +3190,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
 
     def _d2c_arg() -> dict:
         _ed = registry_digest([R1, R2, P1])
-        return {"root_claim_id": "G0", "argument_digest": d64, "goal_digest": d64,
+        return {"root_claim_id": "G0", "argument_digest": d64, "goal": "Test goal.",
+            "goal_digest": d64,
             "frozen_scope_digest": None, "deferred_scope_digest": d64,
             "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
                 "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
@@ -2798,10 +3219,12 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                  "file_bindings": [{"path": "src/a.py", "sha256": d64},
                                    {"path": "tests/a_test.py", "sha256": d64}],
                  "exit_code": 0, "spike_gate": "pass", "supersedes": None}],
-            "audit": {"state": "passed", "independence": "decorrelated",
+            "route_stamp": 1, "investigation_stamp": 2,
+            "audit": {"state": "passed", "independence": "distinct",
                 "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
                 "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
-                "reviewed_claims": [{"claim_id": "G0", "evidence_digest": _ed}]}}
+                "reviewed_claims": [{"claim_id": "G0", "evidence_digest": _ed}],
+                "findings": []}}
 
     def _arg_env(argument: dict) -> dict:
         return {"type": "Allow", "converged": False, "run": full_rv, "argument": argument}
@@ -2967,7 +3390,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
 
     def _d2c_super_arg() -> dict:
         _ed = registry_digest([R1, P1])
-        return {"root_claim_id": "G0", "argument_digest": d64, "goal_digest": d64,
+        return {"root_claim_id": "G0", "argument_digest": d64, "goal": "Test goal.",
+            "goal_digest": d64,
             "frozen_scope_digest": None, "deferred_scope_digest": d64,
             "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
                 "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
@@ -3002,10 +3426,12 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                  "file_bindings": [{"path": "src/a.py", "sha256": d64},
                                    {"path": "tests/a_test.py", "sha256": d64}],
                  "exit_code": 0, "spike_gate": "pass", "supersedes": P0}],
-            "audit": {"state": "passed", "independence": "decorrelated",
+            "route_stamp": 1, "investigation_stamp": 2,
+            "audit": {"state": "passed", "independence": "distinct",
                 "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
                 "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
-                "reviewed_claims": [{"claim_id": "G0", "evidence_digest": _ed}]}}
+                "reviewed_claims": [{"claim_id": "G0", "evidence_digest": _ed}],
+                "findings": []}}
 
     # The superseded base must pass both the raw schema and the procedural check.
     if schema_rejects(_full_env(_d2c_super_arg()), "response"):
@@ -3118,7 +3544,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         "audit": {"state": "not_required", "independence": "unverified",
             "reviewed_argument_digest": None, "reviewed_goal_digest": None,
             "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": None,
-            "reviewed_claims": []}}
+            "reviewed_claims": [], "findings": []}}
     _ord_local: list[str] = []
     check_argument_view(_arg_env(arg_ord), registry, _ord_local, "neg")
     if _ord_local:
@@ -3184,7 +3610,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         "audit": {"state": "not_required", "independence": "unverified",
             "reviewed_argument_digest": None, "reviewed_goal_digest": None,
             "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": None,
-            "reviewed_claims": []}}
+            "reviewed_claims": [], "findings": []}}
     # The valid two-claim/same-digest base must pass.
     _leak_local: list[str] = []
     check_argument_view(_arg_env(arg_leak), registry, _leak_local, "neg")
@@ -3334,7 +3760,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         errors.append("NEG D2D child_event missing fingerprint: expected schema rejection")
     # extra field.
     p = _child_event_payload()
-    p["independence"] = "decorrelated"
+    p["independence"] = "distinct"
     if not schema_rejects(_req_cmd(_trusted("child_event", "c1", p)), "request"):
         errors.append("NEG D2D child_event extra field: expected schema rejection")
     # nested event alias.
@@ -3365,7 +3791,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         errors.append("NEG D2D attribution unknown subject_kind: expected schema rejection")
     # forbidden independence field.
     p = _attribution_payload()
-    p["independence"] = "decorrelated"
+    p["independence"] = "distinct"
     if not schema_rejects(_req_cmd(_trusted("attribution", None, p)), "request"):
         errors.append("NEG D2D attribution independence field: expected schema rejection")
     # auditor with non-null covered_artifact_ids.
@@ -3389,7 +3815,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     # --- audit_verdict raw-schema negatives (one mutation each) ---
     # forbidden independence field.
     p = _audit_verdict_payload()
-    p["independence"] = "decorrelated"
+    p["independence"] = "distinct"
     if not schema_rejects(_req_cmd(_trusted("audit_verdict", "c1", p)), "request"):
         errors.append("NEG D2D audit_verdict independence field: expected schema rejection")
     # unknown verdict.
@@ -3459,8 +3885,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     # Build a valid correlated request/response bundle and mutate exactly one fact.
     def _run_view(status="active", sections=None, children=None) -> dict:
         return {"id": "run-fx", "goal": "g", "status": status,
-                "modes": {"multi_provider": False, "cli_exec": False},
-                "contract": {"id": "empirica/public", "version": "2.0.0",
+                "contract": {"id": "empirica/public", "version": REGISTRY_VERSION,
                               "digest": d64, "relevant_sections": sections or ["audit"]},
                 "obligations": {"active": [], "deferred": []}, "residuals": [],
                 "freshness": {"changes": []}, "children": children or [],
@@ -3495,12 +3920,12 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                     "state": "approved", "gating": True, "evidence_digest": EV,
                     "active_evidence_ids": [R1, P1], "kind": "needs-experiment"}],
                 "edges": [], "artifacts": _artifacts(),
-                "audit": {"state": audit_state, "independence": "decorrelated",
+                "audit": {"state": audit_state, "independence": "distinct",
                     "reviewed_argument_digest": ARG if covered else None,
                     "reviewed_goal_digest": GOAL if covered else None,
                     "reviewed_frozen_scope_digest": (frozen if (covered and frozen) else None),
                     "reviewed_deferred_scope_digest": ARG if covered else None,
-                    "reviewed_claims": [{"claim_id": "G0", "evidence_digest": EV}] if covered else []}}
+                    "reviewed_claims": [{"claim_id": "G0", "evidence_digest": EV}] if covered else [], "findings": []}}
 
     # child_event wrong child (no matching run child).
     req = _req_cmd(_trusted("child_event", "ch-missing", _child_event_payload()))
@@ -3770,6 +4195,16 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         {"child_id": "dup"}, {"child_id": "dup"}]}
     expect(lambda e: check_state_invariants(bad_state, e, "neg"),
            "duplicate child_id", "state: duplicate child_id")
+    reachable_state = json.loads((V2 / "state-fixtures/valid-active.json").read_text())
+    bad_state = copy.deepcopy(reachable_state)
+    bad_state["governance"]["proposal_digest"] = "sha256:" + "0" * 64
+    expect(lambda e: check_state_invariants(bad_state, e, "neg"),
+           "canonical digest", "state: governance proposal digest mismatch")
+    bad_state = copy.deepcopy(reachable_state)
+    bad_state["governance"]["first_approval"] = False
+    bad_state["governance"]["receipts"] = []
+    expect(lambda e: check_state_invariants(bad_state, e, "neg"),
+           "prior successful approval receipt", "state: governed progress without approval")
     # non-finite deadline rejection (NaN, +Inf, -Inf)
     for bad_dl in (float("nan"), float("inf"), float("-inf")):
         bad_state = {"children": [{"child_id": "c1", "deadline": bad_dl}]}

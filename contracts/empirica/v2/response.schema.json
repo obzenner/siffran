@@ -49,7 +49,7 @@
           "const": "empirica/public"
         },
         "version": {
-          "const": "2.0.0"
+          "const": "3.0.0"
         },
         "digest": {
           "type": "string",
@@ -62,23 +62,6 @@
             "minLength": 1
           },
           "uniqueItems": true
-        }
-      }
-    },
-    "runModes": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "multi_provider",
-        "cli_exec"
-      ],
-      "description": "Effective run modes; output always reports both effective values.",
-      "properties": {
-        "multi_provider": {
-          "type": "boolean"
-        },
-        "cli_exec": {
-          "type": "boolean"
         }
       }
     },
@@ -157,8 +140,7 @@
           ]
         },
         "claim_id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/claimId"
         }
       }
     },
@@ -193,8 +175,7 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": {
-            "type": "string",
-            "minLength": 1
+            "$ref": "#/$defs/claimId"
           }
         },
         "deferred_scope_digest": {
@@ -214,6 +195,21 @@
           "properties": {
             "code": {
               "const": "run.no_active"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "run.goal_required"
             },
             "parameters": {
               "$ref": "#/$defs/emptyParams"
@@ -558,6 +554,21 @@
           ],
           "properties": {
             "code": {
+              "const": "audit.producers_mixed"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
               "const": "audit.independence_unverified"
             },
             "parameters": {
@@ -624,6 +635,186 @@
               "$ref": "#/$defs/freezeDeferredParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.approval_required"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.revision_required"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.approval_unavailable"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.auto_ceiling"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.budget_contradictory"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.auto_invocation_required"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.budget_invalid"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.stale_proposal"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.receipt_replay"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.interaction_limit"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.decision_conflict"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.revision_exhausted"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
         }
       ]
     },
@@ -665,6 +856,12 @@
                 "minLength": 1
               },
               "uniqueItems": true
+            },
+            "claim_id": {
+              "$ref": "#/$defs/claimId"
+            },
+            "target_claim_id": {
+              "$ref": "#/$defs/claimId"
             }
           }
         }
@@ -720,7 +917,10 @@
       "additionalProperties": false,
       "required": [
         "id",
-        "must",
+        "required",
+        "observed",
+        "missing",
+        "next",
         "status"
       ],
       "properties": {
@@ -728,9 +928,87 @@
           "type": "string",
           "minLength": 1
         },
-        "must": {
+        "required": {
           "type": "string",
           "minLength": 1
+        },
+        "observed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "artifact_id",
+              "kind",
+              "outcome",
+              "stale"
+            ],
+            "properties": {
+              "artifact_id": {
+                "$ref": "#/$defs/digest256"
+              },
+              "kind": {
+                "enum": [
+                  "research",
+                  "spike"
+                ]
+              },
+              "outcome": {
+                "enum": [
+                  "supporting",
+                  "refuting",
+                  "pass",
+                  "fail"
+                ]
+              },
+              "stale": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "missing": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "code",
+                "target_claim_id",
+                "parameters"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "target_claim_id": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/claimId"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "parameters": {
+                  "type": "object"
+                }
+              }
+            }
+          ]
+        },
+        "next": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
         },
         "status": {
           "enum": [
@@ -877,7 +1155,7 @@
         "id",
         "goal",
         "status",
-        "modes",
+        "audit",
         "contract",
         "obligations",
         "residuals",
@@ -885,7 +1163,8 @@
         "children",
         "host",
         "next_actions",
-        "untrusted_delimiters"
+        "untrusted_delimiters",
+        "governance"
       ],
       "description": "Public run view. converged lives only on Allow, never duplicated here.",
       "properties": {
@@ -896,6 +1175,9 @@
         "goal": {
           "type": "string"
         },
+        "invocation": {
+          "$ref": "#/$defs/invocationProvenance"
+        },
         "status": {
           "enum": [
             "active",
@@ -905,8 +1187,8 @@
             "stopped_budget"
           ]
         },
-        "modes": {
-          "$ref": "#/$defs/runModes"
+        "audit": {
+          "$ref": "#/$defs/auditSummary"
         },
         "contract": {
           "$ref": "#/$defs/contractIdentity"
@@ -945,6 +1227,281 @@
         },
         "untrusted_delimiters": {
           "$ref": "#/$defs/untrustedDelimiters"
+        },
+        "governance": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "control_mode",
+                "plan_revision",
+                "approved_digest",
+                "approval_kind",
+                "proposal_digest",
+                "proposal",
+                "context",
+                "first_approval",
+                "pre_approval_revisions",
+                "post_approval_revisions",
+                "budgets",
+                "remaining",
+                "request_ready",
+                "display_ready",
+                "next_action",
+                "interactions_remaining",
+                "prompt_error"
+              ],
+              "properties": {
+                "state": {
+                  "enum": [
+                    "pending",
+                    "approved",
+                    "revision_pending",
+                    "rejected"
+                  ]
+                },
+                "control_mode": {
+                  "enum": [
+                    "deliberative",
+                    "auto"
+                  ]
+                },
+                "plan_revision": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "approved_digest": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "approval_kind": {
+                  "enum": [
+                    null,
+                    "host_ui",
+                    "auto"
+                  ]
+                },
+                "proposal_digest": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "proposal": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "budgets",
+                    "rationale"
+                  ],
+                  "properties": {
+                    "budgets": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "max_passes",
+                        "max_spawns",
+                        "max_audit_spawns"
+                      ],
+                      "properties": {
+                        "max_passes": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 1024
+                        },
+                        "max_spawns": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 128
+                        },
+                        "max_audit_spawns": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 128
+                        }
+                      }
+                    },
+                    "rationale": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 600,
+                          "pattern": "\\S"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "context": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "author",
+                    "ingress",
+                    "approval_capability",
+                    "delegation",
+                    "interactive"
+                  ],
+                  "properties": {
+                    "author": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/identityObservation",
+                          "unevaluatedProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "ingress": {
+                      "enum": [
+                        "unavailable",
+                        "mcp_elicitation",
+                        "pi_ui"
+                      ]
+                    },
+                    "approval_capability": {
+                      "enum": [
+                        "unavailable",
+                        "human_configuration"
+                      ]
+                    },
+                    "delegation": {
+                      "type": "boolean"
+                    },
+                    "interactive": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    }
+                  }
+                },
+                "first_approval": {
+                  "type": "boolean"
+                },
+                "pre_approval_revisions": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8
+                },
+                "post_approval_revisions": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8
+                },
+                "budgets": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "max_passes",
+                    "passes_used",
+                    "max_spawns",
+                    "spawns_used",
+                    "max_audit_spawns",
+                    "audit_spawns_used"
+                  ],
+                  "properties": {
+                    "max_passes": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "passes_used": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "max_spawns": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "spawns_used": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "max_audit_spawns": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "audit_spawns_used": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "remaining": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "max_passes",
+                    "max_spawns",
+                    "max_audit_spawns"
+                  ],
+                  "properties": {
+                    "max_passes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "max_spawns": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "max_audit_spawns": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "request_ready": {
+                  "type": "boolean"
+                },
+                "display_ready": {
+                  "type": "boolean"
+                },
+                "next_action": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "interactions_remaining": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "proposal",
+                    "total"
+                  ],
+                  "properties": {
+                    "proposal": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 3
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 128
+                    }
+                  }
+                },
+                "prompt_error": {
+                  "enum": [
+                    null,
+                    "governance.interaction_limit"
+                  ]
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -1216,9 +1773,6 @@
         },
         {
           "$ref": "#/$defs/contractResultSection"
-        },
-        {
-          "$ref": "#/$defs/contractResultFull"
         }
       ]
     },
@@ -1271,28 +1825,6 @@
         }
       }
     },
-    "contractResultFull": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "target",
-        "digest",
-        "full"
-      ],
-      "description": "GetContract full result carries the canonical PublicContract digest so on-demand discovery can be correlated with RunView contract identity; the digest is not embedded inside PublicContract itself.",
-      "properties": {
-        "target": {
-          "const": "full"
-        },
-        "digest": {
-          "$ref": "#/$defs/digest256",
-          "description": "Canonical digest of public-contract.json computed by the registry_digest algorithm; exact-equal to RunView contract.digest."
-        },
-        "full": {
-          "$ref": "#/$defs/publicContract"
-        }
-      }
-    },
     "contractIndex": {
       "type": "object",
       "additionalProperties": false,
@@ -1308,7 +1840,7 @@
           "const": "empirica/public"
         },
         "version": {
-          "const": "2.0.0"
+          "const": "3.0.0"
         },
         "sections": {
           "type": "array",
@@ -1454,6 +1986,7 @@
       "required": [
         "root_claim_id",
         "argument_digest",
+        "goal",
         "goal_digest",
         "frozen_scope_digest",
         "deferred_scope_digest",
@@ -1461,16 +1994,21 @@
         "claims",
         "edges",
         "artifacts",
+        "route_stamp",
+        "investigation_stamp",
         "audit"
       ],
       "description": "Closed GetArgument projection; no generic argument extension map.",
       "properties": {
         "root_claim_id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/claimId"
         },
         "argument_digest": {
           "$ref": "#/$defs/digest256"
+        },
+        "goal": {
+          "type": "string",
+          "minLength": 1
         },
         "goal_digest": {
           "$ref": "#/$defs/digest256"
@@ -1505,6 +2043,22 @@
           },
           "uniqueItems": true
         },
+        "route_stamp": {
+          "description": "First-write-wins route witness sequence; null when routing has not been observed.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "investigation_stamp": {
+          "description": "First-write-wins investigation witness sequence; null when investigation has not been observed.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
         "audit": {
           "$ref": "#/$defs/auditView"
         }
@@ -1525,8 +2079,7 @@
       ],
       "properties": {
         "claim_id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/claimId"
         },
         "text": {
           "type": "string"
@@ -1577,12 +2130,10 @@
       ],
       "properties": {
         "from": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/claimId"
         },
         "to": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/claimId"
         },
         "type": {
           "enum": [
@@ -1631,8 +2182,7 @@
           "$ref": "#/$defs/digest256"
         },
         "claim_id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/claimId"
         },
         "claim_digest": {
           "$ref": "#/$defs/digest256"
@@ -1699,8 +2249,7 @@
           "$ref": "#/$defs/digest256"
         },
         "claim_id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/claimId"
         },
         "claim_digest": {
           "$ref": "#/$defs/digest256"
@@ -1771,8 +2320,7 @@
           "$ref": "#/$defs/digest256"
         },
         "claim_id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/claimId"
         },
         "claim_digest": {
           "$ref": "#/$defs/digest256"
@@ -1849,6 +2397,66 @@
         }
       }
     },
+    "auditSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "independence",
+        "findings"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "required",
+            "pending",
+            "passed",
+            "failed"
+          ]
+        },
+        "independence": {
+          "enum": [
+            "distinct",
+            "mixed",
+            "same_model",
+            "unverified"
+          ]
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Findings of a failed verdict; empty otherwise, including a stale pass."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "required",
+                  "pending",
+                  "passed"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "findings": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
+    },
     "auditView": {
       "type": "object",
       "additionalProperties": false,
@@ -1859,7 +2467,8 @@
         "reviewed_goal_digest",
         "reviewed_frozen_scope_digest",
         "reviewed_deferred_scope_digest",
-        "reviewed_claims"
+        "reviewed_claims",
+        "findings"
       ],
       "properties": {
         "state": {
@@ -1874,7 +2483,8 @@
         },
         "independence": {
           "enum": [
-            "decorrelated",
+            "distinct",
+            "mixed",
             "same_model",
             "unverified"
           ]
@@ -1897,6 +2507,14 @@
             "$ref": "#/$defs/reviewedClaimItem"
           },
           "uniqueItems": true
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Findings of the latest settled verdict, while it still matches the audit state; empty for a stale pass or while a re-audit is pending."
         }
       },
       "allOf": [
@@ -1931,6 +2549,9 @@
               },
               "reviewed_claims": {
                 "maxItems": 0
+              },
+              "findings": {
+                "maxItems": 0
               }
             },
             "required": [
@@ -1938,7 +2559,8 @@
               "reviewed_goal_digest",
               "reviewed_frozen_scope_digest",
               "reviewed_deferred_scope_digest",
-              "reviewed_claims"
+              "reviewed_claims",
+              "findings"
             ]
           }
         },
@@ -1991,8 +2613,7 @@
       ],
       "properties": {
         "claim_id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/claimId"
         },
         "evidence_digest": {
           "$ref": "#/$defs/digest256"
@@ -2004,7 +2625,6 @@
       "additionalProperties": false,
       "required": [
         "type",
-        "run",
         "reasons"
       ],
       "properties": {
@@ -2021,7 +2641,42 @@
             "$ref": "#/$defs/reasonEntry"
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "not": {
+              "required": [
+                "run"
+              ]
+            }
+          },
+          "then": {
+            "properties": {
+              "reasons": {
+                "items": {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/reasonEntry"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "run.goal_required",
+                            "governance.auto_invocation_required",
+                            "governance.budget_contradictory"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "inert": {
       "type": "object",
@@ -2081,468 +2736,460 @@
         }
       }
     },
-    "publicContract": {
-      "title": "Empirica v2 public contract registry",
+    "privateAllowPresented": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "converged",
+        "run",
+        "presentation"
+      ],
+      "description": "QUAL-1 private run-bearing Allow: the public author RunView plus the required private governance presentation. Never emitted on the public wire.",
+      "properties": {
+        "type": {
+          "const": "Allow"
+        },
+        "converged": {
+          "type": "boolean"
+        },
+        "run": {
+          "$ref": "#/$defs/runView"
+        },
+        "presentation": {
+          "$ref": "#/$defs/governancePresentation"
+        }
+      }
+    },
+    "privateBlockPresented": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "run",
+        "reasons",
+        "presentation"
+      ],
+      "description": "QUAL-1 private run-bearing Block plus the required private governance presentation.",
+      "properties": {
+        "type": {
+          "const": "Block"
+        },
+        "run": {
+          "$ref": "#/$defs/runView"
+        },
+        "reasons": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/reasonEntry"
+          }
+        },
+        "presentation": {
+          "$ref": "#/$defs/governancePresentation"
+        }
+      }
+    },
+    "privateInertPresented": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "reason",
+        "run",
+        "presentation"
+      ],
+      "description": "QUAL-1 private run-bearing Inert plus the required private governance presentation.",
+      "properties": {
+        "type": {
+          "const": "Inert"
+        },
+        "reason": {
+          "enum": [
+            "no_run",
+            "unsupported_host_event"
+          ]
+        },
+        "run": {
+          "$ref": "#/$defs/runView"
+        },
+        "presentation": {
+          "$ref": "#/$defs/governancePresentation"
+        }
+      }
+    },
+    "privateGovernanceResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "request_id",
+        "result"
+      ],
+      "description": "QUAL-1 private governance response definition: a run-bearing Allow/Block/Inert must carry the private presentation; the public Block/Inert alternatives are restricted to runless results (a run-bearing unpresented Block/Inert is rejected). Validated only inside application governance ingress; the public response schema forbids a presentation key.",
+      "properties": {
+        "protocol": {
+          "const": "empirica/v2"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "result": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/privateAllowPresented"
+            },
+            {
+              "$ref": "#/$defs/privateBlockPresented"
+            },
+            {
+              "$ref": "#/$defs/privateInertPresented"
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/block"
+                },
+                {
+                  "not": {
+                    "required": [
+                      "run"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/inert"
+                },
+                {
+                  "not": {
+                    "required": [
+                      "run"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "$ref": "#/$defs/fault"
+            }
+          ]
+        }
+      }
+    },
+    "invocationProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host",
+        "interactive",
+        "signal",
+        "delegation"
+      ],
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "interactive": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "signal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "delegation": {
+          "type": "boolean"
+        }
+      }
+    },
+    "identityObservation": {
+      "type": "object",
+      "required": [
+        "identity",
+        "provider_id",
+        "model_id",
+        "policy_version",
+        "source",
+        "observed_by"
+      ],
+      "properties": {
+        "identity": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "provider_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "model_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "policy_version": {
+          "const": "model-identity/1"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "observed_by": {
+          "const": "host"
+        }
+      },
+      "description": "Open only for allOf extension; every direct $ref use must set unevaluatedProperties: false."
+    },
+    "graphClaimItem": {
       "type": "object",
       "additionalProperties": false,
       "required": [
         "id",
-        "version",
-        "protocol",
-        "commands",
-        "decisions",
-        "statuses",
-        "actions",
-        "child_lifecycle",
-        "host_tiers",
-        "audit_execution_modes",
-        "claim_states",
-        "claim_kinds",
-        "audit_states",
-        "independence_states",
-        "freshness_states",
-        "artifact_kinds",
-        "artifact_outcomes",
-        "spike_gates",
-        "attribution_subject_kinds",
-        "attribution_observers",
-        "audit_verdicts",
-        "scope_reviews",
-        "mode_fields",
-        "operation_contexts",
-        "untrusted_delimiters",
-        "presentation_selector",
-        "next_actions",
-        "reasons",
-        "sections"
+        "text",
+        "kind",
+        "gating"
       ],
       "properties": {
         "id": {
-          "const": "empirica/public"
+          "$ref": "#/$defs/claimId"
         },
-        "version": {
-          "const": "2.0.0"
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
         },
-        "protocol": {
-          "const": "empirica/v2"
+        "kind": {
+          "enum": [
+            "ordinary",
+            "needs-experiment",
+            "needs-decision"
+          ]
         },
-        "commands": {
+        "gating": {
+          "type": "boolean"
+        }
+      },
+      "description": "Closed author-supplied claim vertex for a graph action; matches core.evaluation.valid_graph. Uniqueness, root membership, acyclicity and reachability stay core-only."
+    },
+    "graphEdgeItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "to",
+        "type"
+      ],
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/claimId"
+        },
+        "to": {
+          "$ref": "#/$defs/claimId"
+        },
+        "type": {
+          "const": "SupportedBy"
+        }
+      },
+      "description": "Closed author-supplied support edge for a graph action."
+    },
+    "graphPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "root",
+        "claims",
+        "edges"
+      ],
+      "properties": {
+        "root": {
+          "$ref": "#/$defs/claimId"
+        },
+        "claims": {
           "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
           "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        },
-        "decisions": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        },
-        "statuses": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        },
-        "actions": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "author",
-            "host",
-            "trusted"
-          ],
-          "properties": {
-            "author": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              },
-              "uniqueItems": true
-            },
-            "host": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              },
-              "uniqueItems": true
-            },
-            "trusted": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              },
-              "uniqueItems": true
-            }
+            "$ref": "#/$defs/graphClaimItem"
           }
         },
-        "child_lifecycle": {
+        "edges": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/graphEdgeItem"
+          }
+        }
+      },
+      "description": "Closed graph action payload owned by the SSOT and projected into the model-facing tool schema. Defence in depth; core.evaluation.valid_graph remains authoritative."
+    },
+    "governancePresentation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dialog",
+        "scope"
+      ],
+      "properties": {
+        "dialog": {
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "states",
-            "terminal_states",
-            "transitions"
+            "epoch",
+            "control_mode",
+            "state",
+            "reviews_left",
+            "goal",
+            "rationale",
+            "rationale_label",
+            "amendment_warning",
+            "invocation",
+            "budgets"
           ],
           "properties": {
-            "states": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              },
-              "uniqueItems": true
+            "epoch": {
+              "type": "integer",
+              "minimum": 0
             },
-            "terminal_states": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              },
-              "uniqueItems": true
+            "control_mode": {
+              "type": "string"
             },
-            "transitions": {
+            "state": {
+              "type": "string"
+            },
+            "reviews_left": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "proposal",
+                "total"
+              ],
+              "properties": {
+                "proposal": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "total": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "goal": {
+              "type": "string"
+            },
+            "rationale": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 3600,
+                  "pattern": "\\S"
+                }
+              ]
+            },
+            "rationale_label": {
+              "type": "string",
+              "minLength": 1
+            },
+            "amendment_warning": {
+              "type": "string",
+              "minLength": 1
+            },
+            "invocation": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/invocationProvenance"
+                }
+              ]
+            },
+            "budgets": {
               "type": "array",
               "items": {
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
-                  "from",
-                  "to"
+                  "key",
+                  "label",
+                  "short",
+                  "help",
+                  "value",
+                  "used",
+                  "minimum",
+                  "maximum"
                 ],
                 "properties": {
-                  "from": {
-                    "type": "string",
-                    "minLength": 1
+                  "key": {
+                    "type": "string"
                   },
-                  "to": {
-                    "type": "string",
-                    "minLength": 1
+                  "label": {
+                    "type": "string"
+                  },
+                  "short": {
+                    "type": "string"
+                  },
+                  "help": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "integer"
+                  },
+                  "used": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "minimum": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "maximum": {
+                    "type": "integer",
+                    "minimum": 1
                   }
                 }
-              },
-              "uniqueItems": true
+              }
             }
           }
         },
-        "host_tiers": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        },
-        "audit_execution_modes": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        },
-        "claim_states": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        },
-        "claim_kinds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true,
-          "minItems": 1
-        },
-        "audit_states": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        },
-        "independence_states": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        },
-        "freshness_states": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        },
-        "artifact_kinds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true,
-          "minItems": 1
-        },
-        "artifact_outcomes": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true,
-          "minItems": 1
-        },
-        "spike_gates": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true,
-          "minItems": 1
-        },
-        "attribution_subject_kinds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true,
-          "minItems": 1
-        },
-        "attribution_observers": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true,
-          "minItems": 1
-        },
-        "audit_verdicts": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true,
-          "minItems": 1
-        },
-        "scope_reviews": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true,
-          "minItems": 1
-        },
-        "mode_fields": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        },
-        "operation_contexts": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        },
-        "untrusted_delimiters": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "open",
-            "close"
-          ],
-          "properties": {
-            "open": {
-              "type": "string",
-              "minLength": 1
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/graphPayload"
             },
-            "close": {
-              "type": "string",
-              "minLength": 1
+            {
+              "type": "null"
             }
-          }
-        },
-        "presentation_selector": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "context_sections",
-            "terminal_sections",
-            "unknown_reason_sections"
-          ],
-          "description": "Canonical ordered presentation selector registry (D1 §12). The JSON registry is the executable SSOT; exact operation-context key parity and section resolution are enforced procedurally (no Python selector mapping).",
-          "properties": {
-            "context_sections": {
-              "type": "object",
-              "additionalProperties": false,
-              "patternProperties": {
-                "^[a-z][a-z0-9_.-]*$": {
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "uniqueItems": true
-                }
-              }
-            },
-            "terminal_sections": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              },
-              "uniqueItems": true,
-              "minItems": 1
-            },
-            "unknown_reason_sections": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              },
-              "uniqueItems": true,
-              "minItems": 1
-            }
-          }
-        },
-        "next_actions": {
-          "type": "object",
-          "additionalProperties": false,
-          "patternProperties": {
-            "^[a-z][a-z0-9_.-]*$": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "description",
-                "params"
-              ],
-              "properties": {
-                "description": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "params": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        },
-        "reasons": {
-          "type": "object",
-          "additionalProperties": false,
-          "patternProperties": {
-            "^[a-z][a-z0-9_.-]*$": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "params",
-                "next_actions",
-                "sections",
-                "message"
-              ],
-              "properties": {
-                "params": {
-                  "type": "object"
-                },
-                "next_actions": {
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "uniqueItems": true
-                },
-                "sections": {
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "uniqueItems": true
-                },
-                "message": {
-                  "type": "string"
-                }
-              }
-            }
-          }
-        },
-        "sections": {
-          "type": "object",
-          "additionalProperties": false,
-          "patternProperties": {
-            "^[a-z][a-z0-9_/.-]*$": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "title",
-                "summary",
-                "clauses"
-              ],
-              "properties": {
-                "title": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "summary": {
-                  "type": "string"
-                },
-                "clauses": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "id",
-                      "text"
-                    ],
-                    "properties": {
-                      "id": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "text": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    }
-                  },
-                  "uniqueItems": true
-                }
-              }
-            }
-          }
+          ]
         }
       }
     },
-    "publicContractDefs": {}
+    "claimId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+    }
   }
 }

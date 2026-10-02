@@ -1,0 +1,428 @@
+{
+  "result": {
+    "type": "Allow",
+    "contract_result": {
+      "target": "index",
+      "digest": "sha256:c322c3df3584ee0e8ad740c7de58d56478c59dcbdc7ac0ee58d785f2ceb39a8c",
+      "index": {
+        "id": "empirica/public",
+        "version": "3.0.0",
+        "sections": [
+          {
+            "id": "core",
+            "title": "Core concepts"
+          },
+          {
+            "id": "roles",
+            "title": "Role authority"
+          },
+          {
+            "id": "run/lifecycle",
+            "title": "Run lifecycle"
+          },
+          {
+            "id": "claims/graph",
+            "title": "Argument graph"
+          },
+          {
+            "id": "claims/residuals",
+            "title": "Claim residuals"
+          },
+          {
+            "id": "claims/refutation",
+            "title": "Refutation and conflict"
+          },
+          {
+            "id": "evidence/research",
+            "title": "Research evidence"
+          },
+          {
+            "id": "evidence/spike",
+            "title": "Spike evidence"
+          },
+          {
+            "id": "evidence/order",
+            "title": "Evidence ordering"
+          },
+          {
+            "id": "evidence/freshness",
+            "title": "Evidence freshness"
+          },
+          {
+            "id": "audit",
+            "title": "Audit"
+          },
+          {
+            "id": "audit/independence",
+            "title": "Audit independence"
+          },
+          {
+            "id": "children",
+            "title": "Child lifecycle"
+          },
+          {
+            "id": "budget",
+            "title": "Budget"
+          },
+          {
+            "id": "route",
+            "title": "Route"
+          },
+          {
+            "id": "freeze",
+            "title": "Freeze"
+          },
+          {
+            "id": "terminal",
+            "title": "Terminal behavior"
+          },
+          {
+            "id": "hosts/capabilities",
+            "title": "Host capabilities"
+          },
+          {
+            "id": "trusted/ingress",
+            "title": "Trusted ingress payloads"
+          },
+          {
+            "id": "recovery",
+            "title": "Recovery and restore"
+          },
+          {
+            "id": "protocol",
+            "title": "Protocol identity"
+          },
+          {
+            "id": "presentation/selector",
+            "title": "Presentation selector"
+          },
+          {
+            "id": "governance",
+            "title": "Governed initialization"
+          }
+        ],
+        "reasons": [
+          {
+            "code": "run.no_active",
+            "sections": [
+              "run/lifecycle"
+            ]
+          },
+          {
+            "code": "run.goal_required",
+            "sections": [
+              "run/lifecycle"
+            ]
+          },
+          {
+            "code": "run.terminal",
+            "sections": [
+              "terminal"
+            ]
+          },
+          {
+            "code": "run.corrupt",
+            "sections": [
+              "run/lifecycle"
+            ]
+          },
+          {
+            "code": "graph.missing",
+            "sections": [
+              "claims/graph"
+            ]
+          },
+          {
+            "code": "graph.invalid",
+            "sections": [
+              "claims/graph"
+            ]
+          },
+          {
+            "code": "route.required",
+            "sections": [
+              "route"
+            ]
+          },
+          {
+            "code": "investigation.required",
+            "sections": [
+              "route"
+            ]
+          },
+          {
+            "code": "route.late",
+            "sections": [
+              "route"
+            ]
+          },
+          {
+            "code": "claim.research_missing",
+            "sections": [
+              "evidence/research"
+            ]
+          },
+          {
+            "code": "claim.research_unbound",
+            "sections": [
+              "evidence/research"
+            ]
+          },
+          {
+            "code": "claim.spike_missing",
+            "sections": [
+              "evidence/spike"
+            ]
+          },
+          {
+            "code": "claim.spike_prerequisite_missing",
+            "sections": [
+              "evidence/order"
+            ]
+          },
+          {
+            "code": "claim.spike_stale",
+            "sections": [
+              "evidence/freshness"
+            ]
+          },
+          {
+            "code": "claim.human_decision",
+            "sections": [
+              "claims/residuals"
+            ]
+          },
+          {
+            "code": "claim.refuted",
+            "sections": [
+              "claims/refutation"
+            ]
+          },
+          {
+            "code": "evidence.conflict",
+            "sections": [
+              "claims/refutation"
+            ]
+          },
+          {
+            "code": "budget.exhausted",
+            "sections": [
+              "budget"
+            ]
+          },
+          {
+            "code": "audit.required",
+            "sections": [
+              "audit"
+            ]
+          },
+          {
+            "code": "audit.pending",
+            "sections": [
+              "audit"
+            ]
+          },
+          {
+            "code": "audit.unreadable",
+            "sections": [
+              "audit"
+            ]
+          },
+          {
+            "code": "audit.failed",
+            "sections": [
+              "audit"
+            ]
+          },
+          {
+            "code": "audit.stale",
+            "sections": [
+              "audit"
+            ]
+          },
+          {
+            "code": "audit.same_model",
+            "sections": [
+              "audit/independence"
+            ]
+          },
+          {
+            "code": "audit.independence_unverified",
+            "sections": [
+              "audit/independence"
+            ]
+          },
+          {
+            "code": "child.terminal",
+            "sections": [
+              "children"
+            ]
+          },
+          {
+            "code": "host.async_unsupported",
+            "sections": [
+              "hosts/capabilities"
+            ]
+          },
+          {
+            "code": "host.audit_output_unobservable",
+            "sections": [
+              "hosts/capabilities"
+            ]
+          },
+          {
+            "code": "freeze.deferred",
+            "sections": [
+              "freeze"
+            ]
+          },
+          {
+            "code": "governance.auto_invocation_required",
+            "sections": [
+              "governance"
+            ]
+          },
+          {
+            "code": "governance.approval_required",
+            "sections": [
+              "governance"
+            ]
+          },
+          {
+            "code": "governance.revision_required",
+            "sections": [
+              "governance"
+            ]
+          },
+          {
+            "code": "governance.approval_unavailable",
+            "sections": [
+              "governance"
+            ]
+          },
+          {
+            "code": "governance.auto_ceiling",
+            "sections": [
+              "governance"
+            ]
+          },
+          {
+            "code": "governance.budget_contradictory",
+            "sections": [
+              "governance"
+            ]
+          },
+          {
+            "code": "governance.revision_exhausted",
+            "sections": [
+              "governance"
+            ]
+          },
+          {
+            "code": "governance.budget_invalid",
+            "sections": [
+              "governance"
+            ]
+          },
+          {
+            "code": "governance.stale_proposal",
+            "sections": [
+              "governance"
+            ]
+          },
+          {
+            "code": "governance.receipt_replay",
+            "sections": [
+              "governance"
+            ]
+          },
+          {
+            "code": "governance.interaction_limit",
+            "sections": [
+              "governance"
+            ]
+          },
+          {
+            "code": "governance.decision_conflict",
+            "sections": [
+              "governance"
+            ]
+          },
+          {
+            "code": "audit.producers_mixed",
+            "sections": [
+              "audit/independence"
+            ]
+          }
+        ],
+        "next_actions": [
+          {
+            "id": "run.start_fresh",
+            "description": "Start a fresh v2 run."
+          },
+          {
+            "id": "graph.record",
+            "description": "Propose a minimal valid claim graph from supplied context; no repository investigation or evidence is required."
+          },
+          {
+            "id": "run.inspect",
+            "description": "Inspect the current run residuals and state."
+          },
+          {
+            "id": "route.record",
+            "description": "Record a routing commitment before investigation."
+          },
+          {
+            "id": "investigation.record",
+            "description": "Record the first investigation witness after routing."
+          },
+          {
+            "id": "research.record",
+            "description": "Record one externally observed Fold-1 research citation bound to a claim."
+          },
+          {
+            "id": "spike.run",
+            "description": "Request a deterministic harness spike against active research."
+          },
+          {
+            "id": "spike.regate",
+            "description": "Re-gate a stale spike with current prerequisites."
+          },
+          {
+            "id": "human.request_decision",
+            "description": "Request a human decision for a residual claim."
+          },
+          {
+            "id": "budget.raise",
+            "description": "Propose a sized ceiling change through configure_run; only renewed host approval can apply it, never auto (auto projections drop this recovery)."
+          },
+          {
+            "id": "child.spawn_auditor",
+            "description": "Spawn an independent auditor child."
+          },
+          {
+            "id": "child.wait",
+            "description": "Await a pending audit child; the host settles it through the trusted child_event lifecycle (Claude SubagentStop, Pi foreground tool result), not a callable wait."
+          },
+          {
+            "id": "child.retry",
+            "description": "Retry a failed or rejected child."
+          },
+          {
+            "id": "residual.accept",
+            "description": "Accept the current residual and stop or continue with it recorded."
+          },
+          {
+            "id": "host.repair_context",
+            "description": "Host must refresh the observed governance context through the trusted governance_context ingress (Pi refreshGovernance, Claude _governance_context); do not retry configure_run blindly."
+          },
+          {
+            "id": "governance.propose",
+            "description": "Issue a task-sized configure_run (all three ceilings plus a nonblank rationale) and request a host-mediated configuration decision; cannot self-approve."
+          }
+        ]
+      }
+    }
+  },
+  "text": "Contract\ncore — Core concepts\nroles — Role authority\nrun/lifecycle — Run lifecycle\nclaims/graph — Argument graph\nclaims/residuals — Claim residuals\nclaims/refutation — Refutation and conflict\nevidence/research — Research evidence\nevidence/spike — Spike evidence\nevidence/order — Evidence ordering\nevidence/freshness — Evidence freshness\naudit — Audit\naudit/independence — Audit independence\nchildren — Child lifecycle\nbudget — Budget\nroute — Route\nfreeze — Freeze\nterminal — Terminal behavior\nhosts/capabilities — Host capabilities\ntrusted/ingress — Trusted ingress payloads\nrecovery — Recovery and restore\nprotocol — Protocol identity\npresentation/selector — Presentation selector\ngovernance — Governed initialization"
+}

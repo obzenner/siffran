@@ -24,6 +24,7 @@ Coverage (D6 spec section 10):
 """
 from __future__ import annotations
 
+import copy
 import json
 import sys
 import unittest
@@ -44,6 +45,7 @@ if _REPO_ROOT is None:
 
 _PLUGIN_ROOT = _REPO_ROOT / "plugins" / "empirica"
 sys.path.insert(0, str(_PLUGIN_ROOT))
+from governance_setup import TEST_INVOCATION, SIZED_RATIONALE  # noqa: E402
 
 _V2 = _REPO_ROOT / "contracts" / "empirica" / "v2"
 _PUBLIC_CONTRACT = json.loads((_V2 / "public-contract.json").read_text(encoding="utf-8"))
@@ -71,7 +73,7 @@ _DEFAULT_PROFILE = "claude-code@2.1.278"
 
 # --- Accepted observe fixture requests for the four trusted actions ---
 _TRUSTED_FIXTURE_REQUESTS: list[dict] = []
-for _fx_name in ("observe-evidence-leaf", "observe-attribution-covered-actor",
+for _fx_name in ("observe-evidence-leaf", "observe-attribution-auditor",
                  "observe-child-event-redacted", "observe-audit-verdict"):
     _fx = json.loads((_V2 / "fixtures" / f"{_fx_name}.json").read_text(encoding="utf-8"))
     _TRUSTED_FIXTURE_REQUESTS.append(_fx["request"])
@@ -108,10 +110,6 @@ def _import_application_v2():
         raise V2ModuleAbsent(
             "application.v2 module absent: D6-B must introduce the minimal v2 service "
             "compose() factory. " + str(exc)) from exc
-
-
-def _digest64(c: str = "0") -> str:
-    return "sha256:" + c * 64
 
 
 def _valid_request(command: dict, request_id: str = "r") -> dict:
@@ -155,6 +153,10 @@ class RecordingRunRepository:
     def _mint_rev(self) -> str:
         self._rev_counter += 1
         return f"rev-{self._rev_counter}"
+
+    def generations(self, project_id, run_id):
+        return sorted(key.generation for key in self._store
+                      if key.project_id == project_id and key.run_id == run_id)
 
     def read(self, key):
         entry = self._store.get(key)
@@ -277,7 +279,8 @@ class D6ProtocolPrevalidation(unittest.TestCase):
 
 def _raw_command_of(cmd_type: str, run_id: str = "r1") -> dict:
     if cmd_type == "StartRun":
-        return {"type": "StartRun", "selector": {"project": "p", "session": "s"}, "goal": "g"}
+        return {"type": "StartRun", "control_mode": "deliberative", "selector": {"project": "p", "session": "s"}, "goal": "g",
+                "invocation": dict(TEST_INVOCATION)}
     if cmd_type == "ResolveRun":
         return {"type": "ResolveRun", "selector": {"project": "p", "session": "s"}}
     if cmd_type == "GetRun":
@@ -306,20 +309,81 @@ def _build_action_sample(kind: str) -> dict:
         return {"kind": "spike_request", "claim_id": "C0", "command": "pytest",
                 "dependent_files": ["f.py"]}
     if kind == "configure_run":
-        return {"kind": "configure_run", "budgets": {"max_passes": 1}}
+        return {"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1,
+                                                       "max_audit_spawns": 2},
+                "rationale": SIZED_RATIONALE}
     if kind == "route":
         return {"kind": "route", "reason": "primary"}
     if kind == "investigate":
         return {"kind": "investigate"}
     if kind == "freeze":
         return {"kind": "freeze"}
-    if kind == "dispatch":
-        return {"kind": "dispatch", "target": "claim"}
     if kind == "child_reserve":
         return {"kind": "child_reserve", "purpose": "audit",
                 "role_profile": _DEFAULT_PROFILE, "execution": "foreground",
                 "resource_class": "audit"}
     raise ValueError(f"no sample for {kind!r}")
+
+
+class D6ClaimIdSchemaBoundaries(unittest.TestCase):
+    """Every schema claim-id position accepts exactly ``[A-Za-z0-9._-]{1,64}``, nothing more."""
+
+    ACCEPTED = ("A", "a.b-C_9", "x" * 64)
+    REJECTED = ("", "x" * 65, "a b", "claim:C0", "caf\u00e9", "a\nb", "C0\n",
+                "<<<EMPIRICA_UNTRUSTED_DATA>>>")
+
+    @staticmethod
+    def _graph(root, vertex, edge_from, edge_to):
+        return {"kind": "graph", "payload": {
+            "root": root,
+            "claims": [{"id": vertex, "text": "t", "kind": "ordinary", "gating": True},
+                       {"id": "L", "text": "t", "kind": "ordinary", "gating": True}],
+            "edges": [{"from": edge_from, "to": edge_to, "type": "SupportedBy"}]}}
+
+    def _request_valid(self, action: dict) -> bool:
+        env = _valid_request({"type": "ObserveAction", "run_id": "run-1", "action": action})
+        return jsonschema.Draft202012Validator(_REQUEST_SCHEMA).is_valid(env)
+
+    def test_graph_positions(self):
+        for value in self.ACCEPTED:
+            with self.subTest(value=value):
+                self.assertTrue(self._request_valid(self._graph(value, value, value, "L")))
+        for value in self.REJECTED:
+            for position, action in (
+                    ("id", self._graph("R", value, "R", "L")),
+                    ("root", self._graph(value, "R", "R", "L")),
+                    ("from", self._graph("R", "R", value, "L")),
+                    ("to", self._graph("R", "R", "R", value))):
+                with self.subTest(value=value, position=position):
+                    self.assertFalse(self._request_valid(action))
+
+    def test_action_claim_id(self):
+        for kind in ("research", "spike_request"):
+            for value in self.ACCEPTED:
+                with self.subTest(kind=kind, value=value):
+                    self.assertTrue(self._request_valid(
+                        {**_build_action_sample(kind), "claim_id": value}))
+            for value in self.REJECTED:
+                with self.subTest(kind=kind, value=value):
+                    self.assertFalse(self._request_valid(
+                        {**_build_action_sample(kind), "claim_id": value}))
+
+    def test_state_frozen_claim_ids_and_nullable_target(self):
+        state = json.loads((_V2 / "state.schema.json").read_text(encoding="utf-8"))
+        frozen = jsonschema.Draft202012Validator(
+            {**state["properties"]["frozen_claim_ids"], "$defs": state["$defs"]})
+        missing = _RESPONSE_SCHEMA["$defs"]["obligationSummary"]["properties"]["missing"]
+        target = jsonschema.Draft202012Validator(
+            {**missing["oneOf"][1]["properties"]["target_claim_id"],
+             "$defs": _RESPONSE_SCHEMA["$defs"]})
+        self.assertTrue(frozen.is_valid(None))
+        self.assertTrue(target.is_valid(None))
+        for value in self.ACCEPTED:
+            self.assertTrue(frozen.is_valid([value]), value)
+            self.assertTrue(target.is_valid(value), value)
+        for value in self.REJECTED:
+            self.assertFalse(frozen.is_valid([value]), value)
+            self.assertFalse(target.is_valid(value), value)
 
 
 class D6StrictProtocolTests(unittest.TestCase):
@@ -475,6 +539,44 @@ class D6StrictProtocolTests(unittest.TestCase):
                          "fallback envelope must speak v2")
         self.assertEqual(resp.get("request_id"), "fb-1",
                          "fallback must correlate to the supplied valid request ID")
+
+    def test_response_validation_warning_names_pointer_and_validator_without_value(self):
+        """A malformed response emits structural diagnostics but never its untrusted value."""
+        mod = _import_protocol()
+        env = _valid_request({"type": "GetRun", "run_id": "r1"}, request_id="log-1")
+        secret = "CANARY_UNTRUSTED_AUTHOR_TEXT"
+
+        with self.assertLogs("empirica.protocol", level="WARNING") as captured:
+            response = mod.dispatch_request(env, lambda envelope: {
+                "protocol": _PROTOCOL, "request_id": envelope["request_id"],
+                "result": {"type": "Fault", "code": "unavailable",
+                           "fail_direction": "closed", "message": secret, "extra": secret},
+            })
+
+        self.assertEqual(response["result"]["code"], "unavailable")
+        self.assertEqual(len(captured.records), 1)
+        message = captured.records[0].getMessage()
+        # The failing field inside the matching alternative, not the enclosing envelope oneOf.
+        self.assertEqual(message,
+                         "response validation failed pointer=/result validator=additionalProperties")
+        self.assertNotIn(secret, message)
+
+    def test_handler_exception_warning_names_type_without_value(self):
+        """A handler exception logs only its type and preserves the exact Fault response."""
+        mod = _import_protocol()
+        env = _valid_request({"type": "GetRun", "run_id": "r1"}, request_id="log-2")
+        secret = "CANARY_EXCEPTION_VALUE"
+
+        def failing_handler(_envelope):
+            raise LookupError(secret)
+
+        with self.assertLogs("empirica.protocol", level="WARNING") as captured:
+            response = mod.dispatch_request(env, failing_handler)
+
+        self.assertEqual(response["result"], {
+            "type": "Fault", "code": "unavailable", "fail_direction": "closed"})
+        self.assertEqual(captured.records[0].getMessage(), "handler exception type=LookupError")
+        self.assertNotIn(secret, captured.records[0].getMessage())
 
     def test_malformed_handler_no_recursion(self):
         """The malformed-handler fallback does not recurse: the handler is called exactly
@@ -634,9 +736,7 @@ class D6StrictRunStateTests(unittest.TestCase):
     def test_split_spawn_accounts_and_child_class_reconcile_exactly(self):
         mod = _import_run_state()
         split = json.loads(json.dumps(_VALID_ACTIVE_STATE))
-        split["budgets"].update({"spawns_used": 0, "max_audit_spawns": 1,
-                                  "audit_spawns_used": 1})
-        split["children"][0]["resource_class"] = "audit"
+        self.assertEqual(split["children"][0]["resource_class"], "audit")
         self.assertEqual(mod.classify_and_decode(split).kind, "valid")
         self.assertEqual(mod.encode_state(mod.classify_and_decode(split).state), split)
         investigation = json.loads(json.dumps(split))
@@ -731,7 +831,7 @@ class D6StrictRunStateTests(unittest.TestCase):
         """reserved child with spent=true is a schema violation → current-corrupt."""
         mod = _import_run_state()
         bad = json.loads(json.dumps(_VALID_ACTIVE_STATE))
-        bad["children"][0]["spent"] = True  # reserved requires spent=false
+        bad["children"][0].update(state="reserved", spent=True, native_id=None)
         classification = mod.classify_and_decode(bad)
         self.assertEqual(classification.kind, "current_corrupt")
 
@@ -789,7 +889,7 @@ class D6MinimalServiceTests(unittest.TestCase):
         mod = _import_application_v2()
         runs = runs or RecordingRunRepository()
         service = mod.compose(workspace=None, harness=None, runs=runs, artifacts=None,
-                              host=None, profile_id=_DEFAULT_PROFILE, limits=None, clock=None)
+                              host=None, profile_id=_DEFAULT_PROFILE, limits={}, clock=None)
         return service, runs
 
     # ---- valid-current unsupported ----
@@ -798,7 +898,8 @@ class D6MinimalServiceTests(unittest.TestCase):
         """StartRun returns exact schema-valid unsupported/closed (owner stage D7)."""
         service, _ = self._compose()
         resp = service.dispatch(_valid_request(
-            {"type": "StartRun", "selector": {"project": "p", "session": "s"}, "goal": "g"}))
+            {"type": "StartRun", "control_mode": "deliberative", "selector": {"project": "p", "session": "s"}, "goal": "g",
+             "invocation": dict(TEST_INVOCATION)}))
         jsonschema.validate(instance=resp, schema=_RESPONSE_SCHEMA)
         result = resp["result"]
         self.assertEqual(result["type"], "Fault")
@@ -904,6 +1005,28 @@ class D6MinimalServiceTests(unittest.TestCase):
         self.assertNotIn(canary, json.dumps(resp))
         self.assertEqual(runs.create_calls, 0)
         self.assertEqual(runs.cas_calls, 0)
+
+    def test_missing_invocation_state_is_failure_safe_corrupt(self):
+        """A v2 state without required provenance returns run.corrupt without decoding/crashing."""
+        missing = json.loads((_V2 / "state-fixtures" / "invalid-missing-invocation.json").read_text())
+        runs = RecordingRunRepository()
+        runs.inject("r-missing-invocation", missing)
+        service, runs = self._compose(runs)
+        resp = service.dispatch(_valid_request(
+            {"type": "GetRun", "run_id": "r-missing-invocation"}, request_id="r"))
+        self.assertEqual(resp, _expected_corrupt_block("r-missing-invocation", "Unsupported run state."))
+        self.assertEqual((runs.create_calls, runs.cas_calls), (0, 0))
+
+    def test_missing_observation_basis_digest_is_current_corrupt(self):
+        missing = copy.deepcopy(_VALID_ACTIVE_STATE)
+        missing.pop("observation_basis_digest")
+        runs = RecordingRunRepository()
+        runs.inject("r-missing-basis", missing)
+        service, runs = self._compose(runs)
+        resp = service.dispatch(_valid_request(
+            {"type": "GetRun", "run_id": "r-missing-basis"}, request_id="r"))
+        self.assertEqual(resp, _expected_corrupt_block("r-missing-basis", "Unsupported run state."))
+        self.assertEqual((runs.create_calls, runs.cas_calls), (0, 0))
 
     def test_corrupt_state_restore_run_failure_safe_block(self):
         """Corrupt-state RestoreRun returns exact failure-safe run.corrupt Block; zero writes."""

@@ -1,5 +1,7 @@
 # Empirica 2.0 D2B spec — GetContract digest identity
 
+> Historical Empirica 2.0 design; superseded by public contract 3.0.0 and ADR 0060/0061.
+
 **Status:** Parent-frozen small corrective amendment.
 
 ## Goal

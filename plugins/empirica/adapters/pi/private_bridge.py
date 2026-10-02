@@ -15,6 +15,7 @@ from adapters import bridge  # noqa: E402
 from adapters.audit_protocol import (  # noqa: E402
     AuditLaunchPlan, AuditProtocol, IdentityObservation,
 )
+from adapters.identity import observe  # noqa: E402
 
 
 def _plan(profile: str, raw: dict) -> AuditLaunchPlan:
@@ -35,51 +36,94 @@ def _plan_json(plan: AuditLaunchPlan) -> dict:
             "argument": plan.argument, "operation_id": plan.operation_id}
 
 
+def _classify(_profile: str, _raw: dict, payload: dict):
+    return observe(payload.get("provider_id"), payload.get("model_id"),
+                   source=payload.get("source", "pi-model"))
+
+
+def _governance_context(profile: str, raw: dict, payload: dict):
+    return bridge.trusted_governance_context(profile, raw["run_id"], payload)
+
+
+def _governance_decision(profile: str, raw: dict, payload: dict):
+    return bridge.trusted_governance_decision(profile, raw["run_id"], payload)
+
+
+def _audit_prepare(profile: str, raw: dict, _payload: dict):
+    plan = AuditProtocol(profile).prepare(raw["run_id"], role_profile=raw["role_profile"])
+    return {"type": "audit_plan", "plan": _plan_json(plan)}
+
+
+def _audit_reject(profile: str, raw: dict, _payload: dict):
+    AuditProtocol(profile).reject(_plan(profile, raw))
+    return {"type": "audit_terminal"}
+
+
+def _audit_start(profile: str, raw: dict, _payload: dict):
+    AuditProtocol(profile).observe_started(_plan(profile, raw), raw["native_id"])
+    return {"type": "audit_started"}
+
+
+def _audit_identity(profile: str, raw: dict, _payload: dict):
+    auditor = raw["auditor"]
+    AuditProtocol(profile).observe_reviewer(
+        _plan(profile, raw), raw["native_id"], auditor=IdentityObservation(
+            auditor.get("provider_id"), auditor.get("model_id"), auditor["source"]))
+    return {"type": "audit_identity"}
+
+
+def _audit_failure(profile: str, raw: dict, _payload: dict):
+    AuditProtocol(profile).observe_failure(
+        _plan(profile, raw), raw["native_id"], raw.get("state", "failed"))
+    return {"type": "audit_terminal"}
+
+
+def _audit_verdict(profile: str, raw: dict, payload: dict):
+    admitted = AuditProtocol(profile).observe_verdict(
+        _plan(profile, raw), raw["native_id"], payload)
+    return {"type": "audit_verdict", "admitted": admitted}
+
+
+def _child_event(profile: str, raw: dict, payload: dict):
+    return bridge.trusted_child_event(profile, raw["run_id"], raw["child_id"], payload)
+
+
+def _attribution(profile: str, raw: dict, payload: dict):
+    return bridge.trusted_attribution(profile, raw["run_id"], payload)
+
+
+def _evidence_leaf(profile: str, raw: dict, payload: dict):
+    return bridge.trusted_evidence_leaf(profile, raw["run_id"], payload)
+
+
+_HANDLERS = {
+    "classify_identity": _classify,
+    "governance_context": _governance_context,
+    "governance_decision": _governance_decision,
+    "audit_prepare": _audit_prepare,
+    "audit_reject": _audit_reject,
+    "audit_start": _audit_start,
+    "audit_identity": _audit_identity,
+    "audit_failure": _audit_failure,
+    "audit_verdict": _audit_verdict,
+    "child_event": _child_event,
+    "attribution": _attribution,
+    "evidence_leaf": _evidence_leaf,
+}
+
+
+def _dispatch(profile: str, raw: dict, payload: dict):
+    handler = _HANDLERS.get(raw["operation"])
+    if handler is None:
+        raise ValueError("unknown private ingress operation")
+    return handler(profile, raw, payload)
+
+
 def main() -> int:
     try:
         raw = json.load(sys.stdin)
         profile = os.environ["EMPIRICA_HOST_PROFILE_ID"]
-        operation = raw["operation"]
-        run_id = raw["run_id"]
-        payload = raw.get("payload", {})
-        if operation == "audit_prepare":
-            plan = AuditProtocol(profile).prepare(
-                run_id, role_profile=raw["role_profile"])
-            result = {"type": "audit_plan", "plan": _plan_json(plan)}
-        elif operation == "audit_start":
-            plan = _plan(profile, raw)
-            AuditProtocol(profile).observe_started(plan, raw["native_id"])
-            result = {"type": "audit_started"}
-        elif operation == "audit_identity":
-            plan = _plan(profile, raw)
-            author = raw["author"]
-            auditor = raw["auditor"]
-            AuditProtocol(profile).observe_identities(
-                plan, raw["native_id"],
-                author=IdentityObservation(
-                    author.get("provider_id"), author.get("model_id"),
-                    author["observed_by"], author["source"]),
-                auditor=IdentityObservation(
-                    auditor.get("provider_id"), auditor.get("model_id"),
-                    auditor["observed_by"], auditor["source"]),
-            )
-            result = {"type": "audit_identity"}
-        elif operation == "audit_failure":
-            AuditProtocol(profile).observe_failure(
-                _plan(profile, raw), raw["native_id"], raw.get("state", "failed"))
-            result = {"type": "audit_terminal"}
-        elif operation == "audit_verdict":
-            admitted = AuditProtocol(profile).observe_verdict(
-                _plan(profile, raw), raw["native_id"], payload)
-            result = {"type": "audit_verdict", "admitted": admitted}
-        elif operation == "child_event":
-            result = bridge.trusted_child_event(profile, run_id, raw["child_id"], payload)
-        elif operation == "attribution":
-            result = bridge.trusted_attribution(profile, run_id, payload)
-        elif operation == "evidence_leaf":
-            result = bridge.trusted_evidence_leaf(profile, run_id, payload)
-        else:
-            raise ValueError("unknown private ingress operation")
+        result = _dispatch(profile, raw, raw.get("payload", {}))
         json.dump(result, sys.stdout)
         return 0
     except Exception as exc:  # noqa: BLE001 - private adapter boundary fails closed

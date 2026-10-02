@@ -1,15 +1,19 @@
 ---
 number: 39
 title: Make the obligation contract Empirica lossless agent interface
-status: proposed
+status: superseded
 date: 2026-09-12
 links:
 - target: 30
-  kind: relatesto
+  kind: Relates to
 - target: 31
-  kind: relatesto
+  kind: Relates to
 - target: 32
-  kind: relatesto
+  kind: Relates to
+- target: 42
+  kind: Superseded by
+- target: 41
+  kind: Relates to
 ---
 
 # Make the obligation contract Empirica lossless agent interface

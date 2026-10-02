@@ -2,10 +2,8 @@
 //
 // The canonical contract is contracts/empirica/v2/{request,response}.schema.json.
 // This file is a *reduced projection* of that canonical schema: it models only the
-// outbound command subset the Pi adapter genuinely dispatches (StartRun, ResolveRun,
-// EvaluateRun, RestoreRun) and the minimum inbound result fields the central guard
-// validates. It carries no domain rules, no convergence judgement, and no host
-// policy — those live behind the transport in the host-neutral core (ADR-30/D6-C).
+// outbound commands the Pi adapter dispatches and the minimum inbound result fields
+// the central guard validates.
 //
 // This is NOT the contract; the schema is. If this file drifts, the guard still
 // rejects an invalid response, and the conformance suite still catches a bad
@@ -27,17 +25,20 @@ export interface Budgets {
   max_audit_spawns?: number;
 }
 
-export interface Modes {
-  multi_provider?: boolean;
-  cli_exec?: boolean;
+export interface InvocationProvenance {
+  host: string;
+  interactive: boolean | null;
+  signal: string;
+  delegation: boolean;
 }
 
 export interface StartRunCommand {
   type: "StartRun";
+  control_mode: "auto" | "deliberative";
   selector: RunSelector;
   goal: string;
+  invocation: InvocationProvenance;
   budgets?: Budgets;
-  modes?: Modes;
 }
 
 export interface ResolveRunCommand {
@@ -65,7 +66,7 @@ export interface GetArgumentCommand {
 
 export interface GetContractCommand {
   type: "GetContract";
-  target: "index" | "section" | "full";
+  target: "index" | "section";
   section_id?: string;
 }
 
@@ -99,7 +100,7 @@ export interface Request {
 
 // --- response: minimum guard surface ----------------------------------------
 //
-// The canonical response schema is far richer (RunView carries goal, modes,
+// The canonical response schema is far richer (RunView carries goal,
 // contract identity, obligations, residuals, freshness, children, host). The
 // adapter reads only the minimum safe fields the guard asserts before any
 // gate or render; everything else is `[key: string]: unknown` passthrough.
@@ -146,7 +147,7 @@ export interface BlockReason {
 
 export interface Block {
   type: "Block";
-  run: RunSnapshot;
+  run?: RunSnapshot;
   reasons: BlockReason[];
   [key: string]: unknown;
 }

@@ -71,26 +71,46 @@
       "properties": {
         "max_passes": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "maximum": 1024
         },
         "max_spawns": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 128
         },
         "max_audit_spawns": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 128
         }
       }
     },
-    "modes": {
+    "invocationProvenance": {
       "type": "object",
       "additionalProperties": false,
+      "required": [
+        "host",
+        "interactive",
+        "signal",
+        "delegation"
+      ],
       "properties": {
-        "multi_provider": {
-          "type": "boolean"
+        "host": {
+          "type": "string",
+          "minLength": 1
         },
-        "cli_exec": {
+        "interactive": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "signal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "delegation": {
           "type": "boolean"
         }
       }
@@ -118,7 +138,7 @@
     },
     "payload": {
       "type": "object",
-      "description": "Extensible deep graph/evidence/actor domain data; only this object may carry D6-validated payload. The control object itself is closed."
+      "description": "Extensible deep evidence/actor domain data; only this object may carry D6-validated payload. The control object itself is closed."
     },
     "researchPayload": {
       "type": "object",
@@ -185,8 +205,7 @@
       "description": "Closed reviewed-claim item for a trusted audit_verdict payload.",
       "properties": {
         "claim_id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/claimId"
         },
         "evidence_digest": {
           "$ref": "#/$defs/digest256"
@@ -340,164 +359,44 @@
       ]
     },
     "attributionPayload": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "subject_kind",
-        "subject_id",
-        "child_id",
-        "provider_id",
-        "model_id",
-        "observed_by",
-        "covered_artifact_ids"
-      ],
-      "description": "Closed trusted attribution payload carrying normalized identity facts only; never independence, decorrelated, tier, or verdict. provider/model are both non-null or both null.",
-      "properties": {
-        "subject_kind": {
-          "enum": [
-            "covered_actor",
-            "auditor"
-          ]
-        },
-        "subject_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "child_id": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "minLength": 1
-        },
-        "provider_id": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "minLength": 1
-        },
-        "model_id": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "minLength": 1
-        },
-        "observed_by": {
-          "enum": [
-            "host",
-            "configuration"
-          ]
-        },
-        "covered_artifact_ids": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": {
-            "$ref": "#/$defs/digest256"
-          }
-        }
-      },
       "allOf": [
         {
-          "if": {
-            "properties": {
-              "subject_kind": {
-                "const": "auditor"
-              }
-            },
-            "required": [
-              "subject_kind"
-            ]
-          },
-          "then": {
-            "properties": {
-              "child_id": {
-                "type": "string",
-                "minLength": 1
-              },
-              "covered_artifact_ids": {
-                "maxItems": 0
-              }
-            },
-            "required": [
-              "child_id",
-              "covered_artifact_ids"
-            ]
-          }
+          "$ref": "#/$defs/identityObservation"
         },
         {
-          "if": {
-            "properties": {
-              "subject_kind": {
-                "const": "covered_actor"
-              }
+          "type": "object",
+          "required": [
+            "subject_kind",
+            "subject_id",
+            "child_id",
+            "covered_artifact_ids"
+          ],
+          "properties": {
+            "subject_kind": {
+              "enum": [
+                "auditor"
+              ]
             },
-            "required": [
-              "subject_kind"
-            ]
-          },
-          "then": {
-            "properties": {
-              "child_id": {
-                "type": "null"
-              },
-              "covered_artifact_ids": {
-                "minItems": 1
-              }
+            "subject_id": {
+              "type": "string",
+              "minLength": 1
             },
-            "required": [
-              "child_id",
-              "covered_artifact_ids"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "provider_id": {
-                "type": "null"
-              }
+            "child_id": {
+              "type": "string",
+              "minLength": 1
             },
-            "required": [
-              "provider_id"
-            ]
-          },
-          "then": {
-            "properties": {
-              "model_id": {
-                "type": "null"
+            "covered_artifact_ids": {
+              "type": "array",
+              "maxItems": 0,
+              "items": {
+                "$ref": "#/$defs/digest256"
               }
-            },
-            "required": [
-              "model_id"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "provider_id": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "provider_id"
-            ]
-          },
-          "then": {
-            "properties": {
-              "model_id": {
-                "type": "string",
-                "minLength": 1
-              }
-            },
-            "required": [
-              "model_id"
-            ]
+            }
           }
         }
-      ]
+      ],
+      "unevaluatedProperties": false,
+      "description": "Closed trusted reviewer attribution carrying an opaque identity class plus raw provenance."
     },
     "auditVerdictPayload": {
       "type": "object",
@@ -660,7 +559,7 @@
           "const": "graph"
         },
         "payload": {
-          "$ref": "#/$defs/payload"
+          "$ref": "#/$defs/graphPayload"
         }
       }
     },
@@ -679,8 +578,7 @@
           "const": "research"
         },
         "claim_id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/claimId"
         },
         "source_kind": {
           "enum": [
@@ -715,8 +613,7 @@
           "const": "spike_request"
         },
         "claim_id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/claimId"
         },
         "command": {
           "type": "string",
@@ -738,29 +635,46 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "kind"
-      ],
-      "anyOf": [
-        {
-          "required": [
-            "budgets"
-          ]
-        },
-        {
-          "required": [
-            "modes"
-          ]
-        }
+        "kind",
+        "budgets",
+        "rationale"
       ],
       "properties": {
         "kind": {
           "const": "configure_run"
         },
         "budgets": {
-          "$ref": "#/$defs/budgets"
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "max_passes",
+            "max_spawns",
+            "max_audit_spawns"
+          ],
+          "properties": {
+            "max_passes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024
+            },
+            "max_spawns": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_audit_spawns": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 128
+            }
+          }
         },
-        "modes": {
-          "$ref": "#/$defs/modes"
+        "rationale": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600,
+          "pattern": "\\S",
+          "description": "Nonblank author sizing rationale bound by the proposal digest; not a command, authority claim, or approvable conclusion."
         }
       }
     },
@@ -805,27 +719,6 @@
         }
       }
     },
-    "actionDispatch": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "kind",
-        "target"
-      ],
-      "properties": {
-        "kind": {
-          "const": "dispatch"
-        },
-        "target": {
-          "type": "string",
-          "minLength": 1
-        },
-        "claim_id": {
-          "type": "string",
-          "minLength": 1
-        }
-      }
-    },
     "actionChildReserve": {
       "type": "object",
       "additionalProperties": false,
@@ -833,12 +726,16 @@
         {
           "if": {
             "properties": {
-              "resource_class": {"const": "audit"}
+              "resource_class": {
+                "const": "audit"
+              }
             }
           },
           "then": {
             "properties": {
-              "purpose": {"const": "audit"}
+              "purpose": {
+                "const": "audit"
+              }
             }
           }
         }
@@ -996,9 +893,6 @@
           "$ref": "#/$defs/actionFreeze"
         },
         {
-          "$ref": "#/$defs/actionDispatch"
-        },
-        {
           "$ref": "#/$defs/actionChildReserve"
         },
         {
@@ -1021,7 +915,9 @@
       "required": [
         "type",
         "selector",
-        "goal"
+        "goal",
+        "invocation",
+        "control_mode"
       ],
       "properties": {
         "type": {
@@ -1032,13 +928,20 @@
         },
         "goal": {
           "type": "string",
-          "minLength": 1
+          "maxLength": 4096,
+          "description": "Blank goals are refused with run.goal_required."
+        },
+        "invocation": {
+          "$ref": "#/$defs/invocationProvenance"
         },
         "budgets": {
           "$ref": "#/$defs/budgets"
         },
-        "modes": {
-          "$ref": "#/$defs/modes"
+        "control_mode": {
+          "enum": [
+            "deliberative",
+            "auto"
+          ]
         }
       }
     },
@@ -1157,9 +1060,6 @@
         },
         {
           "$ref": "#/$defs/getContractSection"
-        },
-        {
-          "$ref": "#/$defs/getContractFull"
         }
       ]
     },
@@ -1217,21 +1117,326 @@
         }
       }
     },
-    "getContractFull": {
+    "governanceContextPayload": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "type",
-        "target"
+        "author",
+        "ingress"
       ],
       "properties": {
-        "type": {
-          "const": "GetContract"
+        "author": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/identityObservation",
+              "unevaluatedProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
-        "target": {
-          "const": "full"
+        "ingress": {
+          "enum": [
+            "unavailable",
+            "mcp_elicitation",
+            "pi_ui"
+          ]
         }
       }
+    },
+    "governanceDecisionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "receipt_id",
+        "proposal_digest",
+        "plan_revision",
+        "approval_kind"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "receipt_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "proposal_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "plan_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "approval_kind": {
+          "enum": [
+            "auto",
+            "host_ui"
+          ]
+        },
+        "outcome": {
+          "enum": [
+            "approve",
+            "amend",
+            "reject",
+            "dismiss",
+            "present"
+          ]
+        },
+        "amendment": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "budgets"
+          ],
+          "properties": {
+            "budgets": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "max_passes",
+                "max_spawns",
+                "max_audit_spawns"
+              ],
+              "properties": {
+                "max_passes": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1024
+                },
+                "max_spawns": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 128
+                },
+                "max_audit_spawns": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 128
+                }
+              }
+            }
+          }
+        },
+        "submission": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "action",
+            "configuration"
+          ],
+          "properties": {
+            "action": {
+              "enum": [
+                "approve",
+                "edit",
+                "reject"
+              ]
+            },
+            "configuration": {
+              "$ref": "#/$defs/governanceDecisionPayload/properties/amendment"
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "amend"
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "required": [
+              "amendment"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "amendment"
+              ]
+            }
+          }
+        }
+      ],
+      "oneOf": [
+        {
+          "required": [
+            "outcome"
+          ],
+          "not": {
+            "required": [
+              "submission"
+            ]
+          }
+        },
+        {
+          "required": [
+            "submission"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "outcome"
+                ]
+              },
+              {
+                "required": [
+                  "amendment"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "identityObservation": {
+      "type": "object",
+      "required": [
+        "identity",
+        "provider_id",
+        "model_id",
+        "policy_version",
+        "source",
+        "observed_by"
+      ],
+      "properties": {
+        "identity": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "provider_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "model_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "policy_version": {
+          "const": "model-identity/1"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "observed_by": {
+          "const": "host"
+        }
+      },
+      "description": "Open only for allOf extension; every direct $ref use must set unevaluatedProperties: false."
+    },
+    "graphClaimItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "text",
+        "kind",
+        "gating"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/claimId"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "kind": {
+          "enum": [
+            "ordinary",
+            "needs-experiment",
+            "needs-decision"
+          ]
+        },
+        "gating": {
+          "type": "boolean"
+        }
+      },
+      "description": "Closed author-supplied claim vertex for a graph action; matches core.evaluation.valid_graph. Uniqueness, root membership, acyclicity and reachability stay core-only."
+    },
+    "graphEdgeItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "to",
+        "type"
+      ],
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/claimId"
+        },
+        "to": {
+          "$ref": "#/$defs/claimId"
+        },
+        "type": {
+          "const": "SupportedBy"
+        }
+      },
+      "description": "Closed author-supplied support edge for a graph action."
+    },
+    "graphPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "root",
+        "claims",
+        "edges"
+      ],
+      "properties": {
+        "root": {
+          "$ref": "#/$defs/claimId"
+        },
+        "claims": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/graphClaimItem"
+          }
+        },
+        "edges": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/graphEdgeItem"
+          }
+        }
+      },
+      "description": "Closed graph action payload owned by the SSOT and projected into the model-facing tool schema. Defence in depth; core.evaluation.valid_graph remains authoritative."
+    },
+    "claimId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
     }
   }
 }

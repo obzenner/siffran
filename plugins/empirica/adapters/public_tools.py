@@ -1,7 +1,4 @@
-"""Model-callable projection of Empirica's public v2 surface.
-
-Schemas are derived from the canonical contracts; trusted ingress is never registered.
-"""
+"""Model-callable projection of Empirica's canonical public v2 surface."""
 from __future__ import annotations
 
 import copy
@@ -19,13 +16,27 @@ from adapters import bridge as _bridge
 READ_TOOL = "empirica_read"
 OBSERVE_TOOL = "empirica_observe"
 REPORT_TOOL = "report_convergence"
-_TOOL_ORDER = (READ_TOOL, OBSERVE_TOOL, REPORT_TOOL)
-_AUTHOR_KINDS = frozenset(_protocol._PUBLIC_CONTRACT["actions"]["author"])
-_PROFILES = frozenset(_protocol._PROFILES)
+TOOL_NAMES = (READ_TOOL, OBSERVE_TOOL, REPORT_TOOL)
+_AUTHOR_KINDS = frozenset(_protocol.public_contract()["actions"]["author"])
+_PROFILES = frozenset(_protocol.profile_ids())
 _PUBLIC_TOOL_ARTIFACT = (Path(__file__).resolve().parents[1]
                          / "vendor/contracts/empirica/v2/public-tools.json")
 
 Dispatch = Callable[[dict, str], dict]
+
+
+_PRIVATE_RESULT_KEYS = ("presentation", "dialog", "scope")
+
+
+def _contains_private(value: Any) -> bool:
+    """Recursively detect any private presentation field anywhere in a model-facing result."""
+    if isinstance(value, dict):
+        if any(key in value for key in _PRIVATE_RESULT_KEYS):
+            return True
+        return any(_contains_private(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_private(item) for item in value)
+    return False
 
 
 def _deref(value: Any) -> Any:
@@ -37,20 +48,33 @@ def _deref(value: Any) -> Any:
     ref = value.get("$ref")
     if isinstance(ref, str) and ref.startswith("#/$defs/"):
         name = ref.removeprefix("#/$defs/")
-        return _deref(_protocol._REQUEST_SCHEMA["$defs"][name])
+        return _deref(_protocol.request_schema()["$defs"][name])
     return {key: _deref(item) for key, item in value.items()}
 
 
 def _author_action_schema() -> dict:
     choices = []
-    for item in _protocol._REQUEST_SCHEMA["$defs"]["action"]["oneOf"]:
+    guidance = _protocol.public_contract()["bootstrap"]["actions"]
+    for item in _protocol.request_schema()["$defs"]["action"]["oneOf"]:
         expanded = _deref(item)
         kind = expanded.get("properties", {}).get("kind", {}).get("const")
         if kind in _AUTHOR_KINDS:
+            if kind in guidance:
+                row = guidance[kind]
+                if row["operation"] != kind or row["example"].get("kind") != kind:
+                    raise RuntimeError("bootstrap action guidance is bound to the wrong request kind")
+                expanded.update(description=row["description"], examples=[copy.deepcopy(row["example"])])
             choices.append(expanded)
     if {row["properties"]["kind"]["const"] for row in choices} != _AUTHOR_KINDS:
         raise RuntimeError("request schema and PublicContract author actions drifted")
     return {"oneOf": choices}
+
+
+def _checked_validator(schema: dict):
+    """Check one tool input schema against its metaschema once and return its validator."""
+    cls = jsonschema.validators.validator_for(schema)
+    cls.check_schema(schema)
+    return cls(schema)
 
 
 def _project_schemas() -> dict[str, dict]:
@@ -73,7 +97,7 @@ def _project_schemas() -> dict[str, dict]:
             },
             "run_id": run_id,
             "target": {
-                "enum": ["index", "section", "full"],
+                "enum": ["index", "section"],
                 "description": (
                     "Contract projection for GetContract. Use section with section_id."
                 ),
@@ -123,66 +147,62 @@ def _host_handle_schemas(model: dict[str, dict]) -> dict[str, dict]:
     return result
 
 
-def _load_schemas() -> dict[str, dict[str, dict]]:
+def _project_public_tools() -> dict:
+    bootstrap = _protocol.public_contract()["bootstrap"]
+    recovery = _protocol.public_contract()["reasons"]
+    return {"protocol": _protocol.protocol_id(),
+            "definitions": copy.deepcopy(bootstrap["tools"]),
+            "bootstrap_actions": copy.deepcopy(bootstrap["actions"]),
+            "evidence_actions": sorted(
+                kind for kind, metadata in _protocol.public_contract()["actions"]["metadata"].items()
+                if metadata["evidence"]),
+            "governance_decisions": copy.deepcopy(_protocol.public_contract()["governance_decisions"]),
+            "settlement_notices": copy.deepcopy(_protocol.public_contract()["settlement_notices"]),
+            "author_view": copy.deepcopy(_protocol.public_contract()["author_view"]),
+            "host_profiles": {profile_id: {
+                "delegation_env": _protocol.host_profile(profile_id)["delegation_env"],
+            } for profile_id in _protocol.profile_ids()},
+            "start_refusal_codes": sorted(
+                code for code, row in recovery.items()
+                if row.get("disposition") == "start_refused"),
+            "recovery": {code: {key: copy.deepcopy(row[key])
+                       for key in ("message", "sections", "next_actions")}
+                       for code, row in recovery.items()
+                       if row.get("disposition") == "host_recovery"},
+            "schemas": {"model": _project_schemas(),
+                        "host_handle": _host_handle_schemas(_project_schemas())}}
+
+
+_projected = _project_public_tools()
+_PUBLIC_SCHEMAS = _projected["schemas"]
+EVIDENCE_ACTIONS = frozenset(_projected["evidence_actions"])
+
+
+def _load_artifact() -> dict:
     artifact = json.loads(_PUBLIC_TOOL_ARTIFACT.read_text(encoding="utf-8"))
-    projected = _project_schemas()
-    expected = {"protocol": _protocol._PROTOCOL,
-                "schemas": {"model": projected,
-                            "host_handle": _host_handle_schemas(projected)}}
-    if artifact != expected:
+    if artifact != _projected:
         raise RuntimeError("public-tools.json drifted from the canonical v2 contracts")
-    return artifact["schemas"]
-
-
-_PUBLIC_SCHEMAS = _load_schemas()
+    return artifact
 
 
 class PublicTools:
     """Profile-bound public tools over the canonical Empirica bridge."""
 
-    def __init__(self, profile_id: str, *, dispatch: Dispatch = _bridge.handle):
+    def __init__(self, profile_id: str, *, dispatch: Dispatch = _bridge.handle, govern=None):
         if profile_id not in _PROFILES:
             raise ValueError(f"unknown exact Empirica profile: {profile_id!r}")
         self._profile_id = profile_id
         self._dispatch = dispatch
-        self._schemas = copy.deepcopy(_PUBLIC_SCHEMAS["model"])
+        self._govern = govern
+        self._artifact = _load_artifact()
+        self._schemas = copy.deepcopy(self._artifact["schemas"]["model"])
+        # Built once per server: jsonschema.validate would re-check each schema on every call.
+        self._validators = {name: _checked_validator(schema) for name, schema in self._schemas.items()}
 
     def definitions(self) -> list[dict[str, object]]:
-        metadata = {
-            READ_TOOL: {
-                "title": "Read Empirica state",
-                "description": (
-                    "Read public state owned by Empirica. Use GetRun for the current run view, "
-                    "GetArgument for the snapshot-bound audit dossier, GetContract for public "
-                    "protocol guidance, and RestoreRun only when resuming persisted state. "
-                    "GetContract needs target; target=section also needs section_id. Every other "
-                    "operation needs run_id. This tool cannot mutate evidence or admit a verdict."
-                ),
-            },
-            OBSERVE_TOOL: {
-                "title": "Record an Empirica author action",
-                "description": (
-                    "Submit exactly one public author action for an active Empirica run. Use it "
-                    "to route before investigation, construct or refine the claim graph, record "
-                    "cited research, request deterministic spikes, configure bounded modes, or "
-                    "freeze scope. The action must match one advertised variant and run_id must "
-                    "identify the active run. This tool does not accept host-owned lifecycle facts."
-                ),
-            },
-            REPORT_TOOL: {
-                "title": "Request an Empirica decision",
-                "description": (
-                    "Ask Empirica for its guarded terminal decision after current obligations and "
-                    "independent audit handling are complete. Omit intent for the normal convergence "
-                    "decision; use intent=stop only to request an honest non-converged terminal "
-                    "result for accepted residual or exhausted scope. A blocked result identifies "
-                    "the next unmet obligation. Treat the typed result as authoritative and call "
-                    "once rather than retrying for a different answer."
-                ),
-            },
-        }
+        metadata = self._artifact["definitions"]
         definitions = []
-        for name in _TOOL_ORDER:
+        for name in TOOL_NAMES:
             read_only = name == READ_TOOL
             definitions.append({
                 "name": name,
@@ -199,11 +219,22 @@ class PublicTools:
         return definitions
 
     def call(self, name: str, arguments: object) -> dict[str, object]:
+        """Return the model-facing MCP tool result (rendered text only)."""
+        return self._call(name, arguments, include_internal=False)
+
+    def call_internal(self, name: str, arguments: object) -> dict[str, object]:
+        """Return a test/host-internal result with validated JSON beside rendered text.
+
+        MCP transport must call :meth:`call`, never this non-wire inspection path.
+        """
+        return self._call(name, arguments, include_internal=True)
+
+    def _call(self, name: str, arguments: object, *, include_internal: bool) -> dict[str, object]:
         schema = self._schemas.get(name)
         if schema is None:
             return self._error("Unknown public Empirica tool.")
         try:
-            jsonschema.validate(arguments, schema)
+            self._validators[name].validate(arguments)
         except jsonschema.ValidationError as exc:
             return self._error(f"Invalid {name} arguments: {exc.message}")
         assert isinstance(arguments, Mapping)
@@ -212,23 +243,32 @@ class PublicTools:
             return self._error(read_error)
         command = self._command(name, arguments)
         request = {
-            "protocol": _protocol._PROTOCOL,
+            "protocol": _protocol.protocol_id(),
             "request_id": str(uuid.uuid4()),
             "command": command,
         }
         try:
             response = self._dispatch(request, self._profile_id)
-        except Exception:  # public transport failure remains a typed tool error
+            result = response.get("result") if isinstance(response, dict) else None
+            if not isinstance(result, dict):
+                return self._error("Empirica bridge returned no typed result.")
+            if self._govern and name == OBSERVE_TOOL and arguments["action"]["kind"] == "configure_run":
+                result = self._govern(result)
+        except Exception:  # public transport or mediation failure remains a typed tool error
             return self._error("Empirica bridge unavailable.")
-        result = response.get("result") if isinstance(response, dict) else None
-        if not isinstance(result, dict):
-            return self._error("Empirica bridge returned no typed result.")
-        text = json.dumps(result, sort_keys=True, separators=(",", ":"))
-        return {
+        if not isinstance(result, dict) or _contains_private(result):
+            # A misbehaving governor (or any producer) that reintroduces a private presentation
+            # field after dispatch validation becomes a typed closed error with no private payload.
+            return self._error("Empirica returned a non-public result.")
+        from adapters.author_view import render_author_view
+        text = render_author_view(result)
+        tool_result: dict[str, object] = {
             "content": [{"type": "text", "text": text}],
-            "structuredContent": result,
             "isError": result.get("type") == "Fault",
         }
+        if include_internal:
+            tool_result["structuredContent"] = result
+        return tool_result
 
     @staticmethod
     def _read_argument_error(name: str, arguments: Mapping[str, object]) -> str | None:

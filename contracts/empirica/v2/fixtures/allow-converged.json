@@ -18,25 +18,26 @@
         "id": "run-fx",
         "goal": "Prove the public contract is internally consistent.",
         "status": "converged",
-        "modes": {
-          "multi_provider": false,
-          "cli_exec": false
-        },
         "contract": {
           "id": "empirica/public",
-          "version": "2.0.0",
+          "version": "3.0.0",
           "relevant_sections": [
             "terminal",
             "audit",
             "audit/independence"
           ],
-          "digest": "sha256:525fa2359be90b80df00b3a50b6863367d3911cc6bc76e91c76debcb04de89ff"
+          "digest": "sha256:c322c3df3584ee0e8ad740c7de58d56478c59dcbdc7ac0ee58d785f2ceb39a8c"
         },
         "obligations": {
           "active": [
             {
               "id": "empirica/G0",
-              "must": "record research",
+              "required": "record research",
+              "observed": [],
+              "missing": null,
+              "next": [
+                "run.inspect"
+              ],
               "status": "satisfied"
             }
           ],
@@ -62,10 +63,18 @@
           ]
         },
         "terminal_note": "All committed claims approved and fresh; independent audit current and passing.",
-        "next_actions": [],
+        "next_actions": [
+          "run.inspect"
+        ],
         "untrusted_delimiters": {
           "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
           "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+        },
+        "governance": null,
+        "audit": {
+          "state": "passed",
+          "independence": "distinct",
+          "findings": []
         }
       }
     }

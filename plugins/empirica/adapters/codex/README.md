@@ -1,9 +1,9 @@
 # Empirica adapter for Codex CLI
 
 This is the exact `codex-cli@0.146.0` adapter over the shared `empirica/v2` service. It
-translates native hooks, exposes the canonical public MCP tools, and owns one bounded managed
-auditor. Claim, evidence, budget, audit-coverage, and convergence rules remain in the
-host-neutral core.
+translates native hooks, exposes the canonical public MCP tools, and fails closed when audit is
+owed because verdict-producing identity is unobservable. Claim, evidence, budget, audit-coverage,
+and convergence rules remain in the host-neutral core.
 
 ## Work-in-progress status
 
@@ -13,14 +13,21 @@ conformance development and fail-closed experimentation only. Its exact profile 
 not an advertised capability.
 
 Codex native hooks cannot mutate a spawned child request or independently observe the resolved
-model behind a managed `codex exec` process. The adapter can observe one correlated final message,
-but configured argv is not identity evidence. Auditor independence therefore remains `unverified`
-and convergence blocks. Async execution is also unsupported. Codex is excluded from the supported
-installed-host release receipt set until a native resolved-model observation can be bound to the
-managed process and the candidate foreground probe passes.
+model behind a child process. Audit therefore remains `unverified` and convergence blocks. Async
+execution is also unsupported. Codex is excluded from the supported installed-host release receipt
+set until a native resolved-model observation can be bound to an execution.
 
-For adapter development, the managed auditor defaults to `gpt-5.1-codex-mini` and may be pinned
-with `EMPIRICA_CODEX_AUDITOR_MODEL`; that configuration never counts as observed identity.
+There is no default auditor model or `EMPIRICA_CODEX_AUDITOR_MODEL` override. Codex has no
+approval UI, so non-delegated auto and deliberative runs are refused. Explicit
+`$empirica --auto <goal>` requires operator-recorded `EMPIRICA_AUTO_DELEGATION=1` and uses the
+fixed delegation envelope **8 passes / 1 investigation spawn / 2 audit spawns**. The author still
+supplies all three task-sized ceilings and a 1–600 character rationale; StartRun budgets and
+`EMPIRICA_MAX_*` may only narrow the envelope. A proposal outside it is refused: reduce scope or
+use an approval-capable host interactively. Acceptance inside the envelope is delegated policy,
+not human approval. Codex audit remains unsupported because the adapter cannot observe the
+verdict-producing reviewer identity. It does not read host model configuration or claim an
+identity mismatch, and delegated acceptance cannot prove the actual auditor model.
+See [governance](../../skills/empirica/references/governance.md) for configuration and limitations.
 
 ## Surface
 
@@ -30,8 +37,11 @@ with `EMPIRICA_CODEX_AUDITOR_MODEL`; that configuration never counts as observed
 | MCP `empirica_observe` | `ObserveAction` | Public route, graph, research, spike request, freeze, and configuration only; concrete reservation is host-owned. |
 | MCP `empirica_read` | `GetRun`, `GetArgument`, `GetContract`, `RestoreRun` | Complete typed public read surface. |
 | MCP `report_convergence` | `EvaluateRun` | Public guarded decision; never trusted ingress. |
-| `Stop` | resolve → evaluate → managed audit when due → re-evaluate | Blocks on any unavailable or non-converged result; permits only `Allow(converged=true)`. |
-| `SessionStart:compact` | `ResolveRun` | Reconnects the durable selected run. |
+| `Stop` | resolve → evaluate → reject unsupported audit when due | Blocks on any unavailable or non-converged result, including a failed audit rejection; permits only `Allow(converged=true)`. |
+
+Compaction restore is not provided on Codex: there is no `SessionStart` hook, and an `empirica`
+hook action `restore` is unknown to the dispatcher. After compaction the author re-reads the run
+with `empirica_read` (`RestoreRun`); Stop still fails closed for an active run.
 
 The deterministic spike harness remains the sole machine approver. Audit can block but cannot
 manufacture evidence. `evidence_leaf`, attribution, child events, and audit verdicts have no MCP
@@ -58,7 +68,7 @@ ordering claim is inferred from that sensor gap.
 
 ```sh
 make check-codex
-make empirica-host-adapter-check   # deterministic adapter conformance only
-make empirica-host-live-check      # retained installed-host promotion receipts
-make codex-live-check CODEX='npx -y @openai/codex@0.146.0'
+make empirica-host-integration  # expensive simulated conformance, no installed host
+make native-qualification       # operator-led sanity/refusal procedure; launches nothing
+make empirica-host-live-check   # supported-host receipts; Codex is excluded
 ```

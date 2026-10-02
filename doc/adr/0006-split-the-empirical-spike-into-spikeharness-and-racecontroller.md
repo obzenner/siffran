@@ -1,20 +1,22 @@
 ---
 number: 6
 title: Split the empirical spike into SpikeHarness and RaceController
-status: accepted
+status: superseded
 date: 2026-07-17
 tags:
-  - architecture
-  - modules
+- architecture
+- modules
 links:
-  - target: 5
-    kind: Refines
-  - target: 10
-    kind: Refined by
-  - target: 11
-    kind: Refined by
-  - target: 13
-    kind: Refined by
+- target: 5
+  kind: Refines
+- target: 10
+  kind: Refined by
+- target: 11
+  kind: Refined by
+- target: 13
+  kind: Refined by
+- target: 62
+  kind: Superseded by
 ---
 
 # Split the empirical spike into SpikeHarness and RaceController

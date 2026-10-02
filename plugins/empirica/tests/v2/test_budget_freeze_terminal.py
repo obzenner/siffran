@@ -118,9 +118,11 @@ class BudgetFreezeTerminalTests(ConformanceCase):
             self.assertTrue(residual, "must carry a budget.exhausted residual")
             self.assertEqual(residual[0]["parameters"].get("resource"), "pass",
                              "budget.exhausted resource must be 'pass'")
-            # Exact canonical actions/sections on the budget.exhausted residual (D4-S2 correction).
-            self.assertEqual(residual[0].get("next_actions"), spec["next_actions"],
-                             "budget.exhausted residual next_actions must match registry order")
+            # Terminal rows retain canonical sections and prescribe only the contract-owned
+            # inspect guidance (run.terminal), never a mutation of the immutable run.
+            self.assertEqual(residual[0].get("next_actions"),
+                             REASONS["run.terminal"]["next_actions"],
+                             "terminal budget residual must carry only the contract inspect guidance")
             self.assertEqual(residual[0].get("sections"), spec["sections"],
                              "budget.exhausted residual sections must match registry order")
             self.assertFalse(result["converged"], "a budget stop must not converge")

@@ -25,6 +25,12 @@ export function sessionFileFromDetails(details: unknown): string | null {
     ? sessionFile : null;
 }
 
+const SYNTHETIC_MODEL = "<synthetic>";
+
+function nonBlank(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "";
+}
+
 function messageText(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -41,14 +47,16 @@ function messageText(content: unknown): string {
  * message in a complete host-generated Pi child transcript.
  *
  * Any malformed or ambiguous transcript returns null so independence remains
- * unverified. Model-change records and configured result metadata are not
- * identity evidence.
+ * unverified, including any non-synthetic assistant message missing a native
+ * provider or model. Model-change records and configured result metadata are
+ * not identity evidence.
  */
 export function identityFromSessionJsonl(
   jsonl: string,
   expectedVerdict: Record<string, unknown>,
 ): ObservedChildIdentity | null {
   const assistantMessages: Array<Record<string, unknown>> = [];
+  const served = new Set<string>();
   const verdictMessages: Array<{
     message: Record<string, unknown>;
     verdict: Record<string, unknown>;
@@ -70,19 +78,24 @@ export function identityFromSessionJsonl(
     const message = candidate as Record<string, unknown>;
     if (message.role !== "assistant") continue;
     assistantMessages.push(message);
+    // Host-synthesised error rows are the only identity-less assistant form; they served nothing.
+    // Any other assistant message must carry both native facts, or the reviewer is unobservable.
+    if (message.model !== SYNTHETIC_MODEL) {
+      if (!nonBlank(message.provider) || !nonBlank(message.model)) return null;
+      served.add(`${message.provider}\u0000${message.model}`);
+    }
     const verdict = verdictFromText(messageText(message.content));
     if (verdict) verdictMessages.push({ message, verdict });
   }
 
-  if (assistantMessages.length === 0 || verdictMessages.length !== 1) return null;
+  if (assistantMessages.length === 0 || verdictMessages.length !== 1 || served.size !== 1) return null;
   const observed = verdictMessages[0];
   if (observed.message !== assistantMessages.at(-1)) return null;
   if (!isDeepStrictEqual(observed.verdict, expectedVerdict)) return null;
 
   const provider = observed.message.provider;
   const model = observed.message.model;
-  if (typeof provider !== "string" || !provider.trim()
-      || typeof model !== "string" || !model.trim()) return null;
+  if (!nonBlank(provider) || !nonBlank(model) || model === SYNTHETIC_MODEL) return null;
   return {
     provider_id: provider,
     model_id: model,

@@ -39,6 +39,7 @@ not already enforce.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 import json
 import os
 import sys
@@ -53,10 +54,31 @@ from application import protocol as _proto  # noqa: E402
 from application import v2 as _v2  # noqa: E402
 from adapters.execution import FilesystemWorkspace, SubprocessSpikeHarness  # noqa: E402
 from adapters.git.artifact_repo import GitArtifactRepository  # noqa: E402
+from adapters.identity import POLICY_VERSION, observe  # noqa: E402
 from adapters.state.located import LocatedRunRepository  # noqa: E402
 
-_PROTOCOL = _proto._PROTOCOL
-_PROFILES = _proto._PROFILES
+_PROTOCOL = _proto.protocol_id()
+_PROFILES = _proto.profile_ids()
+_HOST_OBSERVER = "host"
+
+
+def _unobserved(value: dict, source: object) -> dict:
+    return {"identity": None, "provider_id": value.get("provider_id"),
+            "model_id": value.get("model_id"), "policy_version": POLICY_VERSION,
+            "source": source, "observed_by": _HOST_OBSERVER}
+
+
+def start_refusal(result: object) -> str | None:
+    """Return a StartRun refusal message, identified structurally by an absent run."""
+    if not isinstance(result, Mapping) or result.get("type") != "Block" or "run" in result:
+        return None
+    reasons = result.get("reasons")
+    if not isinstance(reasons, (list, tuple)) or not reasons or not isinstance(reasons[0], Mapping):
+        return None
+    message = reasons[0].get("message")
+    code = reasons[0].get("code")
+    return (message if isinstance(message, str) and message else
+            code if isinstance(code, str) and code else "start refused")
 
 
 def _fault(code: str, request_id: str) -> dict:
@@ -68,12 +90,31 @@ def _fault(code: str, request_id: str) -> dict:
     }
 
 
+class _LazyGitArtifactRepository:
+    """Defer Git discovery until an active run actually needs its knowledge plane.
+
+    ``ResolveRun`` first reads the machine-local run location.  Constructing the artifact adapter
+    before that read incorrectly made an otherwise inert hook depend on its cwd being a Git
+    repository.  Attribute forwarding deliberately does not translate Git failures: once a run
+    is found, storage errors remain errors and the bridge maps them to a closed fault.
+    """
+
+    def __init__(self, repo_dir: Path) -> None:
+        self._repo_dir = repo_dir
+        self._repository: GitArtifactRepository | None = None
+
+    def __getattr__(self, name: str):
+        if self._repository is None:
+            self._repository = GitArtifactRepository(self._repo_dir)
+        return getattr(self._repository, name)
+
+
 def build_service(profile_id: str):
     """Compose the v2 service with an explicit exact registry ``profile_id`` (D6-C §4).
 
     Requires an explicit exact ``profile_id``; there is no host default. A missing (``None``) or
-    unknown profile raises :class:`ValueError`. The service uses the hardened machine-local run
-    repository and a Git-backed append-only artifact store rooted at ``EMPIRICA_REPO_DIR`` or cwd.
+    unknown profile raises :class:`ValueError`. The machine-local run repository is composed
+    eagerly; Git artifact discovery is deferred until a resolved run needs its knowledge plane.
     """
     if not isinstance(profile_id, str) or not profile_id:
         raise ValueError("an explicit exact registry profile_id is required")
@@ -81,12 +122,34 @@ def build_service(profile_id: str):
         raise ValueError(f"unknown host profile_id: {profile_id!r}")
     runs = LocatedRunRepository()
     repo_dir = Path(os.environ.get("EMPIRICA_REPO_DIR", Path.cwd()))
-    artifacts = GitArtifactRepository(repo_dir)
+    artifacts = _LazyGitArtifactRepository(repo_dir)
     return _v2.compose(
         workspace=FilesystemWorkspace(Path.cwd()), harness=SubprocessSpikeHarness(),
         runs=runs, artifacts=artifacts,
         host=None, profile_id=profile_id, limits={}, clock=None,
     )
+
+
+def _identity(value: object) -> dict | None:
+    """Normalize one raw host observation at the common trusted ingress."""
+    if not isinstance(value, dict):
+        return None
+    provider, model, source = value.get("provider_id"), value.get("model_id"), value.get("source")
+    if not isinstance(source, str) or not source:
+        return None
+    observed = observe(provider, model, source=source)
+    if observed is not None:
+        return {**observed, "observed_by": _HOST_OBSERVER}
+    return _unobserved(value, source)
+
+
+def trusted_governance_context(profile_id: str, run_id: str, payload: dict) -> dict:
+    normalized = {**payload, "author": _identity(payload.get("author"))}
+    return build_service(profile_id).trusted_governance_context(run_id=run_id, payload=normalized)
+
+
+def trusted_governance_decision(profile_id: str, run_id: str, payload: dict) -> dict:
+    return build_service(profile_id).trusted_governance_decision(run_id=run_id, payload=payload)
 
 
 def trusted_audit_plan(profile_id: str, run_id: str, child_id: str) -> dict | None:
@@ -116,7 +179,11 @@ def trusted_audit_verdict(profile_id: str, run_id: str, child_id: str, payload: 
 
 
 def trusted_attribution(profile_id: str, run_id: str, payload: dict) -> dict:
-    return build_service(profile_id).trusted_attribution(run_id=run_id, payload=payload)
+    observed = _identity(payload)
+    normalized_identity = observed if observed is not None else _unobserved(
+        payload, payload.get("source"))
+    normalized = {**payload, **normalized_identity}
+    return build_service(profile_id).trusted_attribution(run_id=run_id, payload=normalized)
 
 
 def handle(request: object, profile_id: str) -> dict:
@@ -130,9 +197,9 @@ def handle(request: object, profile_id: str) -> dict:
     def handler(envelope: dict) -> dict:
         try:
             service = build_service(profile_id)
-        except ValueError:
+            return service._dispatch_validated(envelope)
+        except Exception:  # resolved storage/adapter failures are closed, never inert
             return _fault("unavailable", envelope["request_id"])
-        return service._dispatch_validated(envelope)
 
     return _proto.dispatch_request(request, handler)
 

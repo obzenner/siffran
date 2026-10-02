@@ -1,11 +1,41 @@
 """Thin Empirica v2 application dispatch shell."""
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
+
+from core import governance
 from core.projection import project_runview
 from . import protocol as _proto
 from .location import decode_handle
 from .run_state import classify_and_decode
 from .transaction import Coordinator
+
+# Canonical names of the adapter-private governance ingress operations, defined once here
+# next to the trusted methods that implement them.  Pi ``adapters/pi/private_bridge.py``
+# dispatches these names and Claude ``adapters/bridge.py`` exposes ``trusted_<name>`` callables;
+# C3 asserts both use exactly this tuple.
+PRIVATE_GOVERNANCE_OPERATIONS = ("governance_context", "governance_decision")
+
+
+def _admit_limits(limits: object) -> Mapping[str, int]:
+    """Validate operator limits once at composition and return immutable admitted data."""
+    if not isinstance(limits, Mapping):
+        raise ValueError("application limits must be a mapping")
+    unknown = set(limits) - set(governance.CEILINGS)
+    if unknown:
+        raise ValueError(f"application limits contain unknown keys: {', '.join(sorted(unknown))}")
+    admitted = {}
+    for key, value in limits.items():
+        if type(value) is not int:
+            raise ValueError(f"application limit {key} must be an integer")
+        minimum, maximum = _proto.CEILING_BOUNDS[key]
+        if not minimum <= value <= maximum:
+            raise ValueError(
+                f"application limit {key} must be between {minimum} and {maximum}"
+            )
+        admitted[key] = value
+    return MappingProxyType(admitted)
 
 
 class _Service:
@@ -15,8 +45,8 @@ class _Service:
     def __init__(self, workspace, harness, runs, artifacts, host, profile_id, limits, clock):
         self._workspace, self._harness, self._runs = workspace, harness, runs
         self._artifacts, self._host, self._profile_id = artifacts, host, profile_id
-        self._limits, self._clock = limits or {}, clock
-        self._coordinator = Coordinator(workspace, harness, runs, artifacts, profile_id, limits)
+        self._limits, self._clock = _admit_limits(limits), clock
+        self._coordinator = Coordinator(workspace, harness, runs, artifacts, profile_id, self._limits)
 
     def dispatch(self, raw: dict) -> dict:
         return _proto.dispatch_request(raw, self._handler)
@@ -36,9 +66,7 @@ class _Service:
         if snapshot is None:
             return {"status": "unsupported"}
         view = project_runview(snapshot, self._coordinator._sections(snapshot))
-        view["untrusted_delimiters"] = {
-            "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
-            "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"}
+        view["untrusted_delimiters"] = dict(_proto.untrusted_delimiters())
         return view
 
     def operational_state(self) -> dict:
@@ -73,6 +101,24 @@ class _Service:
     @staticmethod
     def _valid_trusted(name: str, payload: object) -> bool:
         return _proto.validate_trusted_payload(name, payload)
+
+    def trusted_governance_context(self, *, run_id, payload) -> dict:
+        from .governance import transact
+        if not self._valid_trusted("governanceContextPayload", payload):
+            return Coordinator._fault("trusted-governance", "invalid_request")
+        response = transact(self._coordinator, run_id, payload, context=True)
+        if not _proto.validate_private_governance_response(response):
+            return Coordinator._fault("trusted-governance", "unavailable")
+        return response
+
+    def trusted_governance_decision(self, *, run_id, payload) -> dict:
+        from .governance import transact
+        if not self._valid_trusted("governanceDecisionPayload", payload):
+            return Coordinator._fault("trusted-governance", "invalid_request")
+        response = transact(self._coordinator, run_id, payload)
+        if not _proto.validate_private_governance_response(response):
+            return Coordinator._fault("trusted-governance", "unavailable")
+        return response
 
     def trusted_resolve_child(self, *, run_id, native_id) -> str | None:
         """Resolve one native execution through private host correlation only."""

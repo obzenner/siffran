@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import importlib
 
-import jsonschema
 
 # The v2 application composition seam D6/D7 introduce. Only this module knows these names.
 _V2_SEAM_MODULE = "application.v2"
@@ -118,6 +117,10 @@ class LiveDriver:
     def request(self, envelope: dict) -> dict:
         return self._service.dispatch(envelope)
 
+    def approve_governance(self, run_id: str) -> None:
+        from governance_setup import approve_current
+        approve_current(self._service._coordinator, run_id)
+
     def workspace_write(self, path: str, content: bytes) -> None:
         self._workspace.write(path, content)
 
@@ -146,11 +149,6 @@ class LiveDriver:
     def operational_state(self) -> dict:
         return self._service.operational_state()
 
-    def workspace_observe_calls(self) -> int:
-        # Transport telemetry for the pure-core boundary case (D4 case 15): proves workspace reads
-        # are requested through the fake Workspace port, never hidden behind adapter behavior.
-        return self._workspace.observe_calls
-
     def workspace_observe_history(self) -> tuple:
         # D4-S2 transport telemetry: tuples of (exact normalized path batch, result batch) per
         # observe call. Transport facts only; never derives claim/audit/run policy.
@@ -170,7 +168,7 @@ class LiveDriver:
     def _validate_trusted_response(self, resp: dict) -> None:
         """Validate a trusted-ingress response against the v2 response schema."""
         import assertions
-        jsonschema.validate(instance=resp, schema=assertions._RESPONSE_SCHEMA)
+        assertions.RESPONSE_VALIDATOR.validate(resp)
 
     def trusted_child_event(self, run_id: str, child_id: str, event: dict) -> dict:
         """Deliver a trusted child event through the private composition ingress.

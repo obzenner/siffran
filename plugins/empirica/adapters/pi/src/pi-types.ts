@@ -1,18 +1,32 @@
 // Pi extension API types — the official surface the adapter registers against.
 // Retained from the Pi extension contract; only the event handlers the adapter
-// actually wires are typed. No removed-feature types (tool_result, agent_settled).
+// actually wires are typed, including the foreground subagent result boundary.
 
 export type NotifyType = "info" | "warning" | "error";
 
+export interface UiTheme {
+  fg(color: "accent" | "dim" | "warning", text: string): string;
+}
+
 export interface UiContext {
   notify(message: string, type?: NotifyType): void;
+  custom?<T>(factory: (
+    tui: { requestRender(): void }, theme: UiTheme, keybindings: unknown,
+    done: (result: T) => void,
+  ) => { render(width: number): string[]; invalidate(): void; handleInput(data: string): void }): Promise<T>;
+  select?(title: string, options: string[], opts?: { timeout?: number; signal?: AbortSignal }): Promise<string | undefined>;
+  confirm?(title: string, message: string, opts?: { timeout?: number; signal?: AbortSignal }): Promise<boolean>;
+  input?(title: string, placeholder?: string, opts?: { timeout?: number; signal?: AbortSignal }): Promise<string | undefined>;
 }
 
 export interface ExtensionContext {
   ui: UiContext;
+  hasUI?: boolean;
+  mode?: "tui" | "rpc" | "print" | "json";
   cwd?: string;
   model?: { id: string; provider: string };
   modelRegistry?: {
+    getError?(): string | undefined;
     getAvailable(): Array<{ id: string; provider: string; fullId?: string; reasoning?: boolean }>;
   };
   sessionManager?: {
@@ -90,6 +104,8 @@ export interface ToolDefinition {
 export interface ExtensionAPI {
   registerCommand(name: string, def: CommandDefinition): void;
   registerTool?(def: ToolDefinition): void;
+  /** Names of the tools the model can call now (Pi ``pi.getActiveTools()``). */
+  getActiveTools?(): string[];
   appendEntry?(customType: string, data?: unknown): void;
   sendMessage?(
     message: { customType: string; content: string; display?: boolean },

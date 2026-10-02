@@ -5,6 +5,56 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from . import governance
+
+
+def delegated_auto(command: Mapping[str, Any]) -> bool:
+    """Whether admitted invocation facts select delegated automatic authority."""
+    invocation = command["invocation"]
+    return (command["control_mode"] == "auto"
+            and invocation["delegation"] is True
+            and invocation["interactive"] is not True)
+
+
+def start_admission(command: Mapping[str, Any], limits: Mapping[str, int]) -> str | None:
+    """Admit each authority-bearing StartRun source without last-writer-wins merging.
+
+    ``limits`` and ``command["budgets"]`` are the application-boundary ceiling mappings; each
+    holds every ceiling. In delegated auto, each source must fit the fixed policy and StartRun
+    may only narrow the operator limit.
+    """
+    goal = command["goal"]
+    if not goal.strip():
+        return "run.goal_required"
+    invocation = command["invocation"]
+    if (command["control_mode"] == "auto"
+            and not (invocation["interactive"] is True
+                     or invocation["delegation"] is True)):
+        return "governance.auto_invocation_required"
+    if not delegated_auto(command):
+        return None
+    start_budgets = command["budgets"]
+    for source in (limits, start_budgets):
+        for ceiling in governance.CEILINGS:
+            if source[ceiling] > governance.DEFAULT_CEILINGS[ceiling]:
+                return "governance.budget_contradictory"
+    for ceiling in governance.CEILINGS:
+        if start_budgets[ceiling] > limits[ceiling]:
+            return "governance.budget_contradictory"
+    return None
+
+
+def effective_ceilings(command: Mapping[str, Any], limits: Mapping[str, int]) -> dict[str, int]:
+    """Return the componentwise-narrowed operational seed after successful admission.
+
+    ``limits`` and ``command["budgets"]`` hold every ceiling (see :func:`start_admission`).
+    """
+    return {
+        ceiling: min(governance.DEFAULT_CEILINGS[ceiling], limits[ceiling],
+                     command["budgets"][ceiling])
+        for ceiling in governance.CEILINGS
+    }
+
 
 def _immutable(value: Any) -> Any:
     if isinstance(value, Mapping):
@@ -19,9 +69,10 @@ class OperationalState:
     protocol: str
     state_schema: str
     goal: str
+    invocation: Mapping[str, Any]
     status: str
-    modes: Mapping[str, bool]
     budgets: Mapping[str, int]
+    governance: Mapping[str, Any]
     selected_graph_artifact_id: str | None
     frozen_claim_ids: tuple[str, ...] | None
     frozen_semantic_digest: str | None
@@ -30,11 +81,13 @@ class OperationalState:
     stamp_seq: int
     last_derivation_digest: str | None
     children: tuple[Mapping[str, Any], ...]
+    observation_basis_digest: str
     committed_artifact_head_id: str | None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "modes", _immutable(self.modes))
+        object.__setattr__(self, "invocation", _immutable(self.invocation))
         object.__setattr__(self, "budgets", _immutable(self.budgets))
+        object.__setattr__(self, "governance", _immutable(self.governance))
         object.__setattr__(self, "children", _immutable(self.children))
         if self.frozen_claim_ids is not None:
             object.__setattr__(self, "frozen_claim_ids", tuple(self.frozen_claim_ids))

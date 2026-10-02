@@ -1,25 +1,31 @@
 ---
 number: 16
-title: "Implementation plan: how the workflow binds to the siffran repo"
-status: accepted
+title: 'Implementation plan: how the workflow binds to the siffran repo'
+status: superseded
 date: 2026-07-22
 tags:
-  - architecture
-  - implementation
-  - build
+- architecture
+- implementation
+- build
 links:
-  - target: 3
-    kind: Depends on
-  - target: 4
-    kind: Depends on
-  - target: 8
-    kind: Depends on
-  - target: 14
-    kind: Depends on
-  - target: 15
-    kind: Depends on
-  - target: 13
-    kind: relatesto
+- target: 3
+  kind: Depends on
+- target: 4
+  kind: Depends on
+- target: 8
+  kind: Depends on
+- target: 14
+  kind: Depends on
+- target: 15
+  kind: Depends on
+- target: 13
+  kind: Relates to
+- target: 42
+  kind: Superseded by
+- target: 31
+  kind: Superseded by
+- target: 17
+  kind: Relates to
 ---
 
 # Implementation plan: how the workflow binds to the siffran repo

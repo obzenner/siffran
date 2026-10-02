@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from core.records import RunKey
-from .repository import FilesystemRunRepository, GenerationAllocator
+from .repository import FilesystemRunRepository
 
 
 class LocatedRunRepository:
@@ -10,7 +10,6 @@ class LocatedRunRepository:
 
     def __init__(self, repository: FilesystemRunRepository | None = None):
         self.repository = repository or FilesystemRunRepository()
-        self.allocator = GenerationAllocator(self.repository)
 
     def generations(self, project_id: str, run_id: str) -> list[int]:
         return self.repository.generations(project_id, run_id)

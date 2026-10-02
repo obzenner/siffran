@@ -1,14 +1,24 @@
 ---
 number: 45
-title: "Use a strict root-connected claim-dependency DAG"
+title: Use a strict root-connected claim-dependency DAG
 status: accepted
 date: 2026-09-20
-tags: [empirica, claims, graph, assurance]
+tags:
+- empirica
+- claims
+- graph
+- assurance
 links:
-  - target: 22
-    kind: Supersedes
-  - target: 27
-    kind: Amends
+- target: 24
+  kind: Supersedes
+- target: 22
+  kind: Supersedes
+- target: 27
+  kind: Amends
+- target: 46
+  kind: Amended by
+- target: 47
+  kind: Amended by
 ---
 
 # Use a strict root-connected claim-dependency DAG

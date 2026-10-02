@@ -1,5 +1,7 @@
 # Empirica 2.0 D2 implementation spec — canonical contract and schemas
 
+> Historical Empirica 2.0 design; superseded by public contract 3.0.0 and ADR 0060/0061.
+
 **Status:** Frozen writer specification.
 
 **Writer:** one GLM run in `experiment/empirica-2.0`.
@@ -8,7 +10,6 @@
 
 - `doc/design/empirica-2.0-d1-contract.md`;
 - `doc/design/empirica-2.0-d1h-host-capabilities.md`;
-- `doc/design/empirica-2.0-final-dag.md` D2;
 - existing contract conventions under `contracts/` and `scripts/validate_contracts.py`.
 
 D1/D1-H semantics are fixed. The writer may choose small local helper structure but may not rename or

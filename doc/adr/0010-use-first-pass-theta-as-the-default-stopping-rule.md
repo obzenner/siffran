@@ -1,16 +1,18 @@
 ---
 number: 10
 title: Use first-pass-theta as the default stopping rule
-status: accepted
+status: superseded
 date: 2026-07-17
 tags:
-  - architecture
-  - search
+- architecture
+- search
 links:
-  - target: 6
-    kind: Refines
-  - target: 11
-    kind: relatesto
+- target: 6
+  kind: Refines
+- target: 11
+  kind: Relates to
+- target: 62
+  kind: Superseded by
 ---
 
 # Use first-pass-theta as the default stopping rule

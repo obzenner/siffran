@@ -12,9 +12,9 @@ links:
   - target: 7
     kind: Refined by
   - target: 3
-    kind: relatesto
+    kind: Relates to
   - target: 12
-    kind: relatesto
+    kind: Relates to
 ---
 
 # Model the workflow as one pipeline with an optional empirical prefix

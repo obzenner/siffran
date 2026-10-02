@@ -1,22 +1,30 @@
 ---
 number: 7
 title: Track unknowns progressively in a durable fixed-point ledger
-status: accepted
+status: superseded
 date: 2026-07-17
 tags:
-  - architecture
-  - state
+- architecture
+- state
 links:
-  - target: 5
-    kind: Refines
-  - target: 8
-    kind: Depended on by
-  - target: 9
-    kind: Depended on by
-  - target: 14
-    kind: Depended on by
-  - target: 15
-    kind: Refined by
+- target: 5
+  kind: Refines
+- target: 8
+  kind: Depended on by
+- target: 9
+  kind: Depended on by
+- target: 14
+  kind: Depended on by
+- target: 15
+  kind: Refined by
+- target: 62
+  kind: Superseded by
+- target: 18
+  kind: Relates to
+- target: 20
+  kind: Relates to
+- target: 22
+  kind: Relates to
 ---
 
 # Track unknowns progressively in a durable fixed-point ledger

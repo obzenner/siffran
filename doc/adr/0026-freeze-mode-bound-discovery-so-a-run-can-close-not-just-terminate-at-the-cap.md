@@ -1,24 +1,30 @@
 ---
 number: 26
-title: "Freeze mode: bound discovery so a run can close, not just terminate at the cap"
-status: proposed
+title: 'Freeze mode: bound discovery so a run can close, not just terminate at the cap'
+status: accepted
 date: 2026-08-10
 tags:
-  - workflow
-  - termination
-  - harness
-  - convergence
+- workflow
+- termination
+- harness
+- convergence
 links:
-  - target: 9
-    kind: Amends
-  - target: 17
-    kind: Depends on
-  - target: 19
-    kind: Depends on
-  - target: 20
-    kind: relatesto
-  - target: 22
-    kind: relatesto
+- target: 9
+  kind: Amends
+- target: 17
+  kind: Depends on
+- target: 19
+  kind: Depends on
+- target: 20
+  kind: Relates to
+- target: 22
+  kind: Relates to
+- target: 27
+  kind: Amended by
+- target: 46
+  kind: Refines
+- target: 47
+  kind: Refines
 ---
 
 # Freeze mode: bound discovery so a run can close, not just terminate at the cap

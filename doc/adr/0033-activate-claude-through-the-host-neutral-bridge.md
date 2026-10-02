@@ -1,19 +1,23 @@
 ---
 number: 33
-title: "Activate Claude through the host-neutral bridge"
+title: Activate Claude through the host-neutral bridge
 status: accepted
 date: 2026-09-05
 tags:
-  - claude
-  - adapters
-  - activation
+- claude
+- adapters
+- activation
 links:
-  - target: 30
-    kind: Depends on
-  - target: 31
-    kind: Depends on
-  - target: 32
-    kind: Amends
+- target: 30
+  kind: Depends on
+- target: 31
+  kind: Depends on
+- target: 32
+  kind: Amends
+- target: 35
+  kind: Relates to
+- target: 38
+  kind: Relates to
 ---
 
 # Activate Claude through the host-neutral bridge

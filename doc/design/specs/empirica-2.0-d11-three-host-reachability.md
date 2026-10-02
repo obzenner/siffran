@@ -1,6 +1,6 @@
 # Empirica 2.0 D11 — host-driver conformance and supported live promotion
 
-Status: Claude and Pi foreground profiles promoted; Codex adapter WIP and unsupported
+Status: Claude async and Pi foreground profiles promoted; Codex observational and unsupported
 
 ## Decision
 
@@ -8,7 +8,7 @@ Empirica 2.0 supports the exact promoted Claude Code and Pi foreground profiles 
 complete the same positive lifecycle through surfaces available to a real model:
 
 ```text
-StartRun → route → graph → research → deterministic spike → current RunView
+StartRun → route → graph → configure_run approval → investigate → research → deterministic spike → current RunView
 → bound independent audit → private verdict ingress → Allow(converged=true)
 ```
 

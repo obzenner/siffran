@@ -4,17 +4,21 @@
     "request_id": "fx-start-bootstrap",
     "command": {
       "type": "StartRun",
+      "control_mode": "deliberative",
       "selector": {
         "project": "demo",
         "session": "s1"
       },
       "goal": "Prove the public contract is internally consistent.",
+      "invocation": {
+        "host": "test",
+        "interactive": true,
+        "signal": "fixture",
+        "delegation": false
+      },
       "budgets": {
         "max_passes": 3,
         "max_spawns": 2
-      },
-      "modes": {
-        "multi_provider": false
       }
     }
   },
@@ -27,26 +31,39 @@
       "run": {
         "id": "run-fx",
         "goal": "Prove the public contract is internally consistent.",
-        "status": "active",
-        "modes": {
-          "multi_provider": false,
-          "cli_exec": false
+        "invocation": {
+          "host": "test",
+          "interactive": true,
+          "signal": "fixture",
+          "delegation": false
         },
+        "status": "active",
         "contract": {
           "id": "empirica/public",
-          "version": "2.0.0",
+          "version": "3.0.0",
           "relevant_sections": [
             "core",
             "roles",
             "hosts/capabilities"
           ],
-          "digest": "sha256:525fa2359be90b80df00b3a50b6863367d3911cc6bc76e91c76debcb04de89ff"
+          "digest": "sha256:c322c3df3584ee0e8ad740c7de58d56478c59dcbdc7ac0ee58d785f2ceb39a8c"
         },
         "obligations": {
           "active": [
             {
-              "id": "empirica/G0",
-              "must": "record research",
+              "id": "obligation.route",
+              "required": "Record routing before investigation.",
+              "observed": [],
+              "missing": null,
+              "next": [],
+              "status": "residual"
+            },
+            {
+              "id": "obligation.graph",
+              "required": "Propose a valid claim graph from supplied context before requesting review.",
+              "observed": [],
+              "missing": null,
+              "next": [],
               "status": "residual"
             }
           ],
@@ -64,10 +81,65 @@
             "host.async_unsupported"
           ]
         },
-        "next_actions": [],
+        "next_actions": [
+          "route.record",
+          "graph.record"
+        ],
         "untrusted_delimiters": {
           "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
           "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+        },
+        "governance": {
+          "state": "pending",
+          "control_mode": "deliberative",
+          "plan_revision": 0,
+          "approved_digest": null,
+          "approval_kind": null,
+          "proposal": {
+            "budgets": {
+              "max_passes": 10,
+              "max_spawns": 5,
+              "max_audit_spawns": 1
+            },
+            "rationale": null
+          },
+          "context": {
+            "author": null,
+            "ingress": "unavailable",
+            "approval_capability": "unavailable",
+            "delegation": false,
+            "interactive": true
+          },
+          "proposal_digest": "sha256:86d74b272ea96a0196615b8f2954b19a16fc19b3441afe4894ba8d2898d189f8",
+          "budgets": {
+            "max_passes": 10,
+            "passes_used": 3,
+            "max_spawns": 5,
+            "spawns_used": 0,
+            "max_audit_spawns": 1,
+            "audit_spawns_used": 1
+          },
+          "remaining": {
+            "max_passes": 7,
+            "max_spawns": 5,
+            "max_audit_spawns": 0
+          },
+          "request_ready": false,
+          "display_ready": false,
+          "interactions_remaining": {
+            "proposal": 3,
+            "total": 128
+          },
+          "prompt_error": null,
+          "next_action": "governance.propose",
+          "first_approval": false,
+          "pre_approval_revisions": 0,
+          "post_approval_revisions": 0
+        },
+        "audit": {
+          "state": "required",
+          "independence": "unverified",
+          "findings": []
         }
       }
     }

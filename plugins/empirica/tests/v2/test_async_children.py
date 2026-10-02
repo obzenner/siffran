@@ -19,6 +19,8 @@ from assertions import (  # noqa: E402
     evaluate, get_argument, get_run, observe_action, profile_tier,
 )
 
+from governance_setup import SIZED_RATIONALE  # noqa: E402
+
 # Adverse terminal states that require a recovery_action (D2A §3).
 _CHILD_TERMINAL_NEXT = REASONS["child.terminal"]["next_actions"]
 _CHILD_TERMINAL_SECTIONS = REASONS["child.terminal"]["sections"]
@@ -76,7 +78,8 @@ class AsyncChildrenTests(ConformanceCase):
         self.require_graph_admitted(drv, run_id)
         self.dispatch(drv, observe_action(
             run_id=run_id,
-            action={"kind": "configure_run", "budgets": {"max_audit_spawns": 2}}))
+            action={"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}, "rationale": SIZED_RATIONALE}))
+        self.require_governance_approved(drv, run_id)
         request = observe_action(run_id=run_id, action=action_child_reserve(
             purpose="audit", resource_class="audit",
             role_profile=self.DEFAULT_PROFILE, execution="foreground"))
@@ -440,7 +443,9 @@ class AsyncChildrenTests(ConformanceCase):
                     "Foreground-only/observational hosts return typed unsupported capability "
                     "reasons rather than silent fallback; current tiers match D1-H/D2 profiles",
                     profile_id=pid)
-                run_id = self.start_run(drv, goal=self.GOAL)
+                run_id = self.start_run(drv, goal=self.GOAL, control_mode="auto",
+                    invocation={"host": "test", "interactive": False,
+                                "signal": "delegated v2 harness", "delegation": True})
                 self.require_route_admitted(drv, run_id)
                 self.require_investigate_admitted(drv, run_id)
                 resp = self.dispatch(drv, observe_action(run_id=run_id, action=action_child_reserve(

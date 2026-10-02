@@ -4,19 +4,35 @@ title: Bound the loop with a harness-enforced spawn budget
 status: accepted
 date: 2026-07-23
 tags:
-  - architecture
-  - budget
-  - termination
-  - observability
+- architecture
+- budget
+- termination
+- observability
 links:
-  - target: 9
-    kind: Depends on
-  - target: 13
-    kind: Depends on
-  - target: 8
-    kind: relatesto
-  - target: 16
-    kind: relatesto
+- target: 9
+  kind: Depends on
+- target: 13
+  kind: Depends on
+- target: 8
+  kind: Relates to
+- target: 16
+  kind: Relates to
+- target: 18
+  kind: Relates to
+- target: 19
+  kind: Relates to
+- target: 20
+  kind: Relates to
+- target: 21
+  kind: Relates to
+- target: 23
+  kind: Relates to
+- target: 24
+  kind: Relates to
+- target: 26
+  kind: Depends on
+- target: 34
+  kind: Amended by
 ---
 
 # Bound the loop with a harness-enforced spawn budget

@@ -14,7 +14,7 @@ from .correlation import PROTOCOL, request_id as new_request_id
 from .fail_direction import FailureDirection
 from .route import observed_at
 from .selector import context_from_payload
-from .transport import BridgeTransport, Transport
+from .transport import Response, Transport, dispatch_with
 
 _EXECUTIONS = frozenset({"foreground", "async"})
 
@@ -78,12 +78,12 @@ def dispatch_child_reserve(
     purpose: str, role_profile: str, execution: str,
     deadline: str | None = None, transport: Transport | None = None,
     correlation_id: str | None = None,
-) -> dict:
+) -> Response:
     request = build_child_reserve_request(
         payload, run_id, purpose=purpose, role_profile=role_profile, execution=execution,
         deadline=deadline, correlation_id=correlation_id,
     )
-    return (transport if transport is not None else BridgeTransport()).dispatch(request)
+    return dispatch_with(transport, request)
 
 
 def spawn_decision(response: object) -> SpawnDecision:
@@ -94,23 +94,18 @@ def spawn_decision(response: object) -> SpawnDecision:
     real reservation must never be silently admitted by a corrupt or absent result.  An open
     ``Fault`` remains open; a terminal run's application ``Allow`` is open.
     """
-    if not isinstance(response, dict) or not isinstance(response.get("result"), dict):
+    if not isinstance(response, Response):
         return SpawnDecision(2, "spawn denied: malformed reservation response")
-    result = response["result"]
-    kind = result.get("type")
+    result = response.result
+    kind = result.type
     if kind == "Block":
-        reason = result.get("reason")
-        if not isinstance(reason, str):
-            reasons = result.get("reasons")
-            first = reasons[0] if isinstance(reasons, list) and reasons else None
-            if isinstance(first, dict):
-                reason = first.get("message") or first.get("code")
-        return SpawnDecision(2, reason if isinstance(reason, str) else "spawn denied")
+        first = result.first_reason
+        reason = first.message or first.code if first is not None else None
+        return SpawnDecision(2, reason or "spawn denied")
     if kind == "Fault":
-        if result.get("fail_direction") == FailureDirection.OPEN.value:
+        if result.fail_direction == FailureDirection.OPEN.value:
             return SpawnDecision(0)
-        message = result.get("message")
-        return SpawnDecision(2, message if isinstance(message, str) else "spawn gate failed closed")
+        return SpawnDecision(2, result.message or "spawn gate failed closed")
     if kind == "Allow":
         return SpawnDecision(0)
     return SpawnDecision(2, "spawn denied: reservation was not admitted")

@@ -4,18 +4,24 @@ title: Finalizer delegates to the think router; methodology chosen by intent
 status: accepted
 date: 2026-07-17
 tags:
-  - architecture
-  - methodology
-  - integration
+- architecture
+- methodology
+- integration
 links:
-  - target: 3
-    kind: Depends on
-  - target: 5
-    kind: relatesto
-  - target: 13
-    kind: relatesto
-  - target: 14
-    kind: relatesto
+- target: 3
+  kind: Depends on
+- target: 5
+  kind: Relates to
+- target: 13
+  kind: Relates to
+- target: 14
+  kind: Relates to
+- target: 62
+  kind: Amended by
+- target: 23
+  kind: Relates to
+- target: 30
+  kind: Amended by
 ---
 
 # Finalizer delegates to the think router; methodology chosen by intent

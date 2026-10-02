@@ -1,19 +1,35 @@
 ---
 number: 30
-title: "Put host-neutral contracts between plugin cores and harness adapters"
+title: Put host-neutral contracts between plugin cores and harness adapters
 status: accepted
 date: 2026-09-04
 tags:
-  - architecture
-  - portability
-  - contracts
+- architecture
+- portability
+- contracts
 links:
-  - target: 8
-    kind: Amends
-  - target: 12
-    kind: Amends
-  - target: 21
-    kind: Depends on
+- target: 8
+  kind: Amends
+- target: 12
+  kind: Amends
+- target: 21
+  kind: Depends on
+- target: 32
+  kind: Depends on
+- target: 33
+  kind: Depends on
+- target: 37
+  kind: Refines
+- target: 39
+  kind: Relates to
+- target: 40
+  kind: Relates to
+- target: 41
+  kind: Depends on
+- target: 42
+  kind: Depends on
+- target: 43
+  kind: Amended by
 ---
 
 # Put host-neutral contracts between plugin cores and harness adapters

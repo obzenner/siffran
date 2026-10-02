@@ -5,11 +5,13 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from application.protocol import BUDGET_EXHAUSTED_NOTICE, HUMAN_WAIT_NOTICE
+from core.governance import expected_approval_kind
 from .correlation import PROTOCOL, request_id as new_request_id
 from .fail_direction import FailureDirection, blocks_on_failure
 from .route import observed_at
 from .selector import context_from_payload
-from .transport import BridgeTransport, Transport
+from .transport import Response, Result, Transport, dispatch_with
 
 REPORT_CONVERGENCE = "report_convergence"
 
@@ -52,48 +54,90 @@ def build_stop_request(
 def dispatch_stop(
     payload: Mapping[str, object], run_id: str, *, transport: Transport | None = None,
     correlation_id: str | None = None,
-) -> dict:
+) -> Response:
     request = build_stop_request(payload, run_id, correlation_id=correlation_id)
-    return (transport if transport is not None else BridgeTransport()).dispatch(request)
+    return dispatch_with(transport, request)
 
 
-def _json_line(result: dict) -> str:
-    """Stable compact output; one line exactly, matching a hook process' stdout discipline."""
-    return json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n"
+def _hook_stdout(result: Result) -> str:
+    """Render a Stop result as the author plain-text view (one trailing newline)."""
+    from adapters.author_view import render_author_view
+    return render_author_view(result.as_dict()) + "\n"
 
 
-def _async_audit_wait(result: Mapping[str, object]) -> bool:
-    reasons, run = result.get("reasons"), result.get("run")
-    children = run.get("children") if isinstance(run, Mapping) else None
-    return (isinstance(reasons, list) and len(reasons) == 1
-        and isinstance(reasons[0], Mapping) and reasons[0].get("code") == "audit.pending"
-        and isinstance(run, Mapping) and run.get("status") == "active"
-        and isinstance(children, list) and sum(isinstance(c, Mapping)
-            and c.get("resource_class") == "audit" and c.get("state") == "pending"
-            and bool(c.get("child_id")) for c in children) == 1)
+def _async_audit_wait(result: Result) -> bool:
+    run = result.run
+    return (len(result.reasons) == 1 and result.reasons[0].code == "audit.pending"
+        and run is not None and run.status == "active"
+        and sum(child.resource_class == "audit" and child.state == "pending"
+                and bool(child.child_id) for child in run.children) == 1)
+
+
+_HUMAN_WAIT_REASON = {"pending": "governance.approval_required",
+                      "rejected": "governance.approval_required",
+                      "revision_pending": "governance.revision_required"}
+
+
+def _human_approval_wait(result: Result) -> bool:
+    """True only for the sole legitimate human-approval blocker of an active run.
+
+    The phase must call for a human decision (ADR-0063), the host dialog must be reachable, and a
+    new presentation must still be admissible; an exhausted, delegated, or post-approval auto
+    run keeps blocking rather than pausing."""
+    run = result.run
+    if run is None or run.governance is None or run.status != "active":
+        return False
+    governance = run.governance
+    interactions = governance["interactions_remaining"]
+    return (governance.state in _HUMAN_WAIT_REASON
+            and expected_approval_kind(governance) == "host_ui"
+            and governance.context.ingress == "mcp_elicitation"
+            and governance["prompt_error"] is None
+            and interactions["proposal"] > 0 and interactions["total"] > 0
+            and len(result.reasons) == 1
+            and result.reasons[0].code == _HUMAN_WAIT_REASON[governance.state])
+
+
+def _budget_exhausted_wait(result: Result) -> bool:
+    """True only for the sole ``budget.exhausted`` blocker of an active run (ADR-0064 interim).
+
+    The core already refused the only recovery the Block once listed, so blocking the turn again
+    cannot help; mixed reasons and non-active runs keep blocking."""
+    run = result.run
+    return (run is not None and run.status == "active" and len(result.reasons) == 1
+            and result.reasons[0].code == "budget.exhausted")
+
+
+def _settlement(notice: str) -> StopResult:
+    """Exit 0 with a contract-owned ``systemMessage`` and no claim of convergence."""
+    return StopResult(0, stdout=json.dumps(
+        {"systemMessage": notice}, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n")
 
 
 def stop_result(response: object) -> StopResult:
-    """Map wire results to Stop: only one current async audit wait may settle nonterminally."""
-    if not isinstance(response, dict) or not isinstance(response.get("result"), dict):
+    """Settle human/async waits and budget exhaustion nonterminally; never convert their service
+    Block to convergence."""
+    if not isinstance(response, Response):
         return StopResult(2, stderr="empirica completion gate returned a malformed response\n")
-    result = response["result"]
-    kind = result.get("type")
+    result = response.result
+    kind = result.type
     if kind == "Inert":
         return StopResult(0)
     if kind == "Allow":
-        return StopResult(0, stdout=_json_line(result))
+        return StopResult(0, stdout=_hook_stdout(result))
     if kind == "Block":
+        if _human_approval_wait(result):
+            return _settlement(HUMAN_WAIT_NOTICE)
+        if _budget_exhausted_wait(result):
+            return _settlement(BUDGET_EXHAUSTED_NOTICE.format(
+                resource=result.reasons[0]["parameters"]["resource"]))
         if _async_audit_wait(result):
-            return StopResult(0, stdout=_json_line(result))
-        reasons = result.get("reasons")
-        messages = [row.get("message") or row.get("code") for row in reasons
-                    if isinstance(row, dict)] if isinstance(reasons, list) else []
-        text = "\n".join(value for value in messages if isinstance(value, str) and value)
+            return StopResult(0, stdout=_hook_stdout(result))
+        messages = [row.message or row.code for row in result.reasons]
+        text = "\n".join(value for value in messages if value)
         return StopResult(2, stderr=(text or "empirica run is not complete") + "\n")
     if kind == "Fault":
-        message = result.get("message")
-        text = message if isinstance(message, str) and message else "empirica completion gate fault"
+        text = result.message or "empirica completion gate fault"
         if blocks_on_failure(response, fallback=FailureDirection.CLOSED):
             return StopResult(2, stderr=text + "\n")
         return StopResult(0, stderr=text + "\n")

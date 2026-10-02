@@ -6,6 +6,24 @@ The same host-neutral cores power the Claude Code, Codex, and Pi adapters.
 Empirica stores operational state under `~/.empirica-plugin` and durable claims
 and evidence in Git shadow refs, leaving project worktrees clean.
 
+## Governed Empirica starts
+
+Empirica 4.0.0 defaults to host-mediated approval of run configuration—budget ceilings and
+control mode—**before investigation**. The immutable goal is shown read-only; the claim graph
+defines the work but is not approvable. Prepare from supplied context, record route, propose scope,
+and submit `configure_run` to open approval. Configuration changes need a new exact decision;
+graph changes preserve configuration authority while invalidating stale audit coverage. Explicit
+`/empirica --auto <goal>` is bounded automatic acceptance, not human consent: it cannot increase
+budgets and requires an interactive invocation or recorded operator delegation.
+
+Claude needs MCP form elicitation and Pi uses its UI. Reviewer configuration stays with the host,
+and the adapter observes the identity that actually produced the verdict. See the
+[governance guide](plugins/empirica/skills/empirica/references/governance.md) for configuration and
+auto provenance, and the [audit guide](plugins/empirica/skills/empirica/references/audit.md#independence-reporting)
+for identity classification. Inventory-shaped old runs fail closed and require fresh generations;
+they are never silently migrated or approved. New approval flows have deterministic integration
+coverage, not operator-present native approval qualification.
+
 ## Install for Claude Code
 
 Add the marketplace, then install a plugin:
@@ -53,7 +71,9 @@ sandbox and MCP approval policy still apply.
 Codex 0.146.0 adapter exposes the canonical public MCP tools and a fail-closed Stop gate for
 adapter development, but Codex cannot independently observe the resolved auditor model. Its
 profile is therefore `observational` with `promotion_status: wip_unsupported`; convergence blocks
-with `audit.independence_unverified` rather than trusting configured argv. Do not rely on the
+with governance/identity reasons rather than trusting configured argv. Deliberative approval
+is unavailable on Codex; explicit `--auto` can exercise the bounded experimental path but cannot
+prove the auditor identity. Do not rely on the
 experimental Codex package for an Empirica convergence claim:
 
 ```text
@@ -82,7 +102,7 @@ Restart Pi after installation, or run `/reload` in an existing session. Availabl
 /think <intent>                 # structured Methodologist workflow
 /think --simple <intent>        # original single-prompt Methodologist mode
 /empirica <goal>                # start a durable Empirica v2 workflow
-empirica_observe                 # tool: route, graph, research, spike, freeze
+empirica_observe                 # tool: route, graph, configure_run, investigate, research, spike_request, freeze
 empirica_read                    # tool: complete RunView, argument, contract
 report_convergence               # tool: guarded terminal decision
 ```
@@ -118,7 +138,7 @@ promotion remains separate and unsupported.
 | Plugin | Version | Description |
 |--------|---------|-------------|
 | `methodologist` | 0.9.0 | Formal reasoning catalog — lets users choose and execute evidence-backed CS/math methodologies with traced phases and structured output. |
-| `empirica` | 3.1.5 | Host-neutral empirical-convergence workflow — routes uncertainty into a claim graph, requires cited research before deterministic spikes, derives claim state, and binds convergence to a current independent audit. Full execution is hook-enforced only on profiles with author-action and bound-audit capabilities; unsupported profiles fail explicitly before starting. |
+| `empirica` | 4.0.0 | Host-neutral empirical-convergence workflow — requires exact run-configuration approval (or provenance-bound auto), cited research before spikes, per-artifact producer attribution, and a current distinct host-observed audit. Unknown or mixed identity evidence fails closed. |
 <!-- END GENERATED: plugins -->
 
 ## Development
@@ -126,18 +146,16 @@ promotion remains separate and unsupported.
 The project lifecycle lives in the `Makefile` — run `make help` to see every operation:
 
 ```
-make check      # lint + tests + manifest validation + ADR health (run before committing)
+make check      # fast deterministic contributor gate (run before committing)
 make status     # plugin versions, ADR count, working-tree state
 make bump PLUGIN=<name> PART=minor
 make methodologist-codex-check  # deterministic package + MCP validation
-make methodologist-codex-smoke  # real codex-cli 0.146.0 online smoke
-make codex-live-check CODEX='npx -y @openai/codex@0.146.0'
+make native-qualification       # print the operator-led native skill entrypoint; launches nothing
 ```
 
-The online smoke creates isolated temporary `HOME` and `CODEX_HOME` trees,
-installs the local marketplace and plugin, and proves both implicit skill and
-MCP tool invocation. It requires `npx`, network access, and either an existing
-Codex login (copied only into the throwaway home) or `OPENAI_API_KEY`; the
-deterministic check is part of `make check` and has none of those requirements.
+The fast gate never launches online/native sessions. Expensive persistence and simulated-host
+matrices are explicit integration diagnostics, while installed-host qualification is a separate
+operator-led procedure. See [doc/testing.md](./doc/testing.md) for the coverage/cost map and
+native limitations.
 
 See [CLAUDE.md](./CLAUDE.md) for repo structure, conventions, and how to add a plugin or methodology. Run `make check` and the `checkup` skill before committing.

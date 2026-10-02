@@ -30,7 +30,7 @@
         ]
       },
       {
-        "matcher": "Read|Glob|Grep|Bash|WebFetch|WebSearch|NotebookRead|LSP",
+        "matcher": ".*",
         "hooks": [
           {
             "type": "command",
@@ -39,19 +39,6 @@
               "${CLAUDE_PLUGIN_ROOT}/hooks/route_stamp.py"
             ],
             "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/hooks/dispatch_gate.py"
-            ],
-            "timeout": 30
           }
         ]
       }
@@ -126,6 +113,20 @@
               "${CLAUDE_PLUGIN_ROOT}/hooks/subagent_stop.py"
             ],
             "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostModelSwitch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/route_stamp.py"
+            ],
+            "timeout": 10
           }
         ]
       }

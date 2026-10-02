@@ -1,24 +1,42 @@
 ---
 number: 21
-title: "Enforcing the run protocol: three mechanisms on Claude Code and PI"
-status: accepted
+title: 'Enforcing the run protocol: three mechanisms on Claude Code and PI'
+status: superseded
 date: 2026-07-24
 tags:
-  - architecture
-  - process
-  - harness
-  - verification
+- architecture
+- process
+- harness
+- verification
 links:
-  - target: 20
-    kind: Depends on
-  - target: 18
-    kind: Realizes
-  - target: 19
-    kind: Depends on
-  - target: 13
-    kind: relatesto
-  - target: 17
-    kind: relatesto
+- target: 20
+  kind: Depends on
+- target: 18
+  kind: Realizes
+- target: 19
+  kind: Depends on
+- target: 13
+  kind: Relates to
+- target: 17
+  kind: Relates to
+- target: 32
+  kind: Superseded by
+- target: 42
+  kind: Superseded by
+- target: 23
+  kind: Depends on
+- target: 24
+  kind: Depends on
+- target: 25
+  kind: Relates to
+- target: 27
+  kind: Relates to
+- target: 28
+  kind: Relates to
+- target: 29
+  kind: Relates to
+- target: 30
+  kind: Depends on
 ---
 
 # Enforcing the run protocol: three mechanisms on Claude Code and PI

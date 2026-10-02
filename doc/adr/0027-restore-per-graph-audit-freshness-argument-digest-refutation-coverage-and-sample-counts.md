@@ -1,25 +1,33 @@
 ---
 number: 27
-title: "Restore per-graph audit freshness: argument digest, refutation coverage, and sample counts"
-status: proposed
+title: 'Restore per-graph audit freshness: argument digest, refutation coverage, and sample counts'
+status: accepted
 date: 2026-08-11
 tags:
-  - verification
-  - audit
-  - harness
-  - evidence
-  - convergence
+- verification
+- audit
+- harness
+- evidence
+- convergence
 links:
-  - target: 25
-    kind: Amends
-  - target: 26
-    kind: Amends
-  - target: 20
-    kind: Depends on
-  - target: 21
-    kind: relatesto
-  - target: 13
-    kind: relatesto
+- target: 25
+  kind: Amends
+- target: 26
+  kind: Amends
+- target: 20
+  kind: Depends on
+- target: 21
+  kind: Relates to
+- target: 13
+  kind: Relates to
+- target: 29
+  kind: Amended by
+- target: 41
+  kind: Depends on
+- target: 45
+  kind: Amended by
+- target: 46
+  kind: Amended by
 ---
 
 # Restore per-graph audit freshness: argument digest, refutation coverage, and sample counts

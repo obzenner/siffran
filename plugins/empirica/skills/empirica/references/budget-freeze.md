@@ -5,10 +5,12 @@ bounded scope.
 
 ## Budget
 
+`configure_run` changes the proposal only. A host approval installs the exact proposed ceilings
+without resetting counters; auto cannot raise them. See [governance.md](governance.md).
+
 Empirica is bounded by configured pass, investigation-spawn, and mandatory-audit-spawn
 ceilings. Passes are charged only when the current derivation changes; repeated identical
-evaluation does not spend another pass. Do not invent a scope-derived formula in the skill
-and do not lower a ceiling below already consumed work.
+evaluation does not spend another pass. Do not lower a ceiling below already consumed work.
 
 A pass is charged only according to the service's observed progress rules. Investigation
 children use `max_spawns`; the canonical host-owned auditor uses the independent
@@ -17,8 +19,17 @@ selects audit capacity. Each spawn is reserved through the service before child 
 Only a launch rejected before observed start refunds the child's recorded account; denied or
 unsupported launches must not happen outside a reservation.
 
-When a budget is exhausted, accept the typed non-converged terminal result. Never
-remove a claim, forge evidence, or bypass audit to fit the budget.
+When a budget is exhausted the service names it where it bites: once `audit_spawns_used` reaches
+`max_audit_spawns`, a missing, failed, or stale-independence audit is reported as
+`budget.exhausted` (`resource: audit_spawn`) rather than as an audit retry the service would
+refuse; the audit findings stay in the run view's Audit section. The host then settles a sole
+`budget.exhausted` blocker on an active run with a contract-owned notice instead of blocking the
+turn end, and the run stays active. Stop honestly (`report_convergence` with `intent: "stop"`) and
+accept the typed non-converged terminal result, or, in deliberative mode, propose a raise with
+`configure_run` for human approval. Auto mode still requires a fresh run with a larger up-front
+approved size (or a deliberative run) and never authorizes `budget.raise` or another automatic
+approval prompt until ADR-64 (`doc/adr/0064-let-auto-mode-ask-the-human-to-raise-an-exhausted-ceiling.md`)
+is accepted. Never remove a claim, forge evidence, or bypass audit to fit the budget.
 
 ## Stall handling
 
@@ -30,8 +41,6 @@ When no obligation or evidence changed:
    capability;
 4. either perform that distinct action or allow the service to terminate with an
    honest residual.
-
-Do not claim a wall-clock stall deadline unless the active contract exposes one.
 
 ## Freeze
 
@@ -53,10 +62,15 @@ Freeze is an explicit scope commitment, not convergence.
   coverage stale even when frozen IDs do not change.
 - Every committed claim still needs its evidence and passing audit.
 - Deferred claims remain visible in the terminal handoff.
-- A frozen result is never relabeled `converged:true`.
+- A frozen run with deferred claims ends `stopped_frozen` and is never relabeled
+  `converged:true`. A freeze that defers nothing converges normally: request convergence,
+  not `intent=stop`.
+- Deferring means keeping the claim in the graph outside the committed scope. Deleting a
+  claim is not deferring it.
 
-Before submitting `ObserveAction(kind="freeze")`, show the user the committed and
-expected deferred scope. After acceptance, do not mutate the commitment by
-rewriting prose or resubmitting freeze. There is no author-controlled scope
-revision: changing committed meaning requires a fresh run until a trusted
-human-origin revision protocol is supported.
+Freeze requires current configuration approval. It does not approve graph content. Graph changes
+preserve configuration authority but invalidate prior audit coverage. Before submitting
+`ObserveAction(kind="freeze")`, show the user the committed and expected deferred scope. After
+acceptance, do not mutate the commitment by rewriting prose or resubmitting freeze. Changing
+committed frozen meaning requires a fresh run; configuration amendments cannot rewrite that
+commitment.

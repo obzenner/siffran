@@ -6,7 +6,8 @@ import hashlib
 from dataclasses import dataclass
 from typing import Protocol
 
-from core.freshness import FileBinding, FileObservation, canonical_digest, validate_digest256
+from core.freshness import (FileBinding, FileObservation, canonical_digest, observations_digest,
+                            validate_digest256)
 
 
 @dataclass(frozen=True)
@@ -47,8 +48,7 @@ class ObservationSnapshot:
         paths = [o.path for o in self.observations]
         if paths != sorted(set(paths)):
             raise ValueError("observation paths must be canonical lexical unique")
-        if self.digest != canonical_digest(
-                [(o.path, o.state.value, o.sha256) for o in self.observations]):
+        if self.digest != observations_digest(self.observations):
             raise ValueError("digest must equal canonical digest of observations")
 
 

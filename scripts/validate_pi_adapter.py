@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Validate a Pi adapter package (methodologist or empirica).
 
-Usage: ``validate_pi_adapter.py [<adapter-dir-relative-to-repo-root>]``
+Usage: ``validate_pi_adapter.py [<adapter-dir-relative-to-repo-root>]
+[--test-file <basename>] [--typecheck-only] [--package-only]``
 (defaults to the Methodologist adapter for backwards compatibility).
 
 Layers, so the check is meaningful whether or not tooling exists:
@@ -31,6 +32,7 @@ Layers, so the check is meaningful whether or not tooling exists:
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -126,11 +128,11 @@ def check_manifest(adapter: Path, errors: list[str]) -> dict:
             errors.append(f"{rel(manifest_path)}: packaged Empirica auditor agent is not declared")
         elif agent_path is None or not agent_path.is_file():
             errors.append(f"{rel(manifest_path)}: packaged Empirica auditor agent is missing")
-        elif not re.search(
-                r"^model: amazon-bedrock/eu\.anthropic\.claude-opus-4-8$",
+        elif re.search(
+                r"^model:",
                 agent_path.read_text(encoding="utf-8"), re.MULTILINE):
             errors.append(
-                f"{rel(agent_path)}: auditor model must be the promoted provider-qualified identity")
+                f"{rel(agent_path)}: auditor must not pin a model; trusted approved selection is host-injected")
     return manifest
 
 
@@ -243,7 +245,7 @@ def run_typecheck(adapter: Path) -> int:
     return completed.returncode
 
 
-def run_tests(adapter: Path) -> int:
+def run_tests(adapter: Path, test_file: str | None = None) -> int:
     node = shutil.which("node")
     if node is None:
         if os.environ.get("EMPIRICA_ALLOW_SKIP") == "1":
@@ -252,21 +254,38 @@ def run_tests(adapter: Path) -> int:
         print("error: node not found (install Node or set EMPIRICA_ALLOW_SKIP=1)")
         return 1
     tests = sorted(str(p) for p in (adapter / "test").glob("*.test.ts"))
+    if test_file is not None:
+        tests = [p for p in tests if Path(p).name == test_file]
+        if not tests:
+            print(f"error: no test file named {test_file!r} in {rel(adapter)}/test")
+            return 1
     if not tests:
         return 0
     print(f"running {len(tests)} test file(s) via node --test")
+    # Fast tests plus bounded local bridge smoke; long simulated journeys are gone.
+    # This bounds asynchronous waits, not synchronous loops or arbitrary descendants.
     completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
-        [node, "--test", *tests],
+        [node, "--test", "--test-timeout=30000", *tests],
         cwd=adapter,
     )
     return completed.returncode
 
 
 def main(argv: list[str]) -> int:
-    adapter_rel = Path(argv[0]) if argv else DEFAULT_ADAPTER
-    adapter = (ROOT / adapter_rel).resolve()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("adapter", nargs="?", default=str(DEFAULT_ADAPTER))
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--test-file", help="Run one exact test basename instead of the full suite")
+    mode.add_argument("--typecheck-only", action="store_true", help="Stop after static and type checks")
+    mode.add_argument(
+        "--package-only",
+        action="store_true",
+        help="Validate package composition only; do not rerun a bundled adapter's bridge, typecheck, or tests",
+    )
+    args = parser.parse_args(argv)
+    adapter = (ROOT / args.adapter).resolve()
     if not adapter.is_dir():
-        print(f"ERROR: adapter directory not found: {adapter_rel}", file=sys.stderr)
+        print(f"ERROR: adapter directory not found: {args.adapter}", file=sys.stderr)
         return 1
 
     errors: list[str] = []
@@ -279,6 +298,8 @@ def main(argv: list[str]) -> int:
         print("\n".join(f"ERROR: {error}" for error in errors), file=sys.stderr)
         return 1
     print(f"ok: {rel(adapter)} package is well-formed")
+    if args.package_only:
+        return 0
 
     check_bridge_smoke(runtime, errors)
     if errors:
@@ -288,7 +309,7 @@ def main(argv: list[str]) -> int:
     # Run both dynamic layers even if the first fails, so one invocation reports
     # every failure; the gate is red if either the typecheck or the tests fail.
     typecheck_rc = run_typecheck(runtime)
-    tests_rc = run_tests(runtime)
+    tests_rc = 0 if args.typecheck_only else run_tests(runtime, args.test_file)
     return typecheck_rc or tests_rc
 
 

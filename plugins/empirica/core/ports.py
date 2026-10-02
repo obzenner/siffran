@@ -22,6 +22,10 @@ class RunRepository(Protocol[T]):
     document.
     """
 
+    def generations(self, project_id: str, run_id: str) -> list[int]:
+        """Existing generation numbers for a run, ascending; empty if the run has no storage yet."""
+        ...
+
     def read(self, key: RunKey) -> Read[T]:
         """Return ``Present(value, revision)``, ``ABSENT`` (never written / other generation), or
         ``Corrupt(reason)`` (stored but undecodable). Must not raise for absence or corruption —

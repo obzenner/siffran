@@ -1,0 +1,71 @@
+{
+  "result": {
+    "type": "Block",
+    "run": {
+      "id": "run-fx",
+      "goal": "Prove the public contract is internally consistent.",
+      "status": "active",
+      "contract": {
+        "id": "empirica/public",
+        "version": "3.0.0",
+        "relevant_sections": [
+          "children",
+          "recovery"
+        ],
+        "digest": "sha256:c322c3df3584ee0e8ad740c7de58d56478c59dcbdc7ac0ee58d785f2ceb39a8c"
+      },
+      "obligations": {
+        "active": [],
+        "deferred": []
+      },
+      "residuals": [],
+      "freshness": {
+        "changes": []
+      },
+      "children": [
+        {
+          "child_id": "ch-audit-1",
+          "purpose": "audit",
+          "resource_class": "audit",
+          "state": "cancelled",
+          "recovery_action": "child.retry"
+        }
+      ],
+      "host": {
+        "profile_id": "claude-code@2.1.278",
+        "tier": "foreground_only",
+        "missing_capabilities": [
+          "host.async_unsupported"
+        ]
+      },
+      "next_actions": [],
+      "untrusted_delimiters": {
+        "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+        "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+      },
+      "governance": null,
+      "audit": {
+        "state": "required",
+        "independence": "unverified",
+        "findings": []
+      }
+    },
+    "reasons": [
+      {
+        "code": "child.terminal",
+        "parameters": {
+          "state": "cancelled"
+        },
+        "next_actions": [
+          "child.retry",
+          "residual.accept"
+        ],
+        "sections": [
+          "children"
+        ],
+        "message": "Child terminated in state cancelled."
+      }
+    ]
+  },
+  "text": "Block active — no governance\nrun_id: run-fx\nAudit: required\n\nReasons:\n  child.terminal: Child terminated in state cancelled.\n    params: state=cancelled\n    next: host: child_reserve; report_convergence intent=stop\n\nChildren:\n  audit: cancelled — recovery: host: child_reserve"
+}

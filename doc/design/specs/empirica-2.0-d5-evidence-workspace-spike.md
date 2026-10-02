@@ -1,6 +1,6 @@
 # Empirica 2.0 D5/D5-F — pure freshness and immutable spike-execution contracts
 
-**Status:** Parent-revised proposal after Terra/Sol review; requires final acceptance before implementation.
+**Status:** Implemented in D5-F; historical rationale for `core/freshness.py`.
 
 ## Purpose and stage boundary
 

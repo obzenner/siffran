@@ -17,6 +17,8 @@ import jsonschema
 PLUGIN = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN))
 
+from governance_setup import SIZED_RATIONALE  # noqa: E402
+
 
 class PublicToolContractTests(unittest.TestCase):
     def _tools(self):
@@ -52,6 +54,26 @@ class PublicToolContractTests(unittest.TestCase):
             self.assertNotIn(private, text)
         self.assertTrue(definitions[0]["annotations"]["readOnlyHint"])
         self.assertFalse(definitions[1]["annotations"]["readOnlyHint"])
+
+    def test_generated_guidance_and_examples_are_canonical(self):
+        from adapters import public_tools
+        from application import protocol
+
+        artifact = json.loads(public_tools._PUBLIC_TOOL_ARTIFACT.read_text())
+        self.assertEqual(artifact["definitions"], protocol._PUBLIC_CONTRACT["bootstrap"]["tools"])
+        self.assertEqual(artifact["bootstrap_actions"],
+                         protocol._PUBLIC_CONTRACT["bootstrap"]["actions"])
+        observe = public_tools._PUBLIC_SCHEMAS["model"]["empirica_observe"]
+        variants = {row["properties"]["kind"]["const"]: row
+                    for row in observe["properties"]["action"]["oneOf"]}
+        for kind, row in artifact["bootstrap_actions"].items():
+            self.assertEqual(row["operation"], kind)
+            self.assertEqual(row["example"]["kind"], kind)
+            self.assertEqual(variants[kind]["description"], row["description"])
+            self.assertEqual(variants[kind]["examples"], [row["example"]])
+            jsonschema.validate({"run_id": "r", "action": row["example"]}, observe)
+        self.assertIn("requires a selected graph",
+                      artifact["definitions"]["empirica_observe"]["description"])
 
     def test_definitions_satisfy_claude_code_schema_admission(self):
         definitions = self._tools().definitions()
@@ -102,6 +124,7 @@ class PublicToolContractTests(unittest.TestCase):
         for action in (
             {"kind": "child_reserve", "purpose": "audit", "role_profile": "forged",
              "execution": "foreground"},
+            {"kind": "dispatch", "target": "codex"},
             {"kind": "evidence_leaf", "trusted": {}},
             {"kind": "attribution", "trusted": {}},
             {"kind": "child_event", "trusted": {}},
@@ -111,6 +134,27 @@ class PublicToolContractTests(unittest.TestCase):
                 "empirica_observe", {"run_id": "r", "action": action},
             )
             self.assertTrue(result["isError"], action["kind"])
+        self.assertEqual(self.requests, [])
+
+    def test_removed_dispatch_is_refused_and_absent_from_the_public_schema(self):
+        """The removed action is absent from the model-facing schema and rejected pre-dispatch."""
+        tools = self._tools()
+        observe = next(d for d in tools.definitions() if d["name"] == "empirica_observe")
+        kinds = {row["properties"]["kind"]["const"]
+                 for row in observe["inputSchema"]["properties"]["action"]["oneOf"]}
+        self.assertNotIn("dispatch", kinds)
+        result = tools.call(
+            "empirica_observe", {"run_id": "r", "action": {"kind": "dispatch", "target": "codex"}})
+        self.assertTrue(result["isError"])
+        self.assertEqual(self.requests, [])
+
+    def test_configure_run_with_removed_modes_field_is_rejected(self):
+        tools = self._tools()
+        result = tools.call("empirica_observe", {
+            "run_id": "r",
+            "action": {"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}, "rationale": SIZED_RATIONALE, "modes": {"cli_exec": True}},
+        })
+        self.assertTrue(result["isError"])
         self.assertEqual(self.requests, [])
 
     def test_research_requires_locator_and_citation_before_dispatch(self):
@@ -267,6 +311,37 @@ class McpTransportTests(unittest.TestCase):
             [item["name"] for item in response["result"]["tools"]],
             ["empirica_read", "empirica_observe", "report_convergence"],
         )
+
+    def test_mcp_runview_wire_contains_only_rendered_text(self):
+        """Claude/Codex must not receive a duplicate JSON RunView via structuredContent."""
+        from adapters.mcp_server import handle_message
+        from adapters.public_tools import PublicTools
+
+        marker = "JSON_ONLY_RUNVIEW_MARKER"
+        fixture = json.loads((PLUGIN.parents[1] / "contracts" / "empirica" / "v2" / "fixtures" /
+                              "start-bootstrap-allow.json").read_text())
+        valid_result = fixture["expected"]["result"]
+        valid_result["run"]["goal"] = marker
+        tools = PublicTools(
+            "claude-code@2.1.278",
+            dispatch=lambda request, _profile: {
+                "protocol": "empirica/v2",
+                "request_id": request["request_id"],
+                "result": valid_result,
+            },
+        )
+        arguments = {"run_id": "run-visible", "operation": "GetRun"}
+        internal = tools.call_internal("empirica_read", arguments)
+        self.assertEqual(internal["structuredContent"]["run"]["goal"], marker)
+
+        response = handle_message({
+            "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+            "params": {"name": "empirica_read", "arguments": arguments},
+        }, tools)
+        wire_result = response["result"]
+        self.assertEqual(set(wire_result), {"content", "isError"})
+        self.assertNotIn("structuredContent", wire_result)
+        self.assertNotIn(marker, json.dumps(wire_result))
 
     def test_plugin_copy_starts_without_repository_root_contracts(self):
         with tempfile.TemporaryDirectory() as temp:

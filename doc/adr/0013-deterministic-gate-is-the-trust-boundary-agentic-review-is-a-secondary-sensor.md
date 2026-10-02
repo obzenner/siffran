@@ -4,24 +4,40 @@ title: Deterministic gate is the trust boundary; agentic review is a secondary s
 status: accepted
 date: 2026-07-22
 tags:
-  - architecture
-  - validation
-  - verification
+- architecture
+- validation
+- verification
 links:
-  - target: 8
-    kind: Depends on
-  - target: 6
-    kind: Refines
-  - target: 11
-    kind: relatesto
-  - target: 12
-    kind: relatesto
-  - target: 15
-    kind: relatesto
-  - target: 16
-    kind: relatesto
-  - target: 20
-    kind: relatesto
+- target: 8
+  kind: Depends on
+- target: 6
+  kind: Refines
+- target: 11
+  kind: Relates to
+- target: 12
+  kind: Relates to
+- target: 15
+  kind: Relates to
+- target: 16
+  kind: Relates to
+- target: 20
+  kind: Relates to
+- target: 17
+  kind: Depends on
+- target: 18
+  kind: Refines
+- target: 21
+  kind: Relates to
+- target: 23
+  kind: Relates to
+- target: 24
+  kind: Relates to
+- target: 25
+  kind: Relates to
+- target: 27
+  kind: Relates to
+- target: 29
+  kind: Depends on
 ---
 
 # Deterministic gate is the trust boundary; agentic review is a secondary sensor

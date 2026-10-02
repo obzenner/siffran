@@ -5,12 +5,19 @@ import json
 import re
 from typing import Any
 
-from core.evaluation import (EvaluationSnapshot, claim_digest, digest, frozen_scope_invalid,
-                             valid_graph)
-from core.freshness import ActiveSpikeHead, FileBinding
+from core.canonical import canonical_json
+from core.evaluation import (EvaluationSnapshot, active_spike_heads, digest,
+                             frozen_scope_invalid, valid_graph)
+from core.freshness import FileObservation, ObservationState, observations_digest
 from core.records import Artifact
 from core.run import OperationalState
+from core.governance import proposal_digest
 from . import protocol as _proto
+from .history_records import (
+    MANIFEST_KEYS, MANIFEST_KIND, MANIFEST_VERSION, OBSERVATION_BASIS_KEYS,
+    OBSERVATION_BASIS_KIND, OBSERVATION_BASIS_VERSION, OBSERVATION_ROW_KEYS,
+    OBSERVATION_SOURCE_KEYS, POLICY_INPUT_KEYS,
+)
 from .observation import build_observation_snapshot
 from .run_state import encode_state
 
@@ -32,8 +39,7 @@ def state_digest(state: OperationalState) -> str:
 
 
 def make_artifact(body: dict[str, Any]) -> Artifact:
-    raw = json.dumps(body, sort_keys=True, separators=(",", ":"))
-    return Artifact(digest(body), raw)
+    return Artifact(digest(body), canonical_json(body))
 
 
 def _decode(value: Artifact) -> dict[str, Any]:
@@ -50,11 +56,15 @@ def _valid_digest(value: Any) -> bool:
     return type(value) is str and _DIGEST.fullmatch(value) is not None
 
 
+def _wrong_version(value: Any, expected: int) -> bool:
+    return type(value) is not int or value != expected
+
+
 def _manifest(value: Artifact) -> dict[str, Any]:
     item = _decode(value)
-    required = {"artifact_id", "kind", "version", "parent", "artifact_ids",
-                "observation_basis_id", "observation_digest", "next_state_digest"}
-    if set(item) != required or item["kind"] != "transaction_manifest" or type(item["version"]) is not int or item["version"] != 1:
+    version = item.get("version")
+    if (set(item) != MANIFEST_KEYS or item.get("kind") != MANIFEST_KIND
+            or _wrong_version(version, MANIFEST_VERSION)):
         raise HistoryCorrupt("malformed reachable manifest")
     parent = item["parent"]
     ids = item["artifact_ids"]
@@ -64,8 +74,45 @@ def _manifest(value: Artifact) -> dict[str, Any]:
         raise HistoryCorrupt("malformed or duplicate manifest artifact IDs")
     if (type(item["observation_basis_id"]) is not str or not item["observation_basis_id"]
             or not _valid_digest(item["observation_digest"])
-            or not _valid_digest(item["next_state_digest"])):
+            or not _valid_digest(item["next_state_digest"])
+            or not _valid_digest(item["observation_basis_digest"])):
         raise HistoryCorrupt("malformed manifest witnesses")
+    return item
+
+
+def _observation_basis(value: Artifact) -> dict[str, Any]:
+    item = _decode(value)
+    if (set(item) != OBSERVATION_BASIS_KEYS
+            or item["kind"] != OBSERVATION_BASIS_KIND
+            or _wrong_version(item["version"], OBSERVATION_BASIS_VERSION)
+            or not isinstance(item["sources"], list) or not item["sources"]):
+        raise HistoryCorrupt("malformed observation basis")
+    policy = item["policy_inputs"]
+    if (not isinstance(policy, dict) or set(policy) != POLICY_INPUT_KEYS
+            or not all(type(policy[key]) is str and policy[key]
+                       for key in ("contract_id", "contract_version", "profile_id"))
+            or not _valid_digest(policy["contract_digest"])
+            or item["clock_inputs"] != []):
+        raise HistoryCorrupt("malformed observation basis")
+    for source in item["sources"]:
+        if (not isinstance(source, dict)
+                or set(source) != OBSERVATION_SOURCE_KEYS
+                or not isinstance(source["name"], str) or not source["name"]
+                or not isinstance(source["basis_id"], str) or not source["basis_id"]
+                or not _valid_digest(source["digest"])
+                or not isinstance(source["observations"], list)):
+            raise HistoryCorrupt("malformed observation basis source")
+        observations = []
+        try:
+            for row in source["observations"]:
+                if not isinstance(row, dict) or set(row) != OBSERVATION_ROW_KEYS:
+                    raise ValueError("malformed persisted observation")
+                observations.append(FileObservation(
+                    row["path"], ObservationState(row["state"]), row["sha256"]))
+        except (TypeError, ValueError) as exc:
+            raise HistoryCorrupt("malformed persisted observation") from exc
+        if observations_digest(observations) != source["digest"]:
+            raise HistoryCorrupt("persisted observation digest mismatch")
     return item
 
 
@@ -106,9 +153,22 @@ def traverse_history(state: OperationalState, stored: Any) -> tuple[dict[str, An
     ordered: list[dict[str, Any]] = []
     referenced: set[str] = set()
     parent: str | None = None
+    prior_basis: str | None = None
+    seen_bases: set[str] = set()
     for item in chain:
         if item["parent"] != parent:
             raise HistoryCorrupt("broken manifest parent")
+        basis_digest = item["observation_basis_digest"]
+        basis_value = by_id.get(basis_digest)
+        if basis_value is None:
+            raise HistoryCorrupt("missing observation basis")
+        _observation_basis(basis_value)
+        changed = basis_digest != prior_basis
+        basis_appended = basis_digest in item["artifact_ids"]
+        if basis_appended != (changed and basis_digest not in seen_bases):
+            raise HistoryCorrupt("observation basis deduplication mismatch")
+        seen_bases.add(basis_digest)
+        prior_basis = basis_digest
         for aid in item["artifact_ids"]:
             if aid in referenced:
                 raise HistoryCorrupt("duplicate committed artifact reference")
@@ -116,13 +176,16 @@ def traverse_history(state: OperationalState, stored: Any) -> tuple[dict[str, An
             if value is None:
                 raise HistoryCorrupt("missing committed domain artifact")
             domain = _decode(value)
-            if domain.get("kind") == "transaction_manifest":
+            if domain.get("kind") == MANIFEST_KIND:
                 raise HistoryCorrupt("manifest referenced as domain artifact")
             referenced.add(aid)
             ordered.append(domain)
         parent = item["artifact_id"]
     if chain[-1]["next_state_digest"] != state_digest(state):
         raise HistoryCorrupt("latest manifest state witness mismatch")
+    # Redundant with the state-digest witness above, but preserves the more specific diagnosis.
+    if chain[-1]["observation_basis_digest"] != state.observation_basis_digest:
+        raise HistoryCorrupt("latest observation basis state witness mismatch")
     return tuple(ordered)
 
 
@@ -142,25 +205,6 @@ def graph_from_history(state: OperationalState, history: tuple[dict[str, Any], .
     if frozen_scope_invalid(state, graph):
         raise HistoryCorrupt("selected graph conflicts with frozen semantic identity")
     return graph
-
-
-def active_spike_heads(history: tuple[dict[str, Any], ...], graph: dict[str, Any] | None) -> tuple[ActiveSpikeHead, ...]:
-    if graph is None:
-        return ()
-    claims = {c["id"]: c for c in graph["claims"]}
-    latest: dict[str, dict[str, Any]] = {}
-    for item in history:
-        claim = claims.get(item.get("claim_id"))
-        if (item.get("kind") == "spike" and claim is not None
-                and item.get("claim_digest") == claim_digest(claim)):
-            latest[claim["id"]] = item
-    heads = []
-    for claim_id in sorted(latest):
-        item = latest[claim_id]
-        bindings = tuple(FileBinding(b["path"], b["sha256"]) for b in item["file_bindings"])
-        heads.append(ActiveSpikeHead(item["artifact_id"], claim_id,
-                                     item["harness_request_id"], bindings))
-    return tuple(heads)
 
 
 def validate_investigation_history(state: OperationalState,
@@ -185,14 +229,15 @@ def assemble(state: OperationalState, stored: Any, workspace: Any, *, run_id: st
     history = traverse_history(state, stored)
     validate_investigation_history(state, history)
     graph = graph_from_history(state, history, required=require_graph)
+    if proposal_digest(state.goal, state.governance) != state.governance["proposal_digest"]:
+        raise HistoryCorrupt("proposal digest conflicts with selected graph/context")
     observation = build_observation_snapshot(active_spike_heads(history, graph), workspace)
-    profile = _proto._PROFILES[profile_id]
+    profile = _proto.host_profile(profile_id)
     return EvaluationSnapshot(
-        state=state, history=history, graph=graph,
+        state=state, history=history, graph=graph, contract=_proto.CONTRACT_VIEW,
         observations=observation.observations, observation_basis_id=observation.basis_id,
         observation_digest=observation.digest, run_id=run_id,
-        contract_id=_proto._PUBLIC_CONTRACT["id"],
-        contract_version=_proto._PUBLIC_CONTRACT["version"], contract_digest=_proto._DIGEST,
-        profile_id=profile_id, host_tier=profile["current_tier"],
+        **_proto.policy_inputs(profile_id),
+        host_tier=profile["current_tier"],
         host_audit_execution=profile["audit_execution"], command=command,
     )

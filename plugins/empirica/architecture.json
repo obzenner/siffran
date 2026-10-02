@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "description": "Empirica 2.0 target-state architecture policy. Inert internal config consumed by scripts/validate_empirica_architecture.py. Not a public contract; not composed into check-static until D3-M (after D6/D7 make the target state green).",
+  "description": "Empirica 4.0 target-state architecture policy. Inert internal config consumed by scripts/validate_empirica_architecture.py. Not a public contract. Composed into check-static by ADR 0060; line count is not a rule.",
   "runtime_roots": {
     "package_root": "plugins/empirica",
     "python_extension": ".py",
@@ -129,12 +129,7 @@
       "audit_ticket"
     ]
   },
-  "effective_runtime": {
-    "baseline": 9458,
-    "baseline_ref": "4257c8d",
-    "maximum": 9484,
-    "extensions": [".py", ".ts"]
-  },
+  "runtime_extensions": [".py", ".ts"],
   "thin_hooks": {
     "root": "hooks",
     "max_statements": 12,
@@ -144,7 +139,7 @@
   "required_contract_references": {
     "public_contract": "contracts/empirica/v2/public-contract.json",
     "id": "empirica/public",
-    "version": "2.0.0",
+    "version": "3.0.0",
     "protocol": "empirica/v2"
   },
   "required_profile_references": {

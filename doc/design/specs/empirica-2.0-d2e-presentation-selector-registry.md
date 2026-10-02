@@ -1,6 +1,6 @@
 # Empirica 2.0 D2E — canonical presentation selector registry
 
-**Status:** Parent-frozen bounded amendment exposed by D4 cases 37–40.
+**Status:** Implemented historical rationale for the current presentation selector.
 
 ## Problem
 

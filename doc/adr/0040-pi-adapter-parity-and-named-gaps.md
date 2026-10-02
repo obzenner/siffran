@@ -1,13 +1,17 @@
 ---
 number: 40
 title: Pi adapter parity and named gaps
-status: proposed
+status: superseded
 date: 2026-09-12
 links:
 - target: 30
-  kind: relatesto
+  kind: Relates to
 - target: 32
-  kind: relatesto
+  kind: Relates to
+- target: 42
+  kind: Superseded by
+- target: 41
+  kind: Amended by
 ---
 
 # Pi adapter parity and named gaps

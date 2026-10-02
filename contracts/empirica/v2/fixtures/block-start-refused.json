@@ -1,0 +1,41 @@
+{
+  "request": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-start-refused",
+    "command": {
+      "type": "StartRun",
+      "control_mode": "deliberative",
+      "selector": {
+        "project": "p",
+        "session": "s"
+      },
+      "goal": "",
+      "invocation": {
+        "host": "test",
+        "interactive": true,
+        "signal": "fixture",
+        "delegation": false
+      }
+    }
+  },
+  "expected": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-start-refused",
+    "result": {
+      "type": "Block",
+      "reasons": [
+        {
+          "code": "run.goal_required",
+          "message": "A non-empty goal is required; supply the goal explicitly. No run was created.",
+          "next_actions": [
+            "run.start_fresh"
+          ],
+          "sections": [
+            "run/lifecycle"
+          ],
+          "parameters": {}
+        }
+      ]
+    }
+  }
+}

@@ -23,25 +23,21 @@ from assertions import (  # noqa: E402
 
 
 class ActivationRouteGraphTests(ConformanceCase):
-    # 1 — Start exposes goal, modes, contract identity/digest, host profile/tier (no full dump)
-    def test_start_exposes_goal_modes_contract_identity_host_profile(self):
+    # 1 — Start exposes goal, contract identity/digest, host profile/tier (no full dump)
+    def test_start_exposes_goal_contract_identity_host_profile(self):
         drv = self.bind_driver(
             "D9", "case-1",
-            "StartRun exposes goal, exact effective modes requested (and required boolean sibling), "
-            "canonical contract identity/digest, exact selected host profile/tier, active status, "
+            "StartRun exposes goal, canonical contract identity/digest, exact selected "
+            "host profile/tier, active status, "
             "complete bounded RunView arrays, and no full/private dump")
         env = start_run(goal=self.DEFAULT_GOAL,
-                        budgets={"max_passes": 3, "max_spawns": 2},
-                        modes={"multi_provider": False})
+                        budgets={"max_passes": 3, "max_spawns": 2})
         resp = self.dispatch(drv, env)
         self.assert_protocol_identity(resp, env["request_id"])
         result = self.assert_allow(resp, converged=False)
         run = result["run"]
         self.assertEqual(run["goal"], self.DEFAULT_GOAL, "StartRun must echo the goal")
         self.assert_status(run, "active")
-        # Exact complete effective modes object, not just key presence.
-        self.assertEqual(run["modes"], {"multi_provider": False, "cli_exec": False},
-                         "RunView modes must be the exact complete effective modes object")
         # Complete bounded RunView arrays.
         self.assertIn("obligations", run, "RunView must carry obligations")
         self.assertIn("active", run["obligations"], "obligations must carry active array")
@@ -104,6 +100,7 @@ class ActivationRouteGraphTests(ConformanceCase):
             "either first-write-wins witness, leaving the exact full obligation rows from "
             "route+investigate unchanged")
         run_id = self.start_run(drv)
+        self.require_governance_approved(drv, run_id)
         # Capture the RunView before route to derive obligation IDs changed by route+investigate.
         before_run = self.dispatch(drv, get_run(run_id=run_id))["result"]["run"]
         before_idx = self._obligation_index(before_run)
@@ -190,6 +187,7 @@ class ActivationRouteGraphTests(ConformanceCase):
                 run_id = self.start_run(drv)
                 self.assert_allow(self.dispatch(drv, observe_action(
                     run_id=run_id, action=action_graph(payload=graph))), converged=False)
+                self.require_governance_approved(drv, run_id)
                 blocked = self.dispatch(drv, observe_action(run_id=run_id, action=action))
                 self.assert_block_only(blocked, ["route.required"])
 
@@ -199,6 +197,7 @@ class ActivationRouteGraphTests(ConformanceCase):
                 run_id = self.start_run(drv)
                 self.assert_allow(self.dispatch(drv, observe_action(
                     run_id=run_id, action=action_graph(payload=graph))), converged=False)
+                self.require_governance_approved(drv, run_id)
                 self.require_route_admitted(drv, run_id)
                 blocked = self.dispatch(drv, observe_action(run_id=run_id, action=action))
                 self.assert_block_only(blocked, ["investigation.required"])
@@ -209,6 +208,7 @@ class ActivationRouteGraphTests(ConformanceCase):
                 run_id = self.start_run(drv)
                 self.assert_allow(self.dispatch(drv, observe_action(
                     run_id=run_id, action=action_graph(payload=graph))), converged=False)
+                self.require_governance_approved(drv, run_id)
                 self.require_route_admitted(drv, run_id)
                 self.assert_allow(self.dispatch(drv, observe_action(
                     run_id=run_id, action=action_investigate())), converged=False)
@@ -252,30 +252,44 @@ class ActivationRouteGraphTests(ConformanceCase):
 
     # 5 — Malformed/missing selected graph fails closed with a structured reason
     def test_malformed_missing_selected_graph_fails_closed(self):
-        # Independent fresh variants for missing selected graph and malformed selected graph.
-        # The missing variant Evaluate/GetRun without submitting any graph; the malformed variant
-        # submits a malformed graph. Each fails closed with exact graph.invalid, no generic
-        # exception/fallback.
+        # Evaluate a fresh graphless run separately from submitting a malformed graph.
+        # Both fail closed, but missing scope is preparation (graph.missing), not a
+        # human-approval wait; malformed input retains graph.invalid.
         for label in ("missing", "malformed"):
             with self.subTest(variant=label):
                 drv = self.bind_driver(
                     "D7", "case-5",
-                    "Independent fresh variants for missing and malformed selected graph each "
-                    "fail closed with exact graph.invalid, no generic exception/fallback")
+                    "Missing scope fails as graph.missing before approval; malformed scope "
+                    "fails as graph.invalid. Neither case admits work or supplies a reviewable graph.")
                 run_id = self.start_run(drv)
                 if label == "missing":
                     # Missing variant: Evaluate without submitting any graph.
                     resp = self.dispatch(drv, evaluate(
                         run_id=run_id, intent="report_convergence"))
                 else:
-                    # Malformed variant: submit a malformed graph.
+                    # Malformed variant: submit a structurally valid but semantically invalid graph
+                    # (unknown edge endpoint). The closed schema admits it; core valid_graph
+                    # rejects it as graph.invalid, so it fails at the authoritative layer.
                     resp = self.dispatch(drv, observe_action(
-                        run_id=run_id, action=action_graph(payload={"malformed": True})))
-                self.assert_block_only(resp, ["graph.missing" if label == "missing"
-                                               else "graph.invalid"])
+                        run_id=run_id, action=action_graph(payload={
+                            "root": "C0",
+                            "claims": [{"id": "C0", "text": "Claim C0",
+                                        "gating": True, "kind": "ordinary"}],
+                            "edges": [{"from": "C0", "to": "C1",
+                                       "type": "SupportedBy"}]})))
+                result = self.assert_block_only(resp, ["graph.missing" if label == "missing"
+                                                       else "graph.invalid"])
+                self.assertEqual(result["run"]["governance"]["state"], "pending")
+                # scope moved to the private presentation; the reason code and pending state
+                # prove no graph was selected without reading a removed public field.
 
     def test_structurally_invalid_dependency_graphs_are_rejected_without_replacement(self):
-        """Seam 4A: the selected argument is one strict root-connected dependency DAG."""
+        """Seam 4A: the selected argument is one strict root-connected dependency DAG.
+
+        QUAL-1 defence in depth: uniqueness, root membership, acyclicity and reachability stay
+        core-only, so those semantically invalid graphs still reach the coordinator and Block as
+        graph.invalid. A structurally invalid edge type is refused at the wire (invalid_request)
+        by the closed graph schema and never reaches the coordinator; both layers reject it."""
         def claim(cid):
             return {"id": cid, "text": f"Claim {cid}", "gating": True,
                     "kind": "ordinary"}
@@ -296,9 +310,6 @@ class ActivationRouteGraphTests(ConformanceCase):
                                 {"from": "C1", "to": "C0", "type": "SupportedBy"}]},
             "detached": {"root": "C0", "claims": [claim("C0"), claim("C1")],
                          "edges": []},
-            "in-context-edge": {"root": "C0", "claims": [claim("C0"), claim("C1")],
-                                "edges": [{"from": "C0", "to": "C1",
-                                           "type": "InContextOf"}]},
         }
         for label, candidate in variants.items():
             with self.subTest(variant=label):
@@ -315,6 +326,54 @@ class ActivationRouteGraphTests(ConformanceCase):
                 after = self.dispatch(drv, get_argument(run_id=run_id))["result"]["argument"]
                 self.assertEqual(after, before,
                                  "an invalid candidate must not replace the selected graph")
+        # QUAL-1 negative control: a non-SupportedBy edge type is refused at the closed graph
+        # schema before the coordinator sees it, and cannot replace the selected graph.
+        with self.subTest(variant="in-context-edge"):
+            in_context = {"root": "C0", "claims": [claim("C0"), claim("C1")],
+                          "edges": [{"from": "C0", "to": "C1", "type": "InContextOf"}]}
+            drv = self.bind_driver(
+                "D7", "seam-4a",
+                "A non-SupportedBy edge type is refused at the wire and cannot replace the "
+                "previous selected graph")
+            run_id = self.start_run(drv)
+            self.require_graph_admitted(drv, run_id, canonical_graph(n_claims=1))
+            before = self.dispatch(drv, get_argument(run_id=run_id))["result"]["argument"]
+            refused = self.raw_dispatch(drv, observe_action(
+                run_id=run_id, action=action_graph(payload=in_context)))
+            self.assert_fault(refused, code="invalid_request", fail_direction="closed")
+            after = self.dispatch(drv, get_argument(run_id=run_id))["result"]["argument"]
+            self.assertEqual(after, before,
+                             "a wire-refused candidate must not replace the selected graph")
+
+    def test_claim_ids_follow_the_one_pattern_at_wire_and_core(self):
+        """Claim ids are ``[A-Za-z0-9._-]{1,64}``: boundary ids are admitted; pattern-invalid ids,
+        including a trailing newline, in any graph position or an action ``claim_id`` are refused
+        at the wire. Core ``valid_graph`` rejects them independently (test_d7_transactions)."""
+        def graph(root, vertex, edge_from, edge_to):
+            return {"root": root, "edges": [{"from": edge_from, "to": edge_to,
+                                             "type": "SupportedBy"}],
+                    "claims": [{"id": vertex, "text": "Claim", "gating": True, "kind": "ordinary"},
+                               {"id": "L", "text": "Leaf", "gating": True, "kind": "ordinary"}]}
+        for good in ("a.b-C_9", "x" * 64):
+            with self.subTest(accepted=good):
+                drv = self.bind_driver("D7", "seam-4a", "Boundary claim ids are admitted")
+                run_id = self.start_run(drv)
+                self.require_graph_admitted(drv, run_id, graph(good, good, good, "L"))
+        for bad in ("", "x" * 65, "a b", "claim:C0", "caf\u00e9", "a\nb", "C0\n",
+                    "<<<EMPIRICA_UNTRUSTED_DATA>>>"):
+            for position, action in (
+                    ("id", action_graph(payload=graph("R", bad, "R", "L"))),
+                    ("root", action_graph(payload=graph(bad, "R", "R", "L"))),
+                    ("from", action_graph(payload=graph("R", "R", bad, "L"))),
+                    ("to", action_graph(payload=graph("R", "R", "R", bad))),
+                    ("claim_id", action_research(claim_id=bad, source_kind="code",
+                                                 result="supports"))):
+                with self.subTest(rejected=bad, position=position):
+                    drv = self.bind_driver("D7", "seam-4a",
+                                           "Pattern-invalid claim ids are refused at the wire")
+                    run_id = self.start_run(drv)
+                    refused = self.raw_dispatch(drv, observe_action(run_id=run_id, action=action))
+                    self.assert_fault(refused, code="invalid_request", fail_direction="closed")
 
     def test_branching_and_shared_dependency_dag_is_admitted(self):
         def claim(cid):

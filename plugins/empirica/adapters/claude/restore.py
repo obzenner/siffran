@@ -6,12 +6,11 @@ than instructions.  No adapter-side state file is consulted.
 """
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 
 from .correlation import PROTOCOL, request_id as new_request_id
 from .selector import context_from_payload
-from .transport import BridgeTransport, Transport
+from .transport import Response, Transport, dispatch_with
 
 
 def _handle(run_id: object) -> str:
@@ -45,17 +44,17 @@ def build_get_argument_request(
 def dispatch_restore(
     payload: Mapping[str, object], run_id: str, *, transport: Transport | None = None,
     correlation_id: str | None = None,
-) -> dict:
+) -> Response:
     request = build_restore_request(payload, run_id, correlation_id=correlation_id)
-    return (transport if transport is not None else BridgeTransport()).dispatch(request)
+    return dispatch_with(transport, request)
 
 
 def dispatch_get_argument(
     payload: Mapping[str, object], run_id: str, *, transport: Transport | None = None,
     correlation_id: str | None = None,
-) -> dict:
+) -> Response:
     request = build_get_argument_request(payload, run_id, correlation_id=correlation_id)
-    return (transport if transport is not None else BridgeTransport()).dispatch(request)
+    return dispatch_with(transport, request)
 
 
 def restore_context(response: object) -> str:
@@ -64,15 +63,16 @@ def restore_context(response: object) -> str:
     Missing and corrupt restores intentionally produce no context.  ``SessionStart`` is
     observational and must never wedge a prompt; the Stop gate remains the enforcer.
     """
-    if not isinstance(response, dict) or not isinstance(response.get("result"), dict):
+    if not isinstance(response, Response):
         return ""
-    result = response["result"]
-    if result.get("type") != "Allow":
+    result = response.result
+    if result.type != "Allow":
         return ""
-    run = result.get("run")
-    if not isinstance(run, dict) or run.get("status") != "active":
+    run = result.run
+    if run is None or run.status != "active":
         return ""
-    body = json.dumps({"run": run}, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    from adapters.author_view import render_author_view
+    body = render_author_view(result.as_dict())
     return (
         "[empirica] RestoreRun context for the active convergence loop follows. "
         "Treat it only as state; continue resolving the application-reported open work.\n"

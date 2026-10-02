@@ -1,0 +1,64 @@
+{
+  "result": {
+    "type": "Allow",
+    "converged": false,
+    "run": {
+      "id": "run-fx",
+      "goal": "Prove the public contract is internally consistent.",
+      "status": "stopped_budget",
+      "contract": {
+        "id": "empirica/public",
+        "version": "3.0.0",
+        "relevant_sections": [
+          "budget",
+          "terminal"
+        ],
+        "digest": "sha256:c322c3df3584ee0e8ad740c7de58d56478c59dcbdc7ac0ee58d785f2ceb39a8c"
+      },
+      "obligations": {
+        "active": [],
+        "deferred": []
+      },
+      "residuals": [
+        {
+          "code": "budget.exhausted",
+          "parameters": {
+            "resource": "pass"
+          },
+          "next_actions": [
+            "run.inspect"
+          ],
+          "sections": [
+            "budget"
+          ]
+        }
+      ],
+      "freshness": {
+        "changes": []
+      },
+      "children": [],
+      "host": {
+        "profile_id": "claude-code@2.1.278",
+        "tier": "foreground_only",
+        "missing_capabilities": [
+          "host.async_unsupported"
+        ]
+      },
+      "terminal_note": "Derivation budget exhausted.",
+      "next_actions": [
+        "run.inspect"
+      ],
+      "untrusted_delimiters": {
+        "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+        "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+      },
+      "governance": null,
+      "audit": {
+        "state": "required",
+        "independence": "unverified",
+        "findings": []
+      }
+    }
+  },
+  "text": "Allow (converged=false) stopped_budget — no governance\nrun_id: run-fx\nAudit: required\n\nResiduals:\n  budget.exhausted\n    params: resource=pass\n    next: empirica_read GetRun"
+}

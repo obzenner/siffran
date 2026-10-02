@@ -1,24 +1,34 @@
 ---
 number: 41
-title: "Audit as a contract: dossier in, host-observed verdict out"
-status: proposed
+title: 'Audit as a contract: dossier in, host-observed verdict out'
+status: superseded
 date: 2026-09-12
-tags: [audit, contract, independence, pi]
+tags:
+- audit
+- contract
+- independence
+- pi
 links:
-  - target: 20
-    kind: Amends
-  - target: 24
-    kind: Depends on
-  - target: 25
-    kind: Depends on
-  - target: 27
-    kind: Depends on
-  - target: 30
-    kind: Depends on
-  - target: 39
-    kind: relatesto
-  - target: 40
-    kind: Amends
+- target: 20
+  kind: Amends
+- target: 24
+  kind: Depends on
+- target: 25
+  kind: Depends on
+- target: 27
+  kind: Depends on
+- target: 30
+  kind: Depends on
+- target: 39
+  kind: Relates to
+- target: 40
+  kind: Amends
+- target: 42
+  kind: Superseded by
+- target: 60
+  kind: Superseded by
+- target: 49
+  kind: Amended by
 ---
 
 # Audit as a contract: dossier in, host-observed verdict out

@@ -1,20 +1,18 @@
 // Empirica adapter for Pi (pi.dev) — v2-only, radically simplified (D6-C C3).
 //
-// The Pi adapter is a *translator* over the empirica/v2 contract: it maps Pi's
-// native events into requests and maps the guarded typed decision back onto
-// Pi's enforcement/UI. It holds no convergence rules — those live in the
-// host-neutral core, reached through the injected `dispatch` seam.
+// The Pi adapter translates native events into empirica/v2 requests and maps guarded
+// typed decisions back onto Pi enforcement/UI. State and convergence policy remain in
+// the host-neutral core reached through the injected dispatch seam.
 //
 // Complete exact-profile surfaces:
-//   * /empirica -> StartRun and durable opaque-handle context
+//   * /empirica -> StartRun with trusted mode/delegation provenance and durable handle
 //   * empirica_observe/read/report_convergence -> canonical public v2 operations
 //   * tool_call/tool_result -> bound foreground pi-subagents auditor, synchronous
 //     redaction, and adapter-private trusted ingress
 //   * session restoration/compaction -> RestoreRun
 //
-// State and convergence policy remain behind the transport. The adapter retains
-// only the session handle and host-native child correlation needed to observe the
-// exact foreground result.
+// The adapter retains only the session handle and host-native child correlation needed
+// to observe the exact foreground result.
 
 import { fileURLToPath } from "node:url";
 import * as path from "node:path";
@@ -23,6 +21,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type { Dispatch, Request, Response, RunSelector } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
+import { govern, governanceTimeout, piGovernanceContext, refreshGovernance, settlementNotice } from "./governance-ui.ts";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -30,17 +29,23 @@ import type {
   ToolCallResult,
   ToolResultEvent,
 } from "./pi-types.ts";
-import { createPrivateIngress, type AuditPlanData, type PrivateIngress } from "./private-transport.ts";
+import {
+  assertPrivateResponse, createPrivateIngress, type AuditPlanData, type PrivateIngress,
+  type PrivateIngressRequest, type PrivateOperation, type PrivateResponses,
+} from "./private-transport.ts";
 import {
   lifecycleEvent, redactVerdict, resultDigest, resultText as auditResultText, verdictFromText,
 } from "./audit.ts";
 import {
   identityFromSessionJsonl, sessionFileFromDetails,
 } from "./audit-identity.ts";
-import { createStdioBridgeDispatch, defaultBridgeConfig } from "./stdio-transport.ts";
+import { createStdioBridgeDispatch, defaultBridgeConfig, HOST_PROFILE_ID } from "./stdio-transport.ts";
+import { renderAuthorView } from "./author-view.ts";
+import { PUBLIC_TOOLS } from "./public-tools.ts";
 import {
   REPORT_CONVERGENCE_INTENT,
   REPORT_CONVERGENCE_TOOL,
+  SUBAGENT_TOOL,
   evaluateRunRequest,
   gateFromDecision,
   getArgumentRequest,
@@ -48,7 +53,7 @@ import {
   getRunRequest,
   isExecutableSubagentLaunch,
   observeActionRequest,
-  parseModeFlags,
+  parseInvocationFlags,
   resolveRunRequest,
   restoreRunRequest,
   startRunRequest,
@@ -57,6 +62,19 @@ import {
 } from "./translate.ts";
 
 const MAX_AUDIT_SESSION_BYTES = 16 * 1024 * 1024;
+const PRIVATE_RESULT_KEYS = ["presentation", "dialog", "scope"] as const;
+
+// Recursively detect any private governance presentation field in a model-facing result.
+function containsPrivateResult(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsPrivateResult);
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (PRIVATE_RESULT_KEYS.some((key) => key in record)) return true;
+    return Object.values(record).some(containsPrivateResult);
+  }
+  return false;
+}
+
 function readAuditSession(file: string): string | null {
   try {
     const before = lstatSync(file);
@@ -68,7 +86,6 @@ function readAuditSession(file: string): string | null {
   } catch { return null; }
 }
 
-// plugins/empirica/adapters/pi/src/index.ts -> plugins/empirica/skills
 export const DEFAULT_SKILLS_DIR = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -85,19 +102,10 @@ function canonicalPath(value: string): string {
   }
 }
 
-function sameCanonicalAgentFile(candidate: string, expected: string): boolean {
-  if (canonicalPath(candidate) === canonicalPath(expected)) return true;
-  const candidateText = readAuditSession(candidate);
-  const expectedText = readAuditSession(expected);
-  return candidateText !== null && expectedText !== null && candidateText === expectedText;
-}
-
-const PUBLIC_TOOLS_PATH = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "..",
-  "contracts", "empirica", "v2", "public-tools.json");
-const PUBLIC_TOOL_SCHEMAS = (JSON.parse(readFileSync(PUBLIC_TOOLS_PATH, "utf8")) as {
-  schemas: { host_handle: Record<string, Record<string, unknown>> };
-}).schemas.host_handle;
+const PUBLIC_TOOL_SCHEMAS = PUBLIC_TOOLS.schemas.host_handle;
+const INTERACTIVE_BY_MODE: Record<string, boolean> = {
+  tui: true, rpc: true, print: false, json: false,
+};
 const actionChoices = ((PUBLIC_TOOL_SCHEMAS.empirica_observe.properties as {
   action: { oneOf: Array<{ properties: { kind: { const: string } } }> };
 }).action.oneOf);
@@ -117,32 +125,81 @@ export type SelectorProvider = (ctx: ExtensionContext) => RunSelector;
 export interface ResolvedAuditContract {
   agentFilePath: string;
   model: string;
+  agentScope: "project" | "user";
 }
 export type AuditContractResolver = (
   input: Record<string, unknown>, ctx: ExtensionContext,
 ) => Promise<ResolvedAuditContract>;
 
-async function defaultAuditContractResolver(
-  input: Record<string, unknown>, ctx: ExtensionContext,
-): Promise<ResolvedAuditContract> {
-  const api = await import("pi-subagents/preflight") as {
-    resolveSubagentLaunchContract(input: Record<string, unknown>): Promise<
-      { ok: true; contract: { agent: { filePath: string }; model?: string; modelCandidates: string[] } }
-      | { ok: false; message: string }
-    >;
+/** Thinking levels pi-subagents may append to a launch model as ``:<level>`` (its ``THINKING_LEVELS``). */
+const THINKING_LEVELS: ReadonlySet<string> = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+
+/** The model a launch candidate names, without the thinking level the agent file contributed. */
+export function withoutThinkingLevel(model: string): string {
+  const colon = model.lastIndexOf(":");
+  return colon >= 0 && THINKING_LEVELS.has(model.slice(colon + 1)) ? model.slice(0, colon) : model;
+}
+
+export function resolvePiAuditorModel(global: Record<string, unknown>, project: Record<string, unknown>,
+                                       main?: string): string {
+  const configured = (scope: Record<string, unknown>, key: "override" | "default"): string | undefined => {
+    const subagents = scope.subagents as Record<string, unknown> | undefined;
+    if (key === "default") return typeof subagents?.defaultModel === "string" ? subagents.defaultModel : undefined;
+    const overrides = subagents?.agentOverrides as Record<string, { model?: unknown }> | undefined;
+    const model = overrides?.["empirica.empirica-auditor"]?.model;
+    return typeof model === "string" ? model : undefined;
   };
-  const result = await api.resolveSubagentLaunchContract({
-    agent: String(input.agent),
-    task: typeof input.task === "string" ? input.task : undefined,
-    context: "fresh",
-    model: process.env.EMPIRICA_PI_AUDITOR_MODEL,
-    cwd: ctx.cwd ?? process.cwd(),
-    availableModels: ctx.modelRegistry?.getAvailable(),
-  });
-  if (!result.ok) throw new Error(result.message);
-  const model = result.contract.modelCandidates[0] ?? result.contract.model;
-  if (!model) throw new Error("packaged auditor has no resolved model");
-  return { agentFilePath: result.contract.agent.filePath, model };
+  const model = configured(project, "override") ?? configured(global, "override")
+    ?? configured(project, "default") ?? configured(global, "default") ?? main;
+  if (!model) throw new Error("auditor model is unconfigured and the main model is unavailable");
+  return model;
+}
+
+interface AuditorPreflightApi {
+  resolveSubagentLaunchContract(input: Record<string, unknown>): Promise<
+    { ok: true; contract: { agent: { filePath: string }; model?: string; modelCandidates: string[] } }
+    | { ok: false; message: string }
+  >;
+}
+interface PiSettingsApi {
+  SettingsManager: { create(cwd: string, agentDir?: string): {
+    getGlobalSettings(): Record<string, unknown>; getProjectSettings(): Record<string, unknown> } };
+  getAgentDir(): string;
+}
+
+export async function defaultAuditContractResolver(
+  input: Record<string, unknown>, ctx: ExtensionContext,
+  seams?: { preflight: AuditorPreflightApi; settings: PiSettingsApi },
+): Promise<ResolvedAuditContract> {
+  const api = seams?.preflight ?? await import("pi-subagents/preflight") as AuditorPreflightApi;
+  const host = seams?.settings ?? await import("@earendil-works/pi-coding-agent") as PiSettingsApi;
+  const cwd = ctx.cwd ?? process.cwd();
+  const settings = host.SettingsManager.create(cwd, host.getAgentDir());
+  const global = settings.getGlobalSettings();
+  const project = settings.getProjectSettings();
+  const main = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
+  const model = resolvePiAuditorModel(global, project, main);
+  const expectedAgent = String(input.expectedAgent);
+  for (const agentScope of ["project", "user"] as const) {
+    const result = await api.resolveSubagentLaunchContract({
+      agent: String(input.agent),
+      task: typeof input.task === "string" ? input.task : undefined,
+      context: "fresh", model, agentScope, cwd,
+      availableModels: ctx.modelRegistry?.getAvailable(),
+    });
+    if (!result.ok || canonicalPath(result.contract.agent.filePath) !== canonicalPath(expectedAgent)) continue;
+    // The packaged auditor declares a thinking level, which preflight appends to the candidate; only
+    // the model identity must match the configured one.
+    const resolvedModel = result.contract.modelCandidates[0] ?? result.contract.model;
+    const identity = withoutThinkingLevel(model);
+    if (resolvedModel === undefined || withoutThinkingLevel(resolvedModel) !== identity)
+      throw new Error("configured auditor model was substituted by preflight");
+    const available = ctx.modelRegistry?.getAvailable() ?? [];
+    if (!available.some((item) => `${item.provider}/${item.id}` === identity || item.fullId === identity))
+      throw new Error(`configured auditor model is unavailable: ${model}`);
+    return { agentFilePath: result.contract.agent.filePath, model, agentScope };
+  }
+  throw new Error("auditor package unresolvable");
 }
 
 export interface EmpiricaPiDeps {
@@ -154,7 +211,7 @@ export interface EmpiricaPiDeps {
   deriveSelector?: SelectorProvider;
   /** Tool names whose call is the convergence report and must be gated. */
   gatedTools?: readonly string[];
-  /** StartRun options (max_passes, max_spawns, modes). */
+  /** StartRun budget options. */
   startRunOptions?: StartRunOptions;
   /** Tool name used for the bound auditor lifecycle. */
   subagentToolName?: string;
@@ -205,16 +262,19 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
   const subagentToolName = deps.subagentToolName ?? "subagent";
   const privateIngress = deps.privateIngress ?? createPrivateIngress();
   const resolveAuditContract = deps.resolveAuditContract ?? defaultAuditContractResolver;
+  // Read once at load: a malformed EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS fails extension load with its message
+  // instead of surfacing mid-run inside a configure_run that already dispatched.
+  const governanceTimeoutMs = governanceTimeout();
 
   return function empiricaExtension(pi: ExtensionAPI): void {
-    // The active run's opaque handle, held only in memory for this session.
     let runHandle: string | null = null;
+    // The last retired run stays readable: its terminal view's only next action is run.inspect.
+    // Writes still require an active runHandle.
+    let retiredHandle: string | null = null;
     type AuditCorrelation = {
       runHandle: string;
       nativeId: string;
       plan: AuditPlanData;
-      author: Record<string, unknown>;
-      auditor: Record<string, unknown>;
     };
     const audits = new Map<string, AuditCorrelation>();
     const completedAuditCalls = new Set<string>();
@@ -230,6 +290,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     const retireTerminal = (response: Response): void => {
       if (!runHandle || !terminalStatus(response)) return;
       pi.appendEntry?.("empirica.run.done", { runHandle });
+      retiredHandle = runHandle;
       runHandle = null;
     };
 
@@ -241,14 +302,11 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       assertResponse(response, request.request_id);
       return response;
     };
-    const trusted = async (request: Parameters<PrivateIngress>[0]): Promise<Record<string, unknown>> =>
-      privateIngress(request);
+    const trusted = async <Op extends PrivateOperation>(request: PrivateIngressRequest<Op>): Promise<PrivateResponses[Op]> =>
+      assertPrivateResponse(request.operation, await privateIngress(request));
 
-    // (resources) Contribute the shared Empirica skill so Pi discovers the
-    // workflow instructions — the same resource Claude Code ships, no per-host fork.
     pi.on("resources_discover", () => ({ skillPaths: [skillsDir] }));
 
-    // (session_start) Restore the run handle from persisted entries.
     pi.on("session_start", async (_event, ctx) => {
       const entries = ctx.sessionManager?.getEntries() ?? [];
       const terminalRuns = new Set(entries.filter((entry) => entry.customType === "empirica.run.done")
@@ -262,22 +320,19 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       for (const entry of entries) {
         const data = entry.data as {
           runHandle?: unknown; toolCallId?: unknown; nativeId?: unknown;
-          plan?: unknown; author?: unknown; auditor?: unknown; childId?: unknown;
+          plan?: unknown; childId?: unknown;
         } | undefined;
-        if (entry.customType === "empirica.run" && typeof data?.runHandle === "string"
-            && !terminalRuns.has(data.runHandle))
-          runHandle = data.runHandle;
+        if (entry.customType === "empirica.run" && typeof data?.runHandle === "string") {
+          if (terminalRuns.has(data.runHandle)) retiredHandle = data.runHandle;
+          else runHandle = data.runHandle;
+        }
         if (entry.customType === "empirica.audit" && !completedAudits.has(String(data?.toolCallId))
             && typeof data?.runHandle === "string"
             && typeof data.toolCallId === "string" && typeof data.nativeId === "string"
-            && data.plan && typeof data.plan === "object"
-            && data.author && typeof data.author === "object"
-            && data.auditor && typeof data.auditor === "object") {
+            && data.plan && typeof data.plan === "object") {
           audits.set(data.toolCallId, {
             runHandle: data.runHandle, nativeId: data.nativeId,
             plan: data.plan as AuditPlanData,
-            author: data.author as Record<string, unknown>,
-            auditor: data.auditor as Record<string, unknown>,
           });
         }
         if (entry.customType === "empirica.child" && typeof data?.runHandle === "string"
@@ -305,6 +360,11 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           pi.appendEntry?.("empirica.audit.done", { toolCallId });
         } catch { /* retain the durable correlation for a later reconciliation attempt */ }
       }
+      if (runHandle !== null) await refreshGovernance(runHandle, ctx, trusted);
+    });
+
+    pi.on("model_select", async (_event: unknown, ctx: ExtensionContext) => {
+      if (runHandle !== null) await refreshGovernance(runHandle, ctx, trusted);
     });
 
     // Foreground work should be terminal before shutdown. Any remaining correlation is orphaned;
@@ -328,16 +388,17 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       }
     });
 
-    // Public schemas are a checked mechanical artifact projected from request.schema.json.
+    // Public schemas and behavior guidance are checked mechanical contract projections.
     const EMPTY_PARAMS = PUBLIC_TOOL_SCHEMAS.report_convergence;
     const OBSERVE_PARAMS = PUBLIC_TOOL_SCHEMAS.empirica_observe;
     const READ_PARAMS = PUBLIC_TOOL_SCHEMAS.empirica_read;
-    const resultText = (response: Response): string => JSON.stringify(response.result);
+    const resultText = (response: Response): string => renderAuthorView(response.result);
+    let governanceDialog = false;
     if (pi.registerTool) {
       pi.registerTool({
         name: REPORT_CONVERGENCE_TOOL,
         label: "Report convergence",
-        description: "Ask Empirica for guarded convergence or an honest residual stop.",
+        description: PUBLIC_TOOLS.definitions.report_convergence.description,
         parameters: EMPTY_PARAMS,
         async execute(id, raw) {
           if (!runHandle && !reportEvaluations.has(id))
@@ -349,6 +410,10 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           const response = prepared?.intent === intent ? prepared.response : await dispatch(
             evaluateRunRequest(runHandle!, intent, randomUUID()),
           );
+          const notice = settlementNotice(response.result);
+          if (notice !== null)
+            return { content: [{ type: "text", text: `${notice}\n${resultText(response)}` }],
+              details: response.result };
           const decision = gateFromDecision(response.result);
           if (decision.kind === "deny")
             throw new Error(`${decision.reason}\nhandle: ${runHandle ?? "terminal"}`);
@@ -360,7 +425,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       pi.registerTool({
         name: "empirica_read",
         label: "Read Empirica",
-        description: "Read the current run, audit argument, or public contract.",
+        description: PUBLIC_TOOLS.definitions.empirica_read.description,
         parameters: READ_PARAMS,
         async execute(_id, raw, _signal, _onUpdate, ctx) {
           const params = raw as { operation?: unknown; target?: unknown; section_id?: unknown };
@@ -368,8 +433,8 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           let request: Request;
           if (operation === "GetContract") {
             const target = params.target;
-            if (target !== "index" && target !== "section" && target !== "full")
-              throw new Error("GetContract requires target=index|section|full");
+            if (target !== "index" && target !== "section")
+              throw new Error("GetContract requires target=index|section");
             if (target === "section" && typeof params.section_id !== "string")
               throw new Error("GetContract(section) requires section_id");
             request = getContractRequest(target, randomUUID(),
@@ -381,11 +446,12 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
                 ? resolved.result.run : undefined;
               runHandle = run?.id ?? null;
             }
-            if (!runHandle)
+            const readHandle = runHandle ?? retiredHandle;
+            if (!readHandle)
               return { content: [{ type: "text", text: "No active Empirica run." }] };
-            if (operation === "GetRun") request = getRunRequest(runHandle, randomUUID());
-            else if (operation === "GetArgument") request = getArgumentRequest(runHandle, randomUUID());
-            else if (operation === "RestoreRun") request = restoreRunRequest(runHandle, randomUUID());
+            if (operation === "GetRun") request = getRunRequest(readHandle, randomUUID());
+            else if (operation === "GetArgument") request = getArgumentRequest(readHandle, randomUUID());
+            else if (operation === "RestoreRun") request = restoreRunRequest(readHandle, randomUUID());
             else throw new Error("unknown Empirica read operation");
           }
           const response = await dispatch(request);
@@ -396,9 +462,9 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       pi.registerTool({
         name: "empirica_observe",
         label: "Observe Empirica action",
-        description: "Submit one public Empirica author action for the active run.",
+        description: PUBLIC_TOOLS.definitions.empirica_observe.description,
         parameters: OBSERVE_PARAMS,
-        async execute(_id, raw) {
+        async execute(_id, raw, signal, _onUpdate, ctx) {
           if (!runHandle)
             return { content: [{ type: "text", text: "No active Empirica run." }] };
           const params = raw as { action?: unknown };
@@ -407,9 +473,23 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           const action = params.action as { kind?: unknown; [key: string]: unknown };
           if (typeof action.kind !== "string" || !AUTHOR_ACTION_KIND_SET.has(action.kind))
             throw new Error("trusted or unknown Empirica action kind");
-          const response = await dispatch(observeActionRequest(
-            runHandle, action as { kind: string; [key: string]: unknown }, randomUUID()));
-          return { content: [{ type: "text", text: resultText(response) }], details: response.result };
+          if (governanceDialog) throw new Error("Governance dialog in progress; retry after completion");
+          // Take the lock before the first await so concurrent configure_run observes cannot both open a dialog.
+          const owns = action.kind === "configure_run";
+          if (owns) governanceDialog = true;
+          try {
+            let response = await dispatch(observeActionRequest(
+              runHandle, action as { kind: string; [key: string]: unknown }, randomUUID()));
+            if (action.kind === "configure_run" && response.result.type === "Allow") {
+              response = await govern(runHandle, ctx, trusted, signal, undefined,
+                Date.now() + governanceTimeoutMs, response);
+            }
+            // QUAL-1 final public-result guard: the model-facing observe result must never carry
+            // a private governance presentation field, even if host mediation reintroduced one.
+            if (containsPrivateResult(response.result))
+              throw new Error("Empirica returned a non-public result.");
+            return { content: [{ type: "text", text: resultText(response) }], details: response.result };
+          } finally { if (owns) governanceDialog = false; }
         },
       });
     }
@@ -422,21 +502,38 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             "warning");
           return;
         }
-        const parsed = parseModeFlags(args);
-        const goal = parsed.goal || "(goal to be refined from the current task)";
-        const modes = { ...startOptions.modes, ...parsed.modes };
-        if (parsed.unknownFlags.length)
-          ctx.ui.notify(`empirica: unknown mode flags ignored: ${parsed.unknownFlags.join(" ")}`, "warning");
+        const parsed = parseInvocationFlags(args);
+        const goal = parsed.goal;
+        if (parsed.unknownFlags.length) {
+          ctx.ui.notify(`empirica: not started — unknown flags: ${parsed.unknownFlags.join(" ")}`, "error");
+          return;
+        }
+        // Convergence needs the independent audit, which Pi can only launch through pi-subagents'
+        // tool. Refuse before creating a run rather than discovering the gap at audit time.
+        if (!(pi.getActiveTools?.() ?? []).includes(SUBAGENT_TOOL)) {
+          ctx.ui.notify(`empirica: not started — the \`${SUBAGENT_TOOL}\` tool is not active, so no independent `
+            + `audit could run. Enable \`${SUBAGENT_TOOL}\` if pi-subagents is loaded; otherwise load the `
+            + "pi-subagents extension bundled with this package and restart Pi.",
+            "error");
+          return;
+        }
         try {
           // Render the canonical installed skill before creating a run. If the
           // package is incomplete, fail without leaving an active orphan.
           const kickoff = skillInvocation(skillsDir, args);
-          const response = await dispatch(startRunRequest(selectorOf(ctx), goal, randomUUID(), {
-            ...startOptions, modes,
+          const invocation = {
+            host: "pi", interactive: INTERACTIVE_BY_MODE[ctx.mode ?? ""] ?? null,
+            signal: `ctx.mode=${ctx.mode ?? "unknown"}`,
+            delegation: process.env[PUBLIC_TOOLS.host_profiles[HOST_PROFILE_ID].delegation_env] === "1",
+          };
+          const response = await dispatch(startRunRequest(selectorOf(ctx), goal, randomUUID(), invocation, {
+            ...startOptions, controlMode: parsed.controlMode,
           }));
           const result = response.result;
-          if (result.type === "Allow" || result.type === "Block") {
+          if ((result.type === "Allow" || result.type === "Block")
+              && result.run !== undefined) {
             runHandle = result.run.id;
+            await refreshGovernance(runHandle, ctx, trusted);
             pi.appendEntry?.("empirica.run", { runHandle });
             pi.sendMessage?.({
               customType: "empirica",
@@ -461,10 +558,12 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           .replace(/^---[\s\S]*?---\s*/, "").trim();
       } catch { return "Review the supplied Empirica argument and return one verdict block."; }
     };
-    const isCanonicalAuditorInput = (input: Record<string, unknown>): boolean => {
+    const canonicalAuditorInputError = (input: Record<string, unknown>): string | undefined => {
       if (input.agent !== "empirica.empirica-auditor" || typeof input.task !== "string")
-        return false;
-      return Object.keys(input).every((key) => key === "agent" || key === "task");
+        return "empirica auditor launch requires the canonical agent and a string task; the host replaces task with its dossier";
+      if (!Object.keys(input).every((key) => key === "agent" || key === "task"))
+        return "empirica auditor launch accepts only agent and task; omit async, model, context, tools, and other overrides";
+      return undefined;
     };
     const modelPair = (value: unknown, fallbackProvider: string): [string | null, string | null] => {
       if (typeof value !== "string" || !value) return [null, null];
@@ -524,10 +623,9 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         await trusted({
           operation: "audit_identity", run_id: correlation.runHandle,
           native_id: correlation.nativeId, plan: correlation.plan,
-          author: correlation.author,
           auditor: identity ?? {
             provider_id: null, model_id: null,
-            observed_by: "host", source: "pi-child-session-unverified",
+            source: "pi-child-session-unverified",
           },
         });
         if (!verdict) {
@@ -555,6 +653,15 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
 
     // (tool_call) The hard convergence gate plus bound foreground auditor admission.
     pi.on("tool_call", async (event: ToolCallEvent, ctx: ExtensionContext): Promise<ToolCallResult | void> => {
+      if (runHandle !== null) {
+        try {
+          const refreshed = await refreshGovernance(runHandle, ctx, trusted);
+          if (refreshed.result.type !== "Allow" && refreshed.result.type !== "Inert")
+            return { block: true, reason: "empirica governance context unavailable" };
+        } catch (error) {
+          return { block: true, reason: `empirica governance context unavailable: ${describe(error)}` };
+        }
+      }
       if (runHandle !== null && isInvestigationTool(
         event.toolName, event.input, gatedTools, subagentToolName)) {
         try {
@@ -595,41 +702,41 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           pi.appendEntry?.("empirica.child", { toolCallId: event.toolCallId, ...correlation });
           return;
         }
-        if (!isCanonicalAuditorInput(event.input))
-          return { block: true, reason: "empirica auditor launch forbids model/context/tool overrides" };
+        const inputError = canonicalAuditorInputError(event.input);
+        if (inputError) return { block: true, reason: inputError };
+        let plan: AuditPlanData | undefined;
         try {
-          const resolvedAudit = await resolveAuditContract(event.input, ctx);
+          const current = await dispatch(getRunRequest(runHandle, randomUUID()));
+          if (current.result.type !== "Allow") throw new Error("approved configuration unavailable");
+          const governed = current.result.run.governance as { state?: string } | undefined;
+          if (governed?.state !== "approved") throw new Error("approved configuration unavailable");
           const expectedAgent = path.resolve(skillsDir, "..", "agents", "pi", "empirica-auditor.md");
-          if (!sameCanonicalAgentFile(resolvedAudit.agentFilePath, expectedAgent))
-            return { block: true, reason: "empirica auditor package identity was shadowed" };
-          const [auditorProvider, auditorModel] = modelPair(resolvedAudit.model, "pi-subagents");
-          if (!auditorProvider || !auditorModel)
-            return { block: true, reason: "empirica auditor model is unresolved" };
-          if (ctx.model && ctx.model.provider === auditorProvider && ctx.model.id === auditorModel)
-            return { block: true, reason: "empirica auditor model must differ from the author model" };
+          const resolvedAudit = await resolveAuditContract({ ...event.input, expectedAgent }, ctx);
           const roleProfile = "empirica.empirica-auditor";
-          const prepared = await trusted({
-            operation: "audit_prepare", run_id: runHandle, role_profile: roleProfile,
-          });
-          if (prepared.type !== "audit_plan" || !prepared.plan
-              || typeof prepared.plan !== "object")
-            return { block: true, reason: "empirica auditor launch plan unavailable" };
-          const plan = prepared.plan as unknown as AuditPlanData;
+          const [auditorProvider, auditorModel] = modelPair(resolvedAudit.model, "pi-subagents");
           const nativeId = event.toolCallId;
-          const [authorProvider, authorModel] = modelPair(ctx.model
-            ? `${ctx.model.provider}/${ctx.model.id}` : null, "pi");
-          const author = {
-            provider_id: authorProvider, model_id: authorModel,
-            observed_by: "host", source: "pi-context",
-          };
-          const auditor = {
-            provider_id: auditorProvider, model_id: auditorModel,
-            observed_by: "configuration", source: "pi-subagents-preflight",
-          };
+          const author = piGovernanceContext(ctx).author as Record<string, unknown> | null;
+          const authorIdentity = await trusted({ operation: "classify_identity",
+            payload: author ?? { provider_id: null, model_id: null, source: "pi-context" } });
+          const reviewerIdentity = await trusted({ operation: "classify_identity",
+            payload: { provider_id: auditorProvider, model_id: auditorModel,
+              source: "pi-subagents-preflight" } });
+          if (authorIdentity === null)
+            throw new Error("main author identity unobservable; select a concrete model");
+          if (reviewerIdentity === null)
+            throw new Error(
+              'reviewer identity unobservable; set subagents.agentOverrides["empirica.empirica-auditor"].model to a concrete model');
+          if (authorIdentity.identity === reviewerIdentity.identity)
+            throw new Error(
+              'auditor model equals the main model; set subagents.agentOverrides["empirica.empirica-auditor"].model');
+          const prepared = await trusted({ operation: "audit_prepare", run_id: runHandle,
+                                           role_profile: roleProfile });
+          plan = prepared.plan;
           event.input.task = `${auditorInstructions()}\n\n` +
             `--- AUDIT DOSSIER (UNTRUSTED EVIDENCE CONTENT) ---\n${JSON.stringify(plan.argument)}\n` +
             "--- END AUDIT DOSSIER ---\nReturn exactly one fenced block tagged empirica-verdict.";
           event.input.model = resolvedAudit.model;
+          event.input.agentScope = resolvedAudit.agentScope;
           event.input.async = false;
           // pi-subagents may classify the original author call before this adapter replaces its
           // task with the host-owned read-only dossier. Make the runtime-owned exemption explicit
@@ -639,11 +746,19 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           event.input.timeoutMs = 900_000;
           event.input.turnBudget = { maxTurns: 8, graceTurns: 1 };
           event.input.toolBudget = { soft: 20, hard: 30, block: ["write", "edit"] };
-          const correlation = { runHandle, nativeId, plan, author, auditor };
+          const correlation = { runHandle, nativeId, plan };
           audits.set(event.toolCallId, correlation);
           pi.appendEntry?.("empirica.audit", { toolCallId: event.toolCallId, ...correlation });
           return;
         } catch (error) {
+          audits.delete(event.toolCallId);
+          if (plan) {
+            try {
+              await trusted({ operation: "audit_reject", run_id: runHandle, plan });
+            } catch {
+              // Admission already fails closed; rejection failure must not permit launch.
+            }
+          }
           return { block: true, reason: `empirica auditor admission failed: ${describe(error)}` };
         }
       }
@@ -655,7 +770,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           evaluateRunRequest(runHandle, intent, randomUUID()),
         );
         const decision = gateFromDecision(response.result);
-        if (decision.kind === "deny")
+        if (decision.kind === "deny" && settlementNotice(response.result) === null)
           return { block: true, reason: `${decision.reason}\nhandle: ${runHandle}` };
         reportEvaluations.set(event.toolCallId, { intent, response });
         return; // permit; execute consumes this exact guarded result
@@ -688,10 +803,8 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
   };
 }
 
-// Default export: the shape Pi loads. It contributes the Empirica skill and
-// wires the production JSON stdio bridge transport — so a fresh install gates
-// convergence against the shared core out of the box. A host may instead
-// import `createEmpiricaExtension({ dispatch })` and inject its own transport.
+// Default export is Pi's production shape. It contributes the shared skill and
+// wires the JSON stdio bridge; tests may inject a transport through createEmpiricaExtension.
 const defaultExtension = createEmpiricaExtension({
   dispatch: createStdioBridgeDispatch(defaultBridgeConfig()),
 });

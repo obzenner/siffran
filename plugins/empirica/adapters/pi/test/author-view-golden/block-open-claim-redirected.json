@@ -1,0 +1,109 @@
+{
+  "result": {
+    "type": "Block",
+    "run": {
+      "id": "run-fx",
+      "goal": "Prove the public contract is internally consistent.",
+      "status": "active",
+      "contract": {
+        "id": "empirica/public",
+        "version": "3.0.0",
+        "relevant_sections": [
+          "evidence/research"
+        ],
+        "digest": "sha256:c322c3df3584ee0e8ad740c7de58d56478c59dcbdc7ac0ee58d785f2ceb39a8c"
+      },
+      "obligations": {
+        "active": [
+          {
+            "id": "obligation.route",
+            "required": "Record routing before investigation.",
+            "observed": [],
+            "missing": null,
+            "next": [],
+            "status": "satisfied"
+          },
+          {
+            "id": "obligation.graph",
+            "required": "Propose a valid claim graph from supplied context before requesting review.",
+            "observed": [],
+            "missing": null,
+            "next": [],
+            "status": "satisfied"
+          },
+          {
+            "id": "obligation.approval",
+            "required": "Obtain exact host-mediated approval for the current run configuration.",
+            "observed": [],
+            "missing": null,
+            "next": [],
+            "status": "satisfied"
+          },
+          {
+            "id": "obligation.investigation",
+            "required": "Record investigation only after routing and current approval.",
+            "observed": [],
+            "missing": null,
+            "next": [],
+            "status": "satisfied"
+          },
+          {
+            "id": "claim:G0",
+            "required": "The public contract is internally consistent.",
+            "observed": [],
+            "missing": {
+              "code": "claim.spike_missing",
+              "target_claim_id": "S1",
+              "parameters": {}
+            },
+            "next": [
+              "spike.run"
+            ],
+            "status": "residual"
+          }
+        ],
+        "deferred": []
+      },
+      "residuals": [],
+      "freshness": {
+        "changes": []
+      },
+      "children": [],
+      "host": {
+        "profile_id": "claude-code@2.1.278",
+        "tier": "foreground_only",
+        "missing_capabilities": [
+          "host.async_unsupported"
+        ]
+      },
+      "next_actions": [],
+      "untrusted_delimiters": {
+        "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+        "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+      },
+      "governance": null,
+      "audit": {
+        "state": "required",
+        "independence": "unverified",
+        "findings": []
+      }
+    },
+    "reasons": [
+      {
+        "code": "claim.research_missing",
+        "parameters": {},
+        "affected": {
+          "obligation_id": "claim:G0"
+        },
+        "next_actions": [
+          "research.record"
+        ],
+        "sections": [
+          "evidence/research"
+        ],
+        "message": "Record Fold-1 research for this claim."
+      }
+    ]
+  },
+  "text": "Block active — no governance\nrun_id: run-fx\nAudit: required\n\nReasons:\n  claim.research_missing: Record Fold-1 research for this claim. — affected: claim:G0\n    next: empirica_observe kind=research\n\nOpen obligations:\n  claim:G0: <<<EMPIRICA_UNTRUSTED_DATA>>>The public contract is internally consistent.<<<END_EMPIRICA_UNTRUSTED_DATA>>>\n    missing: claim.spike_missing via claim:S1\n    next: empirica_observe kind=spike_request\n\nSatisfied obligations:\n  obligation.route\n  obligation.graph\n  obligation.approval\n  obligation.investigation"
+}

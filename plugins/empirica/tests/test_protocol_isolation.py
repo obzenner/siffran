@@ -16,19 +16,20 @@ from core.context_selector import select_sections  # noqa: E402
 
 class ProtocolIsolationTests(unittest.TestCase):
     def test_contract_results_are_detached_from_canonical_registry(self):
-        full = protocol.contract_result("full")
         section = protocol.contract_result("section", "core")
         index = protocol.contract_result("index")
-        full["full"]["sections"]["core"]["title"] = "mutated"
         section["section"]["clauses"][0]["text"] = "mutated"
         index["index"]["reasons"][0]["sections"].append("mutated")
-        self.assertNotEqual(
-            protocol.contract_result("full")["full"]["sections"]["core"]["title"], "mutated")
         self.assertNotEqual(
             protocol.contract_result("section", "core")["section"]["clauses"][0]["text"],
             "mutated")
         self.assertNotIn(
             "mutated", protocol.contract_result("index")["index"]["reasons"][0]["sections"])
+
+    def test_getcontract_full_projection_is_refused_negative_control(self):
+        # QUAL-1: `target: full` left the public wire; the internal full projection is removed,
+        # never kept private. contract_result must not materialize a full contract dump.
+        self.assertIsNone(protocol.contract_result("full"))
 
     def test_selector_executes_the_supplied_registry_projection(self):
         registry = copy.deepcopy(protocol._PUBLIC_CONTRACT)

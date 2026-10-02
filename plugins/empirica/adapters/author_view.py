@@ -1,0 +1,501 @@
+"""Schema-validated, deterministic plain-text author view for Empirica results."""
+from __future__ import annotations
+
+import json
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any, NewType
+
+from application.protocol import (
+    author_view_labels,
+    next_action_surfaces,
+    response_schema_defs,
+    untrusted_delimiters,
+    validate_public_result,
+)
+from core.freshness import valid_claim_id
+from core.governance import CEILINGS
+from core.projection import safe_text
+
+Trusted = NewType("Trusted", str)
+Untrusted = NewType("Untrusted", str)
+_LABELS = author_view_labels()
+_SURFACES = next_action_surfaces()
+_DEFS = response_schema_defs()
+_DIGEST_DEFS = frozenset({"digest256", "nullableDigest256"})
+_CLAIM_ID_DEF = "claimId"
+_NULL = {"type": "null"}
+
+
+@dataclass(frozen=True)
+class TextSafety:
+    """Convert author-controlled values to escaped, delimited text."""
+
+    open: str
+    close: str
+
+    def untrusted(self, value: object) -> Untrusted:
+        escaped = safe_text(value).replace("<", r"\x3c").replace(">", r"\x3e")
+        return Untrusted(f"{self.open}{escaped}{self.close}")
+
+    def claim_id(self, value: object) -> Trusted | Untrusted:
+        """Render a claim id raw; it is safe by construction only if it matches the pattern."""
+        return Trusted(value) if valid_claim_id(value) else self.untrusted(value)
+
+
+@dataclass(frozen=True)
+class Header:
+    """First-line result, run, governance summary, and public proposal rationale."""
+
+    result_type: Trusted
+    status: Trusted
+    governance: Trusted
+    run_id: Trusted
+    proposal_rationale: Untrusted | None
+
+
+@dataclass(frozen=True)
+class Reason:
+    """One contract-owned reason with typed author parameters."""
+
+    code: Trusted
+    message: Trusted
+    affected: Trusted | None
+    params: tuple[Trusted, ...]
+    next_actions: tuple[Trusted, ...]
+
+
+@dataclass(frozen=True)
+class Obligation:
+    """One projected obligation with ownership-aware text."""
+
+    obligation_id: Trusted
+    required: Trusted | Untrusted | None
+    missing: Trusted | None  # code, plus ``via claim:<id>`` when a descendant claim blocks it
+    next_actions: tuple[Trusted, ...]
+
+
+@dataclass(frozen=True)
+class Child:
+    """One child summary: the host audit label is trusted, an investigation purpose is not."""
+
+    resource_class: Trusted
+    purpose: Trusted | Untrusted
+    state: Trusted
+    recovery: Trusted | None
+
+
+@dataclass(frozen=True)
+class Freshness:
+    """One author-controlled path and trusted freshness state."""
+
+    path: Untrusted
+    state: Trusted
+
+
+@dataclass(frozen=True)
+class AuditSummary:
+    """Contract-owned audit state and host-observed independence classification."""
+
+    state: Trusted
+    independence: Trusted
+    findings: tuple[Untrusted, ...]
+
+
+@dataclass(frozen=True)
+class AuthorView:
+    """Parsed author view consumed by the declarative renderer."""
+
+    header: Header
+    audit: AuditSummary
+    reasons: tuple[Reason, ...]
+    obligations: tuple[Obligation, ...]
+    satisfied: tuple[Trusted, ...]
+    residuals: tuple[Reason, ...]
+    children: tuple[Child, ...]
+    freshness: tuple[Freshness, ...]
+    next_actions: tuple[Trusted, ...]
+
+
+def _fallback(result: Any) -> str:
+    """Return sorted compact JSON for non-view and invalid input."""
+    try:
+        return json.dumps(result, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    except (TypeError, ValueError):
+        return "null"
+
+
+def render_surface(action_id: str) -> Trusted:
+    """Render one contract-owned action surface."""
+    surface = _SURFACES[action_id]
+    tool = surface.get("tool")
+    if tool == "empirica_observe":
+        return Trusted(f"empirica_observe kind={surface['action']}")
+    if tool == "empirica_read":
+        return Trusted(f"empirica_read {surface['operation']}")
+    if tool == "report_convergence":
+        return Trusted(f"report_convergence intent={surface['intent']}")
+    return Trusted(f"{surface['owner']}: {surface['operation']}")
+
+
+def _obligation_id(value: str, safety: TextSafety) -> Trusted:
+    """Render a contract id; an embedded claim id is raw only when its suffix is a claim id."""
+    if value.startswith("claim:"):
+        return Trusted("claim:" + safety.claim_id(value.removeprefix("claim:")))
+    return Trusted(value)
+
+
+ValueRenderer = Callable[[Any, "TextSafety"], str]
+
+
+def _value_renderer(schema: dict[str, Any]) -> ValueRenderer | None:
+    """Derive a value renderer from its response-schema shape; ``None`` drops digests.
+
+    Ownership follows the schema: enums/consts are contract-owned (trusted), claim ids are safe by
+    construction (raw), free strings are author-supplied (untrusted), a nullable ``anyOf`` renders
+    its one non-null branch, and arrays and objects compose their item/field renderers.
+    """
+    if "$ref" in schema:
+        name = schema["$ref"].rsplit("/", 1)[-1]
+        if name == _CLAIM_ID_DEF:
+            return lambda value, safety: safety.claim_id(value)
+        return None if name in _DIGEST_DEFS else _value_renderer(_DEFS[name])
+    if "anyOf" in schema:
+        (branch,) = (row for row in schema["anyOf"] if row != _NULL)
+        inner = _value_renderer(branch)
+        if inner is None:
+            return None
+        return lambda value, safety: "null" if value is None else inner(value, safety)
+    if "enum" in schema or "const" in schema:
+        return lambda value, _safety: str(value)
+    if schema.get("type") == "string":
+        return lambda value, safety: safety.untrusted(value)
+    if schema.get("type") == "array":
+        item = _value_renderer(schema["items"])
+        separator = ", " if _is_string(schema["items"]) else "; "
+        return lambda value, safety: separator.join(item(row, safety) for row in value)
+    if schema.get("type") == "object":
+        fields = tuple((name, _value_renderer(sub))
+                       for name, sub in schema["properties"].items())
+        return lambda value, safety: ": ".join(
+            render(value[name], safety) for name, render in fields
+            if render is not None and name in value)
+    raise ValueError(f"author view cannot render parameter schema: {schema!r}")
+
+
+def _is_string(schema: dict[str, Any]) -> bool:
+    """Whether a schema (following refs) is a string, which joins with ``", "`` in arrays."""
+    if "$ref" in schema:
+        return _is_string(_DEFS[schema["$ref"].rsplit("/", 1)[-1]])
+    return schema.get("type") == "string"
+
+
+def _parameter_renderers() -> dict[str, ValueRenderer | None]:
+    """One renderer per reason/residual parameter key, derived from every ``*Params`` def.
+
+    A key declared by two parameter shapes must have one schema, so its ownership is
+    unambiguous; a new contract parameter is rendered without a code change.
+    """
+    shapes: dict[str, dict[str, Any]] = {}
+    for name, definition in sorted(_DEFS.items()):
+        if not name.endswith("Params"):
+            continue
+        for key, schema in definition.get("properties", {}).items():
+            if shapes.setdefault(key, schema) != schema:
+                raise ValueError(f"parameter {key!r} has conflicting schemas")
+    return {key: _value_renderer(schema) for key, schema in shapes.items()}
+
+
+_PARAMETERS = _parameter_renderers()
+
+
+def _parameters(parameters: dict[str, Any], safety: TextSafety) -> tuple[Trusted, ...]:
+    """Render reason/residual parameters with schema-derived ownership (digests dropped)."""
+    return tuple(
+        Trusted(f"{key}={render(parameters[key], safety)}")
+        for key in sorted(parameters)
+        if (render := _PARAMETERS[key]) is not None)
+
+
+def _affected(value: dict[str, Any] | None, safety: TextSafety) -> Trusted | None:
+    """Render a reason's affected obligation (the schema's only author-relevant field)."""
+    if value is None or "obligation_id" not in value:
+        return None
+    return _obligation_id(value["obligation_id"], safety)
+
+
+def _residual_claims(row: dict[str, Any], safety: TextSafety) -> Trusted | None:
+    """Render the claim a residual blocks and, when redirected, the claim to discharge."""
+    if "claim_id" not in row:
+        return None
+    claim = "claim:" + safety.claim_id(row["claim_id"])
+    target = row.get("target_claim_id", row["claim_id"])
+    if target == row["claim_id"]:
+        return Trusted(claim)
+    return Trusted(f"{claim} {_LABELS['via_claim']}{safety.claim_id(target)}")
+
+
+def _missing(row: dict[str, Any], safety: TextSafety) -> Trusted:
+    """Render an obligation's missing code and, when another claim blocks it, the claim to discharge.
+
+    ``target_claim_id`` is ``None`` for non-claim obligations and equals the obligation's own claim
+    id when it is not redirected; only a different target is named (``code via claim:<id>``).
+    """
+    missing = row["missing"]
+    target = missing["target_claim_id"]
+    if target is None or target == row["id"].removeprefix("claim:"):
+        return Trusted(missing["code"])
+    return Trusted(f"{missing['code']} {_LABELS['via_claim']}{safety.claim_id(target)}")
+
+
+def _reason(row: dict[str, Any], safety: TextSafety) -> Reason:
+    """Parse one schema-valid reason row."""
+    return Reason(
+        Trusted(row["code"]), Trusted(row["message"]),
+        _affected(row.get("affected"), safety),
+        _parameters(row["parameters"], safety),
+        tuple(render_surface(action) for action in row["next_actions"]),
+    )
+
+
+def _governance(run: dict[str, Any]) -> Trusted:
+    """Render the compact governance header summary."""
+    governance = run["governance"]
+    if governance is None:
+        return Trusted(_LABELS["no_governance"])
+    parts = [f"{_LABELS['governance']} {governance['state']}"]
+    usage = " ".join(
+        f"{governance['budgets'][used]}/{governance['proposal']['budgets'][ceiling]}"
+        for ceiling, used in CEILINGS.items())
+    parts.append(f"{_LABELS['budget_usage']} {usage}")
+    return Trusted("; ".join(parts))
+
+
+def _child_label(row: dict[str, Any], safety: TextSafety) -> Trusted | Untrusted:
+    """The host audit child's label is the contract literal ``audit``; any other purpose is fenced."""
+    if row["resource_class"] == "audit" and row["purpose"] == "audit":
+        return Trusted(row["purpose"])
+    return safety.untrusted(row["purpose"])
+
+
+def _parse(result: dict[str, Any]) -> AuthorView:
+    """Parse one schema-valid run-bearing Allow or Block result."""
+    run = result["run"]
+    delimiters = run["untrusted_delimiters"]
+    safety = TextSafety(delimiters["open"], delimiters["close"])
+    result_type = result["type"]
+    if result_type == "Allow":
+        result_type += f" ({_LABELS['converged']}{'true' if result['converged'] else 'false'})"
+    rationale = run["governance"]["proposal"]["rationale"] if run["governance"] is not None else None
+    header = Header(Trusted(result_type), Trusted(run["status"]), _governance(run),
+                    Trusted(run["id"]),
+                    safety.untrusted(rationale) if rationale is not None else None)
+    terminal_next = tuple(render_surface(action) for action in run["next_actions"])
+    terminal = run["status"] != "active"
+    obligations = tuple(
+        Obligation(
+            _obligation_id(row["id"], safety),
+            (safety.untrusted(row["required"])
+             if row["id"].startswith("claim:") else Trusted(row["required"]))
+            if row["required"] else None,
+            _missing(row, safety) if row["missing"] is not None else None,
+            tuple(render_surface(action) for action in row["next"])
+            or (terminal_next if terminal else ()),
+        )
+        for row in run["obligations"]["active"] if row["status"] != "satisfied")
+    satisfied = tuple(
+        _obligation_id(row["id"], safety)
+        for row in run["obligations"]["active"] if row["status"] == "satisfied")
+    residuals = tuple(
+        Reason(Trusted(row["code"]), Trusted(""), _residual_claims(row, safety),
+               _parameters(row["parameters"], safety),
+               tuple(render_surface(action) for action in row["next_actions"]))
+        for row in run["residuals"])
+    children = tuple(
+        Child(Trusted(row["resource_class"]), _child_label(row, safety), Trusted(row["state"]),
+              render_surface(row["recovery_action"]) if row.get("recovery_action") else None)
+        for row in run["children"])
+    freshness = tuple(
+        Freshness(safety.untrusted(row["path"]), Trusted(row["state"]))
+        for row in run["freshness"]["changes"])
+    return AuthorView(
+        header, AuditSummary(Trusted(run["audit"]["state"]),
+                             Trusted(run["audit"]["independence"]),
+                             tuple(safety.untrusted(item) for item in run["audit"]["findings"])),
+        # Only Block carries reasons; a run-bearing Allow has none.
+        (tuple(_reason(row, safety) for row in result["reasons"])
+         if result["type"] == "Block" else ()),
+        obligations, satisfied, residuals, children, freshness,
+        () if terminal else terminal_next,
+    )
+
+
+def _reason_lines(rows: tuple[Reason, ...]) -> tuple[str, ...]:
+    """Render reasons or residuals without section framing."""
+    return tuple(
+        line
+        for row in rows
+        for line in (
+            f"  {row.code}" + (f": {row.message}" if row.message else "")
+            + (f" — {_LABELS['affected']} {row.affected}" if row.affected else ""),
+            *((f"    {_LABELS['params']} {'; '.join(row.params)}",) if row.params else ()),
+            *((f"    {_LABELS['next_inline']} {'; '.join(row.next_actions)}",)
+              if row.next_actions else ()),
+        )
+    )
+
+
+def _obligation_lines(rows: tuple[Obligation, ...]) -> tuple[str, ...]:
+    """Render open obligations without section framing."""
+    return tuple(
+        line
+        for row in rows
+        for line in (
+            f"  {row.obligation_id}" + (f": {row.required}" if row.required else ""),
+            *((f"    {_LABELS['missing']} {row.missing}",) if row.missing else ()),
+            *((f"    {_LABELS['next_inline']} {'; '.join(row.next_actions)}",)
+              if row.next_actions else ()),
+        )
+    )
+
+
+def _child_lines(rows: tuple[Child, ...]) -> tuple[str, ...]:
+    """Render child summaries without section framing."""
+    return tuple(
+        f"  {row.purpose}: {row.state}" +
+        (f" — {_LABELS['recovery']} {row.recovery}" if row.recovery else "") for row in rows)
+
+
+def _freshness_lines(rows: tuple[Freshness, ...]) -> tuple[str, ...]:
+    """Render freshness summaries without section framing."""
+    return tuple(f"  {row.path}: {row.state}" for row in rows)
+
+
+def _audit_lines(audit: AuditSummary) -> tuple[str, ...]:
+    """Render independence once a verdict exists, then the findings a failed audit reported."""
+    suffix = f" ({audit.independence})" if audit.state in {"passed", "failed"} else ""
+    return (f"{_LABELS['audit']} {audit.state}{suffix}",
+            *(f"  {_LABELS['finding']} {item}" for item in audit.findings))
+
+
+def _render(view: AuthorView) -> str:
+    """Render a parsed view through one ordered, empty-dropping section table."""
+    base = (f"{view.header.result_type} {view.header.status} — {view.header.governance}",
+            f"{_LABELS['run_id']} {view.header.run_id}",
+            *((f"{_LABELS['proposal_rationale']} {view.header.proposal_rationale}",)
+              if view.header.proposal_rationale is not None else ()),
+            *_audit_lines(view.audit))
+    sections = (
+        (_LABELS["reasons"], _reason_lines(view.reasons)),
+        (_LABELS["open_obligations"], _obligation_lines(view.obligations)),
+        (_LABELS["satisfied_obligations"], tuple(f"  {item}" for item in view.satisfied)),
+        (_LABELS["residuals"], _reason_lines(view.residuals)),
+        (_LABELS["children"], _child_lines(view.children)),
+        (_LABELS["freshness"], _freshness_lines(view.freshness)),
+        (_LABELS["next"], tuple(f"  {item}" for item in view.next_actions)),
+    )
+    blocks = ("\n".join((title, *lines)) for title, lines in sections if lines)
+    return "\n\n".join(("\n".join(base), *blocks))
+
+
+def _argument_lines(argument: dict[str, Any], safety: TextSafety) -> tuple[str, ...]:
+    """Render the graph projection without private identity or artifact fields."""
+    claims = tuple(
+        f"  {safety.claim_id(row['claim_id'])} {_LABELS['claim_kind']}{row['kind']} "
+        f"{_LABELS['claim_gating']}{'true' if row['gating'] else 'false'} "
+        f"{_LABELS['claim_state']}{row['state']} "
+        f"{_LABELS['claim_evidence']}"
+        f"{_LABELS['evidence_present'] if row['active_evidence_ids'] else _LABELS['evidence_none']}: "
+        f"{safety.untrusted(row['text'])}"
+        for row in argument["claims"]
+    )
+    edges = tuple(
+        f"  {safety.claim_id(row['from'])} -{row['type']}-> {safety.claim_id(row['to'])}"
+        for row in argument["edges"]
+    )
+    citations = tuple(
+        f"  {safety.untrusted(row['citation'])}"
+        for row in argument["artifacts"] if row.get("citation")
+    )
+    audit = argument["audit"]
+    return (
+        f"{_LABELS['goal']} {safety.untrusted(argument['goal'])}",
+        f"{_LABELS['root_claim_id']} {safety.claim_id(argument['root_claim_id'])}",
+        _LABELS["claims"], *claims,
+        *((_LABELS["edges"], *edges) if edges else ()),
+        *((_LABELS["citations"], *citations) if citations else ()),
+        f"{_LABELS['audit_status']} {audit['state']} ({audit['independence']})",
+        *(f"  {_LABELS['finding']} {safety.untrusted(item)}" for item in audit["findings"]),
+    )
+
+
+def _trusted_contract_value(value: Any, indent: str = "") -> tuple[str, ...]:
+    """Render trusted mappings and lists recursively as deterministic text."""
+    if isinstance(value, dict):
+        return tuple(
+            line
+            for key, item in value.items()
+            for line in (
+                (f"{indent}{key}:", *_trusted_contract_value(item, indent + "  "))
+                if isinstance(item, (dict, list)) else (f"{indent}{key}: {item}",)
+            )
+        )
+    if isinstance(value, list):
+        return tuple(
+            line
+            for item in value
+            for line in (
+                (f"{indent}-", *_trusted_contract_value(item, indent + "  "))
+                if isinstance(item, (dict, list)) else (f"{indent}- {item}",)
+            )
+        )
+    return (f"{indent}{value}",)
+
+
+def _contract_lines(contract: dict[str, Any]) -> tuple[str, ...]:
+    """Render an index or section trusted contract projection."""
+    if contract["target"] == "index":
+        return tuple(f"{row['id']} — {row['title']}" for row in contract["index"]["sections"])
+    section = contract["section"]
+    return (
+        f"{section['id']} — {section['title']}",
+        *_trusted_contract_value(
+            {"summary": section["summary"], "clauses": section["clauses"]}, "  "
+        ),
+    )
+
+
+def _render_valid(result: dict[str, Any]) -> str:
+    """Render one schema-valid public result as text."""
+    if "argument" in result:
+        argument = result["argument"]
+        return _LABELS["argument"] + "\n" + "\n".join(
+            _argument_lines(argument, TextSafety(**argument["untrusted_delimiters"]))
+        )
+    if "contract_result" in result:
+        return _LABELS["contract"] + "\n" + "\n".join(_contract_lines(result["contract_result"]))
+    if result["type"] in {"Allow", "Block"} and "run" in result:
+        return _render(_parse(result))
+    if result["type"] == "Block":
+        safety = TextSafety(**untrusted_delimiters())
+        return _LABELS["block"] + "\n" + "\n".join(_reason_lines(
+            tuple(_reason(row, safety) for row in result["reasons"])))
+    if result["type"] == "Fault":
+        message = f": {result['message']}" if "message" in result else ""
+        return f"{_LABELS['fault']} {result['code']} ({result['fail_direction']}){message}"
+    return _LABELS["inert"]
+
+
+def render_author_view(result: Any, *, strict: bool = False) -> str:
+    """Validate once, then render every valid public result as plain text.
+
+    Hosts call this non-strictly so invalid input or a renderer defect degrades to compact JSON.
+    """
+    if not validate_public_result(result):
+        return _fallback(result)
+    try:
+        return _render_valid(result)
+    except (KeyError, TypeError, ValueError):
+        if strict:
+            raise
+        return _fallback(result)

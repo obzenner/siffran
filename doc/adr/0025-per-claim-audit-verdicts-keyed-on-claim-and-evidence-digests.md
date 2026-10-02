@@ -1,24 +1,28 @@
 ---
 number: 25
-title: "Per-claim audit verdicts keyed on claim and evidence digests"
-status: proposed
+title: Per-claim audit verdicts keyed on claim and evidence digests
+status: accepted
 date: 2026-08-10
 tags:
-  - verification
-  - audit
-  - harness
-  - evidence
+- verification
+- audit
+- harness
+- evidence
 links:
-  - target: 20
-    kind: Amends
-  - target: 22
-    kind: Depends on
-  - target: 13
-    kind: relatesto
-  - target: 19
-    kind: relatesto
-  - target: 21
-    kind: relatesto
+- target: 20
+  kind: Amends
+- target: 22
+  kind: Depends on
+- target: 13
+  kind: Relates to
+- target: 19
+  kind: Relates to
+- target: 21
+  kind: Relates to
+- target: 27
+  kind: Amended by
+- target: 41
+  kind: Depends on
 ---
 
 # Per-claim audit verdicts keyed on claim and evidence digests

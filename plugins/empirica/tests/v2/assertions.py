@@ -30,6 +30,10 @@ from pathlib import Path
 
 import jsonschema
 
+from governance_setup import TEST_INVOCATION
+
+from adapters.identity import observe
+from core.canonical import canonical_digest
 from driver import V2SeamAbsent, new_driver
 
 # ---------------------------------------------------------------------------
@@ -64,6 +68,17 @@ _HOST_PROFILES = _load_json("host-profiles.json")
 _REQUEST_SCHEMA = _load_json("request.schema.json")
 _RESPONSE_SCHEMA = _load_json("response.schema.json")
 
+
+def _checked_validator(schema: dict):
+    """Check a static schema against its metaschema once; ``jsonschema.validate`` re-checks per call."""
+    cls = jsonschema.validators.validator_for(schema)
+    cls.check_schema(schema)
+    return cls(schema)
+
+
+REQUEST_VALIDATOR = _checked_validator(_REQUEST_SCHEMA)
+RESPONSE_VALIDATOR = _checked_validator(_RESPONSE_SCHEMA)
+
 # Canonical protocol/contract identity DERIVED from the registry (SSOT), never copied as constants.
 _PROTOCOL = _PUBLIC_CONTRACT["protocol"]
 _CONTRACT_ID = _PUBLIC_CONTRACT["id"]
@@ -75,13 +90,9 @@ REASONS: dict[str, dict] = _PUBLIC_CONTRACT["reasons"]
 NEXT_ACTIONS: dict[str, dict] = _PUBLIC_CONTRACT["next_actions"]
 SECTIONS: dict[str, dict] = _PUBLIC_CONTRACT["sections"]
 STATUSES: list[str] = _PUBLIC_CONTRACT["statuses"]
-DECISIONS: list[str] = _PUBLIC_CONTRACT["decisions"]
 CHILD_STATES: list[str] = _PUBLIC_CONTRACT["child_lifecycle"]["states"]
 CHILD_TERMINAL: list[str] = _PUBLIC_CONTRACT["child_lifecycle"]["terminal_states"]
-CHILD_TRANSITIONS: list = _PUBLIC_CONTRACT["child_lifecycle"]["transitions"]
 HOST_TIERS: list[str] = _PUBLIC_CONTRACT["host_tiers"]
-AUTHOR_ACTIONS: list[str] = _PUBLIC_CONTRACT["actions"]["author"]
-TRUSTED_ACTIONS: list[str] = _PUBLIC_CONTRACT["actions"]["trusted"]
 
 _PROFILES = {p["profile_id"]: p for p in _HOST_PROFILES["profiles"]}
 PROFILE_IDS = sorted(_PROFILES)
@@ -99,9 +110,6 @@ UNTRUSTED_OPEN = _PUBLIC_CONTRACT["untrusted_delimiters"]["open"]
 UNTRUSTED_CLOSE = _PUBLIC_CONTRACT["untrusted_delimiters"]["close"]
 # D2C canonical artifact vocabularies, DERIVED from the registry (never copied as constants).
 CLAIM_KINDS: list[str] = _PUBLIC_CONTRACT["claim_kinds"]
-ARTIFACT_KINDS: list[str] = _PUBLIC_CONTRACT["artifact_kinds"]
-ARTIFACT_OUTCOMES: list[str] = _PUBLIC_CONTRACT["artifact_outcomes"]
-SPIKE_GATES: list[str] = _PUBLIC_CONTRACT["spike_gates"]
 # D2E canonical presentation-selector registry, DERIVED from the PublicContract (the SSOT).
 # Tests compare real selector output directly to these loaded arrays; no context/reason
 # mapping or fallback table is copied into a test file. Every context_sections key equals a
@@ -135,9 +143,7 @@ class HarnessDefect(Exception):
 
 # Deterministic canonical digest of the PublicContract (D9 computes this at runtime; the static
 # fixtures record the same value, so tests assert the response digest matches the registry digest).
-_CONTRACT_DIGEST = "sha256:" + hashlib.sha256(
-    json.dumps(_PUBLIC_CONTRACT, sort_keys=True, separators=(",", ":")).encode("utf-8")
-).hexdigest()
+_CONTRACT_DIGEST = canonical_digest(_PUBLIC_CONTRACT)
 
 
 def contract_digest() -> str:
@@ -148,9 +154,7 @@ def active_set_digest(active_evidence_ids: list[str]) -> str:
     """Canonical registry digest of the exact ordered ``active_evidence_ids`` JSON array (D2C
     invariant §10). This is the single central helper tests use instead of per-case
     self-comparison: ``claim.evidence_digest`` must equal this value."""
-    canonical = json.dumps(active_evidence_ids, sort_keys=True,
-                           separators=(",", ":")).encode("utf-8")
-    return "sha256:" + hashlib.sha256(canonical).hexdigest()
+    return canonical_digest(active_evidence_ids)
 
 
 def protocol() -> str:
@@ -189,10 +193,6 @@ def ordered_dedupe(*lists) -> list:
 
 def reason(code: str) -> dict:
     return REASONS[code]
-
-
-def next_action(action_id: str) -> dict:
-    return NEXT_ACTIONS[action_id]
 
 
 def section(section_id: str) -> dict:
@@ -236,24 +236,18 @@ def _envelope(request_id: str, command: dict) -> dict:
 
 def start_run(*, goal: str, project: str = "demo", session: str = "s1",
               request_id: str | None = None, budgets: dict | None = None,
-              modes: dict | None = None) -> dict:
+              control_mode: str = "deliberative",
+              invocation: dict | None = None) -> dict:
     """Build a valid StartRun envelope. Host profile selection is a driver-factory fact, never an
     invented StartRun field — there is deliberately no ``profile_id`` parameter (D4 spec §4)."""
     cmd: dict = {"type": "StartRun",
                  "selector": {"project": project, "session": session},
-                 "goal": goal}
+                 "goal": goal, "control_mode": control_mode,
+                 "invocation": (invocation if invocation is not None else
+                                {**TEST_INVOCATION, "signal": "v2 harness"})}
     if budgets is not None:
         cmd["budgets"] = budgets
-    if modes is not None:
-        cmd["modes"] = modes
     return _envelope(request_id or _rid("start"), cmd)
-
-
-def resolve_run(*, project: str = "demo", session: str = "s1",
-                request_id: str | None = None) -> dict:
-    return _envelope(request_id or _rid("resolve"),
-                     {"type": "ResolveRun",
-                      "selector": {"project": project, "session": session}})
 
 
 def observe_action(*, run_id: str, action: dict, observed_at: str | None = None,
@@ -322,16 +316,6 @@ def action_spike_request(*, claim_id: str, command: str, dependent_files: list[s
             "command": command, "dependent_files": list(dependent_files)}
 
 
-def action_configure_run(*, budgets: dict | None = None,
-                         modes: dict | None = None) -> dict:
-    a: dict = {"kind": "configure_run"}
-    if budgets is not None:
-        a["budgets"] = budgets
-    if modes is not None:
-        a["modes"] = modes
-    return a
-
-
 def action_route(*, reason: str) -> dict:
     return {"kind": "route", "reason": reason}
 
@@ -342,13 +326,6 @@ def action_investigate() -> dict:
 
 def action_freeze() -> dict:
     return {"kind": "freeze"}
-
-
-def action_dispatch(*, target: str, claim_id: str | None = None) -> dict:
-    a: dict = {"kind": "dispatch", "target": target}
-    if claim_id is not None:
-        a["claim_id"] = claim_id
-    return a
 
 
 def action_child_reserve(*, purpose: str, role_profile: str, execution: str,
@@ -377,13 +354,6 @@ def action_attribution(*, payload: dict | None = None,
     if payload is not None:
         a["payload"] = payload
     return a
-
-
-def action_child_event(*, child_id: str, payload: dict,
-                        boundary: str = "host") -> dict:
-    return {"kind": "child_event", "child_id": child_id,
-            "trusted": {"capability_ref": "<redacted>", "boundary": boundary},
-            "payload": payload}
 
 
 def action_audit_verdict(*, child_id: str, payload: dict,
@@ -439,11 +409,6 @@ def canonical_graph(*, n_claims: int = 1, kind: str | None = None) -> dict:
     return {"root": _CANONICAL_ROOT, "claims": claims, "edges": edges}
 
 
-def canonical_claim_id(*, index: int = 0) -> str:
-    """Return the canonical claim ID at the given index (stable prefix)."""
-    return _CANONICAL_CLAIMS[index]["id"]
-
-
 # ---------------------------------------------------------------------------
 # D2D closed trusted-ingress payload builders (D4-S3a-R)
 # ---------------------------------------------------------------------------
@@ -456,9 +421,7 @@ def canonical_claim_id(*, index: int = 0) -> str:
 def child_event_fingerprint(state: str, native_id: str | None) -> str:
     """Stable canonical digest of child-event facts (state, native_id) so identical calls
     produce identical fingerprints (D2D). Used for identical-replay detection."""
-    facts = json.dumps({"state": state, "native_id": native_id},
-                       sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return "sha256:" + hashlib.sha256(facts).hexdigest()
+    return canonical_digest({"state": state, "native_id": native_id})
 
 
 def build_child_event_payload(state: str, *,
@@ -482,18 +445,18 @@ def build_attribution_payload(*, subject_kind: str, subject_id: str,
                               model_id: str | None = None,
                               observed_by: str = "host",
                               covered_artifact_ids: list[str] | None = None) -> dict:
-    """Construct a valid D2D ``attribution`` closed payload.
-
-    - ``auditor`` requires non-null ``child_id`` and empty ``covered_artifact_ids``;
-    - ``covered_actor`` requires ``child_id`` null and nonempty ``covered_artifact_ids``;
-    - ``provider_id``/``model_id`` are both non-null or both null.
-    """
+    """Construct a closed reviewer attribution through the production identity policy."""
+    normalized = observe(provider_id, model_id, source="conformance-host")
+    identity = normalized["identity"] if normalized is not None and observed_by == "host" else None
     return {
         "subject_kind": subject_kind,
         "subject_id": subject_id,
         "child_id": child_id,
+        "identity": identity,
         "provider_id": provider_id,
         "model_id": model_id,
+        "policy_version": "model-identity/1",
+        "source": "conformance-host",
         "observed_by": observed_by,
         "covered_artifact_ids": list(covered_artifact_ids or []),
     }
@@ -571,10 +534,10 @@ class ConformanceCase(unittest.TestCase):
     # ---- schema validation -------------------------------------------------
 
     def assert_valid_request(self, envelope: dict) -> None:
-        jsonschema.validate(instance=envelope, schema=_REQUEST_SCHEMA)
+        REQUEST_VALIDATOR.validate(envelope)
 
     def assert_valid_response(self, resp: dict) -> None:
-        jsonschema.validate(instance=resp, schema=_RESPONSE_SCHEMA)
+        RESPONSE_VALIDATOR.validate(resp)
 
     def assert_protocol_identity(self, env: dict, request_id: str) -> None:
         self.assertEqual(env.get("protocol"), _PROTOCOL, "protocol must be empirica/v2")
@@ -747,16 +710,18 @@ class ConformanceCase(unittest.TestCase):
         )
         banned_value_substrings = ("capability_ref", "<redacted>", "topsecret")
 
-        def _walk(o):
+        def _walk(o, path=()):
             if isinstance(o, dict):
                 for k, v in o.items():
-                    if k in banned_keys:
+                    # 2.1 explicitly discloses inventory/selected models only in governance.
+                    public_model = "governance" in path and k in {"provider_id", "model_id"}
+                    if k in banned_keys and not public_model:
                         self.fail(
                             f"private/banned field {k!r} must not appear in a public view")
-                    _walk(v)
+                    _walk(v, (*path, k))
             elif isinstance(o, list):
                 for item in o:
-                    _walk(item)
+                    _walk(item, path)
             elif isinstance(o, str):
                 for sub in banned_value_substrings:
                     if sub in o:
@@ -809,17 +774,21 @@ class ConformanceCase(unittest.TestCase):
                     or k == "hash" or k == "sha256" or k.endswith("_hash")
                     or k == "revision" or k == "pointer" or k == "history")
 
-        def _walk(o):
+        def _walk(o, path=()):
             if isinstance(o, dict):
                 for k, v in o.items():
-                    if _is_persisted_operational(k):
+                    # Configuration epoch and accounting telemetry are public,
+                    # but manifest revisions, receipts, and selected-history pointers are not.
+                    public_governance = "governance" in path and k in {
+                        "plan_revision", "passes_used", "spawns_used", "audit_spawns_used"}
+                    if _is_persisted_operational(k) and not public_governance:
                         self.fail(
                             f"persisted operational field {k!r} must not appear in a "
                             f"public/compaction surface")
-                    _walk(v)
+                    _walk(v, (*path, k))
             elif isinstance(o, list):
                 for item in o:
-                    _walk(item)
+                    _walk(item, path)
         _walk(obj)
 
     def assert_claim_kind(self, claim: dict, kind: str) -> None:
@@ -1071,6 +1040,7 @@ class ConformanceCase(unittest.TestCase):
         if resp["result"]["type"] != "Allow":
             raise HarnessDefect(
                 f"a valid graph must be admitted (prerequisite); got {resp['result'].get('type')}")
+        drv.approve_governance(run_id)  # explicit host consent to this exact fixture graph
         # Graph admission is proved by the typed ArgumentView claim/edge projection (D2C).
         arg_resp = self.dispatch(drv, get_argument(run_id=run_id))
         try:
@@ -1122,6 +1092,7 @@ class ConformanceCase(unittest.TestCase):
         if argument["result"]["type"] != "Allow":
             self.require_graph_admitted(drv, run_id)
             argument = self.dispatch(drv, get_argument(run_id=run_id))
+        self.require_governance_approved(drv, run_id)
         before = {child["child_id"] for child in argument["result"].get("run", {}).get("children", [])}
         resp = self.dispatch(drv, observe_action(run_id=run_id, action=action_child_reserve(
             purpose="audit", resource_class="audit",
@@ -1248,46 +1219,27 @@ class ConformanceCase(unittest.TestCase):
         self.require_child_state(drv, run_id, child_id, "pending")
         return child_id
 
-    def require_trusted_audit_attribution(self, drv, run_id: str, child_id: str,
-                                          c0_artifact_id: str | list[str], *,
+    def require_trusted_audit_attribution(self, drv, run_id: str, child_id: str, *,
                                           variant: str) -> None:
-        """Submit trusted covered-actor and auditor attribution through private ingress
-        (D4-S3a-R).
+        """Submit the trusted reviewer attribution through private ingress.
 
-        Covered-actor attribution is bound to exact active approved C0 artifact IDs.
-        Auditor attribution is bound to the pending SUT-admitted audit child. Same-model
-        uses equal normalized provider/model pairs; decorrelated uses distinct pairs;
-        unverified makes one pair null. Every trusted response is validated/asserted.
-        Raises HarnessDefect if any response is not valid."""
-        covered_observer = auditor_observer = "host"
-        if variant == "same_model":
-            covered_provider, covered_model = "p1", "m1"
-            auditor_provider, auditor_model = "p1", "m1"
-        elif variant == "decorrelated":
-            covered_provider, covered_model = "p1", "m1"
-            auditor_provider, auditor_model = "p2", "m2"
-        elif variant == "unverified":
-            covered_provider, covered_model = "p1", "m1"
-            auditor_provider, auditor_model = None, None
-        elif variant == "alias":
-            covered_provider, covered_model = "p1", "m1"
-            auditor_provider, auditor_model = "p2", "opus"
-        elif variant == "configuration":
-            covered_provider, covered_model = "p1", "m1"
-            auditor_provider, auditor_model = "p2", "m2"
-            auditor_observer = "configuration"
-        else:
-            raise HarnessDefect(f"unknown attribution variant {variant!r}")
-        # Covered-actor attribution: bound to exact active approved C0 artifact IDs.
-        covered_ids = ([c0_artifact_id] if isinstance(c0_artifact_id, str)
-                       else list(c0_artifact_id))
-        covered_payload = build_attribution_payload(
-            subject_kind="covered_actor", subject_id="covered-actor-1",
-            child_id=None, provider_id=covered_provider, model_id=covered_model,
-            observed_by=covered_observer, covered_artifact_ids=covered_ids)
-        resp_covered = drv.trusted_attribution(run_id, covered_payload)
-        self.assert_valid_response(resp_covered)
-        # Auditor attribution: bound to pending SUT-admitted audit child.
+        Evidence producers are already bound at admission. Same-model uses the
+        producer's normalized class; distinct uses a distinct class; alias,
+        configuration, and missing observations remain unverified.
+        """
+        variants = {
+            "same_model": ("anthropic", "claude-sonnet-4-6", "host"),
+            "distinct": ("anthropic", "claude-opus-4-6", "host"),
+            "unverified": (None, None, "host"),
+            "alias": ("anthropic", "opus", "host"),
+            "configuration": ("anthropic", "claude-opus-4-6", "configuration"),
+        }
+        try:
+            auditor_provider, auditor_model, auditor_observer = variants[variant]
+        except KeyError as exc:
+            raise HarnessDefect(f"unknown attribution variant {variant!r}") from exc
+        # Producer identities were captured on evidence admission. Only the
+        # observed reviewer is admitted at audit completion.
         auditor_payload = build_attribution_payload(
             subject_kind="auditor", subject_id="auditor-1",
             child_id=child_id, provider_id=auditor_provider, model_id=auditor_model,
@@ -1382,10 +1334,17 @@ class ConformanceCase(unittest.TestCase):
             raise HarnessDefect(f"a valid route must be admitted (prerequisite); got {resp['result'].get('type')}")
         return resp
 
+    def require_governance_approved(self, drv, run_id: str) -> None:
+        argument = self.dispatch(drv, get_argument(run_id=run_id))["result"]
+        if argument.get("type") != "Allow":
+            self.dispatch(drv, observe_action(run_id=run_id, action=action_graph(canonical_graph())))
+        drv.approve_governance(run_id)
+
     def require_investigate_admitted(self, drv, run_id: str) -> None:
         """Assert investigation was admitted (Allow) through derived RunView obligation state.
         Route and investigation witnesses are proved by derived RunView obligation statuses, not
         private artifact IDs (D2C)."""
+        self.require_governance_approved(drv, run_id)
         resp = self.dispatch(drv, observe_action(run_id=run_id, action=action_investigate()))
         if resp["result"]["type"] != "Allow":
             raise HarnessDefect(
@@ -1507,16 +1466,6 @@ class ConformanceCase(unittest.TestCase):
 
     # ---- typed-view assertions (D2A §3, §4) --------------------------------
 
-    def assert_freshness_has_path(self, run: dict, path: str, *, state: str | None = None) -> None:
-        """Assert the run's freshness.changes observes ``path`` (per-path workspace observation)."""
-        changes = run.get("freshness", {}).get("changes", [])
-        match = [c for c in changes if c.get("path") == path]
-        if not match:
-            raise self.failureException(f"freshness.changes must observe bound path {path!r}; got {changes}")
-        if state is not None:
-            self.assertEqual(match[0].get("state"), state,
-                             f"freshness change for {path!r} must report state {state!r}")
-
     def assert_evidence_digest(self, claim: dict) -> None:
         """Assert claim ``evidence_digest`` equals the canonical registry digest of its exact
         ordered ``active_evidence_ids`` (D2C invariant §10). This is the single central assertion
@@ -1538,9 +1487,10 @@ class ConformanceCase(unittest.TestCase):
         if "argument" not in result:
             raise self.failureException("GetArgument Allow must carry the typed argument (D2C)")
         arg = result["argument"]
-        for key in ("root_claim_id", "argument_digest", "goal_digest", "frozen_scope_digest",
-                    "deferred_scope_digest", "untrusted_delimiters", "claims", "edges",
-                    "artifacts", "audit"):
+        for key in ("root_claim_id", "argument_digest", "goal", "goal_digest",
+                    "frozen_scope_digest", "deferred_scope_digest", "untrusted_delimiters",
+                    "claims", "edges", "artifacts", "route_stamp", "investigation_stamp",
+                    "audit"):
             if key not in arg:
                 raise self.failureException(f"ArgumentView must carry {key!r} (D2C)")
         self.assertNotIn("evidence", arg,
@@ -1573,9 +1523,6 @@ class ConformanceCase(unittest.TestCase):
             self.assertNotIn("index", cr, "section projection must not carry a sibling index payload")
             self.assertNotIn("full", cr, "section projection must not carry a sibling full payload")
         elif target == "full":
-            full = cr["full"]
-            self.assertEqual(full["id"], _CONTRACT_ID)
-            self.assertEqual(full["version"], _CONTRACT_VERSION)
-            self.assertNotIn("index", cr, "full projection must not carry a sibling index payload")
-            self.assertNotIn("section_id", cr, "full projection must not carry a sibling section payload")
+            raise self.failureException(
+                "GetContract target: full left the public wire (QUAL-1); it is never a projection")
         return cr

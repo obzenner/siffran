@@ -1,23 +1,29 @@
 ---
 number: 18
-title: "Evidence-bound convergence"
-status: accepted
+title: Evidence-bound convergence
+status: superseded
 date: 2026-07-23
 tags:
-  - architecture
-  - verification
-  - trust-boundary
+- architecture
+- verification
+- trust-boundary
 links:
-  - target: 13
-    kind: Refines
-  - target: 7
-    kind: relatesto
-  - target: 17
-    kind: relatesto
-  - target: 20
-    kind: Realized by
-  - target: 21
-    kind: Realized by
+- target: 13
+  kind: Refines
+- target: 7
+  kind: Relates to
+- target: 17
+  kind: Relates to
+- target: 20
+  kind: Realized by
+- target: 21
+  kind: Realized by
+- target: 62
+  kind: Superseded by
+- target: 19
+  kind: Relates to
+- target: 22
+  kind: Relates to
 ---
 
 # Evidence-bound convergence

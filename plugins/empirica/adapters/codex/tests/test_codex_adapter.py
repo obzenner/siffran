@@ -22,8 +22,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[3]
 if str(PLUGIN_ROOT) not in sys.path:
@@ -40,7 +39,7 @@ from adapters.codex import (  # noqa: E402
     build_start_run_request,
 )
 from adapters.codex.correlation import CorrelationError, correlate, request_id  # noqa: E402
-from adapters.codex.lifecycle import explicit_activation  # noqa: E402
+from adapters.codex.lifecycle import _start, explicit_activation  # noqa: E402
 from adapters.codex.transport import BridgeTransport  # noqa: E402
 
 _REQUEST_SCHEMA = json.loads(
@@ -131,36 +130,11 @@ class ExactV2ProfileTests(unittest.TestCase):
     def test_profile_id_is_the_exact_codex_registry_profile(self) -> None:
         self.assertEqual(CODEX_PROFILE_ID, "codex-cli@0.146.0")
 
-    def test_stop_hook_deadline_exceeds_managed_audit_deadline(self) -> None:
-        from adapters.codex.audit import MANAGED_AUDIT_TIMEOUT_SECONDS
+    def test_stop_hook_deadline_is_pinned_for_bounded_stop_reconciliation(self) -> None:
+        # 960 seconds is the reviewed Codex Stop-hook host deadline, not an audit-runner timeout.
         hooks = json.loads((PLUGIN_ROOT / "hooks" / "codex.json").read_text(encoding="utf-8"))
         stop = hooks["hooks"]["Stop"][0]["hooks"][0]
-        self.assertGreater(stop["timeout"], MANAGED_AUDIT_TIMEOUT_SECONDS)
-
-    def test_managed_runner_without_start_ack_rejects_reservation(self) -> None:
-        from adapters.codex.audit import execute_audit
-        protocol = MagicMock()
-        protocol.prepare.return_value = SimpleNamespace(argument={}, child_id="ch-1")
-        with patch("adapters.codex.audit.AuditProtocol", return_value=protocol):
-            self.assertFalse(execute_audit(
-                {}, "run", runner=lambda _p, _m, _c, _started: (0, "no start")))
-        protocol.reject.assert_called_once()
-        protocol.observe_started.assert_not_called()
-
-    def test_managed_timeout_after_native_start_closes_timed_out(self) -> None:
-        from adapters.codex.audit import execute_audit
-        protocol = MagicMock()
-        protocol.prepare.return_value = SimpleNamespace(argument={}, child_id="ch-1")
-
-        def timeout(_prompt, _model, _cwd, started):
-            started("native-1")
-            return None, ""
-
-        with patch("adapters.codex.audit.AuditProtocol", return_value=protocol):
-            self.assertFalse(execute_audit({}, "run", runner=timeout))
-        protocol.observe_started.assert_called_once()
-        protocol.observe_failure.assert_called_once_with(
-            protocol.prepare.return_value, "native-1", "timed_out")
+        self.assertEqual(stop["timeout"], 960)
 
     def test_transport_dispatches_via_bridge_handle_with_profile_and_no_cwd(self) -> None:
         captured: dict = {}
@@ -273,19 +247,31 @@ class StartRunTests(unittest.TestCase):
         self.assertEqual(request_both["command"]["budgets"],
                          {"max_passes": 5, "max_spawns": 3, "max_audit_spawns": 2})
 
-    def test_modes_emitted_only_when_resolved(self) -> None:
-        request = build_start_run_request(
-            _payload(prompt="$empirica --cli-exec prove X"), correlation_id="start-5", environ={},
-        )
-        _assert_valid(request)
-        self.assertEqual(request["command"]["modes"], {"cli_exec": True})
+    def test_removed_flags_surface_as_unknown(self) -> None:
+        for flag in ("--cli-exec", "--multi-provider"):
+            with self.subTest(flag=flag):
+                result = _start(_payload(prompt=f"$empirica {flag} prove X"))
+                self.assertIn("unknown flags", result["systemMessage"])
+                self.assertIn(flag, result["systemMessage"])
+
+    def test_goal_is_verbatim_and_codex_auto_requires_delegation_signal(self) -> None:
+        command = build_start_run_request(
+            _payload(prompt="$empirica   exact goal  "),
+            environ={"EMPIRICA_AUTO_DELEGATION": "1"},
+        )["command"]
+        self.assertEqual(command["goal"], "  exact goal  ")
+        self.assertEqual(command["invocation"], {
+            "host": "codex", "interactive": None,
+            "signal": "codex hook has no interactive signal", "delegation": True})
+        empty = build_start_run_request(_payload(prompt="$empirica   "), environ={})
+        self.assertEqual(empty["command"]["goal"], "  ")
 
     def test_non_activation_returns_none(self) -> None:
         self.assertIsNone(build_start_run_request(
             _payload(prompt="please discuss empirica"), environ={},
         ))
-        self.assertEqual(explicit_activation(_payload(prompt="$empirica --cli-exec design X")),
-                         "--cli-exec design X")
+        self.assertEqual(explicit_activation(_payload(prompt="$empirica --auto design X")),
+                         "--auto design X")
 
     def test_missing_session_is_rejected_before_transport(self) -> None:
         with self.assertRaises(SelectorError):
@@ -430,6 +416,15 @@ class UnsupportedLifecycleTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         assert_official_output(self, "UserPromptSubmit", json.loads(out))
 
+    def test_refused_start_blocks_prompt_with_reason(self) -> None:
+        with patch.dict(os.environ, {"EMPIRICA_AUTO_DELEGATION": ""}):
+            rc, out = self._run("activate", "UserPromptSubmit", prompt="$empirica --auto prove X")
+        self.assertEqual(rc, 0)
+        result = json.loads(out)
+        self.assertEqual(result["decision"], "block")
+        self.assertIn("Empirica did not start", result["reason"])
+        assert_official_output(self, "UserPromptSubmit", result)
+
     def test_pre_tool_use_spawn_is_inert_without_active_run(self) -> None:
         rc, out = self._run("pre-tool-use", "PreToolUse", tool_name="spawn_agent",
                             tool_input={"message": "audit G0", "agent_type": "auditor"})
@@ -465,13 +460,42 @@ class UnsupportedLifecycleTests(unittest.TestCase):
         rc, out = self._run("stop", "Stop")
         self.assertEqual((rc, out), (0, ""))
 
-    def test_restore_is_inert_without_active_run(self) -> None:
-        rc, out = self._run("restore", "SessionStart", source="compact")
-        self.assertEqual((rc, out), (0, ""))
+    def test_compaction_restore_is_not_provided(self) -> None:
+        from io import StringIO
+        from adapters.codex.lifecycle import main
+        err = StringIO()
+        with patch("sys.stdin", new=self._stdin("SessionStart", source="compact")), \
+                patch("sys.stderr", new=err):
+            rc = main(["restore"])
+        self.assertEqual(rc, 1)
+        self.assertIn("unknown Codex hook action: restore", err.getvalue())
+        hooks = json.loads((PLUGIN_ROOT / "hooks" / "codex.json").read_text(encoding="utf-8"))
+        self.assertNotIn("SessionStart", hooks["hooks"])
 
-    def test_restore_is_inert_for_non_compact_source(self) -> None:
-        rc, out = self._run("restore", "SessionStart", source="startup")
-        self.assertEqual((rc, out), (0, ""))
+    def test_stop_denies_when_audit_rejection_fails(self) -> None:
+        from adapters.audit_protocol import AuditProtocolError
+        from adapters.codex.lifecycle import _stop
+        resolved = {"protocol": "empirica/v2", "request_id": "x",
+                    "result": {"type": "Allow", "converged": False, "run": {"id": "er2:opaque"}}}
+        owed = {"protocol": "empirica/v2", "request_id": "y",
+                "result": {"type": "Block", "reasons": [{"code": "audit.required",
+                                                         "message": "audit owed"}]}}
+        for failing in (None, "reconcile_orphans", "prepare", "reject"):
+            with self.subTest(failing=failing):
+                failures = {name: (AuditProtocolError("boom") if name == failing else None)
+                            for name in ("reconcile_orphans", "prepare", "reject")}
+                with patch("adapters.codex.lifecycle._dispatch", side_effect=[resolved, owed, owed]), \
+                        patch("adapters.codex.lifecycle._refresh_governance"), \
+                        patch("adapters.audit_protocol.AuditProtocol.reconcile_orphans",
+                              side_effect=failures["reconcile_orphans"]), \
+                        patch("adapters.audit_protocol.AuditProtocol.prepare",
+                              side_effect=failures["prepare"]), \
+                        patch("adapters.audit_protocol.AuditProtocol.reject",
+                              side_effect=failures["reject"]):
+                    result = _stop(_official("Stop"))
+                reason = ("audit owed" if failing is None
+                          else "Empirica convergence gate unavailable.")
+                self.assertEqual(result, {"decision": "block", "reason": reason})
 
     def test_unknown_action_returns_nonzero(self) -> None:
         from io import StringIO

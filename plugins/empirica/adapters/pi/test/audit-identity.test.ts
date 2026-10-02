@@ -101,6 +101,14 @@ test("fails closed when more than one assistant message contains a verdict", () 
   assert.equal(identityFromSessionJsonl(transcript, VERDICT), null);
 });
 
+test("fails closed when fallback attempts served more than one model", () => {
+  const transcript = [
+    assistant("first attempt", "provider", "model-a"),
+    assistant(BLOCK, "provider", "model-b"),
+  ].join("\n");
+  assert.equal(identityFromSessionJsonl(transcript, VERDICT), null);
+});
+
 test("fails closed without native provider and model facts", () => {
   assert.equal(identityFromSessionJsonl(assistant(BLOCK, null), VERDICT), null);
   assert.equal(identityFromSessionJsonl(assistant(BLOCK, "provider", ""), VERDICT), null);
@@ -109,6 +117,37 @@ test("fails closed without native provider and model facts", () => {
     line({ type: "message", message: { role: "assistant", content: BLOCK } }),
   ].join("\n");
   assert.equal(identityFromSessionJsonl(configuredOnly, VERDICT), null);
+});
+
+test("fails closed when an earlier assistant attempt lacks native provider or model", () => {
+  const earlierWithoutModel = line({ type: "message", message: {
+    role: "assistant", content: "first attempt", provider: "provider" } });
+  assert.equal(identityFromSessionJsonl(
+    [earlierWithoutModel, assistant(BLOCK, "provider", "model-b")].join("\n"), VERDICT), null);
+  const earlierWithoutProvider = line({ type: "message", message: {
+    role: "assistant", content: "first attempt", model: "model-b" } });
+  assert.equal(identityFromSessionJsonl(
+    [earlierWithoutProvider, assistant(BLOCK, "provider", "model-b")].join("\n"), VERDICT), null);
+});
+
+test("fails closed when an earlier assistant attempt has a blank provider or model", () => {
+  for (const [provider, model] of [["  ", "model-b"], ["provider", " "], [7, "model-b"], ["provider", null]]) {
+    assert.equal(identityFromSessionJsonl(
+      [assistant("first attempt", provider, model), assistant(BLOCK, "provider", "model-b")].join("\n"),
+      VERDICT), null, JSON.stringify([provider, model]));
+  }
+});
+
+test("ignores host-synthesised error rows but never binds a verdict to one", () => {
+  const synthetic = line({ type: "message", message: {
+    role: "assistant", model: "<synthetic>", content: "provider error" } });
+  assert.deepEqual(
+    identityFromSessionJsonl([synthetic, assistant(BLOCK, "provider", "model-b")].join("\n"), VERDICT),
+    { provider_id: "provider", model_id: "model-b", observed_by: "host", source: "pi-child-session" });
+  const syntheticVerdict = line({ type: "message", message: {
+    role: "assistant", provider: "provider", model: "<synthetic>", content: BLOCK } });
+  assert.equal(identityFromSessionJsonl(
+    [assistant("first attempt", "provider", "model-b"), syntheticVerdict].join("\n"), VERDICT), null);
 });
 
 test("fails closed on malformed or non-object JSONL records", () => {

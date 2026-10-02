@@ -48,14 +48,15 @@ non-empty list of repo-relative dependent files:
 {
   "kind": "spike_request",
   "claim_id": "G1",
-  "command": "make focused-check",
-  "dependent_files": ["plugins/example/core.py"]
+  "command": "python3 -m json.tool contracts/empirica/v2/public-contract.json",
+  "dependent_files": ["contracts/empirica/v2/public-contract.json"]
 }
 ```
 
 The service—not the author—captures a coherent workspace tree, seals the request,
 runs the harness exactly once against captured bytes, records file hashes, and
-derives pass/fail solely from the subprocess exit code. Do not submit an
+derives pass/fail solely from the subprocess exit code. A spike's file bindings must include every
+file its command reads, because the harness sandbox contains only the bound files. Do not submit an
 `evidence_leaf` or a claimed gate.
 
 A passing exit code satisfies Fold 2 only while every bound file remains current.

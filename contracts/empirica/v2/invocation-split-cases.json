@@ -1,0 +1,7 @@
+[
+  {"args": "", "flags": [], "goal": ""},
+  {"args": "  exact goal  ", "flags": [], "goal": "  exact goal  "},
+  {"args": "--wat\tnext", "flags": ["--wat"], "goal": "next"},
+  {"args": "prove --auto x", "flags": [], "goal": "prove --auto x"},
+  {"args": "--auto   ", "flags": ["--auto"], "goal": ""}
+]

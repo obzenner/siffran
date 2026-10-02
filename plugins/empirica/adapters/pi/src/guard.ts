@@ -12,6 +12,8 @@
 // on every dispatch result (including test fakes). The guard is intentionally
 // strict and minimal — it checks exactly what the adapter reads, no more.
 
+import { PUBLIC_TOOLS } from "./public-tools.ts";
+
 import {
   PROTOCOL,
   type FailDirection,
@@ -21,6 +23,7 @@ import {
   type RunStatus,
 } from "./contract.ts";
 
+const START_REFUSAL_REASON_CODES = new Set<string>(PUBLIC_TOOLS.start_refusal_codes);
 const RUN_STATUSES: ReadonlySet<RunStatus> = new Set([
   "active",
   "converged",
@@ -142,7 +145,7 @@ export function assertResponse(
       break;
     }
     case "Block": {
-      assertRunSnapshot(result.run, "Block");
+      if (result.run !== undefined) assertRunSnapshot(result.run, "Block");
       if (!Array.isArray(result.reasons) || result.reasons.length === 0)
         throw new GuardError("Block.reasons must be a nonempty array");
       // Each reason is an object with a nonempty string code; an optional
@@ -160,6 +163,9 @@ export function assertResponse(
             "Block.reasons[].message must be a string when present",
           );
       }
+      if (result.run === undefined && result.reasons.some(
+        (reason) => !isObject(reason) || !START_REFUSAL_REASON_CODES.has(String(reason.code))))
+        throw new GuardError("Block without run must be a start refusal");
       break;
     }
     case "Inert": {

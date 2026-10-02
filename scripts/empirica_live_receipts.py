@@ -1,6 +1,7 @@
 """Structural verification for operator-captured installed-host Empirica receipts."""
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -10,8 +11,10 @@ from pathlib import Path
 from typing import Any
 
 FORMAT = "empirica-live-receipt/v2"
-_PROFILE_REGISTRY = json.loads((Path(__file__).resolve().parents[1]
-                               / "contracts/empirica/v2/host-profiles.json").read_text())
+_CONTRACTS = Path(__file__).resolve().parents[1] / "contracts/empirica/v2"
+_PROFILE_REGISTRY = json.loads((_CONTRACTS / "host-profiles.json").read_text())
+# Author-view headings and line labels are contract-owned; the projection is the repository JSON.
+_LABELS = json.loads((_CONTRACTS / "public-tools.json").read_text())["author_view"]["labels"]
 _RECEIPT_HOSTS = {
     "claude": ("claude-code", "empirica:empirica-auditor"),
     "pi": ("pi", "empirica.empirica-auditor"),
@@ -32,7 +35,9 @@ _VERSION_OUTPUT = {
 }
 _VERDICT = re.compile(r"```empirica-verdict\s*\n(\{.*?\})\s*\n```", re.DOTALL)
 _AGENT_ID = re.compile(r"agentId:\s*([A-Za-z0-9_-]+)")
-_AGENT_MESSAGE = re.compile(r'^<agent-message from="([A-Za-z0-9_-]+)">\n')
+_HANDBACK_FRAME = re.compile(
+    r'<agent-message from="([A-Za-z0-9_-]+)">\n\[Subagent hand-back\][^\n]* The report follows:\n'
+    r'((?:  [^\n]*\n)*  [^\n]*)\n</agent-message>')
 
 
 def safe_read(path: Path) -> bytes:
@@ -153,21 +158,185 @@ def converged_result(value: Any) -> bool:
             and value["run"].get("status") == "converged")
 
 
+_LIVE_CHILD_STATES = frozenset({"reserved", "launching", "pending"})
+_CHILD_STATES = ("reserved", "launching", "pending", "completed", "launch_rejected", "failed",
+                 "cancelled", "timed_out", "orphaned")
+_STORAGE_ID = re.compile(r"s256-[0-9a-f]{64}")
+_GENERATION_DIR = re.compile(r"gen-([1-9][0-9]*)")
+
+
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def run_handle(state_path: Path) -> str:
+    """The public ``er2:`` run handle of the durable run stored at ``state_path``.
+
+    The host stores one run generation at ``<home>/projects/<p>/runs/<s>/gen-<g>/run.json`` and
+    its public handle is ``er2:<b64url(payload)>:<b64url(sha256(payload))>`` where ``payload`` is
+    the compact, key-sorted JSON ``{"g": <g>, "p": "<p>", "s": "<s>"}``. The handle is therefore
+    derived from the retained state path exactly as the host derives it; a path outside that
+    layout (or with non-canonical ids) is not a durable host run and is rejected.
+    """
+    parts = state_path.parts
+    if len(parts) < 6 or (parts[-6], parts[-4], parts[-1]) != ("projects", "runs", "run.json"):
+        raise ValueError("durable state is not stored at projects/<p>/runs/<s>/gen-<g>/run.json")
+    project, session, generation = parts[-5], parts[-3], _GENERATION_DIR.fullmatch(parts[-2])
+    if (_STORAGE_ID.fullmatch(project) is None or _STORAGE_ID.fullmatch(session) is None
+            or generation is None):
+        raise ValueError("durable state path does not carry canonical run identifiers")
+    payload = json.dumps({"g": int(generation.group(1)), "p": project, "s": session},
+                         sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return "er2:" + _b64url(payload) + ":" + _b64url(hashlib.sha256(payload).digest())
+
+
 def state_facts(path: Path, expected_role: str) -> tuple[dict, dict]:
     state = json.loads(safe_read(path))
     if not isinstance(state, dict) or state.get("status") != "converged":
         raise ValueError("durable state is not converged")
     children = [row for row in state.get("children", [])
                 if isinstance(row, dict) and row.get("purpose") == "audit"]
-    if len(children) != 1:
-        raise ValueError("durable state must contain exactly one audit child")
-    child = children[0]
+    if not children:
+        raise ValueError("durable state contains no audit child")
+    # A failed audit may be retried. The receipt binds the latest reservation, the audit that
+    # the convergence relied on; every earlier audit must already be settled.
+    if any(row.get("state") in _LIVE_CHILD_STATES for row in children):
+        raise ValueError("durable state retains an unsettled audit child")
+    child = children[-1]
     if child.get("state") != "completed" or child.get("audit_role_profile") != expected_role:
         raise ValueError("durable audit child is not completed with the canonical role")
     for key in ("child_id", "native_id", "audit_operation_id"):
         if not isinstance(child.get(key), str) or not child[key]:
             raise ValueError(f"durable audit child lacks {key}")
     return state, child
+
+
+# The receipt tool reads the Claude author plain-text view from the native transcript. It is
+# deliberately independent of plugin code: these recognizers mirror the first line and the
+# ``Title:`` sections of ``plugins/empirica/adapters/author_view.py``, with every heading and line
+# label read from the contract projection, and are pinned to the renderer's real output by
+# ``scripts/tests/test_empirica_live_receipts.py``.
+_AUTHOR_HEADER = re.compile(
+    rf"(Allow \({re.escape(_LABELS['converged'])}(true|false)\)|Block) ([a-z_]+) — [^\n]*")
+_REASON_ENTRY = re.compile(r"  ([A-Za-z0-9_.]+)(?:: | — |$)")
+_AUDIT_PENDING = "audit.pending"
+_PENDING_AUDIT_CHILD = "  audit: pending"
+_COMPLETED_AUDIT_CHILD = "  audit: completed"
+
+
+def author_view_header(text: str) -> tuple[str, str, bool | None] | None:
+    """Parse the first line of a run-bearing author view, or return ``None``.
+
+    The renderer emits ``<Allow (converged=true|false)|Block> <status> — <governance summary>``.
+    Returns ``(result_type, status, converged)`` with ``result_type`` ``"Allow"`` or ``"Block"``
+    and ``converged`` ``True``/``False`` for Allow and ``None`` for Block. Fault, Inert, hook
+    acknowledgements such as ``{"continue": true}``, and the retired JSON shapes are not run views.
+    """
+    match = _AUTHOR_HEADER.fullmatch(text.split("\n", 1)[0])
+    if match is None:
+        return None
+    result_type = match.group(1).split(" ", 1)[0]
+    converged = {"true": True, "false": False}.get(match.group(2))
+    return result_type, match.group(3), converged
+
+
+def author_view_section(text: str, title: str) -> list[str]:
+    """Return the indented lines of the author-view section ``title`` (for example ``Reasons:``).
+
+    Sections are blank-line separated blocks whose first line is exactly ``title`` (a Stop hook's
+    single trailing newline is ignored); an absent or duplicated section yields ``[]``. Reason and obligation entries are indented two spaces and
+    their ``params:``/``next:`` continuations four.
+    """
+    blocks = [block.split("\n") for block in text.rstrip("\n").split("\n\n")
+              if block.split("\n", 1)[0] == title]
+    return blocks[0][1:] if len(blocks) == 1 else []
+
+
+def handback_report(content: str) -> tuple[str, str] | None:
+    """Parse a Claude Code subagent hand-back frame into ``(native_id, report)``, or ``None``.
+
+    Claude Code delivers a background subagent's final report as
+    ``<agent-message from="<id>">`` + a ``[Subagent hand-back] … The report follows:`` preamble +
+    the report with every line indented two spaces + ``</agent-message>``. The indentation is the
+    harness's forgery guard, so the whole body must be indented; it is removed exactly once.
+    """
+    match = _HANDBACK_FRAME.fullmatch(content)
+    if match is None:
+        return None
+    return match.group(1), "\n".join(line[2:] for line in match.group(2).split("\n"))
+
+
+def _entries(lines: list[str]) -> list[str]:
+    """Keep the two-space entry lines of a section, dropping four-space continuations."""
+    return [line for line in lines if line.startswith("  ") and not line.startswith("   ")]
+
+
+_CHILD_LINE = re.compile(r"  (.*): (" + "|".join(_CHILD_STATES) + r")(?: — "
+                         + re.escape(_LABELS["recovery"]) + r" [^\n]*)?")
+_RUN_ID_LINE = re.compile(re.escape(_LABELS["run_id"]) + r" (\S+)")
+
+
+def author_view_run_id(text: str) -> str | None:
+    """The run handle of an author view, or ``None`` when it is missing, repeated, or misplaced.
+
+    The renderer prints exactly one ``<run_id label> <handle>`` line, directly after the header.
+    Any other line that starts with the run-id label, or a run id that is not the second line,
+    is ambiguous and yields ``None``.
+    """
+    lines = text.split("\n")
+    marked = [line for line in lines if line.startswith(_LABELS["run_id"])]
+    if len(lines) < 2 or len(marked) != 1 or marked[0] != lines[1]:
+        return None
+    match = _RUN_ID_LINE.fullmatch(lines[1])
+    return match.group(1) if match else None
+
+
+def pending_audit_settlement(text: str, run: str) -> bool:
+    """Whether ``text`` is the Stop-hook author view of run ``run`` blocked on one pending audit.
+
+    Requires the view's ``run_id`` to equal ``run`` (the handle of the durable run being
+    receipted, see ``run_handle``), header ``Block`` with status ``active``, a ``Reasons:``
+    section whose sole entry is ``audit.pending``, and a ``Children:`` section with exactly one
+    live child, ``audit: pending``. Settled children (``completed``, ``failed``, ``cancelled``,
+    …, with the renderer's `` — recovery: …`` suffix) are earlier audits of a retry and are
+    allowed; each audit of a retry has its own settlement, and the caller takes the one after the
+    bound launch. The text view carries no child id: the pending child is bound to the durable child
+    by the run binding above, the Agent-launch acknowledgement (``agentId`` equals the state's
+    ``native_id``), and the ordering launch < launch result < settlement < notification < report,
+    the last two enforced by the caller.
+    """
+    header = author_view_header(text)
+    if author_view_run_id(text) != run or header is None or header[:2] != ("Block", "active"):
+        return False
+    reasons = _entries(author_view_section(text, _LABELS["reasons"]))
+    codes = [match.group(1) for line in reasons if (match := _REASON_ENTRY.match(line))]
+    children = author_view_section(text, _LABELS["children"])
+    parsed = [_CHILD_LINE.fullmatch(line) for line in children]
+    live = [match.group(0) for match in parsed if match and match.group(2) in _LIVE_CHILD_STATES]
+    return (len(reasons) == 1 and codes == [_AUDIT_PENDING]
+            and bool(children) and None not in parsed and live == [_PENDING_AUDIT_CHILD])
+
+
+def converged_report_view(text: str, run: str) -> bool:
+    """Whether ``text`` is the author view of run ``run`` as ``Allow (converged=true)``, converged.
+
+    The view's ``run_id`` must equal ``run`` and its ``Children:`` section must show a completed
+    audit child.
+    """
+    return (author_view_run_id(text) == run
+            and author_view_header(text) == ("Allow", "converged", True)
+            and _COMPLETED_AUDIT_CHILD in author_view_section(text, _LABELS["children"]))
+
+
+def claude_report_result(child: dict) -> dict:
+    """The structured receipt ``result`` for a Claude converged report.
+
+    Claude's tool result is plain text with no structured payload, so the result is projected from
+    the recognized view (``Allow``/converged/``converged``) and the durable completed audit child.
+    """
+    return {"type": "Allow", "converged": True, "run": {"status": "converged", "children": [{
+        "child_id": child["child_id"], "purpose": "audit", "resource_class": "audit",
+        "state": "completed"}]}}
 
 
 def _tool_result_text(item: dict) -> str:
@@ -191,7 +360,32 @@ def _claude_handbacks(rows: list[dict]) -> list[tuple[int, str]]:
     return found
 
 
-def inspect_claude(parent: list[dict], child_rows: list[dict], child: dict) -> dict:
+def require_row_versions(rows: list[dict], indexes: list[int], version: str, label: str) -> None:
+    """Require the native ``version`` of each listed transcript record to equal ``version``.
+
+    Only the records that support the accepted lifecycle are checked, so unrelated historical
+    rows written by an older host (a session resumed after an upgrade) do not matter. Claude
+    Code stamps its own version on every ``user``/``assistant``/``attachment`` record; a missing
+    or different value is rejected. ``queue-operation`` bookkeeping records carry no version, so
+    one without the field is skipped, while one that carries a value must match.
+    """
+    for index in sorted(set(indexes)):
+        row = rows[index]
+        if row.get("type") == "queue-operation" and "version" not in row:
+            continue
+        if row.get("version") != version:
+            raise ValueError(
+                f"claude {label} record {index} native version {row.get('version')!r} "
+                f"does not match attested host version {version}")
+
+
+def inspect_claude(parent: list[dict], child_rows: list[dict], child: dict, run: str,
+                   host_version: str) -> dict:
+    """Project a Claude installed-host receipt from the native transcripts.
+
+    ``run`` is the ``run_handle`` of the durable state being receipted and ``host_version`` the
+    attested ``claude --version``; the records that support the lifecycle must carry both.
+    """
     launches = []
     for index, row in enumerate(parent):
         attachment = row.get("attachment")
@@ -205,27 +399,27 @@ def inspect_claude(parent: list[dict], child_rows: list[dict], child: dict) -> d
         if (updated.get("subagent_type") == "empirica:empirica-auditor"
                 and updated.get("run_in_background") is True):
             launches.append((index, attachment.get("toolUseID"), updated))
-    if len(launches) != 1:
-        raise ValueError("claude: expected one bound background canonical Agent launch")
-    launch_index, tool_id, _ = launches[0]
+    acknowledged = {
+        item.get("tool_use_id"): _tool_result_text(item)
+        for row in parent
+        for item in (row.get("message", {}).get("content") or []
+                     if isinstance(row.get("message"), dict)
+                     and isinstance(row["message"].get("content"), list) else [])
+        if isinstance(item, dict) and item.get("type") == "tool_result"
+    }
+    bound = [launch for launch in launches
+             if (match := _AGENT_ID.search(acknowledged.get(launch[1], ""))) is not None
+             and match.group(1) == child["native_id"]]
+    if len(bound) != 1 or bound[0] != launches[-1]:
+        raise ValueError("claude: the durable audit child is not the last canonical Agent launch")
+    launch_index, tool_id, _ = bound[0]
     report_uses = []
     settlements = []
     for index, row in enumerate(parent):
         attachment = row.get("attachment")
         if isinstance(attachment, dict) and attachment.get("hookName") == "Stop":
-            try:
-                stopped = json.loads(attachment.get("stdout", ""))
-            except ValueError:
-                stopped = {}
-            reasons = stopped.get("reasons", []) if isinstance(stopped, dict) else []
-            stopped_run = stopped.get("run", {}) if isinstance(stopped, dict) else {}
-            stopped_children = stopped_run.get("children", []) if isinstance(stopped_run, dict) else []
-            pending = [item for item in stopped_children if isinstance(item, dict)
-                       and item.get("resource_class") == "audit" and item.get("state") == "pending"]
-            if (stopped.get("type") == "Block" and stopped_run.get("status") == "active"
-                    and len(pending) == 1 and pending[0].get("child_id") == child["child_id"]
-                    and [reason.get("code") for reason in reasons
-                         if isinstance(reason, dict)] == ["audit.pending"]):
+            stdout = attachment.get("stdout")
+            if isinstance(stdout, str) and pending_audit_settlement(stdout, run):
                 settlements.append(index)
         message = row.get("message", {})
         for item in message.get("content", []) if isinstance(message, dict) else []:
@@ -234,8 +428,21 @@ def inspect_claude(parent: list[dict], child_rows: list[dict], child: dict) -> d
                     and item["name"].endswith("report_convergence")
                     and isinstance(item.get("id"), str)):
                 report_uses.append((index, item["id"]))
+    converged_ids = {
+        item.get("tool_use_id")
+        for row in parent
+        for item in (row.get("message", {}).get("content") or []
+                     if isinstance(row.get("message"), dict)
+                     and isinstance(row["message"].get("content"), list) else [])
+        if isinstance(item, dict) and item.get("type") == "tool_result"
+        and converged_report_view(_tool_result_text(item), run)
+    }
+    report_uses = [use for use in report_uses if use[1] in converged_ids]
+    # Each audit of a retry has its own Stop settlement; the receipt is bound to the settlement
+    # that follows the bound (last) launch, and there must be exactly one of those.
+    settlements = [index for index in settlements if index > launch_index]
     if len(report_uses) != 1 or len(settlements) != 1:
-        raise ValueError("claude: expected one pending Stop settlement and convergence tool use")
+        raise ValueError("claude: expected one pending Stop settlement and converged report")
     report_use_index, report_id = report_uses[0]
     settlement_index = settlements[0]
     agent_results = []
@@ -245,11 +452,9 @@ def inspect_claude(parent: list[dict], child_rows: list[dict], child: dict) -> d
         if row.get("type") == "queue-operation" and row.get("operation") == "enqueue":
             content = row.get("content")
             if isinstance(content, str):
-                match = _AGENT_MESSAGE.match(content)
-                if (match is not None and match.group(1) == child["native_id"]
-                        and content.rstrip().endswith("</agent-message>")
-                        and "[Subagent hand-back]" in content):
-                    notifications.append((index, content))
+                handback = handback_report(content)
+                if handback is not None and handback[0] == child["native_id"]:
+                    notifications.append((index, handback[1]))
         message = row.get("message", {})
         content = message.get("content") if isinstance(message, dict) else None
         for item in content if isinstance(content, list) else []:
@@ -260,12 +465,8 @@ def inspect_claude(parent: list[dict], child_rows: list[dict], child: dict) -> d
                 agent_results.append((index, item_text))
             if item.get("tool_use_id") != report_id:
                 continue
-            try:
-                value = json.loads(item_text)
-            except ValueError:
-                continue
-            if converged_result(value):
-                report_results.append((index, value))
+            if converged_report_view(item_text, run):
+                report_results.append((index, claude_report_result(child)))
     if len(agent_results) != 1 or len(notifications) != 1 or len(report_results) != 1:
         raise ValueError("claude: missing unique launch acknowledgement/notification/report result")
     launch_result_index, launch_text = agent_results[0]
@@ -276,11 +477,16 @@ def inspect_claude(parent: list[dict], child_rows: list[dict], child: dict) -> d
             or "Async agent launched successfully" not in launch_text
             or _VERDICT.search(launch_text)):
         raise ValueError("claude: launch acknowledgement does not bind one async native id")
-    child_row, child_message, _ = final_assistant(child_rows, "claude")
     handbacks = _claude_handbacks(child_rows)
     if len(handbacks) != 1:
         raise ValueError("claude: child transcript lacks one authoritative SubagentHandback")
-    _, child_handback = handbacks[0]
+    handback_index, child_handback = handbacks[0]
+    # The auditor's identity is the message that emitted the handback: a real Claude child ends
+    # with that tool call and no trailing text message.
+    child_row = child_rows[handback_index]
+    child_message = child_row["message"]
+    if not isinstance(child_message.get("model"), str) or not child_message["model"]:
+        raise ValueError("claude: child handback message lacks native model identity")
     child_verdict = verdict(child_handback)
     if child_row.get("agentId") != child["native_id"]:
         raise ValueError("claude: child transcript/native id mismatch")
@@ -289,6 +495,10 @@ def inspect_claude(parent: list[dict], child_rows: list[dict], child: dict) -> d
     if not (launch_index < launch_result_index < settlement_index < notification_index
             < report_use_index <= report_result_index):
         raise ValueError("claude: async launch/notification/convergence order is invalid")
+    require_row_versions(parent, [launch_index, launch_result_index, settlement_index,
+                                  notification_index, report_use_index, report_result_index],
+                         host_version, "parent")
+    require_row_versions(child_rows, [handback_index], host_version, "child")
     author_parent = [row for row in parent if row.get("isSidechain") is not True]
     _, author_message, _ = final_assistant(author_parent, "claude")
     return {
@@ -299,6 +509,12 @@ def inspect_claude(parent: list[dict], child_rows: list[dict], child: dict) -> d
     }
 def inspect_pi(parent: list[dict], child_rows: list[dict], child: dict,
                child_path: Path) -> dict:
+    """Project a Pi installed-host receipt from the native session files.
+
+    Pi session records carry no host version: the only ``version`` field is the session header's
+    file-format number (``3``), which is unrelated to the ``pi --version`` string, so there is
+    nothing to cross-check against the attested host version.
+    """
     calls: list[tuple[int, dict, dict]] = []
     results: list[tuple[int, dict]] = []
     for index, row in enumerate(parent):
@@ -323,9 +539,16 @@ def inspect_pi(parent: list[dict], child_rows: list[dict], child: dict,
             launch_calls.append((index, message, item))
         if item.get("name") == "report_convergence":
             report_calls.append((index, message, item))
-    if len(launch_calls) != 1 or len(report_calls) != 1:
-        raise ValueError("pi: expected one canonical child call and one convergence call")
-    launch_index, author_message, launch_call = launch_calls[0]
+    bound = [call for call in launch_calls if call[2].get("id") == child["native_id"]]
+    if len(bound) != 1 or bound[0] is not launch_calls[-1]:
+        raise ValueError("pi: the durable audit child is not the last canonical child call")
+    converged_ids = {message.get("toolCallId") for _, message in results
+                     if message.get("toolName") == "report_convergence"
+                     and converged_result(message.get("details"))}
+    report_calls = [call for call in report_calls if call[2].get("id") in converged_ids]
+    if len(report_calls) != 1:
+        raise ValueError("pi: expected one converged convergence call")
+    launch_index, author_message, launch_call = bound[0]
     report_index, _, report_call = report_calls[0]
     launch_id = launch_call.get("id")
     report_id = report_call.get("id")
@@ -416,7 +639,8 @@ def inspect(receipt: dict, host: str, expected_commit: str,
         state, child = state_facts(paths["run_state"], role)
         parent = jsonl(paths["transcript"])
         child_rows = jsonl(paths["child_session"])
-        facts = (inspect_claude(parent, child_rows, child) if host == "claude"
+        facts = (inspect_claude(parent, child_rows, child, run_handle(paths["run_state"]),
+                                host_version) if host == "claude"
                  else inspect_pi(parent, child_rows, child, paths["child_session"]))
         for key, value in (("audit_child_id", child["child_id"]),
                            ("audit_native_id", child["native_id"]),

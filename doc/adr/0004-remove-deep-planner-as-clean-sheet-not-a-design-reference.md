@@ -8,7 +8,7 @@ tags:
   - scope
 links:
   - target: 2
-    kind: relatesto
+    kind: Relates to
   - target: 16
     kind: Depended on by
 ---

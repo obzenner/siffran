@@ -24,7 +24,8 @@ import posixpath
 from typing import Any, Protocol
 
 from application.ports import CapturedFile, HarnessResult, WorkspaceCapture
-from core.freshness import FileObservation, ObservationState, canonical_digest
+from core.freshness import (FileObservation, ObservationState, canonical_digest,
+                            observations_digest)
 
 import sut_adapter  # the only composition bridge; no load-time cycle (sut_adapter late-imports this)
 
@@ -59,7 +60,6 @@ class ConformanceDriver(Protocol):
     def compact(self) -> dict: ...
     def artifacts(self) -> tuple[dict, ...]: ...
     def operational_state(self) -> dict: ...
-    def workspace_observe_calls(self) -> int: ...
     # D4-S2 policy-free telemetry seams: observation history (path batches/results) and harness
     # invocation attestations. Trusted lifecycle events use the real private composition ingress
     # (trusted_child_event/trusted_evidence_leaf/trusted_audit_verdict); fake telemetry alone is
@@ -87,13 +87,6 @@ class FakeClock:
 
     def __init__(self, start: float = 0.0) -> None:
         self._t = float(start)
-
-    def now(self) -> float:
-        self._t += 1.0
-        return self._t
-
-    def advance(self, seconds: float) -> None:
-        self._t += float(seconds)
 
     def read(self) -> float:
         return self._t
@@ -176,7 +169,7 @@ class FakeWorkspace:
             observation = FileObservation(row["path"], ObservationState(row["state"]), sha)
             files.append(CapturedFile(observation, self._files.get(row["path"])
                                       if row["state"] == "present" else None))
-        basis = canonical_digest([(r["path"], r["state"], r["sha256"]) for r in out])
+        basis = observations_digest(tuple(item.observation for item in files))
         return WorkspaceCapture(basis, tuple(files))
 
     def observe_history(self) -> tuple[tuple[tuple[str, ...], tuple[dict, ...]], ...]:
@@ -231,6 +224,10 @@ class FakeRunRepository:
     def _mint(self) -> str:
         self._counter += 1
         return f"r{self._counter}"
+
+    def generations(self, project_id, run_id):
+        return sorted(key.generation for key in self._store
+                      if key.project_id == project_id and key.run_id == run_id)
 
     def read(self, key):
         entry = self._store.get(key)

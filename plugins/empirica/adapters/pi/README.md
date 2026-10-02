@@ -6,28 +6,51 @@ surface as the Claude and Codex adapters and owns no convergence policy.
 ## Capability profile
 
 The promoted profile is qualified on Pi `0.84.1` and admits compatible Pi releases
-`>=0.84.1,<0.85.0`; receipts still record the exact observed Pi version. The controlled
+`>=0.84.1,<0.90.0`; receipts still record the exact observed Pi version. The controlled
 `pi-subagents` dependency remains pinned at `0.50.0`. The profile tier is `foreground_only`, with
 `promotion_status=promoted` after an installed-host foreground trace reached guarded
 `Allow(converged=true)`. `pi-subagents` must provide its structured `subagent` tool.
 Asynchronous audit execution is not supported and is never silently downgraded.
 
+## Governed initialization
+
+4.0.0 adds exact author-sized run-configuration approval before investigation. The author chooses
+all three ceilings from the task and selected graph and supplies the bounded rationale; this adapter
+never chooses ceilings. Deliberative mode uses `ctx.hasUI` and one documented `ctx.ui.custom()`
+component for every change; cancel/no custom UI fails closed. ↑/↓
+moves through controls, digits edit budgets, ←/→ chooses the action, Enter
+activates it, and Esc dismisses. Approval covers
+budget ceilings and control mode while showing the goal read-only; graph content and reviewer
+configuration are not approvable. The review renders the escaped rationale as **Agent sizing
+rationale — unverified**. A human amendment changes ceilings only and opens a read-only locked
+confirmation showing original versus amended values plus the warning that the rationale was not
+regenerated. Interactive `--auto` opens this same dialog exactly once before investigation, then
+accepts only non-raising revisions without another dialog. Missing UI never downgrades to delegation.
+Delegated auto requires recorded operator provenance and remains inside 8/1/2. See
+[governance](../../skills/empirica/references/governance.md) for limits, identity classes,
+and fresh-generation compatibility. These UI flows have fast simulated-control coverage and
+real-service governance coverage; the historical profile receipt does not certify native human
+approval for 4.0.0. Follow the operator-led procedure printed by `make native-qualification` for
+that boundary.
+
 ## Surface
 
 | Pi surface | v2 operation | Behaviour |
 |---|---|---|
-| `/empirica <goal>` | `StartRun` | Starts a durable run, persists the opaque handle, and injects public-tool guidance. |
+| `/empirica <goal>` | `StartRun` | Starts a durable run, persists the opaque handle, and injects public-tool guidance. Refuses before creating a run when the bundled pi-subagents `subagent` tool is not active, because no independent audit could launch. |
 | `empirica_observe` | `ObserveAction` | Accepts only canonical public author kinds. Trusted kinds are rejected locally and by schema. |
-| `empirica_read` | `GetRun`, `GetArgument`, `GetContract`, `RestoreRun` | Returns the complete typed result; resolves a session handle when needed. |
+| `empirica_read` | `GetRun`, `GetArgument`, `GetContract`, `RestoreRun` | Returns a deterministic plain-text author view; resolves a session handle when needed. |
 | `report_convergence` | `EvaluateRun(report_convergence | stop)` | Fails closed unless the guarded response is `Allow`; `intent: stop` records an honest non-converged terminal. |
 | `tool_call(subagent)` | `child_reserve` + private lifecycle | Binds the canonical auditor, forces foreground execution, injects the dossier, and records launching/pending facts. |
 | `tool_result(subagent)` | private `audit_identity` + `audit_verdict` | Correlates by `toolCallId`, redacts before the first await, binds the verdict to the final native assistant record in the host-generated child session, and admits only one exact fenced verdict. |
 | compaction | `RestoreRun` | Carries the opaque handle and restores the selected run. |
 
-The packaged auditor pins `amazon-bedrock/eu.anthropic.claude-opus-4-8`, qualified on stock Pi
-`0.84.1` with a provider-qualified registry identity. Deployments may override it with
-`EMPIRICA_PI_AUDITOR_MODEL` when their registry uses a concrete private provider alias; the adapter
-resolves that launch contract and rejects shadowed agent definitions and author-supplied overrides.
+The canonical auditor has no plugin model pin. The adapter chooses the project or user scope that
+resolves this package's own auditor, then derives the execution model from host settings in order:
+`subagents.agentOverrides["empirica.empirica-auditor"].model`, `subagents.defaultModel`, then the
+main model. It rejects an unavailable reviewer or one in the same identity class before launch,
+and rejects shadowed agent definitions and author-supplied overrides. `EMPIRICA_PI_AUDITOR_MODEL` no longer configures
+the auditor.
 The adapter never trusts `details.results[].model`, which is requested launch configuration.
 Instead it reads the exact result row's host-generated `sessionFile` and accepts identity only when
 the final native assistant record carries concrete provider/model fields and its sole verdict equals
@@ -42,16 +65,29 @@ The adapter-private Python subprocess exposes no Pi tool. It is the imperative i
 host-observed attribution, child events, and audit verdicts. Public tools cannot express these
 payloads.
 
+## Canonical audit call
+
+Follow the complete packaged-auditor invocation and rejection rules in
+[audit](../../skills/empirica/references/audit.md).
+
 ## Hard gate
 
 With a non-null run handle, `report_convergence` permits only a centrally guarded `Allow`.
 `Block`, `Inert`, every `Fault`, malformed responses, and transport failures deny. The central
 guard enforces `converged=true` iff `run.status=converged`.
 
+Two Blocks are the exception and settle nonterminally: the sole human-approval wait (ADR-63) and
+the sole `budget.exhausted` blocker of an active run (ADR-64 interim). Pi permits the call, prints
+the contract-owned notice (`settlement_notices`) ahead of the preserved Block, keeps the run
+active, and opens no dialog and makes no private call. Mixed reasons and terminal runs still
+deny.
+
 Pi has no native completion veto; the model must call `report_convergence` before making a
 convergence claim. A turn can otherwise finish without a terminal decision.
 
 ## Validation
 
-Run `make check-pi` for deterministic adapter coverage. Profile promotion additionally requires
-`make empirica-host-live-check` with a retained installed-Pi receipt.
+Run `make check-pi` for fast deterministic adapter coverage. Run the targeted diagnostics in
+`doc/testing.md` when changing persistence or full host-flow boundaries. Profile qualification is
+operator-led via `make native-qualification`; release promotion additionally requires
+`make empirica-host-live-check` with an honestly applicable retained installed-Pi receipt.

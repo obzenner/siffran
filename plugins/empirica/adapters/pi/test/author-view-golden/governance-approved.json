@@ -1,0 +1,146 @@
+{
+  "result": {
+    "type": "Allow",
+    "converged": false,
+    "run": {
+      "id": "er2:eyJnIjoxLCJwIjoiczI1Ni0xNDhkZTljNWE3YTQ0ZDE5ZTU2Y2Q5YWUxYTU1NGJmNjc4NDdhZmIwYzU4ZjZlMTJmYTI5YWM3ZGRmY2E5OTQwIiwicyI6InMyNTYtMDQzYTcxODc3NGM1NzJiZDhhMjVhZGJlYjFiZmNkNWMwMjU2YWUxMWNlY2Y5ZjljM2Y5MjVkMGU1MmJlYWY4OSJ9:zFWArl1x3pB-UWMmhkZ1IgidXrUoWSFArvzxWrE7E3s",
+      "goal": "governed task",
+      "invocation": {
+        "host": "test",
+        "interactive": true,
+        "signal": "test",
+        "delegation": false
+      },
+      "status": "active",
+      "governance": {
+        "state": "approved",
+        "control_mode": "deliberative",
+        "plan_revision": 0,
+        "approved_digest": "sha256:401ebe634c8dec141904f52be4c79f08c913ba58c9c752924ed557cf6b143ffd",
+        "approval_kind": "host_ui",
+        "proposal": {
+          "budgets": {
+            "max_passes": 8,
+            "max_spawns": 1,
+            "max_audit_spawns": 2
+          },
+          "rationale": "One gating claim, no experiments; one audit plus one retry."
+        },
+        "context": {
+          "author": null,
+          "ingress": "pi_ui",
+          "approval_capability": "human_configuration",
+          "delegation": false,
+          "interactive": true
+        },
+        "proposal_digest": "sha256:401ebe634c8dec141904f52be4c79f08c913ba58c9c752924ed557cf6b143ffd",
+        "interactions_remaining": {
+          "proposal": 2,
+          "total": 127
+        },
+        "prompt_error": null,
+        "budgets": {
+          "max_passes": 8,
+          "passes_used": 0,
+          "max_spawns": 1,
+          "spawns_used": 0,
+          "max_audit_spawns": 2,
+          "audit_spawns_used": 0
+        },
+        "remaining": {
+          "max_passes": 8,
+          "max_spawns": 1,
+          "max_audit_spawns": 2
+        },
+        "request_ready": true,
+        "display_ready": true,
+        "next_action": "investigation.record",
+        "first_approval": true,
+        "pre_approval_revisions": 0,
+        "post_approval_revisions": 0
+      },
+      "contract": {
+        "id": "empirica/public",
+        "version": "3.0.0",
+        "digest": "sha256:aa5a3d52b597af56d32d567ad5ec440710333f7ada4acf7cc6c7a8ed90072a9e",
+        "relevant_sections": []
+      },
+      "obligations": {
+        "active": [
+          {
+            "id": "obligation.route",
+            "required": "Record routing before investigation.",
+            "observed": [],
+            "missing": null,
+            "next": [],
+            "status": "satisfied"
+          },
+          {
+            "id": "obligation.graph",
+            "required": "Propose a valid claim graph from supplied context before requesting review.",
+            "observed": [],
+            "missing": null,
+            "next": [],
+            "status": "satisfied"
+          },
+          {
+            "id": "obligation.approval",
+            "required": "Obtain exact host-mediated approval for the current run configuration.",
+            "observed": [],
+            "missing": null,
+            "next": [],
+            "status": "satisfied"
+          },
+          {
+            "id": "obligation.investigation",
+            "required": "Record investigation only after routing and current approval.",
+            "observed": [],
+            "missing": null,
+            "next": [],
+            "status": "residual"
+          },
+          {
+            "id": "claim:C0",
+            "required": "supplied uncertainty",
+            "observed": [],
+            "missing": {
+              "code": "claim.research_missing",
+              "target_claim_id": "C0",
+              "parameters": {}
+            },
+            "next": [
+              "research.record"
+            ],
+            "status": "residual"
+          }
+        ],
+        "deferred": []
+      },
+      "residuals": [],
+      "freshness": {
+        "changes": []
+      },
+      "children": [],
+      "audit": {
+        "state": "required",
+        "independence": "unverified",
+        "findings": []
+      },
+      "next_actions": [
+        "investigation.record"
+      ],
+      "untrusted_delimiters": {
+        "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+        "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+      },
+      "host": {
+        "profile_id": "pi@0.84.1+pi-subagents@0.50.0",
+        "tier": "foreground_only",
+        "missing_capabilities": [
+          "host.async_unsupported"
+        ]
+      }
+    }
+  },
+  "text": "Allow (converged=false) active — governance: approved; passes/spawns/audits: 0/8 0/1 0/2\nrun_id: er2:eyJnIjoxLCJwIjoiczI1Ni0xNDhkZTljNWE3YTQ0ZDE5ZTU2Y2Q5YWUxYTU1NGJmNjc4NDdhZmIwYzU4ZjZlMTJmYTI5YWM3ZGRmY2E5OTQwIiwicyI6InMyNTYtMDQzYTcxODc3NGM1NzJiZDhhMjVhZGJlYjFiZmNkNWMwMjU2YWUxMWNlY2Y5ZjljM2Y5MjVkMGU1MmJlYWY4OSJ9:zFWArl1x3pB-UWMmhkZ1IgidXrUoWSFArvzxWrE7E3s\nproposal rationale: <<<EMPIRICA_UNTRUSTED_DATA>>>One gating claim, no experiments; one audit plus one retry.<<<END_EMPIRICA_UNTRUSTED_DATA>>>\nAudit: required\n\nOpen obligations:\n  obligation.investigation: Record investigation only after routing and current approval.\n  claim:C0: <<<EMPIRICA_UNTRUSTED_DATA>>>supplied uncertainty<<<END_EMPIRICA_UNTRUSTED_DATA>>>\n    missing: claim.research_missing\n    next: empirica_observe kind=research\n\nSatisfied obligations:\n  obligation.route\n  obligation.graph\n  obligation.approval\n\nNext:\n  empirica_observe kind=investigate"
+}

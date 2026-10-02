@@ -4,17 +4,19 @@ title: Forbid inkrot (/hr); require methodologist (/think) as companion
 status: accepted
 date: 2026-07-17
 tags:
-  - architecture
-  - dependencies
+- architecture
+- dependencies
 links:
-  - target: 5
-    kind: relatesto
-  - target: 12
-    kind: Depended on by
-  - target: 15
-    kind: relatesto
-  - target: 16
-    kind: Depended on by
+- target: 5
+  kind: Relates to
+- target: 12
+  kind: Depended on by
+- target: 15
+  kind: Relates to
+- target: 16
+  kind: Depended on by
+- target: 62
+  kind: Amended by
 ---
 
 # Forbid inkrot (/hr); require methodologist (/think) as companion

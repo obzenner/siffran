@@ -2,11 +2,13 @@
   "protocol": "empirica/v2",
   "state_schema": "empirica.run/2",
   "goal": "Prove unknown status is rejected.",
-  "status": "not_a_status",
-  "modes": {
-    "multi_provider": false,
-    "cli_exec": false
+  "invocation": {
+    "host": "test",
+    "interactive": true,
+    "signal": "fixture",
+    "delegation": false
   },
+  "status": "not_a_status",
   "budgets": {
     "max_passes": 1,
     "passes_used": 0,
@@ -23,5 +25,26 @@
   "stamp_seq": 0,
   "last_derivation_digest": null,
   "children": [],
-  "committed_artifact_head_id": null
+  "committed_artifact_head_id": null,
+  "governance": {
+    "state": "pending",
+    "control_mode": "deliberative",
+    "plan_revision": 0,
+    "approved_digest": null,
+    "approval_kind": null,
+    "receipts": [],
+    "proposal": {
+      "budgets": {
+        "max_passes": 1,
+        "max_spawns": 0,
+        "max_audit_spawns": 1
+      }
+    },
+    "context": {
+      "author": null,
+      "ingress": "unavailable",
+      "approval_capability": "unavailable"
+    },
+    "proposal_digest": "sha256:3eb306f346a326af16feec9ac67cbbff73ddbbc87ade683caf90fbc62918eb0b"
+  }
 }

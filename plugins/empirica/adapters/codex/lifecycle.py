@@ -1,17 +1,17 @@
 """Codex CLI 0.146.0 hook translation for the shared ``empirica/v2`` bridge (D6-C C2b).
 
-This module owns native payload parsing and native JSON hook output only.  Run allocation,
+This module owns native payload parsing and native JSON hook output only. Run allocation,
 ordering, budgets, evidence, audit coverage, and convergence remain in the application/core.
 
-Codex is a complete exact-profile host (``codex-cli@0.146.0``). Public author/read
-operations are exposed through the shared MCP server. Hooks allocate and resolve durable runs,
-inject the opaque handle, enforce Stop, and own a bounded ``codex exec`` foreground auditor
-because native 0.146.0 hooks cannot observe arbitrary child output. Trusted evidence,
-attribution, child events, and audit verdicts remain adapter-private.
+Codex is the documented refusal host (``codex-cli@0.146.0``, ``observational`` tier,
+``audit_execution: unavailable``). Public author/read operations are exposed through the shared
+MCP server. Hooks allocate and resolve durable runs, inject the opaque handle, and enforce Stop.
+No auditor is launched: native 0.146.0 hooks cannot observe the verdict-producing child, so when
+an audit is owed Stop rejects the audit reservation and the run stays blocked. Compaction
+restore is not provided on Codex. Trusted evidence, attribution, and child events remain
+adapter-private.
 
-The deterministic spike harness remains the only machine approver. The managed auditor may
-block convergence but cannot manufacture machine evidence or write trusted state through a
-model-callable surface.
+The deterministic spike harness remains the only machine approver.
 """
 from __future__ import annotations
 
@@ -23,19 +23,19 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from adapters.state import project_id, run_id
+from adapters import bridge as application_bridge
+from adapters.invocation import provenance, split_leading_flags
+from adapters.public_tools import TOOL_NAMES
+from .transport import CODEX_PROFILE_ID
 
 from .correlation import PROTOCOL, request_id as new_request_id
 from .transport import BridgeTransport, Transport
-from .audit import execute_audit
+from .audit import reject_unsupported_audit
 
 _ACTIVATION = re.compile(
     r"^\s*(?:\$empirica(?::empirica)?|/empirica(?::empirica)?)\b(?P<args>.*)$",
     re.DOTALL,
 )
-_MODE_FLAGS = {"--multi-provider": "multi_provider", "--cli-exec": "cli_exec"}
-_MODE_ENV = {"multi_provider": "EMPIRICA_MODE_MULTI_PROVIDER", "cli_exec": "EMPIRICA_MODE_CLI_EXEC"}
-_TRUE = frozenset({"1", "true", "on", "enabled"})
-_FALSE = frozenset({"0", "false", "off", "disabled", ""})
 
 
 class SelectorError(ValueError):
@@ -74,54 +74,10 @@ def explicit_activation(payload: Mapping[str, object]) -> str | None:
     if not isinstance(prompt, str):
         return None
     match = _ACTIVATION.match(prompt)
-    return match.group("args").strip() if match else None
-
-
-def _activation_args(payload: Mapping[str, object]) -> str:
-    args = explicit_activation(payload)
-    return args if isinstance(args, str) else ""
-
-
-def _env_mode(environ: Mapping[str, str], mode: str) -> bool | None:
-    raw = environ.get(_MODE_ENV[mode])
-    if raw is None:
+    if not match:
         return None
-    value = raw.strip().lower()
-    if value in _TRUE:
-        return True
-    if value in _FALSE:
-        return False
-    return None
-
-
-def _resolve_modes(args: str, environ: Mapping[str, str]) -> dict[str, bool]:
-    """Resolve env > leading invocation flag > default for each known mode."""
-    tokens = args.split()
-    flags: dict[str, bool] = {}
-    index = 0
-    while index < len(tokens) and tokens[index].startswith("--"):
-        token = tokens[index]
-        if token in _MODE_FLAGS:
-            flags[_MODE_FLAGS[token]] = True
-        elif token.startswith("--no-") and f"--{token[5:]}" in _MODE_FLAGS:
-            flags[_MODE_FLAGS[f"--{token[5:]}"]] = False
-        index += 1
-    modes: dict[str, bool] = {}
-    for mode in ("multi_provider", "cli_exec"):
-        env = _env_mode(environ, mode)
-        if env is not None:
-            modes[mode] = env
-        elif mode in flags:
-            modes[mode] = flags[mode]
-    return modes
-
-
-def _goal(args: str, fallback: str) -> str:
-    tokens = args.split()
-    index = 0
-    while index < len(tokens) and tokens[index].startswith("--"):
-        index += 1
-    return " ".join(tokens[index:]).strip() or fallback
+    args = match.group("args")
+    return args[1:] if args[:1].isspace() else args
 
 
 def _positive_env(environ: Mapping[str, str], name: str, *, zero: bool = False) -> int | None:
@@ -143,22 +99,24 @@ def build_start_run_request(
 ) -> dict | None:
     """Translate an explicit ``$empirica`` prompt into an exact v2 ``StartRun`` envelope.
 
-    No ``actor`` field is emitted.  Explicit max values are nested under ``budgets`` and omitted
-    when absent; resolved modes are emitted only when non-empty.  Returns ``None`` when the prompt
-    does not explicitly start Empirica.
+    No ``actor`` field is emitted. Explicit max values are nested under ``budgets`` and omitted
+    when absent. Returns ``None`` when the prompt does not explicitly start Empirica.
     """
     args = explicit_activation(payload)
     if args is None:
         return None
     env = os.environ if environ is None else environ
+    leading, goal = split_leading_flags(args)
     command: dict = {
         "type": "StartRun",
         "selector": selector_from_payload(payload),
-        "goal": _goal(args, "empirica run (goal unspecified)"),
+        "goal": goal,
+        "control_mode": "auto" if "--auto" in leading else "deliberative",
+        "invocation": provenance(
+            "codex", None, "codex hook has no interactive signal", env,
+            profile_id=CODEX_PROFILE_ID,
+        ),
     }
-    modes = _resolve_modes(args, env)
-    if modes:
-        command["modes"] = modes
     budgets: dict[str, int] = {}
     if (passes := _positive_env(env, "EMPIRICA_MAX_PASSES")) is not None:
         budgets["max_passes"] = passes
@@ -188,25 +146,26 @@ def build_resolve_request(
 
 # --- lifecycle entry points ---------------------------------------------------
 
-def _dispatch(payload: Mapping[str, object], request: dict,
-               transport: Transport | None = None) -> dict:
+def _dispatch(request: dict, transport: Transport | None = None) -> dict:
     return (transport if transport is not None else BridgeTransport()).dispatch(request)
 
 
-def _resolve_run(payload: Mapping[str, object], transport: Transport | None = None) -> str | None:
+def _resolve_run(payload: Mapping[str, object], transport: Transport | None = None, *, strict=False) -> str | None:
     """``ResolveRun`` through the strict bridge shell; return a run handle only when resolved.
 
-    At D6 the no-location run port reports every opaque ID unresolved, so this always
-    returns ``None``.  Any transport failure is treated as no resolvable run rather than
-    wedging the host event.
+    Transport failure is inert for observational hooks and raises for strict admission hooks.
     """
     try:
-        response = _dispatch(payload, build_resolve_request(payload), transport)
-    except Exception:  # noqa: BLE001 - never wedge a host event on transport failure
+        response = _dispatch(build_resolve_request(payload), transport)
+    except Exception:
+        if strict:
+            raise
         return None
     result = response.get("result") if isinstance(response, dict) else None
     run = result.get("run") if isinstance(result, dict) else None
     handle = run.get("id") if isinstance(run, dict) else None
+    if strict and not handle and not (isinstance(result, dict) and result.get("type") == "Inert" and result.get("reason") == "no_run"):
+        raise RuntimeError("run resolution unavailable")
     return handle if isinstance(handle, str) and handle else None
 
 
@@ -216,17 +175,28 @@ def _context_output(event: str, context: str) -> dict:
 
 def _start(payload: dict) -> dict | None:
     """UserPromptSubmit: best-effort activation, always fail open."""
-    request = build_start_run_request(payload)
-    if request is None:
+    args = explicit_activation(payload)
+    if args is None:
         return None
-    response = _dispatch(payload, request)
+    leading, _ = split_leading_flags(args)
+    unknown = [flag for flag in leading if flag != "--auto"]
+    if unknown:
+        return {"systemMessage": "empirica activation failed: unknown flags: " + " ".join(unknown)}
+    request = build_start_run_request(payload)
+    response = _dispatch(request)
     result = response.get("result", {}) if isinstance(response, dict) else {}
     if result.get("type") == "Fault":
         code = result.get("code")
         text = code if isinstance(code, str) and code else "unknown"
         return {"systemMessage": f"empirica activation failed: {text}"}
+    refusal = application_bridge.start_refusal(result)
+    if refusal is not None:
+        # A refusal is a decision, not an activation failure: block the prompt with the reason.
+        return {"decision": "block", "reason": f"Empirica did not start: {refusal}"}
     run = result.get("run", {}) if isinstance(result, dict) else {}
     handle = run.get("id", "unresolved")
+    if handle != "unresolved":
+        _refresh_governance(payload, handle)
     context = (
         f"Empirica v2 is active. Opaque run handle: {handle}. "
         "Use empirica_observe for route/graph/research/spike/freeze actions, "
@@ -237,10 +207,38 @@ def _start(payload: dict) -> dict | None:
     return _context_output("UserPromptSubmit", context)
 
 
+def _refresh_governance(payload: dict, handle: str) -> dict:
+    model = payload.get("model")
+    return application_bridge.trusted_governance_context(CODEX_PROFILE_ID, handle, {
+        "author": {"provider_id": "openai", "model_id": model,
+                   "source": "codex-hook"}
+        if isinstance(model, str) and model else None, "ingress": "unavailable"})
+
+
 def _pre_tool_use(payload: dict) -> dict | None:
-    """PreToolUse: ``ResolveRun`` through the strict shell; inert when unresolved."""
-    _resolve_run(payload)
-    return None  # D6: no active run → no cap or stamp to enforce (D7-D10 own these)
+    """Only exact absence is inert. Unknown storage/approval denies native investigation."""
+    try:
+        handle = _resolve_run(payload, strict=True)
+        if handle is None:
+            return None
+        refreshed = _refresh_governance(payload, handle)
+        if refreshed.get("result", {}).get("type") not in {"Allow", "Inert"}:
+            raise RuntimeError("governance context unavailable")
+        name = payload.get("tool_name", "")
+        if name in {prefix + tool for prefix in ("", "mcp__empirica__")
+                    for tool in TOOL_NAMES}:
+            return None
+        result = _dispatch({"protocol": PROTOCOL, "request_id": new_request_id(payload, "investigate"),
+            "command": {"type": "ObserveAction", "run_id": handle, "action": {"kind": "investigate"}}})["result"]
+        if result.get("type") == "Allow":
+            return None
+        reason = result.get("reasons", [{}])[0].get("message", "Empirica investigation denied")
+    except SelectorError:
+        return None
+    except Exception:
+        reason = "Empirica run/approval unavailable; investigation denied"
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                    "permissionDecisionReason": reason}}
 
 
 def build_evaluate_request(payload: Mapping[str, object], run_id: str) -> dict:
@@ -259,16 +257,21 @@ def _audit_required(result: Mapping[str, object]) -> bool:
 
 
 def _stop(payload: dict) -> dict | None:
-    """Stop: enforce convergence and run one adapter-owned bound audit when it is due."""
-    handle = _resolve_run(payload)
-    if handle is None:
-        return None
+    """Stop: allow only ``Allow(converged=true)``; reject the audit reservation when one is owed.
+
+    Codex cannot audit, so an owed audit is rejected and the run is re-evaluated (it stays
+    blocked). Any failure on an active located run, including the rejection, denies Stop.
+    """
     try:
-        response = _dispatch(payload, build_evaluate_request(payload, handle))
+        handle = _resolve_run(payload, strict=True)
+        if handle is None:
+            return None
+        _refresh_governance(payload, handle)
+        response = _dispatch(build_evaluate_request(payload, handle))
         result = response.get("result", {}) if isinstance(response, dict) else {}
         if isinstance(result, Mapping) and _audit_required(result):
-            execute_audit(payload, handle)
-            response = _dispatch(payload, build_evaluate_request(payload, handle))
+            reject_unsupported_audit(handle)
+            response = _dispatch(build_evaluate_request(payload, handle))
     except Exception:  # active located run: evaluation/audit failure must deny Stop
         return {"decision": "block", "reason": "Empirica convergence gate unavailable."}
     result = response.get("result", {}) if isinstance(response, dict) else {}
@@ -282,14 +285,6 @@ def _stop(payload: dict) -> dict | None:
     if result.get("type") == "Inert":
         return None
     return {"decision": "block", "reason": "Empirica convergence gate unavailable."}
-
-
-def _restore(payload: dict) -> dict | None:
-    """SessionStart:compact: ``ResolveRun`` through the strict shell; inert when unresolved."""
-    if payload.get("source") != "compact":
-        return None
-    _resolve_run(payload)
-    return None  # D6: no active run to restore (D7 owns run identity)
 
 
 def _payload() -> dict:
@@ -308,7 +303,6 @@ def main(argv: list[str] | None = None) -> int:
             "activate": _start,
             "pre-tool-use": _pre_tool_use,
             "stop": _stop,
-            "restore": _restore,
         }[action](payload)
     except KeyError:
         print(f"unknown Codex hook action: {action}", file=sys.stderr)

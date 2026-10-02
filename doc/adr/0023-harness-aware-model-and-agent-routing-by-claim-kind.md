@@ -1,26 +1,26 @@
 ---
 number: 23
-title: "Harness-aware model and agent routing by claim kind"
+title: Harness-aware model and agent routing by claim kind
 status: superseded
 date: 2026-07-24
 tags:
-  - architecture
-  - harness
-  - routing
-  - cost
+- architecture
+- harness
+- routing
+- cost
 links:
-  - target: 24
-    kind: Superseded by
-  - target: 21
-    kind: Depends on
-  - target: 20
-    kind: Depends on
-  - target: 12
-    kind: relatesto
-  - target: 17
-    kind: relatesto
-  - target: 13
-    kind: relatesto
+- target: 24
+  kind: Superseded by
+- target: 21
+  kind: Depends on
+- target: 20
+  kind: Depends on
+- target: 12
+  kind: Relates to
+- target: 17
+  kind: Relates to
+- target: 13
+  kind: Relates to
 ---
 
 # Harness-aware model and agent routing by claim kind

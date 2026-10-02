@@ -150,13 +150,15 @@ class ProjectionContextTests(ConformanceCase):
         self.assertEqual(rev_out, rev_expected,
                          "reversed reason input must produce the corresponding canonical order")
 
-    # 41 — GetContract index/full and representative sections incl presentation/selector: exact projection
+    # 41 — GetContract index and representative sections incl presentation/selector: exact projection.
+    # `target: full` is a negative control: it left the public wire and must be refused.
     def test_get_contract_returns_exact_projection(self):
         drv = self.bind_driver(
             "D9", "case-41",
-            "GetContract index/full and representative sections including presentation/selector "
-            "return exact requested projection, canonical identity/digest, no sibling target payload")
-        for target, extra in (("index", {}), ("full", {}),
+            "GetContract index and representative sections including presentation/selector "
+            "return exact requested projection, canonical identity/digest, no sibling target payload; "
+            "target: full is refused")
+        for target, extra in (("index", {}),
                               ("section", {"section_id": "evidence/freshness"}),
                               ("section", {"section_id": "presentation/selector"})):
             with self.subTest(target=target, section=extra.get("section_id")):
@@ -165,6 +167,12 @@ class ProjectionContextTests(ConformanceCase):
                 cr = self.assert_contract_result(resp, target, section_id=extra.get("section_id"))
                 self.assertEqual(cr.get("digest"), contract_digest(),
                                  "contract_result digest must equal the canonical registry digest")
+        # QUAL-1 negative control: target: full is no longer a public projection and is refused.
+        # Use raw_dispatch so the malformed request reaches the SUT and yields a typed Fault.
+        refused = self.raw_dispatch(drv, get_contract(target="full"))
+        self.assert_fault(refused, code="invalid_request", fail_direction="closed")
+        self.assertIsNone(refused["result"].get("contract_result"),
+                          "a refused GetContract full must not carry any contract_result")
         # unknown section is Fault/closed (case 39 covers the seam; assert here too)
         unknown = self.dispatch(drv, get_contract(target="section", section_id="does/not/exist"))
         self.assert_fault(unknown, fail_direction="closed")

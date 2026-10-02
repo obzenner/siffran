@@ -1,18 +1,22 @@
-// Pure translation tests: request builder semantics, mode parsing, gate
+// Pure translation tests: request builder semantics, invocation parsing, gate
 // decisions, notices, and the subagent classifier. No core, no bridge — only
 // the pure functions in translate.ts.
 //
 // Builder structural shape and schema conformance are proven by parity.test.ts
 // (lexical projection + emitted-builder jsonschema). This file retains only the
 // SEMANTICS the schema cannot prove: optional-field omission/default behaviour,
-// mode-flag parsing, gate decision mapping, and notice text/type.
+// invocation-flag parsing, gate decision mapping, and notice text/type.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import * as path from "node:path";
 
 import {
   startRunRequest,
-  parseModeFlags,
+  splitLeadingFlags,
+  parseInvocationFlags,
   gateFromDecision,
   convergenceNotice,
   statusNotice,
@@ -26,45 +30,56 @@ import { type Result } from "../src/contract.ts";
 
 const SEL = { project: "p", session: "s" };
 const RID = "rid-1";
+const INVOCATION = { host: "pi", interactive: true, signal: "ctx.mode=tui", delegation: false };
 const RUN = { id: "h", status: "active" as const };
+const SPLIT_CASES = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../../contracts/empirica/v2/invocation-split-cases.json");
 
 // --- request builder semantics (omission/default — schema cannot prove) -----
 
-test("startRunRequest omits budgets and modes when not supplied (omission semantics)", () => {
-  const req = startRunRequest(SEL, "g", RID);
+test("startRunRequest omits budgets when not supplied (omission semantics)", () => {
+  const req = startRunRequest(SEL, "g", RID, INVOCATION);
   if (req.command.type === "StartRun") {
     assert.equal("budgets" in req.command, false, "budgets must be absent, not undefined");
-    assert.equal("modes" in req.command, false, "modes must be absent, not undefined");
   }
 });
 
-test("startRunRequest carries budgets and modes only when supplied", () => {
-  const req = startRunRequest(SEL, "g", RID, {
-    maxPasses: 3, maxSpawns: 1, maxAuditSpawns: 2, modes: { cli_exec: true },
+test("startRunRequest carries budgets only when supplied", () => {
+  const req = startRunRequest(SEL, "g", RID, INVOCATION, {
+    maxPasses: 3, maxSpawns: 1, maxAuditSpawns: 2,
   });
   if (req.command.type === "StartRun") {
     assert.deepEqual(req.command.budgets,
       { max_passes: 3, max_spawns: 1, max_audit_spawns: 2 });
-    assert.deepEqual(req.command.modes, { cli_exec: true });
   }
 });
 
-// --- mode flags --------------------------------------------------------------
+// --- invocation flags --------------------------------------------------------
 
-test("parseModeFlags surfaces unknown leading flags", () => {
-  assert.deepEqual(parseModeFlags("--cli-exec --wat goal words"), {
-    goal: "goal words", modes: { cli_exec: true }, unknownFlags: ["--wat"],
+test("splitLeadingFlags matches the shared Python host split table", () => {
+  const cases = JSON.parse(readFileSync(SPLIT_CASES, "utf8")) as
+    Array<{ args: string; flags: string[]; goal: string }>;
+  for (const row of cases) {
+    assert.deepEqual(splitLeadingFlags(row.args), { flags: row.flags, goal: row.goal }, row.args);
+  }
+});
+
+test("removed flags surface as unknown", () => {
+  assert.deepEqual(parseInvocationFlags("--cli-exec --multi-provider goal words"), {
+    goal: "goal words", unknownFlags: ["--cli-exec", "--multi-provider"],
   });
 });
 
-test("parseModeFlags parses multi-provider and no- variants", () => {
-  assert.deepEqual(parseModeFlags("--multi-provider --no-cli-exec g"), {
-    goal: "g", modes: { multi_provider: true, cli_exec: false }, unknownFlags: [],
+test("auto is the only recognized invocation flag", () => {
+  assert.deepEqual(parseInvocationFlags("--auto goal"), {
+    goal: "goal", unknownFlags: [], controlMode: "auto",
   });
+  assert.equal(parseInvocationFlags("goal --auto").controlMode, undefined);
 });
 
-test("parseModeFlags empty args yields empty modes and goal", () => {
-  assert.deepEqual(parseModeFlags(""), { goal: "", modes: {}, unknownFlags: [] });
+test("parseInvocationFlags preserves empty and verbatim goals", () => {
+  assert.deepEqual(parseInvocationFlags(""), { goal: "", unknownFlags: [] });
+  assert.equal(parseInvocationFlags("  exact goal  ").goal, "  exact goal  ");
 });
 
 // --- gateFromDecision (table-driven) -----------------------------------------

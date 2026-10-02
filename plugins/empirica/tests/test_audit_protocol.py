@@ -74,16 +74,15 @@ class AuditProtocolTests(unittest.TestCase):
         self.assertEqual(reservation["execution"], "foreground")
         self.assertEqual(plan.evidence_ids, ["sha256:" + "1" * 64])
         self.protocol.observe_started(plan, "native-1")
-        self.protocol.observe_identities(
+        self.protocol.observe_reviewer(
             plan, "native-1",
-            author=IdentityObservation("p1", "m1", "host", "parent"),
-            auditor=IdentityObservation("p2", "m2", "host", "child"))
+            auditor=IdentityObservation("p2", "m2", "child"))
         self.assertTrue(self.protocol.observe_verdict(
             plan, "native-1", {"verdict": "pass"}))
         self.assertEqual([row[0] for row in self.events],
-                         ["child", "child", "attribution", "attribution", "verdict"])
+                         ["child", "child", "attribution", "verdict"])
         self.assertEqual([row[2] for row in self.events[:2]], ["launching", "pending"])
-        auditor = self.events[3][1]
+        auditor = self.events[2][1]
         self.assertEqual(auditor["child_id"], "ch-1")
         self.assertEqual(auditor["subject_id"], "auditor:ch-1")
 
@@ -179,10 +178,9 @@ class AuditProtocolTests(unittest.TestCase):
             verdict_ingress=self.protocol._verdict, plan_ingress=self.protocol._plan)
         plan = AuditLaunchPlan("test-profile", "run", "ch-1", "canonical", self.argument)
         with self.assertRaises(AuditProtocolError):
-            protocol.observe_identities(
+            protocol.observe_reviewer(
                 plan, "native-1",
-                author=IdentityObservation("p1", "m1", "host", "parent"),
-                auditor=IdentityObservation("p2", "m2", "host", "child"))
+                auditor=IdentityObservation("p2", "m2", "child"))
         self.assertEqual(self.events[-1][2], "failed")
 
     def test_recovery_orphans_every_active_audit_child(self) -> None:

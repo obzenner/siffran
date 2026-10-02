@@ -1,0 +1,9 @@
+{
+  "result": {
+    "type": "Fault",
+    "code": "unsupported",
+    "fail_direction": "closed",
+    "message": "no eval"
+  },
+  "text": "Fault unsupported (closed): no eval"
+}

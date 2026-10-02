@@ -9,8 +9,8 @@
     "protocol",
     "state_schema",
     "goal",
+    "invocation",
     "status",
-    "modes",
     "budgets",
     "selected_graph_artifact_id",
     "frozen_claim_ids",
@@ -20,7 +20,9 @@
     "stamp_seq",
     "last_derivation_digest",
     "children",
-    "committed_artifact_head_id"
+    "observation_basis_digest",
+    "committed_artifact_head_id",
+    "governance"
   ],
   "properties": {
     "protocol": {
@@ -31,7 +33,11 @@
     },
     "goal": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "invocation": {
+      "$ref": "#/$defs/invocationProvenance"
     },
     "status": {
       "enum": [
@@ -41,22 +47,6 @@
         "stopped_frozen",
         "stopped_budget"
       ]
-    },
-    "modes": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "multi_provider",
-        "cli_exec"
-      ],
-      "properties": {
-        "multi_provider": {
-          "type": "boolean"
-        },
-        "cli_exec": {
-          "type": "boolean"
-        }
-      }
     },
     "budgets": {
       "type": "object",
@@ -109,8 +99,7 @@
         "array"
       ],
       "items": {
-        "type": "string",
-        "minLength": 1
+        "$ref": "#/$defs/claimId"
       },
       "uniqueItems": true
     },
@@ -148,8 +137,275 @@
         "$ref": "#/$defs/childRecord"
       }
     },
+    "observation_basis_digest": {
+      "$ref": "#/$defs/digest256",
+      "description": "Content digest of the observation-basis event referenced by the latest committed transaction manifest."
+    },
     "committed_artifact_head_id": {
       "$ref": "#/$defs/nullableDigest256"
+    },
+    "governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "control_mode",
+        "plan_revision",
+        "approved_digest",
+        "approval_kind",
+        "proposal_digest",
+        "proposal",
+        "context",
+        "delegation_envelope",
+        "receipts",
+        "first_approval",
+        "pre_approval_revisions",
+        "post_approval_revisions"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "pending",
+            "approved",
+            "revision_pending",
+            "rejected"
+          ]
+        },
+        "control_mode": {
+          "enum": [
+            "deliberative",
+            "auto"
+          ]
+        },
+        "plan_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "approved_digest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "approval_kind": {
+          "enum": [
+            null,
+            "host_ui",
+            "auto"
+          ]
+        },
+        "proposal_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "proposal": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "budgets",
+            "rationale"
+          ],
+          "properties": {
+            "budgets": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "max_passes",
+                "max_spawns",
+                "max_audit_spawns"
+              ],
+              "properties": {
+                "max_passes": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1024
+                },
+                "max_spawns": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 128
+                },
+                "max_audit_spawns": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 128
+                }
+              }
+            },
+            "rationale": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 600,
+                  "pattern": "\\S"
+                }
+              ],
+              "description": "Author sizing rationale (null for the unapprovable StartRun placeholder)."
+            }
+          }
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "author",
+            "ingress",
+            "approval_capability",
+            "delegation",
+            "interactive"
+          ],
+          "properties": {
+            "author": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/identityObservation",
+                  "unevaluatedProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "ingress": {
+              "enum": [
+                "unavailable",
+                "mcp_elicitation",
+                "pi_ui"
+              ]
+            },
+            "approval_capability": {
+              "enum": [
+                "unavailable",
+                "human_configuration"
+              ]
+            },
+            "delegation": {
+              "type": "boolean",
+              "description": "Operator-recorded delegation provenance admitted as a neutral fact."
+            },
+            "interactive": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Interactive invocation provenance admitted as a neutral fact."
+            }
+          }
+        },
+        "delegation_envelope": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "max_passes",
+                "max_spawns",
+                "max_audit_spawns"
+              ],
+              "properties": {
+                "max_passes": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                },
+                "max_spawns": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "max_audit_spawns": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 2
+                }
+              }
+            }
+          ],
+          "description": "Durable componentwise-narrowed delegated-auto authority envelope; null outside delegated auto."
+        },
+        "first_approval": {
+          "type": "boolean",
+          "description": "Durable fact: whether this run has had a first successful approval; never inferred from revision, pending state, or latest approval kind."
+        },
+        "pre_approval_revisions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8
+        },
+        "post_approval_revisions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8
+        },
+        "receipts": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "fingerprint",
+              "presentation_fingerprint",
+              "outcome",
+              "plan_revision",
+              "proposal_digest",
+              "approval_kind"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "fingerprint": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "presentation_fingerprint": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "outcome": {
+                "enum": [
+                  "approve",
+                  "amend",
+                  "reject",
+                  "dismiss",
+                  "present"
+                ]
+              },
+              "plan_revision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "proposal_digest": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$",
+                "description": "Immutable exact proposal binding for this receipt."
+              },
+              "approval_kind": {
+                "enum": [
+                  "host_ui",
+                  "auto"
+                ],
+                "description": "Immutable per-receipt approval kind; host_ui requires a prior exact presentation, auto has none."
+              }
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {
@@ -235,15 +491,25 @@
         },
         "audit_operation_id": {
           "oneOf": [
-            {"$ref": "#/$defs/digest256"},
-            {"type": "null"}
+            {
+              "$ref": "#/$defs/digest256"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "audit_argument": {
-          "type": ["object", "null"]
+          "type": [
+            "object",
+            "null"
+          ]
         },
         "audit_role_profile": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "minLength": 1
         }
       },
@@ -429,6 +695,87 @@
         "null"
       ],
       "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "invocationProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host",
+        "interactive",
+        "signal",
+        "delegation"
+      ],
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "interactive": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "signal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "delegation": {
+          "type": "boolean"
+        }
+      }
+    },
+    "identityObservation": {
+      "type": "object",
+      "required": [
+        "identity",
+        "provider_id",
+        "model_id",
+        "policy_version",
+        "source",
+        "observed_by"
+      ],
+      "properties": {
+        "identity": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "provider_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "model_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "policy_version": {
+          "const": "model-identity/1"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "observed_by": {
+          "const": "host"
+        }
+      },
+      "description": "Open only for allOf extension; every direct $ref use must set unevaluatedProperties: false."
+    },
+    "claimId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
     }
   }
 }

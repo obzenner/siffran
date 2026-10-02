@@ -1,14 +1,14 @@
 ---
 number: 38
-title: "Warn when the checkout is behind the installed plugin"
+title: Warn when the checkout is behind the installed plugin
 status: accepted
 date: 2026-09-08
 tags:
-  - tooling
-  - usability
+- tooling
+- usability
 links:
-  - target: 33
-    kind: relatesto
+- target: 33
+  kind: Relates to
 ---
 
 # Warn when the checkout is behind the installed plugin

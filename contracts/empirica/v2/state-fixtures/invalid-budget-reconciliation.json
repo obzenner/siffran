@@ -2,11 +2,13 @@
   "protocol": "empirica/v2",
   "state_schema": "empirica.run/2",
   "goal": "Reject a charged audit child omitted from its account.",
-  "status": "active",
-  "modes": {
-    "multi_provider": false,
-    "cli_exec": false
+  "invocation": {
+    "host": "test",
+    "interactive": true,
+    "signal": "fixture",
+    "delegation": false
   },
+  "status": "active",
   "budgets": {
     "max_passes": 10,
     "passes_used": 0,
@@ -38,21 +40,64 @@
       "audit_argument": {
         "argument_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "root_claim_id": "G0",
+        "goal": "Reject a charged audit child omitted from its account.",
         "goal_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "frozen_scope_digest": null,
         "deferred_scope_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-        "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>", "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
-        "claims": [{"claim_id": "G0", "text": "Codec fixture claim", "kind": "ordinary", "gating": true,
-          "state": "open", "wording_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "evidence_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945", "active_evidence_ids": []}],
+        "untrusted_delimiters": {
+          "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+          "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+        },
+        "claims": [
+          {
+            "claim_id": "G0",
+            "text": "Codec fixture claim",
+            "kind": "ordinary",
+            "gating": true,
+            "state": "open",
+            "wording_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "evidence_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+            "active_evidence_ids": []
+          }
+        ],
         "edges": [],
         "artifacts": [],
-        "audit": {"state": "required", "independence": "unverified", "reviewed_argument_digest": null,
-          "reviewed_goal_digest": null, "reviewed_frozen_scope_digest": null,
-          "reviewed_deferred_scope_digest": null, "reviewed_claims": []}
+        "route_stamp": 1,
+        "investigation_stamp": 2,
+        "audit": {
+          "state": "required",
+          "independence": "unverified",
+          "reviewed_argument_digest": null,
+          "reviewed_goal_digest": null,
+          "reviewed_frozen_scope_digest": null,
+          "reviewed_deferred_scope_digest": null,
+          "reviewed_claims": [],
+          "findings": []
+        }
       },
       "audit_role_profile": "empirica:empirica-auditor"
     }
   ],
-  "committed_artifact_head_id": null
+  "committed_artifact_head_id": null,
+  "governance": {
+    "state": "pending",
+    "control_mode": "deliberative",
+    "plan_revision": 0,
+    "approved_digest": null,
+    "approval_kind": null,
+    "receipts": [],
+    "proposal": {
+      "budgets": {
+        "max_passes": 10,
+        "max_spawns": 1,
+        "max_audit_spawns": 1
+      }
+    },
+    "context": {
+      "author": null,
+      "ingress": "unavailable",
+      "approval_capability": "unavailable"
+    },
+    "proposal_digest": "sha256:e6bf696a3ff3bd71eb56f197578fbad71043464159426fff351f039f34d0e2f8"
+  }
 }

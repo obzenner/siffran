@@ -20,14 +20,33 @@ if str(PLUGIN) not in sys.path:
 from adapters.claude import lifecycle  # noqa: E402
 from adapters.claude.run_start import dispatch_start_run  # noqa: E402
 from adapters.public_tools import PublicTools  # noqa: E402
+from adapters.governance import HostGovernance  # noqa: E402
 
 
 class ClaudeReachabilityTests(unittest.TestCase):
+    def test_real_service_blank_goal_is_operator_visible(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            payload = {"session_id": "blank", "cwd": str(root),
+                       "command_name": "empirica:empirica", "command_args": ""}
+            output = io.StringIO()
+            with patch.dict(os.environ, {"EMPIRICA_HOME": str(root / "state"),
+                                         "EMPIRICA_REPO_DIR": str(root)}, clear=False), \
+                 patch.object(lifecycle, "_payload", return_value=payload), redirect_stdout(output):
+                self.assertEqual(lifecycle.run_start_main(), 0)
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["decision"], "block")
+            self.assertRegex(result["reason"], r"non-empty goal is required")
+
     def test_real_public_tools_and_native_audit_hooks_converge(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             subprocess.run(["git", "init", "-q", str(root)], check=True)
             (root / "probe.py").write_text("print('reachable')\n", encoding="utf-8")
+            parent_transcript = root / "parent.jsonl"
+            parent_transcript.write_text(json.dumps({"message": {"role": "assistant",
+                "model": "claude-sonnet-5", "content": "author"}}) + "\n")
             env = {
                 "EMPIRICA_HOME": str(root / "state"),
                 "EMPIRICA_REPO_DIR": str(root),
@@ -35,6 +54,7 @@ class ClaudeReachabilityTests(unittest.TestCase):
             payload = {
                 "session_id": "claude-reachability",
                 "cwd": str(root),
+                "transcript_path": str(parent_transcript),
                 "command_name": "empirica:empirica",
                 "command_args": "prove the Claude host path",
                 "model": "claude-sonnet-5",
@@ -45,23 +65,31 @@ class ClaudeReachabilityTests(unittest.TestCase):
                 with patch.dict(os.environ, env, clear=False):
                     started = dispatch_start_run(payload, environ={})
                     run_id = started["result"]["run"]["id"]
-                    tools = PublicTools("claude-code@2.1.278")
+                    lifecycle._governance_context(payload, run_id)
+                    mediator = HostGovernance("claude-code@2.1.278", elicit=lambda _m, _s: {
+                        "action": "accept", "content": {}})
+                    tools = PublicTools("claude-code@2.1.278", govern=mediator)
 
                     def observe(action: dict) -> dict:
-                        result = tools.call("empirica_observe", {
+                        result = tools.call_internal("empirica_observe", {
                             "run_id": run_id, "action": action,
                         })
                         self.assertFalse(result["isError"], result)
                         return result["structuredContent"]
 
                     observe({"kind": "route", "reason": "route first"})
-                    observe({"kind": "investigate"})
                     observe({"kind": "graph", "payload": {
                         "root": "G0",
                         "claims": [{"id": "G0", "text": "Claude can drive v2.",
                                     "gating": True, "kind": "needs-experiment"}],
                         "edges": [],
                     }})
+                    approved = observe({"kind": "configure_run",
+                        "budgets": {"max_passes": 8, "max_spawns": 1,
+                                    "max_audit_spawns": 2},
+                        "rationale": "sized for one experimental claim and an audit retry"})
+                    self.assertEqual(approved["run"]["governance"]["state"], "approved")
+                    observe({"kind": "investigate"})
                     observe({"kind": "research", "claim_id": "G0",
                              "source_kind": "code", "result": "supports",
                              "payload": {"source_ref": "probe.py",
@@ -102,22 +130,22 @@ class ClaudeReachabilityTests(unittest.TestCase):
                     with patch.object(lifecycle, "_payload", return_value=payload), \
                          redirect_stdout(pending_output):
                         self.assertEqual(lifecycle.completion_main(), 0)
-                    pending = json.loads(pending_output.getvalue())
-                    self.assertEqual([r["code"] for r in pending["reasons"]], ["audit.pending"])
-                    self.assertEqual(pending["run"]["status"], "active")
+                    pending = pending_output.getvalue()
+                    self.assertIn("Block active", pending)
+                    self.assertIn("audit.pending", pending)
 
                     restore_output = io.StringIO()
                     with patch.object(lifecycle, "_payload", return_value=payload), \
                          redirect_stdout(restore_output):
                         self.assertEqual(lifecycle.restore_main(), 0)
-                    restored = tools.call("empirica_read", {
+                    restored = tools.call_internal("empirica_read", {
                         "run_id": run_id, "operation": "GetRun",
                     })["structuredContent"]
                     audit_children = [child for child in restored["run"]["children"]
                                       if child["resource_class"] == "audit"]
                     self.assertEqual([child["state"] for child in audit_children], ["pending"])
 
-                    argument = tools.call("empirica_read", {
+                    argument = tools.call_internal("empirica_read", {
                         "run_id": run_id, "operation": "GetArgument",
                     })["structuredContent"]["argument"]
                     verdict = {
@@ -154,7 +182,7 @@ class ClaudeReachabilityTests(unittest.TestCase):
                     with patch.object(lifecycle, "_payload", return_value=stop_payload):
                         self.assertEqual(lifecycle.subagent_stop_main(), 0)
 
-                    final = tools.call("report_convergence", {"run_id": run_id})
+                    final = tools.call_internal("report_convergence", {"run_id": run_id})
                     self.assertFalse(final["isError"], final)
                     self.assertEqual(final["structuredContent"]["type"], "Allow")
                     self.assertTrue(final["structuredContent"]["converged"])
