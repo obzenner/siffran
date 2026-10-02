@@ -291,13 +291,19 @@ test("governance context does not inspect configured models", () => {
   assert.equal(calls, 0);
 });
 
-test("timeout remains bounded", () => {
+test("timeout follows the shared Python/TypeScript case table with exact results and messages", () => {
+  const table = JSON.parse(readFileSync(new URL("../../../tests/fixtures/governance-timeout-cases.json", import.meta.url), "utf8")) as {
+    cases: { name: string; env: string | null; seconds: number | null; error: string | null }[];
+  };
+  assert.ok(table.cases.length >= 20);
   const prior = process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS;
   try {
-    for (const value of ["", "0", "1501", "NaN", "Infinity", "invalid"]) {
-      process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS = value; assert.equal(governanceTimeout(), 900_000);
+    for (const { name, env, seconds, error } of table.cases) {
+      if (env === null) delete process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS;
+      else process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS = env;
+      if (error === null) assert.equal(governanceTimeout(), (seconds as number) * 1000, name);
+      else assert.throws(() => governanceTimeout(), (caught: unknown) => caught instanceof Error && caught.message === error, name);
     }
-    process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS = "1"; assert.equal(governanceTimeout(), 1000);
   } finally { if (prior === undefined) delete process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS; else process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS = prior; }
 });
 

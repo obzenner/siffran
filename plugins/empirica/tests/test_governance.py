@@ -117,6 +117,7 @@ class StartAdmissionTests(unittest.TestCase):
         self.assertEqual(dict(governance.DEFAULT_CEILINGS), SIZED_BUDGETS)
 
     def test_start_admission_table(self):
+        full = dict(governance.DEFAULT_CEILINGS)
         cases = [
             ({"goal": "", "control_mode": "deliberative", "invocation": TEST_INVOCATION},
              "run.goal_required"),
@@ -129,7 +130,22 @@ class StartAdmissionTests(unittest.TestCase):
         ]
         for command, expected in cases:
             with self.subTest(command=command):
-                self.assertEqual(start_admission(command, {}), expected)
+                self.assertEqual(
+                    start_admission({**command, "budgets": full}, full), expected)
+
+    def test_sources_are_completed_once_without_widening_the_operator_limit(self):
+        from application.transaction import complete_start_ceilings
+        defaults = dict(governance.DEFAULT_CEILINGS)
+        command = {"type": "StartRun", "goal": "g"}
+        completed, limits = complete_start_ceilings(command, {})
+        self.assertEqual((completed["budgets"], limits), (defaults, defaults))
+        self.assertNotIn("budgets", command)
+        completed, limits = complete_start_ceilings(command, {"max_passes": 2})
+        self.assertEqual(limits, {**defaults, "max_passes": 2})
+        self.assertEqual(completed["budgets"], {**defaults, "max_passes": 2})
+        completed, limits = complete_start_ceilings(
+            {**command, "budgets": {"max_spawns": 0}}, {"max_passes": 2})
+        self.assertEqual(completed["budgets"], {**defaults, "max_passes": 2, "max_spawns": 0})
 
 
 def _seed_budgets(**over):
@@ -241,7 +257,7 @@ class GovernanceTransitionMatrixTests(unittest.TestCase):
         delegated = {"host": "t", "interactive": False, "signal": "op", "delegation": True}
         interactive = {"host": "t", "interactive": True, "signal": "op", "delegation": True}
         deliberative = {"host": "t", "interactive": True, "signal": "op", "delegation": False}
-        over = {"max_passes": 9}
+        over = {**governance.DEFAULT_CEILINGS, "max_passes": 9}
         # delegated auto: enlarging the 8/1/2 envelope is contradictory
         self.assertEqual(start_admission({"goal": "g", "control_mode": "auto",
                                            "invocation": delegated, "budgets": over},

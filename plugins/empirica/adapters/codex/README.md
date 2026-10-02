@@ -37,8 +37,11 @@ See [governance](../../skills/empirica/references/governance.md) for configurati
 | MCP `empirica_observe` | `ObserveAction` | Public route, graph, research, spike request, freeze, and configuration only; concrete reservation is host-owned. |
 | MCP `empirica_read` | `GetRun`, `GetArgument`, `GetContract`, `RestoreRun` | Complete typed public read surface. |
 | MCP `report_convergence` | `EvaluateRun` | Public guarded decision; never trusted ingress. |
-| `Stop` | resolve → evaluate → reject unsupported audit when due | Blocks on any unavailable or non-converged result; permits only `Allow(converged=true)`. |
-| `SessionStart:compact` | `ResolveRun` | Reconnects the durable selected run. |
+| `Stop` | resolve → evaluate → reject unsupported audit when due | Blocks on any unavailable or non-converged result, including a failed audit rejection; permits only `Allow(converged=true)`. |
+
+Compaction restore is not provided on Codex: there is no `SessionStart` hook, and an `empirica`
+hook action `restore` is unknown to the dispatcher. After compaction the author re-reads the run
+with `empirica_read` (`RestoreRun`); Stop still fails closed for an active run.
 
 The deterministic spike harness remains the sole machine approver. Audit can block but cannot
 manufacture evidence. `evidence_leaf`, attribution, child events, and audit verdicts have no MCP

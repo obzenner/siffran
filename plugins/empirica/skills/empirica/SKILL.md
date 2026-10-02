@@ -96,7 +96,9 @@ Do this before reading files, searching, browsing, or running commands.
    configuration; do not expect or parse a `run.governance.state` JSON field.
    Configuration amendments need a second review; human numeric edits are not corruption.
    After cancellation/timeout, wait for the human; Claude can settle the turn nonterminally while
-   investigation and convergence remain blocked. Then record the `investigate` witness `{"kind":"investigate"}` before any
+   investigation and convergence remain blocked. After dismissal, timeout, or rejection, resubmit
+   `configure_run` (the same or human-edited ceilings) to reopen the dialog; record `investigate`
+   only once the view says `approved`. Then record the `investigate` witness `{"kind":"investigate"}` before any
    native read, search, command, evidence submission, or child launch. Approval does not supply
    either witness.
 7. Investigate. Public reads/corrections and explicit honest stop remain available without approval.
@@ -131,6 +133,8 @@ Apply the folds in order:
 
 1. **Research first for every gating claim.** Record a concrete code, docs,
    runtime, or web source that supports or refutes the exact current claim text.
+   `source_ref` and the verbatim `citation` must identify the file or runtime observation that
+   bears on this claim; generic precedent is not evidence for a repository-specific claim.
 2. **Spike second only for `needs-experiment`.** After supporting research,
    request a deterministic command and its non-empty dependent-file set through
    the service. The service captures immutable bytes, runs the harness once, and
@@ -199,6 +203,8 @@ residual obligation or next action returned by the service. A sole `budget.exhau
 an active run settles the turn with a host notice rather than blocking it: stop honestly with
 `intent: "stop"` (or, in deliberative mode, propose a raise for human approval) instead of
 retrying the gate.
+
+For any other reason code, [references/recovery.md](references/recovery.md) gives the next actions and one action to take.
 
 ## 7. Finalize and hand off
 

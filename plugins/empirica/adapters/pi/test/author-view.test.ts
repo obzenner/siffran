@@ -7,6 +7,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import * as path from "node:path";
 import assert from "node:assert/strict";
 import { renderAuthorView } from "../src/author-view.ts";
+import { PUBLIC_TOOLS } from "../src/public-tools.ts";
 
 type Json = Record<string, any>;
 
@@ -44,6 +45,23 @@ test("author-view loads every next-action surface from the public contract", () 
           : `${value.owner}: ${value.operation}`;
     assert.ok(golden.text.includes(rendered), `missing contract surface ${rendered}`);
   }
+});
+
+test("every contract label drives the rendered text", () => {
+  const labels = PUBLIC_TOOLS.author_view.labels as Record<string, string>;
+  const original = { ...labels };
+  const rendered: string[] = [];
+  try {
+    for (const key of Object.keys(original)) labels[key] = `[${key}]`;
+    for (const file of files) {
+      const golden = JSON.parse(readFileSync(path.join(GOLDEN_DIR, file), "utf-8"));
+      rendered.push(renderAuthorView(golden.result, { strict: true }));
+    }
+  } finally {
+    Object.assign(labels, original);
+  }
+  const text = rendered.join("\n");
+  assert.deepEqual(Object.keys(original).filter((key) => !text.includes(`[${key}]`)), []);
 });
 
 test("author-view fallback is total for undefined", () => {

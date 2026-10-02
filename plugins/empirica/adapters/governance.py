@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
+import json
 import os
 import re
 import textwrap
@@ -33,13 +33,28 @@ class Dismiss:
     """A non-decision or invalid host answer that grants no authority."""
 
 
+_TIMEOUT_SPACE = " \t\n\r\f\v"
+_TIMEOUT_SECONDS = re.compile(r"0*([1-9][0-9]{0,3})")
+
+
 def governance_timeout() -> float:
-    """Return the bounded host decision timeout in seconds."""
-    try:
-        value = float(os.environ.get("EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS", "900"))
-        return value if math.isfinite(value) and 1 <= value <= 1500 else 900
-    except ValueError:
+    """Return the host decision timeout in seconds.
+
+    Unset or blank ``EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS`` means the 900-second default. A set value must be
+    ASCII decimal digits only (after trimming ASCII whitespace) from 1 to 1500 inclusive, leading zeros allowed;
+    the significant digits are bounded before conversion so no input length can change the outcome. Anything else raises
+    ``ValueError`` rather than silently becoming the default. The Pi mirror (``governanceTimeout``) accepts the
+    identical syntax and formats the identical message; the shared case table pins both.
+    """
+    raw = os.environ.get("EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS")
+    text = None if raw is None else raw.strip(_TIMEOUT_SPACE)
+    if not text:
         return 900
+    match = _TIMEOUT_SECONDS.fullmatch(text)
+    if match and int(match.group(1)) <= 1500:
+        return int(match.group(1))
+    raise ValueError("EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS must be a whole number of seconds from 1 to 1500, "
+                     f"got {json.dumps(raw, ensure_ascii=False)}")
 
 
 def unavailable(result: dict, code: str = "governance.approval_unavailable", *, message: str | None = None) -> dict:

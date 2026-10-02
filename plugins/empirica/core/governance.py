@@ -158,6 +158,7 @@ def revision_error(governance: Mapping, goal: str, proposal: Mapping) -> str | N
 
 
 def admission(governance: Mapping) -> str | None:
+    """Reason code blocking governed work until the current proposal is approved, else ``None``."""
     if governance["state"] == "approved" and governance["approved_digest"] == governance["proposal_digest"]:
         return None
     return ("governance.revision_required" if governance["approval_kind"] else
@@ -165,6 +166,7 @@ def admission(governance: Mapping) -> str | None:
 
 
 def interactions_remaining(governance: Mapping) -> dict:
+    """Host-dialog presentations left: ``proposal`` for the current plan revision and ``total``."""
     receipts = governance["receipts"]
     shown = sum(r["plan_revision"] == governance["plan_revision"] for r in receipts)
     return {"proposal": max(0, PROPOSAL_INTERACTIONS - shown),
@@ -172,6 +174,7 @@ def interactions_remaining(governance: Mapping) -> dict:
 
 
 def interaction_error(governance: Mapping) -> str | None:
+    """``governance.interaction_limit`` once either interaction allowance is spent, else ``None``."""
     if min(interactions_remaining(governance).values()) == 0:
         return "governance.interaction_limit"
     return None

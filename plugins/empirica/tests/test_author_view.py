@@ -343,7 +343,7 @@ class ContentCompletenessTests(unittest.TestCase):
             }
             text = render_author_view(result, strict=True)
             for action in sorted(emitted):
-                self.assertIn(author_view._surface(action), text, f"{name}: {action}")
+                self.assertIn(author_view.render_surface(action), text, f"{name}: {action}")
 
     def test_every_open_obligation_id_appears(self):
         for name in RUNVIEW_FIXTURES:
@@ -543,6 +543,23 @@ class ParameterOwnershipTests(unittest.TestCase):
         result["reasons"][0]["parameters"] = {"not_in_schema": "x"}
         self.assertFalse(validate_public_result(result))  # the schema closes parameters
         self.assertEqual(render_author_view(result), _fallback(result))
+
+
+class ContractLabelTests(unittest.TestCase):
+    """Every heading and line label is read from the contract, none is a renderer literal."""
+
+    GOLDEN = PLUGIN / "adapters" / "pi" / "test" / "author-view-golden"
+
+    def test_every_contract_label_drives_the_rendered_text(self):
+        from unittest import mock
+        from application.protocol import author_view_labels
+        tagged = {key: f"[{key}]" for key in author_view_labels()}
+        rendered = []
+        with mock.patch.object(author_view, "_LABELS", tagged):
+            for path in sorted(self.GOLDEN.glob("*.json")):
+                rendered.append(render_author_view(json.loads(path.read_text())["result"]))
+        text = "\n".join(rendered)
+        self.assertEqual([key for key in tagged if f"[{key}]" not in text], [])
 
 
 class TotalityTests(unittest.TestCase):

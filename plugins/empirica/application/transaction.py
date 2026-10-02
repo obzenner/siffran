@@ -13,6 +13,7 @@ from core.evaluation import (READ_COMMANDS, SPAWN_BUDGET, Decision, EvaluationSn
                              evaluate_snapshot, frozen_scope_invalid, plan_spike_request,
                              plan_spike_result, valid_attribution)
 from core.projection import project_argument, project_runview, project_presentation, recovery_actions
+from core.ports import RunRepository
 from core.records import Conflict, Corrupt, RunKey
 from core.run import OperationalState, delegated_auto, effective_ceilings, start_admission
 from . import protocol as _proto
@@ -58,8 +59,23 @@ class AbsentLoad:
     """No persisted run exists for the key."""
 
 
+def complete_start_ceilings(command: Mapping[str, Any],
+                            overrides: Mapping[str, int]) -> tuple[dict[str, Any], dict[str, int]]:
+    """Complete the StartRun ceiling sources once, for core admission.
+
+    Returns the command with a full ``budgets`` mapping and the full operator ``limits``
+    mapping. An omitted operator limit is the fixed default; an omitted StartRun ceiling is the
+    operator limit, so it never counts as widening it.
+    """
+    limits = {ceiling: overrides.get(ceiling, governance.DEFAULT_CEILINGS[ceiling])
+              for ceiling in governance.CEILINGS}
+    supplied = command.get("budgets", {})
+    budgets = {ceiling: supplied.get(ceiling, limits[ceiling]) for ceiling in governance.CEILINGS}
+    return {**command, "budgets": budgets}, limits
+
+
 class Coordinator:
-    def __init__(self, workspace: Any, harness: Any, runs: Any, artifacts: Any,
+    def __init__(self, workspace: Any, harness: Any, runs: RunRepository[Any], artifacts: Any,
                  profile_id: str, limits: Mapping[str, int]):
         self.workspace, self.harness, self.runs, self.artifacts = workspace, harness, runs, artifacts
         self.profile_id, self.limits = profile_id, limits
@@ -87,23 +103,14 @@ class Coordinator:
         value = self.artifacts.read(key)
         return value.value if self._present(value) else ()
 
-    def _generations(self, project: str, session: str) -> list[int]:
-        if hasattr(self.runs, "generations"):
-            return list(self.runs.generations(project, session))
-        found: list[int] = []
-        for generation in range(1, 10000):
-            if not self._present(self.runs.read(RunKey(project, session, generation))):
-                break
-            found.append(generation)
-        return found
-
     def _latest_key(self, selector: dict[str, str]) -> RunKey | None:
         project, session = storage_id(selector["project"]), storage_id(selector["session"])
-        generations = self._generations(project, session)
+        generations = self.runs.generations(project, session)
         return RunKey(project, session, generations[-1]) if generations else None
 
-    def _initial_state(self, command: dict[str, Any], observation_basis_digest: str) -> OperationalState:
-        ceilings = effective_ceilings(command, self.limits)
+    def _initial_state(self, command: dict[str, Any], limits: Mapping[str, int],
+                       observation_basis_digest: str) -> OperationalState:
+        ceilings = effective_ceilings(command, limits)
         budgets = {**ceilings, "passes_used": 0, "spawns_used": 0,
                    "audit_spawns_used": 0}
         invocation = command["invocation"]
@@ -151,14 +158,15 @@ class Coordinator:
     def start(self, command: dict[str, Any], request_id: str) -> dict[str, Any]:
         if self.artifacts is None:
             return self._fault(request_id, "unsupported")
-        rejected = start_admission(command, self.limits)
+        command, limits = complete_start_ceilings(command, self.limits)
+        rejected = start_admission(command, limits)
         if rejected:
             return {"protocol": _proto.protocol_id(), "request_id": request_id,
                     "result": {"type": "Block", "reasons": [self._reason(rejected)]}}
         selector = command["selector"]
         empty = build_observation_snapshot((), self.workspace)
         basis_artifact = self._observation_basis_artifact(empty)
-        state = self._initial_state(command, basis_artifact["artifact_id"])
+        state = self._initial_state(command, limits, basis_artifact["artifact_id"])
         latest = self._latest_key(selector)
         if latest is not None:
             current = self.runs.read(latest)
@@ -678,8 +686,7 @@ class Coordinator:
 
     @staticmethod
     def _sections(snapshot: EvaluationSnapshot, reasons: list[str] | None = None) -> list[str]:
-        command = snapshot.command or {}
-        kind = command.get("type")
+        kind = snapshot.command["type"]
         context = ("bootstrap" if kind == "StartRun" else
                    "restore" if kind in {"RestoreRun", "ResolveRun"} else
                    "auditor" if kind == "GetArgument" else

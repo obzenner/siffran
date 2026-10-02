@@ -95,51 +95,51 @@ def _procedural_ok(doc: dict) -> bool:
         return False
     seen: set[str] = set()
     charged = {"investigation": 0, "audit": 0}
-    for ch in doc.get("children", []):
-        cid = ch.get("child_id")
+    for ch in doc["children"]:
+        cid = ch["child_id"]
         if cid in seen:
             return False
         seen.add(cid)
-        resource_class = ch.get("resource_class")
+        resource_class = ch["resource_class"]
         if resource_class == "audit":
-            if (ch.get("purpose") != "audit" or not isinstance(ch.get("audit_operation_id"), str)
-                    or not isinstance(ch.get("audit_argument"), dict)
+            if (ch["purpose"] != "audit" or not isinstance(ch["audit_operation_id"], str)
+                    or not isinstance(ch["audit_argument"], dict)
                     or not _AUDIT_DOSSIER.is_valid(ch["audit_argument"])
-                    or not isinstance(ch.get("audit_role_profile"), str)):
+                    or not isinstance(ch["audit_role_profile"], str)):
                 return False
-        elif (ch.get("audit_operation_id") is not None or ch.get("audit_argument") is not None
-              or ch.get("audit_role_profile") is not None):
+        elif (ch["audit_operation_id"] is not None or ch["audit_argument"] is not None
+              or ch["audit_role_profile"] is not None):
             return False
-        if not ch.get("refunded"):
+        if not ch["refunded"]:
             charged[resource_class] += 1
-        dl = ch.get("deadline")
+        dl = ch["deadline"]
         if dl is not None and (
             isinstance(dl, bool) or not isinstance(dl, (int, float)) or not math.isfinite(dl)
         ):
             return False
     if sum(ch["resource_class"] == "audit" and ch["state"] in {"reserved", "launching", "pending"}
-           for ch in doc.get("children", [])) > 1:
+           for ch in doc["children"]) > 1:
         return False
-    b = doc.get("budgets", {})
-    if b.get("passes_used", 0) > b.get("max_passes", 0):
+    b = doc["budgets"]
+    if b["passes_used"] > b["max_passes"]:
         return False
     for resource_class, (limit, used, _) in SPAWN_BUDGET.items():
-        if b.get(used, 0) > b.get(limit, 0) or b.get(used) != charged[resource_class]:
+        if b[used] > b[limit] or b[used] != charged[resource_class]:
             return False
-    seq = doc.get("stamp_seq", 0)
-    route = doc.get("route_stamp")
-    investigation = doc.get("investigation_stamp")
+    seq = doc["stamp_seq"]
+    route = doc["route_stamp"]
+    investigation = doc["investigation_stamp"]
     if route is not None and route < 1:
         return False
     if investigation is not None and (route is None or investigation < 1 or route >= investigation):
         return False
-    if (doc.get("children") or doc.get("status") == "converged") and investigation is None:
+    if (doc["children"] or doc["status"] == "converged") and investigation is None:
         return False
-    frozen = doc.get("frozen_claim_ids")
-    if (frozen is None) != (doc.get("frozen_semantic_digest") is None):
+    frozen = doc["frozen_claim_ids"]
+    if (frozen is None) != (doc["frozen_semantic_digest"] is None):
         return False
     for key in ("route_stamp", "investigation_stamp"):
-        s = doc.get(key)
+        s = doc[key]
         if s is not None and s > seq:
             return False
     return True

@@ -981,6 +981,71 @@ class SpawnLifecycleTests(unittest.TestCase):
             self.assertEqual(spawn_main(), 0)
 
 
+class ObservationalHookDiagnosticTests(unittest.TestCase):
+    """Host-observational hooks exit 0 on failure and say so on stderr (Stop still gates)."""
+
+    AUDITOR = "empirica:empirica-auditor"
+
+    CASES = (
+        ("restore_main", {}, "SessionStart:compact restore"),
+        ("agent_failure_main",
+         {"tool_input": {"subagent_type": AUDITOR}}, "PostToolUseFailure"),
+        ("subagent_start_main",
+         {"agent_type": AUDITOR, "agent_id": "native-1"}, "SubagentStart"),
+        ("subagent_stop_main",
+         {"agent_type": AUDITOR, "agent_id": "native-1"}, "SubagentStop"),
+    )
+
+    def _run_hook(self, hook: str, payload: dict, **patches) -> tuple[int, str, str]:
+        err, out = StringIO(), StringIO()
+        with patch("sys.stdin", new=StringIO(json.dumps(payload))), \
+                patch("sys.stderr", new=err), patch("sys.stdout", new=out):
+            if "resolve" in patches:
+                with patch.object(lifecycle, "dispatch_resolve", **patches["resolve"]):
+                    code = getattr(lifecycle, hook)()
+            else:
+                with patch("adapters.claude.lifecycle._resolve", **patches["_resolve"]):
+                    code = getattr(lifecycle, hook)()
+        return code, err.getvalue(), out.getvalue()
+
+    def test_real_resolution_failure_reports_one_diagnostic_line_and_exits_zero(self) -> None:
+        """Patch dispatch_resolve (not _resolve) so the resolution layer cannot swallow the failure."""
+        for hook, payload, name in self.CASES:
+            with self.subTest(hook=hook):
+                code, stderr, stdout = self._run_hook(
+                    hook, payload,
+                    resolve={"side_effect": RuntimeError("transport broke\nwith   spaces")})
+                self.assertEqual(code, 0)
+                self.assertEqual(
+                    stderr,
+                    f"empirica {name} hook failed: RuntimeError: transport broke with spaces\n")
+                self.assertEqual(stdout, "")
+
+    def test_genuine_no_run_stays_silent(self) -> None:
+        response = _typed({"type": "Inert", "reason": "no_run"}, "claude-resolve")
+        for hook, payload, _ in self.CASES:
+            with self.subTest(hook=hook):
+                code, stderr, stdout = self._run_hook(
+                    hook, payload, resolve={"return_value": response})
+                self.assertEqual((code, stderr, stdout), (0, "", ""))
+
+    def test_each_observational_hook_reports_one_diagnostic_line_and_exits_zero(self) -> None:
+        """Downstream (post-resolution) failures reach the same single handler."""
+        for hook, payload, name in self.CASES:
+            with self.subTest(hook=hook):
+                code, stderr, _ = self._run_hook(
+                    hook, payload, _resolve={"side_effect": RuntimeError("boom\nwith   spaces")})
+                self.assertEqual(code, 0)
+                self.assertEqual(
+                    stderr,
+                    f"empirica {name} hook failed: RuntimeError: boom with spaces\n")
+
+    def test_diagnostic_is_one_line_without_traceback(self) -> None:
+        line = lifecycle.observational_diagnostic("SubagentStart", ValueError("a\n b"))
+        self.assertEqual(line, "empirica SubagentStart hook failed: ValueError: a b")
+        self.assertNotIn("\n", line)
+
+
 class TranscriptIdentityTests(unittest.TestCase):
     def _observe(self, rows):
         with TemporaryDirectory() as tmp:
@@ -996,6 +1061,18 @@ class TranscriptIdentityTests(unittest.TestCase):
                          "content": "verdict"}},
         ]
         self.assertEqual(self._observe(rows), ("eu.anthropic.claude-opus-4-8", "verdict"))
+
+    def test_empty_string_model_rows_are_not_served_models(self):
+        rows = [
+            {"message": {"role": "assistant", "model": "", "content": "retry"}},
+            {"message": {"role": "assistant", "model": "eu.anthropic.claude-opus-4-8",
+                         "content": "verdict"}},
+        ]
+        self.assertEqual(self._observe(rows), ("eu.anthropic.claude-opus-4-8", "verdict"))
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "child.jsonl"
+            path.write_text(json.dumps(rows[0]) + "\n")
+            self.assertEqual(lifecycle._parse_transcript_contents(str(path)), ([], "retry"))
 
     def test_synthetic_only_and_mid_transcript_switch_are_unobservable(self):
         synthetic = [{"message": {"role": "assistant", "model": "<synthetic>",

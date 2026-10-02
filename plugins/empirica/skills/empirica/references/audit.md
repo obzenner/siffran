@@ -38,7 +38,9 @@ Ordinary conversation with another model is not a substitute.
    including its current blocker and honest next actions. A failed verdict lists any findings under
    the `Audit:` line (`GetArgument` keeps the latest settled verdict's findings unless a re-audit is
    pending); address them before requesting another audit, because hosts may withhold the child's
-   raw output. A stale pass reads `failed` with no findings: re-audit the current evidence. Any changed graph,
+   raw output. Retry at most within the approved audit ceiling (normally one retry); when the audit
+   fails again or `budget.exhausted` appears, call `report_convergence` with `intent=stop`
+   instead of looping. A stale pass reads `failed` with no findings: re-audit the current evidence. Any changed graph,
    evidence, or scope invalidates stale audit coverage and requires a new bound audit.
 
 ## Pi invocation shape

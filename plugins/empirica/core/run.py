@@ -19,9 +19,9 @@ def delegated_auto(command: Mapping[str, Any]) -> bool:
 def start_admission(command: Mapping[str, Any], limits: Mapping[str, int]) -> str | None:
     """Admit each authority-bearing StartRun source without last-writer-wins merging.
 
-    ``limits`` is the single normalized application-boundary ceiling mapping. In delegated
-    auto, each supplied source must fit the fixed policy and StartRun may only narrow an
-    operator-supplied value.
+    ``limits`` and ``command["budgets"]`` are the application-boundary ceiling mappings; each
+    holds every ceiling. In delegated auto, each source must fit the fixed policy and StartRun
+    may only narrow the operator limit.
     """
     goal = command["goal"]
     if not goal.strip():
@@ -33,25 +33,25 @@ def start_admission(command: Mapping[str, Any], limits: Mapping[str, int]) -> st
         return "governance.auto_invocation_required"
     if not delegated_auto(command):
         return None
-    start_budgets = command.get("budgets", {})
+    start_budgets = command["budgets"]
     for source in (limits, start_budgets):
-        for ceiling, value in source.items():
-            if ceiling in governance.CEILINGS and value > governance.DEFAULT_CEILINGS[ceiling]:
+        for ceiling in governance.CEILINGS:
+            if source[ceiling] > governance.DEFAULT_CEILINGS[ceiling]:
                 return "governance.budget_contradictory"
     for ceiling in governance.CEILINGS:
-        if ceiling in limits and ceiling in start_budgets:
-            if start_budgets[ceiling] > limits[ceiling]:
-                return "governance.budget_contradictory"
+        if start_budgets[ceiling] > limits[ceiling]:
+            return "governance.budget_contradictory"
     return None
 
 
 def effective_ceilings(command: Mapping[str, Any], limits: Mapping[str, int]) -> dict[str, int]:
-    """Return the componentwise-narrowed operational seed after successful admission."""
-    start_budgets = command.get("budgets", {})
+    """Return the componentwise-narrowed operational seed after successful admission.
+
+    ``limits`` and ``command["budgets"]`` hold every ceiling (see :func:`start_admission`).
+    """
     return {
-        ceiling: min(governance.DEFAULT_CEILINGS[ceiling],
-                     limits.get(ceiling, governance.DEFAULT_CEILINGS[ceiling]),
-                     start_budgets.get(ceiling, governance.DEFAULT_CEILINGS[ceiling]))
+        ceiling: min(governance.DEFAULT_CEILINGS[ceiling], limits[ceiling],
+                     command["budgets"][ceiling])
         for ceiling in governance.CEILINGS
     }
 

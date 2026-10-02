@@ -7,6 +7,49 @@ export interface DecisionControls {
   budgets: Record<string, { label: string; maximum: number }>;
 }
 
+export type AuthorViewLabel =
+  | "no_governance"
+  | "governance"
+  | "budget_usage"
+  | "converged"
+  | "run_id"
+  | "proposal_rationale"
+  | "audit"
+  | "finding"
+  | "reasons"
+  | "open_obligations"
+  | "satisfied_obligations"
+  | "residuals"
+  | "children"
+  | "freshness"
+  | "next"
+  | "affected"
+  | "params"
+  | "next_inline"
+  | "missing"
+  | "recovery"
+  | "via_claim"
+  | "argument"
+  | "goal"
+  | "root_claim_id"
+  | "claims"
+  | "edges"
+  | "citations"
+  | "audit_status"
+  | "claim_kind"
+  | "claim_gating"
+  | "claim_state"
+  | "claim_evidence"
+  | "evidence_present"
+  | "evidence_none"
+  | "contract"
+  | "block"
+  | "fault"
+  | "inert";
+
+/** Contract-owned author-view headings and line labels (contract `author_view.labels`). */
+export type AuthorViewLabels = Readonly<Record<AuthorViewLabel, string>>;
+
 export interface PublicToolsProjection {
   definitions: Record<string, { title: string; description: string }>;
   schemas: { host_handle: Record<string, Record<string, unknown>> };
@@ -18,6 +61,7 @@ export interface PublicToolsProjection {
     confirmation: { title: string; actions: string[] };
   };
   settlement_notices: { human_wait: string; budget_exhausted: string };
+  author_view: { labels: AuthorViewLabels };
 }
 
 const PUBLIC_TOOLS_PATH = path.resolve(

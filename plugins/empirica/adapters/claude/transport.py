@@ -37,7 +37,10 @@ class FrozenMapping(Mapping[str, Any]):
         return len(self._data)
 
     def as_dict(self) -> dict[str, Any]:
-        """Return a mutable JSON-compatible copy for legacy renderer boundaries."""
+        """Return a plain ``dict``/``list`` copy for ``render_author_view``, which takes plain JSON containers.
+
+        The Claude restore and completion hooks render the result through it.
+        """
         def thaw(value: Any) -> Any:
             if isinstance(value, FrozenMapping):
                 return {key: thaw(item) for key, item in value.items()}

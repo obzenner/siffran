@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, NewType
 
 from application.protocol import (
+    author_view_labels,
     next_action_surfaces,
     response_schema_defs,
     untrusted_delimiters,
@@ -18,6 +19,7 @@ from core.projection import safe_text
 
 Trusted = NewType("Trusted", str)
 Untrusted = NewType("Untrusted", str)
+_LABELS = author_view_labels()
 _SURFACES = next_action_surfaces()
 _DEFS = response_schema_defs()
 _DIGEST_DEFS = frozenset({"digest256", "nullableDigest256"})
@@ -123,7 +125,7 @@ def _fallback(result: Any) -> str:
         return "null"
 
 
-def _surface(action_id: str) -> Trusted:
+def render_surface(action_id: str) -> Trusted:
     """Render one contract-owned action surface."""
     surface = _SURFACES[action_id]
     tool = surface.get("tool")
@@ -230,7 +232,7 @@ def _residual_claims(row: dict[str, Any], safety: TextSafety) -> Trusted | None:
     target = row.get("target_claim_id", row["claim_id"])
     if target == row["claim_id"]:
         return Trusted(claim)
-    return Trusted(f"{claim} via claim:{safety.claim_id(target)}")
+    return Trusted(f"{claim} {_LABELS['via_claim']}{safety.claim_id(target)}")
 
 
 def _missing(row: dict[str, Any], safety: TextSafety) -> Trusted:
@@ -243,7 +245,7 @@ def _missing(row: dict[str, Any], safety: TextSafety) -> Trusted:
     target = missing["target_claim_id"]
     if target is None or target == row["id"].removeprefix("claim:"):
         return Trusted(missing["code"])
-    return Trusted(f"{missing['code']} via claim:{safety.claim_id(target)}")
+    return Trusted(f"{missing['code']} {_LABELS['via_claim']}{safety.claim_id(target)}")
 
 
 def _reason(row: dict[str, Any], safety: TextSafety) -> Reason:
@@ -252,7 +254,7 @@ def _reason(row: dict[str, Any], safety: TextSafety) -> Reason:
         Trusted(row["code"]), Trusted(row["message"]),
         _affected(row.get("affected"), safety),
         _parameters(row["parameters"], safety),
-        tuple(_surface(action) for action in row["next_actions"]),
+        tuple(render_surface(action) for action in row["next_actions"]),
     )
 
 
@@ -260,12 +262,12 @@ def _governance(run: dict[str, Any]) -> Trusted:
     """Render the compact governance header summary."""
     governance = run["governance"]
     if governance is None:
-        return Trusted("no governance")
-    parts = [f"governance: {governance['state']}"]
+        return Trusted(_LABELS["no_governance"])
+    parts = [f"{_LABELS['governance']} {governance['state']}"]
     usage = " ".join(
         f"{governance['budgets'][used]}/{governance['proposal']['budgets'][ceiling]}"
         for ceiling, used in CEILINGS.items())
-    parts.append(f"passes/spawns/audits: {usage}")
+    parts.append(f"{_LABELS['budget_usage']} {usage}")
     return Trusted("; ".join(parts))
 
 
@@ -283,12 +285,12 @@ def _parse(result: dict[str, Any]) -> AuthorView:
     safety = TextSafety(delimiters["open"], delimiters["close"])
     result_type = result["type"]
     if result_type == "Allow":
-        result_type += f" (converged={'true' if result['converged'] else 'false'})"
+        result_type += f" ({_LABELS['converged']}{'true' if result['converged'] else 'false'})"
     rationale = run["governance"]["proposal"]["rationale"] if run["governance"] is not None else None
     header = Header(Trusted(result_type), Trusted(run["status"]), _governance(run),
                     Trusted(run["id"]),
                     safety.untrusted(rationale) if rationale is not None else None)
-    terminal_next = tuple(_surface(action) for action in run["next_actions"])
+    terminal_next = tuple(render_surface(action) for action in run["next_actions"])
     terminal = run["status"] != "active"
     obligations = tuple(
         Obligation(
@@ -297,7 +299,7 @@ def _parse(result: dict[str, Any]) -> AuthorView:
              if row["id"].startswith("claim:") else Trusted(row["required"]))
             if row["required"] else None,
             _missing(row, safety) if row["missing"] is not None else None,
-            tuple(_surface(action) for action in row["next"])
+            tuple(render_surface(action) for action in row["next"])
             or (terminal_next if terminal else ()),
         )
         for row in run["obligations"]["active"] if row["status"] != "satisfied")
@@ -307,11 +309,11 @@ def _parse(result: dict[str, Any]) -> AuthorView:
     residuals = tuple(
         Reason(Trusted(row["code"]), Trusted(""), _residual_claims(row, safety),
                _parameters(row["parameters"], safety),
-               tuple(_surface(action) for action in row["next_actions"]))
+               tuple(render_surface(action) for action in row["next_actions"]))
         for row in run["residuals"])
     children = tuple(
         Child(Trusted(row["resource_class"]), _child_label(row, safety), Trusted(row["state"]),
-              _surface(row["recovery_action"]) if row.get("recovery_action") else None)
+              render_surface(row["recovery_action"]) if row.get("recovery_action") else None)
         for row in run["children"])
     freshness = tuple(
         Freshness(safety.untrusted(row["path"]), Trusted(row["state"]))
@@ -320,7 +322,9 @@ def _parse(result: dict[str, Any]) -> AuthorView:
         header, AuditSummary(Trusted(run["audit"]["state"]),
                              Trusted(run["audit"]["independence"]),
                              tuple(safety.untrusted(item) for item in run["audit"]["findings"])),
-        tuple(_reason(row, safety) for row in result.get("reasons", [])),
+        # Only Block carries reasons; a run-bearing Allow has none.
+        (tuple(_reason(row, safety) for row in result["reasons"])
+         if result["type"] == "Block" else ()),
         obligations, satisfied, residuals, children, freshness,
         () if terminal else terminal_next,
     )
@@ -333,9 +337,10 @@ def _reason_lines(rows: tuple[Reason, ...]) -> tuple[str, ...]:
         for row in rows
         for line in (
             f"  {row.code}" + (f": {row.message}" if row.message else "")
-            + (f" — affected: {row.affected}" if row.affected else ""),
-            *((f"    params: {'; '.join(row.params)}",) if row.params else ()),
-            *((f"    next: {'; '.join(row.next_actions)}",) if row.next_actions else ()),
+            + (f" — {_LABELS['affected']} {row.affected}" if row.affected else ""),
+            *((f"    {_LABELS['params']} {'; '.join(row.params)}",) if row.params else ()),
+            *((f"    {_LABELS['next_inline']} {'; '.join(row.next_actions)}",)
+              if row.next_actions else ()),
         )
     )
 
@@ -347,8 +352,9 @@ def _obligation_lines(rows: tuple[Obligation, ...]) -> tuple[str, ...]:
         for row in rows
         for line in (
             f"  {row.obligation_id}" + (f": {row.required}" if row.required else ""),
-            *((f"    missing: {row.missing}",) if row.missing else ()),
-            *((f"    next: {'; '.join(row.next_actions)}",) if row.next_actions else ()),
+            *((f"    {_LABELS['missing']} {row.missing}",) if row.missing else ()),
+            *((f"    {_LABELS['next_inline']} {'; '.join(row.next_actions)}",)
+              if row.next_actions else ()),
         )
     )
 
@@ -357,7 +363,7 @@ def _child_lines(rows: tuple[Child, ...]) -> tuple[str, ...]:
     """Render child summaries without section framing."""
     return tuple(
         f"  {row.purpose}: {row.state}" +
-        (f" — recovery: {row.recovery}" if row.recovery else "") for row in rows)
+        (f" — {_LABELS['recovery']} {row.recovery}" if row.recovery else "") for row in rows)
 
 
 def _freshness_lines(rows: tuple[Freshness, ...]) -> tuple[str, ...]:
@@ -368,24 +374,25 @@ def _freshness_lines(rows: tuple[Freshness, ...]) -> tuple[str, ...]:
 def _audit_lines(audit: AuditSummary) -> tuple[str, ...]:
     """Render independence once a verdict exists, then the findings a failed audit reported."""
     suffix = f" ({audit.independence})" if audit.state in {"passed", "failed"} else ""
-    return (f"Audit: {audit.state}{suffix}", *(f"  finding: {item}" for item in audit.findings))
+    return (f"{_LABELS['audit']} {audit.state}{suffix}",
+            *(f"  {_LABELS['finding']} {item}" for item in audit.findings))
 
 
 def _render(view: AuthorView) -> str:
     """Render a parsed view through one ordered, empty-dropping section table."""
     base = (f"{view.header.result_type} {view.header.status} — {view.header.governance}",
-            f"run_id: {view.header.run_id}",
-            *((f"proposal rationale: {view.header.proposal_rationale}",)
+            f"{_LABELS['run_id']} {view.header.run_id}",
+            *((f"{_LABELS['proposal_rationale']} {view.header.proposal_rationale}",)
               if view.header.proposal_rationale is not None else ()),
             *_audit_lines(view.audit))
     sections = (
-        ("Reasons:", _reason_lines(view.reasons)),
-        ("Open obligations:", _obligation_lines(view.obligations)),
-        ("Satisfied obligations:", tuple(f"  {item}" for item in view.satisfied)),
-        ("Residuals:", _reason_lines(view.residuals)),
-        ("Children:", _child_lines(view.children)),
-        ("Freshness:", _freshness_lines(view.freshness)),
-        ("Next:", tuple(f"  {item}" for item in view.next_actions)),
+        (_LABELS["reasons"], _reason_lines(view.reasons)),
+        (_LABELS["open_obligations"], _obligation_lines(view.obligations)),
+        (_LABELS["satisfied_obligations"], tuple(f"  {item}" for item in view.satisfied)),
+        (_LABELS["residuals"], _reason_lines(view.residuals)),
+        (_LABELS["children"], _child_lines(view.children)),
+        (_LABELS["freshness"], _freshness_lines(view.freshness)),
+        (_LABELS["next"], tuple(f"  {item}" for item in view.next_actions)),
     )
     blocks = ("\n".join((title, *lines)) for title, lines in sections if lines)
     return "\n\n".join(("\n".join(base), *blocks))
@@ -394,9 +401,11 @@ def _render(view: AuthorView) -> str:
 def _argument_lines(argument: dict[str, Any], safety: TextSafety) -> tuple[str, ...]:
     """Render the graph projection without private identity or artifact fields."""
     claims = tuple(
-        f"  {safety.claim_id(row['claim_id'])} kind={row['kind']} "
-        f"gating={'true' if row['gating'] else 'false'} state={row['state']} "
-        f"evidence={'present' if row['active_evidence_ids'] else 'none'}: "
+        f"  {safety.claim_id(row['claim_id'])} {_LABELS['claim_kind']}{row['kind']} "
+        f"{_LABELS['claim_gating']}{'true' if row['gating'] else 'false'} "
+        f"{_LABELS['claim_state']}{row['state']} "
+        f"{_LABELS['claim_evidence']}"
+        f"{_LABELS['evidence_present'] if row['active_evidence_ids'] else _LABELS['evidence_none']}: "
         f"{safety.untrusted(row['text'])}"
         for row in argument["claims"]
     )
@@ -410,13 +419,13 @@ def _argument_lines(argument: dict[str, Any], safety: TextSafety) -> tuple[str, 
     )
     audit = argument["audit"]
     return (
-        f"goal: {safety.untrusted(argument['goal'])}",
-        f"root_claim_id: {safety.claim_id(argument['root_claim_id'])}",
-        "Claims:", *claims,
-        *(("Edges:", *edges) if edges else ()),
-        *(("Citations:", *citations) if citations else ()),
-        f"Audit status: {audit['state']} ({audit['independence']})",
-        *(f"  finding: {safety.untrusted(item)}" for item in audit["findings"]),
+        f"{_LABELS['goal']} {safety.untrusted(argument['goal'])}",
+        f"{_LABELS['root_claim_id']} {safety.claim_id(argument['root_claim_id'])}",
+        _LABELS["claims"], *claims,
+        *((_LABELS["edges"], *edges) if edges else ()),
+        *((_LABELS["citations"], *citations) if citations else ()),
+        f"{_LABELS['audit_status']} {audit['state']} ({audit['independence']})",
+        *(f"  {_LABELS['finding']} {safety.untrusted(item)}" for item in audit["findings"]),
     )
 
 
@@ -460,21 +469,21 @@ def _render_valid(result: dict[str, Any]) -> str:
     """Render one schema-valid public result as text."""
     if "argument" in result:
         argument = result["argument"]
-        return "Argument\n" + "\n".join(
+        return _LABELS["argument"] + "\n" + "\n".join(
             _argument_lines(argument, TextSafety(**argument["untrusted_delimiters"]))
         )
     if "contract_result" in result:
-        return "Contract\n" + "\n".join(_contract_lines(result["contract_result"]))
+        return _LABELS["contract"] + "\n" + "\n".join(_contract_lines(result["contract_result"]))
     if result["type"] in {"Allow", "Block"} and "run" in result:
         return _render(_parse(result))
     if result["type"] == "Block":
         safety = TextSafety(**untrusted_delimiters())
-        return "Block\n" + "\n".join(_reason_lines(
+        return _LABELS["block"] + "\n" + "\n".join(_reason_lines(
             tuple(_reason(row, safety) for row in result["reasons"])))
     if result["type"] == "Fault":
         message = f": {result['message']}" if "message" in result else ""
-        return f"Fault {result['code']} ({result['fail_direction']}){message}"
-    return "Inert"
+        return f"{_LABELS['fault']} {result['code']} ({result['fail_direction']}){message}"
+    return _LABELS["inert"]
 
 
 def render_author_view(result: Any, *, strict: bool = False) -> str:

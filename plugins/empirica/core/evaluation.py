@@ -60,6 +60,7 @@ class ContractView:
     governance_controls: Mapping[str, Any]
     recovery_exclusions: Mapping[str, tuple[str, ...]]
     late_route_must: str
+    default_next_action: str
     untrusted_delimiters: Mapping[str, str]
 
     def __post_init__(self) -> None:
@@ -74,6 +75,7 @@ class EvaluationSnapshot:
     history: tuple[dict[str, Any], ...]
     graph: dict[str, Any] | None
     contract: ContractView
+    command: dict[str, Any]
     observations: tuple[Any, ...] = ()
     observation_basis_id: str = ""
     observation_digest: str = ""
@@ -84,7 +86,6 @@ class EvaluationSnapshot:
     profile_id: str = ""
     host_tier: str = "observational"
     host_audit_execution: str = "unavailable"
-    command: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "history", _freeze(self.history))
@@ -114,6 +115,10 @@ class EvaluationSnapshot:
     @property
     def late_route_must(self):
         return self.contract.late_route_must
+
+    @property
+    def default_next_action(self):
+        return self.contract.default_next_action
 
     @property
     def untrusted_delimiters(self):
@@ -146,6 +151,7 @@ class Decision:
 
 
 def valid_graph(value: Any) -> bool:
+    """Whether ``value`` is a well-formed claim graph (closed shape, bounded claims, edges)."""
     if not isinstance(value, Mapping) or set(value) != {"root", "claims", "edges"}:
         return False
     claims = value.get("claims")
@@ -225,10 +231,12 @@ def frozen_scope_invalid(state: OperationalState, graph: Mapping[str, Any] | Non
 
 
 def claim_digest(claim: dict[str, Any]) -> str:
+    """Digest binding a claim's id and text; evidence for an edited claim no longer matches it."""
     return digest({"claim_id": claim["id"], "text": claim["text"]})
 
 
 def active_evidence(snapshot: EvaluationSnapshot, claim: dict[str, Any]) -> list[dict[str, Any]]:
+    """Research and spike artifacts bound to the claim's current digest; only the latest spike is active."""
     cd = claim_digest(claim)
     evidence = [a for a in snapshot.history if a.get("kind") in {"research", "spike"} and a.get("claim_id") == claim["id"] and a.get("claim_digest") == cd]
     spikes = [a for a in evidence if a["kind"] == "spike"]
@@ -450,6 +458,7 @@ def bootstrap_precondition(snapshot: EvaluationSnapshot, operation: str) -> tupl
 
 
 def bootstrap_status(snapshot: EvaluationSnapshot) -> dict[str, Any]:
+    """Bootstrap obligations, ordered ``next_actions`` (empty for a terminal run or once bootstrap is complete), and readiness flags."""
     facts = _bootstrap_facts(snapshot)
     state, governed = snapshot.state, snapshot.state.governance
     active = []
@@ -715,7 +724,18 @@ def _audit_reason(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> 
 
 
 def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> Decision:
-    """Apply one validated command without performing I/O."""
+    """Apply one validated command to the snapshot without performing I/O.
+
+    Branches, in order: an invalid frozen scope blocks; a non-active (terminal) run allows only
+    reads and ``stop``/``report_convergence`` evaluation and is otherwise ``Inert``; read commands
+    are allowed; a graphless ``stop`` ends ``stopped_residual``; an operation whose bootstrap
+    precondition is unmet blocks with that reason; governed work is blocked until the current
+    proposal is approved (preparation actions excepted); then each ``ObserveAction`` kind
+    (route, investigate, graph, research, freeze, configure_run, child_reserve; any other is
+    a ``Fault``) and each
+    ``EvaluateRun`` intent (continue, report_convergence, stop) yields its state transition,
+    artifacts, or ``Block``.
+    """
     state, kind = snapshot.state, command["type"]
     if frozen_scope_invalid(state, snapshot.graph):
         return _decision(snapshot, state, "Block", reason="graph.invalid")

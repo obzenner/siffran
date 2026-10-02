@@ -460,13 +460,42 @@ class UnsupportedLifecycleTests(unittest.TestCase):
         rc, out = self._run("stop", "Stop")
         self.assertEqual((rc, out), (0, ""))
 
-    def test_restore_is_inert_without_active_run(self) -> None:
-        rc, out = self._run("restore", "SessionStart", source="compact")
-        self.assertEqual((rc, out), (0, ""))
+    def test_compaction_restore_is_not_provided(self) -> None:
+        from io import StringIO
+        from adapters.codex.lifecycle import main
+        err = StringIO()
+        with patch("sys.stdin", new=self._stdin("SessionStart", source="compact")), \
+                patch("sys.stderr", new=err):
+            rc = main(["restore"])
+        self.assertEqual(rc, 1)
+        self.assertIn("unknown Codex hook action: restore", err.getvalue())
+        hooks = json.loads((PLUGIN_ROOT / "hooks" / "codex.json").read_text(encoding="utf-8"))
+        self.assertNotIn("SessionStart", hooks["hooks"])
 
-    def test_restore_is_inert_for_non_compact_source(self) -> None:
-        rc, out = self._run("restore", "SessionStart", source="startup")
-        self.assertEqual((rc, out), (0, ""))
+    def test_stop_denies_when_audit_rejection_fails(self) -> None:
+        from adapters.audit_protocol import AuditProtocolError
+        from adapters.codex.lifecycle import _stop
+        resolved = {"protocol": "empirica/v2", "request_id": "x",
+                    "result": {"type": "Allow", "converged": False, "run": {"id": "er2:opaque"}}}
+        owed = {"protocol": "empirica/v2", "request_id": "y",
+                "result": {"type": "Block", "reasons": [{"code": "audit.required",
+                                                         "message": "audit owed"}]}}
+        for failing in (None, "reconcile_orphans", "prepare", "reject"):
+            with self.subTest(failing=failing):
+                failures = {name: (AuditProtocolError("boom") if name == failing else None)
+                            for name in ("reconcile_orphans", "prepare", "reject")}
+                with patch("adapters.codex.lifecycle._dispatch", side_effect=[resolved, owed, owed]), \
+                        patch("adapters.codex.lifecycle._refresh_governance"), \
+                        patch("adapters.audit_protocol.AuditProtocol.reconcile_orphans",
+                              side_effect=failures["reconcile_orphans"]), \
+                        patch("adapters.audit_protocol.AuditProtocol.prepare",
+                              side_effect=failures["prepare"]), \
+                        patch("adapters.audit_protocol.AuditProtocol.reject",
+                              side_effect=failures["reject"]):
+                    result = _stop(_official("Stop"))
+                reason = ("audit owed" if failing is None
+                          else "Empirica convergence gate unavailable.")
+                self.assertEqual(result, {"decision": "block", "reason": reason})
 
     def test_unknown_action_returns_nonzero(self) -> None:
         from io import StringIO

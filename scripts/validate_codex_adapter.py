@@ -10,7 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "empirica"
-EVENTS = {"UserPromptSubmit", "PreToolUse", "Stop", "SessionStart"}
+EVENTS = {"UserPromptSubmit", "PreToolUse", "Stop"}
 
 
 def fail(message: str) -> None:

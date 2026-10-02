@@ -225,6 +225,10 @@ class FakeRunRepository:
         self._counter += 1
         return f"r{self._counter}"
 
+    def generations(self, project_id, run_id):
+        return sorted(key.generation for key in self._store
+                      if key.project_id == project_id and key.run_id == run_id)
+
     def read(self, key):
         entry = self._store.get(key)
         if entry is None:

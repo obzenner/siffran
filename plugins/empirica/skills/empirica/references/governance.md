@@ -8,7 +8,7 @@ Submit `configure_run` with **all three** proposed ceilings and a nonblank 1–6
 
 The ordinary host review displays the goal read-only, the three budget ceilings, and escaped literal rationale under **Agent sizing rationale — unverified**. Claude uses its built-in **Accept** button to approve the displayed values, **Decline** to reject, and Esc to decide later; editing any value and accepting submits a ceiling-only amendment. Pi presents the same model in one host-native component. Amendments immediately open one host-owned locked confirmation in the same call. It shows original versus amended ceilings and warns **Written for the original proposal; not regenerated for these human-edited values**. It is read-only: Accept/Approve approves exactly that revision, while Decline/Esc/Keep pending retains the edits without consent. No author action runs between amendment and confirmation. The original timeout, raw receipt fingerprinting, CAS, and exact epoch/digest checks apply across both forms.
 
-Cancel, timeout, invalid content, stale/conflicting replies, and missing UI never grant authority. Presentations are CAS-reserved before UI and bounded to three per configuration epoch and 128 per run. Exact current-schema receipt replay is inert; conflicting replay blocks.
+Cancel, timeout, invalid content, stale/conflicting replies, and missing UI never grant authority. After dismissal, timeout, or rejection the author resubmits `configure_run` (same or human-edited ceilings) to reopen the dialog and records `investigate` only once the view says `approved`. Presentations are CAS-reserved before UI and bounded to three per configuration epoch and 128 per run. Exact current-schema receipt replay is inert; conflicting replay blocks.
 
 ## Modes
 
@@ -28,7 +28,7 @@ Reviewer configuration is not itself evidence of independence. Audit identity cl
 
 ## Timeout, compatibility, and recovery
 
-The host decision timeout defaults to 900 seconds. `EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS` accepts finite 1..1500-second host-owned overrides. It appears in the dialog header and is never approvable. Pi shares one timeout across review and locked confirmation.
+The host decision timeout defaults to 900 seconds. `EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS` accepts host-owned overrides written as whole seconds in plain decimal digits from 1 to 1500 (no fractions, signs, exponents, or hex); a set but malformed or out-of-range value fails extension or server start with an error naming the variable instead of defaulting. It appears in the dialog header and is never approvable. Pi shares one timeout across review and locked confirmation.
 
 Public contract 3.0.0 keeps wire `empirica/v2` and state family `empirica.run/2`. Persisted documents with removed governance fields are intentionally incompatible with the strict current schema and fail closed as `run.corrupt`. A later `StartRun` creates a fresh generation. The runtime never mutates, repairs, converts, or carries approval from an obsolete document.
 

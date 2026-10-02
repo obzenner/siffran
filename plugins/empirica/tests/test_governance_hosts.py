@@ -373,14 +373,21 @@ class GovernanceHostTests(unittest.TestCase):
         self.assertEqual(json.loads(completed.stdout), expected)
 
     def test_documented_timeout_default_and_validated_host_override(self):
+        """Shared case table (also run by the Pi suite): exact seconds or exact error message."""
         from adapters.governance import governance_timeout
-        with patch.dict("os.environ", {}, clear=True):
-            self.assertEqual(governance_timeout(), 900)
-        for raw in ("0", "1501", "nan", "inf", "invalid"):
-            with patch.dict("os.environ", {"EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS": raw}):
-                self.assertEqual(governance_timeout(), 900)
-        with patch.dict("os.environ", {"EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS": "1"}):
-            self.assertEqual(governance_timeout(), 1)
+        table = json.loads((Path(__file__).parent / "fixtures" / "governance-timeout-cases.json").read_text())
+        names = {case["name"] for case in table["cases"]}
+        self.assertTrue({"unset", "blank empty", "min", "max", "zero", "above max", "exponent", "hex",
+                         "underscore", "fraction", "text", "control char"} <= names)
+        for case in table["cases"]:
+            env = {} if case["env"] is None else {"EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS": case["env"]}
+            with self.subTest(case=case["name"]), patch.dict("os.environ", env, clear=True):
+                if case["error"] is None:
+                    self.assertEqual(governance_timeout(), case["seconds"])
+                else:
+                    with self.assertRaises(ValueError) as caught:
+                        governance_timeout()
+                    self.assertEqual(str(caught.exception), case["error"])
 
     def test_dismissals_durable_and_no_fourth_dialog(self):
         self.initialize({"elicitation": {}})

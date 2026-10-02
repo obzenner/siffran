@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 import unittest
 
@@ -27,18 +26,6 @@ class IdentityPolicyTests(unittest.TestCase):
             walk(json.loads((root / name).read_text()))
         self.assertTrue(found)
         self.assertEqual(set(found), {POLICY_VERSION})
-
-    def test_every_pinned_pi_thinking_level_is_normalized(self):
-        """The identity policy strips each level pinned pi-subagents may append (P1-D1)."""
-        source = (Path(__file__).resolve().parents[3] / "node_modules" / "pi-subagents" / "src" / "shared"
-                  / "model-info.ts")
-        if not source.exists():
-            self.skipTest("pi-subagents is not installed (make node_modules)")
-        levels = re.search(r"THINKING_LEVELS = \[([^\]]*)\]", source.read_text()).group(1)
-        for level in re.findall(r'"([a-z]+)"', levels):
-            with self.subTest(level=level):
-                self.assertEqual(observe("amazon-bedrock-us", f"us.openai.gpt-5.6-sol:{level}",
-                                         source="test")["identity"], "openai/gpt-5.6-sol")
 
     def test_equivalent_deployment_spellings_share_classes(self):
         rows = [

@@ -19,6 +19,7 @@ import { createStdioBridgeDispatch, HOST_PROFILE_ID } from "../src/stdio-transpo
 import { startRunRequest, startRunNotice, resolveRunRequest, evaluateRunRequest, observeActionRequest, getRunRequest } from "../src/translate.ts";
 import { govern, refreshGovernance, piGovernanceContext } from "../src/governance-ui.ts";
 import { createPrivateIngress } from "../src/private-transport.ts";
+import { runJsonProcess } from "../src/process-transport.ts";
 import { fakeCtx } from "./fakes.ts";
 import type { Response } from "../src/contract.ts";
 
@@ -37,12 +38,13 @@ const testRepo = mkdtempSync(join(tmpdir(), "empirica-pi-live-"));
 const testHome = join(testRepo, "home");
 mkdirSync(testHome);
 execFileSync("git", ["init", "-q"], { cwd: testRepo });
+const BRIDGE_TIMEOUT_MS = 15_000;
 const bridge = createStdioBridgeDispatch({
   command: py,
   args: [bridgeScript],
   cwd: testRepo,
   env: { ...process.env, EMPIRICA_HOME: testHome },
-  timeoutMs: 15_000,
+  timeoutMs: BRIDGE_TIMEOUT_MS,
 });
 
 test("Pi surfaces the real service blank-goal refusal", async () => {
@@ -181,21 +183,33 @@ test(
 );
 
 test(
-  "live bridge: ResolveRun returns the located run when StartRun won",
+  "live bridge: ResolveRun returns the run StartRun created for the same selector",
   { skip: !pythonAvailable ? "python3 is missing" : false },
   async () => {
-    const response = await bridge(resolveRunRequest(SEL, "live-2"));
+    const selector = { project: "live-pi", session: "resolve-after-start" };
+    const started = await bridge(startRunRequest(selector, "resolve after start", "live-2a", INVOCATION));
+    assert.equal(started.result.type, "Allow", JSON.stringify(started.result));
+    assert.ok("run" in started.result && started.result.run);
+    const resolved = await bridge(resolveRunRequest(selector, "live-2b"));
+    assert.equal(resolved.protocol, "empirica/v2");
+    assert.equal(resolved.request_id, "live-2b");
+    assert.equal(resolved.result.type, "Allow", JSON.stringify(resolved.result));
+    assert.ok("run" in resolved.result && resolved.result.run);
+    assert.match(resolved.result.run.id, /^er2:/);
+    assert.equal(resolved.result.run.status, "active");
+    assert.equal(resolved.result.run.id, started.result.run.id);
+  },
+);
+
+test(
+  "live bridge: ResolveRun for a selector that was never started is Inert",
+  { skip: !pythonAvailable ? "python3 is missing" : false },
+  async () => {
+    const response = await bridge(resolveRunRequest(
+      { project: "live-pi", session: "never-started" }, "live-2c"));
     assert.equal(response.protocol, "empirica/v2");
-    assert.equal(response.request_id, "live-2");
-    // Node may schedule this independently of the StartRun test: absent is Inert; after StartRun
-    // the exact same selector resolves to an Allow with the canonical er2 handle.
-    assert.ok(
-      response.result.type === "Inert" || response.result.type === "Allow",
-      `expected Inert or Allow, got ${response.result.type}`,
-    );
-    if (response.result.type === "Allow" && "run" in response.result) {
-      assert.match(response.result.run.id, /^er2:/);
-    }
+    assert.equal(response.request_id, "live-2c");
+    assert.equal(response.result.type, "Inert", JSON.stringify(response.result));
   },
 );
 
@@ -265,20 +279,14 @@ test(
     // bridge and verify the bridge itself returns a v2 Fault
     // (invalid_request/closed). The bridge speaks v2 only; a v1 protocol is
     // invalid_request before profile composition.
-    const { spawn } = await import("node:child_process");
-    const child = spawn(py, [join(process.cwd(), "bridge.py")], {
-      stdio: ["pipe", "pipe", "pipe"],
+    const response = await runJsonProcess({
+      command: py, args: [join(process.cwd(), "bridge.py")],
       env: { ...process.env, EMPIRICA_HOST_PROFILE_ID: HOST_PROFILE_ID },
-    });
-    const response = await new Promise<string>((resolve, reject) => {
-      let out = "";
-      child.stdout.on("data", (c: string) => (out += c));
-      child.on("close", () => resolve(out));
-      child.on("error", reject);
-      child.stdin.end(
-        JSON.stringify({ protocol: "empirica/v1", request_id: "v1-test", command: { type: "StartRun", selector: { project: "x", session: "y" }, goal: "z" } }),
-      );
-    });
+      timeoutMs: BRIDGE_TIMEOUT_MS, label: "raw v1 bridge request",
+    }, JSON.stringify({
+      protocol: "empirica/v1", request_id: "v1-test",
+      command: { type: "StartRun", selector: { project: "x", session: "y" }, goal: "z" },
+    }));
     const parsed = JSON.parse(response);
     assert.equal(parsed.protocol, "empirica/v2");
     assert.equal(parsed.result.type, "Fault");

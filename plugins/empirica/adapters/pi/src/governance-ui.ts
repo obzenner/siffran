@@ -52,10 +52,24 @@ function unavailable(response: Response, code = "governance.approval_unavailable
     reasons: [{ code, parameters: {}, ...RECOVERY[code] }] } };
 }
 
+/**
+ * Host decision timeout in milliseconds. Unset or blank `EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS` means the
+ * 900-second default; a set value must be ASCII decimal digits only (after trimming ASCII whitespace) from
+ * 1 to 1500 inclusive, leading zeros allowed (significant digits are bounded before conversion so no input
+ * length changes the outcome), or this throws instead of silently becoming the default. The Python mirror
+ * (`governance_timeout`) accepts the identical syntax and formats the identical message; the shared case
+ * table pins both.
+ */
 export function governanceTimeout(): number {
   const raw = process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS;
-  const value = raw?.trim() ? Number(raw) : 900;
-  return Number.isFinite(value) && value >= 1 && value <= 1500 ? value * 1000 : 900_000;
+  const text = raw?.replace(/^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g, "");
+  if (raw === undefined || !text) return 900_000;
+  const match = /^0*([1-9][0-9]{0,3})$/.exec(text);
+  if (match) {
+    const seconds = Number(match[1]);
+    if (seconds <= 1500) return seconds * 1000;
+  }
+  throw new Error(`EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS must be a whole number of seconds from 1 to 1500, got ${JSON.stringify(raw)}`);
 }
 
 function closedFault(code: "unavailable" | "corrupt_run" = "unavailable"): Response {

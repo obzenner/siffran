@@ -78,6 +78,7 @@ _NOTICES = _PUBLIC_CONTRACT["settlement_notices"]
 HUMAN_WAIT_NOTICE: str = _NOTICES["human_wait"]
 #: Template with the single ``{resource}`` placeholder, formatted with the reason's resource.
 BUDGET_EXHAUSTED_NOTICE: str = _NOTICES["budget_exhausted"]
+_AUTHOR_VIEW_LABELS = MappingProxyType(dict(_PUBLIC_CONTRACT["author_view"]["labels"]))
 _RECOVERY_EXCLUSIONS = {
     mode: tuple(actions)
     for mode, actions in _GOVERNANCE_CONTROLS["recovery_exclusions"].items()
@@ -94,6 +95,9 @@ CEILING_BOUNDS = MappingProxyType({
     for name, schema in _configure_ceilings.items()
 })
 _LATE_ROUTE_MUST = _bootstrap["late_route_must"]
+_DEFAULT_NEXT_ACTION = _bootstrap["default_next_action"]
+if _DEFAULT_NEXT_ACTION not in _PUBLIC_CONTRACT["next_actions"]:
+    raise RuntimeError("bootstrap default next action is not a contract next action")
 _UNTRUSTED_DELIMITERS = copy.deepcopy(_PUBLIC_CONTRACT["untrusted_delimiters"])
 _DIGEST = canonical_digest(_PUBLIC_CONTRACT)
 CONTRACT_VIEW = ContractView(
@@ -104,6 +108,7 @@ CONTRACT_VIEW = ContractView(
     governance_controls=_PROJECTION_CONTROLS,
     recovery_exclusions=_RECOVERY_EXCLUSIONS,
     late_route_must=_LATE_ROUTE_MUST,
+    default_next_action=_DEFAULT_NEXT_ACTION,
     untrusted_delimiters=_UNTRUSTED_DELIMITERS,
 )
 
@@ -154,6 +159,11 @@ def host_profile(profile_id: str) -> Mapping[str, Any]:
 def governance_decisions() -> tuple[tuple[str, Mapping[str, Any]], ...]:
     """Return the canonical governance decision rows."""
     return tuple((name, MappingProxyType(row)) for name, row in _GOVERNANCE_DECISIONS)
+
+
+def author_view_labels() -> Mapping[str, str]:
+    """Return the contract-owned author-view section headings and line labels."""
+    return _AUTHOR_VIEW_LABELS
 
 
 def untrusted_delimiters() -> Mapping[str, Any]:

@@ -28,7 +28,8 @@ from application.location import encode_handle, storage_id  # noqa: E402
 from application.transaction import Coordinator as ProductionCoordinator  # noqa: E402
 from core.evaluation import (  # noqa: E402
     EvaluationSnapshot, active_spike_heads, artifact, audit_binding, audit_passes,
-    claim_digest, evaluate_snapshot, frozen_semantic_digest, independence, valid_graph)
+    claim_conflicted, claim_digest, evaluate_snapshot, frozen_semantic_digest, independence,
+    valid_graph)
 from core.freshness import (FileObservation, ObservationState, canonical_digest,  # noqa: E402
                             observations_digest)
 
@@ -277,6 +278,25 @@ class D7TransactionTests(unittest.TestCase):
         } for index, claim in enumerate(reversed(graph["claims"]), start=1))
         self.assertEqual(
             tuple(head.claim_id for head in active_spike_heads(history, graph)), ("Z", "A"))
+
+    def test_additional_same_digest_research_cannot_clear_a_conflict(self):
+        """Research is append-only per claim digest: a third record never removes either outcome."""
+        from types import SimpleNamespace
+        claim = {"id": "C0", "text": "the claim", "kind": "ordinary", "gating": True}
+        digest = claim_digest(claim)
+
+        def research(outcome: str, number: int) -> dict:
+            return {"kind": "research", "claim_id": "C0", "claim_digest": digest,
+                    "outcome": outcome, "artifact_id": "sha256:" + format(number, "x") * 64}
+
+        history = [research("supporting", 1), research("refuting", 2)]
+        self.assertTrue(claim_conflicted(SimpleNamespace(history=tuple(history)), claim))
+        history.append(research("supporting", 3))
+        self.assertTrue(claim_conflicted(SimpleNamespace(history=tuple(history)), claim))
+        history.append(research("refuting", 4))
+        self.assertTrue(claim_conflicted(SimpleNamespace(history=tuple(history)), claim))
+        revised = {**claim, "text": "the revised claim"}
+        self.assertFalse(claim_conflicted(SimpleNamespace(history=tuple(history)), revised))
 
     def test_orphan_is_invisible_and_order_comes_from_manifest(self):
         first = artifact("research", {"n": 1})

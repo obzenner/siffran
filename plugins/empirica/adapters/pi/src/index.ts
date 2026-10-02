@@ -21,7 +21,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type { Dispatch, Request, Response, RunSelector } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
-import { govern, piGovernanceContext, refreshGovernance, settlementNotice } from "./governance-ui.ts";
+import { govern, governanceTimeout, piGovernanceContext, refreshGovernance, settlementNotice } from "./governance-ui.ts";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -262,6 +262,9 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
   const subagentToolName = deps.subagentToolName ?? "subagent";
   const privateIngress = deps.privateIngress ?? createPrivateIngress();
   const resolveAuditContract = deps.resolveAuditContract ?? defaultAuditContractResolver;
+  // Read once at load: a malformed EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS fails extension load with its message
+  // instead of surfacing mid-run inside a configure_run that already dispatched.
+  const governanceTimeoutMs = governanceTimeout();
 
   return function empiricaExtension(pi: ExtensionAPI): void {
     let runHandle: string | null = null;
@@ -478,7 +481,8 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             let response = await dispatch(observeActionRequest(
               runHandle, action as { kind: string; [key: string]: unknown }, randomUUID()));
             if (action.kind === "configure_run" && response.result.type === "Allow") {
-              response = await govern(runHandle, ctx, trusted, signal, undefined, undefined, response);
+              response = await govern(runHandle, ctx, trusted, signal, undefined,
+                Date.now() + governanceTimeoutMs, response);
             }
             // QUAL-1 final public-result guard: the model-facing observe result must never carry
             // a private governance presentation field, even if host mediation reintroduced one.

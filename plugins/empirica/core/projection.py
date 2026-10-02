@@ -65,9 +65,9 @@ def _obligations(snapshot: EvaluationSnapshot, derivation: Any, states: Mapping[
                  stale: set[str], terminal_next: list[str] | None = None,
                  ) -> dict[str, list[dict[str, Any]]]:
     state = snapshot.state
-    late = bool(snapshot.command and snapshot.command.get("type") == "ObserveAction"
-                and snapshot.command["action"].get("kind") == "route"
-                and state.investigation_stamp is not None)
+    late = (snapshot.command["type"] == "ObserveAction"
+            and snapshot.command["action"].get("kind") == "route"
+            and state.investigation_stamp is not None)
     bootstrap = bootstrap_status(snapshot)
     active = [_obligation(row["id"], row["must"], [], None, metadata, row["status"], terminal_next)
               for row in bootstrap["active"]]
@@ -177,6 +177,7 @@ def governance_dialog(goal: str, value: Mapping, controls: Mapping,
 def project_governance(snapshot: EvaluationSnapshot) -> dict:
     value = governance.plain(snapshot.state.governance)
     bootstrap = bootstrap_status(snapshot)
+    actions = bootstrap["next_actions"]  # empty for a terminal run or when bootstrap is complete
     value.update(interactions_remaining=governance.interactions_remaining(snapshot.state.governance),
                  prompt_error=governance.interaction_error(snapshot.state.governance))
     value.pop("receipts")
@@ -185,7 +186,7 @@ def project_governance(snapshot: EvaluationSnapshot) -> dict:
                  remaining={ceiling: snapshot.state.budgets[ceiling] - snapshot.state.budgets[used]
                             for ceiling, used in governance.CEILINGS.items()},
                  request_ready=bootstrap["request_ready"], display_ready=bootstrap["display_ready"],
-                 next_action=bootstrap["next_actions"][-1] if bootstrap["next_actions"] else "run.inspect")
+                 next_action=actions[-1] if actions else snapshot.default_next_action)
     return value
 
 

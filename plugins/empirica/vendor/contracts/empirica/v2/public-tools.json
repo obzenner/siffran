@@ -135,6 +135,48 @@
     "human_wait": "Empirica is paused for human governance input, not converged. Investigation remains blocked; no approval was granted by this pause.",
     "budget_exhausted": "Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this pause. Stop honestly (report_convergence intent=stop), or in deliberative mode propose a raise for human approval; in auto mode start a fresh run."
   },
+  "author_view": {
+    "labels": {
+      "no_governance": "no governance",
+      "governance": "governance:",
+      "budget_usage": "passes/spawns/audits:",
+      "converged": "converged=",
+      "run_id": "run_id:",
+      "proposal_rationale": "proposal rationale:",
+      "audit": "Audit:",
+      "finding": "finding:",
+      "reasons": "Reasons:",
+      "open_obligations": "Open obligations:",
+      "satisfied_obligations": "Satisfied obligations:",
+      "residuals": "Residuals:",
+      "children": "Children:",
+      "freshness": "Freshness:",
+      "next": "Next:",
+      "affected": "affected:",
+      "params": "params:",
+      "next_inline": "next:",
+      "missing": "missing:",
+      "recovery": "recovery:",
+      "via_claim": "via claim:",
+      "argument": "Argument",
+      "goal": "goal:",
+      "root_claim_id": "root_claim_id:",
+      "claims": "Claims:",
+      "edges": "Edges:",
+      "citations": "Citations:",
+      "audit_status": "Audit status:",
+      "claim_kind": "kind=",
+      "claim_gating": "gating=",
+      "claim_state": "state=",
+      "claim_evidence": "evidence=",
+      "evidence_present": "present",
+      "evidence_none": "none",
+      "contract": "Contract",
+      "block": "Block",
+      "fault": "Fault",
+      "inert": "Inert"
+    }
+  },
   "host_profiles": {
     "claude-code@2.1.278": {
       "delegation_env": "EMPIRICA_AUTO_DELEGATION"

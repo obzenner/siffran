@@ -44,21 +44,7 @@
             "type": "command",
             "command": "python3 \"${PLUGIN_ROOT}/hooks/codex_hook.py\" stop",
             "timeout": 960,
-            "statusMessage": "Running the bound Empirica audit and convergence gate"
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "matcher": "compact",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/hooks/codex_hook.py\" restore",
-            "timeout": 30,
-            "statusMessage": "Restoring Empirica state",
-            "additionalContextLimit": 20000
+            "statusMessage": "Enforcing the Empirica convergence gate"
           }
         ]
       }

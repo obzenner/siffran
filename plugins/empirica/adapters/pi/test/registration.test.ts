@@ -28,6 +28,18 @@ function register(): FakePi {
   return pi;
 }
 
+test("a malformed governance timeout fails extension load with the variable named", () => {
+  const prior = process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS;
+  try {
+    process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS = "soon";
+    assert.throws(() => createEmpiricaExtension({ dispatch: noopDispatch }),
+      /EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS must be a whole number of seconds from 1 to 1500, got "soon"/);
+  } finally {
+    if (prior === undefined) delete process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS;
+    else process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS = prior;
+  }
+});
+
 test("registers the /empirica command with a description", () => {
   const pi = register();
   const command = pi.commands.get("empirica");

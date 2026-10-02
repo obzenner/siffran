@@ -184,16 +184,13 @@ def _resolve(
 ) -> tuple[str | None, Result | None]:
     """Return ``(handle, result)`` using only ``ResolveRun`` through the shared bridge.
 
-    Observational hooks preserve non-wedging behavior. Admission hooks pass ``strict``: only exact
-    ``Inert/no_run`` proves that no cap exists; transport failure, faults, and malformed no-handle
-    responses are unavailable and must fail closed.
+    Transport and dispatch exceptions always propagate; each caller owns the single handling layer.
+    Observational hooks catch them in their outer handler (one stderr diagnostic, exit 0), and
+    admission hooks pass ``strict`` and fail closed: only exact ``Inert/no_run`` proves that no cap
+    exists, so faults and malformed no-handle responses are unavailable. Non-strict callers treat a
+    genuine no-run result as silent.
     """
-    try:
-        response = dispatch_resolve(payload, correlation_id="claude-resolve")
-    except Exception:  # noqa: BLE001 - admission callers distinguish unavailable from no-run
-        if strict:
-            raise
-        return None, None
+    response = dispatch_resolve(payload, correlation_id="claude-resolve")
     result = response.result
     run = result.run
     handle = run.id if run is not None else None
@@ -439,8 +436,23 @@ def completion_main() -> int:
     return mapped.exit_code
 
 
+def observational_diagnostic(hook: str, exc: BaseException) -> str:
+    """One stderr line naming the hook, exception class, and whitespace-normalized message (no traceback; the hook payload is not serialized)."""
+    message = " ".join(str(exc).split())
+    return f"empirica {hook} hook failed: {type(exc).__name__}: {message}"
+
+
+def _observational_failure(hook: str, exc: BaseException) -> int:
+    """Report one failure of a host-observational hook on stderr and exit 0.
+
+    These hooks never gate the host; the Stop hook still fails closed on whatever they left open.
+    """
+    print(observational_diagnostic(hook, exc), file=sys.stderr)
+    return 0
+
+
 def restore_main() -> int:
-    """SessionStart:compact: observational, bounded restore context, always exit zero."""
+    """SessionStart:compact: bounded restore context; exit 0, failure diagnostic on stderr."""
     payload = _payload()
     try:
         handle, _ = _resolve(payload)
@@ -448,8 +460,8 @@ def restore_main() -> int:
             AuditProtocol(CLAUDE_PROFILE_ID).reconcile_orphans(handle, native_prefix="claude-session-restore", include_pending=False)
             if context := restore_context(dispatch_restore(payload, handle)):
                 print(context)
-    except Exception:  # noqa: BLE001 - restore never wedges session start
-        pass
+    except Exception as exc:  # noqa: BLE001 - restore never wedges session start
+        return _observational_failure("SessionStart:compact restore", exc)
     return 0
 
 
@@ -479,7 +491,10 @@ def _reserved_plan(handle: str, result: Result) -> AuditLaunchPlan | None:
 
 
 def agent_failure_main() -> int:
-    """PostToolUseFailure reconciles an admitted auditor that never reached SubagentStart."""
+    """PostToolUseFailure reconciles an admitted auditor that never reached SubagentStart.
+
+    Exit 0 always; a failure writes one diagnostic line to stderr.
+    """
     payload = _payload()
     try:
         tool_input = payload.get("tool_input")
@@ -494,13 +509,16 @@ def agent_failure_main() -> int:
         plan = _reserved_plan(handle, result)
         if plan is not None:
             AuditProtocol(CLAUDE_PROFILE_ID).reject(plan)
-    except Exception:
-        return 0
+    except Exception as exc:  # noqa: BLE001 - observational; Stop still fails closed on an open audit
+        return _observational_failure("PostToolUseFailure", exc)
     return 0
 
 
 def subagent_start_main() -> int:
-    """SubagentStart binds the exact native agent id to one reserved audit operation."""
+    """SubagentStart binds the exact native agent id to one reserved audit operation.
+
+    Exit 0 always; a failure writes one diagnostic line to stderr.
+    """
     payload = _payload()
     try:
         if payload.get("agent_type") != "empirica:empirica-auditor":
@@ -513,13 +531,16 @@ def subagent_start_main() -> int:
         if plan is None:
             return 0
         AuditProtocol(CLAUDE_PROFILE_ID).observe_started(plan, native_id)
-    except Exception:  # observational hook; Stop still fails closed on an open audit
-        return 0
+    except Exception as exc:  # noqa: BLE001 - observational; Stop still fails closed on an open audit
+        return _observational_failure("SubagentStart", exc)
     return 0
 
 
 def subagent_stop_main() -> int:
-    """SubagentStop admits only the verdict from its exact bound native execution."""
+    """SubagentStop admits only the verdict from its exact bound native execution.
+
+    Exit 0 always; a failure writes one diagnostic line to stderr.
+    """
     payload = _payload()
     try:
         if payload.get("agent_type") != "empirica:empirica-auditor":
@@ -571,11 +592,11 @@ def subagent_stop_main() -> int:
         protocol.observe_reviewer(
             plan, native_id,
             auditor=IdentityObservation(
-                (_model_observation(auditor_model) or {}).get("provider_id"), auditor_model,
+                _model_observation(auditor_model)["provider_id"], auditor_model,
                 "claude-subagent-transcript"),
         )
         if not protocol.observe_verdict(plan, native_id, verdict):
             print("empirica: auditor verdict rejected; audit failed.", file=sys.stderr)
-    except Exception:  # noqa: BLE001 - SubagentStop is observational to the host
-        return 0
+    except Exception as exc:  # noqa: BLE001 - SubagentStop is observational to the host
+        return _observational_failure("SubagentStop", exc)
     return 0

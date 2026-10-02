@@ -5,6 +5,7 @@ import * as path from "node:path";
 
 import { PROTOCOL, type Response } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
+import { PUBLIC_TOOLS } from "./public-tools.ts";
 
 type Trusted = string & { readonly __trusted: unique symbol };
 type Untrusted = string & { readonly __untrusted: unique symbol };
@@ -66,6 +67,7 @@ const PUBLIC_CONTRACT = JSON.parse(readFileSync(CONTRACT_PATH, "utf8")) as Json;
 const RESPONSE_DEFS = (JSON.parse(readFileSync(
   path.join(path.dirname(CONTRACT_PATH), "response.schema.json"), "utf8",
 )) as Json).$defs as Json;
+const LABELS = PUBLIC_TOOLS.author_view.labels;
 const DIGEST_DEFS = new Set(["digest256", "nullableDigest256"]);
 const CLAIM_ID_DEF = "claimId";
 // The one claim-id pattern, read from the contract. ECMAScript `$` (no `m` flag) matches only at
@@ -309,7 +311,8 @@ function residualClaims(row: Json, safety: TextSafety): Trusted | null {
   if (row.claim_id === undefined) return null;
   const claim = `claim:${claimId(row.claim_id, safety)}`;
   const target = row.target_claim_id ?? row.claim_id;
-  return trusted(target === row.claim_id ? claim : `${claim} via claim:${claimId(target, safety)}`);
+  return trusted(target === row.claim_id
+    ? claim : `${claim} ${LABELS.via_claim}${claimId(target, safety)}`);
 }
 
 /**
@@ -322,7 +325,7 @@ function missing(row: Json, safety: TextSafety): Trusted {
   if (target === null || target === String(row.id).replace(/^claim:/, "")) {
     return trusted(row.missing.code);
   }
-  return trusted(`${row.missing.code} via claim:${claimId(target, safety)}`);
+  return trusted(`${row.missing.code} ${LABELS.via_claim}${claimId(target, safety)}`);
 }
 
 /** Parse one schema-valid reason row. */
@@ -337,9 +340,9 @@ function reason(row: Json, safety: TextSafety): Reason {
 /** Render the compact governance header summary. */
 function governance(run: Json): Trusted {
   const value = run.governance as Json | null;
-  if (value === null) return trusted("no governance");
-  const parts = [`governance: ${value.state}`];
-  parts.push(`passes/spawns/audits: ${CEILINGS.map(
+  if (value === null) return trusted(LABELS.no_governance);
+  const parts = [`${LABELS.governance} ${value.state}`];
+  parts.push(`${LABELS.budget_usage} ${CEILINGS.map(
     ([ceiling, used]) => `${value.budgets[used]}/${value.proposal.budgets[ceiling]}`,
   ).join(" ")}`);
   return trusted(parts.join("; "));
@@ -363,7 +366,7 @@ function parse(result: Json): AuthorView {
   const run = result.run as Json;
   const safety = run.untrusted_delimiters as TextSafety;
   let resultType = String(result.type);
-  if (result.type === "Allow") resultType += ` (converged=${result.converged ? "true" : "false"})`;
+  if (result.type === "Allow") resultType += ` (${LABELS.converged}${result.converged ? "true" : "false"})`;
   const governanceValue = run.governance as Json | null;
   const rationale = governanceValue === null ? null : requiredRationale(governanceValue);
   const header: Header = {
@@ -404,7 +407,9 @@ function parse(result: Json): AuthorView {
       state: trusted(run.audit.state), independence: trusted(run.audit.independence),
       findings: (run.audit.findings as unknown[]).map((item) => untrusted(item, safety)),
     },
-    reasons: (result.reasons ?? []).map((row: Json) => reason(row, safety)),
+    // Only Block carries reasons; a run-bearing Allow has none.
+    reasons: result.type === "Block"
+      ? (result.reasons as Json[]).map((row) => reason(row, safety)) : [],
     obligations, satisfied, residuals, children, freshness,
     nextActions: terminal ? [] : terminalNext,
   };
@@ -413,9 +418,9 @@ function parse(result: Json): AuthorView {
 /** Render reasons or residuals without section framing. */
 function reasonLines(rows: readonly Reason[]): readonly string[] {
   return rows.flatMap((row) => [
-    `  ${row.code}${row.message ? `: ${row.message}` : ""}${row.affected ? ` — affected: ${row.affected}` : ""}`,
-    ...(row.params.length ? [`    params: ${row.params.join("; ")}`] : []),
-    ...(row.nextActions.length ? [`    next: ${row.nextActions.join("; ")}`] : []),
+    `  ${row.code}${row.message ? `: ${row.message}` : ""}${row.affected ? ` — ${LABELS.affected} ${row.affected}` : ""}`,
+    ...(row.params.length ? [`    ${LABELS.params} ${row.params.join("; ")}`] : []),
+    ...(row.nextActions.length ? [`    ${LABELS.next_inline} ${row.nextActions.join("; ")}`] : []),
   ]);
 }
 
@@ -423,15 +428,15 @@ function reasonLines(rows: readonly Reason[]): readonly string[] {
 function obligationLines(rows: readonly Obligation[]): readonly string[] {
   return rows.flatMap((row) => [
     `  ${row.obligationId}${row.required ? `: ${row.required}` : ""}`,
-    ...(row.missing ? [`    missing: ${row.missing}`] : []),
-    ...(row.nextActions.length ? [`    next: ${row.nextActions.join("; ")}`] : []),
+    ...(row.missing ? [`    ${LABELS.missing} ${row.missing}`] : []),
+    ...(row.nextActions.length ? [`    ${LABELS.next_inline} ${row.nextActions.join("; ")}`] : []),
   ]);
 }
 
 /** Render child summaries without section framing. */
 function childLines(rows: readonly Child[]): readonly string[] {
   return rows.map((row) =>
-    `  ${row.purpose}: ${row.state}${row.recovery ? ` — recovery: ${row.recovery}` : ""}`);
+    `  ${row.purpose}: ${row.state}${row.recovery ? ` — ${LABELS.recovery} ${row.recovery}` : ""}`);
 }
 
 /** Render freshness summaries without section framing. */
@@ -442,26 +447,27 @@ function freshnessLines(rows: readonly Freshness[]): readonly string[] {
 /** Render independence only once an audit verdict exists. */
 function auditLines(audit: AuditSummary): string[] {
   const suffix = ["passed", "failed"].includes(audit.state) ? ` (${audit.independence})` : "";
-  return [`Audit: ${audit.state}${suffix}`, ...audit.findings.map((item) => `  finding: ${item}`)];
+  return [`${LABELS.audit} ${audit.state}${suffix}`,
+    ...audit.findings.map((item) => `  ${LABELS.finding} ${item}`)];
 }
 
 /** Render a parsed view through one ordered, empty-dropping section table. */
 function render(view: AuthorView): string {
   const base = [
     `${view.header.resultType} ${view.header.status} — ${view.header.governance}`,
-    `run_id: ${view.header.runId}`,
+    `${LABELS.run_id} ${view.header.runId}`,
     ...(view.header.proposalRationale === null
-      ? [] : [`proposal rationale: ${view.header.proposalRationale}`]),
+      ? [] : [`${LABELS.proposal_rationale} ${view.header.proposalRationale}`]),
     ...auditLines(view.audit),
   ].join("\n");
   const sections: readonly [string, readonly string[]][] = [
-    ["Reasons:", reasonLines(view.reasons)],
-    ["Open obligations:", obligationLines(view.obligations)],
-    ["Satisfied obligations:", view.satisfied.map((item) => `  ${item}`)],
-    ["Residuals:", reasonLines(view.residuals)],
-    ["Children:", childLines(view.children)],
-    ["Freshness:", freshnessLines(view.freshness)],
-    ["Next:", view.nextActions.map((item) => `  ${item}`)],
+    [LABELS.reasons, reasonLines(view.reasons)],
+    [LABELS.open_obligations, obligationLines(view.obligations)],
+    [LABELS.satisfied_obligations, view.satisfied.map((item) => `  ${item}`)],
+    [LABELS.residuals, reasonLines(view.residuals)],
+    [LABELS.children, childLines(view.children)],
+    [LABELS.freshness, freshnessLines(view.freshness)],
+    [LABELS.next, view.nextActions.map((item) => `  ${item}`)],
   ];
   return [base, ...sections.filter(([, lines]) => lines.length)
     .map(([title, lines]) => [title, ...lines].join("\n"))].join("\n\n");
@@ -470,21 +476,24 @@ function render(view: AuthorView): string {
 /** Render the graph projection without private identity or artifact fields. */
 function argumentLines(argument: Json, safety: TextSafety): readonly string[] {
   const claims = (argument.claims as Json[]).map((item) =>
-    `  ${claimId(item.claim_id, safety)} kind=${item.kind} gating=${item.gating ? "true" : "false"} ` +
-    `state=${item.state} evidence=${item.active_evidence_ids.length ? "present" : "none"}: ` +
+    `  ${claimId(item.claim_id, safety)} ${LABELS.claim_kind}${item.kind} ` +
+    `${LABELS.claim_gating}${item.gating ? "true" : "false"} ` +
+    `${LABELS.claim_state}${item.state} ${LABELS.claim_evidence}` +
+    `${item.active_evidence_ids.length ? LABELS.evidence_present : LABELS.evidence_none}: ` +
     `${untrusted(item.text, safety)}`);
   const edges = (argument.edges as Json[]).map((item) =>
     `  ${claimId(item.from, safety)} -${item.type}-> ${claimId(item.to, safety)}`);
   const citations = (argument.artifacts as Json[]).filter((item) => item.citation !== undefined)
     .map((item) => `  ${untrusted(item.citation, safety)}`);
   return [
-    `goal: ${untrusted(argument.goal, safety)}`,
-    `root_claim_id: ${claimId(argument.root_claim_id, safety)}`,
-    "Claims:", ...claims,
-    ...(edges.length ? ["Edges:", ...edges] : []),
-    ...(citations.length ? ["Citations:", ...citations] : []),
-    `Audit status: ${argument.audit.state} (${argument.audit.independence})`,
-    ...(argument.audit.findings as unknown[]).map((item) => `  finding: ${untrusted(item, safety)}`),
+    `${LABELS.goal} ${untrusted(argument.goal, safety)}`,
+    `${LABELS.root_claim_id} ${claimId(argument.root_claim_id, safety)}`,
+    LABELS.claims, ...claims,
+    ...(edges.length ? [LABELS.edges, ...edges] : []),
+    ...(citations.length ? [LABELS.citations, ...citations] : []),
+    `${LABELS.audit_status} ${argument.audit.state} (${argument.audit.independence})`,
+    ...(argument.audit.findings as unknown[]).map(
+      (item) => `  ${LABELS.finding} ${untrusted(item, safety)}`),
   ];
 }
 
@@ -515,20 +524,20 @@ function contractLines(contract: Json): readonly string[] {
 function renderValid(row: Json): string {
   if (row.argument) {
     const argument = row.argument as Json;
-    return `Argument\n${argumentLines(
+    return `${LABELS.argument}\n${argumentLines(
       argument, argument.untrusted_delimiters as TextSafety,
     ).join("\n")}`;
   }
   if (row.contract_result)
-    return `Contract\n${contractLines(row.contract_result as Json).join("\n")}`;
+    return `${LABELS.contract}\n${contractLines(row.contract_result as Json).join("\n")}`;
   if (["Allow", "Block"].includes(row.type) && row.run) return render(parse(row));
   if (row.type === "Block") {
     const safety = PUBLIC_CONTRACT.untrusted_delimiters as TextSafety;
-    return `Block\n${reasonLines((row.reasons as Json[]).map((item) => reason(item, safety))).join("\n")}`;
+    return `${LABELS.block}\n${reasonLines((row.reasons as Json[]).map((item) => reason(item, safety))).join("\n")}`;
   }
   if (row.type === "Fault")
-    return `Fault ${row.code} (${row.fail_direction})${row.message === undefined ? "" : `: ${row.message}`}`;
-  return "Inert";
+    return `${LABELS.fault} ${row.code} (${row.fail_direction})${row.message === undefined ? "" : `: ${row.message}`}`;
+  return LABELS.inert;
 }
 
 /** Validate once, then render every valid public result as plain text. */

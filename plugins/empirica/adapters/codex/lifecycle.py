@@ -3,15 +3,15 @@
 This module owns native payload parsing and native JSON hook output only. Run allocation,
 ordering, budgets, evidence, audit coverage, and convergence remain in the application/core.
 
-Codex is a complete exact-profile host (``codex-cli@0.146.0``). Public author/read
-operations are exposed through the shared MCP server. Hooks allocate and resolve durable runs,
-inject the opaque handle, enforce Stop, and own a bounded ``codex exec`` foreground auditor
-because native 0.146.0 hooks cannot observe arbitrary child output. Trusted evidence,
-attribution, child events, and audit verdicts remain adapter-private.
+Codex is the documented refusal host (``codex-cli@0.146.0``, ``observational`` tier,
+``audit_execution: unavailable``). Public author/read operations are exposed through the shared
+MCP server. Hooks allocate and resolve durable runs, inject the opaque handle, and enforce Stop.
+No auditor is launched: native 0.146.0 hooks cannot observe the verdict-producing child, so when
+an audit is owed Stop rejects the audit reservation and the run stays blocked. Compaction
+restore is not provided on Codex. Trusted evidence, attribution, and child events remain
+adapter-private.
 
-The deterministic spike harness remains the only machine approver. The managed auditor may
-block convergence but cannot manufacture machine evidence or write trusted state through a
-model-callable surface.
+The deterministic spike harness remains the only machine approver.
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ from .transport import CODEX_PROFILE_ID
 
 from .correlation import PROTOCOL, request_id as new_request_id
 from .transport import BridgeTransport, Transport
-from .audit import execute_audit
+from .audit import reject_unsupported_audit
 
 _ACTIVATION = re.compile(
     r"^\s*(?:\$empirica(?::empirica)?|/empirica(?::empirica)?)\b(?P<args>.*)$",
@@ -257,7 +257,11 @@ def _audit_required(result: Mapping[str, object]) -> bool:
 
 
 def _stop(payload: dict) -> dict | None:
-    """Stop: enforce convergence and run one adapter-owned bound audit when it is due."""
+    """Stop: allow only ``Allow(converged=true)``; reject the audit reservation when one is owed.
+
+    Codex cannot audit, so an owed audit is rejected and the run is re-evaluated (it stays
+    blocked). Any failure on an active located run, including the rejection, denies Stop.
+    """
     try:
         handle = _resolve_run(payload, strict=True)
         if handle is None:
@@ -266,7 +270,7 @@ def _stop(payload: dict) -> dict | None:
         response = _dispatch(build_evaluate_request(payload, handle))
         result = response.get("result", {}) if isinstance(response, dict) else {}
         if isinstance(result, Mapping) and _audit_required(result):
-            execute_audit(handle)
+            reject_unsupported_audit(handle)
             response = _dispatch(build_evaluate_request(payload, handle))
     except Exception:  # active located run: evaluation/audit failure must deny Stop
         return {"decision": "block", "reason": "Empirica convergence gate unavailable."}
@@ -281,13 +285,6 @@ def _stop(payload: dict) -> dict | None:
     if result.get("type") == "Inert":
         return None
     return {"decision": "block", "reason": "Empirica convergence gate unavailable."}
-
-
-def _restore(payload: dict) -> dict | None:
-    """SessionStart:compact: ``ResolveRun`` through the strict shell; inert when unresolved."""
-    if payload.get("source") != "compact":
-        return None
-    return None
 
 
 def _payload() -> dict:
@@ -306,7 +303,6 @@ def main(argv: list[str] | None = None) -> int:
             "activate": _start,
             "pre-tool-use": _pre_tool_use,
             "stop": _stop,
-            "restore": _restore,
         }[action](payload)
     except KeyError:
         print(f"unknown Codex hook action: {action}", file=sys.stderr)

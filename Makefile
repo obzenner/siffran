@@ -44,6 +44,9 @@ EMPIRICA_GIT_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/git/tests/test_gi
 EMPIRICA_GIT_IO_BOOTSTRAP_TESTS := $(PLUGINS_DIR)/empirica/adapters/git/tests/test_git_io_bootstrap.py
 EMPIRICA_GOVERNANCE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_governance.py
 EMPIRICA_IDENTITY_TESTS := $(PLUGINS_DIR)/empirica/tests/test_identity.py
+EMPIRICA_IDENTITY_PI_LEVEL_TESTS := $(PLUGINS_DIR)/empirica/tests/test_identity_pi_levels.py
+EMPIRICA_ARCHITECTURE_TESTS := $(SCRIPTS)/tests/test_validate_empirica_architecture.py
+METHODOLOGIST_CODEX_MCP_TESTS := $(PLUGINS_DIR)/methodologist/adapters/codex/tests/test_mcp_server.py
 EMPIRICA_CLAUDE_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/claude/tests/test_claude_adapter.py
 EMPIRICA_CLAUDE_ADAPTER_CONFORMANCE_TESTS := $(PLUGINS_DIR)/empirica/adapters/claude/tests/test_claude_adapter_conformance.py
 EMPIRICA_CODEX_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/codex/tests/test_codex_adapter.py
@@ -89,7 +92,7 @@ check-ci: check-static check-core check-claude check-codex ## Fast contributor g
 	@if [ "$(PI_CHECKS)" = "1" ]; then $(MAKE) check-pi; else printf '$(DIM)Pi suite skipped in CI (PI_CHECKS=1 to include)$(RESET)\n'; fi
 	@printf '\n$(BOLD)CI checks passed.$(RESET)\n'
 
-check-static: lint validate docs-check adr-check empirica-architecture-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check empirica-context-economy-unit-check claude-subagent-models-unit-check pi-canary-unit-check pi-validator-unit-check ## Lint, manifests, docs, ADRs, contracts, vendor copies, activation, receipts, canary config
+check-static: lint validate docs-check adr-check empirica-architecture-check empirica-architecture-unit-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check empirica-context-economy-unit-check claude-subagent-models-unit-check pi-canary-unit-check pi-validator-unit-check ## Lint, manifests, docs, ADRs, architecture validator and its tests, contracts, vendor copies, activation, receipts, canary config
 	@printf '$(BOLD)==> static suite ok$(RESET)\n'
 
 check-core: empirica-author-view-golden empirica-governance-dialog-golden ## Fast host-neutral contracts, malformed input, state, bridge, and governance boundaries
@@ -149,7 +152,7 @@ check-codex: methodologist-codex-check empirica-codex-check ## Fast Codex packag
 		test_codex_adapter.StoreIsolationTests
 	@printf '$(BOLD)==> codex suite ok$(RESET)\n'
 
-check-pi: pi-governance-dialog-golden pi-bundle-check methodologist-pi-check empirica-pi-check pi-auditor-resolution-unit-check ## Fast Pi package, type, unit, guard, and bounded bridge tests — needs Node
+check-pi: pi-governance-dialog-golden pi-bundle-check methodologist-pi-check empirica-pi-check pi-auditor-resolution-unit-check empirica-identity-pi-levels-check ## Fast Pi package, type, unit, guard, and bounded bridge tests — needs Node
 	@printf '$(BOLD)==> pi suite ok$(RESET)\n'
 
 pi-governance-dialog-golden: node_modules ## Check Pi governance screen goldens (UPDATE=1 regenerates)
@@ -296,6 +299,7 @@ methodologist-pi-check: node_modules ## Validate the Methodologist Pi adapter pa
 methodologist-codex-check: ## Deterministically validate the Methodologist Codex package and MCP bridge
 	@printf '$(BOLD)==> methodologist Codex package$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_codex_plugin.py
+	@$(PYTHON) $(METHODOLOGIST_CODEX_MCP_TESTS)
 
 .PHONY: pi-bundle-check
 pi-bundle-check: node_modules ## Validate repository-root Pi package composition without rerunning adapter tests
@@ -359,6 +363,14 @@ empirica-codex-check: ## Validate the Empirica Codex manifest, hooks, and packag
 empirica-architecture-check: ## validate Empirica 4.0 target ownership, dependencies, and subtraction
 	@printf '$(BOLD)==> empirica architecture$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_empirica_architecture.py $(ARGS)
+
+.PHONY: empirica-architecture-unit-check
+empirica-architecture-unit-check: ## Test the architecture validator against synthetic trees (same suite as --self-test)
+	@$(PYTHON) $(EMPIRICA_ARCHITECTURE_TESTS)
+
+.PHONY: empirica-identity-pi-levels-check
+empirica-identity-pi-levels-check: node_modules ## Check the identity policy strips every thinking level the pinned pi-subagents can append — needs Node
+	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_IDENTITY_PI_LEVEL_TESTS)
 
 .PHONY: empirica-claude-mcp-log-unit-check
 empirica-claude-mcp-log-unit-check: ## Test native Claude MCP admission-log verification
@@ -525,8 +537,13 @@ docs-sync: ## Deterministically regenerate the marked plugin tables from manifes
 	@$(PYTHON) $(SCRIPTS)/check_generated_docs.py --write
 
 .PHONY: docs-check
-docs-check: ## Verify the generated plugin tables match the manifests
+docs-check: ## Verify the generated plugin tables and the skill recovery reference match their sources
 	@$(PYTHON) $(SCRIPTS)/check_generated_docs.py
+	@$(PYTHON) $(SCRIPTS)/gen_recovery_reference.py --check
+
+.PHONY: empirica-recovery-reference
+empirica-recovery-reference: ## Regenerate the skill's reason-code recovery reference from the public contract
+	@$(PYTHON) $(SCRIPTS)/gen_recovery_reference.py
 
 .PHONY: release-check
 release-check: check empirica-core-integration empirica-governance-check empirica-host-integration empirica-host-live-check ## Deliberate pre-release gate: fast checks, integration diagnostics, installed-host receipts

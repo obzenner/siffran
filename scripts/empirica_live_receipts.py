@@ -11,8 +11,10 @@ from pathlib import Path
 from typing import Any
 
 FORMAT = "empirica-live-receipt/v2"
-_PROFILE_REGISTRY = json.loads((Path(__file__).resolve().parents[1]
-                               / "contracts/empirica/v2/host-profiles.json").read_text())
+_CONTRACTS = Path(__file__).resolve().parents[1] / "contracts/empirica/v2"
+_PROFILE_REGISTRY = json.loads((_CONTRACTS / "host-profiles.json").read_text())
+# Author-view headings and line labels are contract-owned; the projection is the repository JSON.
+_LABELS = json.loads((_CONTRACTS / "public-tools.json").read_text())["author_view"]["labels"]
 _RECEIPT_HOSTS = {
     "claude": ("claude-code", "empirica:empirica-auditor"),
     "pi": ("pi", "empirica.empirica-auditor"),
@@ -211,10 +213,11 @@ def state_facts(path: Path, expected_role: str) -> tuple[dict, dict]:
 
 # The receipt tool reads the Claude author plain-text view from the native transcript. It is
 # deliberately independent of plugin code: these recognizers mirror the first line and the
-# ``Title:`` sections of ``plugins/empirica/adapters/author_view.py`` and are pinned to the
-# renderer's real output by ``scripts/tests/test_empirica_live_receipts.py``.
+# ``Title:`` sections of ``plugins/empirica/adapters/author_view.py``, with every heading and line
+# label read from the contract projection, and are pinned to the renderer's real output by
+# ``scripts/tests/test_empirica_live_receipts.py``.
 _AUTHOR_HEADER = re.compile(
-    r"(Allow \(converged=(true|false)\)|Block) ([a-z_]+) — [^\n]*")
+    rf"(Allow \({re.escape(_LABELS['converged'])}(true|false)\)|Block) ([a-z_]+) — [^\n]*")
 _REASON_ENTRY = re.compile(r"  ([A-Za-z0-9_.]+)(?:: | — |$)")
 _AUDIT_PENDING = "audit.pending"
 _PENDING_AUDIT_CHILD = "  audit: pending"
@@ -268,19 +271,20 @@ def _entries(lines: list[str]) -> list[str]:
     return [line for line in lines if line.startswith("  ") and not line.startswith("   ")]
 
 
-_CHILD_LINE = re.compile(r"  (.*): (" + "|".join(_CHILD_STATES) + r")(?: — recovery: [^\n]*)?")
-_RUN_ID_LINE = re.compile(r"run_id: (\S+)")
+_CHILD_LINE = re.compile(r"  (.*): (" + "|".join(_CHILD_STATES) + r")(?: — "
+                         + re.escape(_LABELS["recovery"]) + r" [^\n]*)?")
+_RUN_ID_LINE = re.compile(re.escape(_LABELS["run_id"]) + r" (\S+)")
 
 
 def author_view_run_id(text: str) -> str | None:
     """The run handle of an author view, or ``None`` when it is missing, repeated, or misplaced.
 
-    The renderer prints exactly one ``run_id: <handle>`` line, directly after the header. Any
-    other line that starts with ``run_id:``, or a run id that is not the second line, is
-    ambiguous and yields ``None``.
+    The renderer prints exactly one ``<run_id label> <handle>`` line, directly after the header.
+    Any other line that starts with the run-id label, or a run id that is not the second line,
+    is ambiguous and yields ``None``.
     """
     lines = text.split("\n")
-    marked = [line for line in lines if line.startswith("run_id:")]
+    marked = [line for line in lines if line.startswith(_LABELS["run_id"])]
     if len(lines) < 2 or len(marked) != 1 or marked[0] != lines[1]:
         return None
     match = _RUN_ID_LINE.fullmatch(lines[1])
@@ -304,9 +308,9 @@ def pending_audit_settlement(text: str, run: str) -> bool:
     header = author_view_header(text)
     if author_view_run_id(text) != run or header is None or header[:2] != ("Block", "active"):
         return False
-    reasons = _entries(author_view_section(text, "Reasons:"))
+    reasons = _entries(author_view_section(text, _LABELS["reasons"]))
     codes = [match.group(1) for line in reasons if (match := _REASON_ENTRY.match(line))]
-    children = author_view_section(text, "Children:")
+    children = author_view_section(text, _LABELS["children"])
     parsed = [_CHILD_LINE.fullmatch(line) for line in children]
     live = [match.group(0) for match in parsed if match and match.group(2) in _LIVE_CHILD_STATES]
     return (len(reasons) == 1 and codes == [_AUDIT_PENDING]
@@ -321,7 +325,7 @@ def converged_report_view(text: str, run: str) -> bool:
     """
     return (author_view_run_id(text) == run
             and author_view_header(text) == ("Allow", "converged", True)
-            and _COMPLETED_AUDIT_CHILD in author_view_section(text, "Children:"))
+            and _COMPLETED_AUDIT_CHILD in author_view_section(text, _LABELS["children"]))
 
 
 def claude_report_result(child: dict) -> dict:

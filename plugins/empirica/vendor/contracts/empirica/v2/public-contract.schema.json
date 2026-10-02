@@ -36,7 +36,8 @@
     "sections",
     "bootstrap",
     "governance_decisions",
-    "settlement_notices"
+    "settlement_notices",
+    "author_view"
   ],
   "properties": {
     "id": {
@@ -396,10 +397,15 @@
         "operations",
         "actions",
         "tools",
-        "late_route_must"
+        "late_route_must",
+        "default_next_action"
       ],
       "properties": {
         "late_route_must": {
+          "type": "string",
+          "minLength": 1
+        },
+        "default_next_action": {
           "type": "string",
           "minLength": 1
         },
@@ -788,6 +794,213 @@
           "type": "string",
           "minLength": 1,
           "pattern": "^[^{}]*\\{resource\\}[^{}]*$"
+        }
+      }
+    },
+    "author_view": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "labels"
+      ],
+      "properties": {
+        "labels": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "no_governance",
+            "governance",
+            "budget_usage",
+            "converged",
+            "run_id",
+            "proposal_rationale",
+            "audit",
+            "finding",
+            "reasons",
+            "open_obligations",
+            "satisfied_obligations",
+            "residuals",
+            "children",
+            "freshness",
+            "next",
+            "affected",
+            "params",
+            "next_inline",
+            "missing",
+            "recovery",
+            "via_claim",
+            "argument",
+            "goal",
+            "root_claim_id",
+            "claims",
+            "edges",
+            "citations",
+            "audit_status",
+            "claim_kind",
+            "claim_gating",
+            "claim_state",
+            "claim_evidence",
+            "evidence_present",
+            "evidence_none",
+            "contract",
+            "block",
+            "fault",
+            "inert"
+          ],
+          "properties": {
+            "no_governance": {
+              "type": "string",
+              "minLength": 1
+            },
+            "governance": {
+              "type": "string",
+              "minLength": 1
+            },
+            "budget_usage": {
+              "type": "string",
+              "minLength": 1
+            },
+            "converged": {
+              "type": "string",
+              "minLength": 1
+            },
+            "run_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "proposal_rationale": {
+              "type": "string",
+              "minLength": 1
+            },
+            "audit": {
+              "type": "string",
+              "minLength": 1
+            },
+            "finding": {
+              "type": "string",
+              "minLength": 1
+            },
+            "reasons": {
+              "type": "string",
+              "minLength": 1
+            },
+            "open_obligations": {
+              "type": "string",
+              "minLength": 1
+            },
+            "satisfied_obligations": {
+              "type": "string",
+              "minLength": 1
+            },
+            "residuals": {
+              "type": "string",
+              "minLength": 1
+            },
+            "children": {
+              "type": "string",
+              "minLength": 1
+            },
+            "freshness": {
+              "type": "string",
+              "minLength": 1
+            },
+            "next": {
+              "type": "string",
+              "minLength": 1
+            },
+            "affected": {
+              "type": "string",
+              "minLength": 1
+            },
+            "params": {
+              "type": "string",
+              "minLength": 1
+            },
+            "next_inline": {
+              "type": "string",
+              "minLength": 1
+            },
+            "missing": {
+              "type": "string",
+              "minLength": 1
+            },
+            "recovery": {
+              "type": "string",
+              "minLength": 1
+            },
+            "via_claim": {
+              "type": "string",
+              "minLength": 1
+            },
+            "argument": {
+              "type": "string",
+              "minLength": 1
+            },
+            "goal": {
+              "type": "string",
+              "minLength": 1
+            },
+            "root_claim_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "claims": {
+              "type": "string",
+              "minLength": 1
+            },
+            "edges": {
+              "type": "string",
+              "minLength": 1
+            },
+            "citations": {
+              "type": "string",
+              "minLength": 1
+            },
+            "audit_status": {
+              "type": "string",
+              "minLength": 1
+            },
+            "claim_kind": {
+              "type": "string",
+              "minLength": 1
+            },
+            "claim_gating": {
+              "type": "string",
+              "minLength": 1
+            },
+            "claim_state": {
+              "type": "string",
+              "minLength": 1
+            },
+            "claim_evidence": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidence_present": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidence_none": {
+              "type": "string",
+              "minLength": 1
+            },
+            "contract": {
+              "type": "string",
+              "minLength": 1
+            },
+            "block": {
+              "type": "string",
+              "minLength": 1
+            },
+            "fault": {
+              "type": "string",
+              "minLength": 1
+            },
+            "inert": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
         }
       }
     }

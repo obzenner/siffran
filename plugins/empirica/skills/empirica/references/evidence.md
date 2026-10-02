@@ -48,8 +48,8 @@ non-empty list of repo-relative dependent files:
 {
   "kind": "spike_request",
   "claim_id": "G1",
-  "command": "make focused-check",
-  "dependent_files": ["plugins/example/core.py"]
+  "command": "python3 -m json.tool contracts/empirica/v2/public-contract.json",
+  "dependent_files": ["contracts/empirica/v2/public-contract.json"]
 }
 ```
 
