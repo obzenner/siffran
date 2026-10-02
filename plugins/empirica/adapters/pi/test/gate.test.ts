@@ -19,7 +19,10 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { FakePi, FakeUi, fakeCtx } from "./fakes.ts";
-import type { ToolCallEvent, ToolResultEvent } from "../src/pi-types.ts";
+import type { ToolCallEvent, ToolInfo, ToolResultEvent } from "../src/pi-types.ts";
+import type { OwnerEnv } from "../src/runtime-owner.ts";
+import { PUBLIC_TOOLS } from "../src/public-tools.ts";
+import { makeSubagentsPackage, tempParent } from "./owner-fixture.ts";
 import type { PrivateIngressRequest } from "../src/private-transport.ts";
 
 const HANDLE = "run-handle-1";
@@ -145,16 +148,25 @@ interface Wired {
   auditResolutions: Record<string, unknown>[];
 }
 
-function wire(
+interface WireOptions {
+  /** Replaces the fixture owner registrations before ``session_start`` (default: one healthy owner). */
+  owners?: ToolInfo[];
+  /** Environment the owner resolver sees (default: none set). */
+  env?: OwnerEnv;
+}
+
+async function wire(
   responder: (req: Request) => Response,
   echoRequestId = true,
   classify: (provider: unknown, model: unknown) => string | null =
     (provider, model) => `${String(provider)}/${String(model)}`,
-): Wired {
+  options: WireOptions = {},
+): Promise<Wired> {
   const requests: Request[] = [];
   const privateRequests: PrivateIngressRequest[] = [];
   const auditResolutions: Record<string, unknown>[] = [];
   const pi = new FakePi();
+  if (options.owners) pi.subagentOwners = options.owners;
   const dispatch = (req: Request): Response => {
     requests.push(req);
     const resp = responder(req);
@@ -189,12 +201,16 @@ function wire(
       return { protocol: PROTOCOL, request_id: "trusted", result: {
         type: "Inert", reason: "unsupported_host_event", run: run() } };
     },
-    resolveAuditContract: async (input) => {
-      auditResolutions.push({ ...input });
+    ownerEnv: options.env ?? {},
+    resolveAuditContract: async (input, _ctx, preflight) => {
+      // Which package's preflight the adapter handed over: the owner's own sentinel answer.
+      const answer = await preflight.resolveSubagentLaunchContract({});
+      auditResolutions.push({ ...input, preflightAnswer: answer.ok ? "ok" : answer.message });
       return { agentFilePath: resolve(DEFAULT_SKILLS_DIR, "..", "agents", "pi", "empirica-auditor.md"),
         model: "bedrock/auditor-model", agentScope: "project" };
     },
   })(pi);
+  await pi.sessionStart();
   return { pi, requests, privateRequests, auditResolutions };
 }
 
@@ -212,7 +228,7 @@ async function startRun(w: Wired): Promise<void> {
 // --- /empirica ---------------------------------------------------------------
 
 test("/empirica dispatches StartRun and persists the opaque handle", async () => {
-  const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+  const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }));
   const ui = new FakeUi();
 
   await w.pi.command("empirica").handler("build the thing", { ui, mode: "tui" });
@@ -241,7 +257,7 @@ test("/empirica records every Pi mode and operator delegation", async () => {
       for (const delegated of [false, true]) {
         if (delegated) process.env.EMPIRICA_AUTO_DELEGATION = "1";
         else delete process.env.EMPIRICA_AUTO_DELEGATION;
-        const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+        const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }));
         await w.pi.command("empirica").handler("goal", { ui: new FakeUi(), mode });
         if (w.requests[0].command.type === "StartRun") assert.deepEqual(w.requests[0].command.invocation,
           { host: "pi", interactive, signal: `ctx.mode=${mode}`, delegation: delegated });
@@ -254,14 +270,14 @@ test("/empirica records every Pi mode and operator delegation", async () => {
 });
 
 test("/empirica preserves replacement tokens in the literal goal", async () => {
-  const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+  const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }));
   await w.pi.command("empirica").handler("keep $& and $$ literal", { ui: new FakeUi() });
   assert.match(w.pi.userMessages[0], /The user invocation is `keep \$& and \$\$ literal`/);
   assert.doesNotMatch(w.pi.userMessages[0], /\$ARGUMENTS/);
 });
 
 test("/empirica empty goal reports the core refusal without starting", async () => {
-  const w = wire(() => envelope({ type: "Block", reasons: [
+  const w = await wire(() => envelope({ type: "Block", reasons: [
     { code: "run.goal_required", message: "A non-empty goal is required" },
   ] }));
   const ui = new FakeUi();
@@ -274,7 +290,7 @@ test("/empirica empty goal reports the core refusal without starting", async () 
 });
 
 test("/empirica rejects a busy session before creating a run", async () => {
-  const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+  const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }));
   const ui = new FakeUi();
   await w.pi.command("empirica").handler("build the thing", { ui, isIdle: () => false });
   assert.equal(w.requests.length, 0);
@@ -285,7 +301,7 @@ test("/empirica rejects a busy session before creating a run", async () => {
 });
 
 test("/empirica refuses unknown flags (including withdrawn modes) without starting", async () => {
-  const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+  const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }));
   const ui = new FakeUi();
   await w.pi.command("empirica").handler("--cli-exec --multi-provider build the thing", { ui });
   assert.equal(w.requests.length, 0);
@@ -295,10 +311,12 @@ test("/empirica refuses unknown flags (including withdrawn modes) without starti
   assert.equal(ui.notifications[0].type, "error");
 });
 
+const reasonMessage = (code: string): string => PUBLIC_TOOLS.recovery[code].message;
+
 test("/empirica refuses to start when the pi-subagents tool is not active (P1b)", async () => {
   for (const hide of [(pi: FakePi) => { pi.activeTools = []; },
                       (pi: FakePi) => { Object.assign(pi, { getActiveTools: undefined }); }]) {
-    const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+    const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }));
     hide(w.pi);
     const ui = new FakeUi();
     await w.pi.command("empirica").handler("build the thing", { ui });
@@ -306,15 +324,235 @@ test("/empirica refuses to start when the pi-subagents tool is not active (P1b)"
     assert.equal(w.pi.entries.length, 0);
     assert.equal(w.pi.userMessages.length, 0);
     assert.equal(w.pi.modelMessages.length, 0);
-    assert.match(ui.notifications[0].message, /not started — the `subagent` tool is not active/);
+    assert.ok(ui.notifications[0].message.includes(reasonMessage("host.subagents_missing")),
+      ui.notifications[0].message);
+    assert.match(ui.notifications[0].message, /missing-tool: the `subagent` tool is registered but not active/);
     assert.equal(ui.notifications[0].type, "error");
   }
+});
+
+// --- active owner (Empirica 4.1): refusal before any run exists ---------------------------------
+
+const otherOwner = (version = "0.64.0", sentinel = "other"): ToolInfo =>
+  makeSubagentsPackage(tempParent(), { version, sentinel }).tool();
+
+const OWNER_REFUSALS: Array<[string, () => WireOptions, string]> = [
+  ["no subagent tool registered", () => ({ owners: [] }), "host.subagents_missing"],
+  // Pi reports one `subagent` (first wins); the second copy shows only through its slash commands.
+  ["two pi-subagents copies loaded (one subagent tool reported)", () => ({ owners: [otherOwner(), otherOwner("0.74.0")] }),
+    "host.subagents_duplicate_owner"],
+  ["a pi-subagents child process", () => ({ env: { PI_SUBAGENT_CHILD: "1" } }), "host.subagents_owner_unverified"],
+  ["an owner outside any pi-subagents package", () => ({ owners: [
+    makeSubagentsPackage(tempParent(), { name: "not-subagents" }).tool()] }), "host.subagents_owner_unverified"],
+  ["an owner without a readable version", () => ({ owners: [
+    makeSubagentsPackage(tempParent(), { version: null }).tool()] }), "host.subagents_owner_unverified"],
+  ["an owner without the preflight export", () => ({ owners: [
+    makeSubagentsPackage(tempParent(), { preflight: "export const other = 1;\n" }).tool()] }),
+    "host.subagents_version_unsupported"],
+];
+
+for (const [name, options, reason] of OWNER_REFUSALS) {
+  test(`/empirica is refused before StartRun: ${name} (${reason})`, async () => {
+    const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }), true, undefined, options());
+    const ui = new FakeUi();
+    await w.pi.command("empirica").handler("build the thing", { ui });
+    assert.equal(w.requests.length, 0, "no run may be created");
+    assert.equal(w.pi.entries.length, 0);
+    assert.equal(w.pi.userMessages.length, 0);
+    assert.ok(ui.notifications[0].message.includes(reasonMessage(reason)), ui.notifications[0].message);
+    assert.equal(ui.notifications[0].type, "error");
+  });
+
+  test(`configure_run is refused with its contract reason: ${name} (${reason})`, async () => {
+    const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }), true, undefined, options());
+    const ctx = fakeCtx("/work", [{ customType: "empirica.run", data: { runHandle: HANDLE } }]);
+    await w.pi.sessionStart(ctx);
+    const observe = w.pi.tools.get("empirica_observe");
+    assert.ok(observe);
+    const out = await observe.execute("c1", { action: { kind: "configure_run",
+      budgets: { max_passes: 4, max_spawns: 1, max_audit_spawns: 1 }, rationale: "small" } },
+      new AbortController().signal, () => {}, ctx);
+    const details = out.details as Result;
+    assert.equal(details.type, "Block");
+    assert.deepEqual(details.type === "Block" ? details.reasons.map((item) => item.code) : [], [reason]);
+    assert.ok(out.content[0].text.includes(reasonMessage(reason)), out.content[0].text);
+    assert.deepEqual(w.requests.map((request) => request.command.type), ["GetRun"],
+      "no ObserveAction (and so no governance dialog) may be dispatched");
+  });
+}
+
+test("the fake host is faithful to Pi: two loaded copies yield one subagent tool but two package commands", () => {
+  const pi = new FakePi();
+  pi.subagentOwners = [otherOwner("0.64.0", "first"), otherOwner("0.74.0", "second")];
+  assert.equal(pi.getAllTools().filter((tool) => tool.name === SUBAGENT_TOOL).length, 1, "first registrant wins");
+  assert.equal(pi.getAllTools().find((tool) => tool.name === SUBAGENT_TOOL)?.sourceInfo.path,
+    pi.subagentOwners[0].sourceInfo.path);
+  const doctors = pi.getCommands().filter((command) => command.name.startsWith("subagents-doctor"));
+  assert.deepEqual(doctors.map((command) => command.sourceInfo.path),
+    pi.subagentOwners.map((tool) => tool.sourceInfo.path));
+});
+
+test("a second copy visible only through commands refuses /empirica and configure_run as a duplicate owner", async () => {
+  const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }), true, undefined,
+    { owners: [otherOwner("0.64.0", "first"), otherOwner("0.74.0", "second")] });
+  assert.equal(w.pi.getAllTools().filter((tool) => tool.name === SUBAGENT_TOOL).length, 1);
+  const ui = new FakeUi();
+  await w.pi.command("empirica").handler("goal", { ui });
+  assert.equal(w.requests.length, 0);
+  assert.ok(ui.notifications[0].message.includes(reasonMessage("host.subagents_duplicate_owner")), ui.notifications[0].message);
+  assert.match(ui.notifications[0].message, /multiple-owners: 2 distinct pi-subagents packages are loaded/);
+  const ctx = fakeCtx("/work", [{ customType: "empirica.run", data: { runHandle: HANDLE } }]);
+  await w.pi.sessionStart(ctx);
+  const out = await w.pi.tools.get("empirica_observe")!.execute("c1", { action: { kind: "configure_run",
+    budgets: { max_passes: 4, max_spawns: 1, max_audit_spawns: 1 }, rationale: "small" } },
+    new AbortController().signal, () => {}, ctx);
+  const details = out.details as Result;
+  assert.equal(details.type === "Block" ? details.reasons[0].code : details.type, "host.subagents_duplicate_owner");
+});
+
+test("an unavailable tool inventory is an unobservable owner, not a crash", async () => {
+  const pi = new FakePi();
+  pi.inventoryError = new Error("inventory down");
+  const ui = new FakeUi();
+  createEmpiricaExtension({ ownerEnv: {}, dispatch: () => { throw new Error("no dispatch expected"); } })(pi);
+  await pi.sessionStart();
+  await pi.command("empirica").handler("goal", { ui });
+  assert.ok(ui.notifications[0].message.includes(reasonMessage("host.subagents_owner_unverified")));
+  assert.match(ui.notifications[0].message, /could not be observed: inventory down/);
+});
+
+test("an unavailable command inventory is an unobservable owner, not a crash", async () => {
+  const pi = new FakePi();
+  pi.commandsError = new Error("commands down");
+  const ui = new FakeUi();
+  createEmpiricaExtension({ ownerEnv: {}, dispatch: () => { throw new Error("no dispatch expected"); } })(pi);
+  await pi.sessionStart();
+  await pi.command("empirica").handler("goal", { ui });
+  assert.ok(ui.notifications[0].message.includes(reasonMessage("host.subagents_owner_unverified")));
+  assert.match(ui.notifications[0].message, /commands down/);
+});
+
+test("a malformed inventory cannot escape session_start: the run is restored and still gated (fails closed)", async () => {
+  const w = await wire((req) => req.command.type === "EvaluateRun"
+    ? envelope({ type: "Block", run: run(), reasons: [{ code: "claim.research_missing", message: "3 claims lack evidence" }] })
+    : envelope({ type: "Allow", converged: false, run: run() }), true, undefined, { owners: [null as never] });
+  // The run handle is restored by a session_start whose owner inventory is malformed.
+  await startRun(w);
+  const decision = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), { ui: new FakeUi() });
+  assert.deepEqual(decision, { block: true, reason: "3 claims lack evidence\nhandle: run-handle-1" },
+    "the restored handle must be live, so report_convergence is gated");
+  const ui = new FakeUi();
+  await w.pi.command("empirica").handler("goal", { ui });
+  assert.ok(ui.notifications[0].message.includes(reasonMessage("host.subagents_owner_unverified")), ui.notifications[0].message);
+});
+
+test("a /empirica issued before session_start observed an owner is refused, not assumed", async () => {
+  const pi = new FakePi();
+  const ui = new FakeUi();
+  createEmpiricaExtension({ ownerEnv: {}, dispatch: () => { throw new Error("no dispatch expected"); } })(pi);
+  await pi.command("empirica").handler("goal", { ui });
+  assert.ok(ui.notifications[0].message.includes(reasonMessage("host.subagents_owner_unverified")));
+  assert.match(ui.notifications[0].message, /not observed at session_start/);
+});
+
+test("a healthy single owner starts the run", async () => {
+  const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+  await w.pi.command("empirica").handler("build the thing", { ui: new FakeUi() });
+  assert.deepEqual(w.requests.map((request) => request.command.type), ["StartRun"]);
+});
+
+// --- active owner: the correlated audit binds to the owner observed at admission ---------------
+
+const AUDIT_CHILD = { child_id: "ch-1", purpose: "audit", resource_class: "audit", state: "reserved" };
+const auditResponder = (req: Request): Response => req.command.type === "ObserveAction"
+  ? envelope({ type: "Allow", converged: false, run: { ...run(), children: [AUDIT_CHILD] } as never })
+  : req.command.type === "GetArgument"
+    ? envelope({ type: "Allow", converged: false, run: run(), argument: { artifacts: [] } } as never)
+    : envelope({ type: "Allow", converged: false, run: run() });
+const launchAuditor = (w: Wired, id: string) => w.pi.toolCall()(
+  { toolName: SUBAGENT_TOOL, toolCallId: id, input: { agent: "empirica.empirica-auditor", task: "audit" } },
+  fakeCtx());
+
+test("the audit launch contract is resolved through the registered owner's own preflight", async () => {
+  const w = await wire(auditResponder, true, undefined,
+    { owners: [makeSubagentsPackage(tempParent(), { sentinel: "registered-owner" }).tool()] });
+  await startRun(w);
+  assert.equal(await launchAuditor(w, "tc-owner"), undefined);
+  assert.equal(w.auditResolutions.length, 1);
+  assert.equal(w.auditResolutions[0].preflightAnswer, "preflight:registered-owner");
+});
+
+test("an owner that changes after the snapshot refuses the audit before any reservation", async () => {
+  const original = makeSubagentsPackage(tempParent(), { version: "0.74.0" }).tool();
+  const w = await wire(auditResponder, true, undefined, { owners: [original] });
+  await startRun(w);
+  const before = w.requests.length;
+  w.pi.subagentOwners = [otherOwner("0.64.0", "replacement")];
+  const decision = await launchAuditor(w, "tc-changed");
+  assert.equal(decision?.block, true);
+  assert.ok(decision?.reason?.includes(reasonMessage("host.subagents_owner_unverified")), decision?.reason);
+  assert.match(decision?.reason ?? "", /owner changed from .*@0\.74\.0 to .*@0\.64\.0/);
+  assert.equal(w.auditResolutions.length, 0, "the replacement's preflight must never be consulted");
+  assert.deepEqual(w.privateRequests, [], "no audit plan, identity, or start may be requested");
+  // Only the investigation witness every subagent launch records; never a child reservation.
+  assert.deepEqual(w.requests.slice(before).map((request) => request.command.type === "ObserveAction"
+    ? request.command.action.kind : request.command.type), ["investigate"]);
+  // The invalidation is sticky: restoring the original registration cannot revive this snapshot
+  // (a fresh resolution would now equal the binding), and configure_run refuses with the contract reason.
+  w.pi.subagentOwners = [original];
+  const ctx = fakeCtx("/work");
+  const observe = w.pi.tools.get("empirica_observe");
+  assert.ok(observe);
+  const out = await observe.execute("c2", { action: { kind: "configure_run",
+    budgets: { max_passes: 4, max_spawns: 1, max_audit_spawns: 1 }, rationale: "small" } },
+    new AbortController().signal, () => {}, ctx);
+  const details = out.details as Result;
+  assert.equal(details.type === "Block" ? details.reasons[0].code : details.type, "host.subagents_owner_unverified");
+  // ...and so does a later audit launch, although the registration is the original again.
+  const later = await launchAuditor(w, "tc-after-restore");
+  assert.equal(later?.block, true);
+  assert.ok(later?.reason?.includes(reasonMessage("host.subagents_owner_unverified")), later?.reason);
+});
+
+test("a deactivated subagent tool refuses the audit without poisoning the session: reactivating admits it", async () => {
+  const w = await wire(auditResponder);
+  await startRun(w);
+  w.pi.activeTools = [];
+  const refused = await launchAuditor(w, "tc-off");
+  assert.equal(refused?.block, true);
+  assert.ok(refused?.reason?.includes(reasonMessage("host.subagents_missing")), refused?.reason);
+  w.pi.activeTools = ["subagent"];
+  assert.equal(await launchAuditor(w, "tc-on"), undefined, "the unchanged owner is admitted again");
+  assert.equal(w.auditResolutions.length, 1);
+});
+
+test("a vanished, deactivated, or duplicated owner refuses the audit at admission", async () => {
+  const cases: Array<[string, (pi: FakePi) => void, string]> = [
+    ["vanished", (pi) => { pi.subagentOwners = []; }, "host.subagents_missing"],
+    ["duplicated", (pi) => { pi.subagentOwners = [...pi.subagentOwners, otherOwner()]; }, "host.subagents_duplicate_owner"],
+    ["inventory failure", (pi) => { pi.inventoryError = new Error("boom"); }, "host.subagents_owner_unverified"],
+  ];
+  for (const [name, change, reason] of cases) {
+    const w = await wire(auditResponder);
+    await startRun(w);
+    change(w.pi);
+    const decision = await launchAuditor(w, `tc-${name}`);
+    assert.equal(decision?.block, true, name);
+    assert.ok(decision?.reason?.includes(reasonMessage(reason)), `${name}: ${decision?.reason}`);
+    assert.deepEqual(w.privateRequests, [], name);
+  }
+  const inactive = await wire(auditResponder);
+  await startRun(inactive);
+  inactive.pi.activeTools = [];
+  const decision = await launchAuditor(inactive, "tc-inactive");
+  assert.equal(decision?.block, true);
+  assert.ok(decision?.reason?.includes(reasonMessage("host.subagents_missing")), decision?.reason);
 });
 
 // --- tool_call gate ----------------------------------------------------------
 
 test("gate: report_convergence tool is blocked with the reason on Block", async () => {
-  const w = wire((req) =>
+  const w = await wire((req) =>
     req.command.type === "StartRun"
       ? envelope({ type: "Allow", converged: false, run: run() })
       : envelope({ type: "Block", run: run(), reasons: [{ code: "claim.research_missing", message: "3 claims lack evidence" }] }),
@@ -348,7 +586,7 @@ for (const controlMode of ["deliberative", "auto"]) {
   test(`gate: the sole initial-approval blocker pauses report_convergence without converging (${controlMode})`,
     async () => {
       const blocked = { type: "Block" as const, run: waitingRun({}, {}, controlMode), reasons: [APPROVAL_REQUIRED] };
-      const w = wire((req) => req.command.type === "StartRun"
+      const w = await wire((req) => req.command.type === "StartRun"
         ? envelope({ type: "Allow", converged: false, run: run() }) : envelope(blocked as never));
       await startRun(w);
       const event = toolEvent(REPORT_CONVERGENCE_TOOL);
@@ -391,7 +629,7 @@ test("gate: only the legitimate initial-approval blocker is a human wait", async
   for (const [name, changed] of cases) {
     const blocked = { type: "Block" as const, run: waitingRun(), reasons: [APPROVAL_REQUIRED], ...changed };
     assert.equal(humanApprovalWait(blocked as never), false, name);
-    const w = wire((req) => req.command.type === "StartRun"
+    const w = await wire((req) => req.command.type === "StartRun"
       ? envelope({ type: "Allow", converged: false, run: run() }) : envelope(blocked as never));
     await startRun(w);
     const decision = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), { ui: new FakeUi() });
@@ -407,7 +645,7 @@ for (const resource of ["audit_spawn", "pass"]) {
   test(`gate: the sole budget.exhausted blocker settles report_convergence nonterminally (${resource})`,
     async () => {
       const blocked = { type: "Block" as const, run: run(), reasons: [exhausted(resource)] };
-      const w = wire((req) => req.command.type === "StartRun"
+      const w = await wire((req) => req.command.type === "StartRun"
         ? envelope({ type: "Allow", converged: false, run: run() }) : envelope(blocked as never));
       await startRun(w);
       const event = toolEvent(REPORT_CONVERGENCE_TOOL);
@@ -444,7 +682,7 @@ test("gate: only a sole budget.exhausted blocker on an active run is settled", a
   for (const [name, changed] of cases) {
     const blocked = { type: "Block" as const, run: run(), reasons: [exhausted("pass")], ...changed };
     assert.equal(budgetExhaustedWait(blocked as never), false, name);
-    const w = wire((req) => req.command.type === "StartRun"
+    const w = await wire((req) => req.command.type === "StartRun"
       ? envelope({ type: "Allow", converged: false, run: run() }) : envelope(blocked as never));
     await startRun(w);
     const decision = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), { ui: new FakeUi() });
@@ -453,7 +691,7 @@ test("gate: only a sole budget.exhausted blocker on an active run is settled", a
 });
 
 test("gate: report_convergence tool is permitted on Allow", async () => {
-  const w = wire((req) =>
+  const w = await wire((req) =>
     req.command.type === "StartRun"
       ? envelope({ type: "Allow", converged: false, run: run() })
       : envelope({ type: "Allow", converged: true, run: run("converged") }),
@@ -464,7 +702,7 @@ test("gate: report_convergence tool is permitted on Allow", async () => {
 });
 
 test("gate: honest stop intent reaches pre-tool evaluation and execute exactly once", async () => {
-  const w = wire((req) => req.command.type === "StartRun"
+  const w = await wire((req) => req.command.type === "StartRun"
     ? envelope({ type: "Allow", converged: false, run: run() })
     : envelope({ type: "Allow", converged: false, run: run("stopped_residual") }));
   await startRun(w);
@@ -479,7 +717,7 @@ test("gate: honest stop intent reaches pre-tool evaluation and execute exactly o
 });
 
 test("gate: an investigative tool records investigation before execution", async () => {
-  const w = wire((req) => req.command.type === "ObserveAction"
+  const w = await wire((req) => req.command.type === "ObserveAction"
     ? envelope({ type: "Allow", converged: false, run: run() })
     : envelope({ type: "Allow", converged: false, run: run() }));
   await startRun(w);
@@ -494,7 +732,7 @@ test("gate: an investigative tool records investigation before execution", async
 });
 
 test("gate: an investigative tool is blocked when route ordering is denied", async () => {
-  const w = wire((req) => req.command.type === "ObserveAction"
+  const w = await wire((req) => req.command.type === "ObserveAction"
     ? envelope({ type: "Block", run: run(), reasons: [{ code: "route.required",
         message: "route first" }] })
     : envelope({ type: "Allow", converged: false, run: run() }));
@@ -504,7 +742,7 @@ test("gate: an investigative tool is blocked when route ordering is denied", asy
 });
 
 test("gate: with no active run the gated tool passes (nothing to gate)", async () => {
-  const w = wire(() => {
+  const w = await wire(() => {
     throw new Error("should not dispatch without a run");
   });
   const decision = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), { ui: new FakeUi() });
@@ -513,7 +751,7 @@ test("gate: with no active run the gated tool passes (nothing to gate)", async (
 });
 
 test("gate: an unavailable transport fails CLOSED (blocks the report)", async () => {
-  const w = wire(() => {
+  const w = await wire(() => {
     throw new Error("core unreachable");
   });
   await startRun(w);
@@ -523,7 +761,7 @@ test("gate: an unavailable transport fails CLOSED (blocks the report)", async ()
 });
 
 test("gate: closed and open Fault both block the report", async () => {
-  const wClosed = wire((req) =>
+  const wClosed = await wire((req) =>
     req.command.type === "StartRun"
       ? envelope({ type: "Allow", converged: false, run: run() })
       : envelope({ type: "Fault", code: "corrupt_run", fail_direction: "closed" }),
@@ -534,7 +772,7 @@ test("gate: closed and open Fault both block the report", async () => {
   });
   assert.equal(closed?.block, true);
 
-  const wOpen = wire((req) =>
+  const wOpen = await wire((req) =>
     req.command.type === "StartRun"
       ? envelope({ type: "Allow", converged: false, run: run() })
       : envelope({ type: "Fault", code: "unavailable", fail_direction: "open" }),
@@ -547,7 +785,7 @@ test("gate: closed and open Fault both block the report", async () => {
 // --- malformed response cannot permit the hard gate (D6-C C3) ----------------
 
 test("gate: malformed Allow (converged not boolean) fails closed", async () => {
-  const w = wire((req) =>
+  const w = await wire((req) =>
     req.command.type === "StartRun"
       ? envelope({ type: "Allow", converged: false, run: run() })
       : envelope({ type: "Allow", converged: "yes" as never, run: run() } as never),
@@ -564,7 +802,7 @@ test("gate: malformed Allow (converged not boolean) fails closed", async () => {
 // reaches the hard gate and fails closed.
 
 test("gate: malformed Block reason (null entry) fails closed", async () => {
-  const w = wire((req) =>
+  const w = await wire((req) =>
     req.command.type === "StartRun"
       ? envelope({ type: "Allow", converged: false, run: run() })
       : envelope({ type: "Block", run: run(), reasons: [null] as never } as never),
@@ -576,7 +814,7 @@ test("gate: malformed Block reason (null entry) fails closed", async () => {
 });
 
 test("gate: a well-formed Inert is denied (run gone but handle exists)", async () => {
-  const w = wire((req) =>
+  const w = await wire((req) =>
     req.command.type === "StartRun"
       ? envelope({ type: "Allow", converged: false, run: run() })
       : envelope({ type: "Inert", reason: "no_run" }),
@@ -609,7 +847,7 @@ test("subagent: canonical input errors are specific and have no audit side effec
       label: `forbidden ${JSON.stringify(key)}`, fields: { task: "audit", [key]: false }, reason: overrides })),
   ];
   for (const row of cases) await t.test(row.label, async () => {
-    const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+    const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }));
     await startRun(w);
     const input = { agent: "empirica.empirica-auditor", ...row.fields };
     const before = structuredClone(input);
@@ -629,7 +867,7 @@ test("subagent: canonical input errors are specific and have no audit side effec
 });
 
 test("subagent: empty string task retains its existing accepted meaning", async () => {
-  const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+  const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }));
   await startRun(w);
   const input: Record<string, unknown> = { agent: "empirica.empirica-auditor", task: "" };
   assert.equal(await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "empty-task", input }, fakeCtx()), undefined);
@@ -642,7 +880,7 @@ test("subagent: empty string task retains its existing accepted meaning", async 
 
 test("subagent: canonical auditor is reserved, bound, attributed, and prompt-injected", async () => {
   const child = { child_id: "ch-1", purpose: "audit", resource_class: "audit", state: "reserved" };
-  const w = wire((req) => {
+  const w = await wire((req) => {
     if (req.command.type === "ObserveAction")
       return envelope({ type: "Allow", converged: false,
         run: { ...run(), children: [child] } as never });
@@ -677,7 +915,7 @@ test("subagent: canonical auditor is reserved, bound, attributed, and prompt-inj
 
 test("canonical auditor blocks equal normalized identity classes", async () => {
   const child = { child_id: "ch-1", purpose: "audit", resource_class: "audit", state: "reserved" };
-  const w = wire(() => envelope({ type: "Allow", converged: false,
+  const w = await wire(() => envelope({ type: "Allow", converged: false,
     run: { ...run(), children: [child] } }), true, () => "same-class");
   await startRun(w);
   const decision = await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "same-class",
@@ -690,7 +928,7 @@ test("canonical auditor blocks equal normalized identity classes", async () => {
 
 test("canonical auditor clearly blocks a null reviewer identity classification", async () => {
   const child = { child_id: "ch-1", purpose: "audit", resource_class: "audit", state: "reserved" };
-  const w = wire(() => envelope({ type: "Allow", converged: false,
+  const w = await wire(() => envelope({ type: "Allow", converged: false,
     run: { ...run(), children: [child] } }), true,
     (_provider, model) => String(model).includes("auditor") ? null : "author-class");
   await startRun(w);
@@ -703,7 +941,7 @@ test("canonical auditor clearly blocks a null reviewer identity classification",
 });
 
 test("canonical auditor rejects a reservation when a later launch step throws", async () => {
-  const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+  const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }));
   await startRun(w);
   w.pi.appendEntry = () => { throw new Error("late host failure"); };
   const decision = await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "late-failure",
@@ -724,7 +962,7 @@ test("canonical auditor rejects a reservation when a later launch step throws", 
 
 test("tool_result redacts before privately admitting the correlated verdict", async () => {
   const child = { child_id: "ch-1", purpose: "audit", resource_class: "audit", state: "reserved" };
-  const w = wire((req) => {
+  const w = await wire((req) => {
     if (req.command.type === "ObserveAction")
       return envelope({ type: "Allow", converged: false,
         run: { ...run(), children: [child] } as never });
@@ -777,7 +1015,7 @@ test("tool_result redacts before privately admitting the correlated verdict", as
 
 test("missing native session keeps auditor identity unverified", async () => {
   const child = { child_id: "ch-unverified", purpose: "audit", resource_class: "audit", state: "reserved" };
-  const w = wire((req) => {
+  const w = await wire((req) => {
     if (req.command.type === "ObserveAction")
       return envelope({ type: "Allow", converged: false,
         run: { ...run(), children: [child] } as never });
@@ -816,7 +1054,7 @@ test("session restore orphans unresolved audits and tombstones completed correla
     author: { provider_id: "bedrock", model_id: "author-model", observed_by: "host", source: "pi" },
     auditor: { provider_id: "bedrock", model_id: "auditor-model",
       observed_by: "configuration", source: "preflight" } };
-  const unresolved = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+  const unresolved = await wire(() => envelope({ type: "Allow", converged: false, run: run() }));
   await (unresolved.pi.handlers.get("session_start") as (e: unknown, c: unknown) => unknown)(
     {}, fakeCtx("/work", [
       { customType: "empirica.run", data: { runHandle: HANDLE } },
@@ -831,7 +1069,7 @@ test("session restore orphans unresolved audits and tombstones completed correla
     [["audit_failure", "orphaned"]]);
   assert.doesNotMatch(JSON.stringify(unresolvedReplacement.content), /```empirica-verdict/);
 
-  const completed = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+  const completed = await wire(() => envelope({ type: "Allow", converged: false, run: run() }));
   await (completed.pi.handlers.get("session_start") as (e: unknown, c: unknown) => unknown)(
     {}, fakeCtx("/work", [
       { customType: "empirica.run", data: { runHandle: HANDLE } },
@@ -849,7 +1087,7 @@ test("session restore orphans unresolved audits and tombstones completed correla
 
 test("session shutdown orphans a newly admitted unresolved audit", async () => {
   const child = { child_id: "ch-orphan", purpose: "audit", resource_class: "audit", state: "reserved" };
-  const w = wire((req) => {
+  const w = await wire((req) => {
     if (req.command.type === "ObserveAction")
       return envelope({ type: "Allow", converged: false,
         run: { ...run(), children: [child] } as never });
@@ -869,7 +1107,7 @@ test("session shutdown orphans a newly admitted unresolved audit", async () => {
 
 test("malformed auditor result returns a propagated redacted replacement", async () => {
   const child = { child_id: "ch-malformed", purpose: "audit", resource_class: "audit", state: "reserved" };
-  const w = wire((req) => {
+  const w = await wire((req) => {
     if (req.command.type === "ObserveAction")
       return envelope({ type: "Allow", converged: false,
         run: { ...run(), children: [child] } as never });
@@ -896,7 +1134,7 @@ test("malformed auditor result returns a propagated redacted replacement", async
 
 test("errored auditor output is redacted and cannot admit a fenced verdict", async () => {
   const child = { child_id: "ch-error", purpose: "audit", resource_class: "audit", state: "reserved" };
-  const w = wire((req) => {
+  const w = await wire((req) => {
     if (req.command.type === "ObserveAction")
       return envelope({ type: "Allow", converged: false,
         run: { ...run(), children: [child] } as never });
@@ -921,7 +1159,7 @@ test("errored auditor output is redacted and cannot admit a fenced verdict", asy
 });
 
 test("non-canonical auditors stay ordinary budgeted children; model overrides get no trusted admission", async () => {
-  const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+  const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }));
   await startRun(w);
   const before = w.privateRequests.length;
   const evil = await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "evil",
@@ -950,6 +1188,7 @@ test("canonical auditor identity follows filesystem symlinks", async (t) => {
 
   const pi = new FakePi();
   createEmpiricaExtension({
+    ownerEnv: {},
     dispatch: (request) => ({
       ...envelope({ type: "Allow", converged: false, run: run() }),
       request_id: request.request_id,
@@ -987,6 +1226,7 @@ test("unresolvable auditor package is blocked before reservation", async () => {
   const requests: Request[] = [];
   const pi = new FakePi();
   createEmpiricaExtension({
+    ownerEnv: {},
     dispatch: (request) => { requests.push(request); return {
       ...envelope({ type: "Allow", converged: false, run: run() }),
       request_id: request.request_id,
@@ -1009,7 +1249,7 @@ test("unresolvable auditor package is blocked before reservation", async () => {
 });
 
 test("subagent: management list with a real handle is inert (no denial)", async () => {
-  const w = wire((req) =>
+  const w = await wire((req) =>
     req.command.type === "StartRun"
       ? envelope({ type: "Allow", converged: false, run: run() })
       : envelope({ type: "Allow", converged: true, run: run("converged") }),
@@ -1025,7 +1265,7 @@ test("subagent: management list with a real handle is inert (no denial)", async 
 });
 
 test("subagent: executable launch with no handle is inert (nothing to deny)", async () => {
-  const w = wire(() => {
+  const w = await wire(() => {
     throw new Error("should not dispatch without a handle");
   });
   const decision = await w.pi.toolCall()(
@@ -1037,7 +1277,7 @@ test("subagent: executable launch with no handle is inert (nothing to deny)", as
 });
 
 test("subagent: malformed multi-key launch with a real handle is inert", async () => {
-  const w = wire((req) =>
+  const w = await wire((req) =>
     req.command.type === "StartRun"
       ? envelope({ type: "Allow", converged: false, run: run() })
       : envelope({ type: "Allow", converged: true, run: run("converged") }),
@@ -1066,25 +1306,25 @@ const deny = (r: Result): ((req: Request) => Response) => (req) =>
   req.command.type === "StartRun" ? envelope({ type: "Allow", converged: false, run: run() }) : envelope(r);
 
 test("direct tool: report_convergence execute rejects on Block with active handle", async () => {
-  const w = wire(deny({ type: "Block", run: run(), reasons: [{ code: "audit.required", message: "independent audit required" }] }));
+  const w = await wire(deny({ type: "Block", run: run(), reasons: [{ code: "audit.required", message: "independent audit required" }] }));
   await startRun(w);
   await assert.rejects(() => execTool(w, "report_convergence"), /independent audit required/);
 });
 
 test("direct tool: report_convergence execute rejects on Inert(no_run) with active handle", async () => {
-  const w = wire(deny({ type: "Inert", reason: "no_run" }));
+  const w = await wire(deny({ type: "Inert", reason: "no_run" }));
   await startRun(w);
   await assert.rejects(() => execTool(w, "report_convergence"), /no active run to report/);
 });
 
 test("direct tool: report_convergence execute rejects on open Fault with active handle", async () => {
-  const w = wire(deny({ type: "Fault", code: "unavailable", fail_direction: "open" }));
+  const w = await wire(deny({ type: "Fault", code: "unavailable", fail_direction: "open" }));
   await startRun(w);
   await assert.rejects(() => execTool(w, "report_convergence"), /unavailable/);
 });
 
 test("direct tool: report_convergence forwards an honest stop intent", async () => {
-  const w = wire((req) => req.command.type === "StartRun"
+  const w = await wire((req) => req.command.type === "StartRun"
     ? envelope({ type: "Allow", converged: false, run: run() })
     : envelope({ type: "Allow", converged: false, run: run("stopped_residual") }));
   await startRun(w);
@@ -1100,7 +1340,7 @@ test("direct tool: report_convergence forwards an honest stop intent", async () 
 });
 
 test("direct convergence also retires the terminal run handle", async () => {
-  const w = wire((req) => req.command.type === "StartRun"
+  const w = await wire((req) => req.command.type === "StartRun"
     ? envelope({ type: "Allow", converged: false, run: run() })
     : envelope({ type: "Allow", converged: true, run: run("converged") }));
   await startRun(w);
@@ -1112,7 +1352,7 @@ test("direct convergence also retires the terminal run handle", async () => {
 });
 
 test("session restore keeps a verified terminal run inactive", async () => {
-  const w = wire(() => { throw new Error("terminal handle must not dispatch"); });
+  const w = await wire(() => { throw new Error("terminal handle must not dispatch"); });
   const ctx = fakeCtx("/work", [
     { customType: "empirica.run", data: { runHandle: HANDLE } },
     { customType: "empirica.run.done", data: { runHandle: HANDLE } },
@@ -1123,7 +1363,7 @@ test("session restore keeps a verified terminal run inactive", async () => {
 });
 
 test("a retired run stays readable but not writable", async () => {
-  const w = wire((req) => req.command.type === "StartRun"
+  const w = await wire((req) => req.command.type === "StartRun"
     ? envelope({ type: "Allow", converged: false, run: run() })
     : req.command.type === "ResolveRun" ? envelope({ type: "Inert", reason: "no_run" })
     : envelope({ type: "Allow", converged: true, run: run("converged") }));
@@ -1141,7 +1381,7 @@ test("a retired run stays readable but not writable", async () => {
 });
 
 test("session restore keeps a retired run readable", async () => {
-  const w = wire((req) => {
+  const w = await wire((req) => {
     // No active run resolves for the selector, so the read falls back to the retired handle.
     if (req.command.type === "ResolveRun") return envelope({ type: "Inert", reason: "no_run" });
     assert.equal(req.command.type, "GetRun");
@@ -1158,7 +1398,7 @@ test("session restore keeps a retired run readable", async () => {
 });
 
 test("empirica_read uses the restored opaque handle", async () => {
-  const w = wire((req) => {
+  const w = await wire((req) => {
     assert.equal(req.command.type, "GetRun");
     assert.equal(req.command.type === "GetRun" ? req.command.run_id : null, HANDLE);
     return envelope({ type: "Allow", converged: false, run: run() });
@@ -1170,7 +1410,7 @@ test("empirica_read uses the restored opaque handle", async () => {
 });
 
 test("empirica_read without a restored handle resolves the current selector", async () => {
-  const w = wire((req) => {
+  const w = await wire((req) => {
     assert.equal(req.command.type, "ResolveRun");
     assert.deepEqual(
       req.command.type === "ResolveRun" ? req.command.selector : null,
@@ -1186,7 +1426,7 @@ test("empirica_read without a restored handle resolves the current selector", as
 });
 
 test("session_start reconstructs the handle; compaction carries the handle text", async () => {
-  const w = wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+  const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }));
   await startRun(w);
   const ctx = fakeCtx("/work", [{ customType: "empirica.run", data: { runHandle: "restored" } }]);
   await (w.pi.handlers.get("session_start") as (e: unknown, c: unknown) => unknown)({}, ctx);

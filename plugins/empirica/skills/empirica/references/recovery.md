@@ -35,6 +35,12 @@ text view renders them.
 | `child.terminal` | `host: child_reserve`; `report_convergence intent=stop` | A child ended in a terminal state: retry within the ceiling (normally once), or accept the residual and stop. |
 | `host.async_unsupported` | `report_convergence intent=stop` | This host cannot run the audit asynchronously: run it in the foreground, or accept the residual and stop. |
 | `host.audit_output_unobservable` | `report_convergence intent=stop` | This host cannot observe the auditor's output, so the audit cannot pass: accept the residual and stop. |
+| `host.subagents_missing` | `report_convergence intent=stop` | No external pi-subagents runtime is active: install one supported runtime and restart the host, or accept the residual and stop. |
+| `host.subagents_owner_unverified` | `report_convergence intent=stop` | The active audit runtime cannot be proven (owner, package, or version unobservable, or a subagent child process): do not retry blindly; restart the host with one supported runtime, or accept the residual. |
+| `host.subagents_duplicate_owner` | `report_convergence intent=stop` | Two extensions register the `subagent` tool: remove the duplicate, restart the host, and start a fresh run, or accept the residual. |
+| `host.subagents_version_unsupported` | `report_convergence intent=stop` | The active pi-subagents is not a reviewed version or lacks the launch preflight: install a reviewed version and restart, or accept the residual. |
+| `host.subagents_launch_unsupported` | `report_convergence intent=stop` | The runtime admits a launch form Empirica cannot correlate: use only the canonical foreground auditor launch, or accept the residual. |
+| `host.subagents_provenance_missing` | `report_convergence intent=stop` | The run or receipt lacks the exact pi-subagents version and owner path: recapture a provenance-complete run; this one is not evidence. |
 | `freeze.deferred` | `report_convergence intent=stop` | Deferred claims stay residual: accept them when you stop, or investigate them before freezing. |
 | `governance.auto_invocation_required` | `host: StartRun` | Auto needs an interactive invocation or operator-set `EMPIRICA_AUTO_DELEGATION=1`: run interactively or have the operator set it, then start fresh. |
 | `governance.approval_required` | `empirica_observe kind=configure_run`; `report_convergence intent=stop` | Submit a task-sized `configure_run` (all three ceilings plus a 1-600 character rationale) and wait for host approval; nothing is authorized before it. |

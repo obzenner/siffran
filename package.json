@@ -16,29 +16,28 @@
     "node": ">=22.6.0"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
+    "@earendil-works/pi-coding-agent": "*",
+    "pi-subagents": "*"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "pi-subagents": {
       "optional": true
     }
   },
   "devDependencies": {
     "@earendil-works/pi-tui": "0.84.3",
     "@types/node": "^22.0.0",
+    "jiti": "2.7.0",
+    "pi-subagents": "0.50.0",
     "typescript": "^5.6.0"
   },
-  "dependencies": {
-    "pi-subagents": "0.50.0"
-  },
-  "bundledDependencies": [
-    "pi-subagents"
-  ],
   "pi": {
     "extensions": [
       "./plugins/empirica/adapters/pi/src/index.ts",
-      "./plugins/methodologist/adapters/pi/src/index.ts",
-      "./node_modules/pi-subagents/index.ts"
+      "./plugins/methodologist/adapters/pi/src/index.ts"
     ],
     "subagents": {
       "agents": [

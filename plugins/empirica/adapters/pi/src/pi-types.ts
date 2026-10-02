@@ -101,11 +101,59 @@ export interface ToolDefinition {
   ) => Promise<{ content: Array<{ type: "text"; text: string }>; details?: unknown }>;
 }
 
+/**
+ * Where Pi loaded a resource from (mirror of ``SourceInfo`` in Pi's ``dist/core/source-info.d.ts``,
+ * Pi 0.87.1 lines 4-10). Only the fields the owner resolver reads are mirrored.
+ */
+export interface SourceInfo {
+  path: string;
+  source: string;
+  scope: "user" | "project" | "temporary";
+  origin: "package" | "top-level";
+  baseDir?: string;
+}
+
+/**
+ * A registered tool with its provenance: the subset of Pi's ``ToolInfo`` the owner resolver reads
+ * (Pi 0.87.1 ``dist/core/extensions/types.d.ts:1278-1281`` is ``Pick<ToolDefinition, "name" | ...> &
+ * { sourceInfo: SourceInfo }``; Pi 1.0.0 declares ``getAllTools()`` at ``:1239``).
+ */
+export interface ToolInfo {
+  name: string;
+  sourceInfo: SourceInfo;
+}
+
+/**
+ * One slash command Pi reports (mirror of ``SlashCommandInfo`` in Pi's ``dist/core/slash-commands.d.ts``
+ * lines 3-8 — identical in Pi 0.84.1, 0.87.1 and 1.0.0). Extension commands carry the registering
+ * extension's ``sourceInfo``; unlike tools, Pi does not deduplicate them by name (clashes get a ``:n``
+ * suffix), so every loaded extension's commands are visible.
+ */
+export interface SlashCommandInfo {
+  name: string;
+  description?: string;
+  source: "extension" | "prompt" | "skill";
+  sourceInfo: SourceInfo;
+}
+
 export interface ExtensionAPI {
   registerCommand(name: string, def: CommandDefinition): void;
   registerTool?(def: ToolDefinition): void;
   /** Names of the tools the model can call now (Pi ``pi.getActiveTools()``). */
   getActiveTools?(): string[];
+  /**
+   * Every tool registered so far, with the extension that registered it (Pi
+   * ``pi.getAllTools()``; Pi 0.87.1 ``dist/core/extensions/types.d.ts:1072``). A snapshot: it cannot
+   * show tools registered by extensions that load later, so the owner is resolved at ``session_start``.
+   */
+  getAllTools(): ToolInfo[];
+  /**
+   * Every slash command (extension, prompt template, skill) with its provenance (Pi
+   * ``pi.getCommands()``: ``dist/core/extensions/types.d.ts:952`` in 0.84.1, ``:1076`` in 0.87.1,
+   * ``:1248`` in 1.0.0). Used to see a second loaded pi-subagents copy that ``getAllTools()``
+   * hides by first-wins name deduplication (0.87.1 ``extensions/runner.js:370-380``).
+   */
+  getCommands(): SlashCommandInfo[];
   appendEntry?(customType: string, data?: unknown): void;
   sendMessage?(
     message: { customType: string; content: string; display?: boolean },

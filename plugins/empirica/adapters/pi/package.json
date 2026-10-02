@@ -1,7 +1,7 @@
 {
   "name": "@siffran/empirica-pi",
   "version": "0.1.0",
-  "description": "Internal Empirica v2 Pi translation shell; distributed only through the repository-root package that bundles pi-subagents and the auditor role.",
+  "description": "Internal Empirica v2 Pi translation shell; distributed only through the repository-root package that carries the auditor role; the pi-subagents runtime is an external prerequisite.",
   "private": true,
   "type": "module",
   "license": "MIT",

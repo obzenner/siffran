@@ -31,6 +31,23 @@ REQUIRED_SKILL_REFERENCES = {
     "handoff.md",
 }
 STALE_SKILL_TERMS = {"spike_harness.py", "EMPIRICA_STALL_DEADLINE_SEC"}
+# Empirica does not ship pi-subagents: the audit runtime is the external extension that owns the
+# `subagent` tool. The skill may not claim a bundled, packaged, or single-pinned runtime.
+STALE_PI_RUNTIME_TERMS = ("pi-subagents@0.50.0", "pi-subagents 0.50.0", "packaged `pi-subagents",
+                          "bundled pi-subagents", "bundled `pi-subagents")
+REQUIRED_SKILL_DISCLOSURES = (
+    ">=2.1.278,<2.2.0", ">=0.84.1,<0.90.0", "external `pi-subagents`",
+    ">=0.146.0,<0.147.0", "empirica_observe", "empirica_read", "report_convergence",
+)
+
+
+def skill_runtime_problems(skill_text: str) -> list[str]:
+    """How a SKILL.md misstates the host/runtime boundary (stale bundled claims, missing disclosures)."""
+    problems = [f"SKILL.md retains stale bundled Pi runtime claim: {term}"
+                for term in STALE_PI_RUNTIME_TERMS if term in skill_text]
+    problems += [f"SKILL.md omits complete host/tool disclosure: {required}"
+                 for required in REQUIRED_SKILL_DISCLOSURES if required not in skill_text]
+    return problems
 
 
 def fail(message: str) -> None:
@@ -105,12 +122,8 @@ def main() -> int:
     for term in STALE_SKILL_TERMS:
         if term in skill_text:
             fail(f"SKILL.md retains stale runtime term: {term}")
-    for required in (
-        ">=2.1.278,<2.2.0", ">=0.84.1,<0.90.0", "pi-subagents@0.50.0",
-        ">=0.146.0,<0.147.0", "empirica_observe", "empirica_read", "report_convergence",
-    ):
-        if required not in skill_text:
-            fail(f"SKILL.md omits complete host/tool disclosure: {required}")
+    for problem in skill_runtime_problems(skill_text):
+        fail(problem)
 
     for path in [SKILL, *sorted((ROOT / "agents").glob("**/*.md"))]:
         text = path.read_text(encoding="utf-8")

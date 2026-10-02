@@ -203,6 +203,60 @@
         "graph.record"
       ]
     },
+    "host.subagents_missing": {
+      "message": "No external pi-subagents `subagent` tool is active, so no independent audit can launch. Install one supported pi-subagents runtime and restart the host, or accept the residual.",
+      "sections": [
+        "hosts/capabilities"
+      ],
+      "next_actions": [
+        "residual.accept"
+      ]
+    },
+    "host.subagents_owner_unverified": {
+      "message": "The active pi-subagents owner, package, or version cannot be verified (or this is a pi-subagents child process). Do not retry blindly: restart the host with one supported pi-subagents runtime, or accept the residual.",
+      "sections": [
+        "hosts/capabilities"
+      ],
+      "next_actions": [
+        "residual.accept"
+      ]
+    },
+    "host.subagents_duplicate_owner": {
+      "message": "More than one extension registers the `subagent` tool, so the audit runtime is ambiguous. Remove the duplicate, restart the host, and start a fresh run, or accept the residual.",
+      "sections": [
+        "hosts/capabilities"
+      ],
+      "next_actions": [
+        "residual.accept"
+      ]
+    },
+    "host.subagents_version_unsupported": {
+      "message": "The active pi-subagents runtime is not a reviewed version or does not expose the launch preflight Empirica binds. Install a reviewed version and restart the host, or accept the residual.",
+      "sections": [
+        "hosts/capabilities"
+      ],
+      "next_actions": [
+        "residual.accept"
+      ]
+    },
+    "host.subagents_launch_unsupported": {
+      "message": "The pi-subagents runtime admits a launch form Empirica cannot classify or correlate. Use only the canonical foreground auditor launch, or accept the residual.",
+      "sections": [
+        "hosts/capabilities"
+      ],
+      "next_actions": [
+        "residual.accept"
+      ]
+    },
+    "host.subagents_provenance_missing": {
+      "message": "The retained run or receipt lacks the exact pi-subagents version and owner path. Recapture a provenance-complete run; this one is not evidence.",
+      "sections": [
+        "hosts/capabilities"
+      ],
+      "next_actions": [
+        "residual.accept"
+      ]
+    },
     "governance.approval_unavailable": {
       "message": "Host approval UI unavailable/cancelled. Keep pending; use supported UI or start an explicitly auto fresh run.",
       "sections": [

@@ -41,6 +41,12 @@ import {
 } from "./audit-identity.ts";
 import { createStdioBridgeDispatch, defaultBridgeConfig, HOST_PROFILE_ID } from "./stdio-transport.ts";
 import { renderAuthorView } from "./author-view.ts";
+import {
+  nodeOwnerIo, nodePreflightImporter, resolveOwnerPreflight, resolveSubagentOwner, sameOwner, subagentsProvenance,
+  type AuditorPreflightApi, type BoundPreflight, type OwnerEnv, type OwnerIo, type OwnerRefusal,
+  type PreflightImporter, type SubagentOwner, type SubagentsProvenance,
+} from "./runtime-owner.ts";
+import { ownerRefusalBlock, ownerRefusalReason } from "./owner-refusal.ts";
 import { PUBLIC_TOOLS } from "./public-tools.ts";
 import {
   REPORT_CONVERGENCE_INTENT,
@@ -127,8 +133,9 @@ export interface ResolvedAuditContract {
   model: string;
   agentScope: "project" | "user";
 }
+/** Resolves the audit launch contract through the preflight of the session's bound owner. */
 export type AuditContractResolver = (
-  input: Record<string, unknown>, ctx: ExtensionContext,
+  input: Record<string, unknown>, ctx: ExtensionContext, preflight: AuditorPreflightApi,
 ) => Promise<ResolvedAuditContract>;
 
 /** Thinking levels pi-subagents may append to a launch model as ``:<level>`` (its ``THINKING_LEVELS``). */
@@ -155,12 +162,6 @@ export function resolvePiAuditorModel(global: Record<string, unknown>, project: 
   return model;
 }
 
-interface AuditorPreflightApi {
-  resolveSubagentLaunchContract(input: Record<string, unknown>): Promise<
-    { ok: true; contract: { agent: { filePath: string }; model?: string; modelCandidates: string[] } }
-    | { ok: false; message: string }
-  >;
-}
 interface PiSettingsApi {
   SettingsManager: { create(cwd: string, agentDir?: string): {
     getGlobalSettings(): Record<string, unknown>; getProjectSettings(): Record<string, unknown> } };
@@ -169,10 +170,10 @@ interface PiSettingsApi {
 
 export async function defaultAuditContractResolver(
   input: Record<string, unknown>, ctx: ExtensionContext,
-  seams?: { preflight: AuditorPreflightApi; settings: PiSettingsApi },
+  seams: { preflight: AuditorPreflightApi; settings?: PiSettingsApi },
 ): Promise<ResolvedAuditContract> {
-  const api = seams?.preflight ?? await import("pi-subagents/preflight") as AuditorPreflightApi;
-  const host = seams?.settings ?? await import("@earendil-works/pi-coding-agent") as PiSettingsApi;
+  const api = seams.preflight;
+  const host = seams.settings ?? await import("@earendil-works/pi-coding-agent") as PiSettingsApi;
   const cwd = ctx.cwd ?? process.cwd();
   const settings = host.SettingsManager.create(cwd, host.getAgentDir());
   const global = settings.getGlobalSettings();
@@ -217,8 +218,14 @@ export interface EmpiricaPiDeps {
   subagentToolName?: string;
   /** Adapter-private trusted ingress; production uses the private Python bridge. */
   privateIngress?: PrivateIngress;
-  /** Side-effect-free pi-subagents launch-contract resolution. */
+  /** Side-effect-free pi-subagents launch-contract resolution, given the bound owner's preflight. */
   resolveAuditContract?: AuditContractResolver;
+  /** File-system reads for owner resolution (default: the real file system). */
+  ownerIo?: OwnerIo;
+  /** Environment consulted for the pi-subagents child-process flag (default: ``process.env``). */
+  ownerEnv?: OwnerEnv;
+  /** Owner-anchored module resolution and loading (default: ``require.resolve`` from the owner + ``import``). */
+  preflightImporter?: PreflightImporter;
 }
 
 function defaultSelectorProvider(): SelectorProvider {
@@ -261,7 +268,10 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
   const startOptions = deps.startRunOptions ?? {};
   const subagentToolName = deps.subagentToolName ?? "subagent";
   const privateIngress = deps.privateIngress ?? createPrivateIngress();
-  const resolveAuditContract = deps.resolveAuditContract ?? defaultAuditContractResolver;
+  const resolveAuditContract: AuditContractResolver = deps.resolveAuditContract
+    ?? ((input, ctx, preflight) => defaultAuditContractResolver(input, ctx, { preflight }));
+  const ownerIo = deps.ownerIo ?? nodeOwnerIo;
+  const preflightImporter = deps.preflightImporter ?? nodePreflightImporter;
   // Read once at load: a malformed EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS fails extension load with its message
   // instead of surfacing mid-run inside a configure_run that already dispatched.
   const governanceTimeoutMs = governanceTimeout();
@@ -277,6 +287,70 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       plan: AuditPlanData;
     };
     const audits = new Map<string, AuditCorrelation>();
+
+    // The audit runtime: the one extension that registered `subagent`, observed at session_start
+    // (the earliest point every startup extension has loaded) and re-checked on every use. A refusal
+    // is sticky for the session; only the next session_start (startup/reload) observes afresh.
+    type OwnerBinding = { owner: SubagentOwner; preflight: BoundPreflight;
+      /** Adapter-owned observed-runtime object for the host dossier. */
+      provenance: SubagentsProvenance };
+    type OwnerState = { kind: "unobserved" } | { kind: "bound"; binding: OwnerBinding }
+      | { kind: "refused"; refusal: OwnerRefusal };
+    let ownerState: OwnerState = { kind: "unobserved" };
+    const ownerEnv = (): OwnerEnv => deps.ownerEnv ?? process.env;
+    const observeOwner = async (): Promise<OwnerState> => {
+      // Everything is inside the try: a throw here would escape `session_start` before the run
+      // handle is restored, leaving a live run ungated. Any failure is a typed refusal instead.
+      try {
+        const resolved = resolveSubagentOwner(pi.getAllTools(), pi.getCommands(), ownerIo, ownerEnv());
+        if (!resolved.ok) return { kind: "refused", refusal: resolved };
+        const preflight = await resolveOwnerPreflight(resolved, preflightImporter, ownerIo);
+        if (!preflight.ok) return { kind: "refused", refusal: preflight };
+        return { kind: "bound", binding: { owner: resolved, preflight,
+          provenance: subagentsProvenance(resolved, preflight) } };
+      } catch (error) {
+        return { kind: "refused", refusal: { ok: false, code: "owner-unobservable",
+          message: `the pi-subagents owner could not be observed: ${describe(error)}` } };
+      }
+    };
+    /**
+     * The bound owner, re-verified now; any divergence from the session's binding invalidates it.
+     * Synchronous on purpose: `empirica_observe` takes the governance-dialog lock before its first
+     * await, and an await here would let two concurrent configure_run calls both pass admission first.
+     */
+    const currentOwner = (): { ok: true; binding: OwnerBinding } | OwnerRefusal => {
+      if (ownerState.kind === "unobserved")
+        return { ok: false, code: "owner-unobservable",
+          message: "the pi-subagents owner was not observed at session_start" };
+      if (ownerState.kind === "refused") return ownerState.refusal;
+      const bound = ownerState.binding;
+      let fresh: ReturnType<typeof resolveSubagentOwner>;
+      try {
+        fresh = resolveSubagentOwner(pi.getAllTools(), pi.getCommands(), ownerIo, ownerEnv());
+      } catch (error) {
+        fresh = { ok: false, code: "owner-unobservable",
+          message: `the pi-subagents owner could not be re-observed: ${describe(error)}` };
+      }
+      const divergence: OwnerRefusal | undefined = !fresh.ok ? fresh
+        : !sameOwner(bound.owner, fresh)
+          ? { ok: false, code: "owner-changed",
+              message: `the \`${SUBAGENT_TOOL}\` owner changed from ${bound.owner.package_root}@${bound.owner.version} `
+                + `to ${fresh.package_root}@${fresh.version}` }
+          : undefined;
+      if (divergence) {
+        ownerState = { kind: "refused", refusal: divergence };
+        return divergence;
+      }
+      // Registered is not usable: a disabled tool cannot be invoked, so no audit could launch.
+      // B2: tool-inactive reason — a registered-but-inactive tool maps to `missing-tool` (host.subagents_missing,
+      // "install a runtime and restart"); its own code/guidance ("enable `subagent`") lands with the 0.74 review.
+      if (!(pi.getActiveTools?.() ?? []).includes(SUBAGENT_TOOL))
+        return { ok: false, code: "missing-tool",
+          message: `the \`${SUBAGENT_TOOL}\` tool is registered but not active` };
+      return { ok: true, binding: bound };
+    };
+    const ownerDetail = (refusal: OwnerRefusal): string => `${refusal.code}: ${refusal.message}`;
+
     const completedAuditCalls = new Set<string>();
     type ChildCorrelation = { runHandle: string; childId: string; nativeId: string };
     const children = new Map<string, ChildCorrelation>();
@@ -308,6 +382,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     pi.on("resources_discover", () => ({ skillPaths: [skillsDir] }));
 
     pi.on("session_start", async (_event, ctx) => {
+      ownerState = await observeOwner();
       const entries = ctx.sessionManager?.getEntries() ?? [];
       const terminalRuns = new Set(entries.filter((entry) => entry.customType === "empirica.run.done")
         .map((entry) => (entry.data as { runHandle?: unknown } | undefined)?.runHandle)
@@ -474,6 +549,19 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           if (typeof action.kind !== "string" || !AUTHOR_ACTION_KIND_SET.has(action.kind))
             throw new Error("trusted or unknown Empirica action kind");
           if (governanceDialog) throw new Error("Governance dialog in progress; retry after completion");
+          if (action.kind === "configure_run") {
+            // No run can be sized or approved for an audit that cannot launch.
+            const owner = currentOwner();
+            if (!owner.ok) {
+              ctx.ui.notify(`empirica: configure_run refused [${ownerDetail(owner)}]`, "error");
+              const current = await dispatch(getRunRequest(runHandle, randomUUID()));
+              const run = (current.result.type === "Allow" || current.result.type === "Block")
+                ? current.result.run : undefined;
+              const refusal = ownerRefusalBlock(owner.code, run);
+              return { content: [{ type: "text", text: resultText({ ...current, result: refusal }) }],
+                details: refusal };
+            }
+          }
           // Take the lock before the first await so concurrent configure_run observes cannot both open a dialog.
           const owns = action.kind === "configure_run";
           if (owns) governanceDialog = true;
@@ -508,13 +596,13 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           ctx.ui.notify(`empirica: not started — unknown flags: ${parsed.unknownFlags.join(" ")}`, "error");
           return;
         }
-        // Convergence needs the independent audit, which Pi can only launch through pi-subagents'
-        // tool. Refuse before creating a run rather than discovering the gap at audit time.
-        if (!(pi.getActiveTools?.() ?? []).includes(SUBAGENT_TOOL)) {
-          ctx.ui.notify(`empirica: not started — the \`${SUBAGENT_TOOL}\` tool is not active, so no independent `
-            + `audit could run. Enable \`${SUBAGENT_TOOL}\` if pi-subagents is loaded; otherwise load the `
-            + "pi-subagents extension bundled with this package and restart Pi.",
-            "error");
+        // Convergence needs the independent audit, which Pi can only launch through the external
+        // pi-subagents runtime that owns the `subagent` tool. Refuse before creating a run rather
+        // than discovering the gap at audit time; the guidance is the contract reason's.
+        const owner = currentOwner();
+        if (!owner.ok) {
+          const notice = startRunNotice(ownerRefusalBlock(owner.code));
+          ctx.ui.notify(`${notice.text} [${ownerDetail(owner)}]`, "error");
           return;
         }
         try {
@@ -526,6 +614,9 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             signal: `ctx.mode=${ctx.mode ?? "unknown"}`,
             delegation: process.env[PUBLIC_TOOLS.host_profiles[HOST_PROFILE_ID].delegation_env] === "1",
           };
+          // B3: persist owner.binding.provenance (adapter-owned `subagents` object) with the run. The
+          // closed StartRun `invocation` has no field for host-observed runtime facts, so it is
+          // observed and bound here but not yet sent or recorded.
           const response = await dispatch(startRunRequest(selectorOf(ctx), goal, randomUUID(), invocation, {
             ...startOptions, controlMode: parsed.controlMode,
           }));
@@ -680,6 +771,16 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         if (event.toolName !== subagentToolName)
           return { block: true, reason: "empirica: unrecognized child execution surface" };
         const requestedAuditor = event.input.agent === "empirica.empirica-auditor";
+        let auditPreflight: AuditorPreflightApi | undefined;
+        if (requestedAuditor) {
+          // Admission binds to the owner observed now; a changed or vanished owner refuses the audit
+          // before any reservation, plan, or preflight call.
+          const owner = currentOwner();
+          if (!owner.ok)
+            return { block: true, reason: `empirica auditor admission refused — `
+              + `${ownerRefusalReason(owner.code).message} [${ownerDetail(owner)}]` };
+          auditPreflight = owner.binding.preflight.api;
+        }
         if (!requestedAuditor) {
           const purpose = typeof event.input.task === "string" && event.input.task.trim()
             ? event.input.task : "author child";
@@ -711,7 +812,8 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           const governed = current.result.run.governance as { state?: string } | undefined;
           if (governed?.state !== "approved") throw new Error("approved configuration unavailable");
           const expectedAgent = path.resolve(skillsDir, "..", "agents", "pi", "empirica-auditor.md");
-          const resolvedAudit = await resolveAuditContract({ ...event.input, expectedAgent }, ctx);
+          if (auditPreflight === undefined) throw new Error("auditor launch reached admission without a bound owner");
+          const resolvedAudit = await resolveAuditContract({ ...event.input, expectedAgent }, ctx, auditPreflight);
           const roleProfile = "empirica.empirica-auditor";
           const [auditorProvider, auditorModel] = modelPair(resolvedAudit.model, "pi-subagents");
           const nativeId = event.toolCallId;

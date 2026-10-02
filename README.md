@@ -88,13 +88,25 @@ directly as a repo/user skill there if needed, and use native simple mode only.
 
 ## Install for Pi
 
-Install the repository as one Pi package. It bundles the pinned
-`pi-subagents@0.50.0` extension and the Empirica auditor role required by the exact
-`pi@0.84.1+pi-subagents@0.50.0` profile:
+Empirica's independent audit runs through the external
+[`pi-subagents`](https://www.npmjs.com/package/pi-subagents) extension; this package does **not**
+bundle or load it. Install the runtime first, then the repository (which carries Empirica, the
+Methodologist, and the Empirica auditor role):
 
 ```sh
+pi install npm:pi-subagents
 pi install git:github.com/obzenner/siffran
 ```
+
+At `session_start` the Empirica adapter resolves the single extension that registered the `subagent`
+tool from Pi's own tool inventory, reads that package's exact version, and binds its launch preflight.
+It refuses to start or configure a run (with a `host.subagents_*` reason) when there is no `subagent`
+tool, when the session's slash commands show more than one loaded `pi-subagents` package (Pi reports
+only the first `subagent` registration, so a second copy is seen through its commands, not its tool),
+or when the owner's package or version cannot be verified. A second copy is detected only while its
+extension registers commands; Pi runs and reports the first registrant, and that is the one bound.
+A reviewed-versions table and compatibility matrix are planned for a later Empirica release; until
+then any `pi-subagents` version with a working `pi-subagents/preflight` export is accepted.
 
 Restart Pi after installation, or run `/reload` in an existing session. Available commands include:
 

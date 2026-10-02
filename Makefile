@@ -32,7 +32,7 @@ EMPIRICA_CLAUDE_MCP_LOG_TESTS := $(SCRIPTS)/tests/test_check_claude_mcp_log.py
 EMPIRICA_RUN_CENSUS_TESTS := $(SCRIPTS)/tests/test_empirica_run_census.py
 EMPIRICA_CONTEXT_ECONOMY_TESTS := $(SCRIPTS)/tests/test_empirica_context_economy.py
 CLAUDE_SUBAGENT_MODEL_TESTS := $(SCRIPTS)/tests/test_claude_subagent_models.py
-PI_CANARY_CONFIG_TESTS := $(SCRIPTS)/tests/test_configure_pi_canary.py
+PI_CANARY_TESTS := $(SCRIPTS)/tests/test_pi_canary.py
 EMPIRICA_D6_STRICT_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d6_strict_v2.py
 EMPIRICA_LOCATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_location.py
 EMPIRICA_TRANSACTION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_transactions.py
@@ -276,8 +276,10 @@ vendor-check: ## Verify Empirica's obligation and runtime-contract vendor copies
 activation-check: ## Verify Empirica runtime isolation and thin Claude hook activation
 	@printf '$(BOLD)==> empirica activation$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_empirica_activation.py
+	@$(PYTHON) $(SCRIPTS)/tests/test_validate_empirica_activation.py
 
-# devDependencies (typescript, @types/node) that turn the Pi adapter typecheck
+# devDependencies (typescript, @types/node, and pi-subagents as a unit-test fixture only — never a
+# runtime provisioned by this checkout) that turn the Pi adapter typecheck
 # from a skipped note into an enforced gate. Rebuilt when the lockfile changes;
 # Missing npm does not imply a successful typecheck: the validator fails without tsc unless
 # EMPIRICA_ALLOW_SKIP=1 explicitly acknowledges a partial check.
@@ -405,9 +407,9 @@ empirica-host-receipt-unit-check: ## test structural installed-host receipt veri
 	@$(PYTHON) $(EMPIRICA_LIVE_RECEIPT_TESTS)
 
 .PHONY: pi-canary-unit-check
-pi-canary-unit-check: ## Test project-local Pi canary package filtering
-	@printf '$(BOLD)==> Pi canary configuration$(RESET)\n'
-	@$(PYTHON) $(PI_CANARY_CONFIG_TESTS)
+pi-canary-unit-check: ## Test that the dogfood settings and canary recipes never provision or suppress a pi-subagents runtime
+	@printf '$(BOLD)==> Pi dogfood runtime boundary$(RESET)\n'
+	@$(PYTHON) $(PI_CANARY_TESTS)
 
 .PHONY: empirica-host-receipt
 empirica-host-receipt: ## capture one operator-attested receipt: HOST=... TRANSCRIPT=... STATE=... CHILD_SESSION=... VERSION_OUTPUT=... COMMAND=... OUTPUT=...
@@ -472,9 +474,11 @@ doctor: ## empirica preflight: report baseline host capability without inference
 
 # Dogfooding (see docs/packages.md "Scope and Deduplication" in pi): the committed .pi/settings.json
 # adds this checkout as a project-local package and applies autoload:false DELTAs that exclude the
-# globally installed siffran resources and the separately installed pi-subagents extension. The
-# checkout-bundled exact pi-subagents profile remains active; providers and unrelated packages are
-# unchanged. Local edits hot-reload with /reload. Pi asks to trust the folder once.
+# globally installed siffran resources; providers and unrelated packages are unchanged. siffran does
+# not bundle pi-subagents: the audit runtime is the separately installed extension that registers the
+# `subagent` tool (`pi install npm:pi-subagents`), which Empirica resolves at session_start and never
+# installs, enables, or suppresses here. Local edits hot-reload with /reload. Pi asks to trust the
+# folder once.
 CLAUDE ?= claude
 # Dev sessions run `make` themselves. Command-line make variables (ARGS=...) are exported to children,
 # so without this an author's `make check-static` inherits the launcher's ARGS and fails.
@@ -494,15 +498,14 @@ pi-dev: node_modules ## Run Pi with this checkout override: PI=/path/to/pi [ARGS
 
 # Canary: dogfood a pushed PR branch inside a REAL project, not inside siffran. Installs the branch
 # as a project-local package there (project wins over the global install; identity is the repo URL,
-# so the global entry is shadowed, not duplicated). When pi-subagents is already installed globally,
-# filter siffran's bundled copy from the project entry to avoid duplicate tool registration.
-# `pi update --extensions` reconciles the clone.
+# so the global entry is shadowed, not duplicated). The canary installs only siffran; the external
+# pi-subagents runtime is a prerequisite of the project, never changed here. `pi update --extensions`
+# reconciles the clone.
 SIFFRAN_GIT ?= git:github.com/obzenner/siffran
 .PHONY: pi-canary pi-canary-remove
 pi-canary: ## Install a siffran branch project-locally in DIR for dogfooding: make pi-canary REF=<branch> [DIR=<project>]
 	@if [ -z "$(REF)" ]; then printf 'usage: make pi-canary REF=<branch-or-tag> [DIR=<project dir, default: this checkout>]\n' >&2; exit 2; fi
 	@cd "$(or $(DIR),$(CURDIR))" && $(PI) install -l "$(SIFFRAN_GIT)@$(REF)"
-	@$(PYTHON) $(SCRIPTS)/configure_pi_canary.py "$(or $(DIR),$(CURDIR))" "$(SIFFRAN_GIT)@$(REF)"
 	@printf '$(BOLD)==> canary$(RESET) %s@%s installed project-locally in %s; run `pi` there (trust the folder when asked); `make pi-canary-remove DIR=...` to undo\n' "$(SIFFRAN_GIT)" "$(REF)" "$(or $(DIR),$(CURDIR))"
 
 pi-canary-remove: ## Remove the project-local siffran canary from DIR: make pi-canary-remove [DIR=<project>]
