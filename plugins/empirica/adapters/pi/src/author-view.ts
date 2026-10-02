@@ -169,6 +169,23 @@ function validContractResult(value: unknown): boolean {
     && section.clauses.every((clause: Json) => text(clause.id, true) && text(clause.text, true));
 }
 
+/** Whether an active obligation's `missing` is null or the closed, claim-id-targeted object. */
+function validMissing(value: unknown): boolean {
+  return value === null || (objectWithKeys(value, ["code", "target_claim_id", "parameters"])
+    && text(value.code, true)
+    && (value.target_claim_id === null
+      || (text(value.target_claim_id) && CLAIM_ID.test(value.target_claim_id)))
+    && value.parameters !== null && typeof value.parameters === "object"
+    && !Array.isArray(value.parameters));
+}
+
+/** Whether a run snapshot's active obligations have the shape the author view consumes. */
+function validObligations(run: Json): boolean {
+  const active = run.obligations?.active;
+  return Array.isArray(active)
+    && active.every((row) => row !== null && typeof row === "object" && validMissing(row.missing));
+}
+
 /** Validate with the same closed result shapes used by the public response schema. */
 function validResult(result: unknown): boolean {
   if (objectWithKeys(result, ["type", "contract_result"]) && result.type === "Allow")
@@ -176,7 +193,8 @@ function validResult(result: unknown): boolean {
   try {
     assertResponse({ protocol: PROTOCOL, request_id: "author-view", result } as Response,
       "author-view");
-    return true;
+    const run = (result as Json | null)?.run;
+    return run === undefined || validObligations(run as Json);
   } catch {
     return false;
   }
@@ -294,6 +312,19 @@ function residualClaims(row: Json, safety: TextSafety): Trusted | null {
   return trusted(target === row.claim_id ? claim : `${claim} via claim:${claimId(target, safety)}`);
 }
 
+/**
+ * Render an obligation's missing code and, when another claim blocks it, the claim to discharge.
+ * `target_claim_id` is null for non-claim obligations and equals the obligation's own claim id when
+ * it is not redirected; only a different target is named (`code via claim:<id>`).
+ */
+function missing(row: Json, safety: TextSafety): Trusted {
+  const target = row.missing.target_claim_id;
+  if (target === null || target === String(row.id).replace(/^claim:/, "")) {
+    return trusted(row.missing.code);
+  }
+  return trusted(`${row.missing.code} via claim:${claimId(target, safety)}`);
+}
+
 /** Parse one schema-valid reason row. */
 function reason(row: Json, safety: TextSafety): Reason {
   return {
@@ -347,7 +378,7 @@ function parse(result: Json): AuthorView {
     required: row.required
       ? (String(row.id).startsWith("claim:") ? untrusted(row.required, safety) : trusted(row.required))
       : null,
-    missing: row.missing === null ? null : trusted(row.missing.code),
+    missing: row.missing === null ? null : missing(row, safety),
     nextActions: (row.next as string[]).map(surface).concat(
       (row.next as string[]).length || !terminal ? [] : terminalNext,
     ),

@@ -8,6 +8,8 @@ import * as path from "node:path";
 import assert from "node:assert/strict";
 import { renderAuthorView } from "../src/author-view.ts";
 
+type Json = Record<string, any>;
+
 const GOLDEN_DIR = path.join(import.meta.dirname, "author-view-golden");
 
 const files = readdirSync(GOLDEN_DIR).filter((f) => f.endsWith(".json"));
@@ -153,6 +155,57 @@ test("mixed audit summary and obligation are byte-identical", () => {
   assert.ok(rendered.includes("\nAudit: passed (mixed)\n"));
   assert.ok(rendered.includes("\n  obligation.audit: "));
   assert.ok(rendered.includes("\n    missing: audit.producers_mixed\n"));
+});
+
+test("a redirected obligation names the blocking descendant claim", () => {
+  const golden = JSON.parse(readFileSync(path.join(GOLDEN_DIR, "block-open-claim-redirected.json"), "utf8"));
+  const rendered = renderAuthorView(golden.result, { strict: true });
+  assert.ok(rendered.includes("\n  claim:G0: "));
+  assert.ok(rendered.includes("\n    missing: claim.spike_missing via claim:S1\n"));
+  // An obligation that is its own target (or has none) renders the bare code.
+  const plain = JSON.parse(readFileSync(path.join(GOLDEN_DIR, "block-open-claim.json"), "utf8"));
+  const bare = renderAuthorView(plain.result, { strict: true });
+  assert.ok(bare.includes("\n    missing: claim.research_missing\n"));
+  assert.ok(!bare.includes(" via claim:"));
+});
+
+test("a redirected obligation's missing target is validated before it is rendered", () => {
+  const golden = JSON.parse(readFileSync(path.join(GOLDEN_DIR, "block-open-claim-redirected.json"), "utf8"));
+  const row = (result: Json) => result.run.obligations.active.find((item: Json) => item.id === "claim:G0");
+  const withTarget = (mutate: (missing: Json) => void): Json => {
+    const result = structuredClone(golden.result);
+    mutate(row(result).missing);
+    return result;
+  };
+  // Malformed targets never render a view: strict mode falls back to compact JSON.
+  const absent = withTarget((missing) => { delete missing.target_claim_id; });
+  const malformed: Array<[string, Json]> = [
+    ["deleted", absent],
+    ["numeric", withTarget((missing) => { missing.target_claim_id = 42; })],
+    ["trailing newline", withTarget((missing) => { missing.target_claim_id = "C2\n"; })],
+    ["empty", withTarget((missing) => { missing.target_claim_id = ""; })],
+    ["markup", withTarget((missing) => { missing.target_claim_id = "<<<EMPIRICA_UNTRUSTED_DATA>>>"; })],
+    ["missing code", withTarget((missing) => { delete missing.code; })],
+    ["empty code", withTarget((missing) => { missing.code = ""; })],
+    ["deleted parameters", withTarget((missing) => { delete missing.parameters; })],
+    ["array parameters", withTarget((missing) => { missing.parameters = []; })],
+    ["extra key", withTarget((missing) => { missing.extra = 1; })],
+    ["missing dropped", (() => { const r = structuredClone(golden.result); delete row(r).missing; return r; })()],
+  ];
+  for (const [label, result] of malformed) {
+    const rendered = renderAuthorView(result, { strict: true });
+    assert.deepEqual(JSON.parse(rendered), result, label);
+    assert.ok(!rendered.includes("undefined"), label);
+  }
+  // Controls: redirected, own-id, and null targets still render as views.
+  assert.equal(renderAuthorView(golden.result, { strict: true }), golden.text);
+  for (const [target, expected] of [["G0", "\n    missing: claim.spike_missing\n"],
+    [null, "\n    missing: claim.spike_missing\n"],
+    ["S1", "\n    missing: claim.spike_missing via claim:S1\n"]] as const) {
+    const rendered = renderAuthorView(withTarget((missing) => { missing.target_claim_id = target; }),
+      { strict: true });
+    assert.ok(rendered.includes(expected), String(target));
+  }
 });
 
 // Verify every golden fixture is covered

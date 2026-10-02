@@ -46,6 +46,8 @@ Read its first-line status/governance summary, `Reasons`, `Open obligations`, an
 calls directly; do not parse it as JSON or look for hidden digests/governance internals. Pi retains
 validated structured details for host UI only. The host binds and injects the private audit dossier;
 `GetArgument` is text for authors recovering a graph, while `GetContract` is text for inspection.
+`missing: <code> via claim:<id>` on an obligation means that descendant claim blocks it: discharge the
+named claim, not the listed one.
 
 A runnable convergence workflow requires all of these capabilities:
 

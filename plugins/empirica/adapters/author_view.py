@@ -69,7 +69,7 @@ class Obligation:
 
     obligation_id: Trusted
     required: Trusted | Untrusted | None
-    missing: Trusted | None
+    missing: Trusted | None  # code, plus ``via claim:<id>`` when a descendant claim blocks it
     next_actions: tuple[Trusted, ...]
 
 
@@ -233,6 +233,19 @@ def _residual_claims(row: dict[str, Any], safety: TextSafety) -> Trusted | None:
     return Trusted(f"{claim} via claim:{safety.claim_id(target)}")
 
 
+def _missing(row: dict[str, Any], safety: TextSafety) -> Trusted:
+    """Render an obligation's missing code and, when another claim blocks it, the claim to discharge.
+
+    ``target_claim_id`` is ``None`` for non-claim obligations and equals the obligation's own claim
+    id when it is not redirected; only a different target is named (``code via claim:<id>``).
+    """
+    missing = row["missing"]
+    target = missing["target_claim_id"]
+    if target is None or target == row["id"].removeprefix("claim:"):
+        return Trusted(missing["code"])
+    return Trusted(f"{missing['code']} via claim:{safety.claim_id(target)}")
+
+
 def _reason(row: dict[str, Any], safety: TextSafety) -> Reason:
     """Parse one schema-valid reason row."""
     return Reason(
@@ -283,7 +296,7 @@ def _parse(result: dict[str, Any]) -> AuthorView:
             (safety.untrusted(row["required"])
              if row["id"].startswith("claim:") else Trusted(row["required"]))
             if row["required"] else None,
-            Trusted(row["missing"]["code"]) if row["missing"] is not None else None,
+            _missing(row, safety) if row["missing"] is not None else None,
             tuple(_surface(action) for action in row["next"])
             or (terminal_next if terminal else ()),
         )

@@ -105,6 +105,14 @@ def _synthetic_results() -> list[tuple[str, object]]:
     hostile["run"]["children"] = [{"child_id": "ch-" + "0" * 64, "purpose": hostile_text,
                                    "resource_class": "audit", "state": "pending"}]
 
+    # The core redirects an approved ordinary claim's obligation to the open descendant that blocks it
+    # (core/projection.py): the obligation keeps its own id, ``missing.target_claim_id`` names the child.
+    redirected = copy.deepcopy(open_claim)
+    for row in redirected["run"]["obligations"]["active"]:
+        if row["id"].startswith("claim:"):
+            row.update(missing={"code": "claim.spike_missing", "target_claim_id": "S1",
+                                "parameters": {}}, next=["spike.run"])
+
     deferred = copy.deepcopy(json.loads((FIXTURES / "getargument-active.json").read_text())
                              ["expected"]["result"])
     deferred["argument"]["goal"] = hostile_text
@@ -138,6 +146,7 @@ def _synthetic_results() -> list[tuple[str, object]]:
         ("audit-mixed", audit_mixed),
         ("audit-failed-findings", audit_failed),
         ("hostile-author-strings", hostile),
+        ("block-open-claim-redirected", redirected),
         ("fault-no-message", json.loads((FIXTURES / "getcontract-full.json").read_text())
          ["expected"]["result"]),
         ("all-next-actions", all_actions),
