@@ -210,11 +210,13 @@ class LiveReceiptTests(unittest.TestCase):
         return receipt
 
     def with_retried_audit(self, receipt: dict, host: str, *, earlier_state: str = "completed",
-                           earlier_last: bool = False) -> dict:
-        """Add an earlier audit (child, launch, and a blocked report) to a receipt.
+                           earlier_last: bool = False, duplicate_settlement: bool = False) -> dict:
+        """Add an earlier audit (child, launch, its Stop settlement and a blocked report) to a receipt.
 
-        On Claude the final Stop and convergence views render both the earlier and the current
-        audit child, as the host does after a retry.
+        On Claude the earlier audit has its own Stop settlement (one pending child, as the host
+        rendered it at the time) and the final Stop and convergence views render both the earlier
+        and the current audit child, as the host does after a retry. ``duplicate_settlement``
+        repeats the final settlement after the bound launch, which no real host produces.
         """
         state_path = Path(receipt["run_state_path"])
         state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -249,6 +251,8 @@ class LiveReceiptTests(unittest.TestCase):
                 {"type": "user", "message": {"content": [{"type": "tool_result",
                  "tool_use_id": "tool-0",
                  "content": "Async agent launched successfully…\nagentId: native-0"}]}},
+                {"type": "attachment", "attachment": {"hookName": "Stop",
+                 "stdout": PENDING_TEXT + "\n"}},
                 {"type": "assistant", "message": {"role": "assistant", "model": "author",
                  "content": [{"type": "tool_use", "name": "report_convergence",
                               "id": "report-0", "input": {}}]}},
@@ -271,6 +275,10 @@ class LiveReceiptTests(unittest.TestCase):
                             item.get("content"), list) else []:
                         if block.get("text") in texts:
                             block["text"] = texts[block["text"]]
+            if duplicate_settlement:
+                final = next(row for row in rows if row.get("attachment", {}).get("hookName")
+                             == "Stop" and "Children:" in row["attachment"].get("stdout", ""))
+                rows.insert(rows.index(final) + 1, json.loads(json.dumps(final)))
         # Claude's first row is the author's opening text; Pi's first row is the bound launch.
         head = 1 if host == "claude" else 0
         rows = rows + launch if earlier_last else rows[:head] + launch + rows[head:]
@@ -299,6 +307,23 @@ class LiveReceiptTests(unittest.TestCase):
                     receipt = self.with_retried_audit(
                         self.receipt(Path(directory), host), host, **options)
                     self.assertNotEqual(inspect(receipt, host, "commit", "2.0.0"), [])
+
+    def test_claude_binds_the_settlement_that_follows_the_bound_launch(self):
+        # The earlier audit's own settlement precedes the bound launch and is not counted; two
+        # settlements after the bound launch are rejected.
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = self.with_retried_audit(self.receipt(Path(directory), "claude"), "claude")
+            rows = [json.loads(line) for line in Path(receipt["transcript_path"]).read_text(
+                encoding="utf-8").splitlines()]
+            settlements = [row for row in rows if row.get("attachment", {}).get("hookName") == "Stop"
+                           and row["attachment"].get("stdout", "").startswith("Block active")]
+            self.assertEqual(len(settlements), 2)
+            self.assertEqual(inspect(receipt, "claude", "commit", "2.0.0"), [])
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = self.with_retried_audit(self.receipt(Path(directory), "claude"), "claude",
+                                              duplicate_settlement=True)
+            self.assertEqual(inspect(receipt, "claude", "commit", "2.0.0"),
+                             ["claude: claude: expected one pending Stop settlement and converged report"])
 
     def test_structural_receipts_pass_for_supported_hosts(self):
         for host in EXPECTED:

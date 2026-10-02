@@ -295,7 +295,8 @@ def pending_audit_settlement(text: str, run: str) -> bool:
     section whose sole entry is ``audit.pending``, and a ``Children:`` section with exactly one
     live child, ``audit: pending``. Settled children (``completed``, ``failed``, ``cancelled``,
     …, with the renderer's `` — recovery: …`` suffix) are earlier audits of a retry and are
-    allowed. The text view carries no child id: the pending child is bound to the durable child
+    allowed; each audit of a retry has its own settlement, and the caller takes the one after the
+    bound launch. The text view carries no child id: the pending child is bound to the durable child
     by the run binding above, the Agent-launch acknowledgement (``agentId`` equals the state's
     ``native_id``), and the ordering launch < launch result < settlement < notification < report,
     the last two enforced by the caller.
@@ -433,6 +434,9 @@ def inspect_claude(parent: list[dict], child_rows: list[dict], child: dict, run:
         and converged_report_view(_tool_result_text(item), run)
     }
     report_uses = [use for use in report_uses if use[1] in converged_ids]
+    # Each audit of a retry has its own Stop settlement; the receipt is bound to the settlement
+    # that follows the bound (last) launch, and there must be exactly one of those.
+    settlements = [index for index in settlements if index > launch_index]
     if len(report_uses) != 1 or len(settlements) != 1:
         raise ValueError("claude: expected one pending Stop settlement and converged report")
     report_use_index, report_id = report_uses[0]
