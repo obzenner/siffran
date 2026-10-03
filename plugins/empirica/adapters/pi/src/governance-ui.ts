@@ -154,7 +154,7 @@ export function humanApprovalWait(result: Response["result"]): boolean {
     && reasons.length === 1 && reasons[0].code === HUMAN_WAIT_REASON[g.state];
 }
 
-/** True only for the sole `budget.exhausted` blocker of an active run (ADR-0064 interim); mirrors
+/** True only for the sole `budget.exhausted` blocker of an active run (ADR-0063 exhaustion rule); mirrors
  * Python `completion._budget_exhausted_wait`. The core already refused the only recovery the Block
  * once listed, so denying the report again cannot help. */
 export function budgetExhaustedWait(result: Response["result"]): boolean {

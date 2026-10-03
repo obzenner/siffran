@@ -10,19 +10,15 @@ tags:
 - children
 - strict-v2
 links:
-- target: 34
-  kind: Amends
-- target: 41
-  kind: Amends
 - target: 48
   kind: Refines
 - target: 50
   kind: Refines
-- target: 53
-  kind: Refines
 ---
 
 # Isolate investigation and mandatory-audit spawn budgets
+
+Amends ADR-0034, ADR-0041 (removed from the tree; see git history). Refines ADR-0053 (removed from the tree; see git history).
 
 ## Context and Problem Statement
 

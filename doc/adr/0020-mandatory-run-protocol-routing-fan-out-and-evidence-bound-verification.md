@@ -11,43 +11,25 @@ tags:
 links:
 - target: 13
   kind: Depends on
-- target: 18
-  kind: Realizes
 - target: 19
   kind: Depends on
-- target: 7
-  kind: Relates to
-- target: 9
-  kind: Relates to
 - target: 17
   kind: Relates to
 - target: 62
   kind: Amended by
-- target: 21
-  kind: Depends on
-- target: 22
-  kind: Depends on
-- target: 23
-  kind: Depends on
-- target: 24
-  kind: Depends on
 - target: 25
   kind: Amended by
 - target: 26
   kind: Relates to
 - target: 27
   kind: Depends on
-- target: 35
-  kind: Refines
-- target: 37
-  kind: Relates to
-- target: 41
-  kind: Amended by
 - target: 48
   kind: Refines
 ---
 
 # Mandatory run protocol: claim graph, two-fold validation, fan-out, and independent audit
+
+Realizes ADR-0018 (removed from the tree; see git history). Relates to ADR-0007, ADR-0009, ADR-0037 (removed from the tree; see git history). Depends on ADR-0021, ADR-0022, ADR-0023, ADR-0024 (removed from the tree; see git history). Refines ADR-0035 (removed from the tree; see git history). Amended by ADR-0041 (removed from the tree; see git history).
 
 ## Context and Problem Statement
 

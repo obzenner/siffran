@@ -9,15 +9,11 @@ tags:
 - harness
 - convergence
 links:
-- target: 9
-  kind: Amends
 - target: 17
   kind: Depends on
 - target: 19
   kind: Depends on
 - target: 20
-  kind: Relates to
-- target: 22
   kind: Relates to
 - target: 27
   kind: Amended by
@@ -28,6 +24,8 @@ links:
 ---
 
 # Freeze mode: bound discovery so a run can close, not just terminate at the cap
+
+Amends ADR-0009 (removed from the tree; see git history). Relates to ADR-0022 (removed from the tree; see git history).
 
 ## Context and Problem Statement
 

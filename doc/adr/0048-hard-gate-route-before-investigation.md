@@ -12,8 +12,6 @@ tags:
 links:
 - target: 20
   kind: Refines
-- target: 35
-  kind: Supersedes
 - target: 42
   kind: Amends
 - target: 49
@@ -21,6 +19,8 @@ links:
 ---
 
 # Hard-gate route before investigation
+
+Supersedes ADR-0035 (removed from the tree; see git history).
 
 ## Context and Problem Statement
 

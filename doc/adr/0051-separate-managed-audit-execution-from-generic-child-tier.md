@@ -18,11 +18,11 @@ links:
   kind: Amends
 - target: 52
   kind: Amended by
-- target: 55
-  kind: Refines
 ---
 
 # Separate managed-audit execution from the generic child tier
+
+Refines ADR-0055 (removed from the tree; see git history).
 
 ## Context and Problem Statement
 

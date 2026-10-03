@@ -8,30 +8,10 @@ tags:
 - validation
 - verification
 links:
-- target: 8
-  kind: Depends on
-- target: 6
-  kind: Refines
-- target: 11
-  kind: Relates to
-- target: 12
-  kind: Relates to
-- target: 15
-  kind: Relates to
-- target: 16
-  kind: Relates to
 - target: 20
   kind: Relates to
 - target: 17
   kind: Depends on
-- target: 18
-  kind: Refines
-- target: 21
-  kind: Relates to
-- target: 23
-  kind: Relates to
-- target: 24
-  kind: Relates to
 - target: 25
   kind: Relates to
 - target: 27
@@ -41,6 +21,8 @@ links:
 ---
 
 # Deterministic gate is the trust boundary; agentic review is a secondary sensor
+
+Depends on ADR-0008 (removed from the tree; see git history). Refines ADR-0006, ADR-0018 (removed from the tree; see git history). Relates to ADR-0011, ADR-0012, ADR-0015, ADR-0016, ADR-0021, ADR-0023, ADR-0024 (removed from the tree; see git history).
 
 ## Context and Problem Statement
 

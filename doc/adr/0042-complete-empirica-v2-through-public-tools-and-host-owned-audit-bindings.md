@@ -13,18 +13,6 @@ tags:
 links:
 - target: 30
   kind: Depends on
-- target: 40
-  kind: Amends
-- target: 41
-  kind: Amends
-- target: 16
-  kind: Supersedes
-- target: 21
-  kind: Supersedes
-- target: 37
-  kind: Supersedes
-- target: 39
-  kind: Supersedes
 - target: 43
   kind: Amended by
 - target: 44
@@ -40,6 +28,8 @@ links:
 ---
 
 # Complete Empirica v2 through public tools and host-owned audit bindings
+
+Amends ADR-0040, ADR-0041 (removed from the tree; see git history). Supersedes ADR-0016, ADR-0021, ADR-0037, ADR-0039 (removed from the tree; see git history).
 
 ## Context and Problem Statement
 

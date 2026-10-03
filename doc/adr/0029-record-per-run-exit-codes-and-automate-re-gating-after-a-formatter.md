@@ -13,13 +13,13 @@ links:
   kind: Amends
 - target: 13
   kind: Depends on
-- target: 21
-  kind: Relates to
 - target: 62
   kind: Amended by
 ---
 
 # Record per-run exit codes and automate re-gating after a formatter
+
+Relates to ADR-0021 (removed from the tree; see git history).
 
 ## Context and Problem Statement
 

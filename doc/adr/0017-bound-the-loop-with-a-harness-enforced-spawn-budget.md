@@ -9,33 +9,19 @@ tags:
 - termination
 - observability
 links:
-- target: 9
-  kind: Depends on
 - target: 13
   kind: Depends on
-- target: 8
-  kind: Relates to
-- target: 16
-  kind: Relates to
-- target: 18
-  kind: Relates to
 - target: 19
   kind: Relates to
 - target: 20
   kind: Relates to
-- target: 21
-  kind: Relates to
-- target: 23
-  kind: Relates to
-- target: 24
-  kind: Relates to
 - target: 26
   kind: Depends on
-- target: 34
-  kind: Amended by
 ---
 
 # Bound the loop with a harness-enforced spawn budget
+
+Depends on ADR-0009 (removed from the tree; see git history). Relates to ADR-0008, ADR-0016, ADR-0018, ADR-0021, ADR-0023, ADR-0024 (removed from the tree; see git history). Amended by ADR-0034 (removed from the tree; see git history). ADR-0009 is removed from the tree; current bounded termination is covered by ADR-0019 and ADR-0026.
 
 ## Context and Problem Statement
 

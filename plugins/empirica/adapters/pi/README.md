@@ -109,8 +109,8 @@ With a non-null run handle, `report_convergence` permits only a centrally guarde
 `Block`, `Inert`, every `Fault`, malformed responses, and transport failures deny. The central
 guard enforces `converged=true` iff `run.status=converged`.
 
-Two Blocks are the exception and settle nonterminally: the sole human-approval wait (ADR-63) and
-the sole `budget.exhausted` blocker of an active run (ADR-64 interim). Pi permits the call, prints
+Two Blocks are the exception and settle nonterminally: the sole human-approval wait (ADR-0063) and
+the sole `budget.exhausted` blocker of an active run (the current exhaustion rule). Pi permits the call, prints
 the contract-owned notice (`settlement_notices`) ahead of the preserved Block, keeps the run
 active, and opens no dialog and makes no private call. Mixed reasons and terminal runs still
 deny.

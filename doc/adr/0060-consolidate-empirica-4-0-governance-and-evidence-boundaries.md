@@ -9,27 +9,15 @@ tags:
 - identity
 - contracts
 links:
-- target: 24
-  kind: Supersedes
-- target: 53
-  kind: Supersedes
-- target: 54
-  kind: Supersedes
-- target: 55
-  kind: Supersedes
-- target: 57
-  kind: Supersedes
-- target: 58
-  kind: Supersedes
 - target: 56
   kind: Amends
-- target: 41
-  kind: Supersedes
 - target: 61
   kind: Amended by
 ---
 
 # Consolidate Empirica 4.0 governance and evidence boundaries
+
+Supersedes ADR-0024, ADR-0041, ADR-0053, ADR-0054, ADR-0055, ADR-0057, ADR-0058 (removed from the tree; see git history). ADR-0024 is removed from the tree; its optional modes were withdrawn by ADR-0061.
 
 ## Context and Problem Statement
 

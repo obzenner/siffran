@@ -9,10 +9,6 @@ tags:
 - graph
 - assurance
 links:
-- target: 24
-  kind: Supersedes
-- target: 22
-  kind: Supersedes
 - target: 27
   kind: Amends
 - target: 46
@@ -22,6 +18,8 @@ links:
 ---
 
 # Use a strict root-connected claim-dependency DAG
+
+Supersedes ADR-0022, ADR-0024 (removed from the tree; see git history).
 
 ## Context and Problem Statement
 

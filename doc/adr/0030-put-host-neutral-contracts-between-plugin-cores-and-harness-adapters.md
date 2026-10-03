@@ -8,23 +8,9 @@ tags:
 - portability
 - contracts
 links:
-- target: 8
-  kind: Amends
-- target: 12
-  kind: Amends
-- target: 21
-  kind: Depends on
 - target: 32
   kind: Depends on
 - target: 33
-  kind: Depends on
-- target: 37
-  kind: Refines
-- target: 39
-  kind: Relates to
-- target: 40
-  kind: Relates to
-- target: 41
   kind: Depends on
 - target: 42
   kind: Depends on
@@ -33,6 +19,8 @@ links:
 ---
 
 # Put host-neutral contracts between plugin cores and harness adapters
+
+Amends ADR-0008, ADR-0012 (removed from the tree; see git history). Depends on ADR-0021, ADR-0041 (removed from the tree; see git history). Refines ADR-0037 (removed from the tree; see git history). Relates to ADR-0039, ADR-0040 (removed from the tree; see git history). ADR-0008 is removed from the tree; this ADR owns the host-neutral enforcement boundary.
 
 ## Context and Problem Statement
 

@@ -10,17 +10,13 @@ tags:
 - actors
 - attribution
 links:
-- target: 24
-  kind: Amends
-- target: 28
-  kind: Amends
-- target: 36
-  kind: Supersedes
 - target: 60
   kind: Amends
 ---
 
 # Withdraw the cli_exec and multi_provider run modes from Empirica 4.0
+
+Amends ADR-0024, ADR-0028 (removed from the tree; see git history). Supersedes ADR-0036 (removed from the tree; see git history). ADR-0024 is removed from the tree; this ADR records the surviving withdrawal.
 
 ## Context and Problem Statement
 

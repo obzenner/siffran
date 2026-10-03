@@ -28,8 +28,7 @@ turn end, and the run stays active. Stop honestly (`report_convergence` with `in
 accept the typed non-converged terminal result, or, in deliberative mode, propose a raise with
 `configure_run` for human approval. Auto mode still requires a fresh run with a larger up-front
 approved size (or a deliberative run) and never authorizes `budget.raise` or another automatic
-approval prompt until ADR-64 (`doc/adr/0064-let-auto-mode-ask-the-human-to-raise-an-exhausted-ceiling.md`)
-is accepted. Never remove a claim, forge evidence, or bypass audit to fit the budget.
+approval prompt (ADR-0063). Never remove a claim, forge evidence, or bypass audit to fit the budget.
 
 ## Stall handling
 
