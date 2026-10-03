@@ -9,35 +9,21 @@ tags:
 - termination
 - trust-boundary
 links:
-- target: 9
-  kind: Refines
-- target: 8
-  kind: Depends on
 - target: 17
-  kind: Relates to
-- target: 18
   kind: Relates to
 - target: 20
   kind: Depends on
-- target: 21
-  kind: Depends on
-- target: 22
-  kind: Relates to
-- target: 24
-  kind: Relates to
 - target: 25
   kind: Relates to
 - target: 26
   kind: Depends on
-- target: 28
-  kind: Depends on
 - target: 31
-  kind: Amended by
-- target: 34
   kind: Amended by
 ---
 
 # Active-run manifest: run identity, fail-closed gating, and bounded termination
+
+Refines ADR-0009 (removed from the tree; see git history). Depends on ADR-0008, ADR-0021, ADR-0028 (removed from the tree; see git history). Relates to ADR-0018, ADR-0022, ADR-0024 (removed from the tree; see git history). Amended by ADR-0034 (removed from the tree; see git history). ADR-0009 is removed from the tree; this ADR retains the active-run and bounded-termination decision.
 
 ## Context and Problem Statement
 

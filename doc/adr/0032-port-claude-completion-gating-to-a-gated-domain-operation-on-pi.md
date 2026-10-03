@@ -8,21 +8,15 @@ tags:
 - adapters
 - convergence
 links:
-- target: 21
-  kind: Supersedes
-- target: 8
-  kind: Amends
 - target: 30
   kind: Depends on
 - target: 33
   kind: Amended by
-- target: 39
-  kind: Relates to
-- target: 40
-  kind: Relates to
 ---
 
 # Port Claude completion gating to a gated domain operation on Pi
+
+Supersedes ADR-0021 (removed from the tree; see git history). Amends ADR-0008 (removed from the tree; see git history). Relates to ADR-0039, ADR-0040 (removed from the tree; see git history).
 
 ## Context and Problem Statement
 

@@ -1,0 +1,274 @@
+{
+  "description": "Shared accept/reject cases for the host-recorded runtime provenance of a StartRun (invocation.host_runtime). Consumed by the Pi adapter (host-runtime.test.ts, hostRuntimeRejection) and by the Python application (test_host_runtime.py, application.host_runtime.rejection). profile 'external' = a profile whose subagents_compatibility is the Pi profile's real policy (its reviewed_versions contain 0.50.0 and 0.75.0, not 0.75.1 or 9.9.9); profile 'none' = a profile with no external runtime. expect is the stable rejection code or null for accepted.",
+  "cases": [
+    {
+      "id": "newest-reviewed",
+      "profile": "external",
+      "host_runtime": {
+        "policy_id": "pi-subagents-foreground-audit-v1",
+        "subagents": {
+          "package": "pi-subagents",
+          "version": "0.75.0",
+          "owner_path": "/opt/pi-subagents/src/extension/index.js",
+          "package_root": "/opt/pi-subagents",
+          "preflight_path": "/opt/pi-subagents/src/api/preflight.js",
+          "source": "/opt/pi-subagents/index.js"
+        }
+      },
+      "expect": null,
+      "why": "the newest reviewed version with every path inside the package root"
+    },
+    {
+      "id": "oldest-reviewed",
+      "profile": "external",
+      "host_runtime": {
+        "policy_id": "pi-subagents-foreground-audit-v1",
+        "subagents": {
+          "package": "pi-subagents",
+          "version": "0.50.0",
+          "owner_path": "/opt/pi-subagents/src/extension/index.js",
+          "package_root": "/opt/pi-subagents",
+          "preflight_path": "/opt/pi-subagents/src/api/preflight.js",
+          "source": "/opt/pi-subagents/index.js"
+        }
+      },
+      "expect": null,
+      "why": "the oldest reviewed version"
+    },
+    {
+      "id": "absent",
+      "profile": "external",
+      "host_runtime": null,
+      "expect": "missing",
+      "why": "a profile with an external runtime requires the recorded provenance"
+    },
+    {
+      "id": "unreviewed-newer",
+      "profile": "external",
+      "host_runtime": {
+        "policy_id": "pi-subagents-foreground-audit-v1",
+        "subagents": {
+          "package": "pi-subagents",
+          "version": "0.75.1",
+          "owner_path": "/opt/pi-subagents/src/extension/index.js",
+          "package_root": "/opt/pi-subagents",
+          "preflight_path": "/opt/pi-subagents/src/api/preflight.js",
+          "source": "/opt/pi-subagents/index.js"
+        }
+      },
+      "expect": "version",
+      "why": "a released version nobody reviewed"
+    },
+    {
+      "id": "unreviewed-far",
+      "profile": "external",
+      "host_runtime": {
+        "policy_id": "pi-subagents-foreground-audit-v1",
+        "subagents": {
+          "package": "pi-subagents",
+          "version": "9.9.9",
+          "owner_path": "/opt/pi-subagents/src/extension/index.js",
+          "package_root": "/opt/pi-subagents",
+          "preflight_path": "/opt/pi-subagents/src/api/preflight.js",
+          "source": "/opt/pi-subagents/index.js"
+        }
+      },
+      "expect": "version",
+      "why": "a version far outside the reviewed list"
+    },
+    {
+      "id": "other-policy",
+      "profile": "external",
+      "host_runtime": {
+        "policy_id": "pi-subagents-foreground-audit-v2",
+        "subagents": {
+          "package": "pi-subagents",
+          "version": "0.75.0",
+          "owner_path": "/opt/pi-subagents/src/extension/index.js",
+          "package_root": "/opt/pi-subagents",
+          "preflight_path": "/opt/pi-subagents/src/api/preflight.js",
+          "source": "/opt/pi-subagents/index.js"
+        }
+      },
+      "expect": "policy",
+      "why": "provenance recorded under another policy id"
+    },
+    {
+      "id": "other-package",
+      "profile": "external",
+      "host_runtime": {
+        "policy_id": "pi-subagents-foreground-audit-v1",
+        "subagents": {
+          "package": "other-subagents",
+          "version": "0.75.0",
+          "owner_path": "/opt/pi-subagents/src/extension/index.js",
+          "package_root": "/opt/pi-subagents",
+          "preflight_path": "/opt/pi-subagents/src/api/preflight.js",
+          "source": "/opt/pi-subagents/index.js"
+        }
+      },
+      "expect": "package",
+      "why": "another package name"
+    },
+    {
+      "id": "owner-outside-root",
+      "profile": "external",
+      "host_runtime": {
+        "policy_id": "pi-subagents-foreground-audit-v1",
+        "subagents": {
+          "package": "pi-subagents",
+          "version": "0.75.0",
+          "owner_path": "/opt/other/src/extension/index.js",
+          "package_root": "/opt/pi-subagents",
+          "preflight_path": "/opt/pi-subagents/src/api/preflight.js",
+          "source": "/opt/pi-subagents/index.js"
+        }
+      },
+      "expect": "paths",
+      "why": "the owner file is not inside the package root"
+    },
+    {
+      "id": "preflight-outside-root",
+      "profile": "external",
+      "host_runtime": {
+        "policy_id": "pi-subagents-foreground-audit-v1",
+        "subagents": {
+          "package": "pi-subagents",
+          "version": "0.75.0",
+          "owner_path": "/opt/pi-subagents/src/extension/index.js",
+          "package_root": "/opt/pi-subagents",
+          "preflight_path": "/opt/other/src/api/preflight.js",
+          "source": "/opt/pi-subagents/index.js"
+        }
+      },
+      "expect": "paths",
+      "why": "the preflight module is not inside the package root"
+    },
+    {
+      "id": "preflight-is-the-root",
+      "profile": "external",
+      "host_runtime": {
+        "policy_id": "pi-subagents-foreground-audit-v1",
+        "subagents": {
+          "package": "pi-subagents",
+          "version": "0.75.0",
+          "owner_path": "/opt/pi-subagents/src/extension/index.js",
+          "package_root": "/opt/pi-subagents",
+          "preflight_path": "/opt/pi-subagents",
+          "source": "/opt/pi-subagents/index.js"
+        }
+      },
+      "expect": "paths",
+      "why": "the preflight path is the package root itself"
+    },
+    {
+      "id": "preflight-dotdot",
+      "profile": "external",
+      "host_runtime": {
+        "policy_id": "pi-subagents-foreground-audit-v1",
+        "subagents": {
+          "package": "pi-subagents",
+          "version": "0.75.0",
+          "owner_path": "/opt/pi-subagents/src/extension/index.js",
+          "package_root": "/opt/pi-subagents",
+          "preflight_path": "/opt/pi-subagents/../other/preflight.js",
+          "source": "/opt/pi-subagents/index.js"
+        }
+      },
+      "expect": "paths",
+      "why": "a path that climbs out of the root with .."
+    },
+    {
+      "id": "root-dotdot",
+      "profile": "external",
+      "host_runtime": {
+        "policy_id": "pi-subagents-foreground-audit-v1",
+        "subagents": {
+          "package": "pi-subagents",
+          "version": "0.75.0",
+          "owner_path": "/opt/pi-subagents/src/extension/index.js",
+          "package_root": "/opt/x/../pi-subagents",
+          "preflight_path": "/opt/pi-subagents/src/api/preflight.js",
+          "source": "/opt/pi-subagents/index.js"
+        }
+      },
+      "expect": "paths",
+      "why": "a package root that is not normalised (it climbs with ..), although owner and preflight lie below its normalised form"
+    },
+    {
+      "id": "owner-relative",
+      "profile": "external",
+      "host_runtime": {
+        "policy_id": "pi-subagents-foreground-audit-v1",
+        "subagents": {
+          "package": "pi-subagents",
+          "version": "0.75.0",
+          "owner_path": "src/extension/index.js",
+          "package_root": "/opt/pi-subagents",
+          "preflight_path": "/opt/pi-subagents/src/api/preflight.js",
+          "source": "/opt/pi-subagents/index.js"
+        }
+      },
+      "expect": "paths",
+      "why": "a relative owner path"
+    },
+    {
+      "id": "sibling-prefix",
+      "profile": "external",
+      "host_runtime": {
+        "policy_id": "pi-subagents-foreground-audit-v1",
+        "subagents": {
+          "package": "pi-subagents",
+          "version": "0.75.0",
+          "owner_path": "/opt/pi-subagents-evil/src/index.js",
+          "package_root": "/opt/pi-subagents",
+          "preflight_path": "/opt/pi-subagents/src/api/preflight.js",
+          "source": "/opt/pi-subagents/index.js"
+        }
+      },
+      "expect": "paths",
+      "why": "a sibling directory that merely shares the root as a string prefix"
+    },
+    {
+      "id": "not-an-object",
+      "profile": "external",
+      "host_runtime": "pi-subagents@0.75.0",
+      "expect": "malformed",
+      "why": "a string is not a recorded runtime"
+    },
+    {
+      "id": "subagents-not-an-object",
+      "profile": "external",
+      "host_runtime": {
+        "policy_id": "pi-subagents-foreground-audit-v1",
+        "subagents": "0.75.0"
+      },
+      "expect": "malformed",
+      "why": "the subagents member must be an object"
+    },
+    {
+      "id": "none-needed",
+      "profile": "none",
+      "host_runtime": null,
+      "expect": null,
+      "why": "a profile with no external runtime records none"
+    },
+    {
+      "id": "unexpected",
+      "profile": "none",
+      "host_runtime": {
+        "policy_id": "pi-subagents-foreground-audit-v1",
+        "subagents": {
+          "package": "pi-subagents",
+          "version": "0.75.0",
+          "owner_path": "/opt/pi-subagents/src/extension/index.js",
+          "package_root": "/opt/pi-subagents",
+          "preflight_path": "/opt/pi-subagents/src/api/preflight.js",
+          "source": "/opt/pi-subagents/index.js"
+        }
+      },
+      "expect": "unexpected",
+      "why": "a profile with no external runtime must not carry one"
+    }
+  ]
+}

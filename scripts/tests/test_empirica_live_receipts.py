@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import copy
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[1]
@@ -20,9 +22,9 @@ from application.location import encode_handle  # noqa: E402
 from application.protocol import validate_public_result  # noqa: E402
 from core.records import RunKey  # noqa: E402
 from empirica_live_receipts import (  # noqa: E402
-    EXPECTED, FORMAT, author_view_header, author_view_run_id, author_view_section,
-    converged_report_view, digest, handback_report, inspect, pending_audit_settlement,
-    run_handle)
+    EXPECTED, FORMAT, _POLICIES, author_view_header, author_view_run_id, author_view_section,
+    converged_report_view, digest, handback_report, host_runtime_rejection, inspect,
+    pending_audit_settlement, run_handle)
 
 # The durable run of the test receipts: the host stores it at projects/<p>/runs/<s>/gen-<g>/run.json
 # and its public handle encodes exactly those ids. The handle is produced by the host's own codec,
@@ -32,6 +34,16 @@ SESSION_ID = "s256-" + "b" * 64
 RUN_HANDLE = encode_handle(RunKey(PROJECT_ID, SESSION_ID, 1))
 OTHER_HANDLE = encode_handle(RunKey(PROJECT_ID, "s256-" + "c" * 64, 1))
 STATE_PARTS = ("projects", PROJECT_ID, "runs", SESSION_ID, "gen-1", "run.json")
+
+# The audit runtime a Pi run records when it starts (invocation.host_runtime): the newest reviewed version.
+PI_POLICY = _POLICIES["pi"]["subagents_compatibility"]
+PACKAGE_ROOT = "/opt/" + PI_POLICY["package"]
+PI_HOST_RUNTIME = {"policy_id": PI_POLICY["policy_id"], "subagents": {
+    "package": PI_POLICY["package"], "version": PI_POLICY["reviewed_versions"][-1],
+    "owner_path": PACKAGE_ROOT + "/src/extension/index.js", "package_root": PACKAGE_ROOT,
+    "preflight_path": PACKAGE_ROOT + "/src/api/preflight.js", "source": PACKAGE_ROOT + "/index.js"}}
+RUNTIME_CASES = json.loads((ROOT / "plugins/empirica/tests/fixtures/host-runtime-cases.json")
+                           .read_text(encoding="utf-8"))["cases"]
 
 VERDICT = {"verdict": "pass", "findings": [], "argument_digest": "sha256:" + "1" * 64,
            "goal_digest": "sha256:" + "2" * 64,
@@ -100,15 +112,26 @@ def stamp(rows: list[dict], version: str) -> list[dict]:
             else row for row in rows]
 
 
+# The Pi interval extends to the whole 1.0 line only with a native receipt from Pi >= 1.0.0, so a Pi
+# receipt that is expected to pass is one from Pi 1.0.0 (ADR-0052 amendment).
+PI_RECEIPT_VERSION = "1.0.0"
+
+
 class LiveReceiptTests(unittest.TestCase):
     def receipt(self, root: Path, host: str) -> dict:
         profile, version, role = EXPECTED[host]
+        if host == "pi":
+            version = PI_RECEIPT_VERSION
         state_path = root.joinpath(*STATE_PARTS)
         state_path.parent.mkdir(parents=True, exist_ok=True)
-        state_path.write_text(json.dumps({"status": "converged", "children": [{
+        state = {"status": "converged", "children": [{
             "child_id": "child", "native_id": "native", "purpose": "audit",
             "state": "completed", "audit_role_profile": role,
-            "audit_operation_id": "sha256:" + "4" * 64}]}), encoding="utf-8")
+            "audit_operation_id": "sha256:" + "4" * 64}]}
+        if host == "pi":
+            state["invocation"] = {"host": "pi", "interactive": True, "signal": "ctx.mode=tui",
+                                   "delegation": False, "host_runtime": copy.deepcopy(PI_HOST_RUNTIME)}
+        state_path.write_text(json.dumps(state), encoding="utf-8")
         child_path = root / "child.jsonl"
         transcript = root / "parent.jsonl"
         if host == "pi":
@@ -182,6 +205,11 @@ class LiveReceiptTests(unittest.TestCase):
                    "audit_child_id": "child", "audit_native_id": "native",
                    "audit_operation_id": "sha256:" + "4" * 64,
                    "observed_author": author, "observed_auditor": auditor, "result": RESULT}
+        if host == "pi":
+            receipt["subagents_runtime"] = {
+                **{key: PI_HOST_RUNTIME["subagents"][key] for key in (
+                    "package", "version", "owner_path", "package_root", "preflight_path")},
+                "policy_id": PI_HOST_RUNTIME["policy_id"]}
         for name, path in (("transcript", transcript), ("run_state", state_path),
                            ("child_session", child_path), ("version_output", version_path)):
             receipt[f"{name}_path"] = str(path)
@@ -332,10 +360,11 @@ class LiveReceiptTests(unittest.TestCase):
                                          "commit", "2.0.0"), [])
 
     def test_compatible_harness_patch_versions_pass_and_are_recorded_exactly(self):
-        cases = {"claude": ("2.1.280", "2.1.280 (Claude Code)\n"),
-                 "pi": ("0.84.2", "0.84.2\n")}
-        for host, (version, native_output) in cases.items():
-            with self.subTest(host=host), tempfile.TemporaryDirectory() as directory:
+        # Pi's interval is widened to <1.1.0: the whole 1.0 line is inside it.
+        cases = (("claude", "2.1.280", "2.1.280 (Claude Code)\n"), ("pi", "1.0.0", "1.0.0\n"),
+                 ("pi", "1.0.9", "1.0.9\n"))
+        for host, version, native_output in cases:
+            with self.subTest(host=host, version=version), tempfile.TemporaryDirectory() as directory:
                 receipt = self.receipt(Path(directory), host)
                 version_path = Path(receipt["version_output_path"])
                 version_path.write_text(native_output, encoding="utf-8")
@@ -345,8 +374,32 @@ class LiveReceiptTests(unittest.TestCase):
                     self.restamp(receipt, version)
                 self.assertEqual(inspect(receipt, host, "commit", "2.0.0"), [])
 
+    def test_a_pi_receipt_from_before_1_0_0_cannot_release_the_widened_interval(self):
+        # Inside the compatible interval, but the interval's 1.x end has no native receipt: fail, naming it.
+        for version in ("0.84.1", "0.87.1", "0.99.9"):
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as directory:
+                receipt = self.receipt(Path(directory), "pi")
+                version_path = Path(receipt["version_output_path"])
+                version_path.write_text(version + "\n", encoding="utf-8")
+                receipt["version_output_sha256"] = digest(version_path)
+                receipt["host_version"] = version
+                errors = inspect(receipt, "pi", "commit", "2.0.0")
+                self.assertEqual(len(errors), 1, errors)
+                self.assertIn("required pi 1.x receipt is missing", errors[0])
+                self.assertIn(f"from pi {version}", errors[0])
+
+    def test_the_1_x_receipt_is_required_only_while_the_interval_extends_past_1_0_0(self):
+        from empirica_live_receipts import _POLICIES, require_interval_end_receipt
+        require_interval_end_receipt("claude", "2.1.280")
+        require_interval_end_receipt("pi", "1.0.0")
+        narrowed = {**_POLICIES["pi"], "compatibility": {**_POLICIES["pi"]["compatibility"], "maximum_exclusive": "0.90.0"}}
+        with mock.patch.dict(_POLICIES, {"pi": narrowed}):
+            require_interval_end_receipt("pi", "0.87.1")
+        with self.assertRaisesRegex(ValueError, "required pi 1.x receipt is missing"):
+            require_interval_end_receipt("pi", "0.87.1")
+
     def test_incompatible_or_misreported_harness_versions_fail(self):
-        cases = {"claude": "2.2.0", "pi": "0.90.0"}
+        cases = {"claude": "2.2.0", "pi": "1.1.0"}
         for host, version in cases.items():
             with self.subTest(host=host), tempfile.TemporaryDirectory() as directory:
                 receipt = self.receipt(Path(directory), host)
@@ -468,6 +521,119 @@ class LiveReceiptTests(unittest.TestCase):
                 receipt["transcript_sha256"] = digest(transcript)
                 receipt["child_session_sha256"] = digest(child)
                 self.assertTrue(inspect(receipt, host, "commit", "2.0.0"))
+
+    # --- the audit runtime (pi-subagents) of a Pi receipt (Empirica 4.1, D7) ---------------------
+    # Each case starts from a valid Pi receipt and changes exactly one fact.
+
+    def rewrite_state(self, receipt: dict, mutate) -> dict:
+        """Change the durable run state the receipt names and re-attest its digest."""
+        path = Path(receipt["run_state_path"])
+        state = json.loads(path.read_text(encoding="utf-8"))
+        mutate(state)
+        path.write_text(json.dumps(state), encoding="utf-8")
+        receipt["run_state_sha256"] = digest(path)
+        return receipt
+
+    def pi_errors(self, mutate_receipt=None, mutate_state=None) -> list[str]:
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = self.receipt(Path(directory), "pi")
+            if mutate_state is not None:
+                self.rewrite_state(receipt, mutate_state)
+            if mutate_receipt is not None:
+                mutate_receipt(receipt)
+            return inspect(receipt, "pi", "commit", "2.0.0")
+
+    def test_pi_receipt_carries_the_runtime_recorded_in_the_durable_state(self):
+        self.assertEqual(self.pi_errors(), [])
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = self.receipt(Path(directory), "pi")
+            self.assertEqual(receipt["subagents_runtime"]["version"], PI_POLICY["reviewed_versions"][-1])
+            self.assertEqual(set(receipt["subagents_runtime"]),
+                             {"package", "version", "owner_path", "package_root", "preflight_path", "policy_id"})
+
+    def test_pi_receipt_requires_subagents_runtime(self):
+        errors = self.pi_errors(lambda receipt: receipt.pop("subagents_runtime"))
+        self.assertEqual(errors, ["pi: receipt subagents_runtime is missing"])
+
+    def test_pi_receipt_rejects_a_receipt_that_disagrees_with_the_state_on_one_fact(self):
+        for key, value in (("version", "0.64.0"), ("package", "other-subagents"),
+                           ("owner_path", PACKAGE_ROOT + "/src/other.js"), ("package_root", "/opt/elsewhere"),
+                           ("preflight_path", PACKAGE_ROOT + "/src/api/other.js"),
+                           ("policy_id", "pi-subagents-foreground-audit-v2")):
+            with self.subTest(fact=key):
+                errors = self.pi_errors(lambda receipt: receipt["subagents_runtime"].update({key: value}))
+                self.assertEqual(errors, ["pi: receipt subagents_runtime does not equal the runtime recorded in the durable state"])
+
+    def test_pi_receipt_rejects_an_extra_or_missing_receipt_member(self):
+        self.assertTrue(self.pi_errors(lambda receipt: receipt["subagents_runtime"].update(latest="1.0.0")))
+        self.assertTrue(self.pi_errors(lambda receipt: receipt["subagents_runtime"].pop("owner_path")))
+
+    def test_pi_receipt_rejects_state_that_records_no_or_an_unacceptable_runtime(self):
+        def runtime(state):
+            return state["invocation"]["host_runtime"]
+        cases = {
+            "missing": (lambda state: state["invocation"].pop("host_runtime"), "missing"),
+            "unreviewed_version": (lambda state: runtime(state)["subagents"].update(version="0.75.1"), "version"),
+            "far_future_version": (lambda state: runtime(state)["subagents"].update(version="9.9.9"), "version"),
+            "other_policy": (lambda state: runtime(state).update(policy_id="pi-subagents-foreground-audit-v2"), "policy"),
+            "other_package": (lambda state: runtime(state)["subagents"].update(package="other-subagents"), "package"),
+            "preflight_outside_package": (lambda state: runtime(state)["subagents"].update(
+                preflight_path="/opt/other/src/api/preflight.js"), "paths"),
+            "owner_outside_package": (lambda state: runtime(state)["subagents"].update(
+                owner_path="/opt/other/src/extension/index.js"), "paths"),
+            "extra_member": (lambda state: runtime(state)["subagents"].update(sha="0"), "malformed"),
+            "not_an_object": (lambda state: state["invocation"].update(host_runtime="pi-subagents@0.75.0"), "malformed"),
+        }
+        for name, (mutate, code) in cases.items():
+            with self.subTest(case=name):
+                errors = self.pi_errors(mutate_state=mutate)
+                self.assertEqual(errors, [f"pi: durable state does not carry an acceptable pi-subagents runtime ({code})"])
+
+    def test_pi_receipt_rejects_a_legacy_4_0_receipt_without_a_recorded_runtime(self):
+        """A 4.0 receipt (no runtime anywhere) is not migrated or promoted."""
+        def legacy(state):
+            state.pop("invocation")
+        errors = self.pi_errors(lambda receipt: receipt.pop("subagents_runtime"), legacy)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("does not carry an acceptable pi-subagents runtime (missing)", errors[0])
+
+    def test_claude_receipt_is_unaffected_and_may_not_claim_a_pi_runtime(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = self.receipt(Path(directory), "claude")
+            self.assertNotIn("subagents_runtime", receipt)
+            self.assertEqual(inspect(receipt, "claude", "commit", "2.0.0"), [])
+            receipt["subagents_runtime"] = copy.deepcopy(self.receipt(Path(directory) / "pi", "pi")["subagents_runtime"])
+            self.assertTrue(inspect(receipt, "claude", "commit", "2.0.0"))
+
+    def test_the_receipt_rule_decides_every_shared_case_like_the_host_does(self):
+        for case in RUNTIME_CASES:
+            policy = PI_POLICY if case["profile"] == "external" else None
+            with self.subTest(case=case["id"]):
+                self.assertEqual(host_runtime_rejection(policy, case["host_runtime"]), case["expect"], case["why"])
+
+    def test_capture_takes_the_runtime_from_the_state_and_offers_no_flag_for_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()  # the capture records resolved paths (macOS: /var -> /private/var)
+            receipt = self.receipt(root, "pi")
+            output = root / "pi-receipt.json"
+            command = [sys.executable, str(SCRIPTS / "capture_empirica_live_receipt.py"), "pi",
+                       "--transcript", receipt["transcript_path"], "--state", receipt["run_state_path"],
+                       "--child-session", receipt["child_session_path"],
+                       "--version-output", receipt["version_output_path"],
+                       "--command", "native command", "--output", str(output), "--operator-attested"]
+            done = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            captured = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(captured["subagents_runtime"], receipt["subagents_runtime"])
+            self.assertEqual(inspect(captured, "pi", captured["release_commit"], captured["plugin_version"]), [])
+            # No way to claim a different package: the option does not exist.
+            forged = subprocess.run([*command, "--subagents-version", "0.75.0"], capture_output=True, text=True)
+            self.assertEqual(forged.returncode, 2)
+            self.assertIn("unrecognized arguments", forged.stderr)
+            # A state that recorded no runtime cannot be captured at all.
+            self.rewrite_state(receipt, lambda state: state.pop("invocation"))
+            refused = subprocess.run(command, capture_output=True, text=True)
+            self.assertNotEqual(refused.returncode, 0)
 
     def claude_receipt_with(self, root: Path, *, stop: str | None = None,
                             report: object = None) -> tuple[dict, list[str]]:

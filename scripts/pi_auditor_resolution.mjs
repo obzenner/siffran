@@ -3,40 +3,56 @@
 //
 // Why this exists: the Pi adapter blocks an audit when the resolved auditor file is not the
 // package's own file ("empirica auditor package identity was shadowed"). pi-subagents merges
-// package agents into a name-keyed map where the LAST discovered root wins, and user-level
-// packages (for example a globally installed siffran) are discovered after project packages, so a
-// dogfooded checkout can be shadowed by the installed copy. This probe reports the effective
-// resolution per agent scope using the repository's pinned pi-subagents, so the condition is
-// visible before a native qualification instead of at audit launch.
+// package agents into a name-keyed map and user-level packages (for example a globally installed
+// siffran) can shadow a dogfooded checkout. This probe reports the runtime's own effective
+// resolution per agent scope, so the condition is visible before a native qualification instead of
+// at audit launch.
 //
-// It only reads agent/settings files (pi-subagents may run `npm root -g`). It never launches a
-// child, writes artifacts, or edits settings.
+// It asks the package's PUBLIC launch preflight (`pi-subagents/preflight`), loaded from an explicit
+// package root, never a private discovery module. The Pi settings file is an explicit input too:
+// the default is `$PI_CODING_AGENT_DIR/settings.json`, else `~/.pi/agent/settings.json`, resolved
+// in one place (`defaultSettingsPath`) and only when no `--settings` is given; tests always pass it.
+// It never launches a child, writes artifacts, or edits settings (pi-subagents may run `npm root -g`
+// unless PI_OFFLINE=1).
 //
 // Usage: node scripts/pi_auditor_resolution.mjs [--project DIR] [--agent NAME] [--expected FILE]
-//                                               [--require-candidate]
+//            [--package-root DIR] [--settings FILE] [--require-candidate]
+//   --package-root  an installed pi-subagents directory (default: this repository's devDependency,
+//                   a fixture - pass the operator's real install to probe what Pi actually runs)
+//   --settings      the Pi settings.json to use (its directory becomes the Pi agent dir)
 // Exit: 0 report (or candidate effective under --require-candidate); 1 candidate shadowed under
-//       --require-candidate; 2 usage/environment error.
-import { createJiti } from "jiti";
+//       --require-candidate; 2 usage/environment error (including a settings file the package rejects).
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { makeLoader, readPackage, runPreflight } from "./lib/pi_subagents_package.mjs";
+
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+/** Pi's user settings file: `$PI_CODING_AGENT_DIR/settings.json`, else `<home>/.pi/agent/settings.json`. */
+export function defaultSettingsPath(env, home) {
+  const dir = env.PI_CODING_AGENT_DIR;
+  return path.join(dir ? path.resolve(dir) : path.join(home, ".pi", "agent"), "settings.json");
+}
 
 function parse(argv) {
   const opts = {
     project: process.cwd(),
     agent: "empirica.empirica-auditor",
     expected: path.join(repo, "plugins", "empirica", "agents", "pi", "empirica-auditor.md"),
+    package_root: path.join(repo, "node_modules", "pi-subagents"),
+    settings: undefined,
     requireCandidate: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
     if (flag === "--require-candidate") { opts.requireCandidate = true; continue; }
     const value = argv[i + 1];
-    if (!["--project", "--agent", "--expected"].includes(flag) || value === undefined)
+    if (!["--project", "--agent", "--expected", "--package-root", "--settings"].includes(flag) || value === undefined)
       throw new Error(`unknown or incomplete argument: ${flag}`);
-    opts[flag.slice(2)] = value;
+    opts[flag.slice(2).replace("-", "_")] = value;
     i += 1;
   }
   return opts;
@@ -67,28 +83,51 @@ async function main() {
   if (!existsSync(opts.expected)) {
     console.error(`expected auditor file does not exist: ${opts.expected}`); return 2;
   }
-  const pkgRoot = path.join(repo, "node_modules", "pi-subagents");
-  const version = JSON.parse(readFileSync(path.join(pkgRoot, "package.json"), "utf8")).version;
-  const agents = await createJiti(import.meta.url).import(path.join(pkgRoot, "src", "agents", "agents.ts"));
+  const explicitSettings = opts.settings !== undefined;
+  const settings = path.resolve(opts.settings ?? defaultSettingsPath(process.env, os.homedir()));
+  if (path.basename(settings) !== "settings.json") {
+    console.error(`--settings must name a settings.json file: ${settings}`); return 2;
+  }
+  if (explicitSettings && !existsSync(settings)) {
+    console.error(`settings file does not exist: ${settings}`); return 2;
+  }
+  let pkg;
+  try { pkg = readPackage(opts.package_root); } catch (error) {
+    console.error(String(error.message)); return 2;
+  }
+  const loader = makeLoader(path.join(pkg.root, "package.json"));
   const scopes = {};
   for (const scope of ["both", "user", "project"]) {
-    const found = agents.discoverAgents(project, scope).agents
-      .filter((agent) => agent.name === opts.agent || agent.localName === opts.agent);
-    const effective = found[0];
+    let response;
+    try {
+      response = await runPreflight({
+        packageRoot: pkg.root, loader, agentDir: path.dirname(settings),
+        input: { agent: opts.agent, context: "fresh", agentScope: scope, cwd: project },
+      });
+    } catch (error) {
+      // The runtime rejected this configuration (for example a settings field it removed): an
+      // environment error to report, not a resolution to guess at.
+      console.error(`pi-subagents ${pkg.version} (${pkg.root}) rejected ${settings} for scope ${scope}: ${String(error.message ?? error)}`);
+      return 2;
+    }
+    const agent = response.ok ? response.contract.agent : undefined;
     scopes[scope] = {
-      matches: found.length,
-      file: effective?.filePath ?? null,
-      source: effective?.source ?? null,
-      model: effective?.model ?? null,
-      ...sameFile(effective?.filePath, opts.expected),
+      matches: agent ? 1 + (agent.shadowedCandidates?.length ?? 0) : 0,
+      file: agent?.filePath ?? null,
+      source: agent?.source ?? null,
+      model: response.ok ? (response.contract.model ?? null) : null,
+      ...(response.ok ? {} : { refused: response.code }),
+      ...sameFile(agent?.filePath, opts.expected),
     };
   }
   const report = {
-    project, agent: opts.agent, expected: canonical(opts.expected), pi_subagents: version, scopes,
+    project, agent: opts.agent, expected: canonical(opts.expected), pi_subagents: pkg.version,
+    package_root: pkg.root, settings: existsSync(settings) ? settings : null, scopes,
     verdict: scopes.both.same ? `candidate effective (${scopes.both.basis})` : "candidate SHADOWED in default scope",
   };
   console.log(JSON.stringify(report, null, 2));
   return opts.requireCandidate && !scopes.both.same ? 1 : 0;
 }
 
-process.exitCode = await main();
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
+  process.exitCode = await main();

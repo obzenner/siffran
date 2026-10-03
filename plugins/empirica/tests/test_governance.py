@@ -23,7 +23,7 @@ from test_d7_transactions import Runs, Artifacts, Workspace, Harness
 from governance_setup import (AUTHOR, AUDITOR, TEST_INVOCATION, SIZED_RATIONALE,
                               sized_configure_run)
 
-PROFILE = "pi@0.84.1+pi-subagents@0.50.0"
+PROFILE = "pi@0.84.1+pi-subagents-foreground-audit-v1"
 GRAPH = {"root": "C0", "claims": [{"id": "C0", "text": "supplied uncertainty", "gating": True,
                                    "kind": "ordinary"}], "edges": []}
 CONTEXT = {"author": AUTHOR, "ingress": "pi_ui"}
@@ -34,10 +34,17 @@ DELEGATED_INVOCATION = {"host": "test", "interactive": False,
 
 
 class HostProfileApprovalTests(unittest.TestCase):
-    def _profile(self, host_id):
+    def _profiles_document(self):
         root = Path(__file__).resolve().parents[3]
-        profiles = json.loads((root / "contracts/empirica/v2/host-profiles.json").read_text())
-        return next(p for p in profiles["profiles"] if p["host_id"] == host_id)
+        return json.loads((root / "contracts/empirica/v2/host-profiles.json").read_text())
+
+    def _profile(self, host_id):
+        return next(p for p in self._profiles_document()["profiles"] if p["host_id"] == host_id)
+
+    def _document_of(self, profile):
+        """A schema-complete host-profiles document holding only ``profile`` (levels from the contract)."""
+        return {"protocol": "empirica/v2", "thinking_levels": self._profiles_document()["thinking_levels"],
+                "profiles": [profile]}
 
     def _admit_context(self, profile, ingress):
         """Compose a real service for ``profile`` and submit one governance context."""
@@ -59,7 +66,7 @@ class HostProfileApprovalTests(unittest.TestCase):
         synthetic.update(host_id="synthetic", profile_id="synthetic-transport@9.9.9",
                          version="9.9.9", compatibility={"minimum": "9.9.9",
                          "maximum_exclusive": "10.0.0"})
-        jsonschema.validate({"protocol": "empirica/v2", "profiles": [synthetic]}, schema)
+        jsonschema.validate(self._document_of(synthetic), schema)
         admitted = self._admit_context(synthetic, synthetic["approval_ingress"])
         self.assertEqual(admitted["type"], "Allow")
         self.assertEqual(admitted["run"]["governance"]["context"]["approval_capability"],
@@ -87,7 +94,7 @@ class HostProfileApprovalTests(unittest.TestCase):
         synthetic.update(host_id="synthetic", profile_id="synthetic-headless@9.9.9",
                          version="9.9.9", approval_ingress="unavailable",
                          compatibility={"minimum": "9.9.9", "maximum_exclusive": "10.0.0"})
-        jsonschema.validate({"protocol": "empirica/v2", "profiles": [synthetic]}, schema)
+        jsonschema.validate(self._document_of(synthetic), schema)
         admitted = self._admit_context(synthetic, "unavailable")
         self.assertEqual(admitted["type"], "Allow", admitted)
         self.assertEqual(admitted["run"]["governance"]["context"]["approval_capability"],
@@ -976,6 +983,11 @@ class GovernanceServiceTests(unittest.TestCase):
             def trusted_audit_plan(self, _profile, run_id, child_id):
                 return c.trusted_audit_plan(run_id, child_id)
 
+            def trusted_host_runtime(self, _profile, run_id):
+                return self.service.trusted_host_runtime(run_id=run_id)
+
+        BridgeShim.service = self.service
+
         def used():
             return self.view()["governance"]["budgets"]["audit_spawns_used"]
 
@@ -1000,6 +1012,68 @@ class GovernanceServiceTests(unittest.TestCase):
             self.assertEqual(used(), 1)
 
 
+    def test_audit_prepare_refuses_a_runtime_other_than_the_one_recorded_at_start(self):
+        """B3 review defect 1: the runtime is recorded once, at StartRun. A reload or resume may put another
+        (also reviewed) package behind `subagent`; the private audit_prepare must then refuse closed — no
+        reservation, no state write — so a receipt derived from the record never names the wrong runtime."""
+        from adapters.pi import private_bridge
+        from adapters.audit_protocol import AuditProtocol
+        from adapters.identity import observe
+        from governance_setup import approve_current, host_runtime_for, invocation_for
+        recorded = host_runtime_for(PROFILE)
+        self.run_id = self.request({"type": "StartRun", "control_mode": "deliberative", "goal": "runtime-bound",
+                                    "invocation": invocation_for(PROFILE),
+                                    "selector": {"project": "p", "session": "runtime"}})["run"]["id"]
+        self.prepare()
+        approve_current(self.service._coordinator, self.run_id)
+        self.assertEqual(self.action("investigate")["type"], "Allow")
+        self.assertEqual(self.action("research", claim_id="C0", source_kind="code",
+            result="supports", payload={"source_ref": "supplied", "citation": "observed"})["type"], "Allow")
+        c, service = self.service._coordinator, self.service
+
+        def make_protocol(profile, **_kw):
+            return AuditProtocol(profile, dispatch=lambda r, _p: service.dispatch(r),
+                child_event_ingress=lambda _p, r, ch, v: c.trusted_child_event(r, ch, v),
+                attribution_ingress=lambda _p, r, v: c.trusted_attribution(
+                    r, {**v, **observe(v.get("provider_id"), v.get("model_id"), source=v["source"]),
+                        "observed_by": "host"}),
+                verdict_ingress=lambda _p, r, ch, v: c.trusted_audit_verdict(r, ch, v),
+                plan_ingress=lambda _p, r, ch: c.trusted_audit_plan(r, ch))
+
+        class BridgeShim:
+            def trusted_audit_plan(self, _profile, run_id, child_id):
+                return c.trusted_audit_plan(run_id, child_id)
+
+            def trusted_host_runtime(self, _profile, run_id):
+                return service.trusted_host_runtime(run_id=run_id)
+
+        def other(**changes):
+            runtime = copy.deepcopy(recorded)
+            runtime["subagents"].update(changes)
+            return runtime
+
+        def prepare(payload):
+            return private_bridge._dispatch(PROFILE, {"operation": "audit_prepare", "run_id": self.run_id,
+                                                      "role_profile": "empirica:empirica-auditor"}, payload)
+
+        with mock.patch.object(private_bridge, "AuditProtocol", make_protocol), \
+             mock.patch.object(private_bridge, "bridge", BridgeShim()):
+            before = copy.deepcopy(self.runs.data)
+            children = len(self.view()["children"])
+            for label, payload in (
+                    ("a reviewed version other than the recorded one", {"host_runtime": other(version="0.64.0")}),
+                    ("another package root", {"host_runtime": other(package_root="/opt/other/pi-subagents")}),
+                    ("another preflight module", {"host_runtime": other(preflight_path=recorded["subagents"]["package_root"] + "/src/api/other.js")}),
+                    ("no runtime observed", {}),
+                    ("a runtime that is not an object", {"host_runtime": "0.75.0"})):
+                with self.subTest(label):
+                    self.assertEqual(prepare(payload), {"type": "audit_refused", "reason": "runtime_changed"})
+                    self.assertEqual(self.runs.data, before, "a refusal writes no state")
+                    self.assertEqual(len(self.view()["children"]), children, "a refusal reserves no child")
+                    self.assertEqual(self.view()["governance"]["budgets"]["audit_spawns_used"], 0)
+            admitted = prepare({"host_runtime": copy.deepcopy(recorded)})
+            self.assertEqual(admitted["type"], "audit_plan")
+            self.assertEqual(len(self.view()["children"]), children + 1)
 
     def test_old_inventory_shape_fails_closed_and_fresh_generation_opens(self):
         self.prepare()

@@ -14,13 +14,13 @@ links:
   kind: Depends on
 - target: 32
   kind: Amends
-- target: 35
-  kind: Relates to
 - target: 38
   kind: Relates to
 ---
 
 # Activate Claude through the host-neutral bridge
+
+Relates to ADR-0035 (removed from the tree; see git history).
 
 ## Context and Problem Statement
 

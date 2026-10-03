@@ -11,11 +11,11 @@ tags:
 links:
 - target: 31
   kind: Refines
-- target: 57
-  kind: Refines
 ---
 
 # Batch Git artifact reads without changing publication
+
+Refines ADR-0057 (removed from the tree; see git history).
 
 ## Context and Problem Statement
 

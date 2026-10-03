@@ -12,6 +12,7 @@ if str(PLUGIN) not in sys.path:
     sys.path.insert(0, str(PLUGIN))
 
 from adapters import bridge  # noqa: E402
+from application import host_runtime  # noqa: E402
 from adapters.audit_protocol import (  # noqa: E402
     AuditLaunchPlan, AuditProtocol, IdentityObservation,
 )
@@ -49,7 +50,14 @@ def _governance_decision(profile: str, raw: dict, payload: dict):
     return bridge.trusted_governance_decision(profile, raw["run_id"], payload)
 
 
-def _audit_prepare(profile: str, raw: dict, _payload: dict):
+def _audit_prepare(profile: str, raw: dict, payload: dict):
+    # The runtime is recorded once at StartRun; a reload or resume may since have put another package
+    # behind the `subagent` tool. Admit the audit only when the adapter's runtime observed *now* is the
+    # recorded one: refuse closed, before any reservation or state write.
+    recorded = bridge.trusted_host_runtime(profile, raw["run_id"])
+    if recorded is None or not host_runtime.same_runtime(
+            recorded.get("host_runtime"), payload.get("host_runtime")):
+        return {"type": "audit_refused", "reason": "runtime_changed"}
     plan = AuditProtocol(profile).prepare(raw["run_id"], role_profile=raw["role_profile"])
     return {"type": "audit_plan", "plan": _plan_json(plan)}
 

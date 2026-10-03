@@ -18,11 +18,11 @@ links:
   kind: Amends
 - target: 52
   kind: Amended by
-- target: 55
-  kind: Refines
 ---
 
 # Separate managed-audit execution from the generic child tier
+
+Refines ADR-0055 (removed from the tree; see git history).
 
 ## Context and Problem Statement
 
@@ -93,3 +93,13 @@ transactions, host-neutral conformance, Pi adapter suite, contract/vendor parity
 validation, and full `make check`. Installed-host confirmation must use Claude Code's real async
 Agent lifecycle and Pi's real foreground `pi-subagents` lifecycle. Development traces are not
 release receipts, and this decision authorizes neither commit nor publication.
+
+## Amendment (2026-10)
+
+### Changed Decision
+
+Managed Pi audit execution remains foreground, in the packaged `empirica-auditor`, through the real `pi-subagents` lifecycle. What changed is where the runtime comes from: it is an external package, admitted by exact reviewed version under `pi-subagents-foreground-audit-v1`, not a controlled dependency of this plugin. The host sends one audit-bound policy from the contract (`timeoutMs` and `toolBudget` whose `block` list covers every tool the packaged auditor can call); no per-version variant exists and the removed turn bound is never sent.
+
+### Changed Consequences
+
+Owner provenance (package, version, owner file, package root, preflight path) is recorded at `StartRun` and re-proved at audit admission (the adapter sends the runtime it observes now with the private `audit_prepare`, and the application refuses closed, before any reservation or state write, when it is not the recorded one, so a reload or resume across an upgrade cannot make a receipt name a runtime other than the one that ran the audit), and it is matrix-bound: `make empirica-subagents-matrix` re-proves inventory, launch schema, preflight behaviour and classifier for each reviewed version. The generic child tier is unchanged.

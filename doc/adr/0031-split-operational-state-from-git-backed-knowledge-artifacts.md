@@ -8,25 +8,17 @@ tags:
 - git
 - evidence
 links:
-- target: 14
-  kind: Supersedes
 - target: 19
   kind: Amends
-- target: 22
-  kind: Depends on
-- target: 16
-  kind: Supersedes
 - target: 33
   kind: Depends on
-- target: 34
-  kind: Amended by
-- target: 39
-  kind: Relates to
 - target: 59
   kind: Refines
 ---
 
 # Split operational state from Git-backed knowledge artifacts
+
+Supersedes ADR-0014, ADR-0016 (removed from the tree; see git history). Depends on ADR-0022 (removed from the tree; see git history). Amended by ADR-0034 (removed from the tree; see git history). Relates to ADR-0039 (removed from the tree; see git history). ADR-0014 is removed from the tree; this ADR owns the surviving state/artifact split.
 
 ## Context and Problem Statement
 

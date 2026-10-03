@@ -13,18 +13,6 @@ tags:
 links:
 - target: 30
   kind: Depends on
-- target: 40
-  kind: Amends
-- target: 41
-  kind: Amends
-- target: 16
-  kind: Supersedes
-- target: 21
-  kind: Supersedes
-- target: 37
-  kind: Supersedes
-- target: 39
-  kind: Supersedes
 - target: 43
   kind: Amended by
 - target: 44
@@ -40,6 +28,8 @@ links:
 ---
 
 # Complete Empirica v2 through public tools and host-owned audit bindings
+
+Amends ADR-0040, ADR-0041 (removed from the tree; see git history). Supersedes ADR-0016, ADR-0021, ADR-0037, ADR-0039 (removed from the tree; see git history).
 
 ## Context and Problem Statement
 
@@ -112,3 +102,13 @@ file digests plus the release commit and plugin version. The trusted release ope
 root; these receipts are not signatures or proof against operator fabrication. Codex is excluded
 while its resolved auditor identity remains unobservable. `make release-check` requires the
 architecture gate and those supported-host receipts; ordinary `make check` remains deterministic.
+
+## Amendment (2026-10)
+
+### Changed Decision
+
+The Pi binding is no longer a bundled `pi-subagents@0.50.0` dependency. Pi loads an independently installed, external pi-subagents runtime. The Pi profile is `pi@0.84.1+pi-subagents-foreground-audit-v1`: a Pi host interval (`>=0.84.1,<1.1.0`) under one named policy, `pi-subagents-foreground-audit-v1`, with the exact reviewed versions listed in `subagents_compatibility.reviewed_versions` (0.50.0, 0.64.0, 0.74.0, 0.75.0) and `unreviewed_action: refuse`. The adapter proves that the registered `subagent` tool and the imported `pi-subagents/preflight` belong to the same package root and an exact reviewed version, and `StartRun` records that observation once, as the opaque `invocation.host_runtime`. The Python application validates its shape and the profile's policy at the bridge and persists it; the core never interprets it. The Pi profile remains foreground-only. An unobserved, duplicate, mismatched, or unreviewed owner or version fails closed before a run is created. The historical `pi@0.84.1+pi-subagents@0.50.0` profile id records the 4.0 qualification and is not evidence for 4.1 support.
+
+### Changed Consequences
+
+The earlier statement that Pi installation bundles the child runtime is historical and no longer describes 4.1 installation. External-runtime support adds an obligation: a newly published pi-subagents release is refused until it is reviewed (`make empirica-subagents-matrix-update` lists candidates and prints the review commands; nothing is promoted automatically) and `make empirica-subagents-matrix` re-proves every reviewed version against the registry package. A 4.1 Pi receipt carries `subagents_runtime` (package, version, owner path, package root, preflight path, policy id), derived from the persisted run state and never from a command-line flag; `make empirica-host-live-check` rejects a receipt without it or with a version that is not reviewed. There is one audit-bound policy for every reviewed version (`timeoutMs` and `toolBudget`; the removed turn bound is not sent), not a per-version variant. The consumed foreground result and session fields are unchanged. The upper bound `<1.1.0` is **provisional** at the time of this amendment: it rests on the reviewed Pi 1.0 extension API and the Pi API typecheck, and it becomes supported only when a native receipt from Pi 1.0.0 with a reviewed pi-subagents version (planned: 0.75.0, qualification step A9b) exists. No such receipt exists yet; if that run fails the bound returns to `<0.90.0`. `make empirica-host-live-check` enforces this: whenever the Pi interval ends above 1.0.0 the Pi receipt must come from Pi 1.0.0 or later, and a receipt from an older Pi fails naming the missing 1.x receipt.

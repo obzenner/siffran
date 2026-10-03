@@ -5,12 +5,34 @@ must first select their exact graph, then call this helper as a host operator.
 """
 from uuid import uuid4
 
+from application import protocol as _proto
 from application.governance import transact
 from adapters.identity import observe
 from core.governance import expected_approval_kind
 
 TEST_INVOCATION = {"host": "test", "interactive": True,
                    "signal": "test", "delegation": False}
+
+
+def host_runtime_for(profile_id):
+    """The runtime provenance a host of ``profile_id`` records at StartRun (``None`` for a profile with
+    no external audit runtime), built from the profile's own reviewed policy."""
+    policy = _proto.host_profile(profile_id).get("subagents_compatibility")
+    if policy is None:
+        return None
+    root = "/opt/" + policy["package"]
+    return {"policy_id": policy["policy_id"],
+            "subagents": {"package": policy["package"], "version": policy["reviewed_versions"][-1],
+                          "owner_path": root + "/src/extension/index.js", "package_root": root,
+                          "preflight_path": root + "/src/api/preflight.js", "source": root + "/index.ts"}}
+
+
+def invocation_for(profile_id, **changes):
+    """``TEST_INVOCATION`` plus the host runtime the profile requires."""
+    runtime = host_runtime_for(profile_id)
+    return {**TEST_INVOCATION, **changes, **({} if runtime is None else {"host_runtime": runtime})}
+
+
 AUTHOR = {**observe("anthropic", "claude-sonnet-4-6", source="test-host"),
           "observed_by": "host"}
 AUDITOR = {**observe("anthropic", "claude-opus-4-6", source="test-host"),

@@ -143,6 +143,17 @@ def safe_text(item: object) -> str:
     return _HIDDEN.sub(escape, str(item))
 
 
+# The neutral invocation facts a run view and the governance dialog show. The stored invocation may
+# carry further host-recorded members (``host_runtime``); they are persisted for receipts and never
+# projected, so no model-visible payload grows with them.
+INVOCATION_FACTS = ("host", "interactive", "signal", "delegation")
+
+
+def project_invocation(invocation: Mapping) -> dict[str, Any]:
+    """The shown invocation facts, in contract order; host-recorded extras are not projected."""
+    return {key: invocation[key] for key in INVOCATION_FACTS}
+
+
 def governance_dialog(goal: str, value: Mapping, controls: Mapping,
                       invocation: Mapping | None = None) -> dict[str, Any]:
     """Project governance state into host-neutral, display-safe dialog data.
@@ -169,8 +180,8 @@ def governance_dialog(goal: str, value: Mapping, controls: Mapping,
             "rationale_label": controls["rationale_label"],
             "amendment_warning": controls["amendment_warning"],
             "invocation": None if invocation is None else {
-                key: safe_text(invocation[key]) if key in {"host", "signal"} else invocation[key]
-                for key in ("host", "interactive", "signal", "delegation")},
+                key: safe_text(value) if key in {"host", "signal"} else value
+                for key, value in project_invocation(invocation).items()},
             "budgets": budgets}
 
 
@@ -242,7 +253,8 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
     audit = _audit(snapshot)
     return {
         "id": snapshot.run_id, "goal": snapshot.state.goal,
-        "invocation": governance.plain(snapshot.state.invocation), "status": snapshot.state.status,
+        "invocation": project_invocation(governance.plain(snapshot.state.invocation)),
+        "status": snapshot.state.status,
         # A failed verdict's findings are what the author must act on; pass findings stay in GetArgument.
         "audit": {"state": audit["state"], "independence": audit["independence"],
                   "findings": audit["findings"] if audit["state"] == "failed" else []},

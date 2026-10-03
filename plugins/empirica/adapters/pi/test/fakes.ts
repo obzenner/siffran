@@ -7,10 +7,13 @@ import type {
   ExtensionAPI,
   ExtensionContext,
   ResourcesDiscoverHandler,
+  SlashCommandInfo,
   ToolCallHandler,
   ToolDefinition,
+  ToolInfo,
   UiContext,
 } from "../src/pi-types.ts";
+import { defaultSubagentsPackage } from "./owner-fixture.ts";
 
 export interface NotifyCall {
   message: string;
@@ -53,6 +56,46 @@ export class FakePi implements ExtensionAPI {
   readonly entries: Array<{ customType: string; data?: unknown }> = [];
   /** Pi-subagents' tool is active unless a test removes it. */
   activeTools: string[] = ["subagent"];
+  /**
+   * Every `subagent` registration made by a loaded extension, in load order (default: one on-disk
+   * fixture owner). Like Pi, ``getAllTools`` reports only the first registrant of a name, while each
+   * registering extension still contributes its own slash command to ``getCommands``.
+   */
+  subagentOwners: ToolInfo[] = [defaultSubagentsPackage().tool()];
+  /** Extra slash commands appended to ``getCommands`` (any source), e.g. skills or unrelated extensions. */
+  extraCommands: SlashCommandInfo[] = [];
+  /** Set to make ``getAllTools`` throw (the inventory itself is unavailable). */
+  inventoryError: Error | null = null;
+  /** Set to make ``getCommands`` throw. */
+  commandsError: Error | null = null;
+
+  /** First-wins by tool name (Pi 0.87.1 ``extensions/runner.js:370-380``); non-records pass through untouched. */
+  getAllTools(): ToolInfo[] {
+    if (this.inventoryError) throw this.inventoryError;
+    const own: ToolInfo[] = [...this.tools.keys()].map((name) => ({ name,
+      sourceInfo: { path: "<empirica>", source: "local", scope: "user", origin: "top-level" } }));
+    const seen = new Set<string>();
+    return [...this.subagentOwners, ...own].filter((tool) => {
+      const name: unknown = (tool as { name?: unknown } | null)?.name;
+      if (typeof name !== "string") return true;
+      if (seen.has(name)) return false;
+      seen.add(name);
+      return true;
+    });
+  }
+
+  /** Not deduplicated (Pi suffixes clashing names ``:n``): one ``subagents-doctor`` per registering extension. */
+  getCommands(): SlashCommandInfo[] {
+    if (this.commandsError) throw this.commandsError;
+    const owners = this.subagentOwners.filter((tool) => tool !== null && typeof tool === "object" && "sourceInfo" in tool);
+    return [
+      ...owners.map((tool, index): SlashCommandInfo => ({ name: owners.length > 1 ? `subagents-doctor:${index + 1}` : "subagents-doctor",
+        source: "extension", sourceInfo: tool.sourceInfo })),
+      ...[...this.commands.keys()].map((name): SlashCommandInfo => ({ name, source: "extension",
+        sourceInfo: { path: "<empirica>", source: "local", scope: "user", origin: "top-level" } })),
+      ...this.extraCommands,
+    ];
+  }
 
   getActiveTools(): string[] {
     return [...this.activeTools, ...this.tools.keys()];
@@ -88,6 +131,11 @@ export class FakePi implements ExtensionAPI {
 
   resourcesDiscover(): ResourcesDiscoverHandler {
     return this.require("resources_discover") as ResourcesDiscoverHandler;
+  }
+
+  /** Fire ``session_start`` (the owner is observed here) and wait for the handler. */
+  async sessionStart(ctx: ExtensionContext = fakeCtx()): Promise<void> {
+    await (this.require("session_start") as (event: unknown, ctx: ExtensionContext) => unknown)({}, ctx);
   }
 
   toolCall(): ToolCallHandler {

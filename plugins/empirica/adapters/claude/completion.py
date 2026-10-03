@@ -99,7 +99,7 @@ def _human_approval_wait(result: Result) -> bool:
 
 
 def _budget_exhausted_wait(result: Result) -> bool:
-    """True only for the sole ``budget.exhausted`` blocker of an active run (ADR-0064 interim).
+    """True only for the sole ``budget.exhausted`` blocker of an active run (ADR-0063 exhaustion rule).
 
     The core already refused the only recovery the Block once listed, so blocking the turn again
     cannot help; mixed reasons and non-active runs keep blocking."""

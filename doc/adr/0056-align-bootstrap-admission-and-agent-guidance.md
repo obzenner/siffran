@@ -9,17 +9,13 @@ tags:
 - contracts
 - bootstrap
 links:
-- target: 53
-  kind: Refines
-- target: 55
-  kind: Refines
 - target: 60
   kind: Amended by
-- target: 57
-  kind: Refines
 ---
 
 # Align bootstrap admission and agent guidance
+
+Refines ADR-0053, ADR-0055, ADR-0057 (removed from the tree; see git history).
 
 ## Context and Problem Statement
 

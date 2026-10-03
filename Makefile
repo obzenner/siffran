@@ -32,7 +32,7 @@ EMPIRICA_CLAUDE_MCP_LOG_TESTS := $(SCRIPTS)/tests/test_check_claude_mcp_log.py
 EMPIRICA_RUN_CENSUS_TESTS := $(SCRIPTS)/tests/test_empirica_run_census.py
 EMPIRICA_CONTEXT_ECONOMY_TESTS := $(SCRIPTS)/tests/test_empirica_context_economy.py
 CLAUDE_SUBAGENT_MODEL_TESTS := $(SCRIPTS)/tests/test_claude_subagent_models.py
-PI_CANARY_CONFIG_TESTS := $(SCRIPTS)/tests/test_configure_pi_canary.py
+PI_CANARY_TESTS := $(SCRIPTS)/tests/test_pi_canary.py
 EMPIRICA_D6_STRICT_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d6_strict_v2.py
 EMPIRICA_LOCATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_location.py
 EMPIRICA_TRANSACTION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_transactions.py
@@ -44,6 +44,7 @@ EMPIRICA_GIT_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/git/tests/test_gi
 EMPIRICA_GIT_IO_BOOTSTRAP_TESTS := $(PLUGINS_DIR)/empirica/adapters/git/tests/test_git_io_bootstrap.py
 EMPIRICA_GOVERNANCE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_governance.py
 EMPIRICA_IDENTITY_TESTS := $(PLUGINS_DIR)/empirica/tests/test_identity.py
+EMPIRICA_HOST_RUNTIME_TESTS := $(PLUGINS_DIR)/empirica/tests/test_host_runtime.py
 EMPIRICA_IDENTITY_PI_LEVEL_TESTS := $(PLUGINS_DIR)/empirica/tests/test_identity_pi_levels.py
 EMPIRICA_ARCHITECTURE_TESTS := $(SCRIPTS)/tests/test_validate_empirica_architecture.py
 METHODOLOGIST_CODEX_MCP_TESTS := $(PLUGINS_DIR)/methodologist/adapters/codex/tests/test_mcp_server.py
@@ -108,6 +109,7 @@ check-core: empirica-author-view-golden empirica-governance-dialog-golden ## Fas
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_context_economy
 	@$(PYTHON) $(EMPIRICA_AUDIT_PROTOCOL_TESTS)
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_IDENTITY_TESTS)
+	@$(PYTHON) $(EMPIRICA_HOST_RUNTIME_TESTS)
 	@$(PYTHON) $(EMPIRICA_STATE_TESTS)
 	@$(PYTHON) $(METHODOLOGIST_CORE_TESTS)
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q \
@@ -276,8 +278,10 @@ vendor-check: ## Verify Empirica's obligation and runtime-contract vendor copies
 activation-check: ## Verify Empirica runtime isolation and thin Claude hook activation
 	@printf '$(BOLD)==> empirica activation$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_empirica_activation.py
+	@$(PYTHON) $(SCRIPTS)/tests/test_validate_empirica_activation.py
 
-# devDependencies (typescript, @types/node) that turn the Pi adapter typecheck
+# devDependencies (typescript, @types/node, and pi-subagents as a unit-test fixture only — never a
+# runtime provisioned by this checkout) that turn the Pi adapter typecheck
 # from a skipped note into an enforced gate. Rebuilt when the lockfile changes;
 # Missing npm does not imply a successful typecheck: the validator fails without tsc unless
 # EMPIRICA_ALLOW_SKIP=1 explicitly acknowledges a partial check.
@@ -339,15 +343,34 @@ empirica-pi-typecheck: node_modules ## Validate and typecheck the Empirica Pi ad
 pi-validator-unit-check: ## Test Pi validator test selection and bounded async test invocation
 	@$(PYTHON) $(SCRIPTS)/tests/test_validate_pi_adapter.py
 
-# Which auditor file does the pinned pi-subagents resolve for a project? pi-subagents lets a later
-# (user-level) package shadow a project package of the same agent name, which makes the adapter
-# block audits as "package identity was shadowed". Read-only; run before any Pi qualification.
-.PHONY: empirica-pi-auditor-resolution pi-auditor-resolution-unit-check
-empirica-pi-auditor-resolution: node_modules ## Report the effective Pi auditor file for DIR (default: here); STRICT=1 fails when shadowed
-	@node $(SCRIPTS)/pi_auditor_resolution.mjs --project "$(or $(DIR),$(CURDIR))" $(if $(filter 1,$(STRICT)),--require-candidate)
+# Which auditor file does pi-subagents resolve for a project? Agents are keyed by name and the
+# runtime's own precedence picks the file (at 0.75 a project agent wins over a user-level one); when it
+# is not the packaged auditor the adapter blocks audits as "package identity was shadowed".
+# Read-only; run before any Pi qualification.
+.PHONY: empirica-pi-auditor-resolution pi-auditor-resolution-unit-check pi-subagents-inventory pi-preflight-fixture
+empirica-pi-auditor-resolution: node_modules ## Report the effective Pi auditor file for DIR (default: here); STRICT=1 fails when shadowed; PACKAGE_ROOT= (installed pi-subagents, default: the devDependency) and SETTINGS= (a settings.json, default: ~/.pi/agent)
+	@node $(SCRIPTS)/pi_auditor_resolution.mjs --project "$(or $(DIR),$(CURDIR))" $(if $(PACKAGE_ROOT),--package-root "$(PACKAGE_ROOT)") $(if $(SETTINGS),--settings "$(SETTINGS)") $(if $(filter 1,$(STRICT)),--require-candidate)
 
-pi-auditor-resolution-unit-check: node_modules ## Test the Pi auditor resolution and real preflight admission in an isolated HOME (includes negative controls)
-	@node --test $(SCRIPTS)/tests/pi_auditor_resolution.test.mjs $(SCRIPTS)/tests/pi_auditor_preflight.test.mjs
+pi-auditor-resolution-unit-check: node_modules ## Test the Pi auditor resolution, real preflight admission, and the reviewed pi-subagents inventories in an isolated HOME (includes negative controls)
+	@node --test $(SCRIPTS)/tests/pi_auditor_resolution.test.mjs $(SCRIPTS)/tests/pi_auditor_preflight.test.mjs $(SCRIPTS)/tests/pi_subagents_inventory.test.mjs $(SCRIPTS)/tests/empirica_subagents_matrix.test.mjs $(SCRIPTS)/tests/pi_api_typecheck.test.mjs $(SCRIPTS)/tests/npm_fetch.test.mjs
+
+# Integration diagnostics (network: npm). Each proves that checked-in evidence still describes the exact
+# package the registry serves; both are prerequisites of `release-check`, neither runs in `check`.
+.PHONY: empirica-subagents-matrix empirica-subagents-matrix-update empirica-pi-api-typecheck
+empirica-subagents-matrix: node_modules ## Integration: for each reviewed pi-subagents version, check inventory, launch schema, preflight fixture and classifier against the registry package (one JSON line per version; TMPDIR/empirica-subagents-matrix)
+	@node --experimental-strip-types $(SCRIPTS)/empirica_subagents_matrix.mjs
+
+empirica-subagents-matrix-update: node_modules ## List pi-subagents releases newer than the newest reviewed and print the exact review commands (promotes nothing)
+	@node --experimental-strip-types $(SCRIPTS)/empirica_subagents_matrix.mjs --update
+
+empirica-pi-api-typecheck: node_modules ## Integration: typecheck the adapter's Pi API mirror against each reviewed Pi version's declarations (fetched with npm pack)
+	@node $(SCRIPTS)/pi_api_typecheck.mjs
+
+pi-subagents-inventory: node_modules ## Regenerate the reviewed inventory of the pi-subagents at PACKAGE_ROOT (default: the devDependency) into adapters/pi/compat/
+	@node $(SCRIPTS)/gen_pi_subagents_inventory.mjs --package-root "$(or $(PACKAGE_ROOT),$(CURDIR)/node_modules/pi-subagents)"
+
+pi-preflight-fixture: node_modules ## Re-capture the real preflight fixture of the pi-subagents at PACKAGE_ROOT (default: the devDependency)
+	@node $(SCRIPTS)/capture_pi_preflight_fixture.mjs --package-root "$(or $(PACKAGE_ROOT),$(CURDIR)/node_modules/pi-subagents)"
 
 .PHONY: empirica-codex-check
 empirica-codex-check: ## Validate the Empirica Codex manifest, hooks, and package layout (no host execution)
@@ -369,7 +392,7 @@ empirica-architecture-unit-check: ## Test the architecture validator against syn
 	@$(PYTHON) $(EMPIRICA_ARCHITECTURE_TESTS)
 
 .PHONY: empirica-identity-pi-levels-check
-empirica-identity-pi-levels-check: node_modules ## Check the identity policy strips every thinking level the pinned pi-subagents can append — needs Node
+empirica-identity-pi-levels-check: ## Check the identity policy strips exactly the contract's thinking levels (shared fixture cases; no Node needed)
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_IDENTITY_PI_LEVEL_TESTS)
 
 .PHONY: empirica-claude-mcp-log-unit-check
@@ -405,9 +428,9 @@ empirica-host-receipt-unit-check: ## test structural installed-host receipt veri
 	@$(PYTHON) $(EMPIRICA_LIVE_RECEIPT_TESTS)
 
 .PHONY: pi-canary-unit-check
-pi-canary-unit-check: ## Test project-local Pi canary package filtering
-	@printf '$(BOLD)==> Pi canary configuration$(RESET)\n'
-	@$(PYTHON) $(PI_CANARY_CONFIG_TESTS)
+pi-canary-unit-check: ## Test that the dogfood settings and canary recipes never provision or suppress a pi-subagents runtime
+	@printf '$(BOLD)==> Pi dogfood runtime boundary$(RESET)\n'
+	@$(PYTHON) $(PI_CANARY_TESTS)
 
 .PHONY: empirica-host-receipt
 empirica-host-receipt: ## capture one operator-attested receipt: HOST=... TRANSCRIPT=... STATE=... CHILD_SESSION=... VERSION_OUTPUT=... COMMAND=... OUTPUT=...
@@ -472,9 +495,11 @@ doctor: ## empirica preflight: report baseline host capability without inference
 
 # Dogfooding (see docs/packages.md "Scope and Deduplication" in pi): the committed .pi/settings.json
 # adds this checkout as a project-local package and applies autoload:false DELTAs that exclude the
-# globally installed siffran resources and the separately installed pi-subagents extension. The
-# checkout-bundled exact pi-subagents profile remains active; providers and unrelated packages are
-# unchanged. Local edits hot-reload with /reload. Pi asks to trust the folder once.
+# globally installed siffran resources; providers and unrelated packages are unchanged. siffran does
+# not bundle pi-subagents: the audit runtime is the separately installed extension that registers the
+# `subagent` tool (`pi install npm:pi-subagents`), which Empirica resolves at session_start and never
+# installs, enables, or suppresses here. Local edits hot-reload with /reload. Pi asks to trust the
+# folder once.
 CLAUDE ?= claude
 # Dev sessions run `make` themselves. Command-line make variables (ARGS=...) are exported to children,
 # so without this an author's `make check-static` inherits the launcher's ARGS and fails.
@@ -494,15 +519,14 @@ pi-dev: node_modules ## Run Pi with this checkout override: PI=/path/to/pi [ARGS
 
 # Canary: dogfood a pushed PR branch inside a REAL project, not inside siffran. Installs the branch
 # as a project-local package there (project wins over the global install; identity is the repo URL,
-# so the global entry is shadowed, not duplicated). When pi-subagents is already installed globally,
-# filter siffran's bundled copy from the project entry to avoid duplicate tool registration.
-# `pi update --extensions` reconciles the clone.
+# so the global entry is shadowed, not duplicated). The canary installs only siffran; the external
+# pi-subagents runtime is a prerequisite of the project, never changed here. `pi update --extensions`
+# reconciles the clone.
 SIFFRAN_GIT ?= git:github.com/obzenner/siffran
 .PHONY: pi-canary pi-canary-remove
 pi-canary: ## Install a siffran branch project-locally in DIR for dogfooding: make pi-canary REF=<branch> [DIR=<project>]
 	@if [ -z "$(REF)" ]; then printf 'usage: make pi-canary REF=<branch-or-tag> [DIR=<project dir, default: this checkout>]\n' >&2; exit 2; fi
 	@cd "$(or $(DIR),$(CURDIR))" && $(PI) install -l "$(SIFFRAN_GIT)@$(REF)"
-	@$(PYTHON) $(SCRIPTS)/configure_pi_canary.py "$(or $(DIR),$(CURDIR))" "$(SIFFRAN_GIT)@$(REF)"
 	@printf '$(BOLD)==> canary$(RESET) %s@%s installed project-locally in %s; run `pi` there (trust the folder when asked); `make pi-canary-remove DIR=...` to undo\n' "$(SIFFRAN_GIT)" "$(REF)" "$(or $(DIR),$(CURDIR))"
 
 pi-canary-remove: ## Remove the project-local siffran canary from DIR: make pi-canary-remove [DIR=<project>]
@@ -546,7 +570,7 @@ empirica-recovery-reference: ## Regenerate the skill's reason-code recovery refe
 	@$(PYTHON) $(SCRIPTS)/gen_recovery_reference.py
 
 .PHONY: release-check
-release-check: check empirica-core-integration empirica-governance-check empirica-host-integration empirica-host-live-check ## Deliberate pre-release gate: fast checks, integration diagnostics, installed-host receipts
+release-check: check empirica-core-integration empirica-governance-check empirica-host-integration empirica-subagents-matrix empirica-pi-api-typecheck empirica-host-live-check ## Deliberate pre-release gate: fast checks, integration diagnostics, the reviewed pi-subagents and Pi API matrices, installed-host receipts
 	@printf '\n$(BOLD)Ready to release.$(RESET) Remaining steps are yours:\n'
 	@printf '  1. confirm the version bump is in plugin.json (make status)\n'
 	@printf '  2. commit and push\n'

@@ -1,5 +1,14 @@
 {
   "protocol": "empirica/v2",
+  "thinking_levels": [
+    "off",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
   "profiles": [
     {
       "host_id": "claude-code",
@@ -39,11 +48,11 @@
     },
     {
       "host_id": "pi",
-      "profile_id": "pi@0.84.1+pi-subagents@0.50.0",
+      "profile_id": "pi@0.84.1+pi-subagents-foreground-audit-v1",
       "version": "0.84.1",
       "compatibility": {
         "minimum": "0.84.1",
-        "maximum_exclusive": "0.90.0"
+        "maximum_exclusive": "1.1.0"
       },
       "current_tier": "foreground_only",
       "audit_execution": "foreground",
@@ -70,7 +79,31 @@
         "doc/design/empirica-2.0-d1h-host-capabilities.md §4"
       ],
       "delegation_env": "EMPIRICA_AUTO_DELEGATION",
-      "approval_ingress": "pi_ui"
+      "approval_ingress": "pi_ui",
+      "audit_launch_policy": {
+        "timeout_ms": 900000,
+        "tool_budget": {
+          "soft": 20,
+          "hard": 30,
+          "block": [
+            "read",
+            "grep",
+            "find",
+            "ls"
+          ]
+        }
+      },
+      "subagents_compatibility": {
+        "package": "pi-subagents",
+        "policy_id": "pi-subagents-foreground-audit-v1",
+        "reviewed_versions": [
+          "0.50.0",
+          "0.64.0",
+          "0.74.0",
+          "0.75.0"
+        ],
+        "unreviewed_action": "refuse"
+      }
     },
     {
       "host_id": "codex-cli",

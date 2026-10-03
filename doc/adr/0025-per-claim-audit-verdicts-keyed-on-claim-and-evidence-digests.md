@@ -11,21 +11,17 @@ tags:
 links:
 - target: 20
   kind: Amends
-- target: 22
-  kind: Depends on
 - target: 13
   kind: Relates to
 - target: 19
   kind: Relates to
-- target: 21
-  kind: Relates to
 - target: 27
   kind: Amended by
-- target: 41
-  kind: Depends on
 ---
 
 # Per-claim audit verdicts keyed on claim and evidence digests
+
+Depends on ADR-0022, ADR-0041 (removed from the tree; see git history). Relates to ADR-0021 (removed from the tree; see git history).
 
 ## Context and Problem Statement
 

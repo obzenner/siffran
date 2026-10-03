@@ -22,7 +22,7 @@ import { assertResponse, GuardError } from "./guard.ts";
 import { runJsonProcess } from "./process-transport.ts";
 
 /** Exact Pi + pi-subagents profile required for complete foreground audit binding. */
-export const HOST_PROFILE_ID = "pi@0.84.1+pi-subagents@0.50.0";
+export const HOST_PROFILE_ID = "pi@0.84.1+pi-subagents-foreground-audit-v1";
 
 export interface StdioBridgeConfig {
   /** Executable to run (e.g. "python3"). */

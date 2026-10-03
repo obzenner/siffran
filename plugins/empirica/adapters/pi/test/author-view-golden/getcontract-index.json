@@ -3,7 +3,7 @@
     "type": "Allow",
     "contract_result": {
       "target": "index",
-      "digest": "sha256:c322c3df3584ee0e8ad740c7de58d56478c59dcbdc7ac0ee58d785f2ceb39a8c",
+      "digest": "sha256:dfc3b1cb235da4d56b7225a8e9a60c2b208ad1c6405be53782666fa4431fb2e3",
       "index": {
         "id": "empirica/public",
         "version": "3.0.0",
@@ -266,6 +266,48 @@
           },
           {
             "code": "host.audit_output_unobservable",
+            "sections": [
+              "hosts/capabilities"
+            ]
+          },
+          {
+            "code": "host.subagents_missing",
+            "sections": [
+              "hosts/capabilities"
+            ]
+          },
+          {
+            "code": "host.subagents_tool_inactive",
+            "sections": [
+              "hosts/capabilities"
+            ]
+          },
+          {
+            "code": "host.subagents_owner_unverified",
+            "sections": [
+              "hosts/capabilities"
+            ]
+          },
+          {
+            "code": "host.subagents_duplicate_owner",
+            "sections": [
+              "hosts/capabilities"
+            ]
+          },
+          {
+            "code": "host.subagents_version_unsupported",
+            "sections": [
+              "hosts/capabilities"
+            ]
+          },
+          {
+            "code": "host.subagents_launch_unsupported",
+            "sections": [
+              "hosts/capabilities"
+            ]
+          },
+          {
+            "code": "host.subagents_provenance_missing",
             "sections": [
               "hosts/capabilities"
             ]

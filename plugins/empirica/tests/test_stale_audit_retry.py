@@ -17,7 +17,7 @@ from core.evaluation import audit_binding
 from core.records import Corrupt, Present, Revision
 from governance_setup import SIZED_RATIONALE, TEST_INVOCATION, approve_current
 
-PROFILE = "pi@0.84.1+pi-subagents@0.50.0"
+PROFILE = "pi@0.84.1+pi-subagents-foreground-audit-v1"
 
 
 class StaleAuditRetryTests(unittest.TestCase):

@@ -87,3 +87,13 @@ native-output parsing, and provenance mismatch. The Pi gate suite asserts that o
 host-owned auditor receives the explicit read-only acceptance exemption. `make contract-check`
 validates ordered compatibility ranges and vendor parity. Full confirmation is `make check`, followed
 by new installed-host receipts on the exact observed harness versions before release.
+
+## Amendment (2026-10)
+
+### Changed Decision
+
+The separation of policy and provenance now applies to pi-subagents as well as to Pi. The Pi host interval is a reviewed harness range (`>=0.84.1,<1.1.0`); pi-subagents support is an exact list of reviewed versions under one policy id, `pi-subagents-foreground-audit-v1`, embedded in the profile id (`pi@0.84.1+pi-subagents-foreground-audit-v1`). A range or a `latest` tag never proves compatibility, and there are no compatibility variants: every reviewed version receives the same audit-bound policy. Every 4.1 Pi receipt records the exact Pi version and a `subagents_runtime` object (package, version, owner path, package root, preflight path, policy id) derived from retained state evidence. A missing, mixed, or out-of-policy value is rejected.
+
+### Changed Consequences
+
+The former exact `0.50.0` dependency is an honest historical qualification fact, not a current requirement. New upstream releases require the deterministic matrix and a contract review before admission; `host-profiles.json` is the reviewed decision and the checked-in inventories under `plugins/empirica/adapters/pi/compat/` are its evidence, which `make contract-check` requires to be exactly the same set of versions. Existing 4.0 receipts cannot carry the new field and are not promoted by migration. The upper bound `<1.1.0` is **provisional** at the time of this amendment: it rests on the reviewed Pi 1.0 extension API and the Pi API typecheck, and it becomes supported only when a native receipt from Pi 1.0.0 with a reviewed pi-subagents version (planned: 0.75.0, qualification step A9b) exists. No such receipt exists yet; if that run fails the bound returns to `<0.90.0`. `make empirica-host-live-check` enforces this: whenever the Pi interval ends above 1.0.0 the Pi receipt must come from Pi 1.0.0 or later, and a receipt from an older Pi fails naming the missing 1.x receipt.

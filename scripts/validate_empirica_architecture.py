@@ -379,7 +379,29 @@ def check_typescript_dependencies(config: dict, pkg_root: Path, ts_files: list) 
     host_adapters = config["forbidden_cross_host_dependencies"]["host_adapters"]
     # host_adapters are dotted layer ids (adapters.claude); map to directory paths.
     host_dirs = [h.replace(".", "/") for h in host_adapters]
+    # Files reviewed to load a module whose specifier is computed at run time. Each entry is
+    # {"reason": <non-blank>, "count": <int >= 1>}: at most `count` nonliteral loads in that file are
+    # waived (the rest fail as usual), and a listed file that is absent or holds a different number of
+    # nonliteral loads is itself a finding, so a waiver cannot go stale or widen. Literal imports in
+    # the file are still checked, and a malformed entry waives nothing.
+    reviewed_loaders: dict = {}
     diags = []
+    for file, entry in config["forbidden_cross_host_dependencies"].get("reviewed_dynamic_loaders", {}).items():
+        reason = entry.get("reason") if isinstance(entry, dict) else None
+        count = entry.get("count") if isinstance(entry, dict) else None
+        if not (isinstance(reason, str) and reason.strip()
+                and isinstance(count, int) and not isinstance(count, bool) and count >= 1):
+            diags.append(Diagnostic(
+                RULE_DEP_TS, file, 1,
+                'reviewed_dynamic_loaders entry must be {"reason": <non-blank>, "count": <int >= 1>}; '
+                "it waives nothing"))
+        elif not (pkg_root / file).is_file():
+            diags.append(Diagnostic(
+                RULE_DEP_TS, file, 1,
+                "reviewed_dynamic_loaders lists a file that does not exist; remove the stale waiver"))
+        else:
+            reviewed_loaders[file] = count
+    nonliteral_seen: dict = {}
     for path in ts_files:
         rel = rel_posix(path, pkg_root)
         source_host = _host_of_rel(rel, host_dirs)
@@ -388,6 +410,10 @@ def check_typescript_dependencies(config: dict, pkg_root: Path, ts_files: list) 
         tokens = _ts_tokens(path.read_text(encoding="utf-8"))
         for line, spec, kind in _ts_extract_loads(tokens):
             if kind == "nonliteral":
+                if rel in reviewed_loaders:
+                    nonliteral_seen[rel] = nonliteral_seen.get(rel, 0) + 1
+                    if nonliteral_seen[rel] <= reviewed_loaders[rel]:
+                        continue
                 diags.append(Diagnostic(
                     RULE_DEP_TS, rel, line,
                     f"TS host adapter '{source_host}' has nonliteral import()/require() "
@@ -414,6 +440,13 @@ def check_typescript_dependencies(config: dict, pkg_root: Path, ts_files: list) 
                     RULE_DEP_TS, rel, line,
                     f"TS host adapter '{source_host}' imports another host adapter "
                     f"'{target_host}' via '{spec}'"))
+    for file, count in reviewed_loaders.items():
+        found = nonliteral_seen.get(file, 0)
+        if found != count:
+            diags.append(Diagnostic(
+                RULE_DEP_TS, file, 1,
+                f"reviewed_dynamic_loaders expects {count} nonliteral load(s) in this file but found "
+                f"{found}; re-review and update the waiver"))
     return diags
 
 

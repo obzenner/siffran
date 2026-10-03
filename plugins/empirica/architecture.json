@@ -59,7 +59,13 @@
   },
   "forbidden_cross_host_dependencies": {
     "host_adapters": ["adapters.claude", "adapters.codex", "adapters.pi"],
-    "rule": "a host adapter must not import another host adapter"
+    "rule": "a host adapter must not import another host adapter",
+    "reviewed_dynamic_loaders": {
+      "adapters/pi/src/runtime-owner.ts": {
+        "reason": "loads the preflight module of the external pi-subagents package that registered the `subagent` tool; the specifier is a canonical path inside that package and can never name an Empirica host adapter (the file is checked to belong to the owner's own package before loading)",
+        "count": 1
+      }
+    }
   },
   "forbidden_paths": [
     "adapters/claude/migrate_legacy.py"
@@ -147,7 +153,7 @@
     "protocol": "empirica/v2",
     "required_profile_ids": [
       "claude-code@2.1.278",
-      "pi@0.84.1+pi-subagents@0.50.0",
+      "pi@0.84.1+pi-subagents-foreground-audit-v1",
       "codex-cli@0.146.0"
     ]
   },

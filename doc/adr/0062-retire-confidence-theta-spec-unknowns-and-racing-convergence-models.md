@@ -8,31 +8,15 @@ tags:
 - convergence
 - claims
 links:
-- target: 6
-  kind: Supersedes
-- target: 7
-  kind: Supersedes
-- target: 9
-  kind: Supersedes
-- target: 10
-  kind: Supersedes
-- target: 11
-  kind: Supersedes
-- target: 18
-  kind: Supersedes
-- target: 3
-  kind: Amends
-- target: 12
-  kind: Amends
 - target: 20
-  kind: Amends
-- target: 24
   kind: Amends
 - target: 29
   kind: Amends
 ---
 
 # Retire confidence theta spec unknowns and racing convergence models
+
+Supersedes ADR-0006, ADR-0007, ADR-0009, ADR-0010, ADR-0011, ADR-0018 (removed from the tree; see git history). Amends ADR-0003, ADR-0012, ADR-0024 (removed from the tree; see git history). ADR-0006 is removed from the tree; this ADR retires the remaining race/spike model.
 
 ## Context and Problem Statement
 

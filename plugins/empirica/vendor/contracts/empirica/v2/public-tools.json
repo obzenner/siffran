@@ -184,7 +184,7 @@
     "codex-cli@0.146.0": {
       "delegation_env": "EMPIRICA_AUTO_DELEGATION"
     },
-    "pi@0.84.1+pi-subagents@0.50.0": {
+    "pi@0.84.1+pi-subagents-foreground-audit-v1": {
       "delegation_env": "EMPIRICA_AUTO_DELEGATION"
     }
   },
@@ -201,6 +201,69 @@
       ],
       "next_actions": [
         "graph.record"
+      ]
+    },
+    "host.subagents_missing": {
+      "message": "No external pi-subagents `subagent` tool is active, so no independent audit can launch. Install one supported pi-subagents runtime and restart the host, or accept the residual.",
+      "sections": [
+        "hosts/capabilities"
+      ],
+      "next_actions": [
+        "residual.accept"
+      ]
+    },
+    "host.subagents_tool_inactive": {
+      "message": "The pi-subagents `subagent` tool is registered but not active, so no independent audit can launch. Call `subagents_enable` and retry, or set pi-subagents `toolActivation: eager` and reload the host; a restart alone does not change this. Or accept the residual.",
+      "sections": [
+        "hosts/capabilities"
+      ],
+      "next_actions": [
+        "residual.accept"
+      ]
+    },
+    "host.subagents_owner_unverified": {
+      "message": "The active pi-subagents owner, package, or version cannot be verified (or this is a pi-subagents child process). Do not retry blindly: restart the host with one supported pi-subagents runtime, or accept the residual.",
+      "sections": [
+        "hosts/capabilities"
+      ],
+      "next_actions": [
+        "residual.accept"
+      ]
+    },
+    "host.subagents_duplicate_owner": {
+      "message": "More than one extension registers the `subagent` tool, so the audit runtime is ambiguous. Remove the duplicate, restart the host, and start a fresh run, or accept the residual.",
+      "sections": [
+        "hosts/capabilities"
+      ],
+      "next_actions": [
+        "residual.accept"
+      ]
+    },
+    "host.subagents_version_unsupported": {
+      "message": "The active pi-subagents runtime is not a reviewed version or does not expose the launch preflight Empirica binds. Install a reviewed version and restart the host, or accept the residual.",
+      "sections": [
+        "hosts/capabilities"
+      ],
+      "next_actions": [
+        "residual.accept"
+      ]
+    },
+    "host.subagents_launch_unsupported": {
+      "message": "During an Empirica run, `subagent` accepts exactly one launch form (for example `agent` or `workflow`) or a reviewed read-only action (`list`, `status`, `models`, ...); control, mutation, and ambiguous calls are refused. Retry with a supported call, or accept the residual.",
+      "sections": [
+        "hosts/capabilities"
+      ],
+      "next_actions": [
+        "residual.accept"
+      ]
+    },
+    "host.subagents_provenance_missing": {
+      "message": "The retained run or receipt lacks the exact pi-subagents version and owner path. Recapture a provenance-complete run; this one is not evidence.",
+      "sections": [
+        "hosts/capabilities"
+      ],
+      "next_actions": [
+        "residual.accept"
       ]
     },
     "governance.approval_unavailable": {

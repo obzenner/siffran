@@ -7,7 +7,7 @@ import json
 import os
 import re
 import stat
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 FORMAT = "empirica-live-receipt/v2"
@@ -88,6 +88,27 @@ def require_compatible_version(host: str, version: str) -> None:
         raise ValueError(
             f"host version {version} is outside compatible range "
             f"[{compatibility['minimum']}, {compatibility['maximum_exclusive']})")
+
+
+# The first release of a widened upper end of a host's interval that needs its own native receipt. Pi's
+# interval was widened past 0.90 to the whole 1.0 line (ADR-0052 amendment) on the condition that an
+# installed Pi 1.0.0 run exists: until the receipt is from Pi >= 1.0.0 the widening is provisional, so a
+# receipt from an older Pi cannot release it. If the interval is narrowed back to end at or below this
+# release, the rule no longer applies.
+_WIDENED_END_RELEASE = {"pi": "1.0.0"}
+
+
+def require_interval_end_receipt(host: str, version: str) -> None:
+    """Refuse a receipt from before the first release of a provisionally widened interval."""
+    first = _WIDENED_END_RELEASE.get(host)
+    if first is None:
+        return
+    maximum = _POLICIES[host]["compatibility"]["maximum_exclusive"]
+    if _version_tuple(maximum) > _version_tuple(first) and _version_tuple(version) < _version_tuple(first):
+        raise ValueError(
+            f"the {host} interval extends to {maximum} (exclusive), which is admitted only with a native "
+            f"receipt from {host} >= {first}; this receipt is from {host} {version}, so the required "
+            f"{host} {first.split('.')[0]}.x receipt is missing")
 
 
 def digest(path: Path) -> str:
@@ -507,9 +528,69 @@ def inspect_claude(parent: list[dict], child_rows: list[dict], child: dict, run:
         "auditor": {"provider_id": "anthropic", "model_id": child_message["model"]},
         "verdict": child_verdict,
     }
+_SUBAGENTS_RECORDED = ("package", "version", "owner_path", "package_root", "preflight_path", "source")
+_SUBAGENTS_RECEIPT = ("package", "version", "owner_path", "package_root", "preflight_path")
+
+
+def _inside(path: Any, root: Any) -> bool:
+    """Whether ``path`` is strictly below the absolute directory ``root`` (lexical; no filesystem)."""
+    if not isinstance(path, str) or not isinstance(root, str):
+        return False
+    candidate, base = PurePosixPath(path), PurePosixPath(root)
+    return (candidate.is_absolute() and base.is_absolute() and candidate != base
+            and ".." not in candidate.parts and base in candidate.parents)
+
+
+def host_runtime_rejection(policy: dict | None, host_runtime: Any) -> str | None:
+    """A stable code when the run's recorded ``host_runtime`` does not satisfy the profile policy.
+
+    The receipt tool is independent of plugin code, so this is its own copy of the rule the host
+    applies when the run starts (``application/host_runtime.py``); the shared cases in
+    ``plugins/empirica/tests/fixtures/host-runtime-cases.json`` pin the copies together.
+    """
+    if policy is None:
+        return None if host_runtime is None else "unexpected"
+    if host_runtime is None:
+        return "missing"
+    if not isinstance(host_runtime, dict) or not isinstance(host_runtime.get("subagents"), dict):
+        return "malformed"
+    subagents = host_runtime["subagents"]
+    if set(host_runtime) != {"policy_id", "subagents"} or set(subagents) != set(_SUBAGENTS_RECORDED):
+        return "malformed"
+    if host_runtime["policy_id"] != policy["policy_id"]:
+        return "policy"
+    if subagents["package"] != policy["package"]:
+        return "package"
+    if subagents["version"] not in policy["reviewed_versions"]:
+        return "version"
+    if not (_inside(subagents["owner_path"], subagents["package_root"])
+            and _inside(subagents["preflight_path"], subagents["package_root"])):
+        return "paths"
+    return None
+
+
+def subagents_runtime(state: dict, host: str) -> dict | None:
+    """The receipt's ``subagents_runtime``: derived from the persisted run state, never from an argument.
+
+    ``None`` for a host whose profile has no external audit runtime (Claude); for Pi it is the exact
+    package, version, owner file, package root and preflight module the host recorded when the run
+    started, plus the policy id, after they are checked against the profile's reviewed versions.
+    """
+    policy = _POLICIES[host].get("subagents_compatibility")
+    invocation = state.get("invocation")
+    recorded = invocation.get("host_runtime") if isinstance(invocation, dict) else None
+    rejection = host_runtime_rejection(policy, recorded)
+    if rejection is not None:
+        raise ValueError(f"durable state does not carry an acceptable pi-subagents runtime ({rejection})")
+    if policy is None:
+        return None
+    subagents = recorded["subagents"]
+    return {**{key: subagents[key] for key in _SUBAGENTS_RECEIPT}, "policy_id": recorded["policy_id"]}
+
+
 def inspect_pi(parent: list[dict], child_rows: list[dict], child: dict,
-               child_path: Path) -> dict:
-    """Project a Pi installed-host receipt from the native session files.
+               child_path: Path, state: dict) -> dict:
+    """Project a Pi installed-host receipt from the native session files and the durable run state.
 
     Pi session records carry no host version: the only ``version`` field is the session header's
     file-format number (``3``), which is unrelated to the ``pi --version`` string, so there is
@@ -607,6 +688,7 @@ def inspect_pi(parent: list[dict], child_rows: list[dict], child: dict,
         "author": {"provider_id": author_message["provider"], "model_id": author_message["model"]},
         "auditor": {"provider_id": provider, "model_id": child_message["model"]},
         "verdict": child_verdict,
+        "subagents_runtime": subagents_runtime(state, "pi"),
     }
 
 
@@ -623,6 +705,7 @@ def inspect(receipt: dict, host: str, expected_commit: str,
         if not isinstance(host_version, str):
             raise ValueError("exact observed host version is required")
         require_compatible_version(host, host_version)
+        require_interval_end_receipt(host, host_version)
         if receipt.get("plugin_version") != expected_plugin_version:
             raise ValueError("release plugin version mismatch")
         if receipt.get("release_commit") != expected_commit:
@@ -641,12 +724,17 @@ def inspect(receipt: dict, host: str, expected_commit: str,
         child_rows = jsonl(paths["child_session"])
         facts = (inspect_claude(parent, child_rows, child, run_handle(paths["run_state"]),
                                 host_version) if host == "claude"
-                 else inspect_pi(parent, child_rows, child, paths["child_session"]))
+                 else inspect_pi(parent, child_rows, child, paths["child_session"], state))
         for key, value in (("audit_child_id", child["child_id"]),
                            ("audit_native_id", child["native_id"]),
                            ("audit_operation_id", child["audit_operation_id"])):
             if receipt.get(key) != value:
                 raise ValueError(f"{key} mismatch")
+        if receipt.get("subagents_runtime") != facts.get("subagents_runtime"):
+            raise ValueError(
+                "receipt subagents_runtime is missing" if facts.get("subagents_runtime") is not None
+                and receipt.get("subagents_runtime") is None else
+                "receipt subagents_runtime does not equal the runtime recorded in the durable state")
         if receipt.get("result") != facts["result"]:
             raise ValueError("reported result does not equal native report result")
         if receipt.get("observed_author") != facts["author"]:

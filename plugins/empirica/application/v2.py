@@ -135,6 +135,20 @@ class _Service:
                    if child["resource_class"] == "audit" and child.get("native_id") == native_id]
         return matches[0] if len(matches) == 1 else None
 
+    def trusted_host_runtime(self, *, run_id) -> dict | None:
+        """The host runtime recorded at ``StartRun`` as ``{"host_runtime": value-or-None}``, or ``None``
+        when the run cannot be read as a valid run. Private host correlation; never projected publicly."""
+        key = decode_handle(run_id)
+        if key is None:
+            return None
+        read = self._runs.read(key)
+        if not hasattr(read, "value"):
+            return None
+        classification = classify_and_decode(read.value)
+        if classification.kind != "valid":
+            return None
+        return {"host_runtime": governance.plain(classification.state.invocation).get("host_runtime")}
+
     def trusted_audit_plan(self, *, run_id, child_id) -> dict | None:
         """Return one immutable host-owned audit operation; never projected publicly."""
         if not isinstance(child_id, str) or not child_id:

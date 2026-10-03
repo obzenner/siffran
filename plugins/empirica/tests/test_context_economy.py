@@ -38,7 +38,7 @@ def build_child_event_payload(state: str, *, native_id: str | None = None,
             "fingerprint": canonical_digest({"state": state, "native_id": native_id}),
             "result_digest": result_digest}
 
-PROFILE = "pi@0.84.1+pi-subagents@0.50.0"
+PROFILE = "pi@0.84.1+pi-subagents-foreground-audit-v1"
 CODEX = "codex-cli@0.146.0"
 CLAUDE = "claude-code@2.1.278"
 GRAPH = {"root": "C0", "claims": [{"id": "C0", "text": "supplied uncertainty", "gating": True,

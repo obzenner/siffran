@@ -6,11 +6,44 @@ surface as the Claude and Codex adapters and owns no convergence policy.
 ## Capability profile
 
 The promoted profile is qualified on Pi `0.84.1` and admits compatible Pi releases
-`>=0.84.1,<0.90.0`; receipts still record the exact observed Pi version. The controlled
-`pi-subagents` dependency remains pinned at `0.50.0`. The profile tier is `foreground_only`, with
-`promotion_status=promoted` after an installed-host foreground trace reached guarded
-`Allow(converged=true)`. `pi-subagents` must provide its structured `subagent` tool.
-Asynchronous audit execution is not supported and is never silently downgraded.
+`>=0.84.1,<1.1.0`; receipts still record the exact observed Pi version. The profile tier is
+`foreground_only`, with `promotion_status=promoted` after an installed-host foreground trace reached
+guarded `Allow(converged=true)`. `pi-subagents` is an external prerequisite
+(`pi install npm:pi-subagents@<reviewed version>`), never bundled or loaded by this package; it must
+provide the structured `subagent` tool. Only the exact versions in `subagents_compatibility.reviewed_versions`
+(`contracts/empirica/v2/host-profiles.json`) are supported; any other version is refused before a run starts. Asynchronous audit execution is not supported and is never silently
+downgraded.
+
+## Audit runtime ownership
+
+`src/runtime-owner.ts` resolves the audit runtime at `session_start` from `pi.getAllTools()` and
+`pi.getCommands()`; it never searches the file system and never imports `pi-subagents` by bare name.
+Pi keeps only the first registrant of a tool name, so `getAllTools()` can show a single `subagent`
+even when two `pi-subagents` copies are loaded. The adapter therefore also resolves the nearest
+`pi-subagents` package of every extension slash command (Pi does not deduplicate commands) and refuses
+(`host.subagents_duplicate_owner`) when the tool owner and the commands name more than one distinct
+package root. A copy that registers no commands cannot be seen, and a second `subagent` tool entry
+(not produced by current Pi) is refused as well. The first registrant — the one Pi runs — is bound.
+Its canonical `sourceInfo.path` locates the nearest enclosing `package.json`,
+which must be named `pi-subagents` and carry a semver `version`. The adapter then resolves
+`pi-subagents/preflight` *from that package* and requires a callable `resolveSubagentLaunchContract`
+whose file belongs to that same package (the nearest `package.json` above it is the owner's root; a
+nested `node_modules/pi-subagents` copy is refused).
+Each failure is a typed code mapped to a public-contract reason by `src/owner-refusal.ts`
+(`host.subagents_missing`, `_duplicate_owner`, `_owner_unverified`, `_version_unsupported`); the
+guidance text comes from the contract. The owner is re-observed when `/empirica`, `configure_run`,
+and the canonical auditor launch run; if the owner has changed since `session_start` the run is
+refused and the audit is not launched. An owner-identity or inventory refusal is sticky until the next
+`session_start` (startup, `/reload`, or a new session); a registered-but-inactive `subagent` tool is
+refused on each use and admitted again once it is active. A `PI_SUBAGENT_CHILD=1` process is never a
+parent owner. A malformed or unavailable inventory is an unobservable owner, never an exception out
+of `session_start`.
+The runtime is recorded once, with the run, at `StartRun` (`invocation.host_runtime`) and re-proved
+at audit admission: the private `audit_prepare` carries the runtime the adapter observes now, and the
+Python application refuses closed (`audit_refused`, before any reservation or state write) when it is
+not exactly the recorded one, which the adapter turns into the same sticky `owner-changed` refusal.
+A run therefore cannot be audited by a different pi-subagents than the one its receipt will name: after
+a Pi or pi-subagents upgrade, start a new `/empirica` run.
 
 ## Governed initialization
 
@@ -37,7 +70,7 @@ that boundary.
 
 | Pi surface | v2 operation | Behaviour |
 |---|---|---|
-| `/empirica <goal>` | `StartRun` | Starts a durable run, persists the opaque handle, and injects public-tool guidance. Refuses before creating a run when the bundled pi-subagents `subagent` tool is not active, because no independent audit could launch. |
+| `/empirica <goal>` | `StartRun` | Starts a durable run, persists the opaque handle, and injects public-tool guidance. Refuses before creating a run when no verified external pi-subagents owner of the `subagent` tool is active, because no independent audit could launch (contract reason `host.subagents_*`). |
 | `empirica_observe` | `ObserveAction` | Accepts only canonical public author kinds. Trusted kinds are rejected locally and by schema. |
 | `empirica_read` | `GetRun`, `GetArgument`, `GetContract`, `RestoreRun` | Returns a deterministic plain-text author view; resolves a session handle when needed. |
 | `report_convergence` | `EvaluateRun(report_convergence | stop)` | Fails closed unless the guarded response is `Allow`; `intent: stop` records an honest non-converged terminal. |
@@ -76,8 +109,8 @@ With a non-null run handle, `report_convergence` permits only a centrally guarde
 `Block`, `Inert`, every `Fault`, malformed responses, and transport failures deny. The central
 guard enforces `converged=true` iff `run.status=converged`.
 
-Two Blocks are the exception and settle nonterminally: the sole human-approval wait (ADR-63) and
-the sole `budget.exhausted` blocker of an active run (ADR-64 interim). Pi permits the call, prints
+Two Blocks are the exception and settle nonterminally: the sole human-approval wait (ADR-0063) and
+the sole `budget.exhausted` blocker of an active run (the current exhaustion rule). Pi permits the call, prints
 the contract-owned notice (`settlement_notices`) ahead of the preserved Block, keeps the run
 active, and opens no dialog and makes no private call. Mixed reasons and terminal runs still
 deny.

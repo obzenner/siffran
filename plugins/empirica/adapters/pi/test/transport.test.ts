@@ -123,7 +123,7 @@ test("private ingress kills and rejects a bridge that exceeds its deadline", asy
 });
 
 test("HOST_PROFILE_ID is the exact pi profile with no default", () => {
-  assert.equal(HOST_PROFILE_ID, "pi@0.84.1+pi-subagents@0.50.0");
+  assert.equal(HOST_PROFILE_ID, "pi@0.84.1+pi-subagents-foreground-audit-v1");
 });
 
 test("assertPrivateResponse accepts the real private shapes and rejects every malformed one", async () => {
@@ -133,6 +133,7 @@ test("assertPrivateResponse accepts the real private shapes and rejects every ma
     ["classify_identity", null],
     ["classify_identity", { identity: "anthropic/claude" }],
     ["audit_prepare", { type: "audit_plan", plan }],
+    ["audit_prepare", { type: "audit_refused", reason: "runtime_changed" }],
     ["audit_verdict", { type: "audit_verdict", admitted: true }],
     ["audit_verdict", { type: "audit_verdict", admitted: false }],
     ["audit_start", { type: "audit_started" }],
@@ -146,6 +147,8 @@ test("assertPrivateResponse accepts the real private shapes and rejects every ma
   const rejected: Array<[PrivateOperation, unknown]> = [
     ["classify_identity", { identity: "" }],
     ["audit_prepare", { type: "audit_plan", plan: { ...plan, argument: "x" } }],
+    ["audit_prepare", { type: "audit_refused", reason: "anything else" }],
+    ["audit_prepare", { type: "audit_refused" }],
     ["audit_verdict", { type: "audit_verdict", admitted: {} }],
     ["audit_verdict", { type: "audit_verdict" }],
     ["audit_start", { type: "audit_terminal" }],

@@ -37,7 +37,7 @@ def main() -> int:
     facts = (inspect_claude(parent, child_rows, child, run_handle(args.state.resolve()),
                            host_version)
              if args.host == "claude"
-             else inspect_pi(parent, child_rows, child, args.child_session))
+             else inspect_pi(parent, child_rows, child, args.child_session, state))
     receipt = {
         "format": FORMAT,
         "operator_attested": True,
@@ -54,6 +54,9 @@ def main() -> int:
         "observed_auditor": facts["auditor"],
         "result": facts["result"],
     }
+    # Pi only: derived from the run state the host persisted; there is deliberately no flag for it.
+    if facts.get("subagents_runtime") is not None:
+        receipt["subagents_runtime"] = facts["subagents_runtime"]
     for name, path in (("transcript", args.transcript), ("run_state", args.state),
                        ("child_session", args.child_session),
                        ("version_output", args.version_output)):

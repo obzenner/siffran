@@ -21,6 +21,7 @@ import { govern, refreshGovernance, piGovernanceContext } from "../src/governanc
 import { createPrivateIngress } from "../src/private-transport.ts";
 import { runJsonProcess } from "../src/process-transport.ts";
 import { fakeCtx } from "./fakes.ts";
+import { recordedInvocation } from "./owner-fixture.ts";
 import type { Response } from "../src/contract.ts";
 
 const py = process.env.EMPIRICA_PYTHON ?? "python3";
@@ -32,7 +33,7 @@ try {
 }
 
 const SEL = { project: "live-pi", session: "smoke" };
-const INVOCATION = { host: "pi", interactive: true, signal: "ctx.mode=tui", delegation: false };
+const INVOCATION = recordedInvocation();
 const bridgeScript = join(process.cwd(), "bridge.py");
 const testRepo = mkdtempSync(join(tmpdir(), "empirica-pi-live-"));
 const testHome = join(testRepo, "home");
@@ -265,9 +266,44 @@ test(
 );
 
 test(
+  "live bridge: the real private audit_prepare refuses a runtime other than the one recorded at StartRun",
+  { skip: !pythonAvailable ? "python3 is missing" : false },
+  async () => {
+    // The run records INVOCATION.host_runtime once. audit_prepare carries the adapter's runtime observed
+    // now; the real Python private bridge refuses closed when it differs. (The run is not audit-ready, so
+    // the matching runtime proceeds past the comparison and is then refused by the reservation, which
+    // proves the comparison, not the readiness, is what the mismatch tripped.)
+    const env = { ...process.env, EMPIRICA_HOME: testHome, EMPIRICA_REPO_DIR: testRepo };
+    const dispatch = createStdioBridgeDispatch({ command: py, args: [bridgeScript], cwd: testRepo, env });
+    const started = await dispatch(startRunRequest(
+      { project: "pi-runtime", session: "bound" }, "runtime-bound audit", "runtime-start", INVOCATION));
+    assert.equal(started.result.type, "Allow", JSON.stringify(started.result));
+    assert.ok("run" in started.result && started.result.run);
+    const runId = (started.result.run as { id: string }).id;
+    const recorded = INVOCATION.host_runtime;
+    const previous = { EMPIRICA_HOME: process.env.EMPIRICA_HOME, EMPIRICA_REPO_DIR: process.env.EMPIRICA_REPO_DIR };
+    try {
+      process.env.EMPIRICA_HOME = testHome; process.env.EMPIRICA_REPO_DIR = testRepo;
+      const ingress = createPrivateIngress();
+      const prepare = (host_runtime?: unknown) => ingress({ operation: "audit_prepare", run_id: runId,
+        role_profile: "empirica.empirica-auditor", payload: host_runtime === undefined ? {} : { host_runtime } });
+      const otherVersion = { ...recorded, subagents: { ...recorded.subagents, version: "0.64.0" } };
+      const otherRoot = { ...recorded, subagents: { ...recorded.subagents, package_root: "/opt/elsewhere/pi-subagents" } };
+      for (const observed of [otherVersion, otherRoot, undefined])
+        assert.deepEqual(await prepare(observed), { type: "audit_refused", reason: "runtime_changed" });
+      await assert.rejects(prepare(recorded), /audit reservation denied/);
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      }
+    }
+  },
+);
+
+test(
   "live bridge: the exact profile is set in the transport env (no default)",
   () => {
-    assert.equal(HOST_PROFILE_ID, "pi@0.84.1+pi-subagents@0.50.0");
+    assert.equal(HOST_PROFILE_ID, "pi@0.84.1+pi-subagents-foreground-audit-v1");
   },
 );
 

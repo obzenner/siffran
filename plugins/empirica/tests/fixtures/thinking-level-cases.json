@@ -1,0 +1,133 @@
+{
+  "description": "Policy cases for stripping a host-appended thinking level from a model spelling. Consumed by the Pi adapter test (preflight-seam.test.ts: withoutThinkingLevel over 'provider/model_id', expecting without_thinking_level) and by the Python identity test (test_identity_pi_levels.py: adapters.identity.observe(provider, model_id), expecting python_identity or null). The level set itself is the contract's thinking_levels (contracts/empirica/v2/host-profiles.json); a test in each language asserts the cases' strips_level values cover exactly that set, and that each case's without_thinking_level is its model_id minus ':' + strips_level.",
+  "cases": [
+    {
+      "id": "level-off",
+      "provider": "openai",
+      "model_id": "gpt-5.6-sol:off",
+      "strips_level": "off",
+      "without_thinking_level": "gpt-5.6-sol",
+      "python_identity": "openai/gpt-5.6-sol"
+    },
+    {
+      "id": "level-minimal",
+      "provider": "openai",
+      "model_id": "gpt-5.6-sol:minimal",
+      "strips_level": "minimal",
+      "without_thinking_level": "gpt-5.6-sol",
+      "python_identity": "openai/gpt-5.6-sol"
+    },
+    {
+      "id": "level-low",
+      "provider": "openai",
+      "model_id": "gpt-5.6-sol:low",
+      "strips_level": "low",
+      "without_thinking_level": "gpt-5.6-sol",
+      "python_identity": "openai/gpt-5.6-sol"
+    },
+    {
+      "id": "level-medium",
+      "provider": "openai",
+      "model_id": "gpt-5.6-sol:medium",
+      "strips_level": "medium",
+      "without_thinking_level": "gpt-5.6-sol",
+      "python_identity": "openai/gpt-5.6-sol"
+    },
+    {
+      "id": "level-high",
+      "provider": "openai",
+      "model_id": "gpt-5.6-sol:high",
+      "strips_level": "high",
+      "without_thinking_level": "gpt-5.6-sol",
+      "python_identity": "openai/gpt-5.6-sol"
+    },
+    {
+      "id": "level-xhigh",
+      "provider": "openai",
+      "model_id": "gpt-5.6-sol:xhigh",
+      "strips_level": "xhigh",
+      "without_thinking_level": "gpt-5.6-sol",
+      "python_identity": "openai/gpt-5.6-sol"
+    },
+    {
+      "id": "level-max",
+      "provider": "openai",
+      "model_id": "gpt-5.6-sol:max",
+      "strips_level": "max",
+      "without_thinking_level": "gpt-5.6-sol",
+      "python_identity": "openai/gpt-5.6-sol"
+    },
+    {
+      "id": "no-suffix",
+      "provider": "openai",
+      "model_id": "gpt-5.6-sol",
+      "strips_level": null,
+      "without_thinking_level": "gpt-5.6-sol",
+      "python_identity": "openai/gpt-5.6-sol"
+    },
+    {
+      "id": "deployment-id-colon-0",
+      "provider": "openai",
+      "model_id": "gpt-5.6-sol:0",
+      "strips_level": null,
+      "without_thinking_level": "gpt-5.6-sol:0",
+      "python_identity": null
+    },
+    {
+      "id": "custom-suffix",
+      "provider": "openai",
+      "model_id": "gpt-5.6-sol:custom",
+      "strips_level": null,
+      "without_thinking_level": "gpt-5.6-sol:custom",
+      "python_identity": null
+    },
+    {
+      "id": "empty-suffix",
+      "provider": "openai",
+      "model_id": "gpt-5.6-sol:",
+      "strips_level": null,
+      "without_thinking_level": "gpt-5.6-sol:",
+      "python_identity": null
+    },
+    {
+      "id": "only-one-trailing-level",
+      "provider": "openai",
+      "model_id": "gpt-5.6-sol:high:low",
+      "strips_level": "low",
+      "without_thinking_level": "gpt-5.6-sol:high",
+      "python_identity": null
+    },
+    {
+      "id": "level-inside-not-trailing",
+      "provider": "openai",
+      "model_id": "gpt-5.6-sol:high:custom",
+      "strips_level": null,
+      "without_thinking_level": "gpt-5.6-sol:high:custom",
+      "python_identity": null
+    },
+    {
+      "id": "level-is-case-sensitive-in-the-adapter",
+      "provider": "openai",
+      "model_id": "gpt-5.6-sol:HIGH",
+      "strips_level": null,
+      "without_thinking_level": "gpt-5.6-sol:HIGH",
+      "python_identity": "openai/gpt-5.6-sol"
+    },
+    {
+      "id": "bedrock-version-is-a-separate-python-policy",
+      "provider": "anthropic",
+      "model_id": "claude-opus-4-8-v1:0",
+      "strips_level": null,
+      "without_thinking_level": "claude-opus-4-8-v1:0",
+      "python_identity": "anthropic/claude-opus-4-8"
+    },
+    {
+      "id": "bedrock-version-then-level",
+      "provider": "anthropic",
+      "model_id": "claude-opus-4-8-v1:0:high",
+      "strips_level": "high",
+      "without_thinking_level": "claude-opus-4-8-v1:0",
+      "python_identity": "anthropic/claude-opus-4-8"
+    }
+  ]
+}

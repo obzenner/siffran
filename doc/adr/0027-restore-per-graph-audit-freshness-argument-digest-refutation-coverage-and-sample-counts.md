@@ -16,14 +16,10 @@ links:
   kind: Amends
 - target: 20
   kind: Depends on
-- target: 21
-  kind: Relates to
 - target: 13
   kind: Relates to
 - target: 29
   kind: Amended by
-- target: 41
-  kind: Depends on
 - target: 45
   kind: Amended by
 - target: 46
@@ -31,6 +27,8 @@ links:
 ---
 
 # Restore per-graph audit freshness: argument digest, refutation coverage, and sample counts
+
+Relates to ADR-0021 (removed from the tree; see git history). Depends on ADR-0041 (removed from the tree; see git history).
 
 **Status note:** ADR-25 and ADR-26 shipped in plugin 0.6.0 and were merged. An adversarial review
 with fresh context then found five defects in that release, three of them breaking a guarantee those

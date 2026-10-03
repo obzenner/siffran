@@ -9,17 +9,15 @@ tags:
 - budgets
 - auto
 links:
-- target: 53
-  kind: Amends
 - target: 60
   kind: Amends
 - target: 61
   kind: Amends
-- target: 64
-  kind: amendedby
 ---
 
 # Size the run configuration to the task and approve it before investigation in both control modes
+
+Amends ADR-0053 (removed from the tree; see git history). Amended by ADR-0064 (removed from the tree; see git history). ADR-0053 is removed from the tree; this ADR owns the narrower configuration-approval contract.
 
 ## Context and Problem Statement
 

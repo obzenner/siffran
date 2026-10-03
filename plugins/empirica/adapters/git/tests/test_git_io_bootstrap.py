@@ -16,8 +16,8 @@ ROOT = Path(__file__).resolve().parents[5]
 PI = ROOT / "plugins/empirica/adapters/pi"
 sys.path.insert(0, str(ROOT / "plugins/empirica"))
 sys.path.insert(0, str(ROOT / "plugins/empirica/tests"))
-from governance_setup import TEST_INVOCATION  # noqa: E402
-PROFILE = "pi@0.84.1+pi-subagents@0.50.0"
+from governance_setup import invocation_for  # noqa: E402
+PROFILE = "pi@0.84.1+pi-subagents-foreground-audit-v1"
 
 
 class GitIoBootstrapTest(unittest.TestCase):
@@ -69,7 +69,7 @@ class GitIoBootstrapTest(unittest.TestCase):
         started = self.call({
             "type": "StartRun", "control_mode": "deliberative", "selector": {"project": "io", "session": "bootstrap"},
             "goal": "Verify deterministic output.",
-            "invocation": dict(TEST_INVOCATION),
+            "invocation": invocation_for(PROFILE),
         })
         run_id = started["run"]["id"]
         context = {

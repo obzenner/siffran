@@ -419,7 +419,7 @@ class InjectionSafetyTests(unittest.TestCase):
         from test_d7_transactions import Artifacts, Harness, Runs, Workspace
 
         svc = compose(Workspace(), Harness(), Runs(), Artifacts(), None,
-                      "pi@0.84.1+pi-subagents@0.50.0", {}, None)
+                      "pi@0.84.1+pi-subagents-foreground-audit-v1", {}, None)
 
         def request(command):
             return svc.dispatch({"protocol": "empirica/v2", "request_id": "injection",

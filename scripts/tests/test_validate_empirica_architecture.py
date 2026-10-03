@@ -465,6 +465,7 @@ class ArchitectureValidatorTests(unittest.TestCase):
     def test_32_ts_comment_import_not_a_load(self):
         # an import-like line inside a // comment must NOT be treated as a module load
         cfg = base_config()
+        cfg["forbidden_cross_host_dependencies"].pop("reviewed_dynamic_loaders")  # this case is about comments, not the waiver
         self._write("adapters/pi/src/c.ts",
                     '// import { x } from "../../claude/x.ts"\nconst a = 1;\n')
         diags = va.check_typescript_dependencies(cfg, self.pkg, self._ts_files(cfg))
@@ -473,6 +474,7 @@ class ArchitectureValidatorTests(unittest.TestCase):
     def test_33_ts_block_comment_import_not_a_load(self):
         # an import inside a /* */ block comment must NOT be treated as a module load
         cfg = base_config()
+        cfg["forbidden_cross_host_dependencies"].pop("reviewed_dynamic_loaders")  # this case is about comments, not the waiver
         self._write("adapters/pi/src/c.ts",
                     '/* eslint: import { x } from "../../claude/x.ts" */\nconst a = 1;\n')
         diags = va.check_typescript_dependencies(cfg, self.pkg, self._ts_files(cfg))
@@ -494,6 +496,56 @@ class ArchitectureValidatorTests(unittest.TestCase):
         self.assertIn(va.RULE_DEP_TS, self._ids(diags))
         self.assertTrue(any("nonliteral" in d.message and "fail closed" in d.message for d in diags),
                        diags)
+
+    def test_35b_ts_reviewed_dynamic_loader_is_waived_only_for_its_file_reason_and_count(self):
+        # the real config reviews exactly one nonliteral load in the pi-subagents owner loader
+        cfg = base_config()
+        reviewed = "adapters/pi/src/runtime-owner.ts"
+        entries = cfg["forbidden_cross_host_dependencies"]["reviewed_dynamic_loaders"]
+        self.assertEqual(list(entries), [reviewed])
+        self.assertEqual(entries[reviewed]["count"], 1)
+        self.assertTrue(entries[reviewed]["reason"].strip())
+        source = 'const m = await import(spec);\nimport x from "../../claude/x.ts";\n'
+        self._write(reviewed, source)
+        self._write("adapters/pi/src/other.ts", 'const m = await import(spec);\n')
+        diags = va.check_typescript_dependencies(cfg, self.pkg, self._ts_files(cfg))
+        by_file = {(d.path, "nonliteral" in d.message) for d in diags}
+        self.assertIn(("adapters/pi/src/other.ts", True), by_file)       # unreviewed file: still fails
+        self.assertNotIn((reviewed, True), by_file)                      # reviewed loader: waived
+        self.assertTrue(any(d.path == reviewed and "claude" in d.message for d in diags),
+                        "literal cross-host imports in a reviewed file are still checked")
+        entries[reviewed]["reason"] = "  "
+        blank = va.check_typescript_dependencies(cfg, self.pkg, self._ts_files(cfg))
+        self.assertIn((reviewed, True), {(d.path, "nonliteral" in d.message) for d in blank})
+
+    def test_35c_ts_reviewed_dynamic_loader_waives_only_up_to_its_count(self):
+        cfg = base_config()
+        reviewed = "adapters/pi/src/runtime-owner.ts"
+        self._write(reviewed, 'const a = await import(spec);\n')
+        self.assertEqual(va.check_typescript_dependencies(cfg, self.pkg, self._ts_files(cfg)), [])  # the real config passes
+        # a second nonliteral load in the reviewed file is not covered and the count no longer matches
+        self._write(reviewed, 'const a = await import(spec);\nconst b = await import(other);\n')
+        diags = va.check_typescript_dependencies(cfg, self.pkg, self._ts_files(cfg))
+        self.assertEqual([(d.path, d.line) for d in diags if "nonliteral import()" in d.message], [(reviewed, 2)])
+        self.assertTrue(any("expects 1 nonliteral load(s)" in d.message and "found 2" in d.message for d in diags), diags)
+        # a reviewed file whose loader disappeared is a stale waiver
+        self._write(reviewed, 'export const x = 1;\n')
+        stale = va.check_typescript_dependencies(cfg, self.pkg, self._ts_files(cfg))
+        self.assertTrue(any("expects 1 nonliteral load(s)" in d.message and "found 0" in d.message for d in stale), stale)
+
+    def test_35d_ts_reviewed_dynamic_loader_for_a_missing_file_or_malformed_entry_fails(self):
+        cfg = base_config()
+        reviewed = "adapters/pi/src/runtime-owner.ts"
+        entries = cfg["forbidden_cross_host_dependencies"]["reviewed_dynamic_loaders"]
+        missing = va.check_typescript_dependencies(cfg, self.pkg, self._ts_files(cfg))   # file never written
+        self.assertTrue(any(d.path == reviewed and "does not exist" in d.message for d in missing), missing)
+        self._write(reviewed, 'const a = await import(spec);\n')
+        for bad in ("just a reason", {"reason": "r"}, {"count": 1}, {"reason": "r", "count": 0},
+                    {"reason": "r", "count": True}, {"reason": "r", "count": "1"}, None):
+            entries[reviewed] = bad
+            diags = va.check_typescript_dependencies(cfg, self.pkg, self._ts_files(cfg))
+            self.assertTrue(any("must be {" in d.message for d in diags), (bad, diags))
+            self.assertTrue(any("nonliteral import()" in d.message for d in diags), (bad, diags))  # waives nothing
 
     def test_36_ts_concatenated_require_fails_closed(self):
         # require("./" + name) is nonliteral and must fail closed

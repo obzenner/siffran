@@ -24,7 +24,7 @@ function noopDispatch(): Response {
 
 function register(): FakePi {
   const pi = new FakePi();
-  createEmpiricaExtension({ dispatch: noopDispatch })(pi);
+  createEmpiricaExtension({ ownerEnv: {}, dispatch: noopDispatch })(pi);
   return pi;
 }
 
@@ -32,7 +32,7 @@ test("a malformed governance timeout fails extension load with the variable name
   const prior = process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS;
   try {
     process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS = "soon";
-    assert.throws(() => createEmpiricaExtension({ dispatch: noopDispatch }),
+    assert.throws(() => createEmpiricaExtension({ ownerEnv: {}, dispatch: noopDispatch }),
       /EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS must be a whole number of seconds from 1 to 1500, got "soon"/);
   } finally {
     if (prior === undefined) delete process.env.EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS;
@@ -92,7 +92,7 @@ test("the contributed skills directory actually holds the empirica skill", () =>
 
 test("a custom skillsDir overrides the default", async () => {
   const pi = new FakePi();
-  createEmpiricaExtension({ dispatch: noopDispatch, skillsDir: "/tmp/x" })(pi);
+  createEmpiricaExtension({ ownerEnv: {}, dispatch: noopDispatch, skillsDir: "/tmp/x" })(pi);
   const result = await pi.resourcesDiscover()(
     { cwd: HERE, reason: "reload" },
     { ui: undefined as never },
@@ -102,7 +102,7 @@ test("a custom skillsDir overrides the default", async () => {
 
 test("every registered tool declares a JSON-Schema object parameters block", () => {
   const host = new FakePi();
-  createEmpiricaExtension({ dispatch: noopDispatch })(host);
+  createEmpiricaExtension({ ownerEnv: {}, dispatch: noopDispatch })(host);
   for (const def of host.tools.values()) {
     const schema = def.parameters as { type?: unknown; properties?: unknown };
     assert.equal(schema.type, "object", `${def.name}: parameters.type must be "object"`);
@@ -126,7 +126,7 @@ test("empirica_observe configure_run fails closed when the governance ingress th
   const throwingIngress: PrivateIngress = async () => {
     throw new Error("injected governance ingress unavailable");
   };
-  createEmpiricaExtension({ dispatch, privateIngress: throwingIngress })(pi);
+  createEmpiricaExtension({ ownerEnv: {}, dispatch, privateIngress: throwingIngress })(pi);
   // Restore the durable run handle; session_start's own refresh throws (ingress down) but the
   // handle is already set, so the observe tool has an active run to gate.
   const ctx = fakeCtx("/work/repo", [{ customType: "empirica.run", data: { runHandle: "obs-run" } }]);
@@ -184,7 +184,7 @@ function mediatedObserve(choice: "approve" | "dismiss"): {
     if (payload.submission?.action === "approve") return allow(approvedRun, true);
     return allow(pendingRun, false); // dismiss / stored
   };
-  createEmpiricaExtension({ dispatch, privateIngress: trusted })(pi);
+  createEmpiricaExtension({ ownerEnv: {}, dispatch, privateIngress: trusted })(pi);
   const ctx = fakeCtx("/work/repo",
     [{ customType: "empirica.run", data: { runHandle: APPROVED_CONFIGURE.run.id } }]);
   ctx.hasUI = true;
@@ -274,7 +274,7 @@ function lockHarness() {
     if (payload.submission?.action === "approve") return allow(approvedRun, true);
     return allow(approvedRun, false); // outcome "approve": auto-approval, no dialog
   };
-  createEmpiricaExtension({ dispatch, privateIngress: trusted })(pi);
+  createEmpiricaExtension({ ownerEnv: {}, dispatch, privateIngress: trusted })(pi);
   const ctx = fakeCtx("/work/repo",
     [{ customType: "empirica.run", data: { runHandle: APPROVED_CONFIGURE.run.id } }]);
   ctx.hasUI = true;

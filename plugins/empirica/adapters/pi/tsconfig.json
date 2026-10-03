@@ -5,7 +5,6 @@
     "moduleResolution": "NodeNext",
     "baseUrl": ".",
     "paths": {
-      "pi-subagents/preflight": ["src/pi-subagents-preflight.d.ts"],
       "@earendil-works/pi-coding-agent": ["src/pi-coding-agent.d.ts"]
     },
     "lib": ["ES2022"],

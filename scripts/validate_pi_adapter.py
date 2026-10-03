@@ -56,10 +56,59 @@ FORBIDDEN_WRITE = re.compile(
 FORBIDDEN_STATE = re.compile(r"""['"`][^'"`]*\.(?:pi|claude)\b""")
 
 SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:[-+].+)?$")
+SUBAGENTS = "pi-subagents"
+SIFFRAN_REPO = "https://github.com/obzenner/siffran"
 
 
 def rel(path: Path) -> str:
     return str(path.relative_to(ROOT))
+
+
+def external_runtime_problems(manifest: dict) -> list[str]:
+    """How the repository-root package manifest violates the external pi-subagents boundary.
+
+    pi-subagents is the audit runtime, supplied by the user's Pi (``pi install npm:pi-subagents``),
+    never shipped by this package: it may not be a runtime or bundled dependency or a loaded
+    extension. A pinned devDependency (unit-test fixture only) is allowed, and the optional peer
+    declaration and the packaged auditor agent are required.
+    """
+    problems: list[str] = []
+    runtime = manifest.get("dependencies", {})
+    optional = manifest.get("optionalDependencies", {})
+    if SUBAGENTS in runtime or SUBAGENTS in optional:
+        problems.append(f"{SUBAGENTS} must not be a runtime dependency (the user's Pi provides it)")
+    for key in ("bundledDependencies", "bundleDependencies"):
+        if SUBAGENTS in (manifest.get(key) or []):
+            problems.append(f"{SUBAGENTS} must not be bundled")
+    for entry in manifest.get("pi", {}).get("extensions", []):
+        if SUBAGENTS in str(entry):
+            problems.append(f"pi.extensions must not load {SUBAGENTS}: {entry!r}")
+    if manifest.get("peerDependencies", {}).get(SUBAGENTS) != "*":
+        problems.append(f"peerDependencies must declare {SUBAGENTS} as \"*\" (reviewed versions are the adapter's policy, not semver's)")
+    if manifest.get("peerDependenciesMeta", {}).get(SUBAGENTS) != {"optional": True}:
+        problems.append(f"peerDependenciesMeta must mark {SUBAGENTS} optional so npm never installs a second runtime")
+    dev = manifest.get("devDependencies", {}).get(SUBAGENTS)
+    if dev is not None and not SEMVER.match(str(dev)):
+        problems.append(f"devDependencies.{SUBAGENTS} must be an exact version pin, got {dev!r}")
+    return problems
+
+
+def dogfood_settings_problems(settings: dict) -> list[str]:
+    """How the committed ``.pi/settings.json`` violates the external-runtime boundary."""
+    problems: list[str] = []
+    if SUBAGENTS in json.dumps(settings):
+        problems.append(f"must not mention {SUBAGENTS}: the runtime is neither enabled nor suppressed here")
+    siffran_delta = next((entry for entry in settings.get("packages", [])
+                          if isinstance(entry, dict) and entry.get("source") == SIFFRAN_REPO), None)
+    expected = {
+        "source": SIFFRAN_REPO, "autoload": False,
+        "extensions": ["-plugins/empirica/adapters/pi/src/index.ts",
+                       "-plugins/methodologist/adapters/pi/src/index.ts"],
+        "skills": ["-plugins/empirica/skills/empirica", "-plugins/methodologist/skills/think"],
+    }
+    if siffran_delta != expected:
+        problems.append("must suppress every global siffran extension/skill shadowed by the checkout package")
+    return problems
 
 
 def check_manifest(adapter: Path, errors: list[str]) -> dict:
@@ -88,40 +137,14 @@ def check_manifest(adapter: Path, errors: list[str]) -> dict:
             errors.append(f"{rel(manifest_path)}: pi.extensions entry {entry!r} does not exist")
 
     if adapter == ROOT:
-        if manifest.get("dependencies", {}).get("pi-subagents") != "0.50.0":
-            errors.append(f"{rel(manifest_path)}: complete Pi profile must pin pi-subagents 0.50.0")
-        if "pi-subagents" not in manifest.get("bundledDependencies", []):
-            errors.append(f"{rel(manifest_path)}: pi-subagents must be bundled for npm installs")
-        if "./node_modules/pi-subagents/index.ts" not in extensions:
-            errors.append(f"{rel(manifest_path)}: bundled pi-subagents extension is not loaded")
         dev_settings_path = ROOT / ".pi/settings.json"
         try:
             dev_settings = json.loads(dev_settings_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             errors.append(f"{rel(dev_settings_path)}: {exc}")
             dev_settings = {}
-        global_subagents_delta = next((entry for entry in dev_settings.get("packages", [])
-                                       if isinstance(entry, dict)
-                                       and entry.get("source") == "npm:pi-subagents@0.50.0"), None)
-        if global_subagents_delta != {"source": "npm:pi-subagents@0.50.0", "autoload": False,
-                                      "extensions": ["-index.ts"]}:
-            errors.append(f"{rel(dev_settings_path)}: must suppress the global pi-subagents "
-                          "extension while the checkout-bundled profile is active")
-        global_siffran_delta = next((entry for entry in dev_settings.get("packages", [])
-                                    if isinstance(entry, dict)
-                                    and entry.get("source") ==
-                                    "https://github.com/obzenner/siffran"), None)
-        expected_siffran_delta = {
-            "source": "https://github.com/obzenner/siffran", "autoload": False,
-            "extensions": ["-plugins/empirica/adapters/pi/src/index.ts",
-                           "-plugins/methodologist/adapters/pi/src/index.ts",
-                           "-node_modules/pi-subagents/index.ts"],
-            "skills": ["-plugins/empirica/skills/empirica",
-                       "-plugins/methodologist/skills/think"],
-        }
-        if global_siffran_delta != expected_siffran_delta:
-            errors.append(f"{rel(dev_settings_path)}: must suppress every global siffran "
-                          "extension/skill shadowed by the checkout package")
+        errors.extend(f"{rel(manifest_path)}: {problem}" for problem in external_runtime_problems(manifest))
+        errors.extend(f"{rel(dev_settings_path)}: {problem}" for problem in dogfood_settings_problems(dev_settings))
         agent_roots = manifest.get("pi", {}).get("subagents", {}).get("agents", [])
         agent_path = adapter / agent_roots[0] / "empirica-auditor.md" if agent_roots else None
         if agent_roots != ["./plugins/empirica/agents/pi"]:

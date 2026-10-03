@@ -272,6 +272,25 @@ test("interactive auto with unavailable UI fails closed and never delegates", as
   assert.deepEqual(h.decisions, []);
 });
 
+// Pi 1.0 extensions also load in --mode json/--print (hasUI=false, every ui method a no-op) and
+// in RPC mode (hasUI=true, custom() resolves undefined). Neither may crash or approve.
+test("without a UI (print/json mode) the dialog degrades to an unavailable refusal, never a prompt", async () => {
+  const h = harness(); h.ctx.hasUI = false;
+  const response = await h.invoke();
+  assert.equal(response.result.type, "Block");
+  assert.equal(h.customCalls, 0, "no component is attempted");
+  assert.deepEqual(h.decisions, []);
+});
+
+test("a UI whose custom() resolves nothing (RPC mode) is a dismissal, not a crash or an approval", async () => {
+  const h = harness();
+  h.ctx.ui.custom = async () => { h.settings.onCustom(); return undefined as never; };
+  const response = await h.invoke();
+  assert.equal(response.result.type, "Block");
+  assert.deepEqual(outcomes(h), ["present", "dismiss"]);
+  assert.ok(!outcomes(h).includes("approve"));
+});
+
 test("phase decision matches deliberative, interactive-auto, and delegated authority", () => {
   const h = harness();
   assert.equal(expectedApprovalKind(h.g), "host_ui");
