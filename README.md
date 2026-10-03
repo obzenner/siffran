@@ -90,8 +90,10 @@ directly as a repo/user skill there if needed, and use native simple mode only.
 
 Empirica's independent audit runs through the external
 [`pi-subagents`](https://www.npmjs.com/package/pi-subagents) extension; this package does **not**
-bundle or load it. Install the runtime first, then the repository (which carries Empirica, the
-Methodologist, and the Empirica auditor role):
+bundle or load it. The Pi adapter is POSIX-only (macOS and Linux): spikes run through `/bin/sh` under
+POSIX resource limits, and runtime provenance records POSIX paths; Windows is not supported. Install the
+runtime first, then the repository (which carries Empirica, the Methodologist, and the Empirica auditor
+role):
 
 ```sh
 pi install npm:pi-subagents@0.75.0   # Pi <0.86.1: npm:pi-subagents@0.64.0 (see the table below)
@@ -115,14 +117,16 @@ cases are reviewed and added to the contract.
 | `pi-subagents` | Requires Pi | Native receipt (4.1) | Status |
 |---|---|---|---|
 | `0.50.0` | `>=0.84.1` | pending A9 | reviewed; the 4.0 qualification version |
-| `0.64.0` | `>=0.84.1` | pending A9 | reviewed |
+| `0.64.0` | `>=0.84.1` | Pi 0.87.1 (A9a, `ebf426f`) | reviewed |
 | `0.74.0` | `>=0.86.1` | pending A9 | reviewed |
 | `0.75.0` | `>=0.86.1` | pending A9 | reviewed; the repository's development pin |
 
 "Requires Pi" is each release's own declared `@earendil-works/pi-ai` peer (`>=0.80.0` for `0.50.0` and
 `0.64.0`, `>=0.86.1` for `0.74.0` and `0.75.0`), raised to the floor of the supported Pi interval. It is
 recorded in `plugins/empirica/adapters/pi/compat/` and checked against this table. "Native receipt" marks
-the pairs for which an installed-host run has been recorded; `pending A9` means none has yet.
+the pairs for which an installed-host run has been recorded; `pending A9` means none has yet. The
+0.64.0 receipt is native evidence for that pair; the release receipt the live check requires must come
+from Pi 1.0 or later (A9b, pending).
 
 Install the newest reviewed version your Pi satisfies (Pi <0.86.1: `pi-subagents@0.64.0`) and pin the exact
 version, as in the commands above; an unpinned install may resolve to a release that is not in the table

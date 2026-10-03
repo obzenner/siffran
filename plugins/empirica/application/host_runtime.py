@@ -23,7 +23,11 @@ from typing import Any, Mapping
 
 
 def _inside(path: object, root: object) -> bool:
-    """Whether ``path`` is strictly below the absolute directory ``root`` (lexically; no filesystem)."""
+    """Whether ``path`` is strictly below the absolute directory ``root`` (lexically; no filesystem).
+
+    POSIX paths only, by design: the Pi adapter is POSIX-only (spikes run through ``/bin/sh`` under
+    POSIX resource limits), so a Windows-style path is rejected rather than interpreted.
+    """
     if not isinstance(path, str) or not isinstance(root, str):
         return False
     candidate, base = PurePosixPath(path), PurePosixPath(root)
