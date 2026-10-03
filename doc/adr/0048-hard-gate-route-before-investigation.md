@@ -104,3 +104,13 @@ non-bypass. Pi tests cover native dispatch and denial before execution. Interact
 Claude Code 2.1.278 and Pi 0.84.1 + pi-subagents 0.50.0 sessions both denied a native package read
 with `Record a route before investigation.`, then admitted the same read after public route and
 investigate actions with both obligations satisfied.
+
+## Amendment (2026-10)
+
+### Changed Decision
+
+The Pi development profile no longer suppresses a global extension in order to activate a checkout-bundled `0.50.0` runtime. Development and canary setup select one independently installed pi-subagents owner; the adapter verifies that owner's package root and exact version against the reviewed list in the contract (`pi@0.84.1+pi-subagents-foreground-audit-v1`) and refuses a duplicate, unobserved, or unreviewed owner before `StartRun`. The route-before-investigation gate itself is unchanged: runtime admission is an earlier host capability preflight, and when it fails no run is created and no child is reserved.
+
+### Changed Consequences
+
+The suppression arrangement described above documents 4.0 development and remains historical. The 4.1 canary exercises the same owner-resolution and refusal rules as release receipts, because a configured package source is not proof of the active runtime. While a run is active, the Pi adapter also classifies every `subagent` call against the reviewed inventory of the owner's exact version and refuses control, mutation, and ambiguous launches; only one launch form or a reviewed read-only action is admitted.

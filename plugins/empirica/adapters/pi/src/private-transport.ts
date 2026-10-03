@@ -45,6 +45,11 @@ type IdentityResponse = Readonly<{
   model_id: string | null;
 }> | null;
 type AuditPlanResponse = Readonly<{ type: "audit_plan"; plan: AuditPlanData }>;
+/**
+ * `audit_prepare` refused before any reservation: the runtime the adapter observes now is not the one
+ * recorded at StartRun (a reload or resume put another pi-subagents behind the `subagent` tool).
+ */
+type AuditRefusedResponse = Readonly<{ type: "audit_refused"; reason: "runtime_changed" }>;
 type AuditVerdictResponse = Readonly<{ type: "audit_verdict"; admitted: boolean }>;
 type AuditStartedResponse = Readonly<{ type: "audit_started" }>;
 type AuditIdentityResponse = Readonly<{ type: "audit_identity" }>;
@@ -54,7 +59,7 @@ export interface PrivateResponses {
   classify_identity: IdentityResponse;
   governance_context: Response;
   governance_decision: Response;
-  audit_prepare: AuditPlanResponse;
+  audit_prepare: AuditPlanResponse | AuditRefusedResponse;
   audit_reject: AuditTerminalResponse;
   audit_start: AuditStartedResponse;
   audit_identity: AuditIdentityResponse;
@@ -79,9 +84,11 @@ const PRIVATE_SHAPES: { readonly [Op in PrivateOperation]: (value: unknown) => b
   classify_identity: (value) => value === null || (object(value) && string(value.identity)),
   governance_context: envelope,
   governance_decision: envelope,
-  audit_prepare: (value) => object(value) && value.type === "audit_plan" && object(value.plan)
-    && string(value.plan.child_id) && string(value.plan.role_profile)
-    && string(value.plan.operation_id) && object(value.plan.argument),
+  audit_prepare: (value) => object(value) && (
+    (value.type === "audit_refused" && value.reason === "runtime_changed")
+    || (value.type === "audit_plan" && object(value.plan)
+      && string(value.plan.child_id) && string(value.plan.role_profile)
+      && string(value.plan.operation_id) && object(value.plan.argument))),
   audit_verdict: (value) => object(value) && value.type === "audit_verdict"
     && typeof value.admitted === "boolean",
   audit_start: typed("audit_started"),

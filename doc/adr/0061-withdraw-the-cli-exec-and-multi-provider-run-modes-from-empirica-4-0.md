@@ -86,3 +86,13 @@ Shell-level detection of actor CLIs may then exist only as best-effort advice or
 * No reference to `cli_exec`, `multi_provider`, `EMPIRICA_MODE_*` or the `dispatch` action remains in code, contract, schemas, fixtures or live docs. The only exceptions are this ADR, historical ADRs, and tests that assert the removed flags surface as unknown and that a `dispatch` action is rejected.
 * The approval dialog on Claude and Pi shows exactly three budget rows.
 * `make check`, `make empirica-core-integration` and `make empirica-host-integration` pass.
+
+## Amendment (2026-10)
+
+### Changed Decision
+
+The withdrawn run modes stay withdrawn. The external pi-subagents runtime does not reopen them: during an Empirica run the Pi adapter admits only one launch form or a reviewed read-only action of the owner's exact reviewed version, and refuses the control and mutation actions that would make an actor out of a child.
+
+### Changed Consequences
+
+A Pi descendant remains unobserved by Empirica except through the exact native result, session, and owner binding that the audit path consumes. Its author-side use of other launch forms is not metered or attributed; the 4.0 limitation above is unchanged.

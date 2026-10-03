@@ -722,6 +722,63 @@
         },
         "delegation": {
           "type": "boolean"
+        },
+        "host_runtime": {
+          "description": "Optional host-observed facts about the runtime that executes this host's foreground audit, recorded once with the run (Pi: the pi-subagents owner). Validated at the application boundary against the host profile's subagents_compatibility, persisted opaquely, and never interpreted or projected by the core.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "policy_id",
+            "subagents"
+          ],
+          "properties": {
+            "policy_id": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*-v[0-9]+$"
+            },
+            "subagents": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "package",
+                "version",
+                "owner_path",
+                "package_root",
+                "preflight_path",
+                "source"
+              ],
+              "properties": {
+                "package": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                },
+                "version": {
+                  "type": "string",
+                  "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+                },
+                "owner_path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "package_root": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "preflight_path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "source": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                }
+              }
+            }
+          }
         }
       }
     },

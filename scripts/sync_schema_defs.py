@@ -19,6 +19,9 @@ CONTRACTS = ROOT / "contracts" / "empirica" / "v2"
 TARGETS = ("request.schema.json", "response.schema.json", "state.schema.json")
 IDENTITY_KEYS = ("identity", "provider_id", "model_id", "policy_version", "source", "observed_by")
 INVOCATION_KEYS = ("host", "interactive", "signal", "delegation")
+# Optional members of the shared invocation definition: an inline copy that lists them is still the
+# shared shape (`required` stays INVOCATION_KEYS).
+INVOCATION_OPTIONAL_KEYS = ("host_runtime",)
 # Extra closed shared definitions copied verbatim into the targets that reference them.
 # The graph payload is the SSOT for the model-facing graph action shape (defence in depth for
 # core.evaluation.valid_graph); governancePresentation is the private-only dialog body.
@@ -47,10 +50,10 @@ def _pointer(path: tuple[object, ...]) -> str:
                           for part in path)
 
 
-def _shape(value: dict, keys: tuple[str, ...]) -> bool:
+def _shape(value: dict, keys: tuple[str, ...], optional: tuple[str, ...] = ()) -> bool:
     return (set(value.get("required", ())) == set(keys)
             and isinstance(value.get("properties"), dict)
-            and set(value["properties"]) == set(keys))
+            and set(keys) <= set(value["properties"]) <= set(keys) | set(optional))
 
 
 def _same_properties(value: dict, shared: dict) -> bool:
@@ -97,7 +100,7 @@ def _replace_shared(value: object, shared: dict[str, dict],
         result = {"allOf": [{"$ref": "#/$defs/identityObservation"}, extension],
                   "unevaluatedProperties": False}
         return _carry(value, result, shared, path)
-    if _shape(value, INVOCATION_KEYS):
+    if _shape(value, INVOCATION_KEYS, INVOCATION_OPTIONAL_KEYS):
         if not _same_properties(value, invocation):
             raise SchemaGenerationError(
                 f"invocation-shaped schema differs from invocationProvenance at {_pointer(path)}")
@@ -126,6 +129,12 @@ def generated_documents() -> dict[str, dict]:
         if required not in shared:
             raise SchemaGenerationError(f"missing shared definition #/$defs/{required}")
     for name, document in tuple(docs.items()):
+        # The embedded copies of the shared definitions are generated output: refresh the previous
+        # ones in place (they may predate a shared-definition change) instead of comparing against
+        # them, so the document keeps its definition order.
+        for embedded in ("invocationProvenance", "identityObservation"):
+            if embedded in document.get("$defs", {}):
+                document["$defs"][embedded] = copy.deepcopy(shared[embedded])
         document = _replace_shared(document, shared)
         defs = document.setdefault("$defs", {})
         defs.pop("publicContractDefs", None)

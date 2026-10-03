@@ -50,6 +50,7 @@ _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 if str(_PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_ROOT))
 
+from application import host_runtime  # noqa: E402
 from application import protocol as _proto  # noqa: E402
 from application import v2 as _v2  # noqa: E402
 from adapters.execution import FilesystemWorkspace, SubprocessSpikeHarness  # noqa: E402
@@ -157,6 +158,11 @@ def trusted_audit_plan(profile_id: str, run_id: str, child_id: str) -> dict | No
     return build_service(profile_id).trusted_audit_plan(run_id=run_id, child_id=child_id)
 
 
+def trusted_host_runtime(profile_id: str, run_id: str) -> dict | None:
+    """The runtime provenance recorded at StartRun (``{"host_runtime": ...}``), or None if unreadable."""
+    return build_service(profile_id).trusted_host_runtime(run_id=run_id)
+
+
 def trusted_resolve_child(profile_id: str, run_id: str, native_id: str) -> str | None:
     """Resolve an exact native audit execution without exposing correlation publicly."""
     return build_service(profile_id).trusted_resolve_child(run_id=run_id, native_id=native_id)
@@ -197,6 +203,13 @@ def handle(request: object, profile_id: str) -> dict:
     def handler(envelope: dict) -> dict:
         try:
             service = build_service(profile_id)
+            command = envelope["command"]
+            # The host-recorded runtime provenance is checked here, where the exact profile is bound,
+            # so no host can start a run its profile would not accept (and the generic service and
+            # core stay unaware of it).
+            if command["type"] == "StartRun" and host_runtime.rejection(
+                    _proto.host_profile(profile_id), command["invocation"].get("host_runtime")) is not None:
+                return _fault("invalid_request", envelope["request_id"])
             return service._dispatch_validated(envelope)
         except Exception:  # resolved storage/adapter failures are closed, never inert
             return _fault("unavailable", envelope["request_id"])

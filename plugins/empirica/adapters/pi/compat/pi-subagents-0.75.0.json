@@ -1,5 +1,6 @@
 {
   "version": "0.75.0",
+  "peer_pi_ai": ">=0.86.1",
   "launch_contract_version": 3,
   "launch_forms": [
     "agent",

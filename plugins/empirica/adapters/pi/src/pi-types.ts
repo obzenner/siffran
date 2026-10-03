@@ -37,7 +37,8 @@ export interface ExtensionContext {
 
 export interface CommandDefinition {
   description?: string;
-  handler: (args: string, ctx: ExtensionContext) => Promise<void> | void;
+  /** Pi declares ``Promise<void>`` in 0.84.1, 0.87.1 and 1.0.0; a handler that returns nothing is not accepted. */
+  handler: (args: string, ctx: ExtensionContext) => Promise<void>;
 }
 
 export interface ResourcesDiscoverEvent {
@@ -89,9 +90,11 @@ export interface CompactionPreparation {
 
 export interface ToolDefinition {
   name: string;
-  label?: string;
+  /** Required by Pi (``types.d.ts:347`` in 0.84.1, ``:443`` in 1.0.0). */
+  label: string;
   description: string;
-  parameters?: unknown;
+  /** Required by Pi (``:355`` in 0.84.1, ``:451`` in 1.0.0): the tool's parameter schema. */
+  parameters: Record<string, unknown>;
   /**
    * Pi declares ``signal: AbortSignal | undefined`` and ``onUpdate`` optional in every version from
    * 0.84.1 (``types.d.ts:371``) to 1.0.0 (``:492``); a tool must not assume either is present.
@@ -100,9 +103,9 @@ export interface ToolDefinition {
     toolCallId: string,
     params: unknown,
     signal: AbortSignal | undefined,
-    onUpdate: ((u: unknown) => void) | undefined,
+    onUpdate: ((partial: { content: Array<{ type: "text"; text: string }>; details: unknown }) => void) | undefined,
     ctx: ExtensionContext,
-  ) => Promise<{ content: Array<{ type: "text"; text: string }>; details?: unknown }>;
+  ) => Promise<{ content: Array<{ type: "text"; text: string }>; details: unknown }>;
 }
 
 /**
@@ -160,7 +163,7 @@ export interface ExtensionAPI {
   getCommands(): SlashCommandInfo[];
   appendEntry?(customType: string, data?: unknown): void;
   sendMessage?(
-    message: { customType: string; content: string; display?: boolean },
+    message: { customType: string; content: string; display: boolean },
   ): void;
   sendUserMessage(content: string, options?: { deliverAs?: "steer" | "followUp" }): void;
   on(event: "tool_result", handler: (event: ToolResultEvent, ctx: ExtensionContext) => unknown): void;

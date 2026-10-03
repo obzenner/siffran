@@ -19,7 +19,7 @@ import * as path from "node:path";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 
-import type { Dispatch, Request, Response, RunSelector } from "./contract.ts";
+import type { Dispatch, InvocationProvenance, Request, Response, RunSelector } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
 import { govern, governanceTimeout, piGovernanceContext, refreshGovernance, settlementNotice } from "./governance-ui.ts";
 import type {
@@ -48,8 +48,9 @@ import {
   type PreflightImporter, type SubagentOwner, type SubagentsProvenance,
 } from "./runtime-owner.ts";
 import { launchUnsupportedReason, ownerRefusalBlock, ownerRefusalReason } from "./owner-refusal.ts";
-import { AUDIT_LAUNCH_POLICY } from "./host-profile.ts";
-import { auditLaunchInput } from "./audit-launch.ts";
+import { AUDIT_LAUNCH_POLICY, SUBAGENTS_COMPATIBILITY } from "./host-profile.ts";
+import { buildHostRuntime } from "./host-runtime.ts";
+import { auditLaunchInput, preflightLaunch } from "./audit-launch.ts";
 import { admitAuditPreflight, withoutThinkingLevel } from "./preflight-seam.ts";
 import { loadInventory, type SubagentInventory } from "./subagent-inventory.ts";
 import { PUBLIC_TOOLS } from "./public-tools.ts";
@@ -181,10 +182,11 @@ export async function defaultAuditContractResolver(
   const descriptor = {
     version: runtime.version, inventory: runtime.inventory,
     expected: { agent_file_path: String(input.expectedAgent), model },
-    // The launch request the adapter sends (tool_call sets async:false and admits no other field).
-    // forceTopLevelAsync lives in pi-subagents' private config file and is not observable through
-    // the public preflight: it is left unobserved here and fails closed at result parsing instead.
-    launch: { async: false, output_mode: undefined, force_top_level_async: undefined },
+    // The launch request the adapter sends (`tool_call` applies the same `auditLaunchInput`; the task
+    // and scope are irrelevant to the checked fields). forceTopLevelAsync lives in pi-subagents'
+    // private config file and is not observable through the public preflight: it is undefined here and
+    // fails closed at result parsing instead.
+    launch: preflightLaunch(auditLaunchInput({ task: "", model, agentScope: "user", policy: AUDIT_LAUNCH_POLICY })),
     canonical: canonicalPath,
   };
   let unresolved = "auditor package unresolvable";
@@ -286,6 +288,8 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     ?? ((input, ctx, runtime) => defaultAuditContractResolver(input, ctx, { runtime }));
   const ownerIo = deps.ownerIo ?? nodeOwnerIo;
   const preflightImporter = deps.preflightImporter ?? nodePreflightImporter;
+  // The checked-in inventories are exactly the contract's reviewed versions (contract-check and
+  // host-profile.test.ts), and buildHostRuntime re-checks the version when a run starts.
   const inventoryFor = deps.inventoryFor ?? ((version: string) => loadInventory(version));
   // Read once at load: a malformed EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS fails extension load with its message
   // instead of surfacing mid-run inside a configure_run that already dispatched.
@@ -496,7 +500,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         parameters: EMPTY_PARAMS,
         async execute(id, raw) {
           if (!runHandle && !reportEvaluations.has(id))
-            return { content: [{ type: "text", text: "No active Empirica run." }] };
+            return { content: [{ type: "text", text: "No active Empirica run." }], details: undefined };
           const intent = (raw as { intent?: unknown }).intent === "stop"
             ? "stop" : REPORT_CONVERGENCE_INTENT;
           const prepared = reportEvaluations.get(id);
@@ -542,7 +546,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             }
             const readHandle = runHandle ?? retiredHandle;
             if (!readHandle)
-              return { content: [{ type: "text", text: "No active Empirica run." }] };
+              return { content: [{ type: "text", text: "No active Empirica run." }], details: undefined };
             if (operation === "GetRun") request = getRunRequest(readHandle, randomUUID());
             else if (operation === "GetArgument") request = getArgumentRequest(readHandle, randomUUID());
             else if (operation === "RestoreRun") request = restoreRunRequest(readHandle, randomUUID());
@@ -560,7 +564,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         parameters: OBSERVE_PARAMS,
         async execute(_id, raw, signal, _onUpdate, ctx) {
           if (!runHandle)
-            return { content: [{ type: "text", text: "No active Empirica run." }] };
+            return { content: [{ type: "text", text: "No active Empirica run." }], details: undefined };
           const params = raw as { action?: unknown };
           if (!params.action || typeof params.action !== "object")
             throw new Error("action must be an object");
@@ -628,14 +632,13 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           // Render the canonical installed skill before creating a run. If the
           // package is incomplete, fail without leaving an active orphan.
           const kickoff = skillInvocation(skillsDir, args);
-          const invocation = {
+          const invocation: InvocationProvenance = {
             host: "pi", interactive: INTERACTIVE_BY_MODE[ctx.mode ?? ""] ?? null,
             signal: `ctx.mode=${ctx.mode ?? "unknown"}`,
             delegation: process.env[PUBLIC_TOOLS.host_profiles[HOST_PROFILE_ID].delegation_env] === "1",
+            // The observed audit runtime, recorded once with the run (receipts are derived from it).
+            host_runtime: buildHostRuntime(SUBAGENTS_COMPATIBILITY, owner.binding.provenance),
           };
-          // B3: persist owner.binding.provenance (adapter-owned `subagents` object) with the run. The
-          // closed StartRun `invocation` has no field for host-observed runtime facts, so it is
-          // observed and bound here but not yet sent or recorded.
           const response = await dispatch(startRunRequest(selectorOf(ctx), goal, randomUUID(), invocation, {
             ...startOptions, controlMode: parsed.controlMode,
           }));
@@ -646,7 +649,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             await refreshGovernance(runHandle, ctx, trusted);
             pi.appendEntry?.("empirica.run", { runHandle });
             pi.sendMessage?.({
-              customType: "empirica",
+              customType: "empirica", display: false,
               content: `Empirica v2 is active. Opaque run handle: ${runHandle}. Use empirica_observe, empirica_read, and report_convergence.`,
             });
             // Extension-injected slash commands are not passed through Pi's
@@ -857,8 +860,21 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           if (authorIdentity.identity === reviewerIdentity.identity)
             throw new Error(
               'auditor model equals the main model; set subagents.agentOverrides["empirica.empirica-auditor"].model');
+          // The runtime is recorded once, at StartRun. The private bridge admits the audit only when the
+          // runtime observed now is that record, so a receipt derived from the record cannot name a
+          // package other than the one that runs this audit (a reload or resume may have swapped it).
           const prepared = await trusted({ operation: "audit_prepare", run_id: runHandle,
-                                           role_profile: roleProfile });
+            role_profile: roleProfile,
+            payload: { host_runtime: buildHostRuntime(SUBAGENTS_COMPATIBILITY, launch.binding.provenance) } });
+          if (prepared.type === "audit_refused") {
+            const refusal: OwnerRefusal = { ok: false, code: "owner-changed",
+              message: `this run was started under a different pi-subagents runtime than the ${SUBAGENT_TOOL} owner `
+                + `bound now (${launch.binding.owner.package_root}@${launch.binding.owner.version}); `
+                + "start a new session and a new /empirica run" };
+            ownerState = { kind: "refused", refusal };
+            return { block: true, reason: `empirica subagent call refused — `
+              + `${ownerRefusalReason(refusal.code).message} [${ownerDetail(refusal)}]` };
+          }
           plan = prepared.plan;
           Object.assign(event.input, auditLaunchInput({
             task: `${auditorInstructions()}\n\n` +

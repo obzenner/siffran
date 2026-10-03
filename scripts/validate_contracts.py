@@ -50,8 +50,8 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:de4a4afc8339172bc2d80540c9ce4cdc1528fb729bf58ef543378c6988c30848"
-REVIEWED_HOST_PROFILES_DIGEST = "sha256:f459d7b74dc948ef3a76b2548d486f0a92b630cbe9997ae35b4d348c7490f403"
+REVIEWED_REGISTRY_DIGEST = "sha256:dfc3b1cb235da4d56b7225a8e9a60c2b208ad1c6405be53782666fa4431fb2e3"
+REVIEWED_HOST_PROFILES_DIGEST = "sha256:31f7dde3ecdb24e97e88ad8c6812db2f85ff039b0199ddbf0c4e0443de0f9d1b"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
 REGISTRY_VERSION = "3.0.0"
@@ -516,8 +516,68 @@ def check_presentation_selector(contract: dict, errors: list[str], where: str) -
 
 
 
+_EXACT_SEMVER = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
+
+
+PI_COMPAT_DIR = ROOT / "plugins/empirica/adapters/pi/compat"
+
+
+def inventory_versions(compat_dir: Path) -> frozenset[str]:
+    """Versions with a checked-in reviewed inventory: ``pi-subagents-<version>.json``, whose own
+    ``version`` field must equal the file name's."""
+    found = set()
+    for path in sorted(compat_dir.glob("pi-subagents-*.json")):
+        name = path.name.removeprefix("pi-subagents-").removesuffix(".json")
+        version = json.loads(path.read_text(encoding="utf-8")).get("version")
+        if version != name:
+            raise ValueError(f"{path}: inventory describes {version!r}, not {name!r}")
+        found.add(name)
+    return frozenset(found)
+
+
+def check_subagents_compatibility(profile: dict, pwhere: str, inventory_versions: frozenset[str] | None,
+                                  errors: list[str]) -> None:
+    """The external-runtime policy of a foreground-audit profile (Empirica 4.1 D5/D6).
+
+    Exactly the foreground hosts declare it; the profile id is ``<host>@<version>+<policy_id>``, so an
+    id can never encode a range or a runtime version; ``reviewed_versions`` are exact, unique and
+    ascending. ``inventory_versions`` is the set of checked-in reviewed inventories
+    (``adapters/pi/compat/pi-subagents-<version>.json``); when supplied it must equal
+    ``reviewed_versions``. The contract list is the reviewed decision and the inventories are the
+    evidence for it, so promoting a version is an explicit edit of both, never an implicit side effect
+    of generating a file; neither can drift from the other unnoticed."""
+    policy = profile.get("subagents_compatibility")
+    foreground = profile.get("audit_execution") == "foreground"
+    if foreground and policy is None:
+        errors.append(f"{pwhere}: a foreground-audit host must declare subagents_compatibility")
+    if not foreground and policy is not None:
+        errors.append(f"{pwhere}: subagents_compatibility applies only to foreground-audit hosts")
+    if not isinstance(policy, dict):
+        return
+    expected_id = f"{profile.get('host_id')}@{profile.get('version')}+{policy.get('policy_id')}"
+    if profile.get("profile_id") != expected_id:
+        errors.append(f"{pwhere}: profile_id must be '<host_id>@<version>+<policy_id>' = {expected_id!r}")
+    if policy.get("unreviewed_action") != "refuse":
+        errors.append(f"{pwhere}: subagents_compatibility.unreviewed_action must be 'refuse'")
+    reviewed = policy.get("reviewed_versions")
+    if not isinstance(reviewed, list) or not reviewed \
+            or not all(isinstance(v, str) and _EXACT_SEMVER.fullmatch(v) for v in reviewed):
+        errors.append(f"{pwhere}: reviewed_versions must be a nonempty list of exact MAJOR.MINOR.PATCH versions")
+        return
+    if len(set(reviewed)) != len(reviewed):
+        errors.append(f"{pwhere}: reviewed_versions must be unique")
+    if reviewed != sorted(reviewed, key=lambda v: tuple(int(part) for part in v.split("."))):
+        errors.append(f"{pwhere}: reviewed_versions must be in ascending version order")
+    if inventory_versions is not None and set(reviewed) != inventory_versions:
+        errors.append(
+            f"{pwhere}: reviewed_versions {sorted(reviewed)} != checked-in inventories {sorted(inventory_versions)} "
+            f"(missing inventory: {sorted(set(reviewed) - inventory_versions)}; "
+            f"inventory not reviewed: {sorted(inventory_versions - set(reviewed))})")
+
+
 def check_host_profiles(profiles_doc: dict, contract: dict, known_fixture_ids: set,
-                         errors: list[str], where: str) -> None:
+                         errors: list[str], where: str,
+                         inventory_versions: frozenset[str] | None = None) -> None:
     """Load host profiles as canonical data and check them structurally/referentially; the
     complete reviewed field set is frozen by one compact digest, not a duplicated Python row."""
     host_tiers = set(contract.get("host_tiers", []))
@@ -574,6 +634,7 @@ def check_host_profiles(profiles_doc: dict, contract: dict, known_fixture_ids: s
             errors.append(f"{pwhere}: required_live_probe_ids must be nonempty")
         if "candidate_tier" in profile and not (profile.get("candidate_probe_ids") or []):
             errors.append(f"{pwhere}: candidate_tier requires candidate_probe_ids")
+        check_subagents_compatibility(profile, pwhere, inventory_versions, errors)
         policy = profile.get("audit_launch_policy")
         if audit_execution == "foreground" and policy is None:
             errors.append(f"{pwhere}: a foreground-audit host must declare audit_launch_policy")
@@ -2517,7 +2578,8 @@ def main() -> int:
         for p in host_profiles_doc.get("profiles", []):
             if isinstance(p, dict):
                 host_tiers_by_profile[p.get("profile_id")] = p.get("current_tier")
-        check_host_profiles(host_profiles_doc, registry, v2_names, errors, "host-profiles")
+        check_host_profiles(host_profiles_doc, registry, v2_names, errors, "host-profiles",
+                            inventory_versions(PI_COMPAT_DIR))
 
     # #7: the Pi adapter still submits a literal approval ingress. Freeze it against the Pi
     # profile so a profile change cannot silently strand headless/UI approval.
@@ -2740,6 +2802,43 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         "audit_launch_policy"]["tool_budget"]["soft"] = 31
     expect(lambda e: check_host_profiles(bad_budget, registry, required_fixtures, e, "neg"),
            "soft must not exceed hard", "tool budget soft above hard")
+    # (g) external-runtime policy: dropped, unreviewed inventory, missing inventory, order, id encoding.
+    # Hermetic baseline: pretend exactly the reviewed versions are installed, so each mutant changes one fact
+    # (the real directory is compared in main()).
+    installed = frozenset(next(p for p in host_profiles_doc["profiles"] if p.get("host_id") == "pi")
+                          ["subagents_compatibility"]["reviewed_versions"])
+
+    def pi_mutant(mutate):
+        doc = copy.deepcopy(host_profiles_doc)
+        mutate(next(p for p in doc["profiles"] if p.get("host_id") == "pi"))
+        return doc
+
+    for label, mutate, needle in (
+        ("foreground host without subagents_compatibility",
+         lambda p: p.pop("subagents_compatibility"), "must declare subagents_compatibility"),
+        ("a reviewed version with no checked-in inventory",
+         lambda p: p["subagents_compatibility"]["reviewed_versions"].append("9.9.9"), "missing inventory: ['9.9.9']"),
+        ("a checked-in inventory that was never reviewed",
+         lambda p: p["subagents_compatibility"]["reviewed_versions"].remove("0.64.0"), "inventory not reviewed: ['0.64.0']"),
+        ("reviewed versions out of order",
+         lambda p: p["subagents_compatibility"]["reviewed_versions"].reverse(), "ascending version order"),
+        ("duplicate reviewed version",
+         lambda p: p["subagents_compatibility"]["reviewed_versions"].append("0.50.0"), "must be unique"),
+        ("a version range as a reviewed version",
+         lambda p: p["subagents_compatibility"].update(reviewed_versions=[">=0.50.0"]), "exact MAJOR.MINOR.PATCH"),
+        ("a profile id that does not carry the policy id",
+         lambda p: p.update(profile_id="pi@0.84.1"), "profile_id must be '<host_id>@<version>+<policy_id>'"),
+        ("an unknown unreviewed action",
+         lambda p: p["subagents_compatibility"].update(unreviewed_action="warn"), "unreviewed_action must be 'refuse'"),
+    ):
+        expect(lambda e, doc=pi_mutant(mutate): check_host_profiles(
+            doc, registry, required_fixtures, e, "neg", installed), needle, label)
+    not_foreground = copy.deepcopy(host_profiles_doc)
+    next(p for p in not_foreground["profiles"] if p.get("host_id") == "claude-code")[
+        "subagents_compatibility"] = copy.deepcopy(
+        next(p for p in host_profiles_doc["profiles"] if p.get("host_id") == "pi")["subagents_compatibility"])
+    expect(lambda e: check_host_profiles(not_foreground, registry, required_fixtures, e, "neg", installed),
+           "applies only to foreground-audit hosts", "subagents_compatibility on a non-foreground host")
     bad_levels = copy.deepcopy(host_profiles_doc)
     bad_levels["thinking_levels"] = ["high", "high"]
     expect(lambda e: check_host_profiles(bad_levels, registry, required_fixtures, e, "neg"),

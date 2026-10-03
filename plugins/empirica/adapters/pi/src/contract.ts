@@ -30,6 +30,14 @@ export interface InvocationProvenance {
   interactive: boolean | null;
   signal: string;
   delegation: boolean;
+  /** Host-recorded audit-runtime provenance (host-runtime.ts); persisted with the run, never shown. */
+  host_runtime?: {
+    policy_id: string;
+    subagents: {
+      package: string; version: string; owner_path: string; package_root: string;
+      preflight_path: string; source: string;
+    };
+  };
 }
 
 export interface StartRunCommand {

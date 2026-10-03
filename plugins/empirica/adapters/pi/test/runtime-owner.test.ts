@@ -369,8 +369,8 @@ test("every refusal code maps to a host.subagents_* reason the contract carries,
 test("a registered-but-inactive tool has its own guidance, distinct from a missing install", () => {
   const inactive = String(ownerRefusalReason("tool-inactive").message);
   assert.notEqual(inactive, String(ownerRefusalReason("missing-tool").message));
-  assert.match(inactive, /Enable the `subagent` tool \(`subagents_enable`, or `toolActivation: eager`\) and retry/);
-  assert.match(inactive, /a host restart does not change this/);
+  assert.match(inactive, /Call `subagents_enable` and retry, or set pi-subagents `toolActivation: eager` and reload the host/);
+  assert.match(inactive, /a restart alone does not change this/);
   assert.doesNotMatch(inactive, /install/i);
 });
 

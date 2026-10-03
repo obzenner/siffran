@@ -55,6 +55,35 @@ class SyncSchemaDefsTests(unittest.TestCase):
         exact["$comment"] = "retain me"
         self.assertEqual(sync_schema_defs._replace_shared(exact, shared)["$comment"], "retain me")
 
+    def test_the_optional_host_runtime_member_is_part_of_the_shared_invocation_shape(self) -> None:
+        shared = json.loads((sync_schema_defs.CONTRACTS / "shared-defs.json").read_text())["$defs"]
+        invocation = shared["invocationProvenance"]
+        self.assertIn("host_runtime", invocation["properties"])
+        self.assertNotIn("host_runtime", invocation["required"], "optional: Claude and Codex record none")
+        # Carrying the member is the shared shape; it collapses to the reference.
+        self.assertEqual(sync_schema_defs._replace_shared(copy.deepcopy(invocation), shared),
+                         {"$ref": "#/$defs/invocationProvenance"})
+        # An embedding that still has the four 4.0 members is a near match, not silently collapsed.
+        stale = copy.deepcopy(invocation)
+        del stale["properties"]["host_runtime"]
+        with self.assertRaisesRegex(sync_schema_defs.SchemaGenerationError, r"#/\$defs/old"):
+            sync_schema_defs._replace_shared(stale, shared, ("$defs", "old"))
+        # A different host_runtime definition is also a near match.
+        drifted = copy.deepcopy(invocation)
+        drifted["properties"]["host_runtime"]["properties"]["policy_id"]["maxLength"] = 1
+        with self.assertRaisesRegex(sync_schema_defs.SchemaGenerationError, r"#/\$defs/drifted"):
+            sync_schema_defs._replace_shared(drifted, shared, ("$defs", "drifted"))
+        # An unlisted extra member is not the invocation shape at all and is left alone.
+        other = copy.deepcopy(invocation)
+        other["properties"]["unlisted"] = {"type": "string"}
+        self.assertEqual(sync_schema_defs._replace_shared(other, shared)["properties"]["unlisted"], {"type": "string"})
+
+    def test_every_generated_schema_defines_host_runtime_once_and_refers_to_it(self) -> None:
+        for name in sync_schema_defs.TARGETS:
+            text = (sync_schema_defs.CONTRACTS / name).read_text()
+            self.assertEqual(text.count('"host_runtime": {'), 1, f"{name}: one definition, never a pasted copy")
+            self.assertGreaterEqual(text.count('"$ref": "#/$defs/invocationProvenance"'), 1, name)
+
     def test_missing_source_fails_instead_of_generating_self_reference(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             contracts = self._contracts(tmp)

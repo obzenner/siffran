@@ -1391,7 +1391,7 @@
       "sections": [
         "hosts/capabilities"
       ],
-      "message": "The pi-subagents `subagent` tool is registered but not active, so no independent audit can launch. Enable the `subagent` tool (`subagents_enable`, or `toolActivation: eager`) and retry; a host restart does not change this. Or accept the residual.",
+      "message": "The pi-subagents `subagent` tool is registered but not active, so no independent audit can launch. Call `subagents_enable` and retry, or set pi-subagents `toolActivation: eager` and reload the host; a restart alone does not change this. Or accept the residual.",
       "disposition": "host_recovery"
     },
     "host.subagents_owner_unverified": {
@@ -1451,7 +1451,7 @@
       "sections": [
         "hosts/capabilities"
       ],
-      "message": "The pi-subagents runtime admits a launch form Empirica cannot classify or correlate. Use only the canonical foreground auditor launch, or accept the residual.",
+      "message": "During an Empirica run, `subagent` accepts exactly one launch form (for example `agent` or `workflow`) or a reviewed read-only action (`list`, `status`, `models`, ...); control, mutation, and ambiguous calls are refused. Retry with a supported call, or accept the residual.",
       "disposition": "host_recovery"
     },
     "host.subagents_provenance_missing": {

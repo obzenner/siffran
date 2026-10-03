@@ -26,6 +26,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 import { type Request } from "../src/contract.ts";
+import { recordedInvocation } from "./owner-fixture.ts";
 import {
   startRunRequest,
   resolveRunRequest,
@@ -157,7 +158,7 @@ test("lexical projection: Budgets are canonical-optional schema properties", () 
 
 // --- (b) emitted-builder conformance (one builder table) ---------------------
 
-const INVOCATION = { host: "pi", interactive: true, signal: "ctx.mode=tui", delegation: false };
+const INVOCATION = recordedInvocation();
 const BUILDER_TABLE: Array<{ type: string; build: () => Request }> = [
   { type: "StartRun", build: () => startRunRequest({ project: "p", session: "s" }, "goal", "r1", INVOCATION) },
   { type: "StartRun", build: () => startRunRequest({ project: "p", session: "s" }, "g", "r2", INVOCATION, { maxPasses: 3, maxSpawns: 1 }) },

@@ -23,7 +23,7 @@
           "relevant_sections": [
             "hosts/capabilities"
           ],
-          "digest": "sha256:de4a4afc8339172bc2d80540c9ce4cdc1528fb729bf58ef543378c6988c30848"
+          "digest": "sha256:dfc3b1cb235da4d56b7225a8e9a60c2b208ad1c6405be53782666fa4431fb2e3"
         },
         "obligations": {
           "active": [],
@@ -35,7 +35,7 @@
         },
         "children": [],
         "host": {
-          "profile_id": "pi@0.84.1+pi-subagents@0.50.0",
+          "profile_id": "pi@0.84.1+pi-subagents-foreground-audit-v1",
           "tier": "foreground_only",
           "missing_capabilities": [
             "host.async_unsupported"

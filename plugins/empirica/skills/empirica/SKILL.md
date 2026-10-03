@@ -2,7 +2,7 @@
 name: empirica
 description: "Empirical-convergence workflow for non-trivial work whose plan is uncertain. Route before investigating, represent unknowns as claims, require cited research before deterministic spikes, discard refuted claims, and request an independently audited convergence decision. Use for design-and-implement work, architectural uncertainty, competing approaches, and risky assumptions. Host capabilities differ; run the capability preflight before promising convergence. Invoke as /empirica <goal>."
 allowed-tools: Read Glob Grep Bash Edit Write Agent TaskCreate TaskUpdate WebFetch
-compatibility: Designed for Claude Code >=2.1.278,<2.2.0, Codex CLI >=0.146.0,<0.147.0, and Pi >=0.84.1,<0.90.0 with the external pi-subagents runtime (not bundled); requires python3 for hook-backed hosts. Exact observed versions remain receipt provenance; live capabilities still gate execution.
+compatibility: Designed for Claude Code >=2.1.278,<2.2.0, Codex CLI >=0.146.0,<0.147.0, and Pi >=0.84.1,<1.1.0 with the external pi-subagents runtime (not bundled); requires python3 for hook-backed hosts. Exact observed versions remain receipt provenance; live capabilities still gate execution.
 argument-hint: "[--auto] <goal>"
 ---
 
@@ -30,10 +30,11 @@ Identify the exact active host surface from the tools and lifecycle already pres
   are host-owned async children; a current pending audit settles the parent turn
   until Claude's native completion notification resumes it.
 - **Pi capability profile (qualified on `0.84.1`, compatible
-  `>=0.84.1,<0.90.0`, with external `pi-subagents` installed by the user):** continue when `/empirica`
+  `>=0.84.1,<1.1.0`, with external `pi-subagents` installed by the user):** continue when `/empirica`
   injected an opaque handle, `empirica_observe`, `empirica_read`, and `report_convergence` are present,
   and the adapter accepted exactly one active `subagent` owner (its canonical package root, exact
-  version, and that package's own launch preflight). Any other state is a `host.subagents_*`
+  version, and that package's own launch preflight). An unreviewed `pi-subagents` version fails closed
+  (the exact reviewed versions are listed in the README). Any other state is a `host.subagents_*`
   refusal.
 - **Codex CLI observational profile (qualified on `0.146.0`, compatible
   `>=0.146.0,<0.147.0`):** continue when activation injected the opaque

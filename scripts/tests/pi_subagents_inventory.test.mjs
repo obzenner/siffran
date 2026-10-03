@@ -12,9 +12,10 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-  COMPAT_DIR, generateInventory, inventoryPath, serialiseInventory, subagentParamProperties,
+  COMPAT_DIR, generateInventory, inventoryPath, peerPiAi, serialiseInventory, subagentParamProperties,
 } from "../gen_pi_subagents_inventory.mjs";
 import { readPackage } from "../lib/pi_subagents_package.mjs";
+import { useDecoyHome } from "./decoy_home.mjs";
 import { auditLaunchInput } from "../../plugins/empirica/adapters/pi/src/audit-launch.ts";
 import { AUDIT_LAUNCH_POLICY } from "../../plugins/empirica/adapters/pi/src/host-profile.ts";
 import { loadInventory, LAUNCH_FORMS } from "../../plugins/empirica/adapters/pi/src/subagent-inventory.ts";
@@ -31,6 +32,23 @@ test("the devDependency is pinned exactly and is the installed copy", () => {
 test("the devDependency's checked-in inventory equals a fresh generation (never skipped)", async () => {
   const fresh = serialiseInventory(await generateInventory(devDependency));
   assert.equal(readFileSync(inventoryPath(COMPAT_DIR, declared), "utf8"), fresh);
+});
+
+test("the inventory records the package's own declared pi-ai peer, and a package that declares none cannot be recorded", async () => {
+  const manifest = readPackage(devDependency).manifest;
+  const inventory = await generateInventory(devDependency);
+  assert.equal(inventory.peer_pi_ai, manifest.peerDependencies["@earendil-works/pi-ai"]);
+  assert.match(inventory.peer_pi_ai, /^>=\d+\.\d+\.\d+$/);
+  assert.equal(peerPiAi({ version: "9.9.9", peerDependencies: { "@earendil-works/pi-ai": ">=0.90.0" } }), ">=0.90.0");
+  for (const peerDependencies of [undefined, {}, { "@earendil-works/pi-ai": "" }, { "@earendil-works/pi-ai": 90 }])
+    assert.throws(() => peerPiAi({ version: "9.9.9", peerDependencies }), /declares no peerDependencies/);
+});
+
+test("generation never reads the operator's home: a decoy home with invalid agents changes nothing", async (t) => {
+  useDecoyHome(t);
+  const fresh = serialiseInventory(await generateInventory(devDependency));
+  assert.equal(readFileSync(inventoryPath(COMPAT_DIR, declared), "utf8"), fresh);
+  assert.ok(process.env.HOME?.includes("decoy-home-"), "the decoy was in force during the generation");
 });
 
 test("every other reviewed inventory equals a fresh generation where its package root is supplied", async (t) => {

@@ -14,6 +14,16 @@ export interface AuditLaunchDecision {
 }
 
 /**
+ * The launch facts the preflight seam checks (`admitAuditPreflight`'s `descriptor.launch`), read off
+ * the request object that is actually sent, so the seam judges the real request and not constants.
+ */
+export function preflightLaunch(request: Record<string, unknown>): {
+  readonly async: unknown; readonly output_mode: unknown; readonly force_top_level_async: unknown;
+} {
+  return { async: request.async, output_mode: request.outputMode, force_top_level_async: request.forceTopLevelAsync };
+}
+
+/**
  * The host-owned launch fields: the dossier task, the resolved model and scope, a foreground run,
  * the read-only acceptance exemption, and the contract-owned timeout and tool budget. pi-subagents may
  * classify the original author call before the task is replaced, so the acceptance exemption is explicit:

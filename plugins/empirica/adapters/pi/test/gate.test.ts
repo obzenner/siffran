@@ -6,7 +6,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { PROTOCOL, type Request, type Response, type Result } from "../src/contract.ts";
+import { PROTOCOL, type InvocationProvenance, type Request, type Response, type Result } from "../src/contract.ts";
+import { SUBAGENTS_COMPATIBILITY } from "../src/host-profile.ts";
 import { REPORT_CONVERGENCE_TOOL, SUBAGENT_TOOL } from "../src/translate.ts";
 import {
   BUDGET_EXHAUSTED_NOTICE, budgetExhaustedWait, HUMAN_WAIT_NOTICE, humanApprovalWait,
@@ -16,14 +17,16 @@ import {
 } from "../src/index.ts";
 import { loadInventory, type SubagentInventory } from "../src/subagent-inventory.ts";
 import { bound, FIXTURES, fixtureFor } from "./preflight-fixtures.ts";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { isDeepStrictEqual } from "node:util";
+import * as path from "node:path";
 import { join, resolve } from "node:path";
 import { FakePi, FakeUi, fakeCtx } from "./fakes.ts";
 import type { ToolCallEvent, ToolInfo, ToolResultEvent } from "../src/pi-types.ts";
 import type { OwnerEnv } from "../src/runtime-owner.ts";
 import { PUBLIC_TOOLS } from "../src/public-tools.ts";
-import { makeSubagentsPackage, tempParent } from "./owner-fixture.ts";
+import { defaultSubagentsPackage, makeSubagentsPackage, tempParent } from "./owner-fixture.ts";
 import type { PrivateIngressRequest } from "../src/private-transport.ts";
 
 const HANDLE = "run-handle-1";
@@ -181,8 +184,12 @@ async function wire(
   const auditResolutions: Record<string, unknown>[] = [];
   const pi = new FakePi();
   if (options.owners) pi.subagentOwners = options.owners;
+  // What the Python core keeps of the latest StartRun (`invocation.host_runtime`); audit_prepare compares
+  // the adapter's current runtime with it exactly (application/host_runtime.py `same_runtime`).
+  let recordedRuntime: unknown;
   const dispatch = (req: Request): Response => {
     requests.push(req);
+    if (req.command.type === "StartRun") recordedRuntime = req.command.invocation?.host_runtime;
     const resp = responder(req);
     // Echo the request_id so the guard's correlation check passes. Tests that
     // deliberately test a mismatch pass echoRequestId=false.
@@ -200,7 +207,9 @@ async function wire(
         const identity = classify(payload?.provider_id, payload?.model_id);
         return identity === null ? null as unknown as Record<string, unknown> : { identity };
       }
-      if (request.operation === "audit_prepare") return {
+      if (request.operation === "audit_prepare") return recordedRuntime !== undefined
+        && !isDeepStrictEqual(recordedRuntime, request.payload?.host_runtime)
+        ? { type: "audit_refused", reason: "runtime_changed" } : {
         type: "audit_plan",
         plan: { child_id: "ch-1", role_profile: "empirica.empirica-auditor",
           operation_id: `sha256:${"b".repeat(64)}`,
@@ -235,6 +244,14 @@ function toolEvent(toolName: string): ToolCallEvent {
   return { toolName, toolCallId: "tc-1", input: {} };
 }
 
+/** The runtime provenance /empirica must record for the default fixture owner (observed, canonical paths). */
+function ownerHostRuntime(): NonNullable<InvocationProvenance["host_runtime"]> {
+  const pkg = defaultSubagentsPackage();
+  return { policy_id: SUBAGENTS_COMPATIBILITY.policy_id, subagents: { package: "pi-subagents", version: "0.74.0",
+    owner_path: realpathSync(pkg.entry), package_root: realpathSync(pkg.root),
+    preflight_path: realpathSync(path.join(pkg.root, "src", "api", "preflight.ts")), source: "npm:pi-subagents" } };
+}
+
 async function startRun(w: Wired): Promise<void> {
   const ctx = fakeCtx("/work", [
     { customType: "empirica.run", data: { runHandle: HANDLE } },
@@ -253,7 +270,7 @@ test("/empirica dispatches StartRun and persists the opaque handle", async () =>
   assert.equal(w.requests.length, 1);
   assert.equal(w.requests[0].command.type, "StartRun");
   if (w.requests[0].command.type === "StartRun") assert.deepEqual(w.requests[0].command.invocation,
-    { host: "pi", interactive: true, signal: "ctx.mode=tui", delegation: false });
+    { host: "pi", interactive: true, signal: "ctx.mode=tui", delegation: false, host_runtime: ownerHostRuntime() });
   assert.equal(w.pi.entries.length, 1);
   assert.equal(w.pi.entries[0].customType, "empirica.run");
   assert.match(w.pi.modelMessages[0].content, /empirica_observe/);
@@ -277,7 +294,7 @@ test("/empirica records every Pi mode and operator delegation", async () => {
         const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }));
         await w.pi.command("empirica").handler("goal", { ui: new FakeUi(), mode });
         if (w.requests[0].command.type === "StartRun") assert.deepEqual(w.requests[0].command.invocation,
-          { host: "pi", interactive, signal: `ctx.mode=${mode}`, delegation: delegated });
+          { host: "pi", interactive, signal: `ctx.mode=${mode}`, delegation: delegated, host_runtime: ownerHostRuntime() });
       }
     }
   } finally {
@@ -344,8 +361,8 @@ test("/empirica refuses to start when the pi-subagents tool is not active (P1b)"
     assert.ok(ui.notifications[0].message.includes(reasonMessage("host.subagents_tool_inactive")),
       ui.notifications[0].message);
     assert.match(ui.notifications[0].message, /tool-inactive: the `subagent` tool is registered but not active/);
-    assert.match(ui.notifications[0].message, /Enable the `subagent` tool \(`subagents_enable`, or `toolActivation: eager`\)/);
-    assert.match(ui.notifications[0].message, /a host restart does not change this/);
+    assert.match(ui.notifications[0].message, /Call `subagents_enable` and retry, or set pi-subagents `toolActivation: eager` and reload the host/);
+    assert.match(ui.notifications[0].message, /a restart alone does not change this/);
     assert.equal(ui.notifications[0].type, "error");
   }
 });
@@ -922,7 +939,7 @@ test("subagent: canonical auditor is reserved, bound, attributed, and prompt-inj
   // The bound is the contract's audit_launch_policy (host-profiles.json); pi-subagents ≥0.59 has no
   // turn budget, so a turnBudget key would be ignored rather than enforced and must not be sent.
   assert.equal(input.timeoutMs, 900_000);
-  assert.deepEqual(input.toolBudget, { soft: 20, hard: 30, block: ["write", "edit"] });
+  assert.deepEqual(input.toolBudget, { soft: 20, hard: 30, block: ["read", "grep", "find", "ls"] });
   assert.equal("turnBudget" in input, false);
   assert.deepEqual(Object.keys(input).sort(),
     ["acceptance", "agent", "agentScope", "async", "model", "task", "timeoutMs", "toolBudget"]);
@@ -980,6 +997,58 @@ test("canonical auditor rejects a reservation when a later launch step throws", 
   assert.equal(corrected, undefined);
   assert.deepEqual(w.privateRequests.map((item) => item.operation).slice(-3),
     ["classify_identity", "classify_identity", "audit_prepare"]);
+});
+
+test("an audit under the runtime recorded at StartRun carries that exact runtime to the private admission", async () => {
+  const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+  await w.pi.command("empirica").handler("goal", { ui: new FakeUi(), mode: "tui" });
+  await w.pi.sessionStart(fakeCtx("/work", w.pi.entries));
+  const decision = await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "tc-same",
+    input: { agent: "empirica.empirica-auditor", task: "audit" } }, fakeCtx());
+  assert.equal(decision, undefined);
+  const prepare = w.privateRequests.find((request) => request.operation === "audit_prepare");
+  assert.deepEqual(prepare?.payload, { host_runtime: ownerHostRuntime() });
+});
+
+test("an audit is refused, sticky, when the pi-subagents runtime is not the one recorded at StartRun", async () => {
+  // Run under owner A (0.75.0); the session is then reloaded with owner B (0.74.0) behind the tool: the
+  // runtime recorded for the run would otherwise be the one a 4.1 receipt names.
+  const ownerA = makeSubagentsPackage(tempParent("empirica-owner-a-"), { version: "0.75.0" });
+  const ownerB = makeSubagentsPackage(tempParent("empirica-owner-b-"), { version: "0.74.0" });
+  const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }), true, undefined,
+    { owners: [ownerA.tool()] });
+  await w.pi.command("empirica").handler("goal", { ui: new FakeUi(), mode: "tui" });
+  const started = w.requests[0]?.command;
+  assert.equal(started?.type, "StartRun");
+  if (started?.type === "StartRun") assert.equal(started.invocation?.host_runtime?.subagents.version, "0.75.0");
+
+  w.pi.subagentOwners = [ownerB.tool()];
+  await w.pi.sessionStart(fakeCtx("/work", w.pi.entries));
+
+  const requests = w.requests.length, entries = w.pi.entries.length;
+  const input = { agent: "empirica.empirica-auditor", task: "audit" };
+  const decision = await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "tc-reloaded", input }, fakeCtx());
+  assert.equal(decision?.block, true);
+  assert.ok(decision?.reason?.includes(PUBLIC_TOOLS.recovery["host.subagents_owner_unverified"]!.message), decision?.reason);
+  assert.match(decision?.reason ?? "", /owner-changed: this run was started under a different pi-subagents runtime/);
+  assert.match(decision?.reason ?? "", /@0\.74\.0/);
+  // The core refused before reserving anything: no child was reserved, no plan was stored or rejected,
+  // and nothing was launched or correlated.
+  assert.deepEqual(w.privateRequests.map((request) => request.operation),
+    ["classify_identity", "classify_identity", "audit_prepare"]);
+  assert.deepEqual(w.requests.slice(requests).map((request) => request.command.type === "ObserveAction"
+    ? request.command.action.kind : request.command.type), ["investigate", "GetRun"]);
+  assert.equal(w.pi.entries.length, entries);
+  assert.equal(Object.hasOwn(input, "timeoutMs"), false);
+
+  // Sticky: no further audit_prepare, and no other subagent call either, until the session restarts.
+  const privateBefore = w.privateRequests.length;
+  for (const call of [input, { agent: "scout", task: "look" }]) {
+    const again = await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: `tc-${call.agent}`, input: call }, fakeCtx());
+    assert.equal(again?.block, true);
+    assert.match(again?.reason ?? "", /owner-changed/);
+  }
+  assert.equal(w.privateRequests.length, privateBefore);
 });
 
 test("tool_result redacts before privately admitting the correlated verdict", async () => {
@@ -1318,6 +1387,9 @@ test("subagent: a call with two launch forms is refused as unsupported before an
   assert.equal(decision?.block, true);
   assert.ok(decision?.reason?.includes(refusalReason), decision?.reason);
   assert.match(decision?.reason ?? "", /malformed: more than one launch form: agent, workflow/);
+  // The guidance tells the author what IS allowed (one launch form, a reviewed read-only action), not just that something is not.
+  assert.match(refusalReason, /accepts exactly one launch form \(for example `agent` or `workflow`\) or a reviewed read-only action/);
+  assert.match(refusalReason, /control, mutation, and ambiguous calls are refused/);
   assert.equal(w.requests.length, before, "no investigation witness, no reservation");
   assert.deepEqual(w.privateRequests, []);
 });

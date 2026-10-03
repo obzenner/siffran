@@ -44,6 +44,7 @@ EMPIRICA_GIT_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/git/tests/test_gi
 EMPIRICA_GIT_IO_BOOTSTRAP_TESTS := $(PLUGINS_DIR)/empirica/adapters/git/tests/test_git_io_bootstrap.py
 EMPIRICA_GOVERNANCE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_governance.py
 EMPIRICA_IDENTITY_TESTS := $(PLUGINS_DIR)/empirica/tests/test_identity.py
+EMPIRICA_HOST_RUNTIME_TESTS := $(PLUGINS_DIR)/empirica/tests/test_host_runtime.py
 EMPIRICA_IDENTITY_PI_LEVEL_TESTS := $(PLUGINS_DIR)/empirica/tests/test_identity_pi_levels.py
 EMPIRICA_ARCHITECTURE_TESTS := $(SCRIPTS)/tests/test_validate_empirica_architecture.py
 METHODOLOGIST_CODEX_MCP_TESTS := $(PLUGINS_DIR)/methodologist/adapters/codex/tests/test_mcp_server.py
@@ -108,6 +109,7 @@ check-core: empirica-author-view-golden empirica-governance-dialog-golden ## Fas
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_context_economy
 	@$(PYTHON) $(EMPIRICA_AUDIT_PROTOCOL_TESTS)
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_IDENTITY_TESTS)
+	@$(PYTHON) $(EMPIRICA_HOST_RUNTIME_TESTS)
 	@$(PYTHON) $(EMPIRICA_STATE_TESTS)
 	@$(PYTHON) $(METHODOLOGIST_CORE_TESTS)
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q \
@@ -341,15 +343,28 @@ empirica-pi-typecheck: node_modules ## Validate and typecheck the Empirica Pi ad
 pi-validator-unit-check: ## Test Pi validator test selection and bounded async test invocation
 	@$(PYTHON) $(SCRIPTS)/tests/test_validate_pi_adapter.py
 
-# Which auditor file does the pinned pi-subagents resolve for a project? pi-subagents lets a later
-# (user-level) package shadow a project package of the same agent name, which makes the adapter
-# block audits as "package identity was shadowed". Read-only; run before any Pi qualification.
+# Which auditor file does pi-subagents resolve for a project? Agents are keyed by name and the
+# runtime's own precedence picks the file (at 0.75 a project agent wins over a user-level one); when it
+# is not the packaged auditor the adapter blocks audits as "package identity was shadowed".
+# Read-only; run before any Pi qualification.
 .PHONY: empirica-pi-auditor-resolution pi-auditor-resolution-unit-check pi-subagents-inventory pi-preflight-fixture
 empirica-pi-auditor-resolution: node_modules ## Report the effective Pi auditor file for DIR (default: here); STRICT=1 fails when shadowed; PACKAGE_ROOT= (installed pi-subagents, default: the devDependency) and SETTINGS= (a settings.json, default: ~/.pi/agent)
 	@node $(SCRIPTS)/pi_auditor_resolution.mjs --project "$(or $(DIR),$(CURDIR))" $(if $(PACKAGE_ROOT),--package-root "$(PACKAGE_ROOT)") $(if $(SETTINGS),--settings "$(SETTINGS)") $(if $(filter 1,$(STRICT)),--require-candidate)
 
 pi-auditor-resolution-unit-check: node_modules ## Test the Pi auditor resolution, real preflight admission, and the reviewed pi-subagents inventories in an isolated HOME (includes negative controls)
-	@node --test $(SCRIPTS)/tests/pi_auditor_resolution.test.mjs $(SCRIPTS)/tests/pi_auditor_preflight.test.mjs $(SCRIPTS)/tests/pi_subagents_inventory.test.mjs
+	@node --test $(SCRIPTS)/tests/pi_auditor_resolution.test.mjs $(SCRIPTS)/tests/pi_auditor_preflight.test.mjs $(SCRIPTS)/tests/pi_subagents_inventory.test.mjs $(SCRIPTS)/tests/empirica_subagents_matrix.test.mjs $(SCRIPTS)/tests/pi_api_typecheck.test.mjs $(SCRIPTS)/tests/npm_fetch.test.mjs
+
+# Integration diagnostics (network: npm). Each proves that checked-in evidence still describes the exact
+# package the registry serves; both are prerequisites of `release-check`, neither runs in `check`.
+.PHONY: empirica-subagents-matrix empirica-subagents-matrix-update empirica-pi-api-typecheck
+empirica-subagents-matrix: node_modules ## Integration: for each reviewed pi-subagents version, check inventory, launch schema, preflight fixture and classifier against the registry package (one JSON line per version; TMPDIR/empirica-subagents-matrix)
+	@node --experimental-strip-types $(SCRIPTS)/empirica_subagents_matrix.mjs
+
+empirica-subagents-matrix-update: node_modules ## List pi-subagents releases newer than the newest reviewed and print the exact review commands (promotes nothing)
+	@node --experimental-strip-types $(SCRIPTS)/empirica_subagents_matrix.mjs --update
+
+empirica-pi-api-typecheck: node_modules ## Integration: typecheck the adapter's Pi API mirror against each reviewed Pi version's declarations (fetched with npm pack)
+	@node $(SCRIPTS)/pi_api_typecheck.mjs
 
 pi-subagents-inventory: node_modules ## Regenerate the reviewed inventory of the pi-subagents at PACKAGE_ROOT (default: the devDependency) into adapters/pi/compat/
 	@node $(SCRIPTS)/gen_pi_subagents_inventory.mjs --package-root "$(or $(PACKAGE_ROOT),$(CURDIR)/node_modules/pi-subagents)"
@@ -555,7 +570,7 @@ empirica-recovery-reference: ## Regenerate the skill's reason-code recovery refe
 	@$(PYTHON) $(SCRIPTS)/gen_recovery_reference.py
 
 .PHONY: release-check
-release-check: check empirica-core-integration empirica-governance-check empirica-host-integration empirica-host-live-check ## Deliberate pre-release gate: fast checks, integration diagnostics, installed-host receipts
+release-check: check empirica-core-integration empirica-governance-check empirica-host-integration empirica-subagents-matrix empirica-pi-api-typecheck empirica-host-live-check ## Deliberate pre-release gate: fast checks, integration diagnostics, the reviewed pi-subagents and Pi API matrices, installed-host receipts
 	@printf '\n$(BOLD)Ready to release.$(RESET) Remaining steps are yours:\n'
 	@printf '  1. confirm the version bump is in plugin.json (make status)\n'
 	@printf '  2. commit and push\n'

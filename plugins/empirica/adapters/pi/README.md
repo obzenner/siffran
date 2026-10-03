@@ -6,11 +6,12 @@ surface as the Claude and Codex adapters and owns no convergence policy.
 ## Capability profile
 
 The promoted profile is qualified on Pi `0.84.1` and admits compatible Pi releases
-`>=0.84.1,<0.90.0`; receipts still record the exact observed Pi version. The profile tier is
+`>=0.84.1,<1.1.0`; receipts still record the exact observed Pi version. The profile tier is
 `foreground_only`, with `promotion_status=promoted` after an installed-host foreground trace reached
 guarded `Allow(converged=true)`. `pi-subagents` is an external prerequisite
-(`pi install npm:pi-subagents`), never bundled or loaded by this package; it must provide the
-structured `subagent` tool. Asynchronous audit execution is not supported and is never silently
+(`pi install npm:pi-subagents@<reviewed version>`), never bundled or loaded by this package; it must
+provide the structured `subagent` tool. Only the exact versions in `subagents_compatibility.reviewed_versions`
+(`contracts/empirica/v2/host-profiles.json`) are supported; any other version is refused before a run starts. Asynchronous audit execution is not supported and is never silently
 downgraded.
 
 ## Audit runtime ownership
@@ -37,6 +38,12 @@ refused and the audit is not launched. An owner-identity or inventory refusal is
 refused on each use and admitted again once it is active. A `PI_SUBAGENT_CHILD=1` process is never a
 parent owner. A malformed or unavailable inventory is an unobservable owner, never an exception out
 of `session_start`.
+The runtime is recorded once, with the run, at `StartRun` (`invocation.host_runtime`) and re-proved
+at audit admission: the private `audit_prepare` carries the runtime the adapter observes now, and the
+Python application refuses closed (`audit_refused`, before any reservation or state write) when it is
+not exactly the recorded one, which the adapter turns into the same sticky `owner-changed` refusal.
+A run therefore cannot be audited by a different pi-subagents than the one its receipt will name: after
+a Pi or pi-subagents upgrade, start a new `/empirica` run.
 
 ## Governed initialization
 

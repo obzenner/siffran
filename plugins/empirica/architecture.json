@@ -153,7 +153,7 @@
     "protocol": "empirica/v2",
     "required_profile_ids": [
       "claude-code@2.1.278",
-      "pi@0.84.1+pi-subagents@0.50.0",
+      "pi@0.84.1+pi-subagents-foreground-audit-v1",
       "codex-cli@0.146.0"
     ]
   },

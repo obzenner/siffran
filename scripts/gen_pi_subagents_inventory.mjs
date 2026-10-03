@@ -16,7 +16,12 @@
 //     `SUBAGENT_ACTIONS`, which `subagent-executor` validates `action` against; since 0.74 the schema
 //     declares `action` as a free string). PRIVATE for the same reason.
 //   * validateOffline          — the package documents `validate` as offline (`docs/tool-reference.md`).
-// Nothing is read from the home directory: PI_CODING_AGENT_DIR points at a throwaway directory.
+//   * peer_pi_ai               — the package's own `peerDependencies["@earendil-works/pi-ai"]`: the Pi
+//     generation it declares it needs. The README's "Requires Pi" column is derived from it (checked by
+//     scripts/validate_empirica_activation.py), so the pairing claim is data, not prose.
+// The operator's home directory is never read: the preflight runs in a throwaway project with
+// PI_CODING_AGENT_DIR, HOME and USERPROFILE all pointing into the same scratch directory (the
+// package resolves `~/.agents` and `~/.pi` from the home directory, and walks the project's ancestors).
 //
 // Usage: node scripts/gen_pi_subagents_inventory.mjs --package-root DIR [--out-dir DIR | --check]
 //   --package-root DIR  an installed pi-subagents directory (dependencies resolvable)
@@ -28,12 +33,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { importExport, makeLoader, readPackage } from "./lib/pi_subagents_package.mjs";
+import { LAUNCH_FORMS } from "../plugins/empirica/adapters/pi/src/subagent-inventory.ts";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const COMPAT_DIR = path.join(repo, "plugins", "empirica", "adapters", "pi", "compat");
-/** Top-level `subagent` parameters that start an execution; whichever the schema declares is a launch form. */
-const LAUNCH_FORM_CANDIDATES = ["agent", "workflowScript", "workflowScriptPath", "workflow", "resume"];
-
 export function inventoryPath(dir, version) {
   return path.join(dir, `pi-subagents-${version}.json`);
 }
@@ -55,13 +58,19 @@ function workflowShape(property) {
   return shape;
 }
 
+const PI_AI_PEER = "@earendil-works/pi-ai";
+
+/** Environment variables through which the package (or `os.homedir()`) could reach the operator's home. */
+const ISOLATED_ENV = ["PI_CODING_AGENT_DIR", "PI_OFFLINE", "HOME", "USERPROFILE"];
+
 async function observedLaunchContractVersion(packageRoot) {
   const scratch = mkdtempSync(path.join(os.tmpdir(), "pi-subagents-inventory-"));
-  const previous = { dir: process.env.PI_CODING_AGENT_DIR, offline: process.env.PI_OFFLINE };
+  const previous = Object.fromEntries(ISOLATED_ENV.map((key) => [key, process.env[key]]));
   try {
-    mkdirSync(path.join(scratch, "agent")); mkdirSync(path.join(scratch, "project"));
+    for (const dir of ["agent", "project", "home"]) mkdirSync(path.join(scratch, dir));
     process.env.PI_CODING_AGENT_DIR = path.join(scratch, "agent");
     process.env.PI_OFFLINE = "1";
+    process.env.HOME = process.env.USERPROFILE = path.join(scratch, "home");
     const preflight = await importExport(packageRoot, "./preflight");
     const result = await preflight.resolveSubagentLaunchContract({
       agent: "scout", context: "fresh", agentScope: "both", cwd: path.join(scratch, "project") });
@@ -69,7 +78,7 @@ async function observedLaunchContractVersion(packageRoot) {
     if (!Number.isInteger(result.contract.version)) throw new Error("preflight contract carries no integer version");
     return result.contract.version;
   } finally {
-    for (const [key, value] of [["PI_CODING_AGENT_DIR", previous.dir], ["PI_OFFLINE", previous.offline]]) {
+    for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }
     rmSync(scratch, { recursive: true, force: true });
@@ -93,6 +102,14 @@ export async function subagentParamProperties(packageRoot) {
   return Object.keys(schemas.createSubagentParamsSchema().properties);
 }
 
+/** The package's declared peer range on the Pi model layer; a package that declares none cannot be reviewed as data. */
+export function peerPiAi(manifest) {
+  const range = manifest.peerDependencies?.[PI_AI_PEER];
+  if (typeof range !== "string" || range === "")
+    throw new Error(`pi-subagents ${manifest.version} declares no peerDependencies["${PI_AI_PEER}"]; record its Pi requirement by hand first`);
+  return range;
+}
+
 /** The inventory of the installed pi-subagents at `packageRoot`. */
 export async function generateInventory(packageRoot) {
   const pkg = readPackage(packageRoot);
@@ -105,8 +122,10 @@ export async function generateInventory(packageRoot) {
     throw new Error("SUBAGENT_ACTIONS is not a list of strings");
   return {
     version: pkg.version,
+    peer_pi_ai: peerPiAi(pkg.manifest),
     launch_contract_version: await observedLaunchContractVersion(pkg.root),
-    launch_forms: LAUNCH_FORM_CANDIDATES.filter((form) => form in properties),
+    // Top-level parameters that start an execution; whichever the schema declares is a launch form.
+    launch_forms: LAUNCH_FORMS.filter((form) => form in properties),
     actions: [...types.SUBAGENT_ACTIONS],
     supports: {
       turnBudget: "turnBudget" in properties,

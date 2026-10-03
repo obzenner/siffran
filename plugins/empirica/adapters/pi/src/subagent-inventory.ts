@@ -16,6 +16,8 @@ export type LaunchForm = typeof LAUNCH_FORMS[number];
 
 export interface SubagentInventory {
   readonly version: string;
+  /** The package's declared `peerDependencies["@earendil-works/pi-ai"]`: the Pi generation it needs. */
+  readonly peer_pi_ai: string;
   /** The `contract.version` this package's launch preflight emits (observed, not assumed). */
   readonly launch_contract_version: number;
   readonly launch_forms: readonly LaunchForm[];
@@ -59,9 +61,11 @@ function stringList(value: unknown, where: string): string[] {
 /** Validate a parsed inventory document (closed shape); throws on the first deviation. */
 export function parseInventory(document: unknown): SubagentInventory {
   const doc = record(document, "document");
-  exactKeys(doc, ["version", "launch_contract_version", "launch_forms", "actions", "supports"], "document");
+  exactKeys(doc, ["version", "peer_pi_ai", "launch_contract_version", "launch_forms", "actions", "supports"], "document");
   if (typeof doc.version !== "string" || !EXACT_VERSION.test(doc.version))
     throw new Error("pi-subagents inventory: version must be an exact MAJOR.MINOR.PATCH release");
+  if (typeof doc.peer_pi_ai !== "string" || doc.peer_pi_ai === "")
+    throw new Error("pi-subagents inventory: peer_pi_ai must be the package's nonempty declared pi-ai peer range");
   if (typeof doc.launch_contract_version !== "number" || !Number.isInteger(doc.launch_contract_version)
       || doc.launch_contract_version < 1)
     throw new Error("pi-subagents inventory: launch_contract_version must be a positive integer");

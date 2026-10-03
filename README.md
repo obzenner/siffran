@@ -94,7 +94,7 @@ bundle or load it. Install the runtime first, then the repository (which carries
 Methodologist, and the Empirica auditor role):
 
 ```sh
-pi install npm:pi-subagents
+pi install npm:pi-subagents@0.75.0   # Pi <0.86.1: npm:pi-subagents@0.64.0 (see the table below)
 pi install git:github.com/obzenner/siffran
 ```
 
@@ -105,8 +105,28 @@ tool, when the session's slash commands show more than one loaded `pi-subagents`
 only the first `subagent` registration, so a second copy is seen through its commands, not its tool),
 or when the owner's package or version cannot be verified. A second copy is detected only while its
 extension registers commands; Pi runs and reports the first registrant, and that is the one bound.
-A reviewed-versions table and compatibility matrix are planned for a later Empirica release; until
-then any `pi-subagents` version with a working `pi-subagents/preflight` export is accepted.
+Only exact `pi-subagents` versions that Empirica has reviewed are supported, under the policy
+`pi-subagents-foreground-audit-v1` (Pi `>=0.84.1,<1.1.0`). An unreviewed `pi-subagents` version fails closed:
+`/empirica` and `configure_run` are refused with `host.subagents_version_unsupported` before any run is
+created, however new or however similar to a reviewed one it is. A newer release is supported only after
+`make empirica-subagents-matrix-update` lists it and its inventory, preflight fixture and classifier
+cases are reviewed and added to the contract.
+
+| `pi-subagents` | Requires Pi | Native receipt (4.1) | Status |
+|---|---|---|---|
+| `0.50.0` | `>=0.84.1` | pending A9 | reviewed; the 4.0 qualification version |
+| `0.64.0` | `>=0.84.1` | pending A9 | reviewed |
+| `0.74.0` | `>=0.86.1` | pending A9 | reviewed |
+| `0.75.0` | `>=0.86.1` | pending A9 | reviewed; the repository's development pin |
+
+"Requires Pi" is each release's own declared `@earendil-works/pi-ai` peer (`>=0.80.0` for `0.50.0` and
+`0.64.0`, `>=0.86.1` for `0.74.0` and `0.75.0`), raised to the floor of the supported Pi interval. It is
+recorded in `plugins/empirica/adapters/pi/compat/` and checked against this table. "Native receipt" marks
+the pairs for which an installed-host run has been recorded; `pending A9` means none has yet.
+
+Install the newest reviewed version your Pi satisfies (Pi <0.86.1: `pi-subagents@0.64.0`) and pin the exact
+version, as in the commands above; an unpinned install may resolve to a release that is not in the table
+and will then be refused.
 
 Restart Pi after installation, or run `/reload` in an existing session. Available commands include:
 
@@ -150,7 +170,7 @@ promotion remains separate and unsupported.
 | Plugin | Version | Description |
 |--------|---------|-------------|
 | `methodologist` | 0.9.0 | Formal reasoning catalog — lets users choose and execute evidence-backed CS/math methodologies with traced phases and structured output. |
-| `empirica` | 4.0.0 | Host-neutral empirical-convergence workflow — requires exact run-configuration approval (or provenance-bound auto), cited research before spikes, per-artifact producer attribution, and a current distinct host-observed audit. Unknown or mixed identity evidence fails closed. |
+| `empirica` | 4.1.0 | Host-neutral empirical-convergence workflow — requires exact run-configuration approval (or provenance-bound auto), cited research before spikes, per-artifact producer attribution, and a current distinct host-observed audit. Unknown or mixed identity evidence fails closed. |
 <!-- END GENERATED: plugins -->
 
 ## Development
