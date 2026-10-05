@@ -36,6 +36,29 @@ class PublicToolContractTests(unittest.TestCase):
 
         return PublicTools("claude-code@2.1.278", dispatch=dispatch)
 
+    def test_every_allowed_value_list_says_its_type_so_every_model_sees_the_values(self):
+        """A typeless enum is valid JSON Schema, but OpenAI-family models see tools as TypeScript-like
+        signatures, where it renders as ``any`` and hides the values. A Pi session on GPT-5.6 failed
+        its first graph this way, guessing claim kinds and the edge type."""
+        artifact = json.loads((PLUGIN / "vendor/contracts/empirica/v2/public-tools.json").read_text())
+        typeless = []
+
+        def walk(node, where):
+            if isinstance(node, dict):
+                if ("enum" in node or "const" in node) and "type" not in node:
+                    typeless.append(where)
+                for key, item in node.items():
+                    walk(item, f"{where}/{key}")
+            elif isinstance(node, list):
+                for i, item in enumerate(node):
+                    walk(item, f"{where}/{i}")
+
+        walk(artifact["schemas"], "schemas")
+        self.assertEqual(typeless, [])
+        graph = artifact["schemas"]["host_handle"]["empirica_observe"]["properties"]["action"]["oneOf"][0]
+        claim = graph["properties"]["payload"]["properties"]["claims"]["items"]["properties"]["kind"]
+        self.assertEqual((claim["type"], claim["enum"]), ("string", ["ordinary", "needs-experiment", "needs-decision"]))
+
     def test_definitions_expose_only_public_read_observe_and_report(self):
         tools = self._tools()
         definitions = tools.definitions()

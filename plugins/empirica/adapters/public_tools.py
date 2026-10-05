@@ -77,6 +77,29 @@ def _checked_validator(schema: dict):
     return cls(schema)
 
 
+_JSON_TYPES = ((bool, "boolean"), (int, "integer"), (float, "number"), (str, "string"))
+
+
+def _typed(value: Any) -> Any:
+    """Give every ``enum``/``const`` node the JSON type of its values.
+
+    JSON Schema allows a typeless ``enum``, but a model only sees the schema as its host renders
+    it, and some renderings (OpenAI-family models, which see a TypeScript-like signature) show a
+    typeless node as ``any``, hiding the allowed values. A model-facing schema must say them."""
+    if isinstance(value, list):
+        return [_typed(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    result = {key: _typed(item) for key, item in value.items()}
+    values = result.get("enum", [result["const"]] if "const" in result else None)
+    if values is not None and "type" not in result:
+        types = {next((name for kind, name in _JSON_TYPES if type(v) is kind), None) for v in values}
+        if len(types) != 1 or None in types:
+            raise RuntimeError(f"a model-facing enum needs values of one JSON type: {values!r}")
+        result["type"] = types.pop()
+    return result
+
+
 def _project_schemas() -> dict[str, dict]:
     run_id = {
         "type": "string",
@@ -133,7 +156,8 @@ def _project_schemas() -> dict[str, dict]:
             },
         },
     }
-    return {READ_TOOL: read, OBSERVE_TOOL: observe, REPORT_TOOL: report}
+    return {name: _typed(schema)
+            for name, schema in ((READ_TOOL, read), (OBSERVE_TOOL, observe), (REPORT_TOOL, report))}
 
 
 def _host_handle_schemas(model: dict[str, dict]) -> dict[str, dict]:

@@ -322,7 +322,8 @@
               "GetContract",
               "RestoreRun"
             ],
-            "description": "Read the public run view, obtain the current audit argument, inspect the public contract, or restore a persisted run."
+            "description": "Read the public run view, obtain the current audit argument, inspect the public contract, or restore a persisted run.",
+            "type": "string"
           },
           "run_id": {
             "type": "string",
@@ -334,7 +335,8 @@
               "index",
               "section"
             ],
-            "description": "Contract projection for GetContract. Use section with section_id."
+            "description": "Contract projection for GetContract. Use section with section_id.",
+            "type": "string"
           },
           "section_id": {
             "type": "string",
@@ -366,7 +368,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "graph"
+                    "const": "graph",
+                    "type": "string"
                   },
                   "payload": {
                     "type": "object",
@@ -409,7 +412,8 @@
                                 "ordinary",
                                 "needs-experiment",
                                 "needs-decision"
-                              ]
+                              ],
+                              "type": "string"
                             },
                             "gating": {
                               "type": "boolean"
@@ -440,7 +444,8 @@
                               "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
                             },
                             "type": {
-                              "const": "SupportedBy"
+                              "const": "SupportedBy",
+                              "type": "string"
                             }
                           },
                           "description": "Closed author-supplied support edge for a graph action."
@@ -493,7 +498,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "research"
+                    "const": "research",
+                    "type": "string"
                   },
                   "claim_id": {
                     "type": "string",
@@ -505,13 +511,15 @@
                       "code",
                       "runtime",
                       "web"
-                    ]
+                    ],
+                    "type": "string"
                   },
                   "result": {
                     "enum": [
                       "supports",
                       "refutes"
-                    ]
+                    ],
+                    "type": "string"
                   },
                   "payload": {
                     "type": "object",
@@ -548,7 +556,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "spike_request"
+                    "const": "spike_request",
+                    "type": "string"
                   },
                   "claim_id": {
                     "type": "string",
@@ -580,7 +589,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "configure_run"
+                    "const": "configure_run",
+                    "type": "string"
                   },
                   "budgets": {
                     "type": "object",
@@ -638,7 +648,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "route"
+                    "const": "route",
+                    "type": "string"
                   },
                   "reason": {
                     "type": "string",
@@ -661,7 +672,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "investigate"
+                    "const": "investigate",
+                    "type": "string"
                   }
                 },
                 "description": "Record the first investigation witness only after route and exact current host approval.",
@@ -679,7 +691,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "freeze"
+                    "const": "freeze",
+                    "type": "string"
                   }
                 }
               }
@@ -705,7 +718,8 @@
               "report_convergence",
               "stop"
             ],
-            "description": "Request convergence by default, or request an honest non-converged stop."
+            "description": "Request convergence by default, or request an honest non-converged stop.",
+            "type": "string"
           }
         }
       }
@@ -725,14 +739,16 @@
               "GetContract",
               "RestoreRun"
             ],
-            "description": "Read the public run view, obtain the current audit argument, inspect the public contract, or restore a persisted run."
+            "description": "Read the public run view, obtain the current audit argument, inspect the public contract, or restore a persisted run.",
+            "type": "string"
           },
           "target": {
             "enum": [
               "index",
               "section"
             ],
-            "description": "Contract projection for GetContract. Use section with section_id."
+            "description": "Contract projection for GetContract. Use section with section_id.",
+            "type": "string"
           },
           "section_id": {
             "type": "string",
@@ -758,7 +774,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "graph"
+                    "const": "graph",
+                    "type": "string"
                   },
                   "payload": {
                     "type": "object",
@@ -801,7 +818,8 @@
                                 "ordinary",
                                 "needs-experiment",
                                 "needs-decision"
-                              ]
+                              ],
+                              "type": "string"
                             },
                             "gating": {
                               "type": "boolean"
@@ -832,7 +850,8 @@
                               "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
                             },
                             "type": {
-                              "const": "SupportedBy"
+                              "const": "SupportedBy",
+                              "type": "string"
                             }
                           },
                           "description": "Closed author-supplied support edge for a graph action."
@@ -885,7 +904,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "research"
+                    "const": "research",
+                    "type": "string"
                   },
                   "claim_id": {
                     "type": "string",
@@ -897,13 +917,15 @@
                       "code",
                       "runtime",
                       "web"
-                    ]
+                    ],
+                    "type": "string"
                   },
                   "result": {
                     "enum": [
                       "supports",
                       "refutes"
-                    ]
+                    ],
+                    "type": "string"
                   },
                   "payload": {
                     "type": "object",
@@ -940,7 +962,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "spike_request"
+                    "const": "spike_request",
+                    "type": "string"
                   },
                   "claim_id": {
                     "type": "string",
@@ -972,7 +995,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "configure_run"
+                    "const": "configure_run",
+                    "type": "string"
                   },
                   "budgets": {
                     "type": "object",
@@ -1030,7 +1054,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "route"
+                    "const": "route",
+                    "type": "string"
                   },
                   "reason": {
                     "type": "string",
@@ -1053,7 +1078,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "investigate"
+                    "const": "investigate",
+                    "type": "string"
                   }
                 },
                 "description": "Record the first investigation witness only after route and exact current host approval.",
@@ -1071,7 +1097,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "freeze"
+                    "const": "freeze",
+                    "type": "string"
                   }
                 }
               }
@@ -1090,7 +1117,8 @@
               "report_convergence",
               "stop"
             ],
-            "description": "Request convergence by default, or request an honest non-converged stop."
+            "description": "Request convergence by default, or request an honest non-converged stop.",
+            "type": "string"
           }
         }
       }
