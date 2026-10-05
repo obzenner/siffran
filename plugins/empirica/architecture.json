@@ -10,6 +10,7 @@
   "import_package_prefixes": ["empirica", "plugins.empirica"],
   "excluded_test_patterns": [
     "__pycache__",
+    "node_modules",
     "tests",
     "test",
     "test_*",
@@ -43,6 +44,10 @@
     "adapters.state": {
       "roots": ["adapters/state"],
       "forbidden_imports": ["adapters.claude", "adapters.codex", "adapters.pi", "hooks"]
+    },
+    "adapters.observer": {
+      "roots": ["adapters/observer"],
+      "forbidden_imports": ["adapters.claude", "adapters.codex", "adapters.pi", "adapters.bridge", "hooks"]
     },
     "adapters.bridge": {
       "roots": ["adapters/bridge.py", "adapters/__init__.py"],

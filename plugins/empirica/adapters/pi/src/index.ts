@@ -54,6 +54,7 @@ import { auditLaunchInput, preflightLaunch } from "./audit-launch.ts";
 import { admitAuditPreflight, withoutThinkingLevel } from "./preflight-seam.ts";
 import { loadInventory, type SubagentInventory } from "./subagent-inventory.ts";
 import { PUBLIC_TOOLS } from "./public-tools.ts";
+import { startObserver, type ObserverServer } from "./observer-ui.ts";
 import {
   REPORT_CONVERGENCE_INTENT,
   REPORT_CONVERGENCE_TOOL,
@@ -465,9 +466,14 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       if (runHandle !== null) await refreshGovernance(runHandle, ctx, trusted);
     });
 
+    // The /empirica-ui server (registered below): one per extension instance, stopped here at shutdown.
+    let observer: Promise<ObserverServer> | null = null;
+
     // Foreground work should be terminal before shutdown. Any remaining correlation is orphaned;
     // a failed private acknowledgement leaves its durable entry available for the next restore.
     pi.on("session_shutdown", async () => {
+      void observer?.then((server) => server.stop(), () => undefined);
+      observer = null;
       for (const [toolCallId, child] of children) {
         try {
           await trusted({ operation: "child_event", run_id: child.runHandle,
@@ -604,6 +610,26 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         },
       });
     }
+
+    pi.registerCommand("empirica-ui", {
+      description: "Open the Empirica observer UI: every run in your store, read-only, on 127.0.0.1.",
+      handler: async (_args, ctx) => {
+        const first = observer === null;
+        if (observer === null) {
+          const starting = startObserver(ctx.cwd ?? process.cwd());
+          observer = starting;
+          // A server that ends (killed, crashed) is forgotten, so the next /empirica-ui starts a new one.
+          void starting.then((s) => s.exited.then(() => { if (observer === starting) observer = null; }), () => undefined);
+        }
+        try {
+          const server = await observer;
+          ctx.ui.notify(`Empirica observer${first && !server.reused ? "" : " (already running)"}: ${server.url}`, "info");
+        } catch (error) {
+          observer = null;
+          ctx.ui.notify(`/empirica-ui could not start the observer: ${describe(error)}`, "error");
+        }
+      },
+    });
 
     pi.registerCommand("empirica", {
       description: "Start a complete Empirica v2 convergence run.",

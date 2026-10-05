@@ -138,6 +138,7 @@ Restart Pi after installation, or run `/reload` in an existing session. Availabl
 /think <intent>                 # structured Methodologist workflow
 /think --simple <intent>        # original single-prompt Methodologist mode
 /empirica <goal>                # start a durable Empirica v2 workflow
+/empirica-ui                    # open the observer UI for your store (see below)
 empirica_observe                 # tool: route, graph, configure_run, investigate, research, spike_request, freeze
 empirica_read                    # tool: complete RunView, argument, contract
 report_convergence               # tool: guarded terminal decision
@@ -168,13 +169,29 @@ receipts. Codex is explicitly `wip_unsupported` and is not part of the supported
 `make empirica-host-live-check` requires exact receipts for Claude and Pi only; Pi and Claude async
 promotion remains separate and unsupported.
 
+## Watching the store
+
+The Empirica plugin ships a read-only observer UI: every project, run and claim in your store, with
+how they relate, and the detail of whatever you click. It is served by the plugin itself on
+127.0.0.1 and updates while runs progress.
+
+| Host | Start it with |
+|---|---|
+| Claude Code | `/empirica:ui` |
+| Pi | `/empirica-ui` |
+| Any (from this checkout) | `make ui`, or `make ui-demo` for the plugin's demo runs |
+
+A second start for the same store opens the observer already listening on the default port instead
+of starting another. See
+[`plugins/empirica/ui/README.md`](./plugins/empirica/ui/README.md) and ADR-0065.
+
 ## Plugins
 
 <!-- BEGIN GENERATED: plugins (managed by the checkup skill — do not edit by hand) -->
 | Plugin | Version | Description |
 |--------|---------|-------------|
 | `methodologist` | 0.9.0 | Formal reasoning catalog — lets users choose and execute evidence-backed CS/math methodologies with traced phases and structured output. |
-| `empirica` | 4.1.0 | Host-neutral empirical-convergence workflow — requires exact run-configuration approval (or provenance-bound auto), cited research before spikes, per-artifact producer attribution, and a current distinct host-observed audit. Unknown or mixed identity evidence fails closed. |
+| `empirica` | 4.2.0 | Host-neutral empirical-convergence workflow — requires exact run-configuration approval (or provenance-bound auto), cited research before spikes, per-artifact producer attribution, and a current distinct host-observed audit. Unknown or mixed identity evidence fails closed. |
 <!-- END GENERATED: plugins -->
 
 ## Development

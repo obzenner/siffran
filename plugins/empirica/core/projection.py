@@ -11,7 +11,7 @@ from .evaluation import (EvaluationSnapshot, HOST_TIER_UNSUPPORTED, active_evide
                          audit_operation_current, audit_passes, bootstrap_status,
                          claim_blockers, claim_digest, derive_claims,
                          derive_claims_for_projection, digest,
-                         effective_scope_ids, independence)
+                         effective_scope_ids, evidence_digest, independence)
 
 
 def _scope(snapshot: EvaluationSnapshot) -> tuple[list[str], list[str]]:
@@ -316,7 +316,7 @@ def project_argument(snapshot: EvaluationSnapshot) -> dict[str, Any]:
         claims.append({
             "claim_id": claim["id"], "text": claim["text"],
             "wording_digest": claim_digest(claim), "state": state, "kind": claim["kind"],
-            "gating": claim["id"] in gating, "evidence_digest": digest(ids),
+            "gating": claim["id"] in gating, "evidence_digest": evidence_digest(snapshot, claim),
             "active_evidence_ids": ids,
         })
     artifacts: list[dict[str, Any]] = []

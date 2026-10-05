@@ -1,0 +1,13 @@
+basecoat-css 1.0.2
+lucide-static 1.51.0
+@fontsource-variable/ibm-plex-sans 5.3.0
+@fontsource/ibm-plex-mono 5.3.0
+
+98ca5bbecf6bbe67226cdfeb9700173d0f31532ce8772ea34871f6bcfb3f198f  basecoat/basecoat-nova.css
+93fa012baa09fa49a06d411da3ced2176a121e45ae977955ecf82c5bd3eb6a50  basecoat/js/basecoat.min.js
+471e6282f0bd1f99d3a591b1895e2564ab31807f01621833b7ba423950a6e2e4  basecoat/js/tabs.min.js
+e2291e842cf5af167122a22881a740c7f2dda7716f1e8cd76680264f4a859470  fonts/ibm-plex-sans-latin-wght-normal.woff2
+08949f728dc52d528e69b1667d15c89a5686a4ee9a296ff90983985f99c380f7  fonts/ibm-plex-mono-latin-400-normal.woff2
+01d285447409c8a588692162439a038b8cbd7871309ee20267b0d2d91c6e8e22  fonts/ibm-plex-mono-latin-500-normal.woff2
+f56a27edf30667a1f7e4d43c689e5bc050f9383dfd6fdd453ec389b3dffef05e  fonts/fonts.css
+dea43bd33a7fc0edb0f235ef12eb731f3c938a38c0cac0a5053bcc09913598ec  lucide/sprite.svg

@@ -14,6 +14,8 @@ links:
   kind: Depends on
 - target: 59
   kind: Refines
+- target: 65
+  kind: Amended by
 ---
 
 # Split operational state from Git-backed knowledge artifacts

@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://siffran.dev/contracts/empirica-ui-view/v1/run.schema.json",
+  "title": "Empirica observer: one run's detail (GET /api/run?key=KEY, observe --run KEY)",
+  "description": "What the detail panel shows for one run, beyond its row in the store summary (the row owns state, diagnostic and audit state; nothing here repeats them). Same ownership as view.schema.json; reason messages come from the public-contract registry. Enumerations are held equal to their owners by scripts/validate_ui_view.py.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "key", "version", "goal", "budgets", "control", "audit", "residuals", "stale", "author", "auditor", "steps", "claims"],
+  "properties": {
+    "contract": {"const": "empirica-ui-view/v1"},
+    "key": {"type": "string", "minLength": 1},
+    "version": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Equal to the run's version in the view it belongs to."},
+    "goal": {"type": ["string", "null"]},
+    "budgets": {
+      "oneOf": [{"type": "null"}, {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["passes", "spawns", "audit_spawns"],
+        "properties": {
+          "passes": {"$ref": "#/$defs/budget"},
+          "spawns": {"$ref": "#/$defs/budget"},
+          "audit_spawns": {"$ref": "#/$defs/budget"}
+        }
+      }]
+    },
+    "control": {
+      "oneOf": [{"type": "null"}, {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["mode", "approval"],
+        "properties": {
+          "mode": {"enum": ["deliberative", "auto"]},
+          "approval": {"enum": ["pending", "approved", "revision_pending", "rejected"]}
+        }
+      }],
+      "description": "How the run's configuration was governed (state.schema governance.control_mode / state)."
+    },
+    "audit": {
+      "oneOf": [{"type": "null"}, {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["independence", "findings"],
+        "properties": {
+          "independence": {"enum": ["distinct", "mixed", "same_model", "unverified"]},
+          "findings": {"type": "array", "items": {"type": "string"}, "description": "The latest verdict's findings while they are the current failure (the plugin's run view)."}
+        }
+      }]
+    },
+    "residuals": {
+      "type": "array",
+      "description": "Why the run stopped short (the plugin's residuals), each with the registry's message.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "claim", "message"],
+        "properties": {
+          "code": {"type": "string", "minLength": 1},
+          "claim": {"type": ["string", "null"]},
+          "message": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "stale": {
+      "type": "array",
+      "description": "Files whose current workspace observation differs from what an active spike executed against (the plugin's freshness changes).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "state"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "state": {"enum": ["present", "missing", "unreadable", "non_regular", "outside_workspace"]}
+        }
+      }
+    },
+    "author": {"type": ["string", "null"], "description": "The host-observed author identity; null when none was observed."},
+    "auditor": {"type": ["string", "null"], "description": "The host-observed identity of the latest verdict's auditor; null when none."},
+    "steps": {
+      "type": "array",
+      "description": "Every recorded history artifact in causal order.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["n", "kind", "outcome", "claim", "command"],
+        "properties": {
+          "n": {"type": "integer", "minimum": 1},
+          "kind": {"enum": ["graph", "research", "spike_request", "spike", "attribution", "audit_verdict", "observation_basis"]},
+          "outcome": {"enum": ["supporting", "refuting", "pass", "fail", null], "description": "research: supporting/refuting; spike: its gate; audit_verdict: its verdict; null otherwise."},
+          "claim": {"type": ["string", "null"]},
+          "command": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "blocker_message", "research", "spikes", "spikes_ever", "commands"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "blocker_message": {"type": ["string", "null"], "description": "The public-contract registry's message for the claim's blocker in the view; null exactly when that blocker is null."},
+          "research": {"type": "integer", "minimum": 0, "description": "Active supporting research."},
+          "spikes": {"type": "integer", "minimum": 0, "description": "Active passing spikes."},
+          "spikes_ever": {"type": "integer", "minimum": 0, "description": "Spikes ever executed for this claim, superseded included."},
+          "commands": {"type": "array", "items": {"type": "string"}, "description": "Commands of the active spikes."}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["used", "max"],
+      "properties": {"used": {"type": "integer", "minimum": 0}, "max": {"type": "integer", "minimum": 0}}
+    }
+  }
+}

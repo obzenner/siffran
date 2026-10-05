@@ -1,0 +1,32 @@
+{
+  "$description": "What scripts/vendor.mjs copies into vendor/ (CONVENTIONS §9). Versions come from package-lock.json.",
+  "basecoat": {
+    "styles": [
+      "nova"
+    ],
+    "js": [
+      "basecoat",
+      "tabs"
+    ]
+  },
+  "fonts": [
+    {
+      "family": "IBM Plex Sans Variable",
+      "package": "@fontsource-variable/ibm-plex-sans",
+      "file": "ibm-plex-sans-latin-wght-normal.woff2",
+      "weight": "100 700"
+    },
+    {
+      "family": "IBM Plex Mono",
+      "package": "@fontsource/ibm-plex-mono",
+      "file": "ibm-plex-mono-latin-400-normal.woff2",
+      "weight": "400"
+    },
+    {
+      "family": "IBM Plex Mono",
+      "package": "@fontsource/ibm-plex-mono",
+      "file": "ibm-plex-mono-latin-500-normal.woff2",
+      "weight": "500"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; font-src 'self'">
+  <title></title>
+  <link rel="stylesheet" href="../vendor/basecoat/basecoat-nova.css">
+  <link rel="stylesheet" href="../vendor/fonts/fonts.css">
+  <link rel="stylesheet" href="../dist/tokens.css">
+  <link rel="stylesheet" href="../dist/ui.css">
+  <script src="../vendor/basecoat/js/basecoat.min.js" defer></script>
+  <script src="../vendor/basecoat/js/tabs.min.js" defer></script>
+  <script type="module" src="./app.js"></script>
+</head>
+<body class="flex h-dvh flex-col overflow-hidden bg-background font-sans text-foreground">
+  <noscript>Empirica UI renders with JavaScript.</noscript>
+  <header id="bar" class="shrink-0 border-b border-border bg-background px-xl py-s"></header>
+  <ev-split id="split" key="app" class="ev-with-filters min-h-0 flex-1">
+    <main id="main" class="block h-full overflow-hidden px-xl py-l"></main>
+    <aside class="bg-background"><ev-detail></ev-detail></aside>
+  </ev-split>
+  <ev-hint></ev-hint>
+</body>
+</html>

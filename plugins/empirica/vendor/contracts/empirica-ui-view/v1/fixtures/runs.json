@@ -1,0 +1,928 @@
+{
+ "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/1": {
+  "audit": {
+   "findings": [],
+   "independence": "unverified"
+  },
+  "auditor": null,
+  "author": "anthropic/claude-sonnet-4-6",
+  "budgets": {
+   "audit_spawns": {
+    "max": 2,
+    "used": 0
+   },
+   "passes": {
+    "max": 8,
+    "used": 0
+   },
+   "spawns": {
+    "max": 1,
+    "used": 0
+   }
+  },
+  "claims": [
+   {
+    "blocker_message": "Claim requires a human decision.",
+    "commands": [],
+    "id": "C0",
+    "research": 1,
+    "spikes": 0,
+    "spikes_ever": 0
+   },
+   {
+    "blocker_message": "Claim requires a human decision.",
+    "commands": [],
+    "id": "C1",
+    "research": 0,
+    "spikes": 0,
+    "spikes_ever": 0
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "control": {
+   "approval": "approved",
+   "mode": "deliberative"
+  },
+  "goal": "Choose the colour space for exported previews.",
+  "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/1",
+  "residuals": [
+   {
+    "claim": "C0",
+    "code": "claim.human_decision",
+    "message": "Claim requires a human decision."
+   },
+   {
+    "claim": "C1",
+    "code": "claim.human_decision",
+    "message": "Claim requires a human decision."
+   }
+  ],
+  "stale": [],
+  "steps": [
+   {
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null
+   },
+   {
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting"
+   }
+  ],
+  "version": "sha256:65da86144ee1624d8ddbb8944655cb7329dea04f56e667c4cafe4e0327504cea"
+ },
+ "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/2": {
+  "audit": {
+   "findings": [
+    "The tolerance test never checks the wide-gamut swatches."
+   ],
+   "independence": "distinct"
+  },
+  "auditor": "anthropic/claude-opus-4-6",
+  "author": "anthropic/claude-sonnet-4-6",
+  "budgets": {
+   "audit_spawns": {
+    "max": 2,
+    "used": 1
+   },
+   "passes": {
+    "max": 8,
+    "used": 0
+   },
+   "spawns": {
+    "max": 1,
+    "used": 0
+   }
+  },
+  "claims": [
+   {
+    "blocker_message": null,
+    "commands": [],
+    "id": "C0",
+    "research": 1,
+    "spikes": 0,
+    "spikes_ever": 0
+   },
+   {
+    "blocker_message": null,
+    "commands": [
+     "python -m pytest tests/test_colour.py"
+    ],
+    "id": "C1",
+    "research": 1,
+    "spikes": 1,
+    "spikes_ever": 1
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "control": {
+   "approval": "approved",
+   "mode": "deliberative"
+  },
+  "goal": "Choose the colour space for exported previews.",
+  "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/2",
+  "residuals": [],
+  "stale": [],
+  "steps": [
+   {
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null
+   },
+   {
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting"
+   },
+   {
+    "claim": "C1",
+    "command": null,
+    "kind": "research",
+    "n": 4,
+    "outcome": "supporting"
+   },
+   {
+    "claim": "C1",
+    "command": "python -m pytest tests/test_colour.py",
+    "kind": "spike_request",
+    "n": 5,
+    "outcome": null
+   },
+   {
+    "claim": "C1",
+    "command": "python -m pytest tests/test_colour.py",
+    "kind": "spike",
+    "n": 6,
+    "outcome": "pass"
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 7,
+    "outcome": null
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 8,
+    "outcome": null
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "attribution",
+    "n": 9,
+    "outcome": null
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "audit_verdict",
+    "n": 10,
+    "outcome": "fail"
+   }
+  ],
+  "version": "sha256:472ceac8b6196a2fcf93a9bfa9cf72a90f755bad5e5cf11f70baf52c9f5888ad"
+ },
+ "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-39abe9247f103fe638ce5e01424e311f5a2751de1eb1f57f4e2ce6da4bc72b70/1": {
+  "audit": {
+   "findings": [],
+   "independence": "unverified"
+  },
+  "auditor": null,
+  "author": "anthropic/claude-sonnet-4-6",
+  "budgets": {
+   "audit_spawns": {
+    "max": 2,
+    "used": 0
+   },
+   "passes": {
+    "max": 8,
+    "used": 0
+   },
+   "spawns": {
+    "max": 1,
+    "used": 0
+   }
+  },
+  "claims": [
+   {
+    "blocker_message": "Record Fold-1 research for this claim.",
+    "commands": [],
+    "id": "C0",
+    "research": 0,
+    "spikes": 0,
+    "spikes_ever": 0
+   },
+   {
+    "blocker_message": "Spike prerequisites changed; re-gate.",
+    "commands": [
+     "python -m pytest tests/test_decode.py"
+    ],
+    "id": "C1",
+    "research": 1,
+    "spikes": 1,
+    "spikes_ever": 1
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "control": {
+   "approval": "approved",
+   "mode": "deliberative"
+  },
+  "goal": "Make tile decoding constant-memory.",
+  "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-39abe9247f103fe638ce5e01424e311f5a2751de1eb1f57f4e2ce6da4bc72b70/1",
+  "residuals": [],
+  "stale": [
+   {
+    "path": "src/decode.py",
+    "state": "present"
+   }
+  ],
+  "steps": [
+   {
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null
+   },
+   {
+    "claim": "C1",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting"
+   },
+   {
+    "claim": "C1",
+    "command": "python -m pytest tests/test_decode.py",
+    "kind": "spike_request",
+    "n": 4,
+    "outcome": null
+   },
+   {
+    "claim": "C1",
+    "command": "python -m pytest tests/test_decode.py",
+    "kind": "spike",
+    "n": 5,
+    "outcome": "pass"
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 6,
+    "outcome": null
+   }
+  ],
+  "version": "sha256:d2058981ea143c095e100b598b7a9861ae3039c8a26fe4fd5e688c7de067d181"
+ },
+ "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e/1": {
+  "audit": {
+   "findings": [],
+   "independence": "unverified"
+  },
+  "auditor": null,
+  "author": "anthropic/claude-sonnet-4-6",
+  "budgets": {
+   "audit_spawns": {
+    "max": 2,
+    "used": 0
+   },
+   "passes": {
+    "max": 8,
+    "used": 0
+   },
+   "spawns": {
+    "max": 1,
+    "used": 0
+   }
+  },
+  "claims": [
+   {
+    "blocker_message": "Record Fold-1 research for this claim.",
+    "commands": [],
+    "id": "C0",
+    "research": 0,
+    "spikes": 0,
+    "spikes_ever": 0
+   },
+   {
+    "blocker_message": "Active evidence refutes this claim.",
+    "commands": [],
+    "id": "C1",
+    "research": 0,
+    "spikes": 0,
+    "spikes_ever": 0
+   },
+   {
+    "blocker_message": "Record Fold-1 research for this claim.",
+    "commands": [],
+    "id": "C2",
+    "research": 0,
+    "spikes": 0,
+    "spikes_ever": 0
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "control": {
+   "approval": "approved",
+   "mode": "deliberative"
+  },
+  "goal": "Drop the legacy tile format.",
+  "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e/1",
+  "residuals": [
+   {
+    "claim": "C0",
+    "code": "claim.research_missing",
+    "message": "Record Fold-1 research for this claim."
+   },
+   {
+    "claim": "C1",
+    "code": "claim.refuted",
+    "message": "Active evidence refutes this claim."
+   },
+   {
+    "claim": "C2",
+    "code": "claim.research_missing",
+    "message": "Record Fold-1 research for this claim."
+   }
+  ],
+  "stale": [],
+  "steps": [
+   {
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null
+   },
+   {
+    "claim": "C1",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "refuting"
+   }
+  ],
+  "version": "sha256:6fecb0702741dfda24ba60bb2fabdf26f714647f70f05ca563a5f946dd51285a"
+ },
+ "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9/1": {
+  "audit": {
+   "findings": [],
+   "independence": "distinct"
+  },
+  "auditor": "anthropic/claude-opus-4-6",
+  "author": "anthropic/claude-sonnet-4-6",
+  "budgets": {
+   "audit_spawns": {
+    "max": 2,
+    "used": 1
+   },
+   "passes": {
+    "max": 8,
+    "used": 1
+   },
+   "spawns": {
+    "max": 1,
+    "used": 0
+   }
+  },
+  "claims": [
+   {
+    "blocker_message": null,
+    "commands": [],
+    "id": "C0",
+    "research": 1,
+    "spikes": 0,
+    "spikes_ever": 0
+   },
+   {
+    "blocker_message": null,
+    "commands": [
+     "python -m pytest tests/test_cache.py"
+    ],
+    "id": "C1",
+    "research": 1,
+    "spikes": 1,
+    "spikes_ever": 1
+   },
+   {
+    "blocker_message": null,
+    "commands": [],
+    "id": "C2",
+    "research": 1,
+    "spikes": 0,
+    "spikes_ever": 0
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "control": {
+   "approval": "approved",
+   "mode": "deliberative"
+  },
+  "goal": "Cache the tile index so a cold start reads one file.",
+  "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9/1",
+  "residuals": [],
+  "stale": [],
+  "steps": [
+   {
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null
+   },
+   {
+    "claim": "C2",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting"
+   },
+   {
+    "claim": "C1",
+    "command": null,
+    "kind": "research",
+    "n": 4,
+    "outcome": "supporting"
+   },
+   {
+    "claim": "C1",
+    "command": "python -m pytest tests/test_cache.py",
+    "kind": "spike_request",
+    "n": 5,
+    "outcome": null
+   },
+   {
+    "claim": "C1",
+    "command": "python -m pytest tests/test_cache.py",
+    "kind": "spike",
+    "n": 6,
+    "outcome": "pass"
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 7,
+    "outcome": null
+   },
+   {
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 8,
+    "outcome": "supporting"
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 9,
+    "outcome": null
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "attribution",
+    "n": 10,
+    "outcome": null
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "audit_verdict",
+    "n": 11,
+    "outcome": "pass"
+   }
+  ],
+  "version": "sha256:b124369232d01a142b7a140440f0e237a950591a84d2b425d6bad8709eef5cb0"
+ },
+ "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-cb83d909b5dd5e1ef98360c4289ab9c465b1af5cab2e48d54cc3796a4d09e6c5/1": {
+  "audit": null,
+  "auditor": null,
+  "author": null,
+  "budgets": null,
+  "claims": [],
+  "contract": "empirica-ui-view/v1",
+  "control": null,
+  "goal": "Render the legend from one table.",
+  "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-cb83d909b5dd5e1ef98360c4289ab9c465b1af5cab2e48d54cc3796a4d09e6c5/1",
+  "residuals": [],
+  "stale": [],
+  "steps": [],
+  "version": "sha256:6ff3c5c604161515d0a37efb0e4a216b1bace505c7b48afe83618c7c5f6f213e"
+ },
+ "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-e5bc37664845dccec9f662b44804806b99e73cb885080ec8fbd053aa74fcc494/1": {
+  "audit": {
+   "findings": [],
+   "independence": "distinct"
+  },
+  "auditor": "anthropic/claude-opus-4-6",
+  "author": "anthropic/claude-sonnet-4-6",
+  "budgets": {
+   "audit_spawns": {
+    "max": 2,
+    "used": 1
+   },
+   "passes": {
+    "max": 8,
+    "used": 0
+   },
+   "spawns": {
+    "max": 1,
+    "used": 0
+   }
+  },
+  "claims": [
+   {
+    "blocker_message": null,
+    "commands": [],
+    "id": "C0",
+    "research": 1,
+    "spikes": 0,
+    "spikes_ever": 0
+   },
+   {
+    "blocker_message": null,
+    "commands": [],
+    "id": "C1",
+    "research": 1,
+    "spikes": 0,
+    "spikes_ever": 0
+   },
+   {
+    "blocker_message": null,
+    "commands": [],
+    "id": "C2",
+    "research": 1,
+    "spikes": 0,
+    "spikes_ever": 0
+   },
+   {
+    "blocker_message": null,
+    "commands": [],
+    "id": "C3",
+    "research": 2,
+    "spikes": 0,
+    "spikes_ever": 0
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "control": {
+   "approval": "approved",
+   "mode": "deliberative"
+  },
+  "goal": "Split the tile index by zoom level.",
+  "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-e5bc37664845dccec9f662b44804806b99e73cb885080ec8fbd053aa74fcc494/1",
+  "residuals": [],
+  "stale": [],
+  "steps": [
+   {
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null
+   },
+   {
+    "claim": "C1",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting"
+   },
+   {
+    "claim": "C3",
+    "command": null,
+    "kind": "research",
+    "n": 4,
+    "outcome": "supporting"
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "attribution",
+    "n": 5,
+    "outcome": null
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "audit_verdict",
+    "n": 6,
+    "outcome": "pass"
+   },
+   {
+    "claim": "C2",
+    "command": null,
+    "kind": "research",
+    "n": 7,
+    "outcome": "supporting"
+   },
+   {
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 8,
+    "outcome": "supporting"
+   },
+   {
+    "claim": "C3",
+    "command": null,
+    "kind": "research",
+    "n": 9,
+    "outcome": "supporting"
+   }
+  ],
+  "version": "sha256:e3a994bb31a60ee28869218a063e9418f6aa8f68b755b465273e5449a0e3e9fd"
+ },
+ "s256-b5e0eee6e28efca6d6ad05d7b8a94631576037ec9e5ff6d305fe89faa0e1032e/s256-6ec97bb08344a844badedb2426721d756e040e9e77f4f26c70f203bdcb9730bd/1": {
+  "audit": null,
+  "auditor": null,
+  "author": null,
+  "budgets": {
+   "audit_spawns": {
+    "max": 2,
+    "used": 0
+   },
+   "passes": {
+    "max": 8,
+    "used": 0
+   },
+   "spawns": {
+    "max": 1,
+    "used": 0
+   }
+  },
+  "claims": [],
+  "contract": "empirica-ui-view/v1",
+  "control": {
+   "approval": "approved",
+   "mode": "deliberative"
+  },
+  "goal": "Tidy the release checklist.",
+  "key": "s256-b5e0eee6e28efca6d6ad05d7b8a94631576037ec9e5ff6d305fe89faa0e1032e/s256-6ec97bb08344a844badedb2426721d756e040e9e77f4f26c70f203bdcb9730bd/1",
+  "residuals": [],
+  "stale": [],
+  "steps": [],
+  "version": "sha256:42ee9dad152bb9a25d32dbf689590a02129a03c0ad8c8b8e411bad6eafc3fead"
+ },
+ "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470/1": {
+  "audit": {
+   "findings": [],
+   "independence": "unverified"
+  },
+  "auditor": null,
+  "author": "anthropic/claude-sonnet-4-6",
+  "budgets": {
+   "audit_spawns": {
+    "max": 2,
+    "used": 0
+   },
+   "passes": {
+    "max": 8,
+    "used": 0
+   },
+   "spawns": {
+    "max": 1,
+    "used": 0
+   }
+  },
+  "claims": [
+   {
+    "blocker_message": null,
+    "commands": [],
+    "id": "C0",
+    "research": 1,
+    "spikes": 0,
+    "spikes_ever": 0
+   },
+   {
+    "blocker_message": null,
+    "commands": [],
+    "id": "C1",
+    "research": 0,
+    "spikes": 0,
+    "spikes_ever": 0
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "control": {
+   "approval": "approved",
+   "mode": "deliberative"
+  },
+  "goal": "Document the import retry policy.",
+  "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470/1",
+  "residuals": [
+   {
+    "claim": null,
+    "code": "freeze.deferred",
+    "message": "Deferred claims are residual; accept."
+   }
+  ],
+  "stale": [],
+  "steps": [
+   {
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null
+   },
+   {
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting"
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 4,
+    "outcome": null
+   }
+  ],
+  "version": "sha256:e94e5ba48a3f2f41b01ce456af4c7c6430883bdabc288ed10adab4656a5df6f2"
+ },
+ "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148/1": {
+  "audit": null,
+  "auditor": null,
+  "author": null,
+  "budgets": null,
+  "claims": [],
+  "contract": "empirica-ui-view/v1",
+  "control": null,
+  "goal": null,
+  "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148/1",
+  "residuals": [],
+  "stale": [],
+  "steps": [],
+  "version": "sha256:cb3cc03811279664860c3795a785cf5c86b24db9ae83381649efa8ca17adcd4e"
+ },
+ "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-ea2fab75d05920549b4b92798bdf7217fed88df4e0a56de317d1e721524887b2/1": {
+  "audit": {
+   "findings": [],
+   "independence": "unverified"
+  },
+  "auditor": null,
+  "author": "anthropic/claude-sonnet-4-6",
+  "budgets": {
+   "audit_spawns": {
+    "max": 2,
+    "used": 0
+   },
+   "passes": {
+    "max": 1,
+    "used": 1
+   },
+   "spawns": {
+    "max": 1,
+    "used": 0
+   }
+  },
+  "claims": [
+   {
+    "blocker_message": null,
+    "commands": [
+     "python bench/import.py"
+    ],
+    "id": "C0",
+    "research": 1,
+    "spikes": 1,
+    "spikes_ever": 1
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "control": {
+   "approval": "approved",
+   "mode": "deliberative"
+  },
+  "goal": "Find why the nightly import is slow.",
+  "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-ea2fab75d05920549b4b92798bdf7217fed88df4e0a56de317d1e721524887b2/1",
+  "residuals": [
+   {
+    "claim": null,
+    "code": "budget.exhausted",
+    "message": "{resource} budget exhausted."
+   }
+  ],
+  "stale": [],
+  "steps": [
+   {
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null
+   },
+   {
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting"
+   },
+   {
+    "claim": "C0",
+    "command": "python bench/import.py",
+    "kind": "spike_request",
+    "n": 4,
+    "outcome": null
+   },
+   {
+    "claim": "C0",
+    "command": "python bench/import.py",
+    "kind": "spike",
+    "n": 5,
+    "outcome": "pass"
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 6,
+    "outcome": null
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 7,
+    "outcome": null
+   }
+  ],
+  "version": "sha256:70694f5156d73bcf0bc5251fff4c6e1768846d8538d97787c4f50a8e2e411433"
+ }
+}

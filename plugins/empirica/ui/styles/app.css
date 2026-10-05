@@ -1,0 +1,66 @@
+/* Tailwind input (CONVENTIONS §1, T3). Only our utilities are generated: no Tailwind default theme or preflight
+   is imported (Basecoat's vendored bundle brings its own base), so classes outside tokens.json do not exist. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "../dist/theme.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@source "../elements";
+@source "../gallery";
+@source "../app";
+
+/* Focus indicator (T7, WCAG 2.4.7/2.4.13): every Basecoat pack draws focus as a 30-50%-alpha ring (1.6-2.4:1
+   against the surface). One solid 2 px outline in `ring` (>= 7:1) is added everywhere; !important because the
+   vendored components set their ring with higher-specificity variants, and this is the only such override. */
+:focus-visible { outline: 2px solid var(--color-ring) !important; outline-offset: 2px; }
+
+/* Element display (E1): custom elements are inline by default; these are the ones that are blocks. */
+@layer components {
+  ev-steps { display: block; }
+  :where(ev-state, ev-step, ev-meter) { display: inline-flex; }
+  :where(ev-file, ev-goal, ev-legend, ev-detail, ev-history, ev-filters, ev-view) { display: block; }
+  .ev-grey { filter: grayscale(1); }
+}
+
+/* Native <meter> in token colours: quiet track, neutral fill; a full budget turns cautionary. */
+@layer components {
+  meter.ev-meter { inline-size: 100%; block-size: var(--spacing-2xs); border-radius: var(--radius-full); background: var(--muted); appearance: none; }
+  meter.ev-meter::-webkit-meter-bar { background: var(--muted); border: 0; border-radius: var(--radius-full); block-size: var(--spacing-2xs); }
+  meter.ev-meter::-webkit-meter-optimum-value, meter.ev-meter::-webkit-meter-suboptimum-value, meter.ev-meter::-webkit-meter-even-less-good-value { background: var(--tone-neutral); border-radius: var(--radius-full); }
+  meter.ev-meter[data-full]::-webkit-meter-optimum-value { background: var(--tone-caution); }
+  meter.ev-meter::-moz-meter-bar { background: var(--tone-neutral); border-radius: var(--radius-full); }
+  meter.ev-meter[data-full]::-moz-meter-bar { background: var(--tone-caution); }
+}
+
+/* The single top-layer hint (ev-hint): anchored to the hovered/focused element, flips when out of room. */
+@layer components {
+  [popover].ev-hint {
+    position: fixed; inset: auto; margin: 0; border: 0;
+    position-anchor: --ev-hint; position-area: top; position-try-fallbacks: flip-block, flip-inline;
+    margin-block: var(--spacing-2xs); max-inline-size: var(--container-hint);
+    white-space: normal;
+  }
+}
+
+/* ev-split reads these widths in px (getComputedStyle): registered as lengths, a calc() or rem resolves first. */
+@property --ev-panel { syntax: "<length>"; inherits: true; initial-value: 0px; }
+@property --ev-panel-min { syntax: "<length>"; inherits: true; initial-value: 0px; }
+@property --ev-main-min { syntax: "<length>"; inherits: true; initial-value: 0px; }
+
+/* ev-split: main | handle | panel. Each column scrolls on its own; the panel width is a CSS variable set by the
+   element (CSSOM, not markup). */
+@layer components {
+  ev-split { --ev-panel: var(--container-panel); --ev-panel-min: var(--container-panel-min); --ev-main-min: var(--container-main-min); }
+  /* The app's main column holds the filter column too: its width, the gap, the page padding and the divider come on top. */
+  ev-split.ev-with-filters { --ev-main-min: calc(var(--container-sidebar) + 3 * var(--spacing-xl) + var(--spacing-xs) + var(--container-main-min)); }
+  ev-split { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-block-size: 0; }
+  ev-split[open] { grid-template-columns: minmax(0, 1fr) auto var(--ev-split-w, var(--container-panel)); }
+  ev-split > * { position: relative; min-block-size: 0; overflow-y: auto; } /* relative: contains sr-only boxes */
+  ev-split > .ev-split-handle { display: none; overflow: visible; }
+  ev-split > :last-child { display: none; }
+  ev-split[open] > .ev-split-handle, ev-split[open] > :last-child { display: flex; }
+  /* Narrow (container < panel-min + main-min): the panel takes the full width until it is closed (D2 exception). */
+  ev-split[open][narrow] { grid-template-columns: 0 0 minmax(0, 1fr); }
+  ev-split[open][narrow] > :first-child, ev-split[open][narrow] > .ev-split-handle { visibility: hidden; }
+}

@@ -1,0 +1,263 @@
+{
+  "$description": "State vocabulary -> presentation (CONVENTIONS S1). Every domain is keyed by exactly one enum of the observer contract (contracts/empirica-ui-view/v1), held equal by tests/contract.test.mjs. Each entry: tone (semantic colour), icon (meaning key in icons.json), copy key prefix in copy/en.json (label + hint). `quiet: true` marks the usual or bookkeeping values: an overview mark carries no glyph for them and a history folds them, so everything else stands out (V3). `minor: true` (steps) draws a small dot. A step takes its outcome's tone when it has one.",
+  "run": {
+    "active": {
+      "tone": "info",
+      "icon": "running",
+      "copy": "run.active"
+    },
+    "converged": {
+      "tone": "positive",
+      "icon": "converged",
+      "copy": "run.converged"
+    },
+    "stopped_residual": {
+      "tone": "caution",
+      "icon": "stopped",
+      "copy": "run.stopped_residual"
+    },
+    "stopped_budget": {
+      "tone": "caution",
+      "icon": "stopped",
+      "copy": "run.stopped_budget"
+    },
+    "stopped_frozen": {
+      "tone": "caution",
+      "icon": "stopped",
+      "copy": "run.stopped_frozen"
+    }
+  },
+  "diagnostic": {
+    "older-format": {
+      "tone": "neutral",
+      "icon": "older",
+      "copy": "diagnostic.older-format"
+    },
+    "unreadable": {
+      "tone": "negative",
+      "icon": "integrity-broken",
+      "copy": "diagnostic.unreadable"
+    },
+    "history-unavailable": {
+      "tone": "neutral",
+      "icon": "no-history",
+      "copy": "diagnostic.history-unavailable"
+    },
+    "history-missing": {
+      "tone": "caution",
+      "icon": "no-history",
+      "copy": "diagnostic.history-missing"
+    },
+    "history-corrupt": {
+      "tone": "negative",
+      "icon": "integrity-broken",
+      "copy": "diagnostic.history-corrupt"
+    },
+    "workspace-unavailable": {
+      "tone": "caution",
+      "icon": "workspace-off",
+      "copy": "diagnostic.workspace-unavailable"
+    }
+  },
+  "audit": {
+    "passed": {
+      "tone": "audit",
+      "icon": "audit",
+      "copy": "audit.passed"
+    },
+    "failed": {
+      "tone": "negative",
+      "icon": "audit-failed",
+      "copy": "audit.failed"
+    },
+    "stale": {
+      "tone": "caution",
+      "icon": "audit-stale",
+      "copy": "audit.stale"
+    },
+    "pending": {
+      "tone": "neutral",
+      "icon": "audit-pending",
+      "copy": "audit.pending"
+    },
+    "required": {
+      "tone": "neutral",
+      "icon": "audit-pending",
+      "copy": "audit.required"
+    },
+    "not_required": {
+      "tone": "neutral",
+      "icon": "audit-none",
+      "copy": "audit.not_required"
+    }
+  },
+  "claim": {
+    "approved": {
+      "tone": "positive",
+      "icon": "verified",
+      "copy": "claim.approved",
+      "quiet": true
+    },
+    "open": {
+      "tone": "info",
+      "icon": "open",
+      "copy": "claim.open"
+    },
+    "blocked": {
+      "tone": "caution",
+      "icon": "blocked",
+      "copy": "claim.blocked"
+    },
+    "discarded": {
+      "tone": "neutral",
+      "icon": "discarded",
+      "copy": "claim.discarded"
+    }
+  },
+  "evidence": {
+    "spike": {
+      "tone": "positive",
+      "icon": "spike",
+      "copy": "evidence.spike"
+    },
+    "research": {
+      "tone": "neutral",
+      "icon": "research",
+      "copy": "evidence.research"
+    },
+    "none": {
+      "tone": "neutral",
+      "icon": "untested",
+      "copy": "evidence.none"
+    }
+  },
+  "review": {
+    "passed": {
+      "tone": "audit",
+      "icon": "audit",
+      "copy": "review.passed"
+    },
+    "failed": {
+      "tone": "negative",
+      "icon": "audit-failed",
+      "copy": "review.failed"
+    },
+    "stale": {
+      "tone": "caution",
+      "icon": "audit-stale",
+      "copy": "review.stale"
+    },
+    "changed": {
+      "tone": "caution",
+      "icon": "changed",
+      "copy": "review.changed"
+    },
+    "unreviewed": {
+      "tone": "neutral",
+      "icon": "untested",
+      "copy": "review.unreviewed"
+    },
+    "none": {
+      "tone": "neutral",
+      "icon": "audit-pending",
+      "copy": "review.none"
+    }
+  },
+  "step": {
+    "graph": {
+      "tone": "info",
+      "icon": "graph",
+      "copy": "step.graph"
+    },
+    "research": {
+      "tone": "neutral",
+      "icon": "research",
+      "copy": "step.research",
+      "minor": true
+    },
+    "spike_request": {
+      "tone": "neutral",
+      "icon": "spike-request",
+      "copy": "step.spike_request",
+      "minor": true
+    },
+    "spike": {
+      "tone": "neutral",
+      "icon": "spike",
+      "copy": "step.spike"
+    },
+    "audit_verdict": {
+      "tone": "audit",
+      "icon": "audit",
+      "copy": "step.audit_verdict"
+    },
+    "attribution": {
+      "tone": "neutral",
+      "icon": "attribution",
+      "copy": "step.attribution",
+      "quiet": true,
+      "minor": true
+    },
+    "observation_basis": {
+      "tone": "neutral",
+      "icon": "observation",
+      "copy": "step.observation_basis",
+      "quiet": true,
+      "minor": true
+    }
+  },
+  "outcome": {
+    "supporting": {
+      "tone": "positive",
+      "icon": "verified",
+      "copy": "outcome.supporting"
+    },
+    "refuting": {
+      "tone": "negative",
+      "icon": "failed",
+      "copy": "outcome.refuting"
+    },
+    "pass": {
+      "tone": "positive",
+      "icon": "verified",
+      "copy": "outcome.pass"
+    },
+    "fail": {
+      "tone": "negative",
+      "icon": "failed",
+      "copy": "outcome.fail"
+    }
+  },
+  "file": {
+    "present": {
+      "tone": "caution",
+      "icon": "changed",
+      "copy": "file.present"
+    },
+    "missing": {
+      "tone": "caution",
+      "icon": "deleted",
+      "copy": "file.missing"
+    },
+    "unreadable": {
+      "tone": "caution",
+      "icon": "file-odd",
+      "copy": "file.unreadable"
+    },
+    "non_regular": {
+      "tone": "caution",
+      "icon": "file-odd",
+      "copy": "file.non_regular"
+    },
+    "outside_workspace": {
+      "tone": "caution",
+      "icon": "file-odd",
+      "copy": "file.outside_workspace"
+    }
+  },
+  "unknown": {
+    "tone": "neutral",
+    "icon": "unknown",
+    "copy": "unknown"
+  }
+}

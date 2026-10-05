@@ -40,6 +40,10 @@ EMPIRICA_BRIDGE_V2_TESTS := $(PLUGINS_DIR)/empirica/tests/test_bridge_v2.py
 EMPIRICA_PUBLIC_TOOLS_TESTS := $(PLUGINS_DIR)/empirica/tests/test_public_tools.py
 EMPIRICA_AUDIT_PROTOCOL_TESTS := $(PLUGINS_DIR)/empirica/tests/test_audit_protocol.py
 EMPIRICA_STATE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_state_adapter.py
+EMPIRICA_OBSERVER_TESTS := $(PLUGINS_DIR)/empirica/tests/test_observer.py
+EMPIRICA_OBSERVER_SERVER_TESTS := $(PLUGINS_DIR)/empirica/tests/test_observer_server.py
+EMPIRICA_UI := $(PLUGINS_DIR)/empirica/ui
+EMPIRICA_OBSERVE := $(PLUGINS_DIR)/empirica/adapters/observer/cli.py
 EMPIRICA_GIT_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/git/tests/test_git_artifact_repo.py
 EMPIRICA_GIT_IO_BOOTSTRAP_TESTS := $(PLUGINS_DIR)/empirica/adapters/git/tests/test_git_io_bootstrap.py
 EMPIRICA_GOVERNANCE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_governance.py
@@ -85,12 +89,12 @@ help: ## Show this help (generated from target descriptions)
 # `check` is the fast deterministic contributor gate. Expensive filesystem/host-journey matrices
 # live under the explicit integration targets below; installed-host qualification is operator-led
 # and never runs automatically. `check-ci` omits Pi unless the runner explicitly opts in.
-.PHONY: check check-ci check-static check-core check-claude check-codex check-pi pi-governance-dialog-golden
-check: check-static check-core check-claude check-codex check-pi ## Fast contributor gate (not integration/native certification)
+.PHONY: check check-ci check-static check-core check-claude check-codex check-pi check-ui pi-governance-dialog-golden
+check: check-static check-core check-claude check-codex check-pi check-ui ## Fast contributor gate (not integration/native certification)
 	@printf '\n$(BOLD)Fast contributor checks passed.$(RESET)\n'
 
 check-ci: check-static check-core check-claude check-codex ## Fast contributor gate except Pi (PI_CHECKS=1 includes it)
-	@if [ "$(PI_CHECKS)" = "1" ]; then $(MAKE) check-pi; else printf '$(DIM)Pi suite skipped in CI (PI_CHECKS=1 to include)$(RESET)\n'; fi
+	@if [ "$(PI_CHECKS)" = "1" ]; then $(MAKE) check-pi check-ui; else printf '$(DIM)Pi and UI suites skipped in CI (PI_CHECKS=1 to include; they need Node)$(RESET)\n'; fi
 	@printf '\n$(BOLD)CI checks passed.$(RESET)\n'
 
 check-static: lint validate docs-check adr-check empirica-architecture-check empirica-architecture-unit-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check empirica-context-economy-unit-check claude-subagent-models-unit-check pi-canary-unit-check pi-validator-unit-check ## Lint, manifests, docs, ADRs, architecture validator and its tests, contracts, vendor copies, activation, receipts, canary config
@@ -111,6 +115,8 @@ check-core: empirica-author-view-golden empirica-governance-dialog-golden ## Fas
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_IDENTITY_TESTS)
 	@$(PYTHON) $(EMPIRICA_HOST_RUNTIME_TESTS)
 	@$(PYTHON) $(EMPIRICA_STATE_TESTS)
+	@$(PYTHON) $(EMPIRICA_OBSERVER_TESTS)
+	@$(PYTHON) $(EMPIRICA_OBSERVER_SERVER_TESTS)
 	@$(PYTHON) $(METHODOLOGIST_CORE_TESTS)
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q \
 		test_governance.StartAdmissionTests \
@@ -156,6 +162,12 @@ check-codex: methodologist-codex-check empirica-codex-check ## Fast Codex packag
 
 check-pi: pi-governance-dialog-golden pi-bundle-check methodologist-pi-check empirica-pi-check pi-auditor-resolution-unit-check empirica-identity-pi-levels-check ## Fast Pi package, type, unit, guard, and bounded bridge tests — needs Node
 	@printf '$(BOLD)==> pi suite ok$(RESET)\n'
+
+check-ui: ## Fast observer-UI checks: contract coverage, client, filters, layout, conventions — needs Node, not its toolchain
+	@printf '$(BOLD)==> ui suite$(RESET)\n'
+	@cd $(EMPIRICA_UI) && node --test --test-reporter=dot tests/*.test.mjs
+	@cd $(EMPIRICA_UI) && node scripts/audit.mjs
+	@printf '$(BOLD)==> ui suite ok$(RESET)\n'
 
 pi-governance-dialog-golden: node_modules ## Check Pi governance screen goldens (UPDATE=1 regenerates)
 	@if [ "$(UPDATE)" = "1" ]; then \
@@ -246,8 +258,9 @@ adr-check: ## Check ADR link health and numbering (adrs doctor)
 	fi
 
 .PHONY: contract-check contract-fixtures contract-schemas contract-schema-generator-unit-check
-contract-fixtures: ## Regenerate runtime-derived Empirica contract fixture fields
+contract-fixtures: ## Regenerate runtime-derived Empirica contract fixture fields and observer fixtures
 	@$(PYTHON) $(SCRIPTS)/regen_contract_fixtures.py
+	@$(PYTHON) $(SCRIPTS)/regen_ui_view_fixtures.py
 
 contract-schemas: ## Regenerate shared Empirica schema definitions and local embeddings
 	@$(PYTHON) $(SCRIPTS)/sync_schema_defs.py
@@ -255,12 +268,15 @@ contract-schemas: ## Regenerate shared Empirica schema definitions and local emb
 contract-schema-generator-unit-check: ## Check shared-schema drift, near-match, collision, and stale-definition handling
 	@$(PYTHON) -m unittest -q $(SCRIPTS)/tests/test_sync_schema_defs.py
 
-contract-check: ## Validate schemas, generated shared definitions, and conformance fixtures
+contract-check: ## Validate schemas, generated shared definitions, conformance and observer fixtures
 	@printf '$(BOLD)==> contracts$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/sync_schema_defs.py --check
 	@$(MAKE) --no-print-directory contract-schema-generator-unit-check
 	@$(PYTHON) $(SCRIPTS)/regen_contract_fixtures.py --check
 	@$(PYTHON) $(SCRIPTS)/validate_contracts.py
+	@$(PYTHON) $(SCRIPTS)/regen_ui_view_fixtures.py --check
+	@$(PYTHON) $(SCRIPTS)/validate_ui_view.py
+	@$(PYTHON) -m unittest -q $(SCRIPTS)/tests/test_validate_ui_view.py
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) -c 'import adapters.public_tools'
 
 .PHONY: obligations-check
@@ -610,3 +626,33 @@ clean-runs: ## Remove machine-local empirica operational runs (never legacy .cla
 empirica-public-tools-sync: vendor-contracts ## Regenerate public tool schemas after canonical request edits, then sync vendor copies
 	$(PYTHON) scripts/sync_empirica_public_tools.py
 	$(MAKE) vendor-contracts
+
+# --- Empirica observer UI ---------------------------------------------------------------------
+# The UI ships built: plugins/empirica/ui holds its committed dist/ and vendor/. Its Node toolchain
+# (ui/package.json) is dev-only and is needed only to rebuild those.
+.PHONY: ui ui-demo ui-install ui-tokens ui-vendor ui-css ui-contrast ui-browser ui-build
+ui: ## Serve the observer UI for your Empirica store on 127.0.0.1 (REPO=<checkout> adds a repository for runs without a recorded location)
+	@$(PYTHON) $(EMPIRICA_OBSERVE) serve --open $(if $(REPO),--repo "$(REPO)")
+
+ui-demo: ## Serve the observer UI on the plugin's demo data only (reads no store)
+	@$(PYTHON) $(EMPIRICA_OBSERVE) serve --open --demo
+
+ui-install: ## Install the pinned dev-only UI toolchain (npm ci in plugins/empirica/ui)
+	cd $(EMPIRICA_UI) && npm ci
+
+ui-tokens: ## Rebuild the UI's tokens.json -> dist/tokens.css + dist/theme.css (Style Dictionary)
+	cd $(EMPIRICA_UI) && node tokens/build.mjs
+
+ui-vendor: ## Re-vendor the UI's pinned Basecoat, fonts and Lucide subset (records vendor/VERSIONS)
+	cd $(EMPIRICA_UI) && node scripts/vendor.mjs
+
+ui-css: ui-tokens ## Rebuild the UI's dist/ui.css (Tailwind CLI, only its token utilities)
+	cd $(EMPIRICA_UI) && npx --no-install @tailwindcss/cli -i styles/app.css -o dist/ui.css --minify
+
+ui-contrast: ## WCAG contrast of every semantic colour pair of the UI, in both schemes (culori)
+	cd $(EMPIRICA_UI) && node scripts/contrast.mjs
+
+ui-browser: ## Headless-Chrome checks of the UI against the observer server (needs Chrome; integration)
+	cd $(EMPIRICA_UI) && node tests/browser.check.mjs
+
+ui-build: ui-vendor ui-css ui-contrast check-ui ui-browser ## Rebuild everything the UI ships, then check it (needs the toolchain and Chrome)

@@ -70,6 +70,17 @@ _COMMIT_IDENTITY = {
 }
 
 
+def toplevel(path: Path) -> Path | None:
+    """The working tree's top-level directory holding ``path``, or ``None`` outside a repository.
+
+    Plain ``git`` in the user's environment, like the plugin's own project identity
+    (``identity._git_common_dir``): a repository must resolve here exactly as StartRun resolved it,
+    so this deliberately does not use the artifact repository's isolated Git environment."""
+    proc = subprocess.run(["git", "-C", str(path), "rev-parse", "--show-toplevel"],
+                          capture_output=True, text=True, check=False)
+    return Path(proc.stdout.strip()).resolve() if proc.returncode == 0 else None
+
+
 class ArtifactCollision(Exception):
     """An append tried to bind an existing artifact id to a different body.
 
@@ -176,6 +187,14 @@ class GitArtifactRepository:
             proj=_ref_component(key.project_id),
             run=_ref_component(key.run_id),
         )
+
+    def ref_heads(self) -> dict[str, str]:
+        """Every artifact ref and the commit it names, in one read-only ``for-each-ref``: what a
+        reader polls to learn which runs' histories moved without reading any of them."""
+        proc = self._git("for-each-ref", "--format=%(refname) %(objectname)", "refs/empirica/artifacts/")
+        if proc.returncode != 0:
+            raise GitError(f"for-each-ref failed: {proc.stderr.strip()}")
+        return dict(line.split(" ", 1) for line in proc.stdout.splitlines() if " " in line)
 
     # --- git plumbing --------------------------------------------------------
 

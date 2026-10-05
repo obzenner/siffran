@@ -1,0 +1,52 @@
+// The view's filters (VIEW.md R5), as one pure function over the observer's view (empirica-ui-view/v1). Filters
+// are declared in catalogue.json (`filters`); this selects values the data provides and decides no state (X1/E4).
+// A filter's choice is a list of values (a field filter: any of them matches) or `true` (a flag filter: the
+// claim's `flag` field is set). Different filters must all hold. Tested in tests/filter.test.mjs.
+
+import { approved } from "../elements/core/count.js";
+
+const chosen = (f, choice) => (f.flag ? choice[f.id] === true : (choice[f.id] ?? []).length > 0);
+function holds(f, choice, x) {
+  return f.flag ? x[f.flag] != null : choice[f.id].includes(x[f.field]);
+}
+
+/**
+ * What stays in the view: the projects, runs and claims that pass, each project keeping its name and its place
+ * number (`n`, from 1, in the data's order: the label of a project without a name), so its label does not change;
+ * support edges and previous attempts only between what stays.
+ * A run keeps its own facts: `total` is how many claims it has and `approved` how many of them the plugin
+ * approved, whatever the filters show of them.
+ * @returns {{projects:{id:string,name:?string,n:number,runs:object[]}[], counts:{projects:number,runs:number,claims:number}}}
+ */
+export function apply(data, choice, filters) {
+  const runF = filters.filter((f) => f.of === "run" && chosen(f, choice));
+  const claimF = filters.filter((f) => f.of === "claim" && chosen(f, choice));
+  const projects = [];
+  for (const [i, p] of data.projects.entries()) {
+    const runs = [];
+    for (const r of p.runs) {
+      if (!runF.every((f) => holds(f, choice, r))) continue;
+      const claims = r.claims.filter((c) => claimF.every((f) => holds(f, choice, c)));
+      if (claimF.length && !claims.length) continue;
+      const ids = new Set(claims.map((c) => c.id));
+      runs.push({ ...r, total: r.claims.length, approved: approved(r), claims, edges: r.edges.filter((e) => ids.has(e.from) && ids.has(e.to)), root: ids.has(r.root) ? r.root : null });
+    }
+    if (runs.length) projects.push({ id: p.id, name: p.name, n: i + 1, runs });
+  }
+  const kept = new Set(projects.flatMap((p) => p.runs.map((r) => r.key)));
+  for (const p of projects) for (const r of p.runs) if (!kept.has(r.previous)) r.previous = null;
+  const runs = projects.flatMap((p) => p.runs);
+  return { projects, counts: { projects: projects.length, runs: runs.length, claims: runs.reduce((n, r) => n + r.claims.length, 0) } };
+}
+
+/** What `projects` show, counted per value in the order `order(domain)` declares (states.json); values with no
+ * count are left out. The legend's numbers. */
+export function showing(projects, order) {
+  const rs = projects.flatMap((p) => p.runs), cs = rs.flatMap((r) => r.claims);
+  const count = (domain, xs) => order(domain).map((value) => ({ value, n: xs.filter((x) => x === value).length })).filter((x) => x.n);
+  return {
+    runs: count("run", rs.map((r) => r.state)), audits: count("audit", rs.map((r) => r.audit)),
+    diagnostics: count("diagnostic", rs.map((r) => r.diagnostic)), claims: count("claim", cs.map((c) => c.state)),
+    gating: cs.filter((c) => c.gating).length, supports: rs.reduce((n, r) => n + r.edges.length, 0), attempts: rs.filter((r) => r.previous).length,
+  };
+}

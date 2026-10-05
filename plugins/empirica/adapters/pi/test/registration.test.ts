@@ -48,6 +48,12 @@ test("registers the /empirica command with a description", () => {
   assert.equal(typeof command.handler, "function");
 });
 
+test("registers the /empirica-ui command with a description", () => {
+  const command = register().commands.get("empirica-ui");
+  assert.ok(command, "expected an 'empirica-ui' command to be registered");
+  assert.ok((command.description ?? "").length > 0);
+});
+
 test("does NOT register removed commands", () => {
   const pi = register();
   assert.equal(pi.commands.get("empirica-status"), undefined);

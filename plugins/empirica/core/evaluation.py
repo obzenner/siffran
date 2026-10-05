@@ -244,6 +244,11 @@ def active_evidence(snapshot: EvaluationSnapshot, claim: dict[str, Any]) -> list
     return [a for a in evidence if a["kind"] == "research"] + active_spike
 
 
+def evidence_digest(snapshot: EvaluationSnapshot, claim: dict[str, Any]) -> str:
+    """The digest an audit verdict binds per reviewed claim: its ordered active evidence ids."""
+    return digest([a["artifact_id"] for a in active_evidence(snapshot, claim)])
+
+
 def active_spike_heads(
     history: tuple[dict[str, Any], ...], graph: dict[str, Any] | None,
 ) -> tuple[ActiveSpikeHead, ...]:
@@ -616,8 +621,7 @@ def audit_binding(snapshot: EvaluationSnapshot) -> dict[str, Any]:
     for claim in snapshot.graph["claims"]:
         if claim["id"] in gating and derivation.states[claim["id"]] == "approved":
             reviewed.append({"claim_id": claim["id"],
-                             "evidence_digest": digest(
-                                 [a["artifact_id"] for a in active_evidence(snapshot, claim)])})
+                             "evidence_digest": evidence_digest(snapshot, claim)})
     return {"argument_digest": digest({"graph": snapshot.graph, "evidence": visible}),
             "goal_digest": digest(snapshot.state.goal),
             "frozen_scope_digest": (None if snapshot.state.frozen_claim_ids is None

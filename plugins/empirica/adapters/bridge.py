@@ -54,9 +54,10 @@ from application import host_runtime  # noqa: E402
 from application import protocol as _proto  # noqa: E402
 from application import v2 as _v2  # noqa: E402
 from adapters.execution import FilesystemWorkspace, SubprocessSpikeHarness  # noqa: E402
-from adapters.git.artifact_repo import GitArtifactRepository  # noqa: E402
+from adapters.git.artifact_repo import GitArtifactRepository, toplevel  # noqa: E402
 from adapters.identity import POLICY_VERSION, observe  # noqa: E402
 from adapters.state.located import LocatedRunRepository  # noqa: E402
+from adapters.state.locations import Locations  # noqa: E402
 
 _PROTOCOL = _proto.protocol_id()
 _PROFILES = _proto.profile_ids()
@@ -110,6 +111,28 @@ class _LazyGitArtifactRepository:
         return getattr(self._repository, name)
 
 
+class _RecordingRuns:
+    """The run repository, recording where each run it creates works (``adapters.state.locations``):
+    the repository holding its knowledge store and its workspace, so a reader finds them later.
+
+    The record is display and lookup data for readers, never read by a run's decisions, so failing to
+    write it never fails the run: the run is created either way and simply has no record."""
+
+    def __init__(self, runs: LocatedRunRepository, repo_dir: Path, workspace_dir: Path) -> None:
+        self._runs, self._repo_dir, self._workspace_dir = runs, repo_dir, workspace_dir
+
+    def __getattr__(self, name: str):
+        return getattr(self._runs, name)
+
+    def create(self, key, value):
+        revision = self._runs.create(key, value)
+        try:
+            Locations().record(key, toplevel(self._repo_dir), self._workspace_dir.resolve())
+        except (OSError, ValueError):
+            pass
+        return revision
+
+
 def build_service(profile_id: str):
     """Compose the v2 service with an explicit exact registry ``profile_id`` (D6-C §4).
 
@@ -121,8 +144,8 @@ def build_service(profile_id: str):
         raise ValueError("an explicit exact registry profile_id is required")
     if profile_id not in _PROFILES:
         raise ValueError(f"unknown host profile_id: {profile_id!r}")
-    runs = LocatedRunRepository()
     repo_dir = Path(os.environ.get("EMPIRICA_REPO_DIR", Path.cwd()))
+    runs = _RecordingRuns(LocatedRunRepository(), repo_dir, Path.cwd())
     artifacts = _LazyGitArtifactRepository(repo_dir)
     return _v2.compose(
         workspace=FilesystemWorkspace(Path.cwd()), harness=SubprocessSpikeHarness(),

@@ -1,0 +1,101 @@
+{
+  "$description": "Closed lists the UI iterates over (CONVENTIONS 0.2: declarations over code). Pages import them; scripts/audit.mjs expands dynamic copy keys from them. `kinds`, `independence`, `control_modes` and `approvals` are observer-contract enums, held equal by tests/contract.test.mjs. `filters` are the view's filters (VIEW.md R5): a field filter (`of` run or claim) keeps the chosen values, from states.json (`domain`), another list here (`values`) or the data (project); a flag filter (`flag`) keeps the claims whose named field is set. `data_sources` are the server's sources (adapters/observer/server.py); `poll_ms` is how often the app asks whether the store changed.",
+  "kinds": [
+    "needs-experiment",
+    "needs-decision",
+    "ordinary"
+  ],
+  "independence": [
+    "distinct",
+    "mixed",
+    "same_model",
+    "unverified"
+  ],
+  "control_modes": [
+    "deliberative",
+    "auto"
+  ],
+  "approvals": [
+    "pending",
+    "approved",
+    "revision_pending",
+    "rejected"
+  ],
+  "tones": [
+    "positive",
+    "negative",
+    "caution",
+    "info",
+    "human",
+    "audit",
+    "neutral"
+  ],
+  "gallery_sections": [
+    "colours",
+    "atoms",
+    "molecules",
+    "organisms"
+  ],
+  "gallery_state_domains": [
+    "claim",
+    "run",
+    "audit",
+    "diagnostic",
+    "evidence",
+    "review",
+    "file"
+  ],
+  "data_sources": [
+    "store",
+    "demo"
+  ],
+  "poll_ms": 3000,
+  "filters": [
+    {
+      "id": "run-state",
+      "of": "run",
+      "field": "state",
+      "domain": "run"
+    },
+    {
+      "id": "audit",
+      "of": "run",
+      "field": "audit",
+      "domain": "audit"
+    },
+    {
+      "id": "project",
+      "of": "run",
+      "field": "project"
+    },
+    {
+      "id": "claim-state",
+      "of": "claim",
+      "field": "state",
+      "domain": "claim"
+    },
+    {
+      "id": "kind",
+      "of": "claim",
+      "field": "kind",
+      "values": "kinds"
+    },
+    {
+      "id": "evidence",
+      "of": "claim",
+      "field": "evidence",
+      "domain": "evidence"
+    },
+    {
+      "id": "review",
+      "of": "claim",
+      "field": "review",
+      "domain": "review"
+    },
+    {
+      "id": "blocks",
+      "of": "claim",
+      "flag": "blocker"
+    }
+  ]
+}

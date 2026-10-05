@@ -32,8 +32,8 @@ from . import fsio
 
 _DEFAULT_HOME = ".empirica-plugin"
 _HOME_ENV = "EMPIRICA_HOME"
-_DOC_NAME = "run.json"
-_GEN_PREFIX = "gen-"
+DOC_NAME = "run.json"
+GEN_PREFIX = "gen-"
 # A RunKey's string halves are used as single path segments. They should already be sanitised (see
 # ``identity``), but the port accepts arbitrary strings, so the adapter validates rather than trust:
 # a segment with a separator or ``..`` is a traversal attempt and is refused, not normalised away.
@@ -53,8 +53,13 @@ def _reject_non_finite(_constant: str) -> object:
     raise ValueError("non-finite JSON constant")
 
 
+def is_safe_segment(value: str) -> bool:
+    """Whether ``value`` may name one directory of the store layout."""
+    return value not in ("", ".", "..") and _SAFE_SEGMENT.match(value) is not None
+
+
 def _safe_segment(value: str, field: str) -> str:
-    if value in ("", ".", "..") or not _SAFE_SEGMENT.match(value):
+    if not is_safe_segment(value):
         raise ValueError(f"unsafe {field} path segment: {value!r}")
     return value
 
@@ -81,11 +86,14 @@ class FilesystemRunRepository:
         return (self._home / "projects" / _safe_segment(project_id, "project_id")
                 / "runs" / _safe_segment(run_id, "run_id"))
 
-    def _doc_path(self, key: RunKey) -> Path:
+    def generation_dir(self, key: RunKey) -> Path:
+        """The directory holding one generation of a run."""
         if not isinstance(key.generation, int) or key.generation < 0:
             raise ValueError(f"generation must be a non-negative int: {key.generation!r}")
-        return (self.run_dir(key.project_id, key.run_id)
-                / f"{_GEN_PREFIX}{key.generation}" / _DOC_NAME)
+        return self.run_dir(key.project_id, key.run_id) / f"{GEN_PREFIX}{key.generation}"
+
+    def _doc_path(self, key: RunKey) -> Path:
+        return self.generation_dir(key) / DOC_NAME
 
     def generations(self, project_id: str, run_id: str) -> list[int]:
         """Existing generation numbers for a run, ascending. Empty if the run has no storage yet."""
@@ -94,8 +102,8 @@ class FilesystemRunRepository:
             return []
         found: list[int] = []
         for child in base.iterdir():
-            if child.is_dir() and child.name.startswith(_GEN_PREFIX):
-                suffix = child.name[len(_GEN_PREFIX):]
+            if child.is_dir() and child.name.startswith(GEN_PREFIX):
+                suffix = child.name[len(GEN_PREFIX):]
                 if suffix.isdigit():
                     found.append(int(suffix))
         return sorted(found)

@@ -53,6 +53,7 @@ Operational run state (active generations, freeze, freshness) and Git-backed kno
 - [ADR-0029](0029-record-per-run-exit-codes-and-automate-re-gating-after-a-formatter.md) — Record per-run exit codes and automate re-gating after a formatter
 - [ADR-0031](0031-split-operational-state-from-git-backed-knowledge-artifacts.md) — Split operational state from Git-backed knowledge artifacts
 - [ADR-0059](0059-batch-git-artifact-reads-without-changing-publication.md) — Batch Git artifact reads without changing publication
+- [ADR-0065](0065-observe-runs-through-a-plugin-owned-read-only-read-model-served-on-loopback.md) — Observe runs through a plugin-owned read-only read model served on loopback
 
 ## Hosts and compatibility
 
