@@ -1,6 +1,7 @@
 // The view's marks (VIEW.md R2/R4; CONVENTIONS V3/V4), as SVG, drawn by the view and by its key so they cannot
 // differ. Shape carries the kind of thing (diamond = run, circle = claim); the tint carries its state.
-import { TONE, iconAt, stateOf } from "./element.js";
+import { settled } from "./count.js";
+import { TONE, iconAt, quietOf, stateOf } from "./element.js";
 
 // Literal classes per tone (E7).
 const FILL = {
@@ -17,10 +18,16 @@ export function runMark(cx, cy, state) {
   const s = stateOf("run", state);
   return `<path d="M${cx},${cy - R} L${cx + R},${cy} L${cx},${cy + R} L${cx - R},${cy} Z" class="${FILL[s.tone]} ${OUTLINE.plain}" stroke-width="1"></path>${iconAt(s.icon, cx - 4, cy - 4, 8, TONE[s.tone].fg)}`;
 }
-/** A claim: a circle with its state's tint, its glyph unless the state is the quiet one; gating = thick outline. */
-export function claimMark(cx, cy, state, gating) {
-  const s = stateOf("claim", state);
-  return `<circle cx="${cx}" cy="${cy}" r="${R - (gating ? 1 : 0.5)}" class="${FILL[s.tone]} ${gating ? OUTLINE.gating : OUTLINE.plain}" stroke-width="${gating ? 2 : 1}"></circle>${s.quiet ? "" : iconAt(s.icon, cx - 4, cy - 4, 8, TONE[s.tone].fg)}`;
+/** The glyph a claim carries: its state's, unless the state is the quiet one; then its review's, unless the claim is
+ * settled (count.js), when it carries none. */
+export function claimGlyph(claim) {
+  const s = stateOf("claim", claim.state);
+  return !s.quiet ? s : settled(claim, quietOf) ? null : stateOf("review", claim.review);
+}
+/** A claim ({state, review, gating}): a circle with its state's tint and its glyph (claimGlyph); gating = thick outline. */
+export function claimMark(cx, cy, claim) {
+  const s = stateOf("claim", claim.state), g = claimGlyph(claim);
+  return `<circle cx="${cx}" cy="${cy}" r="${R - (claim.gating ? 1 : 0.5)}" class="${FILL[s.tone]} ${claim.gating ? OUTLINE.gating : OUTLINE.plain}" stroke-width="${claim.gating ? 2 : 1}"></circle>${g ? iconAt(g.icon, cx - 4, cy - 4, 8, TONE[g.tone].fg) : ""}`;
 }
 /** A run's audit: its state's icon and tone, 10 units across, top left at (x, y). */
 export function auditMark(x, y, state) {

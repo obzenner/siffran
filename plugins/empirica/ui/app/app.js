@@ -5,7 +5,7 @@
 // changed and redraws only when it did; a run's detail is fetched when it is selected. The URL keeps the data
 // source, the filters and the selection.
 import "../elements/index.js";
-import { projectName, statesOf, t } from "../elements/core/element.js";
+import { projectName, quietOf, statesOf, t } from "../elements/core/element.js";
 import { optionLabel } from "../elements/organisms/ev-filters.js";
 import { claimDetail, fileDetail, projectDetail, runDetail, stepDetail } from "../elements/templates/details.js";
 import { Client } from "./client.js";
@@ -169,7 +169,7 @@ function filter(next) {
   shown = apply(data, choice, FILTERS);
   // An empty store says so; an empty filter result says that.
   view.data = { ...shown, empty: runs.length ? "view.empty" : answered ? `view.empty.${source}` : "view.empty.offline" };
-  document.getElementById("key").data = showing(shown.projects, statesOf);
+  document.getElementById("key").data = showing(shown.projects, statesOf, quietOf);
   filtersEl.choice = choice;
   filtersEl.counts = shown.counts;
   writeChoice(params, choice, FILTERS);

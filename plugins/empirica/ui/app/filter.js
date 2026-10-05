@@ -3,7 +3,7 @@
 // A filter's choice is a list of values (a field filter: any of them matches) or `true` (a flag filter: the
 // claim's `flag` field is set). Different filters must all hold. Tested in tests/filter.test.mjs.
 
-import { approved } from "../elements/core/count.js";
+import { approved, settled } from "../elements/core/count.js";
 
 const chosen = (f, choice) => (f.flag ? choice[f.id] === true : (choice[f.id] ?? []).length > 0);
 function holds(f, choice, x) {
@@ -40,13 +40,17 @@ export function apply(data, choice, filters) {
 }
 
 /** What `projects` show, counted per value in the order `order(domain)` declares (states.json); values with no
- * count are left out. The legend's numbers. */
-export function showing(projects, order) {
+ * count are left out. The legend's numbers. Each claim counts once, under the mark it wears: an approved claim that
+ * is not settled (core/count.js `settled`, with `quiet(domain)`) counts under `unsettled`, by its review. */
+export function showing(projects, order, quiet) {
   const rs = projects.flatMap((p) => p.runs), cs = rs.flatMap((r) => r.claims);
+  const unsettled = (c) => c.state === quiet("claim") && !settled(c, quiet);
   const count = (domain, xs) => order(domain).map((value) => ({ value, n: xs.filter((x) => x === value).length })).filter((x) => x.n);
   return {
     runs: count("run", rs.map((r) => r.state)), audits: count("audit", rs.map((r) => r.audit)),
-    diagnostics: count("diagnostic", rs.map((r) => r.diagnostic)), claims: count("claim", cs.map((c) => c.state)),
+    diagnostics: count("diagnostic", rs.map((r) => r.diagnostic)),
+    claims: count("claim", cs.filter((c) => !unsettled(c)).map((c) => c.state)),
+    unsettled: count("review", cs.filter(unsettled).map((c) => c.review)),
     gating: cs.filter((c) => c.gating).length, supports: rs.reduce((n, r) => n + r.edges.length, 0), attempts: rs.filter((r) => r.previous).length,
   };
 }

@@ -1,5 +1,5 @@
 {
-  "$description": "State vocabulary -> presentation (CONVENTIONS S1). Every domain is keyed by exactly one enum of the observer contract (contracts/empirica-ui-view/v1), held equal by tests/contract.test.mjs. Each entry: tone (semantic colour), icon (meaning key in icons.json), copy key prefix in copy/en.json (label + hint). `quiet: true` marks the usual or bookkeeping values: an overview mark carries no glyph for them and a history folds them, so everything else stands out (V3). `minor: true` (steps) draws a small dot. A step takes its outcome's tone when it has one.",
+  "$description": "State vocabulary -> presentation (CONVENTIONS S1). Every domain is keyed by exactly one enum of the observer contract (contracts/empirica-ui-view/v1), held equal by tests/contract.test.mjs. Each entry: tone (semantic colour), icon (meaning key in icons.json), copy key prefix in copy/en.json (label + hint). `quiet: true` marks the usual or bookkeeping values: an overview mark carries no glyph for them and a history folds them, so everything else stands out (V3). A claim is quiet only when its state and its review both are: an approved claim no passing audit has reviewed carries its review's glyph. `minor: true` (steps) draws a small dot. A step takes its outcome's tone when it has one.",
   "run": {
     "active": {
       "tone": "info",
@@ -135,7 +135,8 @@
     "passed": {
       "tone": "audit",
       "icon": "audit",
-      "copy": "review.passed"
+      "copy": "review.passed",
+      "quiet": true
     },
     "failed": {
       "tone": "negative",

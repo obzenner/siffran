@@ -20,7 +20,9 @@ Ordinary conversation with another model is not a substitute.
 ## Procedure
 
 1. Let the host bind and inject the current typed audit argument. It binds the goal, graph shape,
-   evidence, frozen/deferred scope, and reviewed claims by digest; the author does not fetch it.
+   evidence, frozen/deferred scope, and reviewed claims by digest; the author does not supply it.
+   Read it first with `GetArgument`: it is exactly what the auditor will judge, so a claim whose
+   cited sources do not carry it will fail there.
 2. On Claude, invoke exactly one canonical plugin-scoped auditor and let its host-owned async
    execution settle the parent turn while pending; never poll or respawn. On Pi, invoke exactly
    one canonical plugin-scoped auditor in foreground mode. Do not submit `child_reserve`:

@@ -1,13 +1,14 @@
-import { EvElement, define, esc, stateOf, t } from "../core/element.js";
+import { EvElement, define, esc, quietOf, stateOf, t } from "../core/element.js";
 import { ATTEMPT, LINE, SUPPORTS, arrowDef, auditMark, claimMark, diagnosticMark, runMark } from "../core/marks.js";
 
 /**
  * The view's key (VIEW.md), drawn with the view's own marks (core/marks.js), so it cannot look different from
- * what it explains: the run states, audits, records not fully read and claim states present, each with how many
+ * what it explains: the run states, audits, records not fully read and claim states present (approved ones no passing
+ * audit reviewed apart, by their review), each with how many
  * are showing, the gating outline, and the two kinds of line. The page counts what is showing; the key only draws (X1).
  * @element ev-legend
  * @prop {{runs:{value:string,n:number}[], audits:{value:string,n:number}[], diagnostics:{value:string,n:number}[],
- *         claims:{value:string,n:number}[],
+ *         claims:{value:string,n:number}[], unsettled:{value:string,n:number}[],
  *         gating:number, supports:number, attempts:number}} data
  */
 const ROW = "flex items-baseline gap-m text-xs";
@@ -27,8 +28,10 @@ class EvLegend extends EvElement {
       ${row("run", d.runs.map(({ value, n }) => item(pic(runMark(7, 7, value)), word("run", value), n)))}
       ${row("audit", d.audits.map(({ value, n }) => item(pic(auditMark(2, 2, value)), word("audit", value), n)))}
       ${row("diagnostic", (d.diagnostics ?? []).map(({ value, n }) => item(pic(diagnosticMark(2, 2, value)), word("diagnostic", value), n)))}
-      ${row("claim", [...d.claims.map(({ value, n }) => item(pic(claimMark(7, 7, value, false)), word("claim", value), n)),
-        ...(d.gating ? [item(pic(claimMark(7, 7, "approved", true)), t("legend.gating"), d.gating)] : [])])}
+      ${row("claim", [...d.claims.map(({ value, n }) => item(pic(claimMark(7, 7, { state: value, review: quietOf("review") })), word("claim", value), n)),
+        ...(d.unsettled ?? []).map(({ value, n }) => item(pic(claimMark(7, 7, { state: quietOf("claim"), review: value })),
+          t("legend.unsettled", { state: word("claim", quietOf("claim")), review: word("review", value) }), n)),
+        ...(d.gating ? [item(pic(claimMark(7, 7, { state: quietOf("claim"), review: quietOf("review"), gating: true })), t("legend.gating"), d.gating)] : [])])}
       ${row("line", [...(d.supports ? [item(line(LINE, { id: "s", ...SUPPORTS }), t("legend.supports"), d.supports)] : []),
         ...(d.attempts ? [item(line(LINE, { id: "a", ...ATTEMPT }), t("legend.attempt"), d.attempts)] : [])])}
     </div>`;

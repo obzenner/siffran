@@ -36,7 +36,7 @@ class StaleAuditRetryTests(unittest.TestCase):
         approve_current(self.coordinator, self.run_id)
         activate_investigation(self.coordinator, self.run_id)
         self.action({"kind": "research", "claim_id": "G0", "source_kind": "code",
-                     "result": "supports", "payload": {"source_ref": "source.py",
+                     "result": "supports", "payload": {"source_ref": "notes.md",
                                                            "citation": "tested"}})
         self.restore()
 
@@ -213,7 +213,7 @@ class StaleAuditRetryTests(unittest.TestCase):
         self.action({"kind": "graph", "payload": self.graph})
         approve_current(self.coordinator, self.run_id)
         self.action({"kind": "research", "claim_id": "G0", "source_kind": "code",
-            "result": "supports", "payload": {"source_ref": "source.py", "citation": "tested"}})
+            "result": "supports", "payload": {"source_ref": "notes.md", "citation": "tested"}})
         self.workspace.write("source.py", b"original")
         self.action({"kind": "spike_request", "claim_id": "G0", "command": "test",
                      "dependent_files": ["source.py"]})

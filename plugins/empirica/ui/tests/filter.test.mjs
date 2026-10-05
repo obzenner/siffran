@@ -78,11 +78,25 @@ test("the data is not changed", () => {
 
 test("the legend counts what is showing, per value in states.json order, leaving out values with none", () => {
   const order = (domain) => Object.keys(states[domain]);
-  const k = showing(data.projects, order);
+  const quiet = (domain) => order(domain).find((v) => states[domain][v].quiet);
+  const k = showing(data.projects, order, quiet);
   assert.deepEqual(k.runs.map((x) => x.value), order("run").filter((v) => runs.some((r) => r.state === v)));
   assert.equal(k.runs.reduce((n, x) => n + x.n, 0), runs.filter((r) => r.state).length);
-  assert.deepEqual(k.claims.map((x) => x.value), order("claim").filter((v) => claims.some((c) => c.state === v)));
-  assert.equal(k.claims.reduce((n, x) => n + x.n, 0), claims.length);
+  assert.equal(k.claims.reduce((n, x) => n + x.n, 0) + k.unsettled.reduce((n, x) => n + x.n, 0), claims.length,
+    "each claim counts once");
   assert.equal(k.attempts, runs.filter((r) => r.previous).length);
-  assert.deepEqual(showing(apply(data, { "claim-state": ["open"] }, filters).projects, order).claims.map((x) => x.value), ["open"]);
+  assert.deepEqual(showing(apply(data, { "claim-state": ["open"] }, filters).projects, order, quiet).claims.map((x) => x.value), ["open"]);
+});
+
+test("the legend counts apart, by review, the approved claims that no passing audit reviewed", () => {
+  const order = (domain) => Object.keys(states[domain]);
+  const quiet = (domain) => order(domain).find((v) => states[domain][v].quiet);
+  assert.deepEqual([quiet("claim"), quiet("review")], ["approved", "passed"]);
+  const k = showing(data.projects, order, quiet);
+  const unsettled = claims.filter((c) => c.state === "approved" && c.review !== "passed");
+  assert.ok(unsettled.length > 0 && unsettled.length < claims.filter((c) => c.state === "approved").length,
+    "the demo has approved claims both settled and not");
+  assert.equal(k.unsettled.reduce((n, x) => n + x.n, 0), unsettled.length);
+  assert.equal(k.claims.find((x) => x.value === "approved").n, claims.filter((c) => c.state === "approved").length - unsettled.length);
+  assert.deepEqual(k.unsettled.map((x) => x.value), order("review").filter((v) => unsettled.some((c) => c.review === v)));
 });

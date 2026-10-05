@@ -961,8 +961,22 @@ test("canonical auditor blocks equal normalized identity classes", async () => {
     input: { agent: "empirica.empirica-auditor", task: "audit" } }, fakeCtx());
   assert.equal(decision?.block, true);
   assert.match(decision?.reason ?? "", /agentOverrides/);
+  // The refusal says the run is recoverable, so the author does not end it over a setting.
+  assert.match(decision?.reason ?? "", /still active and nothing was spent.*Do not stop the run/);
   assert.deepEqual(w.privateRequests.map((item) => item.operation),
     ["classify_identity", "classify_identity"]);
+});
+
+test("/empirica does not start a run whose auditor would run on the author's own model", async () => {
+  const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }), true, () => "same-class");
+  const ui = new FakeUi();
+  await w.pi.command("empirica").handler("goal", { ...fakeCtx(), ui, mode: "tui" });
+  assert.deepEqual(w.requests.map((request) => request.command.type), [], "no run was created");
+  assert.equal(ui.notifications.length, 1);
+  assert.equal(ui.notifications[0].type, "error");
+  assert.match(ui.notifications[0].message,
+    /^\/empirica not started: the auditor would run on your own model .*agentOverrides\["empirica\.empirica-auditor"\]/);
+  assert.equal(w.pi.userMessages.length, 0, "the workflow was not kicked off");
 });
 
 test("canonical auditor clearly blocks a null reviewer identity classification", async () => {
@@ -1026,6 +1040,7 @@ test("an audit is refused, sticky, when the pi-subagents runtime is not the one 
   await w.pi.sessionStart(fakeCtx("/work", w.pi.entries));
 
   const requests = w.requests.length, entries = w.pi.entries.length;
+  const privateAtLaunch = w.privateRequests.length;  // /empirica checked the auditor's independence itself
   const input = { agent: "empirica.empirica-auditor", task: "audit" };
   const decision = await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "tc-reloaded", input }, fakeCtx());
   assert.equal(decision?.block, true);
@@ -1034,7 +1049,7 @@ test("an audit is refused, sticky, when the pi-subagents runtime is not the one 
   assert.match(decision?.reason ?? "", /@0\.74\.0/);
   // The core refused before reserving anything: no child was reserved, no plan was stored or rejected,
   // and nothing was launched or correlated.
-  assert.deepEqual(w.privateRequests.map((request) => request.operation),
+  assert.deepEqual(w.privateRequests.slice(privateAtLaunch).map((request) => request.operation),
     ["classify_identity", "classify_identity", "audit_prepare"]);
   assert.deepEqual(w.requests.slice(requests).map((request) => request.command.type === "ObserveAction"
     ? request.command.action.kind : request.command.type), ["investigate", "GetRun"]);

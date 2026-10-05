@@ -130,7 +130,9 @@ Nobody runs `npx` by hand. **[enforced: Makefile]**
   correct in greyscale. **[planned: gallery greyscale snapshot]**
   - In the view (`VIEW.md`), each domain's one *quiet* state (`quiet: true` in `states.json`, e.g. a supported
     claim) is a plain tinted mark and every other state carries its glyph, so the unusual stands out and greyscale
-    stays readable. Unknown is a state of its own (its own glyph and word), never a default. The marks live once in
+    stays readable. A claim is quiet only when its state *and* its review are their domains' quiet values
+    (`core/count.js` `settled`): an approved claim no passing audit reviewed carries its review's glyph, so nothing
+    the author alone vouches for looks final. Unknown is a state of its own (its own glyph and word), never a default. The marks live once in
     `elements/core/marks.js`, and
     the view has a key (`ev-legend`) drawn with those same marks, listing the states present with their counts.
     **[enforced: `make ui-browser`]**

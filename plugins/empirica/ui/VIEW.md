@@ -55,7 +55,7 @@ panel, on click.
 
 | field | view | filter | detail |
 |---|---|---|---|
-| state: approved, open, blocked, discarded | colour + glyph (approved, the quiet state, has no glyph: CONVENTIONS V3) | ✓ | |
+| state: approved, open, blocked, discarded | colour + glyph (approved, the quiet state, has no glyph once a passing audit reviewed it; until then it carries its review's glyph and reads "Approved · No audit yet": CONVENTIONS V3) | ✓ | |
 | gating (in the run's scope: its approval gates convergence) | thick outline | | ✓ |
 | blocker: the plugin's reason, in its words, and the claim it waits on | | ✓ (blocks convergence) | ✓ |
 | kind: needs experiment, needs decision, ordinary | | ✓ | ✓ |

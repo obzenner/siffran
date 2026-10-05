@@ -28,6 +28,7 @@ Deterministic evidence and a distinct, host-observed audit gate convergence; rou
 - [ADR-0013](0013-deterministic-gate-is-the-trust-boundary-agentic-review-is-a-secondary-sensor.md) — Deterministic gate is the trust boundary; agentic review is a secondary sensor
 - [ADR-0020](0020-mandatory-run-protocol-routing-fan-out-and-evidence-bound-verification.md) — Mandatory run protocol: claim graph, two-fold validation, fan-out, and independent audit
 - [ADR-0025](0025-per-claim-audit-verdicts-keyed-on-claim-and-evidence-digests.md) — Per-claim audit verdicts keyed on claim and evidence digests
+- [ADR-0066](0066-check-workspace-citations-verbatim-when-research-is-submitted.md) — Check workspace citations verbatim when research is submitted
 - [ADR-0027](0027-restore-per-graph-audit-freshness-argument-digest-refutation-coverage-and-sample-counts.md) — Restore per-graph audit freshness: argument digest, refutation coverage, and sample counts
 - [ADR-0048](0048-hard-gate-route-before-investigation.md) — Hard-gate route before investigation
 - [ADR-0050](0050-bound-stale-pending-audit-replacement-to-audit-capacity.md) — Bound stale pending-audit replacement to audit capacity

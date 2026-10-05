@@ -34,7 +34,7 @@ from governance_setup import TEST_INVOCATION
 
 from adapters.identity import observe
 from core.canonical import canonical_digest
-from driver import V2SeamAbsent, new_driver
+from driver import CITED_SOURCE, V2SeamAbsent, new_driver
 
 # ---------------------------------------------------------------------------
 # Locate the accepted D2 contract registry (the SSOT — never copied into tests)
@@ -301,8 +301,7 @@ def action_graph(payload: dict | None = None) -> dict:
 
 def action_research(*, claim_id: str, source_kind: str, result: str,
                     payload: dict | None = None) -> dict:
-    details = {"source_ref": "plugins/empirica/tests/v2/assertions.py",
-               "citation": "The test observed this source directly."}
+    details = {"source_ref": CITED_SOURCE[0], "citation": CITED_SOURCE[1]}
     details.update(payload or {})
     return {"kind": "research", "claim_id": claim_id,
             "source_kind": source_kind, "result": result, "payload": details}

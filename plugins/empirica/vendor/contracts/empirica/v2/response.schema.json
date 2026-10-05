@@ -359,6 +359,21 @@
           ],
           "properties": {
             "code": {
+              "const": "research.citation_unverified"
+            },
+            "parameters": {
+              "$ref": "#/$defs/citationUnverifiedParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
               "const": "claim.spike_missing"
             },
             "parameters": {
@@ -3352,6 +3367,23 @@
     "claimId": {
       "type": "string",
       "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+    },
+    "citationUnverifiedParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "problem"
+      ],
+      "properties": {
+        "problem": {
+          "enum": [
+            "source_ref_form",
+            "file_unavailable",
+            "lines_out_of_range",
+            "text_not_found"
+          ]
+        }
+      }
     }
   }
 }

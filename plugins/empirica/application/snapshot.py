@@ -8,7 +8,8 @@ from typing import Any
 from core.canonical import canonical_json
 from core.evaluation import (EvaluationSnapshot, active_spike_heads, digest,
                              frozen_scope_invalid, valid_graph)
-from core.freshness import FileObservation, ObservationState, observations_digest
+from core import citations
+from core.freshness import FileObservation, FreshnessContractError, ObservationState, observations_digest
 from core.records import Artifact
 from core.run import OperationalState
 from core.governance import proposal_digest
@@ -233,11 +234,29 @@ def assemble(state: OperationalState, stored: Any, workspace: Any, *, run_id: st
         raise HistoryCorrupt("proposal digest conflicts with selected graph/context")
     observation = build_observation_snapshot(active_spike_heads(history, graph), workspace)
     profile = _proto.host_profile(profile_id)
+    cited = _cited(command, workspace)
     return EvaluationSnapshot(
         state=state, history=history, graph=graph, contract=_proto.CONTRACT_VIEW,
         observations=observation.observations, observation_basis_id=observation.basis_id,
         observation_digest=observation.digest, run_id=run_id,
         **_proto.policy_inputs(profile_id),
         host_tier=profile["current_tier"],
-        host_audit_execution=profile["audit_execution"], command=command,
+        host_audit_execution=profile["audit_execution"], command=command, cited=cited,
     )
+
+
+def _cited(command: dict[str, Any], workspace: Any) -> Any:
+    """The workspace's capture of the repository file a research action cites (``core.citations``),
+    or ``None``: not a research action, a source not checked there, a path the workspace refuses, or
+    no workspace (the core then reads the file as unavailable)."""
+    action = command.get("action") if command.get("type") == "ObserveAction" else None
+    if not action or action.get("kind") != "research" or workspace is None:
+        return None
+    path = citations.cited_file(action["source_kind"], action["payload"]["source_ref"])
+    if path is None:
+        return None
+    try:
+        (captured,) = workspace.observe((path,)).files
+    except (ValueError, OSError, FreshnessContractError):
+        return None
+    return captured

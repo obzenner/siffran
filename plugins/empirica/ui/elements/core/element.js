@@ -35,6 +35,8 @@ export function projectName(p, n) { return p.name ?? t("view.project", { n }); }
 
 /** The values of a domain, in states.json order. */
 export function statesOf(domain) { return Object.keys(states[domain]); }
+/** A domain's one quiet value (`quiet: true` in states.json), or `undefined`. */
+export function quietOf(domain) { return statesOf(domain).find((v) => states[domain][v].quiet); }
 
 /** Literal class sets per tone (E7: no string-built classes; Tailwind scans these literals). */
 export const TONE = {

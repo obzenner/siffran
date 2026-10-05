@@ -127,10 +127,29 @@ class Artifacts:
         return ABSENT if values is None else Present(frozenset(values.values()), Revision("a"))
 
 
+#: The files the research in the suites built on this double cites, so every citation is verbatim
+#: from its source (core.citations). Each Workspace starts with them.
+CITED_SOURCES = {
+    "supplied": b"observed\n",
+    "counter-proof": b"admitted evidence\n",
+    "first": b"first observer\n",
+    "second": b"second observer\n",
+    "third": b"first observer again\n",
+    "review": b"active audit fixture\n",
+    "notes.md": b"tested\n",
+    "test_d7_transactions.py": b"Repeated artifact fixture.\nDerivation fixture.\n"
+                               b"Post-plan capture fixture.\nObservation basis fixture.\n",
+    "plugins/empirica/tests/test_d7_transactions.py":
+        b"The projection fixture records real supporting evidence.\n",
+    "plugins/empirica/tests/test_context_economy.py": b"The test observed directly what it cites.\n",
+    **{f"sequence-{index}": b"Current producer observation.\n" for index in range(8)},
+}
+
+
 class Workspace:
     def __init__(self):
         self.calls = []
-        self.files = {}
+        self.files = dict(CITED_SOURCES)
 
     def write(self, path, content):
         self.files[path] = bytes(content)
@@ -1097,9 +1116,12 @@ class D7TransactionTests(unittest.TestCase):
         coordinator, runs, artifacts_repo, workspace, harness, _, key = \
             self._run_with_passing_spike(conflict=True)
         self.assertEqual(harness.calls, 1)
-        # Immutable execution capture plus one post-plan capture per result attempt;
-        # successful projection performs no additional observation.
-        self.assertEqual(len(workspace.calls), 3)
+        # The research reads only the file it cites (core.citations); then the immutable execution
+        # capture plus one post-plan capture per result attempt; successful projection performs no
+        # additional observation.
+        cited = [call for call in workspace.calls if call == ("test_d7_transactions.py",)]
+        self.assertEqual(len(cited), 1)
+        self.assertEqual(len(workspace.calls) - len(cited), 3)
         history = traverse_history(
             decode_state(runs.data[key].value), artifacts_repo.values[key].values())
         spikes = [item for item in history if item["kind"] == "spike"]

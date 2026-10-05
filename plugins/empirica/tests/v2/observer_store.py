@@ -110,6 +110,11 @@ class _Builder:
         self.a = _Author()
         self.store = Store(self.a.bind_driver("observer", "store", "observer fixture store", PROFILE))
         self.drv = self.store.driver
+        self.files: dict[str, bytes] = {}  # what the workspace holds, so citations quote it verbatim
+
+    def write(self, path: str, content: bytes) -> None:
+        self.files[path] = content
+        self.drv.workspace_write(path, content)
 
     # --- author and host acts ----------------------------------------------
 
@@ -124,13 +129,17 @@ class _Builder:
         return run_id
 
     def research(self, run_id: str, claim: str, result: str = "supports", ref: str = "README.md"):
+        """Cite ``ref`` verbatim (core.citations): its first line, writing the file if it is new."""
+        if ref not in self.files:
+            self.write(ref, f"{ref} states this directly.\n".encode())
+        citation = self.files[ref].decode().splitlines()[0]
         self.a.dispatch(self.drv, observe_action(run_id=run_id, action=action_research(
             claim_id=claim, source_kind="code", result=result,
-            payload={"source_ref": ref, "citation": f"{ref} states this directly."})))
+            payload={"source_ref": ref, "citation": citation})))
 
     def spike(self, run_id: str, claim: str, command: str, files: dict[str, bytes], exit_code=0):
         for path, content in files.items():
-            self.drv.workspace_write(path, content)
+            self.write(path, content)
         self.drv.harness_complete(command, exit_code)
         self.a.dispatch(self.drv, observe_action(run_id=run_id, action=action_spike_request(
             claim_id=claim, command=command, dependent_files=sorted(files))))
@@ -202,7 +211,7 @@ def _build() -> Store:
         [("C0", "C1")]))
     b.research(run, "C1", ref="src/decode.py")
     b.spike(run, "C1", "python -m pytest tests/test_decode.py", {"src/decode.py": b"decode v1\n"})
-    b.drv.workspace_write("src/decode.py", b"decode v2\n")
+    b.write("src/decode.py", b"decode v2\n")
     b.stamp("stale", "atlas", "s-stale")
 
     # atlas: audited while one supporter had no support. Afterwards it gained support (so the

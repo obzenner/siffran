@@ -9,9 +9,9 @@ from types import MappingProxyType
 from typing import Any
 
 from .canonical import canonical_digest
-from .freshness import ActiveSpikeHead, FileBinding, evaluate_freshness, valid_claim_id
+from .freshness import ActiveSpikeHead, FileBinding, ObservationState, evaluate_freshness, valid_claim_id
 from .run import OperationalState
-from . import governance
+from . import citations, governance
 
 SPAWN_BUDGET = {"investigation": ("max_spawns", *governance.BUDGETS["max_spawns"]),
                 "audit": ("max_audit_spawns", *governance.BUDGETS["max_audit_spawns"])}
@@ -86,6 +86,9 @@ class EvaluationSnapshot:
     profile_id: str = ""
     host_tier: str = "observational"
     host_audit_execution: str = "unavailable"
+    #: The workspace's capture of the file a submitted research record cites (``core.citations``), when
+    #: the command is such a record: an object with ``observation`` (state, sha256) and ``content``.
+    cited: Any = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "history", _freeze(self.history))
@@ -806,6 +809,14 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             if claim is None:
                 return _decision(snapshot, state, "Block", reason="graph.invalid")
             payload = action["payload"]
+            if citations.cited_file(action["source_kind"], payload["source_ref"]) is not None:
+                cited = snapshot.cited
+                problem = citations.citation_problem(
+                    payload["source_ref"], payload["citation"], cited.content if cited else None,
+                    cited.observation.state if cited else ObservationState.UNREADABLE)
+                if problem is not None:
+                    return _decision(snapshot, state, "Block", reason="research.citation_unverified",
+                                     parameters={"problem": problem})
             art = artifact("research", {
                 "claim_id": claim["id"], "claim_digest": claim_digest(claim),
                 "statement_digest": digest(payload),

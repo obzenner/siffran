@@ -107,7 +107,7 @@ class CodexAdapterConformanceTests(unittest.TestCase):
                 observe({"kind": "investigate"})
                 observe({"kind": "research", "claim_id": "G0", "source_kind": "code",
                          "result": "supports", "payload": {"source_ref": "probe.py",
-                                                               "citation": "The probe executes successfully."}})
+                                                               "citation": "print('reachable')"}})
                 observe({"kind": "spike_request", "claim_id": "G0",
                          "command": "python3 probe.py", "dependent_files": ["probe.py"]})
                 observe({"kind": "freeze"})

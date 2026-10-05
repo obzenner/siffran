@@ -156,7 +156,7 @@
   "audit.not_required.label": "No audit needed",
   "audit.not_required.hint": "Nothing in the argument needs an audit yet",
   "claim.approved.label": "Approved",
-  "claim.approved.hint": "Settled by its evidence under the plugin's rules",
+  "claim.approved.hint": "Its evidence meets the plugin's rules; a passing audit makes it final",
   "diagnostic.older-format.label": "Older format",
   "diagnostic.older-format.hint": "Recorded by an earlier plugin: goal and status only",
   "diagnostic.unreadable.label": "Unreadable",
@@ -254,5 +254,6 @@
   "outcome.partial": "{state} · {why}",
   "view.empty.offline": "Nothing to show: the observer has not answered yet.",
   "app.status.missing": "This server does not serve that data",
-  "app.status.invalid": "The observer sent something this page cannot read"
+  "app.status.invalid": "The observer sent something this page cannot read",
+  "legend.unsettled": "{state} · {review}"
 }

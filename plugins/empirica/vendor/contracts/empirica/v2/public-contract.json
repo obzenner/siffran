@@ -1697,6 +1697,32 @@
         "audit/independence"
       ],
       "message": "Covered evidence has mixed producer identities. Research is never superseded; if the only differing producer is a latest spike, re-run that spike under the research producer, otherwise accept the residual."
+    },
+    "research.citation_unverified": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "problem"
+        ],
+        "properties": {
+          "problem": {
+            "enum": [
+              "source_ref_form",
+              "file_unavailable",
+              "lines_out_of_range",
+              "text_not_found"
+            ]
+          }
+        }
+      },
+      "next_actions": [
+        "research.record"
+      ],
+      "sections": [
+        "evidence/research"
+      ],
+      "message": "Research refused: its citation is not verbatim from the cited repository file ({problem}). Cite one file as path or path:N-M and quote it exactly, joining excerpts with …."
     }
   },
   "sections": {

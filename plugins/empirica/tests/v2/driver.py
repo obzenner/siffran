@@ -100,6 +100,11 @@ def _normalize(path: str) -> str:
     return norm
 
 
+#: The source a test's research cites by default, held by every driver's workspace: research must
+#: quote the cited workspace file verbatim (``core.citations``).
+CITED_SOURCE = ("docs/cited.md", "The test observed this source directly.")
+
+
 class FakeWorkspace:
     """``Workspace.observe`` port backed by an in-memory file map.
 
@@ -340,6 +345,7 @@ def new_driver(profile_id: str, *, limits: dict | None = None,
     :class:`V2SeamAbsent` propagates and the assertion layer turns it into a per-case FAILURE.
     """
     workspace = FakeWorkspace()
+    workspace.write(CITED_SOURCE[0], f"# Cited\n\n{CITED_SOURCE[1]}\n".encode())
     harness = FakeSpikeHarness()
     runs = FakeRunRepository()
     artifacts = FakeArtifactRepository()

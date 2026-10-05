@@ -37,9 +37,7 @@ class PublicHostPathTests(ConformanceCase):
         observe(action_graph(graph))
         self.require_governance_approved(drv, run_id)
         observe(action_investigate())
-        observe(action_research(
-            claim_id=root_id, source_kind="code", result="supports",
-            payload={"source_ref": "plugins/empirica/core/evaluation.py"}))
+        observe(action_research(claim_id=root_id, source_kind="code", result="supports"))
 
         drv.workspace_write("src/reachable.py", b"print('reachable')\n")
         drv.harness_complete("python src/reachable.py", 0)

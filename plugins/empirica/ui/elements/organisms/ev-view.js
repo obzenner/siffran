@@ -1,5 +1,5 @@
 import { EvElement, clip, define, esc, projectName, stateOf, t } from "../core/element.js";
-import { ATTEMPT, LINE, R, RING, SUPPORTS, arrowDef, claimMark, runMark, runSideMark } from "../core/marks.js";
+import { ATTEMPT, LINE, R, RING, SUPPORTS, arrowDef, claimGlyph, claimMark, runMark, runSideMark } from "../core/marks.js";
 import { rove, stopIndex } from "../core/rove.js";
 import { U, viewLayout } from "../core/view-layout.js";
 import { edgePath } from "../core/layout.js";
@@ -100,9 +100,10 @@ class EvView extends EvElement {
           ${runSideMark(r.x + U.headW - 12, cy - 5, run)}`;
         out.push(this.#target(`data-run="${esc(r.key)}"`, t("view.run.label", { what }), what, body, i++ === stop));
         for (const c of claimsOf.get(r.key) ?? []) {
-          const claim = claims.get(c.id), cs = stateOf("claim", claim.state);
-          const word = t(`${cs.copy}.label`);
-          const body2 = `<circle cx="${c.cx}" cy="${c.cy}" r="${R + 2.5}" class="${RING}" stroke-width="1.5"></circle>${claimMark(c.cx, c.cy, claim.state, claim.gating)}`;
+          const claim = claims.get(c.id), cs = stateOf("claim", claim.state), g = claimGlyph(claim);
+          // An approved claim no passing audit reviewed says so: "Approved · No audit yet".
+          const word = [t(`${cs.copy}.label`), cs.quiet && g ? t(`${g.copy}.label`) : null].filter(Boolean).join(" · ");
+          const body2 = `<circle cx="${c.cx}" cy="${c.cy}" r="${R + 2.5}" class="${RING}" stroke-width="1.5"></circle>${claimMark(c.cx, c.cy, claim)}`;
           const name2 = `${word}${claim.gating ? ` · ${t("view.gating")}` : ""}: ${clip(claim.text, 120)}`;
           out.push(this.#target(`data-run="${esc(r.key)}" data-claim="${esc(c.id)}"`, name2, `${word} · ${claim.text}`, body2, i++ === stop));
         }

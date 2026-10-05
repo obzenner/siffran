@@ -254,6 +254,15 @@ function defaultSelectorProvider(): SelectorProvider {
   };
 }
 
+/** The one setting that chooses the auditor's model, as the user must write it. */
+const AUDITOR_MODEL_FIX = 'set subagents.agentOverrides["empirica.empirica-auditor"].model to another model '
+  + "in your Pi project or user settings (read at each launch; no restart needed)";
+/** A refused audit launch spends nothing and leaves the run active; the author must not end it for that. */
+const AUDIT_STILL_OPEN = "The run is still active and nothing was spent: once this is fixed, launch the auditor "
+  + "again. Do not stop the run because of this refusal.";
+/** The audit launch /empirica checks before starting a run: the one the skill tells the author to make. */
+const CANONICAL_AUDIT_CALL = { agent: "empirica.empirica-auditor", task: "Audit the host-provided dossier." };
+
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -402,6 +411,33 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     };
     const trusted = async <Op extends PrivateOperation>(request: PrivateIngressRequest<Op>): Promise<PrivateResponses[Op]> =>
       assertPrivateResponse(request.operation, await privateIngress(request));
+
+    const auditRuntimeOf = (binding: OwnerBinding): AuditRuntime => ({ preflight: binding.preflight.api,
+      version: binding.owner.version, inventory: binding.inventory });
+    /**
+     * The auditor this session would launch, and its independence from the author: the audit counts
+     * only when the auditor runs on another model. Both are known before a run exists, so /empirica
+     * checks this before starting one, and the audit launch checks it again (settings may change).
+     */
+    const independentAuditor = async (input: Record<string, unknown>, ctx: ExtensionContext,
+                                      runtime: AuditRuntime): Promise<ResolvedAuditContract> => {
+      const expectedAgent = path.resolve(skillsDir, "..", "agents", "pi", "empirica-auditor.md");
+      const resolved = await resolveAuditContract({ ...input, expectedAgent }, ctx, runtime);
+      const [auditorProvider, auditorModel] = modelPair(resolved.model, "pi-subagents");
+      const author = piGovernanceContext(ctx).author as Record<string, unknown> | null;
+      const authorIdentity = await trusted({ operation: "classify_identity",
+        payload: author ?? { provider_id: null, model_id: null, source: "pi-context" } });
+      const reviewerIdentity = await trusted({ operation: "classify_identity",
+        payload: { provider_id: auditorProvider, model_id: auditorModel, source: "pi-subagents-preflight" } });
+      if (authorIdentity === null)
+        throw new Error("main author identity unobservable; select a concrete model");
+      if (reviewerIdentity === null)
+        throw new Error(`reviewer identity unobservable; ${AUDITOR_MODEL_FIX}`);
+      if (authorIdentity.identity === reviewerIdentity.identity)
+        throw new Error(`the auditor would run on your own model (${resolved.model}), so its audit could not `
+          + `count as independent; ${AUDITOR_MODEL_FIX}`);
+      return resolved;
+    };
 
     pi.on("resources_discover", () => ({ skillPaths: [skillsDir] }));
 
@@ -655,6 +691,12 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           return;
         }
         try {
+          await independentAuditor(CANONICAL_AUDIT_CALL, ctx, auditRuntimeOf(owner.binding));
+        } catch (error) {
+          ctx.ui.notify(`/empirica not started: ${describe(error)}`, "error");
+          return;
+        }
+        try {
           // Render the canonical installed skill before creating a run. If the
           // package is incomplete, fail without leaving an active orphan.
           const kickoff = skillInvocation(skillsDir, args);
@@ -835,8 +877,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         const requestedAuditor = event.input.agent === "empirica.empirica-auditor";
         // Admission binds to the owner verified above (now, in this call); a changed or vanished
         // owner already refused the launch before any reservation, plan, or preflight call.
-        const auditRuntime: AuditRuntime = { preflight: launch.binding.preflight.api,
-          version: launch.binding.owner.version, inventory: launch.binding.inventory };
+        const auditRuntime = auditRuntimeOf(launch.binding);
         if (!requestedAuditor) {
           const purpose = typeof event.input.task === "string" && event.input.task.trim()
             ? event.input.task : "author child";
@@ -867,25 +908,9 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           if (current.result.type !== "Allow") throw new Error("approved configuration unavailable");
           const governed = current.result.run.governance as { state?: string } | undefined;
           if (governed?.state !== "approved") throw new Error("approved configuration unavailable");
-          const expectedAgent = path.resolve(skillsDir, "..", "agents", "pi", "empirica-auditor.md");
-          const resolvedAudit = await resolveAuditContract({ ...event.input, expectedAgent }, ctx, auditRuntime);
+          const resolvedAudit = await independentAuditor(event.input, ctx, auditRuntime);
           const roleProfile = "empirica.empirica-auditor";
-          const [auditorProvider, auditorModel] = modelPair(resolvedAudit.model, "pi-subagents");
           const nativeId = event.toolCallId;
-          const author = piGovernanceContext(ctx).author as Record<string, unknown> | null;
-          const authorIdentity = await trusted({ operation: "classify_identity",
-            payload: author ?? { provider_id: null, model_id: null, source: "pi-context" } });
-          const reviewerIdentity = await trusted({ operation: "classify_identity",
-            payload: { provider_id: auditorProvider, model_id: auditorModel,
-              source: "pi-subagents-preflight" } });
-          if (authorIdentity === null)
-            throw new Error("main author identity unobservable; select a concrete model");
-          if (reviewerIdentity === null)
-            throw new Error(
-              'reviewer identity unobservable; set subagents.agentOverrides["empirica.empirica-auditor"].model to a concrete model');
-          if (authorIdentity.identity === reviewerIdentity.identity)
-            throw new Error(
-              'auditor model equals the main model; set subagents.agentOverrides["empirica.empirica-auditor"].model');
           // The runtime is recorded once, at StartRun. The private bridge admits the audit only when the
           // runtime observed now is that record, so a receipt derived from the record cannot name a
           // package other than the one that runs this audit (a reload or resume may have swapped it).
@@ -920,7 +945,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
               // Admission already fails closed; rejection failure must not permit launch.
             }
           }
-          return { block: true, reason: `empirica auditor admission failed: ${describe(error)}` };
+          return { block: true, reason: `empirica auditor admission failed: ${describe(error)}. ${AUDIT_STILL_OPEN}` };
         }
       }
       if (!gatedTools.has(event.toolName)) return;

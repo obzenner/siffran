@@ -138,6 +138,10 @@ Apply the folds in order:
    runtime, or web source that supports or refutes the exact current claim text.
    `source_ref` and the verbatim `citation` must identify the file or runtime observation that
    bears on this claim; generic precedent is not evidence for a repository-specific claim.
+   One source per record, quoted exactly: the service refuses a workspace `code` or `docs`
+   citation that is not verbatim in the cited file and lines (`research.citation_unverified`),
+   and the auditor independently retrieves every citation ([references/audit.md](references/audit.md)
+   step 4). A summary of what a source says is not a citation.
 2. **Spike second only for `needs-experiment`.** After supporting research,
    request a deterministic command and its non-empty dependent-file set through
    the service. The service captures immutable bytes, runs the harness once, and
@@ -175,6 +179,9 @@ language. When budgets, a stall, or scope closure matter, read
 ## 5. Obtain independent audit
 
 When every in-scope gating claim is approved, read [references/audit.md](references/audit.md).
+Approval is not convergence: it means the evidence passed the service's rules, not that it
+convinces. Before requesting the audit, read `GetArgument`, the argument the auditor will receive,
+and check that each claim follows from its cited sources alone.
 Follow its exact host procedure once: Claude launches `empirica:empirica-auditor`, Pi calls the
 packaged auditor, and Codex ends the turn without launching an ordinary child. The host owns dossier
 binding, correlation, identity observation, and verdict admission. Audit may block but cannot

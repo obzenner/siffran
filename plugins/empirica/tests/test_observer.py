@@ -363,7 +363,7 @@ class FilesystemStoreTests(unittest.TestCase):
         approve_current(service._coordinator, run_id)
         for action in (action_investigate(),
                        action_research(claim_id="C0", source_kind="code", result="supports",
-                                       payload={"source_ref": "README.md"})):
+                                       payload={"source_ref": "README.md:1", "citation": "atlas"})):
             admitted = service.dispatch(observe_action(run_id=run_id, action=action))
             assert admitted["result"]["type"] == "Allow", admitted
 

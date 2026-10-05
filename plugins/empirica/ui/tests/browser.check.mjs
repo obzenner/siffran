@@ -123,17 +123,23 @@ try {
           && (side ? uses.length === 2 && uses[1] === icons[side.icon] : uses.length === 1)
           && text === (r.claims.length ? approved + "/" + r.claims.length : null);
       }) && runs.some((r) => r.diagnostic && r.state) && runs.some((r) => r.state === null);`)));
-    check("R4: a claim shows its state's colour, its glyph unless quiet, the thick outline if and only if gating", await E(page(`
-      return runs.every((r) => r.claims.every((c) => {
+    check("R4: a claim shows its state's colour; its state's glyph unless quiet, else its review's unless that is quiet too; the thick outline if and only if gating", await E(page(`
+      let unsettled = 0;
+      const ok = runs.every((r) => r.claims.every((c) => {
         const m = V.querySelector('[data-mark][data-run="' + r.key + '"][data-claim="' + c.id + '"]'), s = states.claim[c.state], dot = m.querySelector("circle:not(.hidden)");
+        const glyph = !s.quiet ? s : states.review[c.review].quiet ? null : states.review[c.review];
+        if (s.quiet && glyph) unsettled++;
         return dot.classList.contains("fill-tone-" + s.tone + "-tint") && (dot.getAttribute("stroke-width") === "2") === c.gating
-          && (s.quiet ? !m.querySelector("use") : m.querySelector("use").getAttribute("href").endsWith("#" + icons[s.icon]));
-      }));`)));
+          && (glyph ? m.querySelector("use").getAttribute("href").endsWith("#" + icons[glyph.icon]) : !m.querySelector("use"))
+          && (!s.quiet || !glyph || m.getAttribute("aria-label").startsWith("Approved · "));
+      }));
+      return ok && unsettled > 0;`)));
     check("R4: the view encodes nothing else: no other shapes, text only on project labels and run counts", await E(`(() => {
       const svg = document.querySelector("ev-view svg"); const ok = new Set(["svg", "defs", "marker", "path", "g", "rect", "circle", "text", "use"]);
       return [...svg.querySelectorAll("*")].every((n) => ok.has(n.localName)) && [...svg.querySelectorAll("text")].every((t) => t.closest("[data-project], [data-run]")); })()`));
     check("R4: every mark has a name and a hint of at most 60 characters", await E(`[...document.querySelectorAll("ev-view [data-mark]")].every((m) => m.getAttribute("aria-label") && m.dataset.hint && m.dataset.hint.length <= 60 && !/\\bC\\d+\\b/.test(m.dataset.hint))`));
     check("R7: no files in the view", await E(`!document.querySelector("ev-view [data-path], ev-view ev-file, main ev-file")`));
+    // The claim row counts each claim once, under the mark it wears (approved ones not settled by their review, V3).
     const key = [runs.filter((r) => r.state).length, runs.filter((r) => r.audit).length, runs.filter((r) => r.diagnostic).length, claims.length, runs.reduce((n, r) => n + r.edges.length, 0), runs.filter((r) => r.previous).length];
     check("key: the counts are what is showing", same(await E(`(() => { const n = (i) => [...document.querySelectorAll("#key ul")[i].querySelectorAll("li")].map((l) => +l.lastElementChild.textContent);
       const sum = (a) => a.reduce((x, y) => x + y, 0);

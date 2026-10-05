@@ -56,3 +56,4 @@ text view renders them.
 | `governance.interaction_limit` | `empirica_observe kind=configure_run`; `report_convergence intent=stop` | The dialog allowance is spent (3 per configuration, 128 per run): stop honestly or start a fresh run. |
 | `governance.decision_conflict` | `empirica_observe kind=configure_run` | The submitted control and edited fields disagreed and nothing was approved: use one explicit decision path. |
 | `audit.producers_mixed` | `report_convergence intent=stop` | Covered evidence has mixed producers: if only the latest spike differs, re-run it under the research producer, otherwise accept the residual. |
+| `research.citation_unverified` | `empirica_observe kind=research` | The citation was not found verbatim in the cited file: re-read the file and quote it exactly (one file per record, `path` or `path:N-M`, `…` between excerpts), or cite a different source; never paraphrase. |

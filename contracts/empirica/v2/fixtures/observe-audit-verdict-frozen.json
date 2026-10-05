@@ -48,7 +48,7 @@
             "audit",
             "freeze"
           ],
-          "digest": "sha256:dfc3b1cb235da4d56b7225a8e9a60c2b208ad1c6405be53782666fa4431fb2e3"
+          "digest": "sha256:e57f48aa42474a3bb11f982b386e9aff7cf3842280545e1a97055a39537f9c1c"
         },
         "obligations": {
           "active": [],

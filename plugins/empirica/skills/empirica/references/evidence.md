@@ -24,6 +24,12 @@ Public author action:
 ```
 
 `payload.source_ref` and a non-empty verbatim `payload.citation` are mandatory.
+Cite one source per record. For a `code` or `docs` source inside the workspace, `source_ref` is one
+repo-relative file, optionally with lines (`path`, `path:40`, `path:40-63`, `path:40-63,70-72`),
+and the service checks when the record is submitted that `citation` appears there verbatim
+(whitespace runs compare as one space; join separate excerpts with `…`). Otherwise it refuses
+the record with `research.citation_unverified` and records nothing. A URL or an absolute path is
+not checked here: the auditor retrieves it.
 `payload.observed_content_digest` may additionally bind the bytes that were observed when the host
 can compute a SHA-256 digest.
 

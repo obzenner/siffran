@@ -40,6 +40,7 @@ EMPIRICA_BRIDGE_V2_TESTS := $(PLUGINS_DIR)/empirica/tests/test_bridge_v2.py
 EMPIRICA_PUBLIC_TOOLS_TESTS := $(PLUGINS_DIR)/empirica/tests/test_public_tools.py
 EMPIRICA_AUDIT_PROTOCOL_TESTS := $(PLUGINS_DIR)/empirica/tests/test_audit_protocol.py
 EMPIRICA_STATE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_state_adapter.py
+EMPIRICA_CITATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_citations.py
 EMPIRICA_OBSERVER_TESTS := $(PLUGINS_DIR)/empirica/tests/test_observer.py
 EMPIRICA_OBSERVER_SERVER_TESTS := $(PLUGINS_DIR)/empirica/tests/test_observer_server.py
 EMPIRICA_UI := $(PLUGINS_DIR)/empirica/ui
@@ -115,6 +116,7 @@ check-core: empirica-author-view-golden empirica-governance-dialog-golden ## Fas
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_IDENTITY_TESTS)
 	@$(PYTHON) $(EMPIRICA_HOST_RUNTIME_TESTS)
 	@$(PYTHON) $(EMPIRICA_STATE_TESTS)
+	@$(PYTHON) $(EMPIRICA_CITATION_TESTS)
 	@$(PYTHON) $(EMPIRICA_OBSERVER_TESTS)
 	@$(PYTHON) $(EMPIRICA_OBSERVER_SERVER_TESTS)
 	@$(PYTHON) $(METHODOLOGIST_CORE_TESTS)

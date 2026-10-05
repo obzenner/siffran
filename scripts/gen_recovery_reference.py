@@ -35,6 +35,7 @@ AUTHOR_GUIDANCE = {
     "route.late": "The route came after investigation began and cannot be repaired: read the residuals, then stop or start a fresh run.",
     "claim.research_missing": "Record cited research for the named claim; it may support or refute it.",
     "claim.research_unbound": "The research cites an earlier claim text: record new research for the current claim text.",
+    "research.citation_unverified": "The citation was not found verbatim in the cited file: re-read the file and quote it exactly (one file per record, `path` or `path:N-M`, `…` between excerpts), or cite a different source; never paraphrase.",
     "claim.spike_missing": "Request a deterministic spike for the named `needs-experiment` claim.",
     "claim.spike_prerequisite_missing": "Record supporting research for the claim first, then request the spike.",
     "claim.spike_stale": "The spike's inputs changed: request it again against the current research and dependent files.",
