@@ -191,6 +191,25 @@ class LiveDriver:
         self._validate_trusted_response(resp)
         return resp
 
+    def trusted_evidence_presentation(self, run_id: str, payload: dict) -> dict:
+        """Deliver one evidence presentation through the private ingress."""
+        resp = self._service.trusted_evidence_presentation(run_id=run_id, payload=payload)
+        self._validate_trusted_response(resp)
+        return resp
+
+    def trusted_human_surface(self, run_id: str, surface: str) -> dict:
+        """Deliver the host's observation of whether it can show a human a dialog now."""
+        resp = self._service.trusted_human_surface(
+            run_id=run_id, payload={"run_id": run_id, "surface": surface})
+        self._validate_trusted_response(resp)
+        return resp
+
+    def trusted_evidence_confirmation(self, run_id: str, payload: dict) -> dict:
+        """Deliver one human receipt of per-item decisions through the private ingress."""
+        resp = self._service.trusted_evidence_confirmation(run_id=run_id, payload=payload)
+        self._validate_trusted_response(resp)
+        return resp
+
     def trusted_audit_verdict(self, run_id: str, child_id: str, payload: dict) -> dict:
         """Deliver a trusted audit_verdict through the private composition ingress.
 

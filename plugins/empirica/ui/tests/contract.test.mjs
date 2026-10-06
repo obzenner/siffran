@@ -32,6 +32,11 @@ const COVERS = {
   "states.step": [run, "steps", "[]", "kind"],
   "states.outcome": [run, "steps", "[]", "outcome"],
   "states.file": [run, "stale", "[]", "state"],
+  "states.verification": [run, "claims", "[]", "records", "[]", "status"],
+  "states.route": [run, "claims", "[]", "records", "[]", "route"],
+  // the answer, or while it waits the route it waits on: one vocabulary, two enums
+  "states.decision": [[run, "claims", "[]", "decision", "outcome"], [run, "claims", "[]", "decision", "route"]],
+  "catalogue.record_classes": [run, "claims", "[]", "records", "[]", "class"],
   "catalogue.kinds": [view, ...CLAIM, "kind"],
   "catalogue.independence": [run, "audit", "independence"],
   "catalogue.control_modes": [run, "control", "mode"],
@@ -39,11 +44,12 @@ const COVERS = {
 };
 const own = (o) => Object.keys(o).filter((k) => !k.startsWith("$"));
 
-for (const [where, [schema, ...path]] of Object.entries(COVERS)) {
-  test(`${where} covers the contract's ${path.filter((p) => p !== "[]").join(".")} exactly`, () => {
+for (const [where, spec] of Object.entries(COVERS)) {
+  const specs = Array.isArray(spec[0]) ? spec : [spec];
+  test(`${where} covers the contract's ${specs.map(([, ...path]) => path.filter((p) => p !== "[]").join(".")).join(" and ")} exactly`, () => {
     const [file, key] = where.split(".");
     const have = file === "states" ? own(states[key]) : catalogue[key];
-    assert.deepEqual([...have].sort(), [...enumAt(schema, ...path)].sort());
+    assert.deepEqual([...have].sort(), [...new Set(specs.flatMap(([schema, ...path]) => enumAt(schema, ...path)))].sort());
   });
 }
 

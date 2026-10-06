@@ -51,8 +51,11 @@ class Demo:
         self._view = json.loads((folder / "view.json").read_text(encoding="utf-8"))
         self._details = json.loads((folder / "runs.json").read_text(encoding="utf-8"))
 
-    def observe(self) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
-        return self._view, self._details
+    def view(self) -> dict[str, Any]:
+        return self._view
+
+    def detail(self, key: str) -> dict[str, Any] | None:
+        return self._details.get(key)
 
 
 class Sources:
@@ -68,12 +71,17 @@ class Sources:
     def names(self) -> tuple[str, ...]:
         return tuple(name for name, source in self._sources.items() if source is not None)
 
-    def observe(self, name: str):
-        source = self._sources.get(name)
-        if source is None:
-            return None
+    def has(self, name: str) -> bool:
+        return self._sources.get(name) is not None
+
+    def view(self, name: str) -> dict[str, Any]:
         with self._lock:
-            return source.observe()
+            return self._sources[name].view()
+
+    def detail(self, name: str, key: str) -> dict[str, Any] | None:
+        """One run's detail, projected alone (the store's other runs are not)."""
+        with self._lock:
+            return self._sources[name].detail(key)
 
     def report(self, exc: Exception) -> None:
         """Log an observer failure: its traceback the first time, then one line per repeat, so a
@@ -163,20 +171,20 @@ def handler_for(sources: Sources, root: Path = UI):
             self._send(200, path.read_bytes(), TYPES[path.suffix])
 
         def _api(self, route: str, query: dict[str, str]) -> None:
+            name = query.get("source", "store")
+            if not sources.has(name):
+                return self._send(404, b"no such source\n", "text/plain; charset=utf-8")
             try:
-                observed = sources.observe(query.get("source", "store"))
+                answer = sources.view(name) if route == "/api/view" else sources.detail(name, query.get("key", ""))
             except Exception as exc:  # the UI says it has no answer; the terminal says why
                 sources.report(exc)
                 return self._send(500, b"the observer failed\n", "text/plain; charset=utf-8")
-            if observed is None:
-                return self._send(404, b"no such source\n", "text/plain; charset=utf-8")
-            view, details = observed
             if route == "/api/view":
-                etag = f'"{view["token"]}"'
+                etag = f'"{answer["token"]}"'
                 if self.headers.get("If-None-Match") == etag:
                     return self._send(304, headers={"ETag": etag})
-                return self._json(view, {"ETag": etag})
-            detail = details.get(query.get("key", ""))
+                return self._json(answer, {"ETag": etag})
+            detail = answer
             if detail is None:
                 return self._send(404, b"no such run\n", "text/plain; charset=utf-8")
             self._json(detail)

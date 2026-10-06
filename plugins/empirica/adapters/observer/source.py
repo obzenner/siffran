@@ -1,7 +1,8 @@
 """The machine's run store and the user's repositories as an observer ``Source``. Reads only.
 
-* Runs are enumerated from the run repository's layout (``<home>/projects/<p>/runs/<r>/gen-<n>``);
-  each state is read through ``FilesystemRunRepository.read``, the same read the plugin uses.
+* Runs are enumerated from the run repository's layout (``<home>/projects/<p>/runs/<r>/gen-<n>``):
+  every canonical generation directory is a run, whether or not its state can be read (the observer
+  then reports it ``unreadable``); each state is read through ``FilesystemRunRepository.read``, the same read the plugin uses.
 * A project's history is in the repository the bridge recorded for it when it created a run
   (``adapters.state.locations``), read on every poll, so projects that appear while the observer runs
   are found. A ``--repo`` given explicitly also maps by the plugin's own identity,
@@ -103,7 +104,7 @@ class StoreSource:
                     continue
                 for generation in sorted(run.iterdir()):
                     n = generation_of(generation.name)
-                    if n is not None and not generation.is_symlink() and (generation / DOC_NAME).is_file():
+                    if n is not None and not generation.is_symlink() and generation.is_dir():
                         yield RunKey(project.name, run.name, n)
 
     def read_state(self, key: RunKey) -> Any:

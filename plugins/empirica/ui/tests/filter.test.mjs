@@ -10,10 +10,10 @@ const states = JSON.parse(readFileSync(new URL("../states.json", import.meta.url
 const runs = data.projects.flatMap((p) => p.runs), claims = runs.flatMap((r) => r.claims);
 const view = (choice) => apply(data, choice, filters);
 
-test("no filter: everything stays, every project keeps its place number", () => {
+test("no filter: everything stays, every project keeps the observer's label", () => {
   const v = view({});
   assert.deepEqual(v.counts, { projects: data.projects.length, runs: runs.length, claims: claims.length });
-  assert.deepEqual(v.projects.map((p) => p.n), data.projects.map((_, i) => i + 1));
+  assert.deepEqual(v.projects.map((p) => p.label), data.projects.map((p) => p.label));
   assert.equal(v.projects.flatMap((p) => p.runs).reduce((n, r) => n + r.edges.length, 0), runs.reduce((n, r) => n + r.edges.length, 0));
 });
 
@@ -55,8 +55,11 @@ test("a field filter on a claim fact keeps only those values", () => {
   }
 });
 
-test("a project keeps its name, or none", () => {
+test("a project keeps its name, or none, and its label whatever the filters remove", () => {
   assert.deepEqual(view({}).projects.map((p) => p.name), data.projects.map((p) => p.name));
+  const kept = view({ "run-state": ["converged"] }).projects;
+  assert.ok(kept.length < data.projects.length);
+  for (const p of kept) assert.equal(p.label, data.projects.find((x) => x.id === p.id).label, "a label never follows the place in the view");
 });
 
 test("a previous attempt stays only while both runs stay", () => {
@@ -82,6 +85,8 @@ test("the legend counts what is showing, per value in states.json order, leaving
   const k = showing(data.projects, order, quiet);
   assert.deepEqual(k.runs.map((x) => x.value), order("run").filter((v) => runs.some((r) => r.state === v)));
   assert.equal(k.runs.reduce((n, x) => n + x.n, 0), runs.filter((r) => r.state).length);
+  assert.equal(k.total, runs.length, "the key counts every run, the unreadable one included");
+  assert.ok(runs.some((r) => r.state === null) && k.total > k.runs.reduce((n, x) => n + x.n, 0), "the data holds a run with no state");
   assert.equal(k.claims.reduce((n, x) => n + x.n, 0) + k.unsettled.reduce((n, x) => n + x.n, 0), claims.length,
     "each claim counts once");
   assert.equal(k.attempts, runs.filter((r) => r.previous).length);

@@ -3,7 +3,7 @@ import { EvElement, TONE, define, icon, stateOf, t } from "../core/element.js";
 /**
  * One state as glyph (+ word). Level 0 = icon only, level 1 = hover/focus hint (D, S1).
  * @element ev-state
- * @attr {"file"|"claim"|"audit"|"run"|"step"} domain - which vocabulary
+ * @attr {"run"|"diagnostic"|"audit"|"claim"|"evidence"|"review"|"step"|"outcome"|"file"|"verification"|"route"|"decision"} domain - which vocabulary
  * @attr {string} value - a value of that vocabulary (states.json); unknown values render as "Unknown"
  * @attr {"icon"|"label"} show - icon only, or icon + word (default label)
  * @attr {"plain"|"chip"} variant - bare, or a Basecoat badge on a pale tint (default plain)

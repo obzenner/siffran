@@ -54,7 +54,7 @@ _MUST_NOT_EXIST = ""
 _MAX_APPEND_RETRIES = 64
 
 # A tree-path component that is safe to use verbatim: no separators, no leading dot, no refname
-# hazards. Anything else is escaped (see :func:`_tree_path`).
+# hazards. Anything else is escaped (see :func:`tree_path`).
 _SAFE_PATH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 # Fixed commit identity and timestamps. Determinism is a requirement (ADR-31 "deterministic tree
@@ -128,7 +128,7 @@ class GitArtifactRepository:
         if not artifact.artifact_id:
             raise ValueError("artifact_id must be non-empty")
         ref = self.ref_for(key)
-        path = _tree_path(artifact.artifact_id)
+        path = tree_path(artifact.artifact_id)
         new_blob = self._write_blob(_encode_body(artifact))
 
         for _ in range(_MAX_APPEND_RETRIES):
@@ -184,8 +184,8 @@ class GitArtifactRepository:
         yet readable (a slug leads), and always refname-safe."""
         return "refs/empirica/artifacts/{gen}/{proj}/{run}".format(
             gen=int(key.generation),
-            proj=_ref_component(key.project_id),
-            run=_ref_component(key.run_id),
+            proj=ref_component(key.project_id),
+            run=ref_component(key.run_id),
         )
 
     def ref_heads(self) -> dict[str, str]:
@@ -388,7 +388,7 @@ class GitArtifactRepository:
             except UnicodeDecodeError as exc:
                 raise _CorruptTree(f"blob {oid} at {path!r} is not valid UTF-8") from exc
             artifact_id, body = _decode_body(blob, path)
-            if _tree_path(artifact_id) != path:
+            if tree_path(artifact_id) != path:
                 raise _CorruptTree(
                     f"artifact id/path mismatch at {path!r}: blob records id {artifact_id!r}"
                 )
@@ -428,7 +428,7 @@ def _decode_body(blob: str, path: str) -> tuple[str, str]:
     return artifact_id, body
 
 
-def _tree_path(artifact_id: str) -> str:
+def tree_path(artifact_id: str) -> str:
     """An injective, ``/``-free, refname-safe tree path for an artifact id.
 
     Content addresses (hex digests) pass through verbatim for a reviewable layout. Anything else is
@@ -440,7 +440,7 @@ def _tree_path(artifact_id: str) -> str:
     return "=" + artifact_id.encode("utf-8").hex()
 
 
-def _ref_component(value: str) -> str:
+def ref_component(value: str) -> str:
     """A refname-safe component: a readable slug plus a full SHA-256 content digest.
 
     The digest disambiguates distinct inputs even when their slugs collapse to the same slug (e.g.

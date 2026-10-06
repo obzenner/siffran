@@ -1,18 +1,20 @@
+import { PRIORITY, layer } from "../core/dismiss.js";
 import { define, t } from "../core/element.js";
 
 /**
  * Main content + a resizable side panel (L1, D2). The main view stays visible; the divider is draggable (pointer,
- * with cancel handled), movable with arrow keys when focused, reset by double-click, and reports its width to
- * assistive tech. Esc or ev-close closes the panel and returns focus to where it was when the panel opened.
+ * with cancel handled), movable with the arrow, Page and Home/End keys when focused, reset by double-click, and reports its width to
+ * assistive tech. Esc (the panel is the outermost dismissable layer: core/dismiss.js) or ev-close closes the panel and
+ * returns focus to where it was when the panel opened.
  * Widths come from tokens (width.panel, panel-min, main-min via --ev-panel*) and are re-clamped whenever the element
  * resizes. Below panel-min + main-min the element sets `narrow` and the panel takes the full width (D2 exception).
  * Children: exactly two, the main region and then the panel. Emits ev-panel {open} when the panel opens or closes.
- * Behavioural layout element: it may listen at document level for Esc (E3 exception, removed on disconnect).
+ * Behavioural layout element: its Esc layer is registered with core/dismiss.js and removed on disconnect.
  * @element ev-split
  * @attr {boolean} open - panel visible
  * @attr {string} key - localStorage key for the remembered width
  */
-const STEP = 32;
+const PAGE = 4;  // PageUp/PageDown move this many steps; a step is `--ev-split-step` (tokens: width.split-step)
 function px(el, name) {
   const v = getComputedStyle(el).getPropertyValue(name).trim();
   return v.endsWith("rem") ? parseFloat(v) * parseFloat(getComputedStyle(document.documentElement).fontSize) : parseFloat(v);
@@ -23,18 +25,18 @@ class EvSplit extends HTMLElement {
   #return = null;
   #want = 0;  // the width the user chose; resizes clamp from it, so a narrow moment never shrinks it for good
   #resize = new ResizeObserver(() => this.#width(this.#want));
-  #onKey = (e) => { if (e.key === "Escape" && this.hasAttribute("open")) this.removeAttribute("open"); };
+  #off = null;
   #onClose = () => this.removeAttribute("open");
   connectedCallback() {
     if (!this.#handle) this.#build();
     this.#choose(Number(localStorage.getItem(this.#key())) || px(this, "--ev-panel"));
     this.#resize.observe(this);
-    document.addEventListener("keydown", this.#onKey);
+    this.#off = layer({ priority: PRIORITY.panel, open: () => this.hasAttribute("open"), close: () => this.removeAttribute("open") });
     this.addEventListener("ev-close", this.#onClose);
   }
   disconnectedCallback() {
     this.#resize.disconnect();
-    document.removeEventListener("keydown", this.#onKey);
+    this.#off?.();
     this.removeEventListener("ev-close", this.#onClose);
   }
   attributeChangedCallback(name, was, now) {
@@ -63,8 +65,10 @@ class EvSplit extends HTMLElement {
     h.addEventListener("pointerdown", this.#drag);
     h.addEventListener("dblclick", () => this.#choose(px(this, "--ev-panel")));
     h.addEventListener("keydown", (e) => {
-      const d = { ArrowLeft: STEP, ArrowRight: -STEP }[e.key];
-      if (d) { e.preventDefault(); this.#choose(this.#current() + d); }
+      // The panel grows leftwards: Left/Right by a step, PageUp/PageDown by several, Home its narrowest, End its widest.
+      const now = this.#current(), min = px(this, "--ev-panel-min"), max = Number(h.getAttribute("aria-valuemax"));
+      const step = px(this, "--ev-split-step"), to = { ArrowLeft: now + step, ArrowRight: now - step, PageUp: now + PAGE * step, PageDown: now - PAGE * step, Home: min, End: max }[e.key];
+      if (to !== undefined) { e.preventDefault(); this.#choose(to); }
     });
   }
   #focusPanel() {
@@ -95,6 +99,7 @@ class EvSplit extends HTMLElement {
       this.#handle.setAttribute("aria-valuemin", String(Math.round(min)));
       this.#handle.setAttribute("aria-valuemax", String(Math.round(max)));
       this.#handle.setAttribute("aria-valuenow", String(w));
+      this.#handle.setAttribute("aria-valuetext", t("split.value", { n: w }));
     }
   }
   #drag = (e) => {

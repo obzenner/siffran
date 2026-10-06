@@ -2,8 +2,7 @@
 // data (the plugin's own runs, served as source=demo). Page code may assemble and wire elements; it never derives
 // states (E4).
 import "../elements/index.js";
-import { esc, projectName, statesOf, stepOf, t } from "../elements/core/element.js";
-import { optionLabel } from "../elements/organisms/ev-filters.js";
+import { esc, optionLabel, statesOf, stepOf, t } from "../elements/core/element.js";
 import { claimDetail, fileDetail, projectDetail, runDetail, stepDetail } from "../elements/templates/details.js";
 import { Client } from "../app/client.js";
 import { apply } from "../app/filter.js";
@@ -23,14 +22,22 @@ const client = new Client("demo");
 const fx = (await client.view()).view ?? { projects: [] };
 const runs = fx.projects.flatMap((p) => p.runs);
 const byKey = new Map(runs.map((r) => [r.key, r]));
-const details = new Map((await Promise.all(runs.map((r) => client.detail(r)))).filter(Boolean).map((d) => [d.key, d]));
+const details = new Map((await Promise.all(runs.map((r) => client.detail(r)))).filter((r) => r.status === "ok").map((r) => [r.detail.key, r.detail]));
 const longest = [...details.values()].sort((a, b) => b.steps.length - a.steps.length)[0];
 const deep = byKey.get(longest.key), deepDetail = longest;
 // One changed file per freshness state, so the file row is shown in each.
 const fileExamples = statesOf("file").map((state, i) => ({ path: `src/example/${["module.py", "removed.py", "locked.bin", "link", "../outside.txt"][i] ?? "file.txt"}`, state }));
+// One research record per way of standing (how it is verified, or where its confirmation goes): the demo's own
+// where it has one, the first record reworded where not.
+const allRecords = [...details.values()].flatMap((d) => d.claims.flatMap((c) => c.records));
+const standings = [...statesOf("verification").filter((v) => v !== "pending").map((v) => [v, null]), ...statesOf("route").map((r) => ["pending", r])];
+const recordExamples = standings.map(([status, route]) => allRecords.find((r) => r.status === status && r.route === route) ?? { ...allRecords[0], status, route });
 // Every kind and outcome of step the demo histories hold, in states.json order.
 const pairs = new Set([...details.values()].flatMap((d) => d.steps.map((s) => JSON.stringify([s.kind, s.outcome]))));
-const steps = statesOf("step").flatMap((kind) => [...pairs].map((x) => JSON.parse(x)).filter(([k]) => k === kind).map(([, outcome]) => ({ kind, outcome })));
+const seen = statesOf("step").flatMap((kind) => [...pairs].map((x) => JSON.parse(x)).filter(([k]) => k === kind).map(([, outcome]) => ({ kind, outcome })));
+// And every kind and outcome the vocabulary has, whether or not the demo's histories hold one (G2).
+const lacking = statesOf("step").filter((kind) => !seen.some((s) => s.kind === kind)).map((kind) => ({ kind, outcome: null }));
+const steps = [...seen, ...lacking, ...statesOf("outcome").filter((o) => !seen.some((s) => s.outcome === o)).map((outcome) => ({ kind: "research", outcome }))];
 
 function section(key, body) {
   return `<section class="mx-auto flex max-w-page flex-col gap-l py-2xl">
@@ -68,32 +75,36 @@ const atoms = section("atoms", `<div class="flex flex-col gap-xl">
   ${group("gallery.budgets", `<div class="grid max-w-prose grid-cols-3 gap-l"><ev-meter label="budget.passes" used="1" max="10"></ev-meter><ev-meter label="budget.spawns" used="0" max="1"></ev-meter><ev-meter label="budget.audit_spawns" used="2" max="2"></ev-meter></div>`)}
 </div>`);
 
+// A text that does not fit two lines in the gallery's column, so the "Show all" control is shown beside the short one.
+const longText = Array.from({ length: 12 }, () => deepDetail.goal).join(" ");
 const molecules = section("molecules", `<div class="flex flex-col gap-xl">
   ${group("gallery.legend", `<ev-legend id="g-key"></ev-legend>`)}
   <div class="grid gap-xl md:grid-cols-2">
     ${group("gallery.files", `<div id="m-files" class="flex flex-col"></div>`)}
-    ${group("goal.label", `<ev-goal text="${esc(deepDetail.goal)}"></ev-goal>`)}
+    ${group("gallery.records", `<div id="m-records" class="flex flex-col"></div>`)}
+    ${group("gallery.more", `<div class="flex flex-col gap-m"><ev-more label="goal.label" text="${esc(deepDetail.goal)}"></ev-more><ev-more id="g-long" label="goal.label" text="${esc(longText)}"></ev-more></div>`)}
   </div>
 </div>`);
 
 const organisms = section("organisms", `<div class="flex flex-col gap-xl">
   ${group("gallery.history", `<div data-run-key="${esc(deep.key)}"><ev-steps id="o-steps"></ev-steps></div>`)}
   ${group("gallery.history.list", `<div data-run-key="${esc(deep.key)}" class="max-w-prose"><ev-history id="o-history"></ev-history></div>`)}
-  ${group("gallery.view", `<div class="flex aspect-video w-full gap-xl rounded-l border border-border p-l"><div class="w-sidebar shrink-0 overflow-y-auto"><ev-filters id="g-filters"></ev-filters></div><ev-view id="g-view" class="block min-w-0 flex-1"></ev-view></div>`)}
+  ${group("gallery.view", `<div class="flex aspect-video w-full gap-xl rounded-l border border-border p-l"><div class="w-sidebar shrink-0 overflow-y-auto"><ev-filters id="g-filters"></ev-filters></div><ev-view id="g-view" class="min-w-0 flex-1"></ev-view></div>`)}
 </div>`);
 
 document.getElementById("bar").innerHTML = bar;
 document.getElementById("main").innerHTML = colours + atoms + molecules + organisms;
 // The key over every value of each domain (the app shows only the values present, with real counts).
 const every = (domain) => statesOf(domain).map((value, i) => ({ value, n: i + 1 }));
-document.getElementById("g-key").data = { runs: every("run"), audits: every("audit"), diagnostics: every("diagnostic"), claims: every("claim"), gating: 3, supports: 7, attempts: 1 };
+document.getElementById("g-key").data = { total: every("run").reduce((n, x) => n + x.n, 0) + 1, runs: every("run"), audits: every("audit"), diagnostics: every("diagnostic"), claims: every("claim"), gating: 3, supports: 7, attempts: 1 };
+for (const r of recordExamples) { const el = document.createElement("ev-record"); el.data = r; document.getElementById("m-records").append(el); }
 for (const f of fileExamples) { const el = document.createElement("ev-file"); el.data = f; document.getElementById("m-files").append(el); }
 document.getElementById("o-steps").data = deepDetail.steps;
 document.getElementById("o-history").data = { steps: deepDetail.steps, claims: deep.claims };
 // The view with its filters, on the fixtures; every filter value is offered here.
 const gv = document.getElementById("g-view"), gf = document.getElementById("g-filters");
-const options = Object.fromEntries(catalogue.filters.filter((f) => !f.flag).map((f) => [f.id,
-  f.id === "project" ? fx.projects.map((p, i) => ({ value: p.id, label: projectName(p, i + 1) }))
+const options = Object.fromEntries(catalogue.filters.filter((f) => f.control !== "flag").map((f) => [f.id,
+  f.options === "projects" ? fx.projects.map((p) => ({ value: p.id, label: p.label }))
     : (f.domain ? statesOf(f.domain) : catalogue[f.values]).map((v) => ({ value: v, label: optionLabel(f, v) }))]));
 gf.data = { filters: catalogue.filters, options };
 function show(choice) { const v = apply(fx, choice, catalogue.filters); gv.data = v; gf.choice = choice; gf.counts = v.counts; }
@@ -114,8 +125,7 @@ document.addEventListener("ev-open", (e) => {
   if (d.type === "file") { const f = fileExamples.find((x) => x.path === d.path); if (f) open(fileDetail(f)); return; }
   clear();
   if (d.type === "project") {
-    const i = fx.projects.findIndex((p) => p.id === d.id);
-    gv.setAttribute("project", d.id); open(projectDetail(fx.projects[i], i + 1));
+    gv.setAttribute("project", d.id); open(projectDetail(fx.projects.find((p) => p.id === d.id), null));
   } else if (d.type === "run") {
     gv.setAttribute("run", d.run); open(runDetail(byKey.get(d.run), details.get(d.run) ?? null));
   } else if (d.type === "claim") {

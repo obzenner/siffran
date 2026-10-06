@@ -133,7 +133,10 @@
   },
   "settlement_notices": {
     "human_wait": "Empirica is paused for human governance input, not converged. Investigation remains blocked; no approval was granted by this pause.",
-    "budget_exhausted": "Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this pause. Stop honestly (report_convergence intent=stop), or in deliberative mode propose a raise for human approval; in auto mode start a fresh run."
+    "evidence_wait": "Empirica is paused: research evidence is waiting for your confirmation, and the run is not converged. No confirmation was granted by this pause. The agent presents it to you at the end of its next pass; if you leave it on Later or close the dialog it is not shown again for the same work, and the run must change or be accepted as a residual.",
+    "budget_exhausted": "Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this pause. Stop honestly (report_convergence intent=stop), or in deliberative mode propose a raise for human approval; in auto mode start a fresh run.",
+    "surface_unrecorded": "Empirica cannot tell whether a human can be asked in this session, so it is not pausing for a confirmation. The run is not converged and no confirmation was granted. Report again; if this persists, change the work or accept the residual.",
+    "evidence_report": "Research evidence is waiting for your confirmation, and the run is not converged. Call report_convergence now: the human is asked inside that call. No confirmation was granted by this block."
   },
   "author_view": {
     "labels": {
@@ -174,7 +177,24 @@
       "contract": "Contract",
       "block": "Block",
       "fault": "Fault",
-      "inert": "Inert"
+      "inert": "Inert",
+      "waiting": "Waiting on a human:",
+      "waiting_record": "source:",
+      "waiting_claim": "decision needed on claim",
+      "waiting_for_claim": "for claim",
+      "waiting_none_error": "a human can be asked at the end of your next pass",
+      "waiting_unavailable": "no human can be asked in this session",
+      "waiting_already_presented": "already shown; only a changed derivation asks again",
+      "waiting_interaction_limit": "the human interaction limit is reached",
+      "verified_by_service": "checked by the service",
+      "confirmed_by_human": "confirmed by a human",
+      "rejected_by_human": "rejected by a human",
+      "pending_human": "waiting for a human",
+      "human_note": "human note:",
+      "decision_approve": "approved by a human",
+      "decision_reject": "rejected by a human",
+      "human_answer": "human answer:",
+      "pending_audit": "for the audit to retrieve"
     }
   },
   "host_profiles": {
@@ -540,6 +560,11 @@
                       "observed_content_digest": {
                         "type": "string",
                         "pattern": "^sha256:[0-9a-f]{64}$"
+                      },
+                      "spike_unavailable": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Required for a runtime record whose source_ref is neither a workspace path nor a URL or absolute path: why no deterministic spike can establish the observation. Shown to the human verbatim."
                       }
                     }
                   }
@@ -946,6 +971,11 @@
                       "observed_content_digest": {
                         "type": "string",
                         "pattern": "^sha256:[0-9a-f]{64}$"
+                      },
+                      "spike_unavailable": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Required for a runtime record whose source_ref is neither a workspace path nor a URL or absolute path: why no deterministic spike can establish the observation. Shown to the human verbatim."
                       }
                     }
                   }

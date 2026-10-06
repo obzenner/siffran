@@ -7,9 +7,10 @@ import json
 import subprocess
 from pathlib import Path
 
-from empirica_live_receipts import (EXPECTED, FORMAT, digest, inspect_claude, inspect_pi, jsonl,
-                                    native_version, require_compatible_version, run_handle,
-                                    state_facts)
+from empirica_live_receipts import (EXPECTED, FORMAT, audit_retrieval, digest, evidence_receipts,
+                                    inspect_claude, inspect_pi, jsonl, native_version,
+                                    require_answered_presentations, require_compatible_version,
+                                    run_handle, state_facts)
 
 
 def main() -> int:
@@ -19,6 +20,8 @@ def main() -> int:
     parser.add_argument("--state", required=True, type=Path)
     parser.add_argument("--child-session", required=True, type=Path)
     parser.add_argument("--version-output", required=True, type=Path)
+    parser.add_argument("--artifacts-repo", required=True, type=Path,
+                        help="the Git repository holding refs/empirica/artifacts for the run")
     parser.add_argument("--command", required=True)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--operator-attested", action="store_true", required=True)
@@ -38,6 +41,8 @@ def main() -> int:
                            host_version)
              if args.host == "claude"
              else inspect_pi(parent, child_rows, child, args.child_session, state))
+    held = evidence_receipts(args.artifacts_repo, args.state.resolve())
+    require_answered_presentations(held)
     receipt = {
         "format": FORMAT,
         "operator_attested": True,
@@ -52,6 +57,9 @@ def main() -> int:
         "audit_operation_id": child["audit_operation_id"],
         "observed_author": facts["author"],
         "observed_auditor": facts["auditor"],
+        "audit_retrieval": audit_retrieval(state),
+        "artifacts_repo_path": str(args.artifacts_repo.resolve()),
+        "evidence_receipts": held,
         "result": facts["result"],
     }
     # Pi only: derived from the run state the host persisted; there is deliberately no flag for it.

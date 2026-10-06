@@ -26,7 +26,9 @@
         "host",
         "interactive",
         "signal",
-        "delegation"
+        "delegation",
+        "audit_retrieval",
+        "human_surface"
       ],
       "properties": {
         "host": {
@@ -102,6 +104,25 @@
               }
             }
           }
+        },
+        "audit_retrieval": {
+          "description": "The retrieval kinds this host's auditor is observed to cover, recorded once at StartRun and re-observed at audit launch (a divergence refuses the launch). workspace: files inside the workspace; local: absolute or home paths; web: http(s) URLs. A research record of any other kind is confirmed by a human (ADR-0067).",
+          "type": "array",
+          "items": {
+            "enum": [
+              "local",
+              "web",
+              "workspace"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "human_surface": {
+          "description": "Whether the host last observed a surface to show a dialog to a human now: Claude form elicitation advertised by the client, Pi `ctx.hasUI` in the TUI or RPC. Recorded at StartRun and updated by the host's private ingress at every report_convergence. Evidence routes to a human only when this is `human`, the run is not delegated or non-interactive, and the profile has a human approval ingress (ADR-0067).",
+          "enum": [
+            "human",
+            "unavailable"
+          ]
         }
       }
     },

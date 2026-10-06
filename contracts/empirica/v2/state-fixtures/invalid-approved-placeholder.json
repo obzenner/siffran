@@ -6,7 +6,12 @@
     "host": "test",
     "interactive": true,
     "signal": "fixture",
-    "delegation": false
+    "delegation": false,
+    "audit_retrieval": [
+      "local",
+      "workspace"
+    ],
+    "human_surface": "unavailable"
   },
   "status": "converged",
   "budgets": {

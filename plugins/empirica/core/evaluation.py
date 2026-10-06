@@ -11,7 +11,7 @@ from typing import Any
 from .canonical import canonical_digest
 from .freshness import ActiveSpikeHead, FileBinding, ObservationState, evaluate_freshness, valid_claim_id
 from .run import OperationalState
-from . import citations, governance
+from . import citations, confirmation, governance
 
 SPAWN_BUDGET = {"investigation": ("max_spawns", *governance.BUDGETS["max_spawns"]),
                 "audit": ("max_audit_spawns", *governance.BUDGETS["max_audit_spawns"])}
@@ -62,6 +62,8 @@ class ContractView:
     late_route_must: str
     default_next_action: str
     untrusted_delimiters: Mapping[str, str]
+    #: The most items one human batch carries: the request schema's ``maxItems`` for a receipt's decisions.
+    batch_limit: int
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "governance_controls", _freeze(self.governance_controls))
@@ -89,6 +91,8 @@ class EvaluationSnapshot:
     #: The workspace's capture of the file a submitted research record cites (``core.citations``), when
     #: the command is such a record: an object with ``observation`` (state, sha256) and ``content``.
     cited: Any = None
+    #: Where the run's workspace lives, when the workspace says (an absolute citation inside it is refused).
+    workspace_root: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "history", _freeze(self.history))
@@ -126,6 +130,10 @@ class EvaluationSnapshot:
     @property
     def untrusted_delimiters(self):
         return self.contract.untrusted_delimiters
+
+    @property
+    def batch_limit(self):
+        return self.contract.batch_limit
 
 
 @dataclass(frozen=True)
@@ -239,17 +247,41 @@ def claim_digest(claim: dict[str, Any]) -> str:
 
 
 def active_evidence(snapshot: EvaluationSnapshot, claim: dict[str, Any]) -> list[dict[str, Any]]:
-    """Research and spike artifacts bound to the claim's current digest; only the latest spike is active."""
+    """Research and spike artifacts bound to the claim's current digest; only the latest spike is
+    active, and research a human rejected is not."""
     cd = claim_digest(claim)
-    evidence = [a for a in snapshot.history if a.get("kind") in {"research", "spike"} and a.get("claim_id") == claim["id"] and a.get("claim_digest") == cd]
+    evidence = [a for a in snapshot.history if a.get("kind") in {"research", "spike"} and a.get("claim_id") == claim["id"] and a.get("claim_digest") == cd
+                and not (a["kind"] == "research" and confirmation.rejected(snapshot, a))]
     spikes = [a for a in evidence if a["kind"] == "spike"]
     active_spike = spikes[-1:] if spikes else []
     return [a for a in evidence if a["kind"] == "research"] + active_spike
 
 
+def claim_confirmations(snapshot: EvaluationSnapshot, claim: dict[str, Any]) -> list[dict[str, Any]]:
+    """The human receipts that bear on the claim's active evidence, and its own decision if any."""
+    receipts = [r for a in active_evidence(snapshot, claim) if a["kind"] == "research"
+                if (r := confirmation.receipt(snapshot, a)) is not None]
+    answer = confirmation.decision(snapshot, claim["id"], claim_digest(claim))
+    return receipts + ([answer] if answer is not None else [])
+
+
 def evidence_digest(snapshot: EvaluationSnapshot, claim: dict[str, Any]) -> str:
-    """The digest an audit verdict binds per reviewed claim: its ordered active evidence ids."""
-    return digest([a["artifact_id"] for a in active_evidence(snapshot, claim)])
+    """The digest an audit verdict binds per reviewed claim: its ordered active evidence ids and the
+    human receipts on them, so an audit that predates a confirmation is stale."""
+    return digest([a["artifact_id"] for a in active_evidence(snapshot, claim)]
+                  + [r["artifact_id"] for r in claim_confirmations(snapshot, claim)])
+
+
+#: The artifact kinds the audit dossier covers; ``argument_digest`` binds every one of them.
+#: It binds the confirmation artifacts, not the projected ``verification`` rows: a row's ``retrieve``
+#: comes from ``invocation.audit_retrieval``, which is fixed when the run starts and re-checked when an
+#: audit launches. A capability that could change mid-run would have to enter the digest.
+DOSSIER_KINDS = frozenset({"research", "spike_request", "spike", confirmation.KIND})
+
+
+def dossier_artifact_ids(history: tuple[dict[str, Any], ...]) -> list[str]:
+    """Ids of the artifacts the dossier covers, in history order."""
+    return [a["artifact_id"] for a in history if a.get("kind") in DOSSIER_KINDS]
 
 
 def active_spike_heads(
@@ -313,7 +345,8 @@ def local_claim_state(snapshot: EvaluationSnapshot, claim: dict[str, Any],
                       stale: set[str]) -> str:
     evidence = active_evidence(snapshot, claim)
     research = [a for a in evidence if a["kind"] == "research"]
-    supporting = any(a["outcome"] == "supporting" for a in research)
+    supporting = any(a["outcome"] == "supporting" and confirmation.counts(snapshot, a)
+                     for a in research)
     refuting = any(a["outcome"] == "refuting" for a in research)
     spikes = [a for a in evidence if a["kind"] == "spike"]
     spike_failed = bool(spikes and spikes[-1]["outcome"] == "fail")
@@ -324,10 +357,80 @@ def local_claim_state(snapshot: EvaluationSnapshot, claim: dict[str, Any],
     if spike_failed or refuting:
         return "discarded"
     if claim["kind"] == "needs-decision":
-        return "blocked"
+        answer = confirmation.decision(snapshot, claim["id"], claim_digest(claim))
+        if answer is None:
+            return "blocked"
+        return "approved" if answer["outcome"] == confirmation.APPROVE else "discarded"
     approved = supporting and (claim["kind"] == "ordinary" or
                                (claim["kind"] == "needs-experiment" and spike_ok))
     return "approved" if approved else "open"
+
+
+def _awaiting_human(snapshot: EvaluationSnapshot, research: list[dict[str, Any]]) -> list[str]:
+    """Ids of the supporting records a claim waits on, when none of them can approve it yet."""
+    supporting = [a for a in research if a["outcome"] == "supporting"]
+    if not supporting or any(confirmation.counts(snapshot, a) for a in supporting):
+        return []
+    return [a["artifact_id"] for a in supporting]
+
+
+CONFIRMATION_REASON = "evidence.confirmation_required"
+
+
+def pending_human(snapshot: EvaluationSnapshot, scope: tuple[str, ...]) -> dict[str, list[str]]:
+    """Ids of the research records in scope that still wait on a human, by claim."""
+    pending = {}
+    for claim in snapshot.graph["claims"]:
+        if claim["id"] in scope and (records := [
+                a["artifact_id"] for a in active_evidence(snapshot, claim)
+                if a["kind"] == "research"
+                and confirmation.pending_route(snapshot, a) in confirmation.HUMAN_ROUTES]):
+            pending[claim["id"]] = records
+    return pending
+
+
+def pending_decisions(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> list[str]:
+    """Ids of the gating ``needs-decision`` claims still waiting for the human's answer."""
+    return [c["id"] for c in snapshot.graph["claims"]
+            if c["id"] in derivation.scope and c["kind"] == "needs-decision"
+            and derivation.states[c["id"]] == "blocked"]
+
+
+def confirmation_batch(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> dict[str, Any] | None:
+    """What a human would be shown now, or ``None`` when nothing waits on one.
+
+    One batch for one human: the gating ``needs-decision`` claims first, in graph order, then the research
+    records, in their claim's graph order and then by submission. At most ``batch_limit`` items are shown;
+    the rest wait, and are shown after a decision changes the derivation. The ``key`` identifies the
+    derivation and exactly the shown items, so a batch is never presented twice and a changed derivation
+    is a new one."""
+    claims = {c["id"]: c for c in snapshot.graph["claims"]}
+    waiting = pending_decisions(snapshot, derivation)
+    records = [i for ids in pending_human(snapshot, derivation.scope).values() for i in ids]
+    if not waiting and not records:
+        return None
+    limit = snapshot.batch_limit
+    shown_claims = waiting[:limit]
+    shown_records = records[:limit - len(shown_claims)]
+    rows = [{"claim_id": cid, "claim_digest": claim_digest(claims[cid])} for cid in shown_claims]
+    key = digest({"derivation": derivation_digest(snapshot, derivation),
+                  "records": sorted(shown_records), "claims": [(r["claim_id"], r["claim_digest"]) for r in rows]})
+    return {"key": key, "record_ids": shown_records, "claims": rows}
+
+
+def _spike_requirement(snapshot: EvaluationSnapshot, claim: Mapping[str, Any], derivation: ClaimDerivation,
+                       research: list[dict[str, Any]],
+                       spikes: list[dict[str, Any]]) -> tuple[str, dict[str, Any], bool] | None:
+    """The spike reason of a ``needs-experiment`` claim whose research supports it, its parameters and whether
+    the author can act on it now (no passing, fresh spike yet); ``None`` for any other claim."""
+    if claim["kind"] != "needs-experiment" or not any(item["outcome"] == "supporting" for item in research):
+        return None
+    stale_head = (derivation.stale_heads.get(spikes[-1]["artifact_id"])
+                  if spikes and _freshness_sensitive(snapshot, claim) else None)
+    if stale_head is not None:
+        return "claim.spike_stale", {"changes": [{"path": change.path, "state": change.state.value}
+                                                   for change in stale_head.changes]}, True
+    return "claim.spike_missing", {}, not (spikes and spikes[-1].get("outcome") == "pass")
 
 
 def claim_blockers(snapshot: EvaluationSnapshot,
@@ -359,21 +462,22 @@ def claim_blockers(snapshot: EvaluationSnapshot,
         if state == "discarded":
             reason = "claim.refuted"
         elif state == "blocked":
-            reason = "claim.human_decision"
+            reason, parameters = "evidence.confirmation_required", confirmation.parameters(
+                snapshot, [], pending_decisions(snapshot, derivation))
         elif claim_conflicted(snapshot, claim):
             reason = "evidence.conflict"
-        elif (any(item["outcome"] == "supporting" for item in research)
-              and claim["kind"] == "needs-experiment"):
-            sensitive = _freshness_sensitive(snapshot, claim)
-            stale_head = (derivation.stale_heads.get(spikes[-1]["artifact_id"])
-                          if sensitive else None)
-            if stale_head is not None:
-                parameters = {"changes": [{"path": change.path, "state": change.state.value}
-                                           for change in stale_head.changes]}
-            reason = "claim.spike_stale" if stale_head is not None else "claim.spike_missing"
+        elif (spike := _spike_requirement(snapshot, claim, derivation, research, spikes)) and spike[2]:
+            # What the author can do now comes before waiting on a human (A1-5); the batch is still projected.
+            reason, parameters = spike[0], spike[1]
+        elif awaiting := _awaiting_human(snapshot, research):
+            reason, parameters = "evidence.confirmation_required", confirmation.parameters(
+                snapshot, awaiting, pending_decisions(snapshot, derivation))
+        elif spike:
+            reason, parameters = spike[0], spike[1]
         else:
             historical_research = any(
                 item.get("kind") == "research" and item.get("claim_id") == target_id
+                and item.get("claim_digest") != claim_digest(claim)
                 for item in snapshot.history)
             reason = ("claim.research_unbound" if historical_research
                       else "claim.research_missing")
@@ -484,7 +588,7 @@ def bootstrap_status(snapshot: EvaluationSnapshot) -> dict[str, Any]:
         if not facts["graph.selected"]:
             actions.append("graph.record")
         elif not facts["governance.approved"]:
-            if governance.interaction_error(governed):
+            if governance.interaction_error(governed, confirmation.interactions(snapshot)):
                 actions.append("residual.accept")
             else:
                 actions.append("governance.propose")
@@ -492,7 +596,7 @@ def bootstrap_status(snapshot: EvaluationSnapshot) -> dict[str, Any]:
             actions.append("investigation.record")
     request_ready = active_run and bootstrap_precondition(snapshot, "configure_run") is None
     display_ready = (active_run and bootstrap_precondition(snapshot, "governance.present") is None
-                     and governance.interaction_error(governed) is None
+                     and governance.interaction_error(governed, confirmation.interactions(snapshot)) is None
                      and governance.sized(governed))
     return {"active": active, "next_actions": actions,
             "request_ready": request_ready, "display_ready": display_ready}
@@ -568,6 +672,108 @@ def plan_spike_result(snapshot: EvaluationSnapshot, request_body: Mapping[str, A
     return _decision(snapshot, state, artifacts=(result,))
 
 
+def _confirmation_artifact(snapshot: EvaluationSnapshot, receipt_id: str,
+                           item: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The artifact recording one receipt decision, or ``None`` when it names nothing in this run."""
+    stamps = {"route_stamp": snapshot.state.route_stamp,
+              "investigation_stamp": snapshot.state.investigation_stamp}
+    base = {"receipt_id": receipt_id, "outcome": item["outcome"], "approval_kind": "host_ui"}
+    if item["subject"] == "research":
+        record = next((a for a in snapshot.history if a["artifact_id"] == item["artifact_id"]
+                       and a.get("kind") == "research"), None)
+        if record is None:
+            return None
+        # ``record_id``, not ``artifact_id``: the latter names the confirmation itself.
+        body = {"subject": "research", "record_id": record["artifact_id"],
+                "claim_id": record["claim_id"], "claim_digest": record["claim_digest"],
+                **({"note": item["note"]} if "note" in item else {})}
+    else:
+        body = {"subject": "claim", "claim_id": item["claim_id"], "claim_digest": item["claim_digest"],
+                **({"answer": item["answer"]} if "answer" in item else {})}
+    return artifact(confirmation.KIND, {**body, **base, **stamps})
+
+
+def _human_batch_block(snapshot: EvaluationSnapshot) -> Decision | None:
+    """Why no human receipt or presentation is admitted now, else ``None``."""
+    state = snapshot.state
+    blocked = _investigation_block(snapshot)
+    if blocked is not None:
+        return blocked
+    if snapshot.graph is None or frozen_scope_invalid(state, snapshot.graph):
+        return _decision(snapshot, state, "Block", reason="graph.invalid")
+    if not confirmation.human_available(snapshot):
+        return _decision(snapshot, state, "Block", reason="governance.approval_unavailable")
+    return None
+
+
+def plan_evidence_presentation(snapshot: EvaluationSnapshot, payload: Mapping[str, Any]) -> Decision:
+    """Purely record that the host showed the human the batch it names, once per batch key.
+
+    The receipt id names the presentation; sending it again is ``Inert``. A second presentation of a key
+    already presented, or of nothing, is a conflict. Each presentation spends one human interaction."""
+    state = snapshot.state
+    if (blocked := _human_batch_block(snapshot)) is not None:
+        return blocked
+    if confirmation.presentation(snapshot, payload["receipt_id"]) is not None:
+        return _decision(snapshot, state, "Inert")
+    batch = confirmation_batch(snapshot, derive_claims(snapshot))
+    # The presentation names the batch the host showed; any other (a record joined, a wording changed) is refused
+    # and nothing is spent, so what a human was shown is exactly what is recorded as presented.
+    if batch is None or payload["key"] != batch["key"] or confirmation.presented(snapshot, batch["key"]):
+        return _decision(snapshot, state, "Fault", reason="conflict")
+    if governance.interactions_remaining(
+            state.governance, confirmation.interactions(snapshot))["total"] == 0:
+        return _decision(snapshot, state, "Block", reason="governance.interaction_limit")
+    return _decision(snapshot, state, artifacts=(artifact(confirmation.PRESENTATION, {
+        "receipt_id": payload["receipt_id"], "key": batch["key"], "record_ids": batch["record_ids"],
+        "claims": batch["claims"],
+        "approval_kind": "host_ui", "route_stamp": state.route_stamp,
+        "investigation_stamp": state.investigation_stamp}),))
+
+
+def plan_evidence_confirmation(snapshot: EvaluationSnapshot, payload: Mapping[str, Any]) -> Decision:
+    """Purely admit one human receipt of per-item decisions and plan its confirmation artifacts.
+
+    The receipt id must name the current presentation (the pending set has not changed since it was
+    shown) and every decision must be about something that presentation showed. An identical replay is
+    ``Inert``. A decision for something unknown, no longer current, not waiting on a human, or already
+    decided differently fails closed, and so does a receipt id reused for other content. Nothing is
+    admitted unless every decision is."""
+    state = snapshot.state
+    if (blocked := _human_batch_block(snapshot)) is not None:
+        return blocked
+    items = payload["decisions"]
+    planned = [_confirmation_artifact(snapshot, payload["receipt_id"], item) for item in items]
+    subjects = {(i["subject"], i.get("artifact_id", i.get("claim_id"))) for i in items}
+    if None in planned or len(subjects) != len(items):
+        return _decision(snapshot, state, "Fault", reason="conflict")
+    known = {a["artifact_id"] for a in snapshot.history}
+    if all(a["artifact_id"] in known for a in planned):
+        return _decision(snapshot, state, "Inert")
+    others = [a for a in snapshot.history if a.get("kind") == confirmation.KIND
+              and a["receipt_id"] == payload["receipt_id"]]
+    shown = confirmation.presentation(snapshot, payload["receipt_id"])
+    batch = confirmation_batch(snapshot, derive_claims(snapshot))
+    if others or shown is None or batch is None or shown["key"] != batch["key"]:
+        return _decision(snapshot, state, "Fault", reason="conflict")
+    asked = {("research", r) for r in shown["record_ids"]} | {
+        ("claim", c["claim_id"], c["claim_digest"]) for c in shown["claims"]}
+    answered = {("research", i["artifact_id"]) if i["subject"] == "research"
+                else ("claim", i["claim_id"], i["claim_digest"]) for i in items}
+    if not answered <= asked:
+        return _decision(snapshot, state, "Fault", reason="conflict")
+    return _decision(snapshot, state, artifacts=tuple(planned))
+
+
+def approved_claim_ids(snapshot: EvaluationSnapshot) -> list[str]:
+    """Ids of the approved gating claims an audit reviews."""
+    if snapshot.graph is None or frozen_scope_invalid(snapshot.state, snapshot.graph):
+        return []
+    derivation = derive_claims(snapshot)
+    return [c["id"] for c in snapshot.graph["claims"]
+            if c["id"] in derivation.scope and derivation.states[c["id"]] == "approved"]
+
+
 def covered_artifact_ids(snapshot: EvaluationSnapshot) -> list[str]:
     """Return the exact active evidence set whose producer identity an audit covers."""
     if snapshot.graph is None or frozen_scope_invalid(snapshot.state, snapshot.graph):
@@ -618,14 +824,13 @@ def audit_binding(snapshot: EvaluationSnapshot) -> dict[str, Any]:
     derivation = derive_claims(snapshot)
     gating = list(derivation.scope)
     deferred = [cid for cid in all_ids if cid not in set(gating)]
-    visible = [a["artifact_id"] for a in snapshot.history
-               if a.get("kind") in {"research", "spike_request", "spike"}]
     reviewed = []
     for claim in snapshot.graph["claims"]:
         if claim["id"] in gating and derivation.states[claim["id"]] == "approved":
             reviewed.append({"claim_id": claim["id"],
                              "evidence_digest": evidence_digest(snapshot, claim)})
-    return {"argument_digest": digest({"graph": snapshot.graph, "evidence": visible}),
+    return {"argument_digest": digest({"graph": snapshot.graph,
+                                             "evidence": dossier_artifact_ids(snapshot.history)}),
             "goal_digest": digest(snapshot.state.goal),
             "frozen_scope_digest": (None if snapshot.state.frozen_claim_ids is None
                                     else digest(gating)),
@@ -668,6 +873,10 @@ def independence(snapshot: EvaluationSnapshot, verdict: Mapping[str, Any]) -> st
     auditor, producers = audit_attributions(snapshot, verdict)
     auditor_class = identity_pair(auditor)
     producer_classes = [identity_pair(producer) for producer in producers]
+    if auditor_class is not None and not producer_classes and approved_claim_ids(snapshot):
+        # Every reviewed claim is a human's decision with no evidence behind it: nobody produced it, so
+        # there is no producer to be independent of. The audit over the argument is still required.
+        return "human_owned"
     if auditor_class is None or not producer_classes or any(value is None for value in producer_classes):
         return "unverified"
     if len(set(producer_classes)) != 1:
@@ -809,14 +1018,14 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             if claim is None:
                 return _decision(snapshot, state, "Block", reason="graph.invalid")
             payload = action["payload"]
-            if citations.cited_file(action["source_kind"], payload["source_ref"]) is not None:
-                cited = snapshot.cited
-                problem = citations.citation_problem(
-                    payload["source_ref"], payload["citation"], cited.content if cited else None,
-                    cited.observation.state if cited else ObservationState.UNREADABLE)
-                if problem is not None:
-                    return _decision(snapshot, state, "Block", reason="research.citation_unverified",
-                                     parameters={"problem": problem})
+            cited = snapshot.cited
+            problem = citations.submission_problem(
+                action["source_kind"], payload, cited.content if cited else None,
+                cited.observation.state if cited else ObservationState.UNREADABLE,
+                snapshot.workspace_root)
+            if problem is not None:
+                return _decision(snapshot, state, "Block", reason="research.citation_unverified",
+                                 parameters={"problem": problem})
             art = artifact("research", {
                 "claim_id": claim["id"], "claim_digest": claim_digest(claim),
                 "statement_digest": digest(payload),
@@ -826,8 +1035,8 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                 "route_stamp": state.route_stamp,
                 "investigation_stamp": state.investigation_stamp,
                 "producer": _producer(state),
-                **({"observed_content_digest": payload["observed_content_digest"]} if
-                   "observed_content_digest" in payload else {}),
+                **{key: payload[key] for key in ("observed_content_digest", "spike_unavailable")
+                   if key in payload},
             })
             return _decision(snapshot, state, artifacts=(art,))
         if akind == "freeze":
@@ -920,10 +1129,16 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             status = "stopped_frozen" if deferred else "stopped_residual"
             return decide(replace(state, status=status))
         blockers = claim_blockers(snapshot, derivation)
-        if blockers:
-            blocker = blockers[0]
-            return decide(state, "Block", reason=blocker["reason"],
-                          parameters=blocker["parameters"],
+        # Whatever the author can still do alone comes first; the human is asked about the rest.
+        blocker = next((b for b in blockers if b["reason"] != CONFIRMATION_REASON), None)
+        batch = confirmation_batch(snapshot, derivation) if blocker is None else None
+        if batch is not None:
+            return decide(state, "Block", reason=CONFIRMATION_REASON,
+                          parameters=confirmation.parameters(
+                              snapshot, batch["record_ids"], [r["claim_id"] for r in batch["claims"]]))
+        blocker = blocker or (blockers[0] if blockers else None)  # fail closed: never converge past one
+        if blocker is not None:
+            return decide(state, "Block", reason=blocker["reason"], parameters=blocker["parameters"],
                           affected="claim:" + blocker["target_claim_id"])
         current_digest = derivation_digest(snapshot, derivation)
         blocker = pass_budget_blocker(snapshot, current_digest)

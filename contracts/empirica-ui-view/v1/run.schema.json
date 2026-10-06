@@ -5,7 +5,7 @@
   "description": "What the detail panel shows for one run, beyond its row in the store summary (the row owns state, diagnostic and audit state; nothing here repeats them). Same ownership as view.schema.json; reason messages come from the public-contract registry. Enumerations are held equal to their owners by scripts/validate_ui_view.py.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["contract", "key", "version", "goal", "budgets", "control", "audit", "residuals", "stale", "author", "auditor", "steps", "claims"],
+  "required": ["contract", "key", "version", "goal", "budgets", "control", "audit", "residuals", "prompt_error", "waiting", "stale", "author", "auditor", "steps", "claims"],
   "properties": {
     "contract": {"const": "empirica-ui-view/v1"},
     "key": {"type": "string", "minLength": 1},
@@ -41,7 +41,7 @@
         "additionalProperties": false,
         "required": ["independence", "findings"],
         "properties": {
-          "independence": {"enum": ["distinct", "mixed", "same_model", "unverified"]},
+          "independence": {"enum": ["distinct", "mixed", "same_model", "unverified", "human_owned"]},
           "findings": {"type": "array", "items": {"type": "string"}, "description": "The latest verdict's findings while they are the current failure (the plugin's run view)."}
         }
       }]
@@ -57,6 +57,25 @@
           "code": {"type": "string", "minLength": 1},
           "claim": {"type": ["string", "null"]},
           "message": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "prompt_error": {
+      "enum": ["unavailable", "already_presented", "interaction_limit", null],
+      "description": "Why the run's pending confirmation batch cannot be shown to a human now (the run view's confirmation_batch.prompt_error): nobody to ask, already shown (asked again only if something changes), or the run's human interactions are spent. Null when a host will ask, and when nothing waits."
+    },
+    "waiting": {
+      "type": "array",
+      "description": "What the host will ask a human at the end of the pass (ADR-0067): the run view's confirmation_batch, per claim: how many research records need the human's confirmation and whether the claim itself needs the human's decision. Empty unless the run is active and something waits. Not a list of everything unconfirmed: the claims' own records and decisions say that.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["claim", "route", "records", "decision"],
+        "properties": {
+          "claim": {"type": "string", "minLength": 1},
+          "route": {"enum": ["human", "unavailable", "shown", "limit"], "description": "human: the host will ask; unavailable: the host has nobody to ask, so the requirement stays open; shown: already shown, asked again only if something changes; limit: the run's human interactions are spent."},
+          "records": {"type": "integer", "minimum": 0},
+          "decision": {"type": "boolean"}
         }
       }
     },
@@ -84,7 +103,7 @@
         "required": ["n", "kind", "outcome", "claim", "command"],
         "properties": {
           "n": {"type": "integer", "minimum": 1},
-          "kind": {"enum": ["graph", "research", "spike_request", "spike", "attribution", "audit_verdict", "observation_basis"]},
+          "kind": {"enum": ["graph", "research", "spike_request", "spike", "attribution", "audit_verdict", "evidence_presentation", "evidence_confirmation", "observation_basis"]},
           "outcome": {"enum": ["supporting", "refuting", "pass", "fail", null], "description": "research: supporting/refuting; spike: its gate; audit_verdict: its verdict; null otherwise."},
           "claim": {"type": ["string", "null"]},
           "command": {"type": ["string", "null"]}
@@ -96,9 +115,23 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "blocker_message", "research", "spikes", "spikes_ever", "commands"],
+        "required": ["id", "blocker_message", "records", "decision", "research", "spikes", "spikes_ever", "commands"],
         "properties": {
           "id": {"type": "string", "minLength": 1},
+          "records": {"type": "array", "description": "Every research record on the claim as worded now, in the order recorded, with how each is verified (ADR-0067).", "items": {"$ref": "#/$defs/record"}},
+          "decision": {
+            "oneOf": [{"type": "null"}, {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["outcome", "answer", "route"],
+              "properties": {
+                "outcome": {"enum": ["approve", "reject", null], "description": "The human's answer; null while it waits."},
+                "answer": {"type": ["string", "null"], "description": "The human's optional answer, in their words."},
+                "route": {"enum": ["human", "unavailable", "shown", "limit", "ended", null], "description": "Who can answer, while it waits (as for waiting.route; ended: the run is no longer active, so nobody will ask); null once answered."}
+              }
+            }],
+            "description": "A needs-decision claim's human decision; null for every other claim kind."
+          },
           "blocker_message": {"type": ["string", "null"], "description": "The public-contract registry's message for the claim's blocker in the view; null exactly when that blocker is null."},
           "research": {"type": "integer", "minimum": 0, "description": "Active supporting research."},
           "spikes": {"type": "integer", "minimum": 0, "description": "Active passing spikes."},
@@ -109,6 +142,23 @@
     }
   },
   "$defs": {
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "source_kind", "quote", "outcome", "class", "status", "route", "retrieve", "spike_unavailable", "note"],
+      "properties": {
+        "source": {"type": "string", "minLength": 1, "description": "The record's source_ref."},
+        "source_kind": {"enum": ["code", "docs", "runtime", "web"]},
+        "quote": {"type": "string", "description": "The verbatim citation."},
+        "outcome": {"enum": ["supporting", "refuting"]},
+        "class": {"enum": ["verbatim", "retrievable", "observed"], "description": "How the record can be verified (core/citations.py)."},
+        "status": {"enum": ["verified_by_service", "confirmed_by_human", "rejected_by_human", "pending"]},
+        "route": {"enum": ["audit", "human", "unavailable", "shown", "limit", "ended", null], "description": "Where a pending confirmation goes (as for decision.route; audit: the independent audit fetches it); null unless the record is pending."},
+        "retrieve": {"type": "boolean", "description": "The auditor must retrieve the source (its kind is within the host's observed retrieval)."},
+        "spike_unavailable": {"type": ["string", "null"], "description": "Why no deterministic spike could establish an observed record; null for other classes."},
+        "note": {"type": ["string", "null"], "description": "The human's note to the author, when the receipt has one."}
+      }
+    },
     "budget": {
       "type": "object",
       "additionalProperties": false,

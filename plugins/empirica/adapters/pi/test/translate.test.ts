@@ -32,7 +32,7 @@ import { type Result } from "../src/contract.ts";
 
 const SEL = { project: "p", session: "s" };
 const RID = "rid-1";
-const INVOCATION = { host: "pi", interactive: true, signal: "ctx.mode=tui", delegation: false };
+const INVOCATION = { host: "pi", interactive: true, signal: "ctx.mode=tui", delegation: false, audit_retrieval: ["local", "workspace"] as ("local" | "web" | "workspace")[], human_surface: "unavailable" as "human" | "unavailable" };
 const RUN = { id: "h", status: "active" as const };
 const SPLIT_CASES = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
   "../../../../../contracts/empirica/v2/invocation-split-cases.json");

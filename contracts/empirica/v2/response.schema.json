@@ -374,6 +374,21 @@
           ],
           "properties": {
             "code": {
+              "const": "evidence.confirmation_required"
+            },
+            "parameters": {
+              "$ref": "#/$defs/confirmationRequiredParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
               "const": "claim.spike_missing"
             },
             "parameters": {
@@ -408,21 +423,6 @@
             },
             "parameters": {
               "$ref": "#/$defs/spikeStaleParams"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "code",
-            "parameters"
-          ],
-          "properties": {
-            "code": {
-              "const": "claim.human_decision"
-            },
-            "parameters": {
-              "$ref": "#/$defs/emptyParams"
             }
           }
         },
@@ -1083,6 +1083,19 @@
               },
               "stale": {
                 "type": "boolean"
+              },
+              "confirm": {
+                "enum": [
+                  "audit",
+                  "human",
+                  "unavailable"
+                ]
+              },
+              "note": {
+                "type": "string"
+              },
+              "rejected": {
+                "const": true
               }
             }
           }
@@ -1284,7 +1297,8 @@
         "host",
         "next_actions",
         "untrusted_delimiters",
-        "governance"
+        "governance",
+        "confirmation_batch"
       ],
       "description": "Public run view. converged lives only on Allow, never duplicated here.",
       "properties": {
@@ -1620,6 +1634,77 @@
             },
             {
               "type": "null"
+            }
+          ]
+        },
+        "confirmation_batch": {
+          "description": "What a human would be shown now, or null when nothing waits on one. The host presents exactly when this is not null and prompt_error is null, whatever else blocks the run. record_ids and claim_ids are exactly the items one presentation shows (at most the receipt's decision limit); prompt_error says why it cannot be shown: unavailable (nobody to ask), already_presented (only a changed derivation asks again) or interaction_limit.",
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "key",
+                "record_ids",
+                "claim_ids",
+                "records",
+                "prompt_error"
+              ],
+              "properties": {
+                "key": {
+                  "$ref": "#/$defs/digest256"
+                },
+                "record_ids": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "$ref": "#/$defs/digest256"
+                  }
+                },
+                "claim_ids": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "$ref": "#/$defs/claimId"
+                  }
+                },
+                "prompt_error": {
+                  "enum": [
+                    null,
+                    "unavailable",
+                    "already_presented",
+                    "interaction_limit"
+                  ]
+                },
+                "records": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "claim_id",
+                      "source_kind",
+                      "source_ref"
+                    ],
+                    "properties": {
+                      "claim_id": {
+                        "$ref": "#/$defs/claimId"
+                      },
+                      "source_kind": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "source_ref": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                }
+              }
             }
           ]
         }
@@ -2237,6 +2322,32 @@
             "minLength": 1
           },
           "uniqueItems": true
+        },
+        "human_decision": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "outcome",
+            "answer"
+          ],
+          "properties": {
+            "outcome": {
+              "enum": [
+                "approve",
+                "reject"
+              ]
+            },
+            "answer": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
         }
       }
     },
@@ -2290,9 +2401,10 @@
         "outcome",
         "source_kind",
         "source_ref",
-        "citation"
+        "citation",
+        "verification"
       ],
-      "description": "Fold-1 research citation; no spike fields.",
+      "description": "research citation; no spike fields.",
       "properties": {
         "sequence": {
           "type": "integer",
@@ -2340,6 +2452,45 @@
         },
         "observed_content_digest": {
           "$ref": "#/$defs/digest256"
+        },
+        "spike_unavailable": {
+          "type": "string",
+          "minLength": 1
+        },
+        "verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "class",
+            "status",
+            "retrieve"
+          ],
+          "properties": {
+            "class": {
+              "enum": [
+                "verbatim",
+                "retrievable",
+                "observed"
+              ]
+            },
+            "status": {
+              "enum": [
+                "verified_by_service",
+                "confirmed_by_human",
+                "rejected_by_human",
+                "pending"
+              ]
+            },
+            "retrieve": {
+              "type": "boolean"
+            },
+            "receipt": {
+              "$ref": "#/$defs/digest256"
+            },
+            "note": {
+              "type": "string"
+            }
+          }
         }
       }
     },
@@ -2539,7 +2690,8 @@
             "distinct",
             "mixed",
             "same_model",
-            "unverified"
+            "unverified",
+            "human_owned"
           ]
         },
         "findings": {
@@ -2606,7 +2758,8 @@
             "distinct",
             "mixed",
             "same_model",
-            "unverified"
+            "unverified",
+            "human_owned"
           ]
         },
         "reviewed_argument_digest": {
@@ -3008,7 +3161,9 @@
         "host",
         "interactive",
         "signal",
-        "delegation"
+        "delegation",
+        "audit_retrieval",
+        "human_surface"
       ],
       "properties": {
         "host": {
@@ -3084,6 +3239,25 @@
               }
             }
           }
+        },
+        "audit_retrieval": {
+          "description": "The retrieval kinds this host's auditor is observed to cover, recorded once at StartRun and re-observed at audit launch (a divergence refuses the launch). workspace: files inside the workspace; local: absolute or home paths; web: http(s) URLs. A research record of any other kind is confirmed by a human (ADR-0067).",
+          "type": "array",
+          "items": {
+            "enum": [
+              "local",
+              "web",
+              "workspace"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "human_surface": {
+          "description": "Whether the host last observed a surface to show a dialog to a human now: Claude form elicitation advertised by the client, Pi `ctx.hasUI` in the TUI or RPC. Recorded at StartRun and updated by the host's private ingress at every report_convergence. Evidence routes to a human only when this is `human`, the run is not delegated or non-interactive, and the profile has a human approval ingress (ADR-0067).",
+          "enum": [
+            "human",
+            "unavailable"
+          ]
         }
       }
     },
@@ -3380,8 +3554,40 @@
             "source_ref_form",
             "file_unavailable",
             "lines_out_of_range",
-            "text_not_found"
+            "text_not_found",
+            "spike_reason_missing"
           ]
+        }
+      }
+    },
+    "confirmationRequiredParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "route",
+        "record_ids"
+      ],
+      "properties": {
+        "route": {
+          "enum": [
+            "human",
+            "unavailable"
+          ]
+        },
+        "record_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/digest256"
+          }
+        },
+        "claim_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/claimId"
+          }
         }
       }
     }

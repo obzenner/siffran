@@ -145,9 +145,11 @@ def _serve(args, source: StoreSource | None) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    if argv is None:  # as a command: a closed pipe (``| head``) ends quietly
-        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     args = parser().parse_args(argv)
+    # A closed pipe (``| head``) ends a one-shot JSON command quietly. A server must outlive a client that drops its
+    # connection mid-write (a closed tab), so there the write fails with an error the handler already absorbs.
+    if argv is None:
+        signal.signal(signal.SIGPIPE, signal.SIG_IGN if args.command == "serve" else signal.SIG_DFL)
     if args.command == "serve" and args.demo:
         return _serve(args, None)  # the demo reads no store, so none is opened
     try:

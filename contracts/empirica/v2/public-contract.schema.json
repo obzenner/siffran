@@ -783,10 +783,17 @@
       "additionalProperties": false,
       "required": [
         "human_wait",
-        "budget_exhausted"
+        "evidence_wait",
+        "budget_exhausted",
+        "surface_unrecorded",
+        "evidence_report"
       ],
       "properties": {
         "human_wait": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence_wait": {
           "type": "string",
           "minLength": 1
         },
@@ -794,6 +801,14 @@
           "type": "string",
           "minLength": 1,
           "pattern": "^[^{}]*\\{resource\\}[^{}]*$"
+        },
+        "surface_unrecorded": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence_report": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },
@@ -845,7 +860,24 @@
             "contract",
             "block",
             "fault",
-            "inert"
+            "inert",
+            "waiting",
+            "waiting_record",
+            "waiting_claim",
+            "waiting_for_claim",
+            "waiting_none_error",
+            "waiting_unavailable",
+            "waiting_already_presented",
+            "waiting_interaction_limit",
+            "verified_by_service",
+            "confirmed_by_human",
+            "rejected_by_human",
+            "pending_human",
+            "pending_audit",
+            "human_note",
+            "decision_approve",
+            "decision_reject",
+            "human_answer"
           ],
           "properties": {
             "no_governance": {
@@ -997,6 +1029,74 @@
               "minLength": 1
             },
             "inert": {
+              "type": "string",
+              "minLength": 1
+            },
+            "waiting": {
+              "type": "string",
+              "minLength": 1
+            },
+            "waiting_record": {
+              "type": "string",
+              "minLength": 1
+            },
+            "waiting_claim": {
+              "type": "string",
+              "minLength": 1
+            },
+            "waiting_for_claim": {
+              "type": "string",
+              "minLength": 1
+            },
+            "waiting_none_error": {
+              "type": "string",
+              "minLength": 1
+            },
+            "waiting_unavailable": {
+              "type": "string",
+              "minLength": 1
+            },
+            "waiting_already_presented": {
+              "type": "string",
+              "minLength": 1
+            },
+            "waiting_interaction_limit": {
+              "type": "string",
+              "minLength": 1
+            },
+            "verified_by_service": {
+              "type": "string",
+              "minLength": 1
+            },
+            "confirmed_by_human": {
+              "type": "string",
+              "minLength": 1
+            },
+            "rejected_by_human": {
+              "type": "string",
+              "minLength": 1
+            },
+            "pending_human": {
+              "type": "string",
+              "minLength": 1
+            },
+            "human_note": {
+              "type": "string",
+              "minLength": 1
+            },
+            "decision_approve": {
+              "type": "string",
+              "minLength": 1
+            },
+            "decision_reject": {
+              "type": "string",
+              "minLength": 1
+            },
+            "human_answer": {
+              "type": "string",
+              "minLength": 1
+            },
+            "pending_audit": {
               "type": "string",
               "minLength": 1
             }

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -31,7 +32,11 @@ FIXTURES = CONTRACT / "fixtures"
 sys.path.insert(0, str(ROOT / "plugins/empirica"))
 
 from application.history_records import HISTORY_KINDS  # noqa: E402
-from core.observer import EVIDENCE_KINDS, REVIEW_STATES  # noqa: E402
+from core import citations, confirmation  # noqa: E402
+from core.observer import message_problems, ENDED, EVIDENCE_KINDS, REVIEW_STATES, SPENT_ROUTES  # noqa: E402
+
+#: The routes a pending human-owned confirmation can read as: where it goes, or why nobody will ask.
+HUMAN_ASK = {*confirmation.HUMAN_ROUTES, *SPENT_ROUTES.values(), ENDED}
 
 
 def _load(path: Path) -> Any:
@@ -62,6 +67,9 @@ def mirror_problems(view_schema: dict, run_schema: dict, reg: dict, state_schema
     audit = detail["audit"]["oneOf"][1]["properties"]
     control = detail["control"]["oneOf"][1]["properties"]
     step = detail["steps"]["items"]["properties"]
+    record = run_schema["$defs"]["record"]["properties"]
+    waiting = detail["waiting"]["items"]["properties"]
+    decision = detail["claims"]["items"]["properties"]["decision"]["oneOf"][1]["properties"]
     governance = state_schema["properties"]["governance"]["properties"]
     pairs = [
         ("view run.state", _enum(run, "state"), set(reg["statuses"]), "registry statuses"),
@@ -79,6 +87,20 @@ def mirror_problems(view_schema: dict, run_schema: dict, reg: dict, state_schema
         ("view claim.evidence", _enum(claim, "evidence"), set(EVIDENCE_KINDS),
          "core.observer.EVIDENCE_KINDS"),
         ("view claim.review", _enum(claim, "review"), set(REVIEW_STATES), "core.observer.REVIEW_STATES"),
+        ("record class", _enum(record, "class"),
+         {citations.VERBATIM, citations.RETRIEVABLE, citations.OBSERVED}, "core.citations classes"),
+        ("record status", _enum(record, "status"),
+         {confirmation.VERIFIED_BY_SERVICE, confirmation.CONFIRMED_BY_HUMAN,
+          confirmation.REJECTED_BY_HUMAN, confirmation.PENDING}, "core.confirmation statuses"),
+        ("record route", _enum(record, "route"),
+         {confirmation.AUDIT, *HUMAN_ASK}, "core.confirmation routes + core.observer spent routes"),
+        ("waiting route", _enum(waiting, "route"), set(confirmation.HUMAN_ROUTES) | set(SPENT_ROUTES.values()),
+         "core.confirmation.HUMAN_ROUTES + core.observer.SPENT_ROUTES"),
+        ("run prompt_error", _enum(detail, "prompt_error"),
+         {"unavailable", "already_presented", "interaction_limit"}, "core.confirmation.prompt_error"),
+        ("decision outcome", _enum(decision, "outcome"), {confirmation.APPROVE, confirmation.REJECT},
+         "core.confirmation decisions"),
+        ("decision route", _enum(decision, "route"), set(HUMAN_ASK), "core.confirmation + core.observer routes"),
         ("run steps.kind", _enum(step, "kind"), set(HISTORY_KINDS), "history_records.HISTORY_KINDS"),
         ("run steps.outcome", _enum(step, "outcome"),
          set(reg["artifact_outcomes"]) | set(reg["audit_verdicts"]),
@@ -171,6 +193,12 @@ def view_problems(view: dict, view_schema: dict, reasons: set[str]) -> list[str]
     return out
 
 
+def fits(template: str, message: str) -> bool:
+    """Whether ``message`` is ``template`` with every ``{name}`` placeholder filled in."""
+    pattern = re.sub(r"\\\{\w+\\\}", ".+?", re.escape(template))
+    return re.fullmatch(pattern, message, re.DOTALL) is not None
+
+
 def detail_problems(details: dict, view: dict, run_schema: dict, reg: dict) -> list[str]:
     out: list[str] = []
     rows = {r["key"]: r for p in view["projects"] for r in p["runs"]}
@@ -195,14 +223,23 @@ def detail_problems(details: dict, view: dict, run_schema: dict, reg: dict) -> l
             out.append(f"{at}: budgets and control must be null exactly when the state was not decoded")
         if [c["id"] for c in detail["claims"]] != [c["id"] for c in row["claims"]]:
             out.append(f"{at}: claims differ from its view row")
-        out += [f"{at} claim {c['id']}: blocker_message is not the registry message of its blocker"
+        out += [f"{at} claim {c['id']}: blocker_message is not the registry message of its blocker, filled in"
                 for c, r in zip(detail["claims"], row["claims"])
-                if c["blocker_message"] != (None if r["blocker"] is None else messages.get(r["blocker"]))]
+                if (c["blocker_message"] is None) != (r["blocker"] is None)
+                or (r["blocker"] is not None and not fits(messages.get(r["blocker"], ""), c["blocker_message"]))]
         if [s["n"] for s in detail["steps"]] != list(range(1, len(detail["steps"]) + 1)):
             out.append(f"{at}: steps are not numbered 1..n")
         for residual in detail["residuals"]:
-            if messages.get(residual["code"]) != residual["message"]:
+            if not fits(messages.get(residual["code"], ""), residual["message"]):
                 out.append(f"{at}: residual {residual['code']!r} is not a registry reason with its message")
+        texts = [residual["message"] for residual in detail["residuals"]]
+        texts += [c["blocker_message"] for c in detail["claims"] if c["blocker_message"]]
+        out += [f"{at}: message {text!r} still holds a placeholder" for text in texts if re.search(r"\{\w+\}", text)]
+        ids = {c["id"] for c in detail["claims"]}
+        out += [f"{at}: waiting names claim {w['claim']!r}, which the run does not have"
+                for w in detail["waiting"] if w["claim"] not in ids]
+        out += [f"{at} claim {c['id']}: a decision has a route exactly while it waits"
+                for c in detail["claims"] if c["decision"] and (c["decision"]["outcome"] is None) == (c["decision"]["route"] is None)]
         out += [f"{at} claim {c['id']}: more active passing spikes than spikes ever run"
                 for c in detail["claims"] if c["spikes"] > c["spikes_ever"]]
     return out
@@ -212,6 +249,7 @@ def check(view: dict, details: dict | None) -> list[str]:
     view_schema, run_schema = schemas()
     reg = registry()
     out = mirror_problems(view_schema, run_schema, reg, _load(V2 / "state.schema.json"))
+    out += [f"registry message not plain: {p}" for code, spec in reg["reasons"].items() for p in message_problems(code, spec["message"])]
     out += view_problems(view, view_schema, set(reg["reasons"]))
     if details is not None and not out:
         out += detail_problems(details, view, run_schema, reg)

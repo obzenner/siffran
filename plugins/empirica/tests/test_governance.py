@@ -30,7 +30,7 @@ CONTEXT = {"author": AUTHOR, "ingress": "pi_ui"}
 # ADR-0063: configure_run must carry all three ceilings and a nonblank rationale.
 SIZED_BUDGETS = {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}
 DELEGATED_INVOCATION = {"host": "test", "interactive": False,
-                        "signal": "operator", "delegation": True}
+                        "signal": "operator", "delegation": True, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}
 
 
 class HostProfileApprovalTests(unittest.TestCase):
@@ -164,7 +164,7 @@ def _seed_budgets(**over):
 
 def _placeholder(control_mode="deliberative", invocation=None):
     invocation = ({"host": "test", "interactive": True,
-                   "signal": "test", "delegation": False}
+                   "signal": "test", "delegation": False, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}
                   if invocation is None else invocation)
     delegated = (control_mode == "auto" and invocation["interactive"] is not True
                  and invocation["delegation"] is True)
@@ -261,9 +261,9 @@ class GovernanceTransitionMatrixTests(unittest.TestCase):
 
     # --- inflation through a seed or environment override is refused for delegated auto only ---
     def test_start_admission_envelope_binds_delegated_auto_only(self):
-        delegated = {"host": "t", "interactive": False, "signal": "op", "delegation": True}
-        interactive = {"host": "t", "interactive": True, "signal": "op", "delegation": True}
-        deliberative = {"host": "t", "interactive": True, "signal": "op", "delegation": False}
+        delegated = {"host": "t", "interactive": False, "signal": "op", "delegation": True, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}
+        interactive = {"host": "t", "interactive": True, "signal": "op", "delegation": True, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}
+        deliberative = {"host": "t", "interactive": True, "signal": "op", "delegation": False, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}
         over = {**governance.DEFAULT_CEILINGS, "max_passes": 9}
         # delegated auto: enlarging the 8/1/2 envelope is contradictory
         self.assertEqual(start_admission({"goal": "g", "control_mode": "auto",
@@ -568,7 +568,7 @@ class GovernanceServiceTests(unittest.TestCase):
 
     def test_interactive_auto_refuses_new_human_episode_while_ui_remains_capable(self):
         invocation = {"host": "test", "interactive": True,
-                      "signal": "operator", "delegation": True}
+                      "signal": "operator", "delegation": True, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}
         self._prepare_auto(invocation)
         self.assertEqual(self.admit(self.decision("first-human"))["type"], "Allow")
         self.assertEqual(self.action(**sized_configure_run(
@@ -803,7 +803,7 @@ class GovernanceServiceTests(unittest.TestCase):
         from adapters.audit_protocol import AuditProtocol
         from adapters.identity import observe
         c = self.service._coordinator
-        return AuditProtocol(PROFILE, dispatch=lambda r, _p: self.service.dispatch(r),
+        return AuditProtocol(PROFILE, audit_retrieval=["local", "workspace"], dispatch=lambda r, _p: self.service.dispatch(r),
             child_event_ingress=lambda _p, r, ch, v: c.trusted_child_event(r, ch, v),
             attribution_ingress=lambda _p, r, v: c.trusted_attribution(
                 r, {**v, **observe(v.get("provider_id"), v.get("model_id"), source=v["source"]),
@@ -921,7 +921,7 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertEqual(self.action("research", claim_id="C0", source_kind="code", result="supports",
                                     payload={"source_ref": "second", "citation": "second observer"})["type"], "Allow")
         c = self.service._coordinator
-        protocol = AuditProtocol(PROFILE, dispatch=lambda r, _p: self.service.dispatch(r),
+        protocol = AuditProtocol(PROFILE, audit_retrieval=["local", "workspace"], dispatch=lambda r, _p: self.service.dispatch(r),
             child_event_ingress=lambda _p, r, ch, v: c.trusted_child_event(r, ch, v),
             attribution_ingress=lambda _p, r, v: c.trusted_attribution(
                 r, {**v, **observe(v.get("provider_id"), v.get("model_id"), source=v["source"]),
@@ -971,7 +971,7 @@ class GovernanceServiceTests(unittest.TestCase):
         c = self.service._coordinator
 
         def make_protocol(profile, **_kw):
-            return AuditProtocol(profile, dispatch=lambda r, _p: self.service.dispatch(r),
+            return AuditProtocol(profile, audit_retrieval=["local", "workspace"], dispatch=lambda r, _p: self.service.dispatch(r),
                 child_event_ingress=lambda _p, r, ch, v: c.trusted_child_event(r, ch, v),
                 attribution_ingress=lambda _p, r, v: c.trusted_attribution(
                     r, {**v, **observe(v.get("provider_id"), v.get("model_id"), source=v["source"]),
@@ -994,7 +994,8 @@ class GovernanceServiceTests(unittest.TestCase):
         with mock.patch.object(private_bridge, "AuditProtocol", make_protocol), \
              mock.patch.object(private_bridge, "bridge", BridgeShim()):
             prepared = private_bridge._dispatch(PROFILE, {"operation": "audit_prepare",
-                "run_id": self.run_id, "role_profile": "empirica:empirica-auditor"}, {})
+                "run_id": self.run_id, "role_profile": "empirica:empirica-auditor"},
+                {"audit_retrieval": ["local", "workspace"]})
             self.assertEqual(prepared["type"], "audit_plan")
             plan = prepared["plan"]
             self.assertEqual(used(), 1)
@@ -1006,7 +1007,8 @@ class GovernanceServiceTests(unittest.TestCase):
             self.assertEqual(child["state"], "launch_rejected")
             self.assertEqual(used(), 0)  # the audit budget is refunded
             again = private_bridge._dispatch(PROFILE, {"operation": "audit_prepare",
-                "run_id": self.run_id, "role_profile": "empirica:empirica-auditor"}, {})
+                "run_id": self.run_id, "role_profile": "empirica:empirica-auditor"},
+                {"audit_retrieval": ["local", "workspace"]})
             self.assertEqual(again["type"], "audit_plan")
             self.assertNotEqual(again["plan"]["child_id"], plan["child_id"])
             self.assertEqual(used(), 1)
@@ -1032,7 +1034,7 @@ class GovernanceServiceTests(unittest.TestCase):
         c, service = self.service._coordinator, self.service
 
         def make_protocol(profile, **_kw):
-            return AuditProtocol(profile, dispatch=lambda r, _p: service.dispatch(r),
+            return AuditProtocol(profile, audit_retrieval=["local", "workspace"], dispatch=lambda r, _p: service.dispatch(r),
                 child_event_ingress=lambda _p, r, ch, v: c.trusted_child_event(r, ch, v),
                 attribution_ingress=lambda _p, r, v: c.trusted_attribution(
                     r, {**v, **observe(v.get("provider_id"), v.get("model_id"), source=v["source"]),
@@ -1071,7 +1073,8 @@ class GovernanceServiceTests(unittest.TestCase):
                     self.assertEqual(self.runs.data, before, "a refusal writes no state")
                     self.assertEqual(len(self.view()["children"]), children, "a refusal reserves no child")
                     self.assertEqual(self.view()["governance"]["budgets"]["audit_spawns_used"], 0)
-            admitted = prepare({"host_runtime": copy.deepcopy(recorded)})
+            admitted = prepare({"host_runtime": copy.deepcopy(recorded),
+                                "audit_retrieval": ["local", "workspace"]})
             self.assertEqual(admitted["type"], "audit_plan")
             self.assertEqual(len(self.view()["children"]), children + 1)
 
@@ -1124,7 +1127,7 @@ class GovernanceServiceTests(unittest.TestCase):
 
     def test_same_epoch_concurrent_reservations_survive_first_finalization_and_reload(self):
         invocation = {"host": "test", "interactive": True,
-                      "signal": "operator", "delegation": True}
+                      "signal": "operator", "delegation": True, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}
         self._prepare_auto(invocation)
         presentations = [self.decision(label, "present", reserve=False)
                          for label in ("concurrent-a", "concurrent-b")]
@@ -1201,7 +1204,14 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertEqual(self.admit(first)["type"], "Inert")
 
 
+    def test_the_real_total_interaction_cap_is_128(self):
+        self.assertEqual(governance.MAX_INTERACTIONS, 128)  # the cap test below patches it down for speed
+
     def test_total_interaction_cap_allows_existing_finalization_but_no_new_reservation(self):
+        with mock.patch.object(governance, "MAX_INTERACTIONS", 3):  # its single owner; the real value is pinned above
+            self.total_interaction_cap_cells()
+
+    def total_interaction_cap_cells(self):
         self.prepare()
         latest = None
         for revision in range(governance.MAX_INTERACTIONS):
@@ -1250,7 +1260,7 @@ class GovernanceServiceTests(unittest.TestCase):
     def test_start_requires_goal_and_attested_auto_authority(self):
         base = {"type": "StartRun", "control_mode": "deliberative", "selector": {"project": "p", "session": "provenance"},
                 "invocation": {"host": "test", "interactive": False,
-                               "signal": "test noninteractive", "delegation": False}}
+                               "signal": "test noninteractive", "delegation": False, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}}
         for goal in ("", "   "):
             result = self.request({**base, "goal": goal})
             self.assertEqual(result["reasons"][0]["code"], "run.goal_required")
@@ -1464,7 +1474,7 @@ class GovernanceServiceTests(unittest.TestCase):
         self.service = compose(Workspace(), Harness(), self.runs, self.artifacts,
                                None, PROFILE, {}, None)
         interactive = {"host": "test", "interactive": True,
-                       "signal": "operator", "delegation": True}
+                       "signal": "operator", "delegation": True, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}
         self._prepare_auto(interactive)
         self.assertEqual(self.action(**sized_configure_run(
             budgets=SIZED_BUDGETS, rationale="auto preapproval revision"))["type"], "Allow")
@@ -1610,7 +1620,7 @@ class GovernanceServiceTests(unittest.TestCase):
         self.service = compose(Workspace(), Harness(), self.runs, self.artifacts,
                                None, PROFILE, {}, None)
         invocation = {"host": "test", "interactive": True,
-                      "signal": "operator", "delegation": True}
+                      "signal": "operator", "delegation": True, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}
         self._prepare_auto(invocation)
         self.assertEqual(self.admit(self.decision("human"))["type"], "Allow")
         self.assertEqual(self.action(**sized_configure_run(
@@ -1661,7 +1671,7 @@ class GovernanceServiceTests(unittest.TestCase):
 
     def test_every_ceiling_raise_is_refused_after_auto_approval(self):
         interactive = {"host": "test", "interactive": True,
-                       "signal": "operator", "delegation": True}
+                       "signal": "operator", "delegation": True, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}
         raises = (("max_passes", 9), ("max_spawns", 2), ("max_audit_spawns", 3))
         for invocation, approval_kind in ((DELEGATED_INVOCATION, "auto"),
                                           (interactive, "host_ui")):
@@ -1697,7 +1707,7 @@ class GovernanceServiceTests(unittest.TestCase):
         self.run_id = self.request({"type": "StartRun", "goal": "interactive auto",
                                    "control_mode": "auto",
                                    "invocation": {"host": "test", "interactive": True,
-                                                  "signal": "op", "delegation": True},
+                                                  "signal": "op", "delegation": True, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"},
                                    "selector": {"project": "p", "session": "ia"}})["run"]["id"]
         self.prepare()
         # auto before the first approval is refused: interactive needs the human episode
@@ -1787,7 +1797,7 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertEqual(self.view()["governance"]["budgets"]["max_passes"], 9)
 
     def test_pre_approval_auto_revision_exhaustion_is_separate_and_nonmutating(self):
-        invocation = {"host": "test", "interactive": True, "signal": "op", "delegation": True}
+        invocation = {"host": "test", "interactive": True, "signal": "op", "delegation": True, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}
         self._prepare_auto(invocation)
         for n in range(governance.MAX_REVISIONS):
             self.assertEqual(self.action(**sized_configure_run(
@@ -1803,7 +1813,7 @@ class GovernanceServiceTests(unittest.TestCase):
         self.run_id = self.request({"type": "StartRun", "goal": "kind transition",
                                    "control_mode": "auto",
                                    "invocation": {"host": "test", "interactive": True,
-                                                  "signal": "op", "delegation": True},
+                                                  "signal": "op", "delegation": True, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"},
                                    "selector": {"project": "p", "session": "kind"}})["run"]["id"]
         self.prepare()
         human = self.decision("human")
@@ -1817,7 +1827,7 @@ class GovernanceServiceTests(unittest.TestCase):
 
     def test_lost_ui_after_first_auto_approval_does_not_reopen_human_episode(self):
         interactive = {"host": "test", "interactive": True,
-                       "signal": "operator", "delegation": True}
+                       "signal": "operator", "delegation": True, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}
         self._prepare_auto(interactive)
         self.assertEqual(self.admit(self.decision(approval_kind="host_ui"))["type"], "Allow")
         refreshed = self.service.trusted_governance_context(
@@ -1839,7 +1849,7 @@ class GovernanceServiceTests(unittest.TestCase):
 
     def test_human_amendment_consumes_preapproval_allowance_without_renewal(self):
         interactive = {"host": "test", "interactive": True,
-                       "signal": "operator", "delegation": True}
+                       "signal": "operator", "delegation": True, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}
         self._prepare_auto(interactive)
         for n in range(governance.MAX_REVISIONS - 1):
             self.assertEqual(self.action(**sized_configure_run(

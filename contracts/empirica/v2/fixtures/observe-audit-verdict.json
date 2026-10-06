@@ -48,7 +48,7 @@
             "audit",
             "audit/independence"
           ],
-          "digest": "sha256:e57f48aa42474a3bb11f982b386e9aff7cf3842280545e1a97055a39537f9c1c"
+          "digest": "sha256:45fa33dc3aa269f8702ae41c002f7ee29edb005b1129e7ac65c4a33b5f8990af"
         },
         "obligations": {
           "active": [],
@@ -85,7 +85,8 @@
           "state": "passed",
           "independence": "distinct",
           "findings": []
-        }
+        },
+        "confirmation_batch": null
       },
       "argument": {
         "root_claim_id": "G0",
@@ -126,7 +127,12 @@
             "outcome": "supporting",
             "source_kind": "web",
             "source_ref": "https://example.test/s",
-            "citation": "The observed source supports G0."
+            "citation": "The observed source supports G0.",
+            "verification": {
+              "class": "retrievable",
+              "status": "pending",
+              "retrieve": false
+            }
           },
           {
             "sequence": 1,

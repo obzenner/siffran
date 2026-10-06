@@ -30,6 +30,10 @@ export interface InvocationProvenance {
   interactive: boolean | null;
   signal: string;
   delegation: boolean;
+  /** The retrieval kinds the audit child is observed to cover (ADR-0067); recorded once, re-observed at audit launch. */
+  audit_retrieval: readonly ("local" | "web" | "workspace")[];
+  /** Whether the host can show a dialog to a human now (Pi: `ctx.hasUI`); sent again at every report_convergence. */
+  human_surface: "human" | "unavailable";
   /** Host-recorded audit-runtime provenance (host-runtime.ts); persisted with the run, never shown. */
   host_runtime?: {
     policy_id: string;
@@ -132,10 +136,20 @@ export type FaultCode =
 
 export type FailDirection = "open" | "closed";
 
+export interface ConfirmationBatch {
+  key: string;
+  record_ids: string[];
+  claim_ids: string[];
+  records: { claim_id: string; source_kind: string; source_ref: string }[];
+  prompt_error: null | "unavailable" | "already_presented" | "interaction_limit";
+}
+
 /** Minimum run fields the guard validates on Allow/Block branches. */
 export interface RunSnapshot {
   id: string;
   status: RunStatus;
+  /** What a human would be shown now, or null (the core's projection; the host presents when `prompt_error` is null). */
+  confirmation_batch?: ConfirmationBatch | null;
   [key: string]: unknown;
 }
 

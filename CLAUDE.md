@@ -16,17 +16,18 @@ Why this is a rule and not a preference: a command that lives only in a chat mes
 | dogfooding the Pi adapters from this checkout | `make pi-dev` (this tree overrides the installed siffran; nothing else changes) |
 | dogfooding a pushed PR branch inside a real project | `make pi-canary REF=<branch> DIR=<project>` |
 | hand-checking the Codex packages | `make check-codex` |
-| native qualification | `make native-qualification` (prints the operator-led skill path; launches nothing) |
+| native qualification | `make native-qualification` (prints the path of the portable operator-led skill, `.agents/skills/native-qualification`; launches nothing) |
+| the skills and the test-suite layout | `make skills-check` / `make suites-check` |
 | `adrs --ng doctor` | `make adr-check` |
 | **everything, before you commit** | **`make check`** |
-| only the suite you touched | `make check-static` / `check-core` / `check-claude` / `check-codex` / `check-pi` |
-| what CI runs (no Node/Pi on the runner) | `make check-ci` (`PI_CHECKS=1` to include the Pi suite) |
+| only the suite you touched | `make check-static` / `check-core` / `check-evidence` / `check-observer` / `check-claude` / `check-codex` / `check-pi` / `check-ui` |
+| what CI runs (no Node/Pi on the runner) | `make check-ci` (`PI_CHECKS=1` to include the Pi and UI suites) |
 | hand-editing a `version` field | `make bump PLUGIN=<name> PART=minor` |
 | guessing whether the doc tables are current | `make docs-check` |
 
 Rules that follow from this:
 
-- **`make check` must be green before you commit.** It is the seconds-fast composition of five subject-matter suites — `check-static`, `check-core`, `check-claude`, `check-codex`, `check-pi`. `check-ci` omits Pi unless `PI_CHECKS=1`; `make test` includes all fast deterministic tests. Expensive persistence and simulated-host matrices are explicit integration diagnostics documented in `doc/testing.md`; native qualification is operator-led and never automatic.
+- **`make check` must be green before you commit.** It runs the eight fast suites in parallel through `scripts/run_suites.py` (about 40 s): `check-static`, `check-core`, `check-evidence`, `check-observer`, `check-claude`, `check-codex`, `check-pi`, `check-ui`. Each test module belongs to exactly one fast suite or a named integration target (`make suites-check` guards it), and each suite also runs alone. `check-ci` omits Pi and UI unless `PI_CHECKS=1`; `make test` includes all fast deterministic tests. Expensive persistence and simulated-host matrices are explicit integration diagnostics documented in `doc/testing.md`; native qualification is operator-led and never automatic.
 - **Add new lifecycle operations as targets**, with a `## description` so they appear in `make help`. If you find yourself explaining a multi-step command in prose, that command belongs in the Makefile.
 - **No target commits, pushes, or rewrites history**, by design. `make release-check` verifies and then tells you what is left; publishing stays a human decision.
 - **Non-obvious exception:** the generated plugin tables in `CLAUDE.md`/`README.md` are rewritten by the `checkup` skill, which needs a Claude session. `make docs-check` can *detect* drift but not fix it; `make docs` tells you what to run.
@@ -42,6 +43,7 @@ Rules that follow from this:
 - `plugins/<name>/.codex-plugin/plugin.json` — Codex-specific package manifest
 - `plugins/<name>/skills/<skill-name>/SKILL.md` — skill definition (frontmatter + instructions)
 - `plugins/<name>/hooks/` — Python lifecycle hooks + `hooks.json` wiring them to events
+- `.agents/skills/native-qualification/` — the portable Agent Skills operator procedure (`.claude/skills/native-qualification` is a relative symlink to it)
 - `plugins/empirica/adapters/codex/` — Codex 0.146.0 payload translation and native hook results
 - `plugins/<name>/agents/` — subagent definitions. **Spawn these by their plugin-scoped name** (`empirica:empirica-auditor`); the bare name does not resolve.
 - `plugins/<name>/tests/` — committed regressions; fast selections run by `make test`, expensive boundary matrices by the integration targets in `doc/testing.md`
@@ -99,7 +101,7 @@ The table below and the `## Plugins` table in `README.md` are **generated** — 
 | Plugin | Version | Description |
 |--------|---------|-------------|
 | `methodologist` | 0.9.0 | Formal reasoning catalog — lets users choose and execute evidence-backed CS/math methodologies with traced phases and structured output. |
-| `empirica` | 4.2.0 | Host-neutral empirical-convergence workflow — requires exact run-configuration approval (or provenance-bound auto), cited research before spikes, per-artifact producer attribution, and a current distinct host-observed audit. Unknown or mixed identity evidence fails closed. |
+| `empirica` | 5.0.0 | Host-neutral empirical-convergence workflow — requires exact run-configuration approval (or provenance-bound auto), cited research before spikes, per-artifact producer attribution, and a current distinct host-observed audit. Unknown or mixed identity evidence fails closed. |
 <!-- END GENERATED: plugins -->
 
 ## README

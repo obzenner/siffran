@@ -21,6 +21,10 @@ def _run(view, scenario):
     return next(r for p in view["projects"] for r in p["runs"] if r["key"] == SCENARIOS[scenario])
 
 
+def _detail(details, scenario):
+    return details[SCENARIOS[scenario]]
+
+
 class ValidateUiViewTests(unittest.TestCase):
     def assertRejected(self, view, details, needle):
         problems = v.check(view, details)
@@ -73,6 +77,41 @@ class ValidateUiViewTests(unittest.TestCase):
         details = copy.deepcopy(RUNS)
         details[SCENARIOS["converged"]]["diagnostic"] = None
         self.assertRejected(VIEW, details, "Additional properties are not allowed")
+
+    def test_a_message_that_keeps_its_placeholder_is_rejected(self):
+        details = copy.deepcopy(RUNS)
+        _detail(details, "budget")["residuals"][0]["message"] = "{resource} budget exhausted."
+        self.assertRejected(VIEW, details, "still holds a placeholder")
+
+    def test_a_message_that_is_not_the_registry_s_filled_in_is_rejected(self):
+        details = copy.deepcopy(RUNS)
+        _detail(details, "budget")["residuals"][0]["message"] = "The budget is gone."
+        self.assertRejected(VIEW, details, "is not a registry reason with its message")
+        self.assertTrue(v.fits("{resource} budget exhausted.", "pass budget exhausted."))
+        self.assertFalse(v.fits("{resource} budget exhausted.", "budget exhausted."))
+
+    def test_a_waiting_claim_the_run_does_not_have_is_rejected(self):
+        details = copy.deepcopy(RUNS)
+        _detail(details, "verification")["waiting"][0]["claim"] = "C99"
+        self.assertRejected(VIEW, details, "which the run does not have")
+
+    def test_a_decision_with_or_without_a_route_against_its_answer_is_rejected(self):
+        details = copy.deepcopy(RUNS)
+        decision = next(c for c in _detail(details, "verification")["claims"] if c["decision"])["decision"]
+        decision["route"] = None
+        self.assertRejected(VIEW, details, "a decision has a route exactly while it waits")
+
+    def test_a_record_enum_that_drifts_from_the_core_is_rejected(self):
+        view_schema, run_schema = v.schemas()
+        run_schema["$defs"]["record"]["properties"]["status"]["enum"].append("waived")
+        state = json.loads((v.V2 / "state.schema.json").read_text())
+        problems = v.mirror_problems(view_schema, run_schema, v.registry(), state)
+        self.assertTrue(any("record status" in p for p in problems), problems)
+
+    def test_a_project_without_a_label_is_rejected(self):
+        view = copy.deepcopy(VIEW)
+        del view["projects"][0]["label"]
+        self.assertRejected(view, None, "'label' is a required property")
 
     def test_budgets_on_an_undecoded_run_are_rejected(self):
         details = copy.deepcopy(RUNS)

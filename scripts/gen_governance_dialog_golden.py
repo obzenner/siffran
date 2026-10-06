@@ -30,7 +30,8 @@ def dialog(goal: str = "Confirm the exact run configuration", *,
         "budgets": {"passes_used": 0, "spawns_used": 0, "audit_spawns_used": 0},
     }
     invocation = {"host": "test", "interactive": True,
-                  "signal": "operator", "delegation": False}
+                  "signal": "operator", "delegation": False,
+                  "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}
     return governance_dialog(goal, value, projection_controls(), invocation)
 
 

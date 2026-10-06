@@ -286,7 +286,7 @@ test(
       process.env.EMPIRICA_HOME = testHome; process.env.EMPIRICA_REPO_DIR = testRepo;
       const ingress = createPrivateIngress();
       const prepare = (host_runtime?: unknown) => ingress({ operation: "audit_prepare", run_id: runId,
-        role_profile: "empirica.empirica-auditor", payload: host_runtime === undefined ? {} : { host_runtime } });
+        role_profile: "empirica.empirica-auditor", payload: { audit_retrieval: ["local", "workspace"], ...(host_runtime === undefined ? {} : { host_runtime }) } });
       const otherVersion = { ...recorded, subagents: { ...recorded.subagents, version: "0.64.0" } };
       const otherRoot = { ...recorded, subagents: { ...recorded.subagents, package_root: "/opt/elsewhere/pi-subagents" } };
       for (const observed of [otherVersion, otherRoot, undefined])

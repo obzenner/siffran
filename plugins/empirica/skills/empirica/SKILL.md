@@ -16,6 +16,11 @@ The host-neutral `empirica/v2` service owns policy and state. Host adapters only
 translate host events and expose capabilities. Never edit operational state under
 `~/.empirica-plugin/` or knowledge under `refs/empirica/*` directly. Never create Empirica state under `.claude/`, `.codex/`, or `.pi/`.
 
+> **Upgrading from 4.x to 5.0.** Old runs, artifacts and receipts are not migrated and fail closed; start
+> a fresh session. A URL now needs a human on Claude and Pi, and a delegated or non-interactive run
+> cannot confirm. v3 live receipts need a fresh operator capture. The wire family stays `empirica/v2`;
+> the plugin version is 5.0.0.
+
 ## 0. Adopt the stance and preflight the host
 
 Treat training-weight knowledge as hypothesis: discharge load-bearing claims against evidence or surface them as unverified.
@@ -134,14 +139,21 @@ worklist. Counts and reason strings are telemetry, not authority.
 Read [references/evidence.md](references/evidence.md) before adding evidence.
 Apply the folds in order:
 
-1. **Research first for every gating claim.** Record a concrete code, docs,
+1. **Research first for every gating claim, except a `needs-decision` claim** (human-owned: it needs the human's answer, not research). Record a concrete code, docs,
    runtime, or web source that supports or refutes the exact current claim text.
    `source_ref` and the verbatim `citation` must identify the file or runtime observation that
    bears on this claim; generic precedent is not evidence for a repository-specific claim.
-   One source per record, quoted exactly: the service refuses a workspace `code` or `docs`
-   citation that is not verbatim in the cited file and lines (`research.citation_unverified`),
-   and the auditor independently retrieves every citation ([references/audit.md](references/audit.md)
-   step 4). A summary of what a source says is not a citation.
+   One source per record, quoted exactly: the service refuses a workspace citation that is not
+   verbatim in the cited file and lines (`research.citation_unverified`); a URL or an absolute path
+   is retrieved by the auditor where its host can, otherwise confirmed by the human; a `runtime`
+   observation must say why no spike can establish it (`spike_unavailable`) and is always confirmed
+   by the human ([references/evidence.md](references/evidence.md), [references/audit.md](references/audit.md)
+   step 4). What still needs a confirmation is in the obligation as soon as the record exists; the
+   human is asked once, at the end of the pass (`evidence.confirmation_required`), and again only after
+   the derivation changes. Within one claim a missing or stale spike leads the block and the human batch
+   waits behind it (still shown at the end of the pass); the batch is capped at 64 items, decisions
+   first. A `needs-decision` claim is the exception: it is human-owned and needs no research. A summary of
+   what a source says is not a citation.
 2. **Spike second only for `needs-experiment`.** After supporting research,
    request a deterministic command and its non-empty dependent-file set through
    the service. The service captures immutable bytes, runs the harness once, and
@@ -152,7 +164,8 @@ Apply the folds in order:
    - refuting research refutes the claim;
    - a current passing spike satisfies Fold 2;
    - absent or stale evidence leaves the claim open;
-   - `needs-decision` remains a human residual.
+   - `needs-decision` is answered by the human at the end of the pass (approve or reject); until
+     then it is a human residual.
 
 Refuted claims are discarded or replaced with narrower claims. Never preserve a
 preferred design by grading contrary evidence away. New claims must attach to the

@@ -555,6 +555,10 @@ class SizeBudgetTests(_ServiceHarness):
                                 "re-attaching the legacy presentation must exceed the ceiling")
 
 
+#: What a human can be asked: the one batch of evidence and decisions (ADR-0067).
+HUMAN_OPERATIONS = ("confirmation",)
+
+
 class NextActionReachabilityTests(_ServiceHarness):
     """C3: every registered next_actions directive resolves through the canonical ``surface``
     field the contract now owns (QUAL-1-F2 D1a/D1b) -- there is no hand-maintained directive map
@@ -600,7 +604,7 @@ class NextActionReachabilityTests(_ServiceHarness):
         """Resolve a canonical ``surface`` object to a (kind, target) pair, or None. A model
         surface resolves only when its named action/operation/intent is present in the projected
         tool schema; a host owner surface resolves only when it names a known host operation; a
-        human owner surface resolves only when it names ``decision``."""
+        human owner surface resolves only when it names ``confirmation``."""
         if not isinstance(surface, dict):
             return None
         tool = surface.get("tool")
@@ -623,7 +627,7 @@ class NextActionReachabilityTests(_ServiceHarness):
             return (owner, operation)
         if owner == "human":
             operation = surface.get("operation")
-            return (owner, operation) if operation == "decision" else None
+            return (owner, operation) if operation in HUMAN_OPERATIONS else None
         return None
 
     def _resolve_directive(self, directive, author_kinds, read_ops, report_intents,
@@ -657,15 +661,16 @@ class NextActionReachabilityTests(_ServiceHarness):
             # A host/human directive is genuinely not a model author action.
             self.assertNotIn(operation, author_kinds,
                              f"{directive} owner operation must not be a model author action")
-            # Host operations must be in the closed vocabulary; human operations must be decision.
+            # Host operations must be in the closed vocabulary; human operations must be confirmation.
             if surface.get("owner") == "host":
                 self.assertIn(operation, allowed_host_ops,
                               f"{directive} host operation {operation!r} is not in the closed "
                               f"vocabulary (commands, actions.host, actions.trusted, private "
                               f"governance operations)")
             else:
-                self.assertEqual(operation, "decision",
-                                 f"{directive} human operation must be 'decision', got {operation!r}")
+                self.assertIn(operation, HUMAN_OPERATIONS,
+                              f"{directive} human operation must be one of {HUMAN_OPERATIONS}, "
+                              f"got {operation!r}")
 
     def test_residual_accept_binds_to_the_stop_intent(self):
         self.assertEqual(self._surface_of("residual.accept"),
@@ -706,14 +711,13 @@ class NextActionReachabilityTests(_ServiceHarness):
         # A host surface naming a nonexistent operation does not resolve.
         self.assertIsNone(self._resolve({"owner": "host", "operation": "nonexistent_operation"},
                                         author_kinds, read_ops, report_intents, allowed_host_ops))
-        # A human surface naming anything other than "decision" does not resolve.
+        # A human surface naming anything other than "confirmation" does not resolve.
         self.assertIsNone(self._resolve({"owner": "human", "operation": "reject"},
                                         author_kinds, read_ops, report_intents, allowed_host_ops))
 
     def _decision_reasons(self):
         """Reasons the core itself emits for a ``needs-decision`` claim, derived by running a
-        one-claim needs-decision graph to report and keeping the reasons whose ``affected``
-        obligation is that claim. Returns ``{reason_code: next_actions}``."""
+        one-claim needs-decision graph to report. Returns ``{reason_code: next_actions}``."""
         service, run_id = self._fresh_run(None)
 
         def act(action):
@@ -727,50 +731,35 @@ class NextActionReachabilityTests(_ServiceHarness):
         act({"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}, "rationale": SIZED_RATIONALE})
         approve_current(service._coordinator, run_id)
         act({"kind": "investigate"})
+        service.trusted_human_surface(run_id=run_id, payload={"run_id": run_id, "surface": "human"})
         result = service.dispatch({"protocol": "empirica/v2", "request_id": "t",
             "command": {"type": "EvaluateRun", "run_id": run_id,
                         "intent": "report_convergence"}})["result"]
         return {reason["code"]: tuple(reason.get("next_actions", []))
-                for reason in result.get("reasons", []) or []
-                if reason.get("affected", {}).get("obligation_id") == "claim:C0"}
+                for reason in result.get("reasons", []) or []}
 
-    @staticmethod
-    def _human_binding_offenders(next_actions, reasons, decision_reasons):
-        """Human-owned directives that are not tied to the needs-decision claim kind: each must
-        be emitted by a core decision reason, and every contract reason listing it must be one
-        of those decision reasons."""
-        decision_directives = {d for actions in decision_reasons.values() for d in actions}
-        offenders = []
-        for directive, entry in sorted(next_actions.items()):
-            surface = entry.get("surface") if isinstance(entry, dict) else None
-            if not (isinstance(surface, dict) and surface.get("owner") == "human"):
-                continue
-            listing = {code for code, reason in reasons.items()
-                       if directive in reason.get("next_actions", [])}
-            if directive not in decision_directives or not listing <= set(decision_reasons):
-                offenders.append(directive)
-        return offenders
-
-    def test_human_ownership_is_tied_to_the_needs_decision_kind(self):
-        decision_reasons = self._decision_reasons()
-        self.assertTrue(decision_reasons, "a needs-decision claim must emit a decision reason")
+    def test_the_evidence_confirmation_directive_belongs_to_the_confirmation_reason_alone(self):
+        """``human.confirm_evidence`` (operation ``confirmation``) is listed by, and only by,
+        ``evidence.confirmation_required``, the reason the core emits when evidence waits on a human."""
         contract = _proto._PUBLIC_CONTRACT
-        self.assertEqual(self._human_binding_offenders(contract["next_actions"],
-                                                       contract["reasons"], decision_reasons),
-                         [])
-        # The contract has at least one human-owned directive, so the check is not vacuous.
-        self.assertTrue(any(isinstance(row.get("surface"), dict)
-                            and row["surface"].get("owner") == "human"
-                            for row in contract["next_actions"].values()))
+        listing = {code for code, reason in contract["reasons"].items()
+                   if "human.confirm_evidence" in reason.get("next_actions", [])}
+        self.assertEqual(listing, {"evidence.confirmation_required"})
+        confirmations = {d for d, row in contract["next_actions"].items()
+                         if row["surface"].get("operation") == "confirmation"}
+        self.assertEqual(confirmations, {"human.confirm_evidence"})
 
-    def test_negative_control_human_ownership_on_an_unrelated_directive_fails(self):
+    def test_a_needs_decision_claim_emits_the_one_human_batch_reason(self):
+        """A needs-decision claim is not a reason of its own: it is part of the one human batch, so the core
+        emits ``evidence.confirmation_required`` naming the claim and the one human next action."""
         decision_reasons = self._decision_reasons()
-        mutated = copy.deepcopy(_proto._PUBLIC_CONTRACT)
-        mutated["next_actions"]["route.record"]["surface"] = {"owner": "human",
-                                                              "operation": "decision"}
-        self.assertIn("route.record",
-                      self._human_binding_offenders(mutated["next_actions"], mutated["reasons"],
-                                                    decision_reasons))
+        self.assertEqual(decision_reasons,
+                         {"evidence.confirmation_required": ("human.confirm_evidence", "residual.accept")})
+        contract = _proto._PUBLIC_CONTRACT
+        humans = {d for d, row in contract["next_actions"].items()
+                  if row["surface"].get("owner") == "human"}
+        self.assertEqual(humans, {"human.confirm_evidence"})
+        self.assertNotIn("claim.human_decision", contract["reasons"])
 
     def test_private_governance_operations_canonical_and_used(self):
         """The private governance operation names have one canonical definition
@@ -1008,7 +997,7 @@ class DocumentationGuardTests(unittest.TestCase):
         agent_facing = [
             root / "plugins/empirica/skills",
             root / "plugins/empirica/agents",
-            root / ".claude/skills/native-qualification",
+            root / ".agents/skills/native-qualification",
         ]
         offenders: list[str] = []
         needles = ("target: full", "target=full", 'target": "full', "target:full")

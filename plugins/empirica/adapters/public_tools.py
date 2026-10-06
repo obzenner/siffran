@@ -212,12 +212,14 @@ def _load_artifact() -> dict:
 class PublicTools:
     """Profile-bound public tools over the canonical Empirica bridge."""
 
-    def __init__(self, profile_id: str, *, dispatch: Dispatch = _bridge.handle, govern=None):
+    def __init__(self, profile_id: str, *, dispatch: Dispatch = _bridge.handle, govern=None,
+                 confirm=None):
         if profile_id not in _PROFILES:
             raise ValueError(f"unknown exact Empirica profile: {profile_id!r}")
         self._profile_id = profile_id
         self._dispatch = dispatch
         self._govern = govern
+        self._confirm = confirm
         self._artifact = _load_artifact()
         self._schemas = copy.deepcopy(self._artifact["schemas"]["model"])
         # Built once per server: jsonschema.validate would re-check each schema on every call.
@@ -272,12 +274,21 @@ class PublicTools:
             "command": command,
         }
         try:
+            if (self._confirm and name == REPORT_TOOL
+                    and arguments.get("intent", "report_convergence") == "report_convergence"):
+                # What this host can show a human is observed before the evaluation reads it.
+                self._confirm.observe(arguments["run_id"])
             response = self._dispatch(request, self._profile_id)
             result = response.get("result") if isinstance(response, dict) else None
             if not isinstance(result, dict):
                 return self._error("Empirica bridge returned no typed result.")
             if self._govern and name == OBSERVE_TOOL and arguments["action"]["kind"] == "configure_run":
                 result = self._govern(result)
+            elif (self._confirm and name == REPORT_TOOL
+                  and arguments.get("intent", "report_convergence") == "report_convergence"):
+                # The end of a pass: a block that waits on the human is presented once, then re-evaluated.
+                result = self._confirm(result, lambda: self._dispatch(
+                    {**request, "request_id": str(uuid.uuid4())}, self._profile_id)["result"])
         except Exception:  # public transport or mediation failure remains a typed tool error
             return self._error("Empirica bridge unavailable.")
         if not isinstance(result, dict) or _contains_private(result):

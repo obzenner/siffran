@@ -454,8 +454,10 @@ class ActivationRouteGraphTests(ConformanceCase):
         self.assertEqual(self.get_argument_claim(hold_drv, hold_run, "P")["state"], "open")
         hold_result = self.assert_block_reason(
             self.dispatch(hold_drv, evaluate(run_id=hold_run, intent="report_convergence")),
-            "claim.human_decision")
-        self.assertEqual(hold_result["reasons"][0]["affected"], {"obligation_id": "claim:H"})
+            "evidence.confirmation_required",
+            parameters={"route": "unavailable", "record_ids": [], "claim_ids": ["H"]})
+        # One human batch names the waiting decision; it is not tied to one claim's obligation.
+        self.assertNotIn("affected", hold_result["reasons"][0])
 
         own_hold_drv = self.bind_driver("D7", "seam-4b",
                                         "Dependency evaluation preserves parent human hold")

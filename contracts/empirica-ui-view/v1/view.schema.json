@@ -17,11 +17,13 @@
     "project": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "name", "repo", "runs"],
+      "required": ["id", "name", "label", "repo", "since", "runs"],
       "properties": {
         "id": {"type": "string", "minLength": 1, "description": "The plugin's storage id (a one-way digest; never shown as a label)."},
         "name": {"type": ["string", "null"], "minLength": 1, "description": "Display name: the matched repository's folder name; null when no repository matched."},
+        "label": {"type": "string", "minLength": 1, "description": "What the project is called wherever it is listed: name when known, otherwise the stable word for an unnamed project. Never a position, never an id."},
         "repo": {"type": ["string", "null"], "minLength": 1, "description": "The matched repository's top-level path on this machine; null when none matched."},
+        "since": {"type": ["number", "null"], "description": "When the project's oldest run last changed (seconds since the epoch): the human fact that tells two unnamed projects apart in detail. Null when no run has a time."},
         "runs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/run"}, "description": "Newest first by updated."}
       }
     },

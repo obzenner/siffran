@@ -5,7 +5,7 @@ OBSERVATION_BASIS_KIND = "observation_basis"
 # returns): author evidence (``core.evaluation``), host-observed trusted ingress (``transaction``),
 # and the observation basis. Readers that enumerate kinds (the observer read model) are held to it.
 HISTORY_KINDS = ("graph", "research", "spike_request", "spike", "attribution", "audit_verdict",
-                 OBSERVATION_BASIS_KIND)
+                 "evidence_presentation", "evidence_confirmation", OBSERVATION_BASIS_KIND)
 OBSERVATION_BASIS_VERSION = 1
 OBSERVATION_BASIS_KEYS = frozenset({
     "artifact_id", "kind", "version", "sources", "policy_inputs", "clock_inputs",

@@ -209,7 +209,7 @@ def initial() -> OperationalState:
                  "max_audit_spawns": 1, "audit_spawns_used": 0},
         governance=initial_governance("g", {"max_passes": 8, "max_spawns": 1,
             "max_audit_spawns": 1}, "deliberative", {"host": "test", "interactive": True,
-            "signal": "test", "delegation": False}, None),
+            "signal": "test", "delegation": False, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}, None),
         selected_graph_artifact_id=None, frozen_claim_ids=None, frozen_semantic_digest=None,
         route_stamp=None,
         investigation_stamp=None, stamp_seq=0, last_derivation_digest=None, children=(),

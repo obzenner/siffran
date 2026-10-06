@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import copy
 import json
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -20,10 +22,13 @@ for path in (SCRIPTS, ROOT / "plugins/empirica"):
 from adapters.author_view import render_author_view  # noqa: E402
 from application.location import encode_handle  # noqa: E402
 from application.protocol import validate_public_result  # noqa: E402
-from core.records import RunKey  # noqa: E402
+from adapters.git.artifact_repo import GitArtifactRepository  # noqa: E402
+from application.snapshot import make_artifact  # noqa: E402
+from core.freshness import observations_digest  # noqa: E402
+from core.records import Artifact, RunKey  # noqa: E402
 from empirica_live_receipts import (  # noqa: E402
     EXPECTED, FORMAT, _POLICIES, author_view_header, author_view_run_id, author_view_section,
-    converged_report_view, digest, handback_report, host_runtime_rejection, inspect,
+    converged_report_view, digest, evidence_receipts, handback_report, host_runtime_rejection, inspect,
     pending_audit_settlement, run_handle)
 
 # The durable run of the test receipts: the host stores it at projects/<p>/runs/<s>/gen-<g>/run.json
@@ -117,6 +122,96 @@ def stamp(rows: list[dict], version: str) -> list[dict]:
 PI_RECEIPT_VERSION = "1.0.0"
 
 
+RETRIEVAL = ["local", "workspace"]
+RECORD_ID = "sha256:" + "f" * 64
+
+
+_STORES: dict[tuple[bool, bool], tuple[Path, list[dict]]] = {}
+
+
+def evidence_store(root: Path, *, presentation: bool = True, confirmation: bool = True) -> tuple[Path, list[dict]]:
+    """A copy of the (once built) store for this combination, so each test owns its repository."""
+    if (presentation, confirmation) not in _STORES:
+        _STORES[presentation, confirmation] = build_store(
+            Path(tempfile.mkdtemp(prefix="empirica-store-")), presentation, confirmation)
+    template, rows = _STORES[presentation, confirmation]
+    repo = root / "artifact-store"
+    shutil.rmtree(repo, ignore_errors=True)
+    shutil.copytree(template, repo)
+    return repo, copy.deepcopy(rows)
+
+
+def build_store(root: Path, presentation: bool, confirmation: bool) -> tuple[Path, list[dict]]:
+    """A Git artifact store with a real committed manifest chain: the research, then one manifest per human step.
+
+    The artifacts and manifests are content-addressed by the application's own constructors and written by the host's
+    store adapter; the rows a receipt must then carry are spelled out here, independently of the tool that derives them."""
+    repo = root / "artifact-store"
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    store, key = GitArtifactRepository(repo), RunKey(PROJECT_ID, SESSION_ID, 1)
+    basis = make_artifact({"kind": "observation_basis", "version": 1, "clock_inputs": [], "policy_inputs": {
+        "contract_id": "c", "contract_version": "2", "contract_digest": "sha256:" + "1" * 64, "profile_id": "p"},
+        "sources": [{"name": "workspace", "basis_id": "b", "digest": observations_digest([]), "observations": []}]})
+    rows, parent = [], None
+
+    def commit(*artifacts: Artifact) -> None:
+        """Append the artifacts, then the manifest that references them (the newest commit is the head)."""
+        nonlocal parent
+        for artifact in artifacts:
+            store.append(key, artifact)
+        manifest = make_artifact({
+            "kind": "transaction_manifest", "version": 2, "parent": parent,
+            "artifact_ids": [a.artifact_id for a in artifacts], "observation_basis_id": "b",
+            "observation_digest": "sha256:" + "2" * 64, "observation_basis_digest": basis.artifact_id,
+            "next_state_digest": "sha256:" + "3" * 64})
+        store.append(key, manifest)
+        parent = manifest.artifact_id
+
+    # A converged run always holds its research, so its ref exists whatever the human was asked.
+    commit(make_artifact({"kind": "research", "claim_id": "C1"}), basis)
+    if presentation:
+        shown = make_artifact({
+            "kind": "evidence_presentation", "receipt_id": "p-1", "key": "sha256:" + "9" * 64,
+            "record_ids": [RECORD_ID], "claims": [{"claim_id": "C1", "claim_digest": "sha256:" + "8" * 64}],
+            "approval_kind": "host_ui"})
+        commit(shown)
+        rows.append({"kind": "evidence_presentation", "receipt_id": "p-1", "artifact_id": shown.artifact_id,
+                     "record_ids": [RECORD_ID], "claim_ids": ["C1"]})
+    if confirmation:
+        decided = make_artifact({
+            "kind": "evidence_confirmation", "receipt_id": "p-1", "subject": "research", "record_id": RECORD_ID,
+            "claim_id": "C1", "outcome": "confirm", "approval_kind": "host_ui"})
+        commit(decided)
+        rows.append({"kind": "evidence_confirmation", "receipt_id": "p-1", "artifact_id": decided.artifact_id,
+                     "subject": "research", "outcome": "confirm", "target": RECORD_ID})
+    return repo, sorted(rows, key=lambda row: (row["kind"], row["receipt_id"], row["artifact_id"]))
+
+
+def head_of(repo: Path) -> str:
+    """The artifact id the store's newest commit added: what the run's retained state records as its committed head."""
+    refs = subprocess.run(["git", "-C", str(repo), "for-each-ref", "--format=%(refname)", "refs/empirica/artifacts/"],
+                          capture_output=True, text=True, check=True).stdout.split()
+    if not refs:
+        return ""
+    ref = refs[0]
+    name = subprocess.run(["git", "-C", str(repo), "diff-tree", "--root", "--no-commit-id", "--name-only", "-r", ref],
+                          capture_output=True, text=True, check=True).stdout.split()[-1]
+    return bytes.fromhex(name[1:]).decode() if name.startswith("=") else name
+
+
+def record_repo(root: Path, repo: Path) -> None:
+    """The run's recorded artifact location (``projects/<project>/project.json``, written when the run began), and
+    the committed head its retained state names (``committed_artifact_head_id``): the store's newest artifact."""
+    state_path = root.joinpath(*STATE_PARTS)
+    if state_path.exists() and (repo / ".git").exists():
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["committed_artifact_head_id"] = head_of(repo) or state.get("committed_artifact_head_id")
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+    sidecar = root / "projects" / PROJECT_ID / "project.json"
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    sidecar.write_text(json.dumps({"repo": str(repo)}), encoding="utf-8")
+
+
 class LiveReceiptTests(unittest.TestCase):
     def receipt(self, root: Path, host: str) -> dict:
         profile, version, role = EXPECTED[host]
@@ -128,9 +223,11 @@ class LiveReceiptTests(unittest.TestCase):
             "child_id": "child", "native_id": "native", "purpose": "audit",
             "state": "completed", "audit_role_profile": role,
             "audit_operation_id": "sha256:" + "4" * 64}]}
+        state["invocation"] = {"host": host, "audit_retrieval": list(RETRIEVAL)}
         if host == "pi":
             state["invocation"] = {"host": "pi", "interactive": True, "signal": "ctx.mode=tui",
-                                   "delegation": False, "host_runtime": copy.deepcopy(PI_HOST_RUNTIME)}
+                                   "delegation": False, "audit_retrieval": list(RETRIEVAL),
+                                   "host_runtime": copy.deepcopy(PI_HOST_RUNTIME)}
         state_path.write_text(json.dumps(state), encoding="utf-8")
         child_path = root / "child.jsonl"
         transcript = root / "parent.jsonl"
@@ -204,7 +301,11 @@ class LiveReceiptTests(unittest.TestCase):
                    "release_commit": "commit", "command": "native command",
                    "audit_child_id": "child", "audit_native_id": "native",
                    "audit_operation_id": "sha256:" + "4" * 64,
-                   "observed_author": author, "observed_auditor": auditor, "result": RESULT}
+                   "observed_author": author, "observed_auditor": auditor, "result": RESULT,
+                   "audit_retrieval": list(RETRIEVAL)}
+        repo, held = evidence_store(root)
+        record_repo(root, repo)
+        receipt["artifacts_repo_path"], receipt["evidence_receipts"] = str(repo), held
         if host == "pi":
             receipt["subagents_runtime"] = {
                 **{key: PI_HOST_RUNTIME["subagents"][key] for key in (
@@ -597,6 +698,265 @@ class LiveReceiptTests(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("does not carry an acceptable pi-subagents runtime (missing)", errors[0])
 
+    # ---- v3: what the auditor could retrieve, and what the human was asked and answered -------
+
+    def v3_errors(self, host="claude", *, mutate_receipt=None, mutate_state=None, store=None) -> list[str]:
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = self.receipt(Path(directory), host)
+            if mutate_state is not None:
+                self.rewrite_state(receipt, mutate_state)
+            if store is not None:
+                repo, held = evidence_store(Path(directory) / "other", **store) if (
+                    (Path(directory) / "other").mkdir() or True) else None
+                receipt["artifacts_repo_path"], receipt["evidence_receipts"] = str(repo), held
+                record_repo(Path(directory), repo)  # the run recorded this store; only its contents differ
+                receipt["run_state_sha256"] = digest(Path(receipt["run_state_path"]))
+            if mutate_receipt is not None:
+                mutate_receipt(receipt)
+            return inspect(receipt, host, "commit", "2.0.0")
+
+    def test_v3_receipts_pass_and_carry_what_the_run_recorded(self):
+        for host in EXPECTED:
+            with self.subTest(host=host), tempfile.TemporaryDirectory() as directory:
+                receipt = self.receipt(Path(directory), host)
+                self.assertEqual(receipt["format"], "empirica-live-receipt/v3")
+                self.assertEqual(receipt["audit_retrieval"], RETRIEVAL)
+                self.assertEqual([row["kind"] for row in receipt["evidence_receipts"]],
+                                 ["evidence_confirmation", "evidence_presentation"])
+                self.assertEqual(inspect(receipt, host, "commit", "2.0.0"), [])
+
+    def test_v2_receipts_are_rejected_not_migrated(self):
+        for host in EXPECTED:
+            errors = self.v3_errors(host, mutate_receipt=lambda r: r.update(format="empirica-live-receipt/v2"))
+            self.assertEqual(errors, [f"{host}: operator-attested v3 receipt is required"])
+            legacy = self.v3_errors(host, mutate_receipt=lambda r: [r.pop(k) for k in (
+                "audit_retrieval", "artifacts_repo_path", "evidence_receipts")])
+            self.assertEqual(len(legacy), 1)
+
+    def test_the_audit_retrieval_must_equal_the_one_the_run_recorded(self):
+        for host in EXPECTED:
+            for label, change in (("narrower", ["workspace"]), ("wider", ["local", "web", "workspace"]),
+                                  ("empty", []), ("absent", None)):
+                with self.subTest(host=host, receipt=label):
+                    def mutate(receipt, change=change):
+                        receipt.pop("audit_retrieval") if change is None else receipt.update(audit_retrieval=change)
+                    self.assertEqual(self.v3_errors(host, mutate_receipt=mutate), [
+                        f"{host}: receipt audit_retrieval does not equal the retrieval recorded in the durable state"])
+
+    def test_a_state_without_a_valid_recorded_retrieval_cannot_be_receipted(self):
+        for label, mutate in (("missing", lambda s: s["invocation"].pop("audit_retrieval")),
+                              ("unknown kind", lambda s: s["invocation"].update(audit_retrieval=["ftp"])),
+                              ("unsorted", lambda s: s["invocation"].update(audit_retrieval=["workspace", "local"])),
+                              ("duplicate", lambda s: s["invocation"].update(audit_retrieval=["local", "local"])),
+                              ("not a list", lambda s: s["invocation"].update(audit_retrieval="local"))):
+            for host in EXPECTED:
+                with self.subTest(host=host, state=label):
+                    errors = self.v3_errors(host, mutate_state=mutate)
+                    self.assertEqual(errors, [f"{host}: durable state does not record a valid invocation.audit_retrieval"])
+
+    def test_the_human_receipts_must_equal_what_the_artifact_store_holds(self):
+        def drop(receipt):
+            receipt["evidence_receipts"] = receipt["evidence_receipts"][:1]
+
+        def invent(receipt):
+            receipt["evidence_receipts"] = receipt["evidence_receipts"] + [
+                {**receipt["evidence_receipts"][0], "outcome": "confirm", "artifact_id": "sha256:" + "1" * 64}]
+
+        def flip(receipt):
+            row = next(r for r in receipt["evidence_receipts"] if r["kind"] == "evidence_confirmation")
+            row["outcome"] = "reject"
+        message = "receipt evidence_receipts do not equal the presentations and confirmations the artifact store holds for this run"
+        for label, mutate in (("left out", drop), ("invented", invent), ("outcome changed", flip),
+                              ("emptied", lambda r: r.update(evidence_receipts=[]))):
+            with self.subTest(label):
+                self.assertEqual(self.v3_errors(mutate_receipt=mutate), [f"claude: {message}"])
+
+    def test_D_a_wrong_repository_holding_the_same_ref_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            receipt = self.receipt(root, "claude")
+            (root / "wrong").mkdir()
+            wrong, held = evidence_store(root / "wrong", presentation=False, confirmation=False)
+            receipt["artifacts_repo_path"], receipt["evidence_receipts"] = str(wrong), held
+            self.assertEqual(held, [])  # it holds the same ref, only without the human's answers
+            errors = inspect(receipt, "claude", "commit", "2.0.0")
+            self.assertEqual(errors, ["claude: the artifact store is not the repository the run recorded"])
+
+    def test_D_a_run_that_recorded_no_location_or_an_inconsistent_one_is_refused(self):
+        message = ["claude: the artifact store is not the repository the run recorded"]
+        for label, mutate in (("absent", lambda root: (root / "projects" / PROJECT_ID / "project.json").unlink()),
+                              ("malformed", lambda root: (root / "projects" / PROJECT_ID / "project.json").write_text("{")),
+                              ("no repo member", lambda root: (root / "projects" / PROJECT_ID / "project.json").write_text("{}")),
+                              ("not a repository", lambda root: record_repo(root, root / "nowhere"))):
+            with self.subTest(label), tempfile.TemporaryDirectory() as directory:
+                receipt = self.receipt(Path(directory), "claude")
+                mutate(Path(directory))
+                self.assertEqual(inspect(receipt, "claude", "commit", "2.0.0"), message)
+
+    def test_D_a_nested_directory_of_the_recorded_repository_keeps_exactly_the_original_receipts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            receipt = self.receipt(root, "claude")
+            repo = Path(receipt["artifacts_repo_path"])
+            nested = repo / "deeper" / "still"
+            nested.mkdir(parents=True)
+            state_path = root.joinpath(*STATE_PARTS)
+            self.assertEqual(evidence_receipts(nested, state_path), receipt["evidence_receipts"])
+            self.assertEqual(len(receipt["evidence_receipts"]), 2)
+            receipt["artifacts_repo_path"] = str(nested)
+            self.assertEqual(inspect(receipt, "claude", "commit", "2.0.0"), [])
+
+    def test_a_symlink_to_the_repository_root_keeps_both_receipts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            receipt = self.receipt(root, "claude")
+            link = root / "alias-link"
+            link.symlink_to(receipt["artifacts_repo_path"])
+            self.assertEqual(evidence_receipts(link, root.joinpath(*STATE_PARTS)), receipt["evidence_receipts"])
+
+    def test_D_a_ref_rolled_back_below_the_runs_committed_head_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            receipt = self.receipt(root, "claude")
+            repo = Path(receipt["artifacts_repo_path"])
+            state_path = root.joinpath(*STATE_PARTS)
+            ref = subprocess.run(["git", "-C", str(repo), "for-each-ref", "--format=%(refname)",
+                                  "refs/empirica/artifacts/"], capture_output=True, text=True, check=True).stdout.split()[0]
+            first = subprocess.run(["git", "-C", str(repo), "rev-list", "--max-parents=0", ref],
+                                   capture_output=True, text=True, check=True).stdout.split()[0]
+            subprocess.run(["git", "-C", str(repo), "update-ref", ref, first], check=True)
+            with self.assertRaises(ValueError) as caught:
+                evidence_receipts(repo, state_path)
+            self.assertIn("committed history", str(caught.exception))
+            self.assertEqual(inspect(receipt, "claude", "commit", "2.0.0"),
+                             ["claude: the artifact store does not hold the run's committed history: "
+                              "missing reachable manifest"])
+
+    def _rewrite_ref(self, repo: Path, drop) -> None:
+        """Replace the run's ref by a commit whose tree lacks the entries ``drop(path, blob_json)`` selects."""
+        ref = subprocess.run(["git", "-C", str(repo), "for-each-ref", "--format=%(refname)", "refs/empirica/artifacts/"],
+                             capture_output=True, text=True, check=True).stdout.split()[0]
+        kept = []
+        for line in subprocess.run(["git", "-C", str(repo), "ls-tree", ref], capture_output=True, text=True,
+                                   check=True).stdout.splitlines():
+            meta, _, path = line.partition("\t")
+            blob = subprocess.run(["git", "-C", str(repo), "cat-file", "blob", meta.split()[2]],
+                                  capture_output=True, text=True, check=True).stdout
+            if not drop(path, json.loads(json.loads(blob)["body"])):
+                kept.append(line + "\n")
+        tree = subprocess.run(["git", "-C", str(repo), "mktree"], input="".join(kept), capture_output=True, text=True,
+                              check=True).stdout.strip()
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+               "GIT_COMMITTER_EMAIL": "t@t"}
+        commit = subprocess.run(["git", "-C", str(repo), "commit-tree", tree, "-m", "x"], capture_output=True, text=True,
+                                check=True, env=env).stdout.strip()
+        subprocess.run(["git", "-C", str(repo), "update-ref", ref, commit], check=True)
+
+    def test_D_a_tree_that_holds_the_head_but_lost_a_presentation_is_refused(self):
+        for lost in ("evidence_presentation", "evidence_confirmation", "research"):
+            with self.subTest(lost), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                receipt = self.receipt(root, "claude")
+                repo = Path(receipt["artifacts_repo_path"])
+                self._rewrite_ref(repo, lambda _path, body: body.get("kind") == lost)
+                with self.assertRaises(ValueError) as caught:
+                    evidence_receipts(repo, root.joinpath(*STATE_PARTS))
+                self.assertIn("committed history", str(caught.exception))
+                self.assertIn("missing committed domain artifact", str(caught.exception))
+                self.assertEqual(inspect(receipt, "claude", "commit", "2.0.0"),
+                                 ["claude: the artifact store does not hold the run's committed history: "
+                                  "missing committed domain artifact"])
+
+    def test_a_valid_store_yields_exactly_the_receipts_of_its_chain_and_ignores_an_unreferenced_artifact(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            receipt = self.receipt(root, "claude")
+            repo = Path(receipt["artifacts_repo_path"])
+            orphan = make_artifact({"kind": "evidence_presentation", "receipt_id": "orphan", "key": "sha256:" + "9" * 64,
+                                    "record_ids": [], "claims": [], "approval_kind": "host_ui"})
+            GitArtifactRepository(repo).append(RunKey(PROJECT_ID, SESSION_ID, 1), orphan)
+            self.assertEqual(evidence_receipts(repo, root.joinpath(*STATE_PARTS)), receipt["evidence_receipts"])
+            self.assertEqual(len(receipt["evidence_receipts"]), 2)
+
+    def test_D_a_state_that_names_no_committed_head_is_refused(self):
+        for label, value in (("absent", None), ("not a string", 7), ("not in the store", "sha256:" + "f" * 64)):
+            with self.subTest(label), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                receipt = self.receipt(root, "claude")
+                state_path = root.joinpath(*STATE_PARTS)
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+                state.pop("committed_artifact_head_id", None)
+                if value is not None:
+                    state["committed_artifact_head_id"] = value
+                state_path.write_text(json.dumps(state), encoding="utf-8")
+                receipt["run_state_sha256"] = digest(state_path)
+                with self.assertRaises(ValueError):
+                    evidence_receipts(Path(receipt["artifacts_repo_path"]), state_path)
+
+    def test_a_worktree_of_the_recorded_repository_is_the_same_repository(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            receipt = self.receipt(root, "claude")
+            repo = Path(receipt["artifacts_repo_path"])
+            env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+                   "GIT_COMMITTER_EMAIL": "t@t"}
+            subprocess.run(["git", "-C", str(repo), "commit", "-q", "--allow-empty", "-m", "x"], check=True, env=env)
+            alias = root / "alias"
+            subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", str(alias)], check=True, env=env)
+            receipt["artifacts_repo_path"] = str(alias)
+            self.assertEqual(inspect(receipt, "claude", "commit", "2.0.0"), [])
+
+    def test_a_converged_run_whose_store_has_no_ref_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = self.receipt(Path(directory), "claude")
+            empty = Path(directory) / "empty"
+            subprocess.run(["git", "init", "-q", str(empty)], check=True)
+            record_repo(Path(directory), empty)
+            receipt["run_state_sha256"] = digest(Path(receipt["run_state_path"]))
+            receipt["artifacts_repo_path"], receipt["evidence_receipts"] = str(empty), []
+            self.assertEqual(inspect(receipt, "claude", "commit", "2.0.0"),
+                             ["claude: the artifact store holds no ref for this run, so no receipt can be checked against it"])
+
+    def test_a_run_that_never_asked_a_human_carries_an_empty_list(self):
+        for host in EXPECTED:
+            with self.subTest(host=host), tempfile.TemporaryDirectory() as directory:
+                receipt = self.receipt(Path(directory), host)
+                repo, held = evidence_store(Path(directory) / "x" if (Path(directory) / "x").mkdir() is None else None,
+                                            presentation=False, confirmation=False)
+                record_repo(Path(directory), repo)
+                receipt["run_state_sha256"] = digest(Path(receipt["run_state_path"]))
+                receipt["artifacts_repo_path"], receipt["evidence_receipts"] = str(repo), held
+                self.assertEqual((held, inspect(receipt, host, "commit", "2.0.0")), ([], []))
+
+    def test_a_confirmation_needs_a_presentation_in_the_same_store(self):
+        errors = self.v3_errors(store={"presentation": False})
+        self.assertEqual(errors, ["claude: a human confirmation names no recorded presentation"])
+
+    def test_the_artifact_store_path_is_required_and_must_be_a_repository(self):
+        self.assertEqual(self.v3_errors(mutate_receipt=lambda r: r.pop("artifacts_repo_path")),
+                         ["claude: the artifact store path is required to check the human receipts"])
+        self.assertEqual(len(self.v3_errors(mutate_receipt=lambda r: r.update(artifacts_repo_path="/nonexistent/x"))), 1)
+
+    def test_capture_requires_the_artifact_store_and_records_what_it_holds(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            receipt = self.receipt(root, "claude")
+            output = root / "receipt.json"
+            command = [sys.executable, str(SCRIPTS / "capture_empirica_live_receipt.py"), "claude",
+                       "--transcript", receipt["transcript_path"], "--state", receipt["run_state_path"],
+                       "--child-session", receipt["child_session_path"],
+                       "--version-output", receipt["version_output_path"], "--command", "native command",
+                       "--output", str(output), "--operator-attested"]
+            missing = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(missing.returncode, 2)
+            self.assertIn("--artifacts-repo", missing.stderr)
+            done = subprocess.run([*command, "--artifacts-repo", receipt["artifacts_repo_path"]],
+                                  capture_output=True, text=True)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            captured = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual((captured["audit_retrieval"], captured["evidence_receipts"]),
+                             (RETRIEVAL, receipt["evidence_receipts"]))
+
     def test_claude_receipt_is_unaffected_and_may_not_claim_a_pi_runtime(self):
         with tempfile.TemporaryDirectory() as directory:
             receipt = self.receipt(Path(directory), "claude")
@@ -620,7 +980,8 @@ class LiveReceiptTests(unittest.TestCase):
                        "--transcript", receipt["transcript_path"], "--state", receipt["run_state_path"],
                        "--child-session", receipt["child_session_path"],
                        "--version-output", receipt["version_output_path"],
-                       "--command", "native command", "--output", str(output), "--operator-attested"]
+                       "--command", "native command", "--output", str(output),
+                       "--artifacts-repo", receipt["artifacts_repo_path"], "--operator-attested"]
             done = subprocess.run(command, capture_output=True, text=True)
             self.assertEqual(done.returncode, 0, done.stderr)
             captured = json.loads(output.read_text(encoding="utf-8"))

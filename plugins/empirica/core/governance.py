@@ -165,17 +165,21 @@ def admission(governance: Mapping) -> str | None:
             "governance.approval_required")
 
 
-def interactions_remaining(governance: Mapping) -> dict:
-    """Host-dialog presentations left: ``proposal`` for the current plan revision and ``total``."""
+def interactions_remaining(governance: Mapping, confirmations: int = 0) -> dict:
+    """Host-dialog presentations left: ``proposal`` for the current plan revision and ``total``.
+
+    The one count of human interactions: a configuration receipt and an evidence presentation (ADR-0067,
+    ``confirmations`` of them) each spend one unit of ``total``; every path that admits or shows an
+    interaction reads this function."""
     receipts = governance["receipts"]
     shown = sum(r["plan_revision"] == governance["plan_revision"] for r in receipts)
     return {"proposal": max(0, PROPOSAL_INTERACTIONS - shown),
-            "total": MAX_INTERACTIONS - len(receipts)}
+            "total": max(0, MAX_INTERACTIONS - len(receipts) - confirmations)}
 
 
-def interaction_error(governance: Mapping) -> str | None:
+def interaction_error(governance: Mapping, confirmations: int = 0) -> str | None:
     """``governance.interaction_limit`` once either interaction allowance is spent, else ``None``."""
-    if min(interactions_remaining(governance).values()) == 0:
+    if min(interactions_remaining(governance, confirmations).values()) == 0:
         return "governance.interaction_limit"
     return None
 
@@ -240,7 +244,8 @@ def resolve_submission(governance: Mapping, submission: Mapping,
     return resolved, None
 
 
-def decision_error(run_id: str, governance: Mapping, decision: Mapping) -> str | None:
+def decision_error(run_id: str, governance: Mapping, decision: Mapping,
+                   confirmations: int = 0) -> str | None:
     """Validate one governance decision against current policy; ``inert`` signals an exact
     historical replay that must not reopen authority."""
     outcome = decision.get("outcome")
@@ -266,7 +271,7 @@ def decision_error(run_id: str, governance: Mapping, decision: Mapping) -> str |
     if (decision["run_id"] != run_id or decision["proposal_digest"] != governance["proposal_digest"]
             or decision["plan_revision"] != governance["plan_revision"]):
         return "governance.stale_proposal"
-    if prior is None and (reason := interaction_error(governance)):
+    if prior is None and (reason := interaction_error(governance, confirmations)):
         return reason
     expected = expected_approval_kind(governance)
     auto_authorized = (governance["first_approval"] or

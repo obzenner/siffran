@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -36,7 +37,7 @@ from application import protocol as _proto  # noqa: E402
 from application.observer import Observer  # noqa: E402
 from assertions import (action_graph, action_investigate, action_research, action_route,  # noqa: E402
                         get_argument, get_run, observe_action, start_run)
-from observer_store import DriverSource, build_store  # noqa: E402
+from observer_store import DriverSource, _Builder, _graph, build_store  # noqa: E402
 
 _STORE = build_store()
 
@@ -74,6 +75,231 @@ class ContractTests(unittest.TestCase):
         _, details = _observe()
         recorded = {step["kind"] for detail in details.values() for step in detail["steps"]}
         self.assertEqual(recorded, set(HISTORY_KINDS))
+
+
+class ReasonMessageTests(unittest.TestCase):
+    """Q3a-1: a reason's message is filled in once, by the observer, from the reason's own parameters."""
+
+    def test_the_placeholders_are_the_reason_s_parameters(self):
+        from core.observer import reason_message
+        self.assertEqual(reason_message("{resource} budget exhausted.", {"resource": "pass"}),
+                         "pass budget exhausted.")
+        self.assertEqual(reason_message("Stale: {scope}.", {"scope": ["C1", "C2"], "claim_id": "C1"}),
+                         "Stale: C1, C2.")
+        self.assertEqual(reason_message("Nothing to fill.", {}), "Nothing to fill.")
+
+    def test_an_unfillable_or_unsuitable_parameter_is_a_contract_bug_not_half_a_message(self):
+        from core.observer import reason_message
+        for template, parameters in (("{resource} spent.", {}), ("{resource} spent.", {"resource": None}),
+                                     ("{resource} spent.", {"resource": {"a": 1}}),
+                                     ("{resource} spent.", {"resource": True})):
+            with self.subTest(parameters=parameters), self.assertRaises(ValueError):
+                reason_message(template, parameters)
+
+    def test_no_message_the_observer_emits_keeps_a_placeholder(self):
+        _, details = _observe()
+        texts = [r["message"] for d in details.values() for r in d["residuals"]]
+        texts += [c["blocker_message"] for d in details.values() for c in d["claims"] if c["blocker_message"]]
+        self.assertIn("pass budget exhausted.", texts)
+        self.assertEqual([t for t in texts if "{" in t or "}" in t], [])
+
+
+    def test_every_reason_the_core_can_emit_has_its_placeholders_among_its_required_params(self):
+        import re
+        contract = json.loads((_ROOT / "contracts" / "empirica" / "v2" / "public-contract.json").read_text())
+        for code, reason in contract["reasons"].items():
+            placeholders = set(re.findall(r"\{(\w+)\}", reason["message"]))
+            self.assertLessEqual(placeholders, set(reason["params"].get("required", ())), code)
+
+    def test_every_registry_message_that_reaches_the_ui_is_one_plain_sentence(self):
+        from core.observer import message_problems
+        contract = json.loads((_ROOT / "contracts" / "empirica" / "v2" / "public-contract.json").read_text())
+        problems = [p for code, reason in contract["reasons"].items() for p in message_problems(code, reason["message"])]
+        self.assertEqual(problems, [])
+
+    def test_negative_control_the_old_paragraph_and_a_jargon_word_are_caught(self):
+        from core.observer import message_problems
+        old = ("Research or a decision waits on a human, and nothing else blocks the run. The host shows the pending set "
+               "once per derivation, at most one batch of the items below, and the human answers in one receipt.")
+        self.assertEqual(len(message_problems("evidence.confirmation_required", old)), 3)  # too long, derivation, receipt
+        self.assertEqual(len(message_problems("claim.refuted", "Fold-1 research refutes it.")), 1)
+        self.assertEqual(message_problems("governance.auto_ceiling", "x" * 300), [])  # not shown to a human
+
+    def test_one_reason_that_cannot_be_worded_makes_one_run_unreadable_not_the_store(self):
+        from unittest.mock import patch
+        import core.observer as core_observer
+        real = core_observer.project
+        calls = []
+
+        def project(snapshot, messages):
+            calls.append(1)
+            if len(calls) == 1:
+                raise ValueError("unfillable placeholder")
+            return real(snapshot, messages)
+        def unreadable(view):
+            return sum(1 for p in view["projects"] for run in p["runs"] if run["diagnostic"] == "unreadable")
+        baseline = unreadable(Observer(DriverSource(build_store())).view())
+        with patch.object(core_observer, "project", project):
+            view = Observer(DriverSource(build_store())).view()
+        self.assertEqual(unreadable(view), baseline + 1)
+        self.assertGreater(sum(1 for p in view["projects"] for run in p["runs"] if run["diagnostic"] is None), 0)
+
+
+class ProjectLabelTests(unittest.TestCase):
+    """Q3b-8: the observer names each project; the label never depends on its place in the view."""
+
+    def test_a_project_is_its_folder_name_or_the_word_for_an_unnamed_one(self):
+        view, _ = _observe()
+        labels = {p["name"]: p["label"] for p in view["projects"]}
+        unnamed = next(p for p in view["projects"] if p["name"] is None)
+        self.assertEqual(labels, {"atlas": "atlas", "harbor": "harbor", "lumen": "lumen", None: labels[None]})
+        # Told apart by a human fact, when the project began (UTC), never by an id.
+        moment = time.gmtime(unnamed["since"])
+        self.assertEqual(labels[None], f"Unnamed project · since {moment.tm_mday} "
+                                       f"{('Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec').split()[moment.tm_mon - 1]}")
+
+    def test_two_unnamed_projects_read_differently(self):
+        from application.observer import _unnamed
+        self.assertNotEqual(_unnamed(1_700_000_000.0), _unnamed(1_700_000_000.0 + 40 * 86400))
+        self.assertEqual(_unnamed(None), "Unnamed project")
+
+    def test_unnamed_projects_of_a_real_store_read_differently_by_a_finer_time(self):
+        from application.observer import _tell_apart, _unnamed
+        day = 1_758_000_000.0  # one day, as on the owner's store: eleven unnamed projects began on 23 Sep
+        shapes = [day + 60 * i for i in range(11)] + [day + 3600, day + 86400 * 2, day + 86400 * 2 + 5, day + 86400 * 2 + 5.25]
+        rows = [{"name": None, "label": "Unnamed project", "since": t} for t in shapes]
+        rows.append({"name": "atlas", "label": "atlas", "since": day})
+        rows.append({"name": None, "label": "Unnamed project", "since": None})
+        self.assertGreater(len(shapes), len({_unnamed(t) for t in shapes}), "the day alone told them apart: not a real-store shape")  # control
+        _tell_apart(rows)
+        labels = [r["label"] for r in rows]
+        self.assertEqual(len(labels), len(set(labels)), labels)
+        self.assertEqual(rows[-2]["label"], "atlas")
+        self.assertTrue(all(not any(ch.isdigit() for ch in r["label"].split("since")[0]) and "sha256" not in r["label"] for r in rows))
+        # a lone unnamed project keeps the short form; the finer form is used only where it is needed
+        lone = [{"name": None, "label": "Unnamed project", "since": day}, {"name": None, "label": "Unnamed project", "since": day + 90000}]
+        _tell_apart(lone)
+        self.assertTrue(all(len(r["label"].split("since ")[1].split()) == 2 for r in lone), lone)
+
+    def test_a_project_knows_when_its_oldest_run_last_changed(self):
+        view, _ = _observe()
+        for project in view["projects"]:
+            self.assertEqual(project["since"], min(r["updated"] for r in project["runs"]))
+
+    def test_the_label_does_not_change_when_projects_are_reordered(self):
+        store = build_store()
+        before = {p["id"]: p["label"] for p in Observer(DriverSource(store)).view()["projects"]}
+        store.times = {k: -t for k, t in store.times.items()}  # the opposite recency
+        after = Observer(DriverSource(store)).view()["projects"]
+        self.assertNotEqual([p["id"] for p in after], list(before))
+        named = {p["id"]: p["label"] for p in after if p["name"] is not None}
+        self.assertEqual(named, {k: v for k, v in before.items() if k in named})
+
+
+class VerificationFactsTests(unittest.TestCase):
+    """ADR-0067: how each research record is verified, what waits on a human, and the human's answers."""
+
+    @classmethod
+    def setUpClass(cls):
+        _, details = _observe()
+        cls.detail = details[_STORE.expect["verification"]]
+        cls.claims = {c["id"]: c for c in cls.detail["claims"]}
+
+    def record(self, claim):
+        (record,) = self.claims[claim]["records"]
+        return record
+
+    def test_each_record_states_its_class_status_and_route(self):
+        rows = {claim: {k: self.record(claim)[k] for k in ("class", "status", "route", "retrieve")}
+                for claim in ("C1", "C2", "C3", "C4", "C5", "C6")}
+        self.assertEqual(rows, {
+            "C1": {"class": "verbatim", "status": "verified_by_service", "route": None, "retrieve": True},
+            "C2": {"class": "retrievable", "status": "pending", "route": "audit", "retrieve": True},
+            "C3": {"class": "retrievable", "status": "confirmed_by_human", "route": None, "retrieve": False},
+            "C4": {"class": "observed", "status": "rejected_by_human", "route": None, "retrieve": False},
+            "C5": {"class": "retrievable", "status": "pending", "route": "human", "retrieve": False},
+            "C6": {"class": "observed", "status": "pending", "route": "human", "retrieve": False}})
+
+    def test_an_observed_record_carries_why_no_spike_could_establish_it_and_the_human_s_note(self):
+        self.assertEqual(self.record("C4")["spike_unavailable"], "The job only runs on the nightly cluster.")
+        self.assertEqual(self.record("C4")["note"], "That log is from a different job.")
+        self.assertEqual(self.record("C3")["note"], "Checked the format page myself.")
+        self.assertEqual((self.record("C1")["spike_unavailable"], self.record("C1")["note"]), (None, None))
+
+    def test_what_waits_on_a_human_is_listed_per_claim_and_audit_routed_research_is_not(self):
+        self.assertEqual(self.detail["waiting"], [
+            {"claim": "C5", "route": "human", "records": 1, "decision": False},
+            {"claim": "C6", "route": "human", "records": 1, "decision": False},
+            {"claim": "C7", "route": "human", "records": 0, "decision": True}])
+
+    def test_a_needs_decision_claim_says_whether_it_is_answered(self):
+        self.assertEqual(self.claims["C7"]["decision"], {"outcome": None, "answer": None, "route": "human"})
+        self.assertIsNone(self.claims["C1"]["decision"])
+
+
+class WaitingOwnerTests(unittest.TestCase):
+    """R3 M2: what waits on a human is the run view's ``confirmation_batch``, nothing else. It is empty when the run is
+    not active, and it says when the batch was already shown or the run's interactions are spent."""
+
+    @staticmethod
+    def _run(answer: bool = False, present: bool = False, limit: bool = False):
+        from core import governance
+        b = _Builder()
+        run = b.begin("atlas", "s-wait", "Read tiles through one path.", _graph(
+            "C0", [("C0", "ordinary", "Every tile read goes through the index."),
+                   ("C1", "ordinary", "The nightly log shows no other read."),
+                   ("C2", "ordinary", "Last week's log shows no other read.")], [("C0", "C1"), ("C0", "C2")]))
+        b.cite(run, "C1", "runtime", "nightly log", "0 reads outside the index", spike_unavailable="Only runs nightly.")
+        b.cite(run, "C2", "runtime", "weekly log", "0 reads outside the index", spike_unavailable="Only runs weekly.")
+        b.research(run, "C0", ref="README.md")
+        b.evaluate(run, "report_convergence")
+        ids = b.record_ids(run)
+        if present:
+            b.drv.trusted_evidence_presentation(run, {"run_id": run, "receipt_id": "r1", "key": b.batch_key(run)})
+        if answer:
+            patch = mock.patch.object(governance, "MAX_INTERACTIONS", len(
+                (lambda src: src.read_state(next(iter(src.keys()))))(DriverSource(b.store)).value["governance"]["receipts"]) + 1) if limit else contextlib.nullcontext()
+            with patch:
+                b.present_and_answer(run, "r1", [{"subject": "research", "artifact_id": ids["C1"], "outcome": "confirm"}])
+                view, details = Observer(DriverSource(b.store)).observe()
+            return _rows(view), details
+        b.stamp("wait", "atlas", "s-wait")
+        view, details = Observer(DriverSource(b.store)).observe()
+        return _rows(view), details
+
+    @staticmethod
+    def _detail(details):
+        return next(iter(details.values()))
+
+    def test_a_run_a_host_will_ask_lists_its_batch(self):
+        _, details = self._run()
+        d = self._detail(details)
+        self.assertEqual(d["prompt_error"], None)
+        self.assertEqual([(w["claim"], w["route"], w["records"]) for w in d["waiting"]], [("C1", "human", 1), ("C2", "human", 1)])
+
+    def test_a_batch_already_shown_reads_shown_everywhere_and_is_not_promised_again(self):
+        _, details = self._run(present=True)
+        d = self._detail(details)
+        self.assertEqual(d["prompt_error"], "already_presented")
+        self.assertEqual({w["route"] for w in d["waiting"]}, {"shown"})
+        self.assertEqual({r["route"] for c in d["claims"] for r in c["records"] if r["status"] == "pending"}, {"shown"})
+
+    def test_when_the_runs_interactions_are_spent_it_says_so(self):
+        _, details = self._run(answer=True, limit=True)
+        d = self._detail(details)
+        self.assertEqual(d["prompt_error"], "interaction_limit")
+        self.assertEqual({w["route"] for w in d["waiting"]}, {"limit"})
+
+    def test_a_stopped_run_waits_on_nobody(self):
+        _, details = _observe()
+        stopped = details[_STORE.expect["decision"]]
+        self.assertEqual((stopped["waiting"], stopped["prompt_error"]), ([], None))
+        pending = [c["decision"] for c in stopped["claims"] if c["decision"] and c["decision"]["outcome"] is None]
+        self.assertTrue(pending)
+        self.assertEqual({d["route"] for d in pending}, {"ended"})
+        # control: the active run in the same store does list what waits, so "always empty" would be caught
+        self.assertTrue(details[_STORE.expect["verification"]]["waiting"])
+        self.assertNotIn("ended", {d["decision"]["route"] for d in details[_STORE.expect["verification"]]["claims"] if d["decision"]})
 
 
 class AgreementTests(unittest.TestCase):
@@ -142,7 +368,7 @@ class AgreementTests(unittest.TestCase):
                          {"C0": "unreviewed", "C1": "stale", "C2": "unreviewed", "C3": "changed"})
         self.assertEqual(r["reaudit"]["audit"], "failed")
         self.assertEqual((claims["decision"]["C0"]["blocker"], claims["decision"]["C0"]["blocker_claim"]),
-                         ("claim.human_decision", "C1"))
+                         ("evidence.confirmation_required", "C1"))
 
     def test_the_output_does_not_depend_on_the_host_profile(self):
         reference = _observe()
@@ -512,6 +738,24 @@ class LocationsTests(unittest.TestCase):
             for _ in range(3):
                 source.refresh()
         self.assertEqual(calls, [self.repo])
+
+    def test_every_generation_directory_has_a_row_whatever_its_state_document_is(self):
+        """Q3a-2: a missing, dangling, directory-shaped or unreadable run.json is a diagnostic, not a run
+        that silently disappears."""
+        from adapters.observer.source import StoreSource
+        self._start("p")
+        runs = self.home / "projects" / "stray" / "runs"
+        for name in ("absent", "directory", "dangling", "unreadable"):
+            (runs / name / "gen-1").mkdir(parents=True)
+        (runs / "directory" / "gen-1" / "run.json").mkdir()
+        os.symlink(runs / "nowhere.json", runs / "dangling" / "gen-1" / "run.json")
+        (runs / "unreadable" / "gen-1" / "run.json").write_text("{")
+        view = Observer(StoreSource(self.home)).view()
+        stray = next(p for p in view["projects"] if p["name"] is None)
+        self.assertEqual(sorted(r["key"].split("/")[1] for r in stray["runs"]),
+                         ["absent", "dangling", "directory", "unreadable"])
+        self.assertEqual({r["diagnostic"] for r in stray["runs"]}, {"unreadable"})
+        self.assertEqual(validate_ui_view.check(view, None), [])
 
     def test_a_stray_directory_in_the_store_hides_nothing(self):
         from adapters.observer.source import StoreSource

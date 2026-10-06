@@ -8,7 +8,12 @@
       "host": "test",
       "interactive": true,
       "signal": "test",
-      "delegation": false
+      "delegation": false,
+      "audit_retrieval": [
+        "local",
+        "workspace"
+      ],
+      "human_surface": "unavailable"
     },
     "status": "active",
     "governance": {
@@ -138,6 +143,7 @@
       "missing_capabilities": [
         "host.async_unsupported"
       ]
-    }
+    },
+    "confirmation_batch": null
   }
 }

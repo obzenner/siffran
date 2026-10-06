@@ -1,0 +1,209 @@
+// The end-of-pass evidence dialog on Pi (ADR-0067): standard ctx.ui.select/input dialogs, nothing custom,
+// no dialog without a UI, and nothing granted on cancel, timeout or error.
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+import { askItems, confirmEvidence, evidenceConfirmationWait, itemTitle, observeSurface } from "../src/evidence-ui.ts";
+import type { EvidenceItem, PrivateIngressRequest } from "../src/private-transport.ts";
+import type { ExtensionContext } from "../src/pi-types.ts";
+import type { Response } from "../src/contract.ts";
+
+const RECORD: EvidenceItem = { subject: "research", id: "sha256:" + "a".repeat(64), claim: "The API is stable.",
+  source_kind: "web", source_ref: "https://example.test/spec", quote: "stable since v2", class: "retrievable" };
+const OBSERVED: EvidenceItem = { ...RECORD, id: "sha256:" + "b".repeat(64), source_kind: "runtime",
+  source_ref: "deploy output", class: "observed", reason: "Needs production credentials." };
+const DECISION: EvidenceItem = { subject: "claim", id: "C1", digest: "sha256:" + "c".repeat(64), text: "Ship it?" };
+
+const BATCH = (promptError: string | null = null) => ({ key: "sha256:" + "d".repeat(64), record_ids: [RECORD.id],
+  claim_ids: [], prompt_error: promptError });
+const blocked = (route = "human", promptError: string | null = route === "human" ? null : "unavailable",
+                 code = "evidence.confirmation_required"): Response => ({
+  protocol: "empirica/v2", request_id: "r",
+  result: { type: "Block", run: { id: "run-1", status: "active", confirmation_batch: BATCH(promptError) }, reasons: [{
+    code, message: "m", sections: [], next_actions: [],
+    parameters: { route, record_ids: [RECORD.id] } }] } } as unknown as Response);
+const refreshed: Response = { protocol: "empirica/v2", request_id: "r2",
+  result: { type: "Allow", converged: false, run: { id: "run-1", status: "active" } } } as unknown as Response;
+
+interface Script { selects: Array<string | undefined>; inputs: Array<string | undefined> }
+
+function ctxFor(script: Script, options: { hasUI?: boolean; select?: boolean; input?: boolean; custom?: boolean } = {}) {
+  const shown: Array<{ kind: string; title: string; options?: string[]; opts?: unknown }> = [];
+  const ui: Record<string, unknown> = { notify() {} };
+  if (options.select !== false) ui.select = async (title: string, choices: string[], opts?: unknown) => {
+    shown.push({ kind: "select", title, options: choices, opts }); return script.selects.shift(); };
+  if (options.input !== false) ui.input = async (title: string, _p?: string, opts?: unknown) => {
+    shown.push({ kind: "input", title, opts }); return script.inputs.shift(); };
+  ui.custom = async () => { throw new Error("the evidence dialog must not use ctx.ui.custom"); };
+  return { ctx: { ui, hasUI: options.hasUI ?? true, mode: "tui" } as unknown as ExtensionContext, shown };
+}
+
+function bridge(items: EvidenceItem[], receipt: unknown = { type: "evidence_receipt", result: { type: "Allow" } }) {
+  const calls: PrivateIngressRequest[] = [];
+  const trusted = async (request: PrivateIngressRequest) => {
+    calls.push(request);
+    return request.operation === "evidence_presentation"
+      ? { type: "evidence_presentation", receipt_id: "p-1", items } : receipt;
+  };
+  return { trusted, calls };
+}
+
+const run = (ctx: ExtensionContext, trusted: (r: PrivateIngressRequest) => Promise<unknown>, response = blocked(),
+             deadline = Date.now() + 60_000) =>
+  confirmEvidence(response, "run-1", ctx, trusted as never, async () => refreshed, deadline);
+
+test("TUI: each item gets a select and, for a decision, a note; the answers are one receipt", async () => {
+  // the first input is for the confirmed record: an empty note is simply no note
+  const script = { selects: ["Confirm", "Reject", "Approve"], inputs: ["", "Wrong system.", "Ship it."] as Array<string | undefined> };
+  const live = ctxFor(script);
+  const { trusted, calls } = bridge([RECORD, OBSERVED, DECISION]);
+  assert.equal(await run(live.ctx, trusted), refreshed);
+  assert.deepEqual(calls.map((c) => c.operation), ["evidence_presentation", "evidence_confirmation"]);
+  assert.deepEqual(calls[0].payload, {}, "the core's batch is presented; the host names nothing");
+  const sent = calls[1].payload as { receipt_id: string; answers: unknown[] };
+  assert.equal(sent.receipt_id, "p-1");
+  assert.deepEqual(sent.answers, [
+    { subject: "research", id: RECORD.id, choice: "confirm", note: null },
+    { subject: "research", id: OBSERVED.id, choice: "reject", note: "Wrong system." },
+    { subject: "claim", id: "C1", choice: "approve", note: "Ship it." }]);
+  assert.deepEqual(live.shown.filter((s) => s.kind === "select").map((s) => s.options),
+    [["Confirm", "Reject", "Later"], ["Confirm", "Reject", "Later"], ["Approve", "Reject", "Later"]]);
+});
+
+test("the dialog shows the source, the verbatim quote, the claim and the reason no spike could decide it", () => {
+  const title = itemTitle(OBSERVED, 2, 3);
+  for (const text of ["2 of 3", "runtime source: deploy output", 'Quote: "stable since v2"', "For claim: The API is stable.",
+    "Why no deterministic check: Needs production credentials."]) assert.ok(title.includes(text), text);
+  assert.ok(itemTitle(DECISION, 1, 1).includes("Ship it?"));
+  const long = itemTitle({ ...RECORD, quote: `${"x".repeat(900)} THE QUALIFICATION AT THE END` }, 1, 1);
+  assert.ok(long.includes("THE QUALIFICATION AT THE END") && !long.includes("…"), "the human reads the whole quote");
+});
+
+test("RPC-like: standard select/input work without a custom component", async () => {
+  const { ctx } = ctxFor({ selects: ["Confirm"], inputs: ["fine"] });
+  const { trusted, calls } = bridge([RECORD]);
+  assert.equal(await run(ctx, trusted), refreshed);
+  assert.equal((calls[1].payload as { answers: Array<{ note: string }> }).answers[0].note, "fine");
+});
+
+test("print and JSON (no UI), or a UI without select/input: nothing is presented, nothing spent", async () => {
+  for (const options of [{ hasUI: false }, { select: false }, { input: false }]) {
+    const { ctx } = ctxFor({ selects: ["Confirm"], inputs: [""] }, options);
+    const { trusted, calls } = bridge([RECORD]);
+    const original = blocked();
+    assert.equal(await run(ctx, trusted, original), original, JSON.stringify(options));
+    assert.deepEqual(calls, [], JSON.stringify(options));
+  }
+});
+
+test("nothing is presented without a batch the core says can be shown; another blocker does not stop it", async () => {
+  const noBatch = { ...blocked(), result: { ...blocked().result, run: { id: "run-1", status: "active", confirmation_batch: null } } } as unknown as Response;
+  for (const response of [blocked("unavailable"), blocked("human", "already_presented"), blocked("human", "interaction_limit"),
+    noBatch, refreshed]) {
+    const { ctx } = ctxFor({ selects: ["Confirm"], inputs: [""] });
+    const { trusted, calls } = bridge([RECORD]);
+    assert.equal(await run(ctx, trusted, response), response);
+    assert.deepEqual(calls, []);
+  }
+  // An open claim leads the reason, and the human is still asked.
+  const { ctx } = ctxFor({ selects: ["Confirm"], inputs: [""] });
+  const { trusted, calls } = bridge([RECORD]);
+  assert.equal(await run(ctx, trusted, blocked("human", null, "claim.research_missing")), refreshed);
+  assert.deepEqual(calls.map((c) => c.operation), ["evidence_presentation", "evidence_confirmation"]);
+});
+
+test("cancelling any dialog, or running past the deadline, submits nothing and the batch is evaluated again", async () => {
+  const cases: Array<[string, Script, number]> = [
+    ["cancel first select", { selects: [undefined], inputs: [] }, 60_000],
+    ["cancel second select", { selects: ["Confirm", undefined], inputs: [""] }, 60_000],
+    ["cancel the note", { selects: ["Confirm"], inputs: [undefined] }, 60_000],
+    ["a label that was not offered", { selects: ["Approve"], inputs: [""] }, 60_000],
+    ["deadline already past", { selects: ["Confirm"], inputs: [""] }, -1]];
+  for (const [label, script, ms] of cases) {
+    const { ctx } = ctxFor(script);
+    const { trusted, calls } = bridge([RECORD, OBSERVED]);
+    assert.equal(await run(ctx, trusted, blocked(), Date.now() + ms), refreshed, label);  // the shown batch is spent
+    assert.ok(!calls.some((c) => c.operation === "evidence_confirmation"), label);
+  }
+});
+
+test("the dialogs are given the time that is left, so a stuck dialog times out", async () => {
+  const { ctx, shown } = ctxFor({ selects: ["Later"], inputs: [] });
+  const deadline = Date.now() + 5_000;
+  assert.deepEqual(await askItems([RECORD], ctx, deadline), [{ subject: "research", id: RECORD.id, choice: "later", note: null }]);
+  const timeout = (shown[0].opts as { timeout: number }).timeout;
+  assert.ok(timeout > 0 && timeout <= 5_000, String(timeout));
+});
+
+test("Later asks for no note, and an all-Later batch submits no receipt at all", async () => {
+  const { ctx, shown } = ctxFor({ selects: ["Later", "Later"], inputs: [] });
+  const { trusted, calls } = bridge([RECORD, OBSERVED]);
+  assert.equal(await run(ctx, trusted, blocked()), refreshed);
+  assert.equal(shown.filter((s) => s.kind === "input").length, 0);
+  assert.deepEqual(calls.map((c) => c.operation), ["evidence_presentation"]);
+});
+
+test("a refused presentation, a refused receipt, or an error returns the original response", async () => {
+  const original = blocked();
+  const { ctx } = ctxFor({ selects: ["Confirm"], inputs: [""] });
+  const refused = async () => ({ type: "evidence_refused", result: { type: "Fault" } });
+  assert.equal(await run(ctx, refused, original), original);
+  const notAllowed = bridge([RECORD], { type: "evidence_receipt", result: { type: "Fault" } });
+  assert.equal(await run(ctxFor({ selects: ["Confirm"], inputs: [""] }).ctx, notAllowed.trusted, original), refreshed);
+  const throwing = async () => { throw new Error("bridge down"); };
+  assert.equal(await run(ctxFor({ selects: ["Confirm"], inputs: [""] }).ctx, throwing, original), original);
+});
+
+test("the wait notice applies only to the sole, unspent, human-answerable evidence blocker of an active run", () => {
+  assert.equal(evidenceConfirmationWait(blocked().result), true);
+  assert.equal(evidenceConfirmationWait(blocked("unavailable").result), false);
+  for (const error of ["already_presented", "interaction_limit"])
+    assert.equal(evidenceConfirmationWait(blocked("human", error).result), false, error);  // nothing will ask: block
+  assert.equal(evidenceConfirmationWait(blocked("human", null, "claim.research_missing").result), false);  // the open claim leads
+  const terminal = blocked(); (terminal.result as { run: { status: string } }).run.status = "converged";
+  assert.equal(evidenceConfirmationWait(terminal.result), false);
+  const mixed = blocked(); (mixed.result as { reasons: unknown[] }).reasons.push({ code: "run.corrupt", parameters: {} });
+  assert.equal(evidenceConfirmationWait(mixed.result), false);
+});
+
+test("the host tells the core whether it can show a dialog, at every report", async () => {
+  const sent: unknown[] = [];
+  const trusted = async (request: PrivateIngressRequest) => { sent.push(request.payload); return {}; };
+  for (const [options, surface] of [[{}, "human"], [{ hasUI: false }, "unavailable"], [{ select: false }, "unavailable"]] as const)
+    await observeSurface("run-1", ctxFor({ selects: [], inputs: [] }, options).ctx, trusted as never);
+  assert.deepEqual(sent, [{ surface: "human" }, { surface: "unavailable" }, { surface: "unavailable" }]);
+  await observeSurface("run-1", ctxFor({ selects: [], inputs: [] }).ctx, (async () => { throw new Error("down"); }) as never);
+});
+
+test("a surface that could not be recorded as present is recorded as unavailable (fail closed)", async () => {
+  const sent: string[] = [];
+  const failsForHuman = async (request: PrivateIngressRequest) => {
+    const surface = (request.payload as { surface: string }).surface;
+    sent.push(surface);
+    if (surface === "human") throw new Error("store unavailable");
+    return {};
+  };
+  await observeSurface("run-1", ctxFor({ selects: [], inputs: [] }).ctx, failsForHuman as never);
+  assert.deepEqual(sent, ["human", "unavailable"]);
+  // a host that never had a surface says unavailable once and does not retry; a recorded human is not followed by a second call
+  sent.length = 0;
+  await observeSurface("run-1", ctxFor({ selects: [], inputs: [] }, { hasUI: false }).ctx, failsForHuman as never);
+  await observeSurface("run-1", ctxFor({ selects: [], inputs: [] }).ctx, (async (r: PrivateIngressRequest) => { sent.push("ok:" + (r.payload as { surface: string }).surface); return {}; }) as never);
+  assert.deepEqual(sent, ["unavailable", "ok:human"]);
+});
+
+test("observeSurface says whether the core holds the observation: a typed fault or a throw is a failure", async () => {
+  const ctx = ctxFor({ selects: [], inputs: [] }).ctx;
+  const reply = (value: unknown) => (async () => value) as never;
+  assert.equal(await observeSurface("run-1", ctx, reply({ type: "Allow" })), true);
+  assert.equal(await observeSurface("run-1", ctx, reply({ result: { type: "Allow" } })), true);
+  assert.equal(await observeSurface("run-1", ctx, reply({ result: { type: "Fault", code: "unavailable" } })), false);
+  assert.equal(await observeSurface("run-1", ctx, reply({ type: "Fault", code: "unavailable" })), false);
+  assert.equal(await observeSurface("run-1", ctx, (async () => { throw new Error("down"); }) as never), false);
+  // no UI: one attempt as unavailable, no second
+  const sent: string[] = [];
+  const noUi = ctxFor({ selects: [], inputs: [] }, { hasUI: false }).ctx;
+  assert.equal(await observeSurface("run-1", noUi, (async (r: PrivateIngressRequest) => { sent.push((r.payload as { surface: string }).surface); throw new Error("x"); }) as never), false);
+  assert.deepEqual(sent, ["unavailable"]);
+});

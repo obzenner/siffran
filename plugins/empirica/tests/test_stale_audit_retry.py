@@ -54,7 +54,7 @@ class StaleAuditRetryTests(unittest.TestCase):
     def restore(self):
         self.coordinator = ProductionCoordinator(
             self.workspace, Harness(), self.runs, self.artifacts, PROFILE, {})
-        self.protocol = AuditProtocol(PROFILE,
+        self.protocol = AuditProtocol(PROFILE, audit_retrieval=["local", "workspace"],
             dispatch=lambda request, _profile: self.coordinator.handle(request["command"], "protocol"),
             child_event_ingress=lambda _p, run, child, event:
                 self.coordinator.trusted_child_event(run, child, event),

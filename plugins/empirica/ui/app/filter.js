@@ -11,18 +11,17 @@ function holds(f, choice, x) {
 }
 
 /**
- * What stays in the view: the projects, runs and claims that pass, each project keeping its name and its place
- * number (`n`, from 1, in the data's order: the label of a project without a name), so its label does not change;
+ * What stays in the view: the projects, runs and claims that pass, each project keeping the label the observer gave it;
  * support edges and previous attempts only between what stays.
  * A run keeps its own facts: `total` is how many claims it has and `approved` how many of them the plugin
  * approved, whatever the filters show of them.
- * @returns {{projects:{id:string,name:?string,n:number,runs:object[]}[], counts:{projects:number,runs:number,claims:number}}}
+ * @returns {{projects:{id:string,name:?string,label:string,since:?number,runs:object[]}[], counts:{projects:number,runs:number,claims:number}}}
  */
 export function apply(data, choice, filters) {
   const runF = filters.filter((f) => f.of === "run" && chosen(f, choice));
   const claimF = filters.filter((f) => f.of === "claim" && chosen(f, choice));
   const projects = [];
-  for (const [i, p] of data.projects.entries()) {
+  for (const p of data.projects) {
     const runs = [];
     for (const r of p.runs) {
       if (!runF.every((f) => holds(f, choice, r))) continue;
@@ -31,7 +30,7 @@ export function apply(data, choice, filters) {
       const ids = new Set(claims.map((c) => c.id));
       runs.push({ ...r, total: r.claims.length, approved: approved(r), claims, edges: r.edges.filter((e) => ids.has(e.from) && ids.has(e.to)), root: ids.has(r.root) ? r.root : null });
     }
-    if (runs.length) projects.push({ id: p.id, name: p.name, n: i + 1, runs });
+    if (runs.length) projects.push({ id: p.id, name: p.name, label: p.label, since: p.since, runs });
   }
   const kept = new Set(projects.flatMap((p) => p.runs.map((r) => r.key)));
   for (const p of projects) for (const r of p.runs) if (!kept.has(r.previous)) r.previous = null;
@@ -45,12 +44,13 @@ export function apply(data, choice, filters) {
 export function showing(projects, order, quiet) {
   const rs = projects.flatMap((p) => p.runs), cs = rs.flatMap((r) => r.claims);
   const unsettled = (c) => c.state === quiet("claim") && !settled(c, quiet);
-  const count = (domain, xs) => order(domain).map((value) => ({ value, n: xs.filter((x) => x === value).length })).filter((x) => x.n);
+  const tally = (domain, xs) => order(domain).map((value) => ({ value, n: xs.filter((x) => x === value).length })).filter((x) => x.n);
   return {
-    runs: count("run", rs.map((r) => r.state)), audits: count("audit", rs.map((r) => r.audit)),
-    diagnostics: count("diagnostic", rs.map((r) => r.diagnostic)),
-    claims: count("claim", cs.filter((c) => !unsettled(c)).map((c) => c.state)),
-    unsettled: count("review", cs.filter(unsettled).map((c) => c.review)),
+    total: rs.length,
+    runs: tally("run", rs.map((r) => r.state)), audits: tally("audit", rs.map((r) => r.audit)),
+    diagnostics: tally("diagnostic", rs.map((r) => r.diagnostic)),
+    claims: tally("claim", cs.filter((c) => !unsettled(c)).map((c) => c.state)),
+    unsettled: tally("review", cs.filter(unsettled).map((c) => c.review)),
     gating: cs.filter((c) => c.gating).length, supports: rs.reduce((n, r) => n + r.edges.length, 0), attempts: rs.filter((r) => r.previous).length,
   };
 }

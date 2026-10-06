@@ -10,6 +10,8 @@ tags:
 links:
 - target: 20
   kind: Amends
+- target: 67
+  kind: Relates to
 ---
 
 # Check workspace citations verbatim when research is submitted

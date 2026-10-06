@@ -15,6 +15,7 @@ The adapter supplies a :class:`Source`: where runs are, when each changed, and w
 """
 from __future__ import annotations
 
+import time
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -32,6 +33,8 @@ from .observation import ObservationUnavailable, build_observation_snapshot
 from .snapshot import GraphInvalid, HistoryCorrupt, active_spike_heads, assemble
 
 CONTRACT = "empirica-ui-view/v1"
+#: The label of a project no repository matched: a stable word, never a position in the view.
+UNNAMED_PROJECT = "Unnamed project"
 #: The marker the plugin's pre-v2 state documents carry instead of ``protocol``/``state_schema``.
 _PRE_V2_MARKER = "schema"
 #: A malformed recorded artifact that ``traverse_history`` admits (it checks only that each is an
@@ -129,7 +132,7 @@ class Observer:
         detail = {"contract": CONTRACT, "key": row["key"], "version": version, "goal": goal,
                   "budgets": None if state is None else _core.budgets(state),
                   "control": None if state is None else _core.control(state),
-                  "audit": None, "residuals": [], "stale": [], "author": None, "auditor": None,
+                  "audit": None, "residuals": [], "prompt_error": None, "waiting": [], "stale": [], "author": None, "auditor": None,
                   "steps": [], "claims": []}
         return Observed(summary, detail)
 
@@ -165,7 +168,11 @@ class Observer:
         except _MALFORMED_HISTORY:
             return self._partial(row, base_digest, "history-corrupt", **partial)
         version = _version(base_digest, snapshot.observation_digest)
-        facts, detail = _core.project(snapshot, self._messages)
+        try:
+            facts, detail = _core.project(snapshot, self._messages)
+        except ValueError:
+            # A reason that cannot be worded is a fact about this one run, never about the whole store.
+            return self._partial(row, base_digest, "unreadable", **partial)
         return Observed({**row, "version": version, "state": state.status, "diagnostic": None, **facts},
                         {"contract": CONTRACT, "key": row["key"], "version": version, **detail},
                         active_spike_heads(snapshot.history, snapshot.graph), snapshot.observation_digest)
@@ -214,7 +221,10 @@ class Observer:
         rows = []
         for project_id, runs in projects.items():
             meta = self._source.project(project_id)
-            rows.append({"id": project_id, "name": meta.name, "repo": meta.repo, "runs": runs})
+            since = [run["updated"] for run in runs if run["updated"] is not None]
+            rows.append({"id": project_id, "name": meta.name, "label": meta.name or UNNAMED_PROJECT,
+                         "repo": meta.repo, "since": min(since, default=None), "runs": runs})
+        _tell_apart(rows)
         view = {"contract": CONTRACT,
                 "token": digest([[p["id"], p["name"], p["repo"], [[run["key"], run["version"]] for run in p["runs"]]]
                                  for p in rows]),
@@ -223,6 +233,56 @@ class Observer:
 
     def view(self) -> dict[str, Any]:
         return self.observe()[0]
+
+    def detail(self, key: str) -> dict[str, Any] | None:
+        """One run's detail by its view key, projected alone (the rest of the store is only listed, and a
+        run whose cached projection is current is not projected again); ``None`` when no such run."""
+        self._source.refresh()
+        keys = frozenset(self._source.keys())
+        found = next((k for k in keys if run_key(k) == key), None)
+        return None if found is None else self._run(found, keys).detail
+
+
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+#: How finely a moment is told, coarse to fine; a label gets only as fine as it needs to be unique in its view.
+_GRAINS = ("%d %b", "%d %b %H:%M", "%d %b %H:%M:%S")
+
+
+def _unnamed(first_run: float | None, grain: int = 0) -> str:
+    """A project no repository matched, told apart from the others by a human fact: when it began (UTC)."""
+    if first_run is None:
+        return UNNAMED_PROJECT
+    moment = time.gmtime(first_run)
+    text = f"{moment.tm_mday} {_MONTHS[moment.tm_mon - 1]}"
+    if grain >= 1:
+        text += f" {moment.tm_hour:02d}:{moment.tm_min:02d}"
+    if grain >= 2:
+        text += f":{moment.tm_sec:02d}"
+    if grain >= 3:
+        text += f".{int((first_run % 1) * 1000):03d}"
+    return f"{UNNAMED_PROJECT} · since {text}"
+
+
+def _tell_apart(rows: list[dict[str, Any]]) -> None:
+    """Make the labels of the unnamed projects unique within this view by the finest fact they share least: the
+    day, else the minute, else the second, else the millisecond their first run began. Never a goal (a goal is
+    never a title), an id or a position."""
+    unnamed = [r for r in rows if r["name"] is None]
+    for grain in range(4):
+        for row in unnamed:
+            row["label"] = _unnamed(row["since"], grain)
+        seen: dict[str, int] = {}
+        for row in unnamed:
+            seen[row["label"]] = seen.get(row["label"], 0) + 1
+        duplicated = {label for label, n in seen.items() if n > 1}
+        if not duplicated:
+            return
+        # only the projects still sharing a label are told finer; the rest keep their coarser, shorter one
+        coarse = {id(r): r["label"] for r in unnamed if r["label"] not in duplicated}
+        unnamed = [r for r in unnamed if id(r) not in coarse]
+        for row in rows:
+            if id(row) in coarse:
+                row["label"] = coarse[id(row)]
 
 
 def _version(base_digest: str, observation_digest: str) -> str:

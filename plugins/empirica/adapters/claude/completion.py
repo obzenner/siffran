@@ -5,7 +5,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from application.protocol import BUDGET_EXHAUSTED_NOTICE, HUMAN_WAIT_NOTICE
+from application.protocol import BUDGET_EXHAUSTED_NOTICE, EVIDENCE_REPORT_NOTICE, HUMAN_WAIT_NOTICE
 from core.governance import expected_approval_kind
 from .correlation import PROTOCOL, request_id as new_request_id
 from .fail_direction import FailureDirection, blocks_on_failure
@@ -98,6 +98,23 @@ def _human_approval_wait(result: Result) -> bool:
             and result.reasons[0].code == _HUMAN_WAIT_REASON[governance.state])
 
 
+def _evidence_report_directive(result: Result) -> bool:
+    """True only when the human confirmation is the sole blocker, a human can be asked, and the batch has
+    not been shown yet. The Stop then blocks with the directive to report convergence (the human is asked inside
+    that call); it never pauses.
+
+    The core returns ``evidence.confirmation_required`` only when nothing else blocks the run, and projects
+    ``confirmation_batch.prompt_error``: ``already_presented`` (Later, cancel or timeout already spent this
+    derivation), ``interaction_limit`` and ``unavailable`` all mean no dialog will come, so the Stop keeps
+    blocking with the real reason and the author changes the work or accepts the residual."""
+    run = result.run
+    if run is None or run.status != "active" or len(result.reasons) != 1:
+        return False
+    reason, batch = result.reasons[0], run.get("confirmation_batch")
+    return (reason.code == "evidence.confirmation_required" and reason["parameters"].get("route") == "human"
+            and batch is not None and batch["prompt_error"] is None)
+
+
 def _budget_exhausted_wait(result: Result) -> bool:
     """True only for the sole ``budget.exhausted`` blocker of an active run (ADR-0063 exhaustion rule).
 
@@ -128,6 +145,10 @@ def stop_result(response: object) -> StopResult:
     if kind == "Block":
         if _human_approval_wait(result):
             return _settlement(HUMAN_WAIT_NOTICE)
+        if _evidence_report_directive(result):
+            # Never a pause: in Claude the human is asked inside report_convergence (MCP elicitation), so a Stop that
+            # waited would end the turn with nobody asked. Block with the one directive that gets the human asked.
+            return StopResult(2, stderr=EVIDENCE_REPORT_NOTICE + "\n")
         if _budget_exhausted_wait(result):
             return _settlement(BUDGET_EXHAUSTED_NOTICE.format(
                 resource=result.reasons[0]["parameters"]["resource"]))

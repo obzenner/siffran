@@ -577,7 +577,7 @@ class GovernancePresentationTests(unittest.TestCase):
         from core.governance import initial, revise
         budgets = {"max_passes": 8, "max_spawns": 0, "max_audit_spawns": 1}
         invocation = {"host": "test", "interactive": True,
-                      "signal": "operator", "delegation": False}
+                      "signal": "operator", "delegation": False, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}
         g = revise("Exact goal", initial("Exact goal", budgets, "deliberative", invocation, None),
                    proposal={"budgets": budgets, "rationale": SIZED_RATIONALE})
         g.update(scope=copy.deepcopy(GRAPH), context=copy.deepcopy(CONTEXT),

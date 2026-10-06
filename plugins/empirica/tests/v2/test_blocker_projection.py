@@ -209,11 +209,6 @@ class BlockerProjectionTests(ConformanceCase):
                 claim_id=graph["root"], source_kind=source, result=result)))
         cases.append((drv, run_id, "evidence.conflict"))
 
-        drv = self.bind_driver("blocker-projection", "decision", "Human decision")
-        run_id = self.start_run(drv)
-        self.require_graph_admitted(drv, run_id, canonical_graph(n_claims=1, kind="needs-decision"))
-        cases.append((drv, run_id, "claim.human_decision"))
-
         for case_drv, case_run, reason in cases:
             with self.subTest(reason=reason):
                 self._stop_and_assert_parity(case_drv, case_run, reason)
@@ -253,7 +248,7 @@ class BlockerProjectionTests(ConformanceCase):
         self.assertEqual(claim_residuals, [
             ("M", "M", "claim.research_missing"),
             ("P", "M", "claim.research_missing"),
-            ("R", "R", "claim.human_decision"),
+            ("R", "R", "evidence.confirmation_required"),
         ])
 
 

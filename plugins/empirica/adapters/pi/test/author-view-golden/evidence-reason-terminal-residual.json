@@ -1,0 +1,70 @@
+{
+  "result": {
+    "type": "Allow",
+    "converged": false,
+    "run": {
+      "id": "run-fx",
+      "goal": "Prove the public contract is internally consistent.",
+      "status": "stopped_budget",
+      "contract": {
+        "id": "empirica/public",
+        "version": "3.0.0",
+        "relevant_sections": [
+          "budget",
+          "terminal"
+        ],
+        "digest": "sha256:45fa33dc3aa269f8702ae41c002f7ee29edb005b1129e7ac65c4a33b5f8990af"
+      },
+      "obligations": {
+        "active": [],
+        "deferred": []
+      },
+      "residuals": [
+        {
+          "code": "evidence.confirmation_required",
+          "sections": [
+            "evidence/research"
+          ],
+          "parameters": {
+            "route": "human",
+            "record_ids": [
+              "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+              "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+            ]
+          },
+          "next_actions": [
+            "human.confirm_evidence",
+            "residual.accept"
+          ]
+        }
+      ],
+      "freshness": {
+        "changes": []
+      },
+      "children": [],
+      "host": {
+        "profile_id": "claude-code@2.1.278",
+        "tier": "foreground_only",
+        "missing_capabilities": [
+          "host.async_unsupported"
+        ]
+      },
+      "terminal_note": "Derivation budget exhausted.",
+      "next_actions": [
+        "run.inspect"
+      ],
+      "untrusted_delimiters": {
+        "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+        "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+      },
+      "governance": null,
+      "audit": {
+        "state": "required",
+        "independence": "unverified",
+        "findings": []
+      },
+      "confirmation_batch": null
+    }
+  },
+  "text": "Allow (converged=false) stopped_budget — no governance\nrun_id: run-fx\nAudit: required\n\nResiduals:\n  evidence.confirmation_required\n    params: route=human\n    next: human: confirmation; report_convergence intent=stop"
+}

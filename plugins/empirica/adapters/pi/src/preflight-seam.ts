@@ -15,6 +15,7 @@
 // The response does not report async/outputMode/forceTopLevelAsync, so those are checked on the
 // launch request the adapter is about to send (`descriptor.launch`), not read from the response.
 
+import { auditRetrievalFrom, type RetrievalKind } from "./audit-retrieval.ts";
 import { THINKING_LEVELS } from "./host-profile.ts";
 import type { SubagentInventory } from "./subagent-inventory.ts";
 
@@ -61,6 +62,8 @@ export interface AdmittedAuditContract {
   /** The resolved launch model with its reasoning level removed. */
   readonly model: string;
   readonly launch_contract_version: number;
+  /** What the child can retrieve, from its effective tool allowlist (audit-retrieval.ts). */
+  readonly audit_retrieval: readonly RetrievalKind[];
 }
 
 export type AuditAdmission =
@@ -121,5 +124,10 @@ export function admitAuditPreflight(descriptor: AuditPreflightDescriptor, respon
   const model = withoutThinkingLevel(resolvedModel);
   if (model !== withoutThinkingLevel(descriptor.expected.model))
     return refuse("model-substituted", `preflight resolved ${resolvedModel}, the configured auditor model is ${descriptor.expected.model}`);
-  return { kind: "accept", contract: { agent_file_path: agent.filePath, model, launch_contract_version: contractVersion } };
+  const tools = contract.tools;
+  const allowlist = isRecord(tools) ? tools.effectiveAllowlist : undefined;
+  if (!Array.isArray(allowlist) || !allowlist.every((tool) => typeof tool === "string"))
+    return refuse("malformed-response", "contract.tools.effectiveAllowlist is missing or not a list of tool names");
+  return { kind: "accept", contract: { agent_file_path: agent.filePath, model, launch_contract_version: contractVersion,
+    audit_retrieval: auditRetrievalFrom(allowlist) } };
 }

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { apply } from "../app/filter.js";
-import { U, viewLayout } from "../elements/core/view-layout.js";
+import { U, attemptPath, viewLayout } from "../elements/core/view-layout.js";
 
 const data = JSON.parse(readFileSync(new URL("../../vendor/contracts/empirica-ui-view/v1/fixtures/view.json", import.meta.url)));
 const { filters } = JSON.parse(readFileSync(new URL("../catalogue.json", import.meta.url)));
@@ -61,5 +61,52 @@ test("R3 next attempts: one line per run whose previous attempt is in the view",
   assert.ok(prev.length >= 1);
 });
 
+test("where even the smallest scale does not fit, the rows stay within the width and only the height overflows", () => {
+  const small = { width: 500, height: 300 }, minScale = 0.67;
+  const L = viewLayout(many, small, () => 30, minScale);
+  assert.ok(L.width * minScale <= small.width + 1e-6, `${L.width} wide at ${minScale}`);
+  assert.ok(L.height * minScale > small.height, "this data really does overflow");
+});
+
 test("deterministic", () => assert.deepEqual(viewLayout(all, BOX), viewLayout(all, BOX)));
 test("nothing to show", () => assert.deepEqual(viewLayout([], BOX).runs, []));
+
+// Q3b-9: the dashed line between runs stays out of the diamonds, the claims under them and the project's label.
+const bezier = (d) => {
+  const n = d.match(/-?\d+(\.\d+)?/g).map(Number), [x0, y0, x1, y1, x2, y2, x3, y3] = n;
+  return Array.from({ length: 41 }, (_, i) => { const t = i / 40, u = 1 - t; return { t, x: u ** 3 * x0 + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t ** 3 * x3, y: u ** 3 * y0 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t ** 3 * y3 }; });
+};
+const R = 6;
+const diamond = (c, p) => Math.abs(p.x - c.x) + Math.abs(p.y - c.y) < R - 0.01;
+test("stacked runs: the line runs down the margin, through neither diamond", () => {
+  for (const [a, b] of [[{ x: 100, y: 60 }, { x: 100, y: 140 }], [{ x: 100, y: 140 }, { x: 100, y: 60 }], [{ x: 100, y: 60 }, { x: 120, y: 140 }]]) {
+    const pts = bezier(attemptPath(a, b, R));
+    assert.ok(pts.every((p) => !diamond(a, p) && !diamond(b, p)), "clear of both diamonds");
+    if (a.x === b.x) assert.ok(pts.slice(2, -2).every((p) => p.x < a.x - R - 1), "in the margin left of the column");
+  }
+});
+test("side by side: the line stays below the label band, above the heads", () => {
+  const labelBottom = 16, headTop = labelBottom + U.pad + 2;  // a project's first row of heads sits under the label and the padding
+  const a = { x: 30, y: headTop + 8 }, b = { x: 130, y: headTop + 8 };
+  const pts = bezier(attemptPath(a, b, R));
+  assert.ok(pts.every((p) => p.y > labelBottom), `peak ${Math.min(...pts.map((p) => p.y))} is below the label band`);
+  assert.ok(pts.slice(1, -1).every((p) => !diamond(a, p) && !diamond(b, p)));
+});
+test("negative control: the old fixed bow would climb through a stacked pair's upper diamond", () => {
+  const a = { x: 100, y: 60 }, b = { x: 100, y: 140 };
+  const old = bezier(`M${a.x},${a.y} C${a.x},${Math.min(a.y, b.y) - 14} ${b.x},${Math.min(a.y, b.y) - 14} ${b.x},${b.y}`);
+  assert.ok(old.slice(2, -2).some((p) => diamond(a, p) || Math.abs(p.x - a.x) < R), "the old route is caught by the same predicate");
+});
+
+import { wrapLabel } from "../elements/core/view-layout.js";
+test("a long project label wraps at its separators within the cap, and never sets a box wider than the cap", () => {
+  assert.deepEqual(wrapLabel("Unnamed project · since 23 Sep 19:49 · 2 runs"), ["Unnamed project", "since 23 Sep 19:49 · 2 runs"]);
+  assert.deepEqual(wrapLabel("atlas · 6 runs"), ["atlas · 6 runs"]);
+  const long = wrapLabel("x".repeat(80) + " · 3 runs");
+  assert.ok(long.length <= 2 && long.every((l) => l.length <= 28) && long[0].endsWith("…"));
+});
+test("a box is as wide as its marks and its capped label, not its full label", () => {
+  const p = (n) => ({ id: n, n: 1, runs: [{ key: n + "r", previous: null, root: null, claims: [], edges: [] }] });
+  const wide = viewLayout([p("a")], BOX, () => ({ chars: 200, lines: 1 })).projects[0].w, capped = viewLayout([p("a")], BOX, () => ({ chars: 28, lines: 2 })).projects[0];
+  assert.ok(capped.w < wide && capped.lines === 2);
+});

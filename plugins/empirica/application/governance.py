@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from core import governance as policy
+from core import confirmation, governance as policy
 from core.evaluation import bootstrap_precondition
 from core.records import Corrupt
 from .location import decode_handle
@@ -50,7 +50,8 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                 if governed == policy.plain(state.governance):
                     return c._inert_with_run(rid, snapshot, presentation=True)
             else:
-                reason = policy.decision_error(run_id, governed, payload)
+                reason = policy.decision_error(run_id, governed, payload,
+                                             confirmation.interactions(snapshot))
                 if reason == "inert":
                     # Historical and raw-submission receipts replay before current admission rules.
                     return c._inert_with_run(rid, snapshot, presentation=True)

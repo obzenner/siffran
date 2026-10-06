@@ -176,6 +176,21 @@ def trusted_governance_decision(profile_id: str, run_id: str, payload: dict) -> 
     return build_service(profile_id).trusted_governance_decision(run_id=run_id, payload=payload)
 
 
+def trusted_evidence_confirmation(profile_id: str, run_id: str, payload: dict) -> dict:
+    """One human receipt of per-item decisions; private, never exposed by public dispatch."""
+    return build_service(profile_id).trusted_evidence_confirmation(run_id=run_id, payload=payload)
+
+
+def trusted_human_surface(profile_id: str, run_id: str, payload: dict) -> dict:
+    """Host-observed: can a human be shown a dialog now? Never exposed by public dispatch."""
+    return build_service(profile_id).trusted_human_surface(run_id=run_id, payload=payload)
+
+
+def trusted_evidence_presentation(profile_id: str, run_id: str, payload: dict) -> dict:
+    """Record that the host showed the human the pending batch; private, never exposed by public dispatch."""
+    return build_service(profile_id).trusted_evidence_presentation(run_id=run_id, payload=payload)
+
+
 def trusted_audit_plan(profile_id: str, run_id: str, child_id: str) -> dict | None:
     """Load the immutable operation committed with one audit reservation."""
     return build_service(profile_id).trusted_audit_plan(run_id=run_id, child_id=child_id)

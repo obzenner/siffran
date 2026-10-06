@@ -67,7 +67,6 @@ plugins/empirica/ui/
                               declared filters, client.js talks to the observer server)
   gallery/index.html          every element x every state, on the observer's demo data
 package.json, package-lock.json   dev-only, exact versions (no ^ or ~)
-eslint.config.mjs, stylelint.config.mjs
 ```
 
 The UI ships built: `dist/` and `vendor/` are committed, and the observer serves this folder. The `make` targets
@@ -78,7 +77,7 @@ Nobody runs `npx` by hand. **[enforced: Makefile]**
 ## 2. Tokens (T)
 
 - **T1.** Tokens use the W3C **Design Tokens (DTCG)** format in `tokens/tokens.json`. It is the only place a
-  raw value (hex, rem, ms) may appear. **[enforced: stylelint, eslint no-restricted-syntax on hex/px literals]**
+  raw value (hex, rem, ms) may appear. **[enforced: `scripts/audit.mjs` T1: no Tailwind arbitrary value, no hex colour, `px` or `ms` literal, bare timer delay or unitless SVG number in code or `styles/app.css`]**
   - Exception: layout-algorithm inputs (the view's mark sizes and gaps, `U` in `core/view-layout.js`) are named
     constants, because the layout runs in JS on numbers; the view's SVG scales them all together. Panel widths are tokens (`width.panel`,
     `panel-min`, `main-min`) that `ev-split` reads at runtime.
@@ -150,6 +149,9 @@ Nobody runs `npx` by hand. **[enforced: Makefile]**
 - **V5. Icons:**
   - Lucide only, copied into `vendor/lucide`.
   - One icon per meaning, declared in `icons.json`; an icon is never used for two meanings.
+  - Within one vocabulary (a `states.json` domain) no two values share a glyph, unless the later declares
+    `"alias": "<the earlier>"` because the two are one state under two names (`outcome.pass` and `supporting` are).
+    **[enforced: `scripts/audit.mjs` V5]**
   - Sizes come from the `icon-s` / `icon-m` tokens. **[enforced: unknown icon names fail lint]**
 - **V6. Typography:**
   - One vendored pairing, **IBM Plex Sans + IBM Plex Mono** (`font` in tokens). Mono only for digests, commands and paths.
@@ -172,8 +174,7 @@ Hierarchy (Brad Frost): **atoms → molecules → organisms → templates → pa
     **[enforced: manifest enum check]**
 - **E3. Rendering is a pure function of inputs.**
   - No `fetch`, no timers, no global state, no reading other elements.
-  - Re-render on `attributeChangedCallback` and on a `.data` setter. **[review + eslint no-restricted-globals in
-    elements/]**
+  - Re-render on `attributeChangedCallback` and on a `.data` setter. **[review; `scripts/audit.mjs` finds an observed attribute nothing sets (E10)]**
   - Exceptions: `ev-hint` (the page-level hint service) and `ev-split` (Esc) listen at document level, and both
     remove those listeners on disconnect. `ev-hint` also observes the DOM while shown and uses one short grace
     timer, so the hint is hoverable and hides when its target is removed.
@@ -211,7 +212,14 @@ Layout:
   `ev-split` (main + resizable side panel). Static wrappers such as stack or cluster elements are not added, because
   the utilities already say it.
 - **L2.** Responsiveness is handled by container queries inside elements, not media queries in pages.
-  **[review]**
+  **[review]** Page-level columns are the one exception: the breakpoints are tokens (`breakpoint.*`, read by Tailwind
+  variants and by `theme()` in `styles/app.css`), never numbers in markup: `wide` (90rem) is where the filters become a
+  sidebar.
+- **L3. Levels.** Imports run down the atomic levels and never up. `core` imports `core`; atoms import core;
+  molecules core and atoms; organisms core, atoms and molecules; `layout` core; `templates` core and templates;
+  `elements/index.js` any element; pages (`app/`, `gallery/`) import only the elements' index, `core`, `templates` and
+  their own folder. A page needing a helper an organism owns means the helper belongs in `core`.
+  **[enforced: `scripts/audit.mjs` L3]**
 
 ## 5. Progressive disclosure (D)
 
@@ -229,13 +237,22 @@ Every element declares which levels it supports, in JSDoc, recorded in the manif
 - **D2.** Detail opens in **one non-modal side panel** (`ev-split`) next to the content, never in a sheet that covers
   or blurs it. The main view stays visible and scrollable, and the divider is draggable (and keyboard-movable), with
   its width remembered and re-clamped when the window changes. The divider is a `separator` with its current,
-  minimum and maximum width. A new selection replaces the panel's content and always opens it; Esc or the panel's
-  close button closes it, clears the selection, and returns focus to where it was. A centred modal dialog is
-  reserved for decisions that block everything else. **[review]**
+  minimum and maximum width. A new selection replaces the panel's content and always opens it. Esc leaves one level
+  (a claim, step or file → its run → its project → nothing, and the panel closes with the last), the panel's close
+  button leaves the whole selection, and either returns focus to the mark just left (a step or a file has none: its
+  run's). A centred modal dialog is reserved for decisions that block everything else. **[enforced: `make ui-browser`
+  walks every edge of `catalogue.json` `route.edges`, at wide and narrow widths, and crawls the panel for controls it
+  does not declare]**
   - Exception: below `panel-min + main-min` there is no room for both, so the panel takes the full width until it
     is closed. Focus moves into the panel when it does, and returns to the invoker on close.
 - **D3.** Clicking always reveals more and never navigates away unexpectedly. Navigation is an explicit link.
   **[review]**
+- **D4. One navigation model** (`VIEW.md` "Navigation"). What is selected is one value of a declared union
+  (`app/route.js`), kept in the URL with the filters and moved only by `navigate` in `app/app.js`. A panel below the
+  top level shows its place as a breadcrumb; Esc leaves one layer at a time through one registry
+  (`elements/core/dismiss.js`: hint, then any open key, then the selection level by level, then the panel); focus goes
+  back to the mark just left, found by data attributes. **[enforced: `make ui-browser` walks every edge of
+  `catalogue.json` `route.edges`]**
 
 ## 6. Copy (C) and the state vocabulary (S)
 
@@ -291,6 +308,18 @@ Every element declares which levels it supports, in JSDoc, recorded in the manif
 
   **[enforced: ui-check]**
 - **G3.** A design change is reviewed on the gallery first and assembled into pages second. **[review]**
+- **G4.** Every vocabulary in `states.json` is shown by the gallery, each value (`catalogue.json`
+  `gallery_state_domains`, or `gallery_other_domains` for those its step strip shows). **[enforced: audit G4]**
+- **C4.** The variables a `t()`, `plain()` or `count()` call gives are exactly the `{placeholders}` of its copy; a
+  value the template cannot fill never reaches the screen as `{name}` (the browser checks the rendered text too).
+  **[enforced: audit C4 and `make ui-browser`]**
+- **E10.** Every attribute an element observes is set somewhere other than its own file. **[enforced: audit E10]**
+- **T8.** Every token in `tokens.json`, in every group (colour tiers, scales, `duration`, `font`, `width`), is used: a
+  primitive by a semantic colour that points at it, a semantic colour by a utility, a `var()` (the vendored Basecoat
+  sheet counts) or `styles/app.css`, any other by its own utility or `--<group>-<name>`; a group with no rule fails.
+  **[enforced: audit T8]** Durations and the divider's step are read from the tokens (`--duration-grace`,
+  `--ev-split-step`) by `ev-hint` and `ev-split`; screen-pixel bounds of the picture live in `catalogue.json`
+  (`picture`).
 
 ## 9. Process
 

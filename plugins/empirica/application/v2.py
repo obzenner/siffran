@@ -120,6 +120,33 @@ class _Service:
             return Coordinator._fault("trusted-governance", "unavailable")
         return response
 
+    def trusted_evidence_confirmation(self, *, run_id, payload) -> dict:
+        """Admit one human receipt of per-item decisions on research and ``needs-decision`` claims."""
+        terminal = self._trusted_terminal(run_id)
+        if terminal:
+            return terminal
+        if not self._valid_trusted("evidenceConfirmationPayload", payload):
+            return Coordinator._fault("trusted-confirmation", "invalid_request")
+        return self._coordinator.trusted_evidence_confirmation(run_id, payload)
+
+    def trusted_evidence_presentation(self, *, run_id, payload) -> dict:
+        """Record that the host showed the human the pending batch; one human interaction."""
+        terminal = self._trusted_terminal(run_id)
+        if terminal:
+            return terminal
+        if not self._valid_trusted("evidencePresentationPayload", payload):
+            return Coordinator._fault("trusted-presentation", "invalid_request")
+        return self._coordinator.trusted_evidence_presentation(run_id, payload)
+
+    def trusted_human_surface(self, *, run_id, payload) -> dict:
+        """Record whether the host can show a human a dialog now; the latest observation counts."""
+        terminal = self._trusted_terminal(run_id)
+        if terminal:
+            return terminal
+        if not self._valid_trusted("humanSurfacePayload", payload):
+            return Coordinator._fault("trusted-surface", "invalid_request")
+        return self._coordinator.trusted_human_surface(run_id, payload)
+
     def trusted_resolve_child(self, *, run_id, native_id) -> str | None:
         """Resolve one native execution through private host correlation only."""
         key = decode_handle(run_id)

@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from adapters import bridge as application_bridge
 from adapters.audit import child_event
+from adapters.invocation import audit_retrieval as observed_audit_retrieval
 
 Dispatch = Callable[[dict, str], dict]
 TrustedEvent = Callable[[str, str, str, dict], dict]
@@ -58,6 +59,7 @@ class AuditProtocol:
         attribution_ingress: TrustedAttribution = application_bridge.trusted_attribution,
         verdict_ingress: TrustedVerdict = application_bridge.trusted_audit_verdict,
         plan_ingress: TrustedPlan = application_bridge.trusted_audit_plan,
+        audit_retrieval: list[str] | None = None,
     ) -> None:
         if execution not in {"foreground", "async"}:
             raise ValueError("audit execution must be foreground or async")
@@ -67,6 +69,7 @@ class AuditProtocol:
         self._attribution = attribution_ingress
         self._verdict = verdict_ingress
         self._plan = plan_ingress
+        self._audit_retrieval = audit_retrieval
 
     def _request(self, command: dict) -> dict:
         response = self._dispatch({
@@ -84,7 +87,10 @@ class AuditProtocol:
                 and response["result"].get("type") in {"Allow", "Inert"})
 
     def prepare(self, run_id: str, *, role_profile: str) -> AuditLaunchPlan:
-        """Atomically reserve one host-owned audit child and bind the current dossier."""
+        """Atomically reserve one host-owned audit child and bind the current dossier.
+
+        The launch is refused, and the reservation rejected, when the auditor retrieval the host
+        observes now is not the one recorded at ``StartRun``: research was routed by the recorded one."""
         current = self._request({"type": "GetRun", "run_id": run_id})
         current_result = current.get("result", {})
         current_run = current_result.get("run", {}) if isinstance(current_result, Mapping) else {}
@@ -120,6 +126,8 @@ class AuditProtocol:
             if (not isinstance(argument, dict) or not isinstance(operation_id, str)
                     or durable_role != role_profile):
                 raise AuditProtocolError("durable audit operation unavailable")
+            if sorted(operation["audit_retrieval"]) != self._observed_retrieval():
+                raise AuditProtocolError("audit retrieval capability changed since the run started")
             return AuditLaunchPlan(
                 self.profile_id, run_id, child_id, durable_role, argument, operation_id)
         except Exception as exc:
@@ -130,6 +138,12 @@ class AuditProtocol:
             if isinstance(exc, AuditProtocolError):
                 raise
             raise AuditProtocolError("durable audit operation unavailable") from exc
+
+    def _observed_retrieval(self) -> list[str]:
+        """The retrieval kinds the host's auditor is observed to cover now."""
+        if self._audit_retrieval is None:
+            return observed_audit_retrieval(self.profile_id)
+        return sorted(self._audit_retrieval)
 
     def reconcile_orphans(self, run_id: str, *, native_prefix: str, include_pending: bool = True) -> int:
         current = self._request({"type": "GetRun", "run_id": run_id})

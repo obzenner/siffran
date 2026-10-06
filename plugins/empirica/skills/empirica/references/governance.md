@@ -26,6 +26,16 @@ Reviewer configuration still comes from the host, and observed audit independenc
 
 Reviewer configuration is not itself evidence of independence. Audit identity classification and its fail-closed cases are owned by the [audit guide](audit.md#independence-reporting). Only exact documented model/version mappings establish identity equivalence across providers; moving/private aliases remain unknown.
 
+## Human confirmations are not configuration
+
+Run configuration is the only thing the configuration dialog approves. Confirming research or answering a
+`needs-decision` claim is a separate human receipt at the end of a pass (ADR-0067): the host first records a
+presentation of the pending set (it spends one human interaction, counted together with configuration
+presentations against the 128-per-run allowance), then one receipt carries one decision per item. A receipt
+binds the presentation it answers and each item's record or claim wording, so it can never be mistaken for a
+configuration approval, and an identical replay is inert while a conflicting one blocks. With no approval
+ingress (route `unavailable`) nothing is asked and the requirement stays open.
+
 ## Timeout, compatibility, and recovery
 
 The host decision timeout defaults to 900 seconds. `EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS` accepts host-owned overrides written as whole seconds in plain decimal digits from 1 to 1500 (no fractions, signs, exponents, or hex); a set but malformed or out-of-range value fails extension or server start with an error naming the variable instead of defaulting. It appears in the dialog header and is never approvable. Pi shares one timeout across review and locked confirmation.
@@ -33,3 +43,9 @@ The host decision timeout defaults to 900 seconds. `EMPIRICA_GOVERNANCE_TIMEOUT_
 Public contract 3.0.0 keeps wire `empirica/v2` and state family `empirica.run/2`. Persisted documents with removed governance fields are intentionally incompatible with the strict current schema and fail closed as `run.corrupt`. A later `StartRun` creates a fresh generation. The runtime never mutates, repairs, converts, or carries approval from an obsolete document.
 
 Deterministic unit/integration tests are not native human-approval or installed-host qualification receipts.
+
+## Upgrading from 4.x to 5.0
+
+Old runs, artifacts and receipts are not migrated and fail closed. To move over, start a fresh session.
+URLs now need a human on Claude and Pi; delegated and non-interactive runs cannot confirm. v3 live receipts
+need a fresh operator capture. The wire family `empirica/v2` is distinct from the plugin version 5.0.0.

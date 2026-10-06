@@ -12,7 +12,7 @@
           "audit",
           "children"
         ],
-        "digest": "sha256:e57f48aa42474a3bb11f982b386e9aff7cf3842280545e1a97055a39537f9c1c"
+        "digest": "sha256:45fa33dc3aa269f8702ae41c002f7ee29edb005b1129e7ac65c4a33b5f8990af"
       },
       "obligations": {
         "active": [
@@ -62,13 +62,14 @@
         "state": "passed",
         "independence": "mixed",
         "findings": []
-      }
+      },
+      "confirmation_batch": null
     },
     "reasons": [
       {
         "code": "audit.producers_mixed",
         "parameters": {},
-        "message": "Covered evidence has mixed producer identities. Research is never superseded; if the only differing producer is a latest spike, re-run that spike under the research producer, otherwise accept the residual.",
+        "message": "Covered evidence has mixed producers; re-run the latest spike under the research producer or accept the residual.",
         "next_actions": [
           "residual.accept"
         ],
@@ -81,5 +82,5 @@
       }
     ]
   },
-  "text": "Block active — no governance\nrun_id: run-fx\nAudit: passed (mixed)\n\nReasons:\n  audit.producers_mixed: Covered evidence has mixed producer identities. Research is never superseded; if the only differing producer is a latest spike, re-run that spike under the research producer, otherwise accept the residual. — affected: obligation.audit\n    next: report_convergence intent=stop\n\nOpen obligations:\n  obligation.audit: Obtain a current independent audit of every approved gating claim.\n    missing: audit.producers_mixed\n    next: report_convergence intent=stop\n\nChildren:\n  audit: completed"
+  "text": "Block active — no governance\nrun_id: run-fx\nAudit: passed (mixed)\n\nReasons:\n  audit.producers_mixed: Covered evidence has mixed producers; re-run the latest spike under the research producer or accept the residual. — affected: obligation.audit\n    next: report_convergence intent=stop\n\nOpen obligations:\n  obligation.audit: Obtain a current independent audit of every approved gating claim.\n    missing: audit.producers_mixed\n    next: report_convergence intent=stop\n\nChildren:\n  audit: completed"
 }

@@ -6,7 +6,12 @@
     "host": "test",
     "interactive": true,
     "signal": "test",
-    "delegation": false
+    "delegation": false,
+    "audit_retrieval": [
+      "local",
+      "workspace"
+    ],
+    "human_surface": "unavailable"
   },
   "status": "active",
   "budgets": {
@@ -120,7 +125,12 @@
             "outcome": "supporting",
             "source_kind": "code",
             "source_ref": "supplied",
-            "citation": "observed"
+            "citation": "observed",
+            "verification": {
+              "class": "verbatim",
+              "status": "verified_by_service",
+              "retrieve": true
+            }
           }
         ],
         "route_stamp": 1,

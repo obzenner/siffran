@@ -50,7 +50,9 @@ V2 = CONTRACTS / "empirica" / "v2"
 # --------------------------------------------------------------------------- #
 # Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
 # canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:e57f48aa42474a3bb11f982b386e9aff7cf3842280545e1a97055a39537f9c1c"
+# A research artifact row's verification, as the argument view requires it (ADR-0067).
+VERIFICATION = {"class": "verbatim", "status": "verified_by_service", "retrieve": True}
+REVIEWED_REGISTRY_DIGEST = "sha256:45fa33dc3aa269f8702ae41c002f7ee29edb005b1129e7ac65c4a33b5f8990af"
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:31f7dde3ecdb24e97e88ad8c6812db2f85ff039b0199ddbf0c4e0443de0f9d1b"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
@@ -265,10 +267,7 @@ def check_next_action_surfaces(contract: dict, public_tools: dict, errors: list[
 
     Host-owned operations must be one of: contract ``commands``, ``actions.host``,
     ``actions.trusted``, or the private governance operations.  Human-owned operations
-    must be exactly ``decision``, and only on a claim-scoped decision directive: its params
-    require ``claim_id`` and every reason that lists it lists only human-owned directives.
-    (The runtime tie to the ``needs-decision`` claim kind is asserted in C3 from the core's
-    own blocker derivation.)"""
+    is ``confirmation``: the one batch receipt for pending evidence and decisions, which takes no params."""
     next_actions = contract.get("next_actions", {})
     if not isinstance(next_actions, dict):
         return
@@ -279,9 +278,6 @@ def check_next_action_surfaces(contract: dict, public_tools: dict, errors: list[
     allowed_host_ops |= set(_actions.get("host", {}))
     allowed_host_ops |= set(_actions.get("trusted", {}))
     allowed_host_ops |= set(private_governance_ops)
-    human_owned = {name for name, row in next_actions.items()
-                   if isinstance(row, dict) and isinstance(row.get("surface"), dict)
-                   and row["surface"].get("owner") == "human"}
     for directive, entry in sorted(next_actions.items()):
         if not isinstance(entry, dict):
             continue
@@ -316,18 +312,9 @@ def check_next_action_surfaces(contract: dict, public_tools: dict, errors: list[
                               f"operation {operation!r} is not a known host operation")
         elif owner == "human":
             operation = surface.get("operation")
-            if operation != "decision":
+            if operation != "confirmation":
                 errors.append(f"{where}: next_actions.{directive} human-owned surface "
-                              f"operation {operation!r} must be 'decision'")
-            params = entry.get("params")
-            required = params.get("required", []) if isinstance(params, dict) else []
-            listing = [code for code, reason in contract.get("reasons", {}).items()
-                       if directive in reason.get("next_actions", [])]
-            if "claim_id" not in required or not listing or any(
-                    set(contract["reasons"][code]["next_actions"]) - human_owned
-                    for code in listing):
-                errors.append(f"{where}: next_actions.{directive} human-owned surface is "
-                              f"not a claim-scoped decision directive")
+                              f"operation {operation!r} must be 'confirmation'")
         else:
             errors.append(f"{where}: next_actions.{directive} surface is not a valid "
                           f"tool/owner binding: {surface!r}")
@@ -1620,7 +1607,8 @@ def _minimal_valid_state() -> dict:
         "governance": json.loads((V2 / "state-fixtures/valid-active.json").read_text())["governance"],
         "goal": "g",
         "invocation": {"host": "test", "interactive": True,
-                       "signal": "validator fixture", "delegation": False},
+                       "signal": "validator fixture", "delegation": False,
+                       "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"},
         "status": "active",
         "budgets": {"max_passes": 1, "passes_used": 0,
                     "max_spawns": 1, "spawns_used": 0,
@@ -2733,15 +2721,10 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                                               private_gov_ops),
            "not a known host operation", "surface names nonexistent host operation")
     bad = copy.deepcopy(registry)
-    bad["next_actions"]["human.request_decision"]["surface"]["operation"] = "reject"
+    bad["next_actions"]["human.confirm_evidence"]["surface"]["operation"] = "reject"
     expect(lambda e: check_next_action_surfaces(bad, public_tools_doc, e, "neg",
                                               private_gov_ops),
-           "must be 'decision'", "human op other than decision")
-    bad = copy.deepcopy(registry)
-    bad["next_actions"]["route.record"]["surface"] = {"owner": "human", "operation": "decision"}
-    expect(lambda e: check_next_action_surfaces(bad, public_tools_doc, e, "neg",
-                                              private_gov_ops),
-           "not a claim-scoped decision directive", "human ownership on an unrelated directive")
+           "must be 'confirmation'", "human op other than confirmation")
     bad = copy.deepcopy(registry)
     bad["next_actions"]["residual.accept"]["params"]["properties"] = {
         "note": {"type": "string"}}
@@ -3061,7 +3044,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         "contract_result.digest", "GetContract wrong-but-well-formed digest")
 
     # D2A §8/§9 negatives: one mutation each with its own expected diagnostic substring.
-    full_rv = {"governance": None, "id": "r", "goal": "g", "status": "active",
+    full_rv = {"governance": None, "confirmation_batch": None, "id": "r", "goal": "g", "status": "active",
                "audit": {"state": "required", "independence": "unverified", "findings": []},
                "contract": {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
                "obligations": {"active": [], "deferred": []}, "residuals": [],
@@ -3239,7 +3222,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         "artifact_id": "sha256:" + "1" * 64, "claim_id": "G0", "claim_digest": d64,
         "kind": "research", "statement_digest": d64, "active": True, "outcome": "pass",
         "source_kind": "web", "source_ref": "https://example.test/s",
-        "citation": "Observed test source."}]
+        "citation": "Observed test source.", "verification": VERIFICATION}]
     expect(lambda e: check_argument_view(arg_bad_kind, registry, e, "neg"),
            "research outcome", "research artifact spike outcome")
 
@@ -3301,11 +3284,11 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         {"sequence": 0, "artifact_id": "sha256:" + "1" * 64, "claim_id": "G0", "claim_digest": d64,
          "kind": "research", "statement_digest": d64, "active": True, "outcome": "supporting",
          "source_kind": "web", "source_ref": "https://example.test/s",
-         "citation": "Observed test source."},
+         "citation": "Observed test source.", "verification": VERIFICATION},
         {"sequence": 1, "artifact_id": "sha256:" + "1" * 64, "claim_id": "G0", "claim_digest": d64,
          "kind": "research", "statement_digest": d64, "active": True, "outcome": "supporting",
          "source_kind": "web", "source_ref": "https://example.test/s",
-         "citation": "Observed test source."}]
+         "citation": "Observed test source.", "verification": VERIFICATION}]
     expect(lambda e: check_argument_view(arg_dup_art, registry, e, "neg"),
            "not unique", "duplicate artifact_id")
 
@@ -3335,11 +3318,11 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                 {"sequence": 0, "artifact_id": R1, "claim_id": "G0", "claim_digest": d64,
                  "kind": "research", "statement_digest": d64, "active": True,
                  "outcome": "supporting", "source_kind": "web",
-                 "source_ref": "https://example.test/s", "citation": "Observed test source."},
+                 "source_ref": "https://example.test/s", "citation": "Observed test source.", "verification": VERIFICATION},
                 {"sequence": 1, "artifact_id": R2, "claim_id": "G0", "claim_digest": d64,
                  "kind": "research", "statement_digest": d64, "active": True,
                  "outcome": "supporting", "source_kind": "code",
-                 "source_ref": "src/a.py", "citation": "Observed test source."},
+                 "source_ref": "src/a.py", "citation": "Observed test source.", "verification": VERIFICATION},
                 {"sequence": 2, "artifact_id": Q1, "claim_id": "G0", "claim_digest": d64,
                  "kind": "spike_request", "statement_digest": d64,
                  "harness_request_id": "h1", "command": "make test", "command_digest": d64,
@@ -3535,7 +3518,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                 {"sequence": 0, "artifact_id": R1, "claim_id": "G0", "claim_digest": d64,
                  "kind": "research", "statement_digest": d64, "active": True,
                  "outcome": "supporting", "source_kind": "web",
-                 "source_ref": "https://example.test/s", "citation": "Observed test source."},
+                 "source_ref": "https://example.test/s", "citation": "Observed test source.", "verification": VERIFICATION},
                 {"sequence": 1, "artifact_id": Q1, "claim_id": "G0", "claim_digest": d64,
                  "kind": "spike_request", "statement_digest": d64,
                  "harness_request_id": "h1", "command": "make test", "command_digest": d64,
@@ -3672,7 +3655,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
             {"sequence": 0, "artifact_id": R1, "claim_id": "G0", "claim_digest": d64,
              "kind": "research", "statement_digest": d64, "active": True,
              "outcome": "supporting", "source_kind": "web",
-             "source_ref": "https://example.test/s", "citation": "Observed test source."}],
+             "source_ref": "https://example.test/s", "citation": "Observed test source.", "verification": VERIFICATION}],
         "audit": {"state": "not_required", "independence": "unverified",
             "reviewed_argument_digest": None, "reviewed_goal_digest": None,
             "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": None,
@@ -3723,7 +3706,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
             {"sequence": 0, "artifact_id": R1, "claim_id": "G0", "claim_digest": d64,
              "kind": "research", "statement_digest": d64, "active": True,
              "outcome": "supporting", "source_kind": "web",
-             "source_ref": "https://example.test/s", "citation": "Observed test source."},
+             "source_ref": "https://example.test/s", "citation": "Observed test source.", "verification": VERIFICATION},
             {"sequence": 1, "artifact_id": Q1, "claim_id": "G0", "claim_digest": d64,
              "kind": "spike_request", "statement_digest": d64,
              "harness_request_id": "h1", "command": "make test", "command_digest": d64,
@@ -3738,7 +3721,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
             {"sequence": 3, "artifact_id": R_X, "claim_id": "G1", "claim_digest": d64,
              "kind": "research", "statement_digest": d64, "active": True,
              "outcome": "supporting", "source_kind": "code",
-             "source_ref": "src/b.py", "citation": "Observed test source."}],
+             "source_ref": "src/b.py", "citation": "Observed test source.", "verification": VERIFICATION}],
         "audit": {"state": "not_required", "independence": "unverified",
             "reviewed_argument_digest": None, "reviewed_goal_digest": None,
             "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": None,
@@ -4029,7 +4012,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
             {"sequence": 0, "artifact_id": R1, "claim_id": "G0", "claim_digest": WORD,
              "kind": "research", "statement_digest": STMT, "active": True,
              "outcome": "supporting", "source_kind": "web", "source_ref": "src/a.py",
-             "citation": "Observed test source."},
+             "citation": "Observed test source.", "verification": VERIFICATION},
             {"sequence": 1, "artifact_id": Q1, "claim_id": "G0", "claim_digest": WORD,
              "kind": "spike_request", "statement_digest": STMT,
              "harness_request_id": "h1", "command": "make test", "command_digest": CMD,

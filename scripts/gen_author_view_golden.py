@@ -141,7 +141,64 @@ def _synthetic_results() -> list[tuple[str, object]]:
                                                   "parameters": {}},
                        next=list(failed_metadata["next_actions"]))
 
+    # What waits on a human (the batch), in each of the four states a human can be in, with a hostile source.
+    waiting = {}
+    for state in (None, "unavailable", "already_presented", "interaction_limit"):
+        view = copy.deepcopy(open_claim)
+        view["run"]["confirmation_batch"] = {
+            "key": "sha256:" + "5" * 64, "record_ids": ["sha256:" + "6" * 64, "sha256:" + "7" * 64],
+            "claim_ids": ["D1"], "prompt_error": state,
+            "records": [{"claim_id": "C0", "source_kind": "web", "source_ref": "https://example.test/spec"},
+                        {"claim_id": "C0", "source_kind": "runtime", "source_ref": hostile_text}]}
+        waiting[f"waiting-on-a-human-{state or 'askable'}"] = view
+
+    # The real reason a pending human confirmation returns (non-empty record_ids, which the renderer omits as digests),
+    # through each state a human can be in, and as a residual once the run stopped.
+    meta = contract["reasons"]["evidence.confirmation_required"]
+    records = ["sha256:" + "6" * 64, "sha256:" + "7" * 64]
+
+    def evidence_reason(route, prompt_error, claim_ids=()):
+        view = copy.deepcopy(open_claim)
+        view["run"]["confirmation_batch"] = {
+            "key": "sha256:" + "5" * 64, "record_ids": records, "claim_ids": list(claim_ids), "prompt_error": prompt_error,
+            "records": [{"claim_id": "C0", "source_kind": "web", "source_ref": "https://example.test/spec"},
+                        {"claim_id": "C0", "source_kind": "runtime", "source_ref": hostile_text}]}
+        parameters = {"route": route, "record_ids": records, **({"claim_ids": list(claim_ids)} if claim_ids else {})}
+        view["reasons"] = [{"code": "evidence.confirmation_required", "message": meta["message"],
+                            "parameters": parameters, "sections": meta["sections"],
+                            "next_actions": meta["next_actions"] if route == "human" else ["residual.accept"]}]
+        return view
+
+    evidence = {"evidence-reason-askable": evidence_reason("human", None),
+                "evidence-reason-later": evidence_reason("human", "already_presented"),
+                "evidence-reason-unavailable": evidence_reason("unavailable", "unavailable"),
+                "evidence-reason-mixed": evidence_reason("human", None, ["D1"])}
+    stopped = copy.deepcopy(json.loads((FIXTURES / "allow-stopped-budget.json").read_text())["expected"]["result"])
+    stopped["run"]["residuals"] = [{"code": "evidence.confirmation_required", "sections": meta["sections"],
+                                    "parameters": {"route": "human", "record_ids": records},
+                                    "next_actions": meta["next_actions"]}]
+    evidence["evidence-reason-terminal-residual"] = stopped
+
+    # The author reads what the human answered: every verification status, the note, the decision and its answer.
+    answered = copy.deepcopy(json.loads((FIXTURES / "getargument-active.json").read_text())["expected"]["result"])
+    base = answered["argument"]["artifacts"][0]
+    answered["argument"]["artifacts"] = [
+        {**base, "sequence": index, "artifact_id": "sha256:" + str(index + 1) * 64,
+         "verification": {"class": cls, "status": status, "retrieve": False, **note}}
+        for index, (cls, status, note) in enumerate((
+            ("verbatim", "verified_by_service", {}), ("retrievable", "confirmed_by_human", {}),
+            ("retrievable", "rejected_by_human", {"note": hostile_text}), ("observed", "pending", {}), ("retrievable", "pending", {"retrieve": True})))]
+    claim = answered["argument"]["claims"][0]
+    answered["argument"]["claims"] = [
+        claim, {**claim, "claim_id": "D1", "kind": "needs-decision", "state": "approved",
+                "human_decision": {"outcome": "approve", "answer": hostile_text}},
+        {**claim, "claim_id": "D2", "kind": "needs-decision", "state": "discarded",
+         "human_decision": {"outcome": "reject", "answer": None}}]
+
     return [
+        *waiting.items(),
+        *evidence.items(),
+        ("getargument-human-answers", answered),
         ("audit-stale-scope", audit_stale),
         ("audit-mixed", audit_mixed),
         ("audit-failed-findings", audit_failed),

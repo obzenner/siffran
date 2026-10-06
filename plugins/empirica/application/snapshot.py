@@ -117,10 +117,8 @@ def _observation_basis(value: Artifact) -> dict[str, Any]:
     return item
 
 
-def traverse_history(state: OperationalState, stored: Any) -> tuple[dict[str, Any], ...]:
-    head = state.committed_artifact_head_id
-    if not _valid_digest(head):
-        raise HistoryCorrupt("missing committed manifest head")
+def index_artifacts(stored: Any) -> dict[str, Artifact]:
+    """The physical artifacts by content address; an unreachable malformed orphan is not authoritative and is skipped."""
     values = getattr(stored, "value", stored)
     if values is None:
         raise HistoryCorrupt("missing artifact store")
@@ -128,13 +126,20 @@ def traverse_history(state: OperationalState, stored: Any) -> tuple[dict[str, An
     try:
         for value in values:
             if not isinstance(value, Artifact) or not _valid_digest(value.artifact_id):
-                continue  # unreachable malformed physical orphan is not authoritative
+                continue
             prior = by_id.get(value.artifact_id)
             if prior is not None and prior != value:
                 raise HistoryCorrupt("colliding physical artifact IDs")
             by_id[value.artifact_id] = value
     except TypeError as exc:
         raise HistoryCorrupt("artifact store is not iterable") from exc
+    return by_id
+
+
+def manifest_chain(head: Any, by_id: dict[str, Artifact]) -> list[dict[str, Any]]:
+    """The committed manifests from genesis to ``head``, following ``parent`` links; each must be present and well formed."""
+    if not _valid_digest(head):
+        raise HistoryCorrupt("missing committed manifest head")
     chain: list[dict[str, Any]] = []
     seen: set[str] = set()
     cursor: str | None = head
@@ -151,25 +156,21 @@ def traverse_history(state: OperationalState, stored: Any) -> tuple[dict[str, An
     chain.reverse()
     if not chain or chain[0]["parent"] is not None:
         raise HistoryCorrupt("manifest chain lacks genesis")
+    return chain
+
+
+def committed_artifacts(chain: list[dict[str, Any]], by_id: dict[str, Artifact],
+                        before_manifest: Any = None) -> tuple[dict[str, Any], ...]:
+    """The domain artifacts the chain references, in commit order. A referenced artifact that is missing, repeated, or itself
+    a manifest is corrupt history. ``before_manifest`` (optional) is called with each manifest first, to add its own checks."""
     ordered: list[dict[str, Any]] = []
     referenced: set[str] = set()
     parent: str | None = None
-    prior_basis: str | None = None
-    seen_bases: set[str] = set()
     for item in chain:
         if item["parent"] != parent:
             raise HistoryCorrupt("broken manifest parent")
-        basis_digest = item["observation_basis_digest"]
-        basis_value = by_id.get(basis_digest)
-        if basis_value is None:
-            raise HistoryCorrupt("missing observation basis")
-        _observation_basis(basis_value)
-        changed = basis_digest != prior_basis
-        basis_appended = basis_digest in item["artifact_ids"]
-        if basis_appended != (changed and basis_digest not in seen_bases):
-            raise HistoryCorrupt("observation basis deduplication mismatch")
-        seen_bases.add(basis_digest)
-        prior_basis = basis_digest
+        if before_manifest is not None:
+            before_manifest(item)
         for aid in item["artifact_ids"]:
             if aid in referenced:
                 raise HistoryCorrupt("duplicate committed artifact reference")
@@ -182,12 +183,36 @@ def traverse_history(state: OperationalState, stored: Any) -> tuple[dict[str, An
             referenced.add(aid)
             ordered.append(domain)
         parent = item["artifact_id"]
+    return tuple(ordered)
+
+
+def traverse_history(state: OperationalState, stored: Any) -> tuple[dict[str, Any], ...]:
+    by_id = index_artifacts(stored)
+    chain = manifest_chain(state.committed_artifact_head_id, by_id)
+    prior_basis: str | None = None
+    seen_bases: set[str] = set()
+
+    def check_basis(item: dict[str, Any]) -> None:
+        nonlocal prior_basis
+        basis_digest = item["observation_basis_digest"]
+        basis_value = by_id.get(basis_digest)
+        if basis_value is None:
+            raise HistoryCorrupt("missing observation basis")
+        _observation_basis(basis_value)
+        changed = basis_digest != prior_basis
+        basis_appended = basis_digest in item["artifact_ids"]
+        if basis_appended != (changed and basis_digest not in seen_bases):
+            raise HistoryCorrupt("observation basis deduplication mismatch")
+        seen_bases.add(basis_digest)
+        prior_basis = basis_digest
+
+    ordered = committed_artifacts(chain, by_id, check_basis)
     if chain[-1]["next_state_digest"] != state_digest(state):
         raise HistoryCorrupt("latest manifest state witness mismatch")
     # Redundant with the state-digest witness above, but preserves the more specific diagnosis.
     if chain[-1]["observation_basis_digest"] != state.observation_basis_digest:
         raise HistoryCorrupt("latest observation basis state witness mismatch")
-    return tuple(ordered)
+    return ordered
 
 
 def graph_from_history(state: OperationalState, history: tuple[dict[str, Any], ...],
@@ -210,7 +235,8 @@ def graph_from_history(state: OperationalState, history: tuple[dict[str, Any], .
 
 def validate_investigation_history(state: OperationalState,
                                    history: tuple[dict[str, Any], ...]) -> None:
-    evidence_kinds = {"research", "spike_request", "spike", "attribution", "audit_verdict"}
+    evidence_kinds = {"research", "spike_request", "spike", "attribution", "audit_verdict",
+                      "evidence_confirmation", "evidence_presentation"}
     evidence = [item for item in history if item.get("kind") in evidence_kinds]
     if not evidence:
         return
@@ -242,7 +268,13 @@ def assemble(state: OperationalState, stored: Any, workspace: Any, *, run_id: st
         **_proto.policy_inputs(profile_id),
         host_tier=profile["current_tier"],
         host_audit_execution=profile["audit_execution"], command=command, cited=cited,
+        workspace_root=_root(workspace) if command.get("type") == "ObserveAction" else None,
     )
+
+
+def _root(workspace: Any) -> str | None:
+    root = getattr(workspace, "root", None)
+    return None if root is None else str(root)
 
 
 def _cited(command: dict[str, Any], workspace: Any) -> Any:

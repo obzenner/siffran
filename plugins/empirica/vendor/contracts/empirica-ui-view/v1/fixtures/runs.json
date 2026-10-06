@@ -22,17 +22,38 @@
   },
   "claims": [
    {
-    "blocker_message": "Claim requires a human decision.",
+    "blocker_message": "Waiting for a human to confirm research or answer a decision.",
     "commands": [],
+    "decision": null,
     "id": "C0",
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "docs/viewers.md states this directly.",
+      "retrieve": true,
+      "route": null,
+      "source": "docs/viewers.md",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service"
+     }
+    ],
     "research": 1,
     "spikes": 0,
     "spikes_ever": 0
    },
    {
-    "blocker_message": "Claim requires a human decision.",
+    "blocker_message": "Waiting for a human to confirm research or answer a decision.",
     "commands": [],
+    "decision": {
+     "answer": null,
+     "outcome": null,
+     "route": "ended"
+    },
     "id": "C1",
+    "records": [],
     "research": 0,
     "spikes": 0,
     "spikes_ever": 0
@@ -45,16 +66,17 @@
   },
   "goal": "Choose the colour space for exported previews.",
   "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/1",
+  "prompt_error": null,
   "residuals": [
    {
     "claim": "C0",
-    "code": "claim.human_decision",
-    "message": "Claim requires a human decision."
+    "code": "evidence.confirmation_required",
+    "message": "Waiting for a human to confirm research or answer a decision."
    },
    {
     "claim": "C1",
-    "code": "claim.human_decision",
-    "message": "Claim requires a human decision."
+    "code": "evidence.confirmation_required",
+    "message": "Waiting for a human to confirm research or answer a decision."
    }
   ],
   "stale": [],
@@ -81,7 +103,8 @@
     "outcome": "supporting"
    }
   ],
-  "version": "sha256:05a8bc1eba60abc634baad9efd1605f8a3d16357d0168159e117507a43a226b7"
+  "version": "sha256:65dc581bdcf2e8fd7f76f089de0ac3c4d6780c369798574b3134f73b9af42301",
+  "waiting": []
  },
  "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/2": {
   "audit": {
@@ -110,7 +133,22 @@
    {
     "blocker_message": null,
     "commands": [],
+    "decision": null,
     "id": "C0",
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "docs/viewers.md states this directly.",
+      "retrieve": true,
+      "route": null,
+      "source": "docs/viewers.md",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service"
+     }
+    ],
     "research": 1,
     "spikes": 0,
     "spikes_ever": 0
@@ -120,7 +158,22 @@
     "commands": [
      "python -m pytest tests/test_colour.py"
     ],
+    "decision": null,
     "id": "C1",
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/colour.py states this directly.",
+      "retrieve": true,
+      "route": null,
+      "source": "src/colour.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service"
+     }
+    ],
     "research": 1,
     "spikes": 1,
     "spikes_ever": 1
@@ -133,6 +186,7 @@
   },
   "goal": "Choose the colour space for exported previews.",
   "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/2",
+  "prompt_error": null,
   "residuals": [],
   "stale": [],
   "steps": [
@@ -207,7 +261,8 @@
     "outcome": "fail"
    }
   ],
-  "version": "sha256:c4dc4b45180586dfb0c5ff1eee9917bffcb6eb4335fee936376af256b4e308fb"
+  "version": "sha256:1a45218c39ff6cdebd8a3507a699a7552380262bc4eb5ddb90d623fc5643b032",
+  "waiting": []
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-39abe9247f103fe638ce5e01424e311f5a2751de1eb1f57f4e2ce6da4bc72b70/1": {
   "audit": {
@@ -232,9 +287,11 @@
   },
   "claims": [
    {
-    "blocker_message": "Record Fold-1 research for this claim.",
+    "blocker_message": "Record research for this claim.",
     "commands": [],
+    "decision": null,
     "id": "C0",
+    "records": [],
     "research": 0,
     "spikes": 0,
     "spikes_ever": 0
@@ -244,7 +301,22 @@
     "commands": [
      "python -m pytest tests/test_decode.py"
     ],
+    "decision": null,
     "id": "C1",
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/decode.py states this directly.",
+      "retrieve": true,
+      "route": null,
+      "source": "src/decode.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service"
+     }
+    ],
     "research": 1,
     "spikes": 1,
     "spikes_ever": 1
@@ -257,6 +329,7 @@
   },
   "goal": "Make tile decoding constant-memory.",
   "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-39abe9247f103fe638ce5e01424e311f5a2751de1eb1f57f4e2ce6da4bc72b70/1",
+  "prompt_error": null,
   "residuals": [],
   "stale": [
    {
@@ -308,7 +381,8 @@
     "outcome": null
    }
   ],
-  "version": "sha256:f6287921f304d1aa2aea2f51fefa0c62847d6eb38dfd1abb3a7261ef5927278a"
+  "version": "sha256:49ee27758a36e0e8f1c29c4553de8432b6a7d376ef66edabc9f41bd32b33cfd5",
+  "waiting": []
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e/1": {
   "audit": {
@@ -333,9 +407,11 @@
   },
   "claims": [
    {
-    "blocker_message": "Record Fold-1 research for this claim.",
+    "blocker_message": "Record research for this claim.",
     "commands": [],
+    "decision": null,
     "id": "C0",
+    "records": [],
     "research": 0,
     "spikes": 0,
     "spikes_ever": 0
@@ -343,15 +419,32 @@
    {
     "blocker_message": "Active evidence refutes this claim.",
     "commands": [],
+    "decision": null,
     "id": "C1",
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "refuting",
+      "quote": "jobs/export.py states this directly.",
+      "retrieve": true,
+      "route": null,
+      "source": "jobs/export.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service"
+     }
+    ],
     "research": 0,
     "spikes": 0,
     "spikes_ever": 0
    },
    {
-    "blocker_message": "Record Fold-1 research for this claim.",
+    "blocker_message": "Record research for this claim.",
     "commands": [],
+    "decision": null,
     "id": "C2",
+    "records": [],
     "research": 0,
     "spikes": 0,
     "spikes_ever": 0
@@ -364,11 +457,12 @@
   },
   "goal": "Drop the legacy tile format.",
   "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e/1",
+  "prompt_error": null,
   "residuals": [
    {
     "claim": "C0",
     "code": "claim.research_missing",
-    "message": "Record Fold-1 research for this claim."
+    "message": "Record research for this claim."
    },
    {
     "claim": "C1",
@@ -378,7 +472,7 @@
    {
     "claim": "C2",
     "code": "claim.research_missing",
-    "message": "Record Fold-1 research for this claim."
+    "message": "Record research for this claim."
    }
   ],
   "stale": [],
@@ -405,7 +499,8 @@
     "outcome": "refuting"
    }
   ],
-  "version": "sha256:5720dd3882231c6407b1cef9979b2cf633209dd6c558901c18041e3f6f1796f1"
+  "version": "sha256:134fa32cf36870f931f8d53363b7618c051c089729b660b9d0fa4ad0eeadb07a",
+  "waiting": []
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9/1": {
   "audit": {
@@ -432,7 +527,22 @@
    {
     "blocker_message": null,
     "commands": [],
+    "decision": null,
     "id": "C0",
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/loader.py states this directly.",
+      "retrieve": true,
+      "route": null,
+      "source": "src/loader.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service"
+     }
+    ],
     "research": 1,
     "spikes": 0,
     "spikes_ever": 0
@@ -442,7 +552,22 @@
     "commands": [
      "python -m pytest tests/test_cache.py"
     ],
+    "decision": null,
     "id": "C1",
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/cache.py states this directly.",
+      "retrieve": true,
+      "route": null,
+      "source": "src/cache.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service"
+     }
+    ],
     "research": 1,
     "spikes": 1,
     "spikes_ever": 1
@@ -450,7 +575,22 @@
    {
     "blocker_message": null,
     "commands": [],
+    "decision": null,
     "id": "C2",
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/loader.py states this directly.",
+      "retrieve": true,
+      "route": null,
+      "source": "src/loader.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service"
+     }
+    ],
     "research": 1,
     "spikes": 0,
     "spikes_ever": 0
@@ -463,6 +603,7 @@
   },
   "goal": "Cache the tile index so a cold start reads one file.",
   "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9/1",
+  "prompt_error": null,
   "residuals": [],
   "stale": [],
   "steps": [
@@ -544,7 +685,8 @@
     "outcome": "pass"
    }
   ],
-  "version": "sha256:ba8eb546b29e9c825b9b88e4ec2097aa8e58e645eebb874bb1ad69cb6ff17425"
+  "version": "sha256:9abe8014a216c1e3fc3d2370b7f1e928e9637765a1a412b71500da47ec372dde",
+  "waiting": []
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-cb83d909b5dd5e1ef98360c4289ab9c465b1af5cab2e48d54cc3796a4d09e6c5/1": {
   "audit": null,
@@ -556,10 +698,308 @@
   "control": null,
   "goal": "Render the legend from one table.",
   "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-cb83d909b5dd5e1ef98360c4289ab9c465b1af5cab2e48d54cc3796a4d09e6c5/1",
+  "prompt_error": null,
   "residuals": [],
   "stale": [],
   "steps": [],
-  "version": "sha256:6ff3c5c604161515d0a37efb0e4a216b1bace505c7b48afe83618c7c5f6f213e"
+  "version": "sha256:6ff3c5c604161515d0a37efb0e4a216b1bace505c7b48afe83618c7c5f6f213e",
+  "waiting": []
+ },
+ "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211/1": {
+  "audit": {
+   "findings": [],
+   "independence": "unverified"
+  },
+  "auditor": null,
+  "author": "anthropic/claude-sonnet-4-6",
+  "budgets": {
+   "audit_spawns": {
+    "max": 2,
+    "used": 0
+   },
+   "passes": {
+    "max": 8,
+    "used": 0
+   },
+   "spawns": {
+    "max": 1,
+    "used": 0
+   }
+  },
+  "claims": [
+   {
+    "blocker_message": "Record research for this claim.",
+    "commands": [],
+    "decision": null,
+    "id": "C0",
+    "records": [],
+    "research": 0,
+    "spikes": 0,
+    "spikes_ever": 0
+   },
+   {
+    "blocker_message": null,
+    "commands": [],
+    "decision": null,
+    "id": "C1",
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "docs/export.md states this directly.",
+      "retrieve": true,
+      "route": null,
+      "source": "docs/export.md",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service"
+     }
+    ],
+    "research": 1,
+    "spikes": 0,
+    "spikes_ever": 0
+   },
+   {
+    "blocker_message": null,
+    "commands": [],
+    "decision": null,
+    "id": "C2",
+    "records": [
+     {
+      "class": "retrievable",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "every tile is read through the index",
+      "retrieve": true,
+      "route": "audit",
+      "source": "/opt/vendor/tiles/SPEC.md",
+      "source_kind": "docs",
+      "spike_unavailable": null,
+      "status": "pending"
+     }
+    ],
+    "research": 1,
+    "spikes": 0,
+    "spikes_ever": 0
+   },
+   {
+    "blocker_message": null,
+    "commands": [],
+    "decision": null,
+    "id": "C3",
+    "records": [
+     {
+      "class": "retrievable",
+      "note": "Checked the format page myself.",
+      "outcome": "supporting",
+      "quote": "readers must use the index",
+      "retrieve": false,
+      "route": null,
+      "source": "https://tiles.example.org/format#export",
+      "source_kind": "web",
+      "spike_unavailable": null,
+      "status": "confirmed_by_human"
+     }
+    ],
+    "research": 1,
+    "spikes": 0,
+    "spikes_ever": 0
+   },
+   {
+    "blocker_message": "Record research for this claim.",
+    "commands": [],
+    "decision": null,
+    "id": "C4",
+    "records": [
+     {
+      "class": "observed",
+      "note": "That log is from a different job.",
+      "outcome": "supporting",
+      "quote": "tile reads: 0 outside the index",
+      "retrieve": false,
+      "route": null,
+      "source": "nightly export log, 2026-09-27",
+      "source_kind": "runtime",
+      "spike_unavailable": "The job only runs on the nightly cluster.",
+      "status": "rejected_by_human"
+     }
+    ],
+    "research": 0,
+    "spikes": 0,
+    "spikes_ever": 0
+   },
+   {
+    "blocker_message": "Waiting for a human to confirm research or answer a decision.",
+    "commands": [],
+    "decision": null,
+    "id": "C5",
+    "records": [
+     {
+      "class": "retrievable",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "direct tile reads are not available",
+      "retrieve": false,
+      "route": "human",
+      "source": "https://provider.example.net/limits",
+      "source_kind": "web",
+      "spike_unavailable": null,
+      "status": "pending"
+     }
+    ],
+    "research": 1,
+    "spikes": 0,
+    "spikes_ever": 0
+   },
+   {
+    "blocker_message": "Waiting for a human to confirm research or answer a decision.",
+    "commands": [],
+    "decision": null,
+    "id": "C6",
+    "records": [
+     {
+      "class": "observed",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "no reads outside the index",
+      "retrieve": false,
+      "route": "human",
+      "source": "export log, 2026-09-21",
+      "source_kind": "runtime",
+      "spike_unavailable": "The run is over and its inputs are gone.",
+      "status": "pending"
+     }
+    ],
+    "research": 1,
+    "spikes": 0,
+    "spikes_ever": 0
+   },
+   {
+    "blocker_message": "Waiting for a human to confirm research or answer a decision.",
+    "commands": [],
+    "decision": {
+     "answer": null,
+     "outcome": null,
+     "route": "human"
+    },
+    "id": "C7",
+    "records": [],
+    "research": 0,
+    "spikes": 0,
+    "spikes_ever": 0
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "control": {
+   "approval": "approved",
+   "mode": "deliberative"
+  },
+  "goal": "Document the tile export path.",
+  "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211/1",
+  "prompt_error": null,
+  "residuals": [],
+  "stale": [],
+  "steps": [
+   {
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null
+   },
+   {
+    "claim": "C1",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting"
+   },
+   {
+    "claim": "C2",
+    "command": null,
+    "kind": "research",
+    "n": 4,
+    "outcome": "supporting"
+   },
+   {
+    "claim": "C3",
+    "command": null,
+    "kind": "research",
+    "n": 5,
+    "outcome": "supporting"
+   },
+   {
+    "claim": "C4",
+    "command": null,
+    "kind": "research",
+    "n": 6,
+    "outcome": "supporting"
+   },
+   {
+    "claim": "C5",
+    "command": null,
+    "kind": "research",
+    "n": 7,
+    "outcome": "supporting"
+   },
+   {
+    "claim": "C6",
+    "command": null,
+    "kind": "research",
+    "n": 8,
+    "outcome": "supporting"
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "evidence_presentation",
+    "n": 9,
+    "outcome": null
+   },
+   {
+    "claim": "C3",
+    "command": null,
+    "kind": "evidence_confirmation",
+    "n": 10,
+    "outcome": null
+   },
+   {
+    "claim": "C4",
+    "command": null,
+    "kind": "evidence_confirmation",
+    "n": 11,
+    "outcome": null
+   }
+  ],
+  "version": "sha256:9e6eaa59d0f1d9ee09064b5a3eafe7509d203ab5ffe8436a3ceace6ff1e14fc3",
+  "waiting": [
+   {
+    "claim": "C5",
+    "decision": false,
+    "records": 1,
+    "route": "human"
+   },
+   {
+    "claim": "C6",
+    "decision": false,
+    "records": 1,
+    "route": "human"
+   },
+   {
+    "claim": "C7",
+    "decision": true,
+    "records": 0,
+    "route": "human"
+   }
+  ]
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-e5bc37664845dccec9f662b44804806b99e73cb885080ec8fbd053aa74fcc494/1": {
   "audit": {
@@ -586,7 +1026,22 @@
    {
     "blocker_message": null,
     "commands": [],
+    "decision": null,
     "id": "C0",
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/index.py states this directly.",
+      "retrieve": true,
+      "route": null,
+      "source": "src/index.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service"
+     }
+    ],
     "research": 1,
     "spikes": 0,
     "spikes_ever": 0
@@ -594,7 +1049,22 @@
    {
     "blocker_message": null,
     "commands": [],
+    "decision": null,
     "id": "C1",
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/writer.py states this directly.",
+      "retrieve": true,
+      "route": null,
+      "source": "src/writer.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service"
+     }
+    ],
     "research": 1,
     "spikes": 0,
     "spikes_ever": 0
@@ -602,7 +1072,22 @@
    {
     "blocker_message": null,
     "commands": [],
+    "decision": null,
     "id": "C2",
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/callers.py states this directly.",
+      "retrieve": true,
+      "route": null,
+      "source": "src/callers.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service"
+     }
+    ],
     "research": 1,
     "spikes": 0,
     "spikes_ever": 0
@@ -610,7 +1095,34 @@
    {
     "blocker_message": null,
     "commands": [],
+    "decision": null,
     "id": "C3",
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/server.py states this directly.",
+      "retrieve": true,
+      "route": null,
+      "source": "src/server.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service"
+     },
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "docs/server.md states this directly.",
+      "retrieve": true,
+      "route": null,
+      "source": "docs/server.md",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service"
+     }
+    ],
     "research": 2,
     "spikes": 0,
     "spikes_ever": 0
@@ -623,6 +1135,7 @@
   },
   "goal": "Split the tile index by zoom level.",
   "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-e5bc37664845dccec9f662b44804806b99e73cb885080ec8fbd053aa74fcc494/1",
+  "prompt_error": null,
   "residuals": [],
   "stale": [],
   "steps": [
@@ -690,7 +1203,8 @@
     "outcome": "supporting"
    }
   ],
-  "version": "sha256:5659638013b5e872e4835d057b9374570c1aea634a5d052cbe6ec662035fac87"
+  "version": "sha256:428a552048049724f0eab2233626a801da4a423e9825c1855e5ecda4463b2c95",
+  "waiting": []
  },
  "s256-b5e0eee6e28efca6d6ad05d7b8a94631576037ec9e5ff6d305fe89faa0e1032e/s256-6ec97bb08344a844badedb2426721d756e040e9e77f4f26c70f203bdcb9730bd/1": {
   "audit": null,
@@ -718,10 +1232,12 @@
   },
   "goal": "Tidy the release checklist.",
   "key": "s256-b5e0eee6e28efca6d6ad05d7b8a94631576037ec9e5ff6d305fe89faa0e1032e/s256-6ec97bb08344a844badedb2426721d756e040e9e77f4f26c70f203bdcb9730bd/1",
+  "prompt_error": null,
   "residuals": [],
   "stale": [],
   "steps": [],
-  "version": "sha256:e5cf204386edc88d9ce2cf3926ecc4220a1b77549c69982a31e9b146c6effdfb"
+  "version": "sha256:adeb52dd6b46a8945150eabd9af65e8a1fb37f8425a4a4569782d53c3f0dca65",
+  "waiting": []
  },
  "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470/1": {
   "audit": {
@@ -748,7 +1264,22 @@
    {
     "blocker_message": null,
     "commands": [],
+    "decision": null,
     "id": "C0",
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "import/retry.py states this directly.",
+      "retrieve": true,
+      "route": null,
+      "source": "import/retry.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service"
+     }
+    ],
     "research": 1,
     "spikes": 0,
     "spikes_ever": 0
@@ -756,7 +1287,9 @@
    {
     "blocker_message": null,
     "commands": [],
+    "decision": null,
     "id": "C1",
+    "records": [],
     "research": 0,
     "spikes": 0,
     "spikes_ever": 0
@@ -769,6 +1302,7 @@
   },
   "goal": "Document the import retry policy.",
   "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470/1",
+  "prompt_error": null,
   "residuals": [
    {
     "claim": null,
@@ -807,7 +1341,8 @@
     "outcome": null
    }
   ],
-  "version": "sha256:059375bbb7740d62b3bc6620842fdc46ad824d748bcade3d7126aa27c7501afd"
+  "version": "sha256:c12ccd086a86be12bb52f17ed3d7ee064790d744f51cd9d7aebdf96ff03c13a3",
+  "waiting": []
  },
  "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148/1": {
   "audit": null,
@@ -819,10 +1354,12 @@
   "control": null,
   "goal": null,
   "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148/1",
+  "prompt_error": null,
   "residuals": [],
   "stale": [],
   "steps": [],
-  "version": "sha256:cb3cc03811279664860c3795a785cf5c86b24db9ae83381649efa8ca17adcd4e"
+  "version": "sha256:cb3cc03811279664860c3795a785cf5c86b24db9ae83381649efa8ca17adcd4e",
+  "waiting": []
  },
  "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-ea2fab75d05920549b4b92798bdf7217fed88df4e0a56de317d1e721524887b2/1": {
   "audit": {
@@ -851,7 +1388,22 @@
     "commands": [
      "python bench/import.py"
     ],
+    "decision": null,
     "id": "C0",
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "import/query.sql states this directly.",
+      "retrieve": true,
+      "route": null,
+      "source": "import/query.sql",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service"
+     }
+    ],
     "research": 1,
     "spikes": 1,
     "spikes_ever": 1
@@ -864,11 +1416,12 @@
   },
   "goal": "Find why the nightly import is slow.",
   "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-ea2fab75d05920549b4b92798bdf7217fed88df4e0a56de317d1e721524887b2/1",
+  "prompt_error": null,
   "residuals": [
    {
     "claim": null,
     "code": "budget.exhausted",
-    "message": "{resource} budget exhausted."
+    "message": "pass budget exhausted."
    }
   ],
   "stale": [],
@@ -923,6 +1476,7 @@
     "outcome": null
    }
   ],
-  "version": "sha256:9b40dae008cbc3d36eccc99783505a7121c98ed678068c32dac87c2ca6a2b51f"
+  "version": "sha256:25c63831692b348f59f99a759f8c4252f43cfdc10ea81bb7e9db43c3c7d19bb8",
+  "waiting": []
  }
 }

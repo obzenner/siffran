@@ -24,7 +24,10 @@ export type PrivateOperation =
   | "audit_verdict"
   | "child_event"
   | "attribution"
-  | "evidence_leaf";
+  | "evidence_leaf"
+  | "human_surface"
+  | "evidence_presentation"
+  | "evidence_confirmation";
 
 export interface PrivateIngressRequest<Op extends PrivateOperation = PrivateOperation> {
   operation: Op;
@@ -50,6 +53,20 @@ type AuditPlanResponse = Readonly<{ type: "audit_plan"; plan: AuditPlanData }>;
  * recorded at StartRun (a reload or resume put another pi-subagents behind the `subagent` tool).
  */
 type AuditRefusedResponse = Readonly<{ type: "audit_refused"; reason: "runtime_changed" }>;
+/** One thing the human is asked about (built once, in adapters/confirmation.py). */
+export type EvidenceItem =
+  | { subject: "research"; id: string; claim: string; source_kind: string; source_ref: string;
+      quote: string; class: string; reason?: string }
+  | { subject: "claim"; id: string; digest: string; text: string };
+export interface EvidenceAnswer { subject: "research" | "claim"; id: string; choice: string; note: string | null }
+/** The presentation is recorded (and has spent one interaction) or the core refused it. */
+type EvidencePresentationResponse =
+  | Readonly<{ type: "evidence_presentation"; receipt_id: string; items: EvidenceItem[] }>
+  | Readonly<{ type: "evidence_refused"; result: Record<string, unknown> }>;
+/** The receipt was admitted (`evidence_receipt`), or the answers granted nothing (`evidence_none`). */
+type EvidenceConfirmationResponse =
+  | Readonly<{ type: "evidence_receipt"; result: Record<string, unknown> }>
+  | Readonly<{ type: "evidence_none" }>;
 type AuditVerdictResponse = Readonly<{ type: "audit_verdict"; admitted: boolean }>;
 type AuditStartedResponse = Readonly<{ type: "audit_started" }>;
 type AuditIdentityResponse = Readonly<{ type: "audit_identity" }>;
@@ -68,6 +85,9 @@ export interface PrivateResponses {
   child_event: Response;
   attribution: Response;
   evidence_leaf: Response;
+  human_surface: Response;
+  evidence_presentation: EvidencePresentationResponse;
+  evidence_confirmation: EvidenceConfirmationResponse;
 }
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -98,6 +118,14 @@ const PRIVATE_SHAPES: { readonly [Op in PrivateOperation]: (value: unknown) => b
   child_event: envelope,
   attribution: envelope,
   evidence_leaf: envelope,
+  human_surface: envelope,
+  evidence_presentation: (value) => object(value) && (
+    (value.type === "evidence_presentation" && string(value.receipt_id) && Array.isArray(value.items)
+      && value.items.every((item) => object(item) && string(item.id)
+        && (item.subject === "research" || item.subject === "claim")))
+    || (value.type === "evidence_refused" && object(value.result))),
+  evidence_confirmation: (value) => object(value)
+    && (value.type === "evidence_none" || (value.type === "evidence_receipt" && object(value.result))),
 };
 
 /** Assert one adapter-private response at the sole private ingress boundary. */

@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { PROTOCOL, type InvocationProvenance, type Request, type Response, type Result } from "../src/contract.ts";
 import { SUBAGENTS_COMPATIBILITY } from "../src/host-profile.ts";
 import { REPORT_CONVERGENCE_TOOL, SUBAGENT_TOOL } from "../src/translate.ts";
+import { EVIDENCE_WAIT_NOTICE } from "../src/evidence-ui.ts";
 import {
   BUDGET_EXHAUSTED_NOTICE, budgetExhaustedWait, HUMAN_WAIT_NOTICE, humanApprovalWait,
 } from "../src/governance-ui.ts";
@@ -162,6 +163,8 @@ interface Wired {
 }
 
 interface WireOptions {
+  /** The private `human_surface` ingress fails (`throw`) or answers a typed Fault (`fault`). */
+  surface?: "throw" | "fault";
   /** Replaces the fixture owner registrations before ``session_start`` (default: one healthy owner). */
   owners?: ToolInfo[];
   /** Environment the owner resolver sees (default: none set). */
@@ -170,6 +173,8 @@ interface WireOptions {
   inventoryFor?: (version: string) => SubagentInventory | undefined;
   /** The adapter's configured subagent tool name (default: `subagent`). */
   subagentToolName?: string;
+  /** What the fake preflight reports the auditor can retrieve (default: workspace and local files). */
+  auditRetrieval?: readonly ("local" | "web" | "workspace")[];
 }
 
 async function wire(
@@ -202,6 +207,9 @@ async function wire(
       if (request.operation === "governance_context") return { protocol: PROTOCOL,
         request_id: "trusted-governance", result: { type: "Inert", reason: "unsupported_host_event", run: run() } };
       privateRequests.push(request);
+      if (request.operation === "human_surface" && options.surface === "throw") throw new Error("the core went away");
+      if (request.operation === "human_surface" && options.surface === "fault")
+        return { protocol: PROTOCOL, request_id: "trusted", result: { type: "Fault", code: "unavailable", fail_direction: "closed" } };
       if (request.operation === "classify_identity") {
         const payload = request.payload as { provider_id?: unknown; model_id?: unknown } | undefined;
         const identity = classify(payload?.provider_id, payload?.model_id);
@@ -215,6 +223,10 @@ async function wire(
           operation_id: `sha256:${"b".repeat(64)}`,
           argument: { argument_digest: `sha256:${"a".repeat(64)}`, claims: [] } },
       };
+      if (request.operation === "evidence_presentation") return { type: "evidence_presentation", receipt_id: "p-1",
+        items: [{ subject: "research", id: `sha256:${"a".repeat(64)}`, claim: "C", source_kind: "web",
+          source_ref: "https://example.test/x", quote: "q", class: "retrievable" }] };
+      if (request.operation === "evidence_confirmation") return { type: "evidence_receipt", result: { type: "Allow" } };
       if (request.operation === "audit_verdict")
         return { type: "audit_verdict", admitted: true };
       if (request.operation === "audit_start") return { type: "audit_started" };
@@ -233,7 +245,8 @@ async function wire(
       auditResolutions.push({ ...input, preflightAnswer: answer.ok ? "ok" : answer.message,
         runtimeVersion: runtime.version, inventoryVersion: runtime.inventory.version });
       return { agentFilePath: resolve(DEFAULT_SKILLS_DIR, "..", "agents", "pi", "empirica-auditor.md"),
-        model: "bedrock/auditor-model", agentScope: "project" };
+        model: "bedrock/auditor-model", agentScope: "project",
+        auditRetrieval: options.auditRetrieval ?? ["local", "workspace"] };
     },
   })(pi);
   await pi.sessionStart();
@@ -270,7 +283,7 @@ test("/empirica dispatches StartRun and persists the opaque handle", async () =>
   assert.equal(w.requests.length, 1);
   assert.equal(w.requests[0].command.type, "StartRun");
   if (w.requests[0].command.type === "StartRun") assert.deepEqual(w.requests[0].command.invocation,
-    { host: "pi", interactive: true, signal: "ctx.mode=tui", delegation: false, host_runtime: ownerHostRuntime() });
+    { host: "pi", interactive: true, signal: "ctx.mode=tui", delegation: false, audit_retrieval: ["local", "workspace"], human_surface: "unavailable", host_runtime: ownerHostRuntime() });
   assert.equal(w.pi.entries.length, 1);
   assert.equal(w.pi.entries[0].customType, "empirica.run");
   assert.match(w.pi.modelMessages[0].content, /empirica_observe/);
@@ -292,14 +305,29 @@ test("/empirica records every Pi mode and operator delegation", async () => {
         if (delegated) process.env.EMPIRICA_AUTO_DELEGATION = "1";
         else delete process.env.EMPIRICA_AUTO_DELEGATION;
         const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }));
-        await w.pi.command("empirica").handler("goal", { ui: new FakeUi(), mode });
+        await w.pi.command("empirica").handler("goal", { ui: new FakeUi(), mode, hasUI: interactive });
         if (w.requests[0].command.type === "StartRun") assert.deepEqual(w.requests[0].command.invocation,
-          { host: "pi", interactive, signal: `ctx.mode=${mode}`, delegation: delegated, host_runtime: ownerHostRuntime() });
+          { host: "pi", interactive, signal: `ctx.mode=${mode}`, delegation: delegated, audit_retrieval: ["local", "workspace"], human_surface: interactive ? "human" : "unavailable", host_runtime: ownerHostRuntime() });
       }
     }
   } finally {
     if (prior === undefined) delete process.env.EMPIRICA_AUTO_DELEGATION;
     else process.env.EMPIRICA_AUTO_DELEGATION = prior;
+  }
+});
+
+test("/empirica records what the preflight says the auditor can retrieve, and re-sends it at audit launch", async () => {
+  for (const observed of [["local", "workspace"], ["local"], []] as const) {
+    const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }), true, undefined,
+      { auditRetrieval: observed });
+    await w.pi.command("empirica").handler("goal", { ui: new FakeUi(), mode: "tui" });
+    const start = w.requests[0].command;
+    assert.deepEqual(start.type === "StartRun" ? start.invocation?.audit_retrieval : null, observed);
+    await w.pi.sessionStart(fakeCtx("/work", w.pi.entries));
+    await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "tc-r",
+      input: { agent: "empirica.empirica-auditor", task: "audit" } }, fakeCtx());
+    const prepare = w.privateRequests.find((request) => request.operation === "audit_prepare");
+    assert.deepEqual(prepare?.payload?.audit_retrieval, observed);
   }
 });
 
@@ -605,6 +633,91 @@ test("gate: report_convergence tool is blocked with the reason on Block", async 
   );
 });
 
+const BATCH = (promptError: string | null = null) => ({ key: `sha256:${"d".repeat(64)}`,
+  record_ids: [`sha256:${"a".repeat(64)}`], claim_ids: [], prompt_error: promptError,
+  records: [{ claim_id: "C1", source_kind: "web", source_ref: "https://example.test/x" }] });
+const EVIDENCE_WAITING = (route = "human", promptError: string | null = route === "human" ? null : "unavailable",
+                          code = "evidence.confirmation_required") => ({ type: "Block" as const,
+  run: { id: HANDLE, status: "active" as never, governance: null, confirmation_batch: BATCH(promptError) },
+  reasons: [{ code, message: code === "evidence.confirmation_required" ? "Research waits on a human."
+    : code.startsWith("claim.spike") ? `Spike problem: ${code}.` : "Record research for C1.",
+    parameters: { route, record_ids: [`sha256:${"a".repeat(64)}`] } }] });
+
+function uiCtx(selects: string[], inputs: string[] = [""]) {
+  const ctx = fakeCtx();
+  ctx.hasUI = true;
+  ctx.ui.select = async () => selects.shift();
+  ctx.ui.input = async () => inputs.shift();
+  return ctx;
+}
+
+/** The core's answers around one presentation: the batch is unspent until presented, then spent. */
+function spendingResponder(w: () => { privateRequests: Array<{ operation: string }> }) {
+  return (req: { command: { type: string } }) => req.command.type === "StartRun"
+    ? envelope({ type: "Allow", converged: false, run: run() })
+    : envelope(EVIDENCE_WAITING("human", w().privateRequests.some((r) => r.operation === "evidence_presentation")
+      ? "already_presented" : null) as never);
+}
+
+test("gate: the end of a pass presents the waiting evidence once, then re-evaluates", async () => {
+  let evaluations = 0;
+  const w = await wire((req) => {
+    if (req.command.type === "StartRun") return envelope({ type: "Allow", converged: false, run: run() });
+    evaluations += 1;
+    return envelope(evaluations === 1 ? EVIDENCE_WAITING() as never : { type: "Allow", converged: false, run: run() });
+  });
+  await startRun(w);
+  const decision = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), uiCtx(["Confirm"]));
+  assert.equal(decision, undefined, "confirmed evidence lets the second evaluation permit");
+  assert.equal(evaluations, 2);
+  const ops = w.privateRequests.map((request) => request.operation).filter((op) => op.startsWith("evidence_") || op === "human_surface");
+  assert.deepEqual(ops, ["human_surface", "evidence_presentation", "evidence_confirmation"]);
+  assert.deepEqual(w.privateRequests.find((r) => r.operation === "human_surface")?.payload, { surface: "human" });
+});
+
+test("gate: Later or a cancelled batch grants nothing and the spent batch blocks with the real reason", async () => {
+  for (const selects of [["Later"], []]) {
+    // eslint-disable-next-line prefer-const
+    let holder: Awaited<ReturnType<typeof wire>>;
+    holder = await wire(spendingResponder(() => holder));
+    const w = holder;
+    await startRun(w);
+    const decision = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), uiCtx(selects));
+    assert.deepEqual(decision, { block: true, reason: `Research waits on a human.\nhandle: ${HANDLE}` });
+    assert.ok(!w.privateRequests.some((request) => request.operation === "evidence_confirmation"));
+    // and the next report does not show the dialog again: the key is spent
+    const again = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), uiCtx(["Confirm"]));
+    assert.equal(again?.block, true);
+    assert.equal(w.privateRequests.filter((request) => request.operation === "evidence_presentation").length, 1);
+  }
+});
+
+test("gate: only an unspent sole confirmation pauses; an open claim, a spent key or no interactions block", async () => {
+  const cases: Array<[string, ReturnType<typeof EVIDENCE_WAITING>, string]> = [
+    ["an open claim leads", EVIDENCE_WAITING("human", null, "claim.research_missing"), "Record research for C1."],
+    ["the key was shown already", EVIDENCE_WAITING("human", "already_presented"), "Research waits on a human."],
+    ["the interactions are spent", EVIDENCE_WAITING("human", "interaction_limit"), "Research waits on a human."]];
+  for (const [label, response, message] of cases) {
+    const w = await wire((req) => req.command.type === "StartRun"
+      ? envelope({ type: "Allow", converged: false, run: run() }) : envelope(response as never));
+    await startRun(w);
+    const ctx = label === "an open claim leads" ? uiCtx([]) : fakeCtx();
+    const decision = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), ctx);
+    assert.deepEqual(decision, { block: true, reason: `${message}\nhandle: ${HANDLE}` }, label);
+  }
+});
+
+test("gate: without a UI, or with route unavailable, the requirement stays a denial and nothing is presented", async () => {
+  for (const [route, ctx] of [["human", fakeCtx()], ["unavailable", uiCtx(["Confirm"])]] as const) {
+    const w = await wire((req) => req.command.type === "StartRun"
+      ? envelope({ type: "Allow", converged: false, run: run() }) : envelope(EVIDENCE_WAITING(route) as never));
+    await startRun(w);
+    const decision = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), ctx);
+    assert.equal(route === "human" ? decision : decision?.block, route === "human" ? undefined : true, route);
+    assert.ok(!w.privateRequests.some((request) => request.operation === "evidence_presentation"), route);
+  }
+});
+
 function waitingRun(overrides: Record<string, unknown> = {}, context: Record<string, unknown> = {},
                     controlMode = "deliberative") {
   return { id: HANDLE, status: "active" as never, governance: {
@@ -637,7 +750,8 @@ for (const controlMode of ["deliberative", "auto"]) {
       assert.ok(text.startsWith(HUMAN_WAIT_NOTICE), text);
       assert.equal((output.details as { type: string }).type, "Block");
       // The wait is settlement only: no decision ingress, no dialog, and the run handle stays active.
-      assert.equal(w.privateRequests.length, privateBefore, "no governance decision or audit ingress call");
+      assert.equal(w.privateRequests.filter((r) => r.operation !== "human_surface").length, privateBefore,
+        "no governance decision or audit ingress call");
       assert.equal(customCalls, 0, "no dialog opened");
       const evaluations = w.requests.length;
       const again = await execute("tc-2");
@@ -696,7 +810,8 @@ for (const resource of ["audit_spawn", "pass"]) {
       assert.ok(text.includes(resource));
       // The original Block is preserved; the pause is settlement only.
       assert.equal((output.details as { type: string }).type, "Block");
-      assert.equal(w.privateRequests.length, privateBefore, "no governance decision or audit ingress call");
+      assert.equal(w.privateRequests.filter((r) => r.operation !== "human_surface").length, privateBefore,
+        "no governance decision or audit ingress call");
       assert.equal(customCalls, 0, "no dialog opened");
       // The run stays active: a follow-up report dispatches against the same handle.
       const evaluations = w.requests.length;
@@ -865,7 +980,7 @@ test("gate: a well-formed Inert is denied (run gone but handle exists)", async (
 test("canonical audit guidance keeps the exact two-field example in procedural references", () => {
   const example = '{"agent":"empirica.empirica-auditor","task":"Audit the host-provided dossier."}';
   for (const file of ["empirica/references/audit.md",
-    "../../../.claude/skills/native-qualification/SKILL.md"]) {
+    "../../../.agents/skills/native-qualification/references/pi.md"]) {
     assert.ok(readFileSync(resolve(DEFAULT_SKILLS_DIR, file), "utf8").includes(example), file);
   }
 });
@@ -1021,7 +1136,8 @@ test("an audit under the runtime recorded at StartRun carries that exact runtime
     input: { agent: "empirica.empirica-auditor", task: "audit" } }, fakeCtx());
   assert.equal(decision, undefined);
   const prepare = w.privateRequests.find((request) => request.operation === "audit_prepare");
-  assert.deepEqual(prepare?.payload, { host_runtime: ownerHostRuntime() });
+  assert.deepEqual(prepare?.payload,
+    { host_runtime: ownerHostRuntime(), audit_retrieval: ["local", "workspace"] });
 });
 
 test("an audit is refused, sticky, when the pi-subagents runtime is not the one recorded at StartRun", async () => {
@@ -1316,7 +1432,8 @@ test("canonical auditor identity follows filesystem symlinks", async (t) => {
       : { protocol: PROTOCOL, request_id: "trusted", result: {
           type: "Inert", reason: "unsupported_host_event", run: run() } },
     resolveAuditContract: async () => ({ agentFilePath: realAgent,
-                                         model: "bedrock/auditor-model", agentScope: "project" }),
+                                         model: "bedrock/auditor-model", agentScope: "project",
+                                         auditRetrieval: ["local", "workspace"] }),
     skillsDir: join(aliasPackage, "skills"),
   })(pi);
   await (pi.handlers.get("session_start") as (e: unknown, c: unknown) => unknown)(
@@ -1660,4 +1777,29 @@ test("session_start reconstructs the handle; compaction carries the handle text"
   const out = await (w.pi.handlers.get("session_before_compact") as (e: unknown, c: unknown) => unknown)({ preparation: { firstKeptEntryId: "e", tokensBefore: 4 } }, ctx);
   assert.match((out as { compaction: { summary: string } }).compaction.summary, /restored/);
   assert.equal(w.pi.entries.length, 0);
+});
+
+test("gate: a surface that could not be recorded never pauses and never shows a dialog; one plain reason blocks", async () => {
+  for (const surface of ["throw", "fault"] as const) {
+    const w = await wire((req) => req.command.type === "StartRun"
+      ? envelope({ type: "Allow", converged: false, run: run() }) : envelope(EVIDENCE_WAITING() as never), true,
+      undefined, { surface });
+    await startRun(w);
+    const ctx = uiCtx(["Confirm"]);
+    const decision = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), ctx);
+    assert.equal(decision?.block, true, surface);
+    assert.ok(String(decision?.reason).startsWith("Empirica cannot tell whether a human can be asked"), String(decision?.reason));
+    assert.ok(!w.privateRequests.some((request) => request.operation.startsWith("evidence_")), surface);
+  }
+});
+
+test("gate: a missing or stale spike on the same claim leads the block, and the waiting evidence is still presented", async () => {
+  for (const code of ["claim.spike_missing", "claim.spike_stale"]) {
+    const w = await wire((req) => req.command.type === "StartRun"
+      ? envelope({ type: "Allow", converged: false, run: run() }) : envelope(EVIDENCE_WAITING("human", null, code) as never));
+    await startRun(w);
+    const decision = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), uiCtx(["Later"]));
+    assert.deepEqual(decision, { block: true, reason: `Spike problem: ${code}.\nhandle: ${HANDLE}` }, code);
+    assert.equal(w.privateRequests.filter((r) => r.operation === "evidence_presentation").length, 1, code);
+  }
 });

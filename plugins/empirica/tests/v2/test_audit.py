@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import unittest
 
+from driver import CITED_SOURCE
 from assertions import (  # noqa: E402
     ConformanceCase, UNTRUSTED_CLOSE, UNTRUSTED_OPEN,
     action_attribution, action_audit_verdict, action_graph, action_research,
@@ -233,8 +234,8 @@ class AuditTests(ConformanceCase):
         verdict2 = self.build_audit_verdict_payload(drv2, run2, verdict="pass", scope_review="pass")
         self.assertEqual(drv2.trusted_audit_verdict(run2, child2, verdict2)["result"]["type"], "Allow")
         self.dispatch(drv2, observe_action(run_id=run2, action=action_research(
-            claim_id=scope2["root_id"], source_kind="web", result="supports",
-            payload={"source_ref": "https://example.test/new-support"})))
+            claim_id=scope2["root_id"], source_kind="code", result="supports",
+            payload={"source_ref": CITED_SOURCE[0] + ":3"})))
         stale = self.dispatch(drv2, evaluate(run_id=run2, intent="report_convergence"))
         self.assert_block_only(stale, ["audit.failed"])
         # The summary follows the gate: a pass bound to superseded evidence no longer reads passed,

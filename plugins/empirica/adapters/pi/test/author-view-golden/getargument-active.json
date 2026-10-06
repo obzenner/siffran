@@ -13,7 +13,7 @@
           "claims/graph",
           "evidence/research"
         ],
-        "digest": "sha256:e57f48aa42474a3bb11f982b386e9aff7cf3842280545e1a97055a39537f9c1c"
+        "digest": "sha256:45fa33dc3aa269f8702ae41c002f7ee29edb005b1129e7ac65c4a33b5f8990af"
       },
       "obligations": {
         "active": [],
@@ -41,7 +41,8 @@
         "state": "required",
         "independence": "unverified",
         "findings": []
-      }
+      },
+      "confirmation_batch": null
     },
     "argument": {
       "root_claim_id": "G0",
@@ -98,7 +99,12 @@
           "source_kind": "web",
           "source_ref": "https://example.test/source",
           "citation": "The observed source supports G0.",
-          "observed_content_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+          "observed_content_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+          "verification": {
+            "class": "retrievable",
+            "status": "pending",
+            "retrieve": false
+          }
         }
       ],
       "route_stamp": 1,
@@ -115,5 +121,5 @@
       }
     }
   },
-  "text": "Argument\ngoal: <<<EMPIRICA_UNTRUSTED_DATA>>>Prove the public contract is internally consistent.<<<END_EMPIRICA_UNTRUSTED_DATA>>>\nroot_claim_id: G0\nClaims:\n  G0 kind=ordinary gating=true state=open evidence=present: <<<EMPIRICA_UNTRUSTED_DATA>>>Root claim<<<END_EMPIRICA_UNTRUSTED_DATA>>>\n  S1 kind=ordinary gating=true state=open evidence=none: <<<EMPIRICA_UNTRUSTED_DATA>>>Support claim<<<END_EMPIRICA_UNTRUSTED_DATA>>>\nEdges:\n  G0 -SupportedBy-> S1\nCitations:\n  <<<EMPIRICA_UNTRUSTED_DATA>>>The observed source supports G0.<<<END_EMPIRICA_UNTRUSTED_DATA>>>\nAudit status: not_required (unverified)"
+  "text": "Argument\ngoal: <<<EMPIRICA_UNTRUSTED_DATA>>>Prove the public contract is internally consistent.<<<END_EMPIRICA_UNTRUSTED_DATA>>>\nroot_claim_id: G0\nClaims:\n  G0 kind=ordinary gating=true state=open evidence=present: <<<EMPIRICA_UNTRUSTED_DATA>>>Root claim<<<END_EMPIRICA_UNTRUSTED_DATA>>>\n  S1 kind=ordinary gating=true state=open evidence=none: <<<EMPIRICA_UNTRUSTED_DATA>>>Support claim<<<END_EMPIRICA_UNTRUSTED_DATA>>>\nEdges:\n  G0 -SupportedBy-> S1\nCitations:\n  <<<EMPIRICA_UNTRUSTED_DATA>>>The observed source supports G0.<<<END_EMPIRICA_UNTRUSTED_DATA>>> — waiting for a human\nAudit status: not_required (unverified)"
 }

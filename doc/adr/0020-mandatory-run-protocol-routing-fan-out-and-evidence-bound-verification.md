@@ -27,6 +27,8 @@ links:
   kind: Refines
 - target: 66
   kind: Amended by
+- target: 67
+  kind: Amended by
 ---
 
 # Mandatory run protocol: claim graph, two-fold validation, fan-out, and independent audit

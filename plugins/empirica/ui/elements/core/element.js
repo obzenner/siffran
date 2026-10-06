@@ -17,6 +17,13 @@ export function t(key, vars = {}) {
   return s.replace(/\{(\w+)\}/g, (_, k) => esc(vars[k] ?? ""));
 }
 
+/** The same lookup for text that is escaped later (an attribute built by a template that calls `esc` itself), so a
+ * value is never escaped twice. */
+export function plain(key, vars = {}) {
+  const s = copy[key];
+  return s === undefined ? `⟦${key}⟧` : s.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? ""));
+}
+
 /** Presentation for a state (S1). Unknown values map to the visible "unknown" entry, never to a default tone. */
 export function stateOf(domain, value) {
   return states[domain]?.[value] ?? states.unknown;
@@ -30,8 +37,18 @@ export function stepOf(kind, outcome) {
     label: o ? t("step.with", { kind: word, outcome: t(`${o.copy}.label`) }) : word };
 }
 
-/** A project's label: its folder name, else its place in the view. */
-export function projectName(p, n) { return p.name ?? t("view.project", { n }); }
+/** A counted phrase: `${key}.one` for exactly one thing, else `key`. `{n}` is that count unless `vars` says more. */
+export function count(key, n, vars = {}) { return t(n === 1 ? `${key}.one` : key, { n, ...vars }); }
+/** Parts of one line, the blank ones left out, joined with the catalogue's separator (never one typed in code). */
+export function joined(...parts) { return parts.filter(Boolean).join(copy["list.join"]); }
+/** A moment the observer recorded (seconds since the epoch), in the reader's locale: a date and a time. */
+export function when(seconds) {
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(seconds * 1000));
+}
+/** The word for one value a filter offers: a state's word, else its `copy` prefix + value. */
+export function optionLabel(f, value) {
+  return f.domain ? t(`${stateOf(f.domain, value).copy}.label`) : t(`${f.copy}.${value}`);
+}
 
 /** The values of a domain, in states.json order. */
 export function statesOf(domain) { return Object.keys(states[domain]); }

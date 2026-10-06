@@ -24,6 +24,13 @@ for identity classification. Inventory-shaped old runs fail closed and require f
 they are never silently migrated or approved. New approval flows have deterministic integration
 coverage, not operator-present native approval qualification.
 
+## Upgrading from 4.x to 5.0
+
+Empirica 5.0 does not migrate old runs, artifacts or receipts; they fail closed. To move over, start a
+fresh session. A URL source now needs a human on Claude and Pi, and delegated or non-interactive runs
+cannot confirm. v3 live receipts need a fresh operator capture. The wire family `empirica/v2` is distinct
+from the plugin version 5.0.0.
+
 ## Install for Claude Code
 
 Add the marketplace, then install a plugin:
@@ -191,7 +198,7 @@ of starting another. See
 | Plugin | Version | Description |
 |--------|---------|-------------|
 | `methodologist` | 0.9.0 | Formal reasoning catalog — lets users choose and execute evidence-backed CS/math methodologies with traced phases and structured output. |
-| `empirica` | 4.2.0 | Host-neutral empirical-convergence workflow — requires exact run-configuration approval (or provenance-bound auto), cited research before spikes, per-artifact producer attribution, and a current distinct host-observed audit. Unknown or mixed identity evidence fails closed. |
+| `empirica` | 5.0.0 | Host-neutral empirical-convergence workflow — requires exact run-configuration approval (or provenance-bound auto), cited research before spikes, per-artifact producer attribution, and a current distinct host-observed audit. Unknown or mixed identity evidence fails closed. |
 <!-- END GENERATED: plugins -->
 
 ## Development

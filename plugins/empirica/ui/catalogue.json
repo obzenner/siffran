@@ -1,5 +1,5 @@
 {
-  "$description": "Closed lists the UI iterates over (CONVENTIONS 0.2: declarations over code). Pages import them; scripts/audit.mjs expands dynamic copy keys from them. `kinds`, `independence`, `control_modes` and `approvals` are observer-contract enums, held equal by tests/contract.test.mjs. `filters` are the view's filters (VIEW.md R5): a field filter (`of` run or claim) keeps the chosen values, from states.json (`domain`), another list here (`values`) or the data (project); a flag filter (`flag`) keeps the claims whose named field is set. `data_sources` are the server's sources (adapters/observer/server.py); `poll_ms` is how often the app asks whether the store changed.",
+  "$description": "Closed lists the UI iterates over (CONVENTIONS 0.2: declarations over code). Pages import them; scripts/audit.mjs expands dynamic copy keys from them. `kinds`, `independence`, `control_modes` and `approvals` are observer-contract enums, held equal by tests/contract.test.mjs. `filters` are the view's filters (VIEW.md R5): a field filter (`of` run or claim) keeps the chosen values, from states.json (`domain`), another list here (`values`) or the data (project); a flag filter (`flag`) keeps the claims whose named field is set. Each filter's `control` says how it is drawn (chips, a select, a flag); `options: projects` takes its values from the data's projects, `copy` names the copy family that words a `values` list. `record_classes` are the observer's research-record classes (held equal to the run contract); `budgets` the run budgets shown; `legend_domains` the key's groups. `route` declares the navigation (below). `data_sources` are the server's sources (adapters/observer/server.py); `poll_ms` is how often the app asks whether the store changed. `gallery_other_domains` are the vocabularies the gallery shows in its step strip rather than as state rows.",
   "kinds": [
     "needs-experiment",
     "needs-decision",
@@ -9,7 +9,8 @@
     "distinct",
     "mixed",
     "same_model",
-    "unverified"
+    "unverified",
+    "human_owned"
   ],
   "control_modes": [
     "deliberative",
@@ -43,7 +44,10 @@
     "diagnostic",
     "evidence",
     "review",
-    "file"
+    "file",
+    "verification",
+    "route",
+    "decision"
   ],
   "data_sources": [
     "store",
@@ -55,47 +59,268 @@
       "id": "run-state",
       "of": "run",
       "field": "state",
-      "domain": "run"
+      "domain": "run",
+      "control": "chips"
     },
     {
       "id": "audit",
       "of": "run",
       "field": "audit",
-      "domain": "audit"
+      "domain": "audit",
+      "control": "chips"
     },
     {
       "id": "project",
       "of": "run",
-      "field": "project"
+      "field": "project",
+      "control": "select",
+      "options": "projects"
     },
     {
       "id": "claim-state",
       "of": "claim",
       "field": "state",
-      "domain": "claim"
+      "domain": "claim",
+      "control": "chips"
     },
     {
       "id": "kind",
       "of": "claim",
       "field": "kind",
-      "values": "kinds"
+      "values": "kinds",
+      "control": "chips",
+      "copy": "kind"
     },
     {
       "id": "evidence",
       "of": "claim",
       "field": "evidence",
-      "domain": "evidence"
+      "domain": "evidence",
+      "control": "chips"
     },
     {
       "id": "review",
       "of": "claim",
       "field": "review",
-      "domain": "review"
+      "domain": "review",
+      "control": "chips"
     },
     {
       "id": "blocks",
       "of": "claim",
-      "flag": "blocker"
+      "flag": "blocker",
+      "control": "flag"
     }
+  ],
+  "record_classes": [
+    "verbatim",
+    "retrievable",
+    "observed"
+  ],
+  "budgets": [
+    "passes",
+    "spawns",
+    "audit_spawns"
+  ],
+  "legend_domains": [
+    "run",
+    "audit",
+    "diagnostic",
+    "claim",
+    "line"
+  ],
+  "route": {
+    "$description": "The selection as one value (app/route.js reads `levels` and `parent`) and every way of moving it. `levels` outermost first; `parent` is where Esc and the breadcrumb lead; `marked` are the levels drawn as a mark in the view (focus returns to the nearest marked ancestor of what was left). `edges` is the table tests/browser.walk.mjs holds the app to: each is `from` a level (or none) by an `action` to a level; the walk also crawls every control in the panel and fails on any control whose move is not declared here. `inert` are the panel controls that move nothing: a disclosure (details, Show all) and a chip that only has a hint.",
+    "levels": [
+      "project",
+      "run",
+      "claim",
+      "step",
+      "file"
+    ],
+    "parent": {
+      "project": "none",
+      "run": "project",
+      "claim": "run",
+      "step": "run",
+      "file": "run"
+    },
+    "edges": [
+      {
+        "from": "none",
+        "action": "mark",
+        "to": "project"
+      },
+      {
+        "from": "none",
+        "action": "mark",
+        "to": "run"
+      },
+      {
+        "from": "none",
+        "action": "mark",
+        "to": "claim"
+      },
+      {
+        "from": "project",
+        "action": "mark",
+        "to": "run"
+      },
+      {
+        "from": "run",
+        "action": "mark",
+        "to": "claim"
+      },
+      {
+        "from": "claim",
+        "action": "mark",
+        "to": "run"
+      },
+      {
+        "from": "claim",
+        "action": "link-run",
+        "to": "run"
+      },
+      {
+        "from": "claim",
+        "action": "link-blocker",
+        "to": "claim"
+      },
+      {
+        "from": "run",
+        "action": "link-claim",
+        "to": "claim"
+      },
+      {
+        "from": "project",
+        "action": "link-run",
+        "to": "run"
+      },
+      {
+        "from": "run",
+        "action": "row-step",
+        "to": "step"
+      },
+      {
+        "from": "run",
+        "action": "row-file",
+        "to": "file"
+      },
+      {
+        "from": "step",
+        "action": "link-claim",
+        "to": "claim"
+      },
+      {
+        "from": "claim",
+        "action": "crumb-up",
+        "to": "run"
+      },
+      {
+        "from": "step",
+        "action": "crumb-up",
+        "to": "run"
+      },
+      {
+        "from": "file",
+        "action": "crumb-up",
+        "to": "run"
+      },
+      {
+        "from": "run",
+        "action": "crumb-up",
+        "to": "project"
+      },
+      {
+        "from": "claim",
+        "action": "crumb-up",
+        "to": "project"
+      },
+      {
+        "from": "step",
+        "action": "crumb-up",
+        "to": "project"
+      },
+      {
+        "from": "file",
+        "action": "crumb-up",
+        "to": "project"
+      },
+      {
+        "from": "project",
+        "action": "esc",
+        "to": "none"
+      },
+      {
+        "from": "run",
+        "action": "esc",
+        "to": "project"
+      },
+      {
+        "from": "claim",
+        "action": "esc",
+        "to": "run"
+      },
+      {
+        "from": "step",
+        "action": "esc",
+        "to": "run"
+      },
+      {
+        "from": "file",
+        "action": "esc",
+        "to": "run"
+      },
+      {
+        "from": "project",
+        "action": "close",
+        "to": "none"
+      },
+      {
+        "from": "run",
+        "action": "close",
+        "to": "none"
+      },
+      {
+        "from": "claim",
+        "action": "close",
+        "to": "none"
+      },
+      {
+        "from": "step",
+        "action": "close",
+        "to": "none"
+      },
+      {
+        "from": "file",
+        "action": "close",
+        "to": "none"
+      }
+    ],
+    "marked": [
+      "project",
+      "run",
+      "claim"
+    ],
+    "inert": [
+      "disclosure",
+      "hint"
+    ]
+  },
+  "picture": {
+    "$description": "The picture's scale is bounded in screen pixels (VIEW.md): a mark (a run's or a claim's drawn size, outline outside) is at least `mark_px.min` and at least `mark_label_ratio` times the text beside it; text is `text_px.min` to `text_px.max`; every mark has a transparent hit target of at least `target_px`. The topology scales within those bounds; a picture that does not fit at the smallest scale scrolls, and one smaller than its box is centred.",
+    "mark_px": {
+      "min": 11
+    },
+    "text_px": {
+      "min": 11,
+      "max": 16
+    },
+    "target_px": 24,
+    "mark_label_ratio": 0.9
+  },
+  "gallery_other_domains": [
+    "step",
+    "outcome"
   ]
 }

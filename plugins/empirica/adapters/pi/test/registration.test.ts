@@ -160,7 +160,7 @@ const APPROVED_CONFIGURE = JSON.parse(readFileSync(
 const PRESENTATION = { dialog: {
   epoch: 0, control_mode: "deliberative", state: "pending",
   reviews_left: { proposal: 2, total: 127 }, goal: "Review the run configuration below.",
-  invocation: { host: "pi", interactive: true, signal: "operator", delegation: false },
+  invocation: { host: "pi", interactive: true, signal: "operator", delegation: false, audit_retrieval: ["local", "workspace"], human_surface: "unavailable" },
   budgets: [
     { key: "max_passes", label: "Investigation passes", short: "passes", help: "Investigation passes the run may use", value: 8, used: 0, minimum: 1, maximum: 1024 },
     { key: "max_spawns", label: "Child spawns", short: "spawns", help: "Non-audit child agents", value: 1, used: 0, minimum: 0, maximum: 128 },

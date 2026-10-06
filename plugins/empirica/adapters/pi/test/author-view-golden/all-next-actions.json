@@ -9,7 +9,12 @@
         "host": "test",
         "interactive": true,
         "signal": "fixture",
-        "delegation": false
+        "delegation": false,
+        "audit_retrieval": [
+          "local",
+          "workspace"
+        ],
+        "human_surface": "unavailable"
       },
       "status": "active",
       "contract": {
@@ -20,7 +25,7 @@
           "roles",
           "hosts/capabilities"
         ],
-        "digest": "sha256:e57f48aa42474a3bb11f982b386e9aff7cf3842280545e1a97055a39537f9c1c"
+        "digest": "sha256:45fa33dc3aa269f8702ae41c002f7ee29edb005b1129e7ac65c4a33b5f8990af"
       },
       "obligations": {
         "active": [
@@ -64,14 +69,14 @@
         "research.record",
         "spike.run",
         "spike.regate",
-        "human.request_decision",
         "budget.raise",
         "child.spawn_auditor",
         "child.wait",
         "child.retry",
         "residual.accept",
         "host.repair_context",
-        "governance.propose"
+        "governance.propose",
+        "human.confirm_evidence"
       ],
       "untrusted_delimiters": {
         "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
@@ -128,8 +133,9 @@
         "state": "required",
         "independence": "unverified",
         "findings": []
-      }
+      },
+      "confirmation_batch": null
     }
   },
-  "text": "Allow (converged=false) active — governance: pending; passes/spawns/audits: 3/10 0/5 1/1\nrun_id: run-fx\nAudit: required\n\nOpen obligations:\n  obligation.route: Record routing before investigation.\n  obligation.graph: Propose a valid claim graph from supplied context before requesting review.\n\nNext:\n  host: StartRun\n  empirica_observe kind=graph\n  empirica_read GetRun\n  empirica_observe kind=route\n  empirica_observe kind=investigate\n  empirica_observe kind=research\n  empirica_observe kind=spike_request\n  empirica_observe kind=spike_request\n  human: decision\n  empirica_observe kind=configure_run\n  host: child_reserve\n  host: child_event\n  host: child_reserve\n  report_convergence intent=stop\n  host: governance_context\n  empirica_observe kind=configure_run"
+  "text": "Allow (converged=false) active — governance: pending; passes/spawns/audits: 3/10 0/5 1/1\nrun_id: run-fx\nAudit: required\n\nOpen obligations:\n  obligation.route: Record routing before investigation.\n  obligation.graph: Propose a valid claim graph from supplied context before requesting review.\n\nNext:\n  host: StartRun\n  empirica_observe kind=graph\n  empirica_read GetRun\n  empirica_observe kind=route\n  empirica_observe kind=investigate\n  empirica_observe kind=research\n  empirica_observe kind=spike_request\n  empirica_observe kind=spike_request\n  empirica_observe kind=configure_run\n  host: child_reserve\n  host: child_event\n  host: child_reserve\n  report_convergence intent=stop\n  host: governance_context\n  empirica_observe kind=configure_run\n  human: confirmation"
 }

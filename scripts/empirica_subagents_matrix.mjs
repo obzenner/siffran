@@ -13,6 +13,8 @@
 //   classifier  the call classifier, given this version's inventory, admits exactly the reviewed surface:
 //               each launch form alone is executable, two are malformed, every action outside the
 //               read-only allowlist is unsupported, every allowlisted one present is management
+//   retrieval   the retrieval kinds derived from the live preflight's `contract.tools.effectiveAllowlist` through the
+//               adapter's one tool->kind table equal the set reviewed for every version (ADR-0067)
 // One JSON line per version on stdout; exit 1 when any version fails, times out, or cannot be fetched.
 //
 // Usage: node scripts/empirica_subagents_matrix.mjs [--root DIR]
@@ -81,14 +83,24 @@ export function reviewCommands(version, root) {
  * The four checks of one version, from evidence already read. Pure: every input is data.
  * `expected` is the checked-in evidence, `observed` what the package serves now.
  */
-export function evaluateCell({ version, request, properties, inventory, liveFixture, checkedFixture, classify, managementActions }) {
+export function evaluateCell({ version, request, properties, inventory, liveFixture, checkedFixture, classify, managementActions, retrieval }) {
   const checks = {};
   const missing = Object.keys(request).filter((key) => !properties.includes(key));
   checks.schema = missing.length === 0 ? { ok: true } : { ok: false, detail: `parameters not declared by the package: ${missing.join(", ")}` };
   const same = JSON.stringify(maskMachineDigests(liveFixture)) === JSON.stringify(maskMachineDigests(checkedFixture));
   checks.preflight = same ? { ok: true } : { ok: false, detail: "live preflight differs from the checked-in fixture" };
   checks.classifier = classifierVerdict({ version, inventory, classify, managementActions });
+  if (retrieval !== undefined) checks.retrieval = retrievalVerdict(version, retrieval);
   return checks;
+}
+
+/** The retrieval kinds every reviewed pi-subagents version is pinned to give the canonical auditor: it reads files, never the web. */
+export const REVIEWED_RETRIEVAL = ["local", "workspace"];
+
+/** `observed` is derived from the live preflight by the adapter's own table; it must equal the reviewed set. */
+export function retrievalVerdict(version, { observed, reviewed = REVIEWED_RETRIEVAL }) {
+  return JSON.stringify(observed) === JSON.stringify(reviewed) ? { ok: true }
+    : { ok: false, detail: `${version}: the auditor's retrieval is ${JSON.stringify(observed)}, reviewed ${JSON.stringify(reviewed)}` };
 }
 
 /** The launch-contract members that are hashes over path-bearing content (verified: the same package
@@ -192,11 +204,16 @@ async function cellMain(argv) {
   if (generated.version !== version) throw new Error(`the package at ${packageRoot} is ${generated.version}, not ${version}`);
   const inventory = loadInventory(version);
   if (inventory === undefined) throw new Error(`no checked-in inventory for ${version}`);
+  const { auditRetrievalFrom } = await import("../plugins/empirica/adapters/pi/src/audit-retrieval.ts");
+  const liveFixture = await captureFixture(packageRoot);
+  const allowlist = liveFixture.cases.canonical_auditor?.response?.contract?.tools?.effectiveAllowlist;
   const request = { agent: "empirica.empirica-auditor", ...auditLaunchInput({ task: "t", model: "audit/reviewer", agentScope: "user", policy: AUDIT_LAUNCH_POLICY }) };
   const checks = evaluateCell({
     version, request, properties: await subagentParamProperties(packageRoot), inventory,
-    liveFixture: await captureFixture(packageRoot), checkedFixture: readJson(fixturePath(FIXTURE_DIR, version)),
+    liveFixture, checkedFixture: readJson(fixturePath(FIXTURE_DIR, version)),
     classify: classifySubagentCall, managementActions: MANAGEMENT_ACTIONS,
+    // A preflight that reports no allowlist derives nothing, which never equals the reviewed set.
+    retrieval: { observed: Array.isArray(allowlist) ? auditRetrievalFrom(allowlist) : null },
   });
   process.stdout.write(`${JSON.stringify(checks)}\n`);
 }

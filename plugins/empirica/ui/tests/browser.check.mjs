@@ -8,6 +8,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { withPage as openPage } from "./cdp.mjs";
+import { walk } from "./browser.walk.mjs";
+import { layoutChecks } from "./browser.layout.mjs";
 
 const ui = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CLI = path.join(ui, "..", "adapters", "observer", "cli.py");
@@ -33,6 +35,7 @@ const details = Object.fromEntries(await Promise.all(runs.map(async (r) => [r.ke
 // The runs the checks open: a converged run with its history, and the run with a changed file.
 const CONVERGED = runs.find((r) => r.state === "converged" && !r.diagnostic).key;
 const STALE = runs.find((r) => details[r.key].stale.length).key;
+const VERIFY = runs.find((r) => details[r.key].claims.some((c) => c.records.some((x) => x.class === "observed"))).key;
 let failed = 0;
 function check(name, ok, got) { if (!ok) failed++; console.log(`${ok ? "ok  " : "FAIL"} ${name}${ok ? "" : `  got ${JSON.stringify(got)}`}`); }
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -59,7 +62,8 @@ const page = (body) => `(async () => { ${LOAD} ${body} })()`;
 // Where each mark's own shape is (its selection ring aside, which only appears around it).
 const RECTS = `JSON.stringify([...document.querySelectorAll("ev-view [data-mark]")].map((m) => { const b = m.querySelector("path:not(.hidden), circle:not(.hidden), text").getBoundingClientRect(); return [Math.round(b.x), Math.round(b.y), Math.round(b.width)]; }))`;
 const SHOWING = `document.querySelector("ev-filters [data-showing]").textContent`;
-const showing = ([p, r, c]) => `${p} projects · ${r} runs · ${c} claims`;
+const noun = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+const showing = ([p, r, c]) => `${noun(p, "project", "projects")} · ${noun(r, "run", "runs")} · ${noun(c, "claim", "claims")}`;
 const counts = `[document.querySelectorAll("ev-view [data-mark][data-project]").length, document.querySelectorAll("ev-view [data-mark][data-run]:not([data-claim])").length, document.querySelectorAll("ev-view [data-mark][data-claim]").length]`;
 const tick = (name, value) => `(async () => { const x = ${name}; x.checked = ${value}; x.dispatchEvent(new Event("change", { bubbles: true })); await new Promise((r) => setTimeout(r, 150)); })()`;
 const box = (sel) => `document.querySelector('ev-filters input[data-filter="${sel[0]}"]${sel[1] ? `[value="${sel[1]}"]` : ""}')`;
@@ -75,8 +79,9 @@ try {
     check("R1: every project, run and claim in the data is in the view", await E(page(`return projectMarks.length === fx.projects.length && runMarks.length === runs.length && claimMarks.length === claims.length
       && runs.every((r) => V.querySelector('[data-mark][data-run="' + r.key + '"]:not([data-claim])')) && claims.length > 0;`)));
     const fits = `(() => { const v = document.querySelector("ev-view").getBoundingClientRect(), m = document.getElementById("main");
+      const vis = (x) => (x.querySelector("path:not(.hidden), circle:not(.hidden)") ?? x).getBoundingClientRect();
       return document.documentElement.scrollHeight <= innerHeight && document.documentElement.scrollWidth <= innerWidth && m.scrollHeight <= m.clientHeight
-        && [...document.querySelectorAll("ev-view [data-mark]")].every((x) => { const b = x.getBoundingClientRect(); return b.width > 0 && b.left >= v.left - 1 && b.right <= v.right + 1 && b.top >= v.top - 1 && b.bottom <= v.bottom + 1; }); })()`;
+        && [...document.querySelectorAll("ev-view [data-mark]")].every((x) => { const b = vis(x); return b.width > 0 && b.left >= v.left - 1 && b.right <= v.right + 1 && b.top >= v.top - 1 && b.bottom <= v.bottom + 1; }); })()`;
     check("R1: nothing scrolls, and every mark is inside the view", await E(fits));
     const contained = `(() => { const a = document.querySelector("[data-filters]"); return a.scrollHeight <= a.clientHeight; })()`;
     check("the filters fit their column without scrolling", await E(contained));
@@ -85,13 +90,13 @@ try {
     check("1280 × 720: the filters still fit without scrolling", await E(contained));
     await resize(P, 900, 560); await P.sleep(300);
     const size1 = await E(`document.querySelector("ev-view [data-claim] circle:not(.hidden)").getBoundingClientRect().width`);
-    check("R1: in a smaller window everything still fits, the marks get smaller", (await E(fits)) && size1 < size0, [size0, size1]);
+    check("R1: in a smaller window everything still fits, the marks never grow", (await E(fits)) && size1 <= size0, [size0, size1]);
     await resize(P, 1500, 900); await P.sleep(300);
     // R2 each entity type is distinct
-    check("R2: a project is a region labelled with its folder name (else its place), a run a diamond, a claim a circle", await E(page(`
+    check("R2: a project is a region labelled as the observer labels it, a run a diamond, a claim a circle", await E(page(`
       const regions = V.querySelectorAll("svg > rect.stroke-border").length;
       const diamond = (m) => /^M[\\d.-]+,[\\d.-]+ L[\\d.-]+,[\\d.-]+ L[\\d.-]+,[\\d.-]+ L[\\d.-]+,[\\d.-]+ Z$/.test(m.querySelector("path").getAttribute("d"));
-      return regions === fx.projects.length && projectMarks.every((m, i) => m.querySelector("text").textContent === (fx.projects[i].name ?? "Project " + (i + 1)) + " · " + fx.projects[i].runs.length + (fx.projects[i].runs.length === 1 ? " run" : " runs"))
+      return regions === fx.projects.length && projectMarks.every((m, i) => m.getAttribute("aria-label") === fx.projects[i].label + " · " + fx.projects[i].runs.length + (fx.projects[i].runs.length === 1 ? " run" : " runs"))
         && fx.projects.some((p) => p.name === null) && runMarks.every(diamond) && runMarks.every((m) => !m.querySelector("circle"))
         && claimMarks.every((m) => m.querySelectorAll("circle").length === 2 && !m.querySelector("path"));`)));
     // R3 relationships are drawn
@@ -106,21 +111,23 @@ try {
       const lines = [...V.querySelectorAll("path[data-attempt]")], want = runs.filter((r) => r.previous);
       return want.length > 0 && lines.length === want.length && want.every((r) => lines.some((l) => l.dataset.attempt === r.key && l.dataset.previous === r.previous && l.getAttribute("stroke-dasharray") && l.getAttribute("marker-end")));`)));
     check("R3: claims are drawn under their own run, runs inside their project's region", await E(page(`
+      const vis = (m) => (m.querySelector("path:not(.hidden), circle:not(.hidden)") ?? m).getBoundingClientRect();
       const regions = [...V.querySelectorAll("svg > rect.stroke-border")].map((r) => r.getBoundingClientRect());
       const inside = (b, o) => b.left >= o.left - 1 && b.right <= o.right + 1 && b.top >= o.top - 1 && b.bottom <= o.bottom + 1;
       return fx.projects.every((p, i) => p.runs.every((r) => {
-        const head = V.querySelector('[data-mark][data-run="' + r.key + '"]:not([data-claim])').getBoundingClientRect();
-        return inside(head, regions[i]) && r.claims.every((c) => { const b = V.querySelector('[data-mark][data-run="' + r.key + '"][data-claim="' + c.id + '"]').getBoundingClientRect(); return inside(b, regions[i]) && b.top > head.bottom; });
+        const head = vis(V.querySelector('[data-mark][data-run="' + r.key + '"]:not([data-claim])'));
+        return inside(head, regions[i]) && r.claims.every((c) => { const b = vis(V.querySelector('[data-mark][data-run="' + r.key + '"][data-claim="' + c.id + '"]')); return inside(b, regions[i]) && b.top > head.bottom; });
       }));`)));
     // R4 the encodings
     check("R4: a run shows its state's colour and glyph, approved of total, and its diagnostic's mark, else its audit's", await E(page(`
       return runs.every((r) => {
-        const m = V.querySelector('[data-mark][data-run="' + r.key + '"]:not([data-claim])'), s = states.run[r.state] ?? states.unknown;
+        const m = V.querySelector('[data-mark][data-run="' + r.key + '"]:not([data-claim])'), s = r.state === null ? null : states.run[r.state];
         const side = r.diagnostic ? states.diagnostic[r.diagnostic] : r.audit ? states.audit[r.audit] : null;
         const uses = [...m.querySelectorAll("use")].map((u) => u.getAttribute("href").split("#")[1]), text = m.querySelector("text")?.textContent ?? null;
         const approved = r.claims.filter((c) => c.state === "approved").length;
-        return m.querySelector("path").classList.contains("fill-tone-" + s.tone + "-tint") && uses[0] === icons[s.icon]
-          && (side ? uses.length === 2 && uses[1] === icons[side.icon] : uses.length === 1)
+        const fill = m.querySelector("path").classList.contains(s ? "fill-tone-" + s.tone + "-tint" : "fill-none");
+        return fill && (s ? uses[0] === icons[s.icon] : true)
+          && (side ? uses.length === (s ? 2 : 1) && uses.at(-1) === icons[side.icon] : uses.length === 1)
           && text === (r.claims.length ? approved + "/" + r.claims.length : null);
       }) && runs.some((r) => r.diagnostic && r.state) && runs.some((r) => r.state === null);`)));
     check("R4: a claim shows its state's colour; its state's glyph unless quiet, else its review's unless that is quiet too; the thick outline if and only if gating", await E(page(`
@@ -135,7 +142,7 @@ try {
       }));
       return ok && unsettled > 0;`)));
     check("R4: the view encodes nothing else: no other shapes, text only on project labels and run counts", await E(`(() => {
-      const svg = document.querySelector("ev-view svg"); const ok = new Set(["svg", "defs", "marker", "path", "g", "rect", "circle", "text", "use"]);
+      const svg = document.querySelector("ev-view svg"); const ok = new Set(["svg", "defs", "marker", "path", "g", "rect", "circle", "text", "tspan", "use"]);
       return [...svg.querySelectorAll("*")].every((n) => ok.has(n.localName)) && [...svg.querySelectorAll("text")].every((t) => t.closest("[data-project], [data-run]")); })()`));
     check("R4: every mark has a name and a hint of at most 60 characters", await E(`[...document.querySelectorAll("ev-view [data-mark]")].every((m) => m.getAttribute("aria-label") && m.dataset.hint && m.dataset.hint.length <= 60 && !/\\bC\\d+\\b/.test(m.dataset.hint))`));
     check("R7: no files in the view", await E(`!document.querySelector("ev-view [data-path], ev-view ev-file, main ev-file")`));
@@ -149,7 +156,41 @@ try {
       const m = document.querySelector('ev-view [data-mark][data-run="' + k + '"]:not([data-claim])');
       return !/claim graph/.test(m.getAttribute("aria-label") + m.dataset.hint); })`));
     await E(clickRun(partial[0].key)); await P.sleep(300);
-    check("…nor does its detail", await E(`(() => { const x = ${DETAIL}.textContent; return !/claim graph/.test(x) && x.includes("Record"); })()`));
+    check("…nor does its detail", await E(`(() => { const x = ${DETAIL}.textContent; return !/claim graph/.test(x) && !x.includes("Record") && x.includes("·"); })()`));
+    // Q3a-1/9: every detail of every run reads as words: no `{name}` from a template, no `⟦key⟧`, and a residual names its claim.
+    const words = `(() => { const x = document.body.innerText; return !/\\{\\w+\\}/.test(x) && !x.includes("⟦"); })()`;
+    const seen = [];
+    for (const r of runs) {
+      await E(clickRun(r.key)); await P.sleep(200);
+      const linked = await E(`[...${DETAIL}.querySelectorAll("[aria-label] a, section a")].length`);
+      seen.push([await E(words), linked]);
+    }
+    check("no detail shows a `{placeholder}` or a missing-copy marker", seen.every(([ok]) => ok), seen);
+    const twice = runs.find((r) => { const m = details[r.key].residuals.map((x) => x.message); return new Set(m).size < m.length; });
+    await E(clickRun(twice.key)); await P.sleep(250);
+    const asked = details[twice.key].residuals.filter((x) => x.claim);
+    check("Q3a-9: residuals that share a message each name their own claim, in words, as a link", same(await E(`[...${DETAIL}.querySelectorAll('section[aria-label="What is left"] a')].map((a) => a.textContent)`),
+      asked.map((x) => twice.claims.find((c) => c.id === x.claim).text.slice(0, 48))) || (await E(`${DETAIL}.querySelectorAll('section[aria-label="What is left"] a').length`)) === asked.length);
+    const budget = runs.find((r) => r.state === "stopped_budget");
+    await E(clickRun(budget.key)); await P.sleep(250);
+    check("Q3a-1: a residual is worded with its parameters: the budget that ran out", await E(`${DETAIL}.textContent.includes("pass budget exhausted.")`));
+    // ADR-0067: how each research record is verified, what waits on the human, the decision
+    await E(clickRun(VERIFY)); await P.sleep(250);
+    check("ADR-0067: a run lists what waits on the human, each claim named", await E(`(() => { const s = ${DETAIL}.querySelector('section[aria-label="Waiting for your confirmation"]'); return !!s && s.querySelectorAll("a").length === ${details[VERIFY].waiting.length}; })()`));
+    const observed = details[VERIFY].claims.find((c) => c.records.some((x) => x.class === "observed" && x.status === "rejected_by_human"));
+    await E(`document.querySelector('ev-view [data-mark][data-run="${VERIFY}"][data-claim="${observed.id}"]').dispatchEvent(new MouseEvent("click", { bubbles: true }))`); await P.sleep(250);
+    check("ADR-0067: a record shows its source and how it stands; the quote only on click", same(await E(`(async () => { const d = ${DETAIL}.querySelector("ev-record details"); const q = d.querySelector("blockquote"); const before = q.checkVisibility(); d.querySelector("summary").click(); await new Promise((r) => setTimeout(r, 100)); return [d.querySelector("summary").textContent.includes("Rejected by you"), before, q.checkVisibility(), d.textContent.includes("The job only runs on the nightly cluster."), d.textContent.includes("Rejected, your note") && d.textContent.includes("That log is from a different job.")]; })()`), [true, false, true, true, true]));
+    const waiting = details[VERIFY].claims.find((c) => c.decision?.route === "human");
+    await E(`document.querySelector('ev-view [data-mark][data-run="${VERIFY}"][data-claim="${waiting.id}"]').dispatchEvent(new MouseEvent("click", { bubbles: true }))`); await P.sleep(250);
+    check("ADR-0067: a needs-decision claim is worded as a decision it waits for", await E(`${DETAIL}.textContent.includes("Waiting for your decision") && !${DETAIL}.textContent.includes("Waiting for your confirmation")`));
+    // R3 M2: a stopped run asks nobody, and says so; it promises no dialog
+    const STOPPED = runs.find((r) => r.state === "stopped_residual" && details[r.key].claims.some((c) => c.decision && c.decision.outcome === null));
+    check("R3 M2: the demo has a stopped run with a decision still unanswered", !!STOPPED);
+    await E(clickRun(STOPPED.key)); await P.sleep(250);
+    check("R3 M2: a stopped run lists nothing as waiting for a confirmation", await E(`!${DETAIL}.querySelector('section[aria-label="Waiting for your confirmation"]') && !${DETAIL}.textContent.includes("Waiting for your")`));
+    const undecided = details[STOPPED.key].claims.find((c) => c.decision && c.decision.outcome === null);
+    await E(`document.querySelector('ev-view [data-mark][data-run="${STOPPED.key}"][data-claim="${undecided.id}"]').dispatchEvent(new MouseEvent("click", { bubbles: true }))`); await P.sleep(250);
+    check("R3 M2: its decision says nobody will ask, not that a dialog is coming", await E(`${DETAIL}.textContent.includes("Not asked · the run has stopped") && !${DETAIL}.textContent.includes("Waiting for your")`));
     // R6 details on click; nothing moves
     const before = await E(RECTS);
     await E(clickRun(CONVERGED)); await P.sleep(300);
@@ -166,17 +207,23 @@ try {
     await E(`window.__c = document.querySelector('ev-view [data-mark][data-run="${CONVERGED}"][data-claim="C1"]'); __c.focus(); __c.dispatchEvent(new MouseEvent("click", { bubbles: true }))`); await P.sleep(300);
     check("R6: a claim opens its detail; nothing moves; only it is selected", (await E(RECTS)) === before && await E(`(() => { const s = document.querySelectorAll("ev-view [data-selected]"); const x = ${DETAIL}.textContent;
       return s.length === 1 && s[0] === __c && x.includes("Claim") && x.includes("Review") && x.includes("Supporting research") && !/\\bC1\\b/.test(x.split("Technical")[0]); })()`));
-    await E(`document.querySelector("#split ev-detail a[href]").click()`); await P.sleep(300);
+    await E(`document.querySelector("#split ev-detail dl a[href]").click()`); await P.sleep(300);
     check("R6: the claim's run link selects the run in the view", await E(`document.querySelector("ev-view [data-selected]")?.dataset.run === "${CONVERGED}" && !document.querySelector("ev-view [data-selected]").dataset.claim`));
     const blocked = runs.flatMap((r) => r.claims.filter((c) => c.blocker).map((c) => [r.key, c])).find(([, c]) => c.blocker_claim === c.id);
     await E(`document.querySelector('ev-view [data-mark][data-run="${blocked[0]}"][data-claim="${blocked[1].id}"]').dispatchEvent(new MouseEvent("click", { bubbles: true }))`); await P.sleep(300);
     const message = details[blocked[0]].claims.find((c) => c.id === blocked[1].id).blocker_message;
     check("R6: a blocked claim says what blocks it, in the plugin's words", await E(`${DETAIL}.textContent.includes(${JSON.stringify(message)})`), message);
     await E(`document.querySelector("ev-view [data-mark][data-project]").dispatchEvent(new MouseEvent("click", { bubbles: true }))`); await P.sleep(150);
-    check("R6: a project opens its detail: its runs and claims, counted", (await E(RECTS)) === before && await E(`(() => { const x = ${DETAIL}.textContent; return x.includes(${JSON.stringify(fx.projects[0].name ?? "Project 1")}) && x.includes("Runs") && x.includes("Claims"); })()`));
+    check("R6: a project opens its detail: its runs and claims, counted", (await E(RECTS)) === before && await E(`(() => { const x = ${DETAIL}.textContent; return x.includes(${JSON.stringify(fx.projects[0].label)}) && x.includes("Runs") && x.includes("Claims"); })()`));
     await E(`__c.focus(); __c.dispatchEvent(new MouseEvent("click", { bubbles: true }))`); await P.sleep(150);
     await P.key("Escape"); await P.sleep(150);
-    check("Esc clears the selection; the panel stays and says what to click; focus stays", same(await E(`[document.querySelectorAll("ev-view [data-selected]").length, document.getElementById("split").hasAttribute("open"), !!document.querySelector("#split ev-detail [data-empty]"), document.activeElement === __c, new URLSearchParams(location.search).has("claim")]`), [0, true, true, true, false]));
+    check("Esc closes the innermost layer first: the hint on the focused mark, the selection unchanged", same(await E(`[document.querySelector("ev-hint").matches(":popover-open"), new URLSearchParams(location.search).get("claim")]`), [false, "C1"]));
+    await P.key("Escape"); await P.sleep(150);
+    check("Esc leaves one level: a claim goes to its run, focus back on the claim's mark", same(await E(`[document.querySelector("ev-view [data-selected]")?.dataset.claim ?? null, document.querySelector("ev-view [data-selected]")?.dataset.run === "${CONVERGED}", document.activeElement === __c, new URLSearchParams(location.search).has("claim")]`), [null, true, true, false]));
+    await P.key("Escape"); await P.sleep(150);
+    await P.key("Escape"); await P.sleep(150);
+    await P.key("Escape"); await P.sleep(150);
+    check("Esc at the top clears the selection; the panel stays and says what to click", same(await E(`[document.querySelectorAll("ev-view [data-selected]").length, document.getElementById("split").hasAttribute("open"), !!document.querySelector("#split ev-detail [data-empty]"), ["project", "run", "claim"].some((k) => new URLSearchParams(location.search).has(k))]`), [0, true, true, false]));
     check("R6: Esc moves nothing in the view", (await E(RECTS)) === before);
     // keyboard
     check("keyboard: the view is one tab stop", await E(`document.querySelectorAll('ev-view [data-mark][tabindex="0"]').length === 1`));
@@ -184,8 +231,9 @@ try {
     check("keyboard: ArrowRight moves to the next mark and carries the stop", await E(`(() => { const all = [...document.querySelectorAll("ev-view [data-mark]")]; return document.activeElement === all[__k + 1] && all[__k + 1].getAttribute("tabindex") === "0" && all[__k].getAttribute("tabindex") === "-1"; })()`));
     await P.key(" "); await P.sleep(150);
     check("keyboard: Space opens the focused mark", await E(`document.activeElement.hasAttribute("data-selected") && !document.querySelector("#split ev-detail [data-empty]")`));
-    check("keyboard: the focused mark shows its ring", await E(`(() => { const r = document.activeElement.querySelector(".stroke-ring"); return !!r && getComputedStyle(r).display !== "none"; })()`));
+    check("keyboard: the focused, selected mark has the focus outline and its selection shape", await E(`(() => { const m = document.activeElement, r = m.querySelector('[class*="group-data-selected"]'); return getComputedStyle(m).outlineStyle === "solid" && !!r && getComputedStyle(r).display !== "none"; })()`));
     // R5 filters remove
+    await E(`__c.dispatchEvent(new MouseEvent("click", { bubbles: true }))`); await P.sleep(150);  // an approved claim: the "open" filter removes it
     await E(tick(box(["claim-state", "open"]), true));
     const open = expect((c) => c.state === "open");
     check("R5: a claim filter keeps only matching claims, and runs and projects that still have one", await E(`${SHOWING} === "${showing(open)}"`) && same(await E(counts), open)
@@ -227,7 +275,7 @@ try {
     check("360 px: with nothing selected the panel is closed and nothing scrolls sideways", same(await E(`[document.getElementById("split").hasAttribute("narrow"), document.getElementById("split").hasAttribute("open"), document.documentElement.scrollWidth <= innerWidth]`), [true, false, true]));
     await resize(P, 1500, 900); await P.sleep(300);
     check("wide again: the panel is open again", await E(`document.getElementById("split").hasAttribute("open")`));
-    check("separator reports min/now/max", await E(`(() => { const h=document.querySelector(".ev-split-handle"); return +h.getAttribute("aria-valuemin") > 0 && +h.getAttribute("aria-valuenow") > 0 && +h.getAttribute("aria-valuemax") > +h.getAttribute("aria-valuenow"); })()`));
+    check("separator reports min/now/max", await E(`(() => { const h=document.querySelector(".ev-split-handle"); return +h.getAttribute("aria-valuemin") > 0 && +h.getAttribute("aria-valuenow") > 0 && +h.getAttribute("aria-valuemax") >= +h.getAttribute("aria-valuenow") && !!h.getAttribute("aria-valuetext"); })()`));
     check("cancelled drag cleans up", same(await E(`(() => { const h=document.querySelector(".ev-split-handle"), s=document.getElementById("split"); h.dispatchEvent(new PointerEvent("pointerdown",{pointerId:1,bubbles:true})); const d=s.classList.contains("select-none"); h.dispatchEvent(new PointerEvent("pointercancel",{pointerId:1,bubbles:true})); return [d, s.classList.contains("select-none")]; })()`), [true, false]));
     check("reconnect does not duplicate events", (await E(`(() => { const t=document.querySelector("ev-view"); let n=0; const h=()=>n++; document.addEventListener("ev-open",h); const p=t.parentNode; p.removeChild(t); p.appendChild(t); t.querySelector("[data-claim]").dispatchEvent(new MouseEvent("click",{bubbles:true})); document.removeEventListener("ev-open",h); return n; })()`)) === 1);
     check("hint hides when its target is removed", await E(`(async () => { const b=document.querySelector("ev-view [data-claim]"); b.dispatchEvent(new PointerEvent("pointerover",{bubbles:true})); const shown=document.getElementById("ev-hint").matches(":popover-open"); b.remove(); await new Promise(r=>setTimeout(r,50)); return shown && !document.getElementById("ev-hint").matches(":popover-open"); })()`));
@@ -269,6 +317,41 @@ try {
     check("polling: an unreachable observer is said, and the view stays", await E(`document.getElementById("status").textContent.includes("Can't reach")`) && (await E(counts))[1] === runs.length - 1);
     answer = without(CONVERGED); await poll();
     check("polling: the observer back, the message goes; a selected run that left the store is deselected", await E(`document.getElementById("status").textContent === "" && !document.querySelector("ev-view [data-selected]") && !!document.querySelector("#split ev-detail [data-empty]") && !new URLSearchParams(location.search).has("run")`));
+  });
+
+  // Labels are the observer's, so a reorder relabels nothing; a detail that cannot be had says so in the panel and
+  // leaves the header to the view poll; a bad view is said and the next good one recovers.
+  await withPage(`${APP}`, "1500x900", async (P) => {
+    await P.waitReady(); await P.sleep(300);
+    const E = P.evalJs;
+    let answer = null, run = null;
+    P.on("Fetch.requestPaused", ({ requestId, request }) => {
+      if (request.url.includes("/api/run")) {
+        if (run === null) return P.send("Fetch.continueRequest", { requestId });
+        return P.send("Fetch.fulfillRequest", { requestId, responseCode: run, body: "", responseHeaders: [] });
+      }
+      if (answer === null) return P.send("Fetch.continueRequest", { requestId });
+      const body = Buffer.from(JSON.stringify(answer)).toString("base64");
+      P.send("Fetch.fulfillRequest", { requestId, responseCode: 200, body, responseHeaders: [{ name: "Content-Type", value: "application/json" }, { name: "ETag", value: `"${answer.token ?? "x"}"` }] });
+    });
+    await P.send("Fetch.enable", { patterns: [{ urlPattern: "*/api/view*" }, { urlPattern: "*/api/run*" }] });
+    const poll = () => P.sleep(3600);
+    const unnamed = fx.projects.find((p) => p.name === null);
+    await E(`document.querySelector('ev-view [data-mark][data-project="${unnamed.id}"]').dispatchEvent(new MouseEvent("click", { bubbles: true }))`); await P.sleep(200);
+    const labels = `[...document.querySelectorAll("ev-view [data-mark][data-project]")].map((m) => m.getAttribute("aria-label")).sort()`;
+    const before = await E(labels);
+    answer = { ...fx, token: `sha256:${"4".repeat(64)}`, projects: [...fx.projects].reverse() }; await poll();
+    check("Q3b-8: reordering the projects relabels none, and the panel and the view agree", same(await E(labels), before)
+      && await E(`${DETAIL}.querySelector("p.font-medium").textContent === ${JSON.stringify(unnamed.label)} && document.querySelector("ev-view [data-selected]").getAttribute("aria-label").startsWith(${JSON.stringify(unnamed.label)})`));
+    check("Q3b-8: an unnamed project is told apart in its detail by its first activity, not by a number", await E(`${DETAIL}.textContent.includes("First activity") && !/Project \\d+/.test(document.body.innerText)`));
+    answer = { contract: "empirica-ui-view/v1" }; await poll();
+    check("Q3a-3: a view that is not the contract is said; the last good view stays", await E(`document.getElementById("status").textContent.includes("cannot read") && document.querySelectorAll("ev-view [data-mark]").length > 0`));
+    answer = null; await poll();
+    check("Q3a-3: polling goes on after a bad view, and recovers", await E(`document.getElementById("status").textContent === ""`));
+    run = 500;
+    await E(`document.querySelector('ev-view [data-mark][data-run="${CONVERGED}"]:not([data-claim])').dispatchEvent(new MouseEvent("click", { bubbles: true }))`); await P.sleep(300);
+    check("Q3a-7: a detail that cannot be had says so inside the panel, keeps the row's facts, and leaves the header alone", await E(`${DETAIL}.querySelector("[data-notice]")?.textContent.includes("reported an error") && !${DETAIL}.querySelector("[data-notice]")?.textContent.includes("can't be reached") && ${DETAIL}.textContent.includes("Audit") && document.getElementById("status").textContent === ""`));
+    run = null;
   });
 
   // A link to a claim opens with it selected and the filters it names applied.
@@ -314,8 +397,35 @@ try {
       check("decision: a repeat group opens when it holds the selected step", await E(`[...document.querySelectorAll("#o-history details")].some(d => d.open && d.querySelector('[data-step="${rep.inner[1]}"]'))`));
     }
     check("decision: failed spikes and audits never hide in a group", await E(`[...document.querySelectorAll("#o-history details summary")].every(s => !/failed/i.test(s.textContent))`));
+    check("gallery: every step kind and every step outcome has a specimen", await E(page(`
+      const kinds = new Set([...document.querySelectorAll("ev-step")].map((e) => e.getAttribute("value"))), outs = new Set([...document.querySelectorAll("ev-step")].map((e) => e.getAttribute("outcome")));
+      return Object.keys(states.step).every((k) => kinds.has(k)) && Object.keys(states.outcome).every((o) => outs.has(o));`)));
+    // m4: "Show all" appears only on text that does not fit two lines.
+    const MORE = `(() => { const [short, long] = [document.querySelector("ev-more[label]"), document.getElementById("g-long")].map((e) => e.querySelector("[data-more]")); return [!short.checkVisibility(), long.checkVisibility()]; })()`;
+    check("gallery: Show all is on the long text and not on the short one", same(await E(MORE), [true, true]));
+    await E(`document.getElementById("g-long").querySelector("[data-more]").click()`); await P.sleep(100);
+    check("gallery: Show all opens the text in place and Show less folds it", await E(`(() => { const m = document.getElementById("g-long"), q = () => [m.querySelector("[data-text]"), m.querySelector("[data-more]")]; let [t, b] = q(); const open = !t.className.includes("line-clamp") && b.textContent === "Show less" && b.getAttribute("aria-expanded") === "true"; b.click(); [t, b] = q(); return open && t.className.includes("line-clamp") && b.textContent === "Show all"; })()`));
+    // control: the same text made long gives the short one a control, and a long one made short loses it
+    await E(`(() => { const a = document.querySelector("ev-more[label]"), b = document.getElementById("g-long"); a.setAttribute("text", b.getAttribute("text")); b.setAttribute("text", "Short."); })()`); await P.sleep(150);
+    check("gallery control: with the texts swapped the long one has no control and the short one has one", same(await E(MORE), [false, false]));
     check("gallery: meters are named", await E(`[...document.querySelectorAll("meter")].every(m => m.getAttribute("aria-label"))`));
   });
+  // m10: a poll answered 304 is not reported by the browser as a cancelled request
+  await withPage(APP, "1500x900", async (P) => {
+    const urls = new Map(), failures = [], statuses = [];
+    P.on("Network.requestWillBeSent", (p) => urls.set(p.requestId, p.request.url));
+    P.on("Network.loadingFailed", (p) => failures.push([urls.get(p.requestId), p.errorText]));
+    P.on("Network.responseReceived", (p) => { if (urls.get(p.requestId)?.includes("/api/view")) statuses.push(p.response.status); });
+    await P.send("Network.enable"); await P.waitReady();
+    await P.sleep(7600);
+    check("m10: two polls answered 304 leave no cancelled request", statuses.filter((s) => s === 304).length >= 2 && failures.length === 0, [statuses, failures]);
+    // control: a 304 whose body the page never reads (the old client) is reported as cancelled, so the listener can see it
+    await P.evalJs(`fetch("/api/view?source=demo", { headers: { "If-None-Match": ${JSON.stringify(await P.evalJs(`fetch("/api/view?source=demo").then((r) => r.headers.get("ETag"))`))} } }).then(() => 0)`);
+    await P.sleep(400);
+    check("m10 control: an unread 304 is reported as cancelled", failures.length >= 1, failures);
+  });
+  await walk({ B, fx, details, withPage, check, same });
+  await layoutChecks({ B, fx, details, withPage, check, resize, keys: { STALE, VERIFY, CONVERGED } });
 } finally {
   demo.p.kill(); store.p.kill();
   fs.rmSync(home, { recursive: true, force: true });

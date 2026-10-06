@@ -29,5 +29,22 @@
   "no-history": "unplug",
   "workspace-off": "folder-x",
   "close": "x",
-  "chosen": "check"
+  "chosen": "check",
+  "budget-out": "gauge",
+  "frozen": "snowflake",
+  "audit-required": "shield-question",
+  "unreadable": "file-warning",
+  "history-missing": "history",
+  "file-unreadable": "file-lock",
+  "file-outside": "file-output",
+  "source-verified": "file-check",
+  "confirmed": "badge-check",
+  "rejected": "thumbs-down",
+  "auditor-fetch": "scan-search",
+  "waiting-human": "hourglass",
+  "cannot-confirm": "lock",
+  "asked": "message-circle-question",
+  "shown-to-human": "eye",
+  "asking-spent": "ban",
+  "run-ended": "circle-stop"
 }

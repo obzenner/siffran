@@ -11,7 +11,7 @@ from adapters.identity import observe
 from core.governance import expected_approval_kind
 
 TEST_INVOCATION = {"host": "test", "interactive": True,
-                   "signal": "test", "delegation": False}
+                   "signal": "test", "delegation": False, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}
 
 
 def host_runtime_for(profile_id):

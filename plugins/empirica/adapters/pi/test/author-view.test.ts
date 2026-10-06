@@ -243,3 +243,111 @@ test("a governance proposal without its required rationale never renders as a vi
   })();
   assert.ok(rendered === null || rendered.startsWith("{"), `rendered an old shape: ${rendered}`);
 });
+
+// --- the class of defect: every registry reason renders strictly ------------------------------------------------
+// A schema-built instance of every reason's parameters (every property; every array non-empty with two distinct
+// items of its element type) and every next action must render as readable text in strict mode: no crash, no JSON
+// fallback, no digest. renderAuthorView(strict) validates against the response schema first, so an invalid sample throws.
+
+const CONTRACT_DIR = path.resolve(import.meta.dirname, "..", "..", "..", "..", "..", "contracts", "empirica", "v2");
+const REGISTRY = JSON.parse(readFileSync(path.join(CONTRACT_DIR, "public-contract.json"), "utf8"));
+const DEFS = JSON.parse(readFileSync(path.join(CONTRACT_DIR, "response.schema.json"), "utf8")).$defs as Json;
+
+function sample(schema: Json, index = 0): unknown {
+  if (schema.$ref !== undefined) return sample(DEFS[String(schema.$ref).split("/").pop() as string], index);
+  if (schema.const !== undefined) return schema.const;
+  if (schema.enum !== undefined) return schema.enum[index % schema.enum.length];
+  for (const key of ["anyOf", "oneOf"]) {
+    if (schema[key] !== undefined) return sample((schema[key] as Json[]).find((row) => row.type !== "null") as Json, index);
+  }
+  if (schema.type === "string") {
+    if (schema.pattern === undefined) return "x".repeat(Math.max(1, schema.minLength ?? 1)) + String(index);
+    const re = new RegExp(schema.pattern);
+    const hit = [`sha256:${(index + 1).toString(16).repeat(64)}`, `C${index}`, `dir/file${index}.py`].find((c) => re.test(c));
+    assert.ok(hit !== undefined, `no sample for pattern ${schema.pattern}`);
+    return hit;
+  }
+  if (schema.type === "integer") return Math.max(schema.minimum ?? 0, 0) + index;
+  if (schema.type === "boolean") return true;
+  if (schema.type === "array") {
+    const count = Math.min(schema.maxItems ?? 2, Math.max(2, schema.minItems ?? 0));
+    return Array.from({ length: count }, (_, i) => sample(schema.items, i));
+  }
+  if (schema.type === "object")
+    return Object.fromEntries(Object.entries(schema.properties ?? {}).map(([name, sub]) => [name, sample(sub as Json, index)]));
+  assert.fail(`no sample for schema ${JSON.stringify(schema)}`);
+}
+
+function strictText(result: Json, label: string): string {
+  const text = renderAuthorView(result, { strict: true });
+  assert.ok(!text.startsWith("{"), `${label}: fell back to JSON`);
+  assert.ok(!text.includes("sha256:"), `${label}: a digest reached the text`);
+  return text;
+}
+
+const blockBase = () => structuredClone(JSON.parse(readFileSync(path.join(GOLDEN_DIR, "block-open-claim.json"), "utf8")).result);
+const registryReasons = (): Array<[string, unknown]> => (DEFS.reasonPayload.oneOf as Json[]).map((branch) =>
+  [branch.properties.code.const as string, sample(branch.properties.parameters)]);
+
+test("every registry reason renders strictly as a block reason and as a residual", () => {
+  const rows = registryReasons();
+  assert.equal(rows.length, Object.keys(REGISTRY.reasons).length);
+  for (const [code, parameters] of rows) {
+    const meta = REGISTRY.reasons[code];
+    const block = blockBase();
+    block.reasons = [{ code, message: meta.message, parameters, next_actions: meta.next_actions, sections: meta.sections }];
+    assert.ok(strictText(block, code).includes(code), code);
+    const residual = blockBase();
+    residual.run.residuals = [{ code, parameters, next_actions: meta.next_actions, sections: meta.sections }];
+    assert.ok(strictText(residual, `residual ${code}`).includes(code), `residual ${code}`);
+  }
+});
+
+test("every next-action shape renders strictly", () => {
+  const meta = REGISTRY.reasons["run.no_active"];
+  const block = blockBase();
+  block.reasons = [{ code: "run.no_active", message: meta.message, parameters: {},
+    next_actions: Object.keys(REGISTRY.next_actions), sections: meta.sections }];
+  const text = strictText(block, "all next actions");
+  assert.ok(text.includes("report_convergence intent=stop"));
+});
+
+test("the pending-record reason names its recovery and hides the digests", () => {
+  const meta = REGISTRY.reasons["evidence.confirmation_required"];
+  const block = blockBase();
+  block.reasons = [{ code: "evidence.confirmation_required", message: meta.message,
+    parameters: { route: "human", record_ids: [`sha256:${"a".repeat(64)}`, `sha256:${"b".repeat(64)}`] },
+    next_actions: meta.next_actions, sections: meta.sections }];
+  const text = strictText(block, "pending records");
+  assert.ok(text.includes("route=human"));
+  assert.ok(text.includes("report_convergence intent=stop"));
+});
+
+const PENDING_GOLDENS: Record<string, string[]> = {
+  "evidence-reason-askable": ["human: confirmation", "report_convergence intent=stop"],
+  "evidence-reason-later": ["human: confirmation", "report_convergence intent=stop"],
+  "evidence-reason-unavailable": ["report_convergence intent=stop"],
+  "evidence-reason-mixed": ["human: confirmation", "report_convergence intent=stop", "decision needed on claim D1"],
+  "evidence-reason-terminal-residual": ["human: confirmation", "report_convergence intent=stop"],
+};
+
+test("pending-evidence goldens: same normally and strictly, recovery calls present, no digest", () => {
+  for (const [name, calls] of Object.entries(PENDING_GOLDENS)) {
+    const result = JSON.parse(readFileSync(path.join(GOLDEN_DIR, `${name}.json`), "utf8")).result;
+    const text = renderAuthorView(result, { strict: true });
+    assert.equal(renderAuthorView(result), text, name);
+    assert.ok(!text.startsWith("{") && !text.includes("sha256:"), name);
+    for (const call of calls) assert.ok(text.includes(call), `${name}: ${call}`);
+  }
+});
+
+test("pending-evidence goldens fence human text", () => {
+  const result = JSON.parse(readFileSync(path.join(GOLDEN_DIR, "evidence-reason-mixed.json"), "utf8")).result;
+  const { open, close } = result.run.untrusted_delimiters;
+  const text = renderAuthorView(result, { strict: true });
+  for (const row of result.run.confirmation_batch.records) {
+    const line = text.split("\n").find((l) => l.trim().startsWith(`source: ${row.source_kind}`)) as string;
+    assert.ok(line.includes(open) && line.includes(close));
+  }
+  assert.ok(!text.includes("FORGED <<<EMPIRICA"));
+});

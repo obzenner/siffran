@@ -10,13 +10,19 @@ const FILL = {
 };
 const OUTLINE = { plain: "stroke-subtle", gating: "stroke-muted-foreground" };
 export const LINE = "fill-none stroke-muted-foreground";
-export const RING = "hidden fill-none stroke-ring group-data-selected:inline group-focus-visible:inline";
-export const R = 6;  // a run mark's and a claim mark's half size
+// Selection is a filled backing with a solid outline in the text colour; focus is the page-wide outline (app.css), so the
+// two read apart and are never the same ring twice.
+export const RING = "hidden fill-accent stroke-foreground group-data-selected:inline";
+export const R = 6;  // a run mark's and a claim mark's half size (both are drawn 2R across, outline outside)
+export const STROKE = { thin: 1, gating: 2 };  // outline widths
 
-/** A run: a diamond with its state's tint and glyph, centred on (cx, cy). */
+/** A run: a diamond with its state's tint and glyph, centred on (cx, cy). A run with no state (its record could not
+ * be decoded) is an empty diamond: the glyph beside it says why, and "unknown" is kept for unknown values (S1). */
 export function runMark(cx, cy, state) {
+  const diamond = (fill) => `<path d="M${cx},${cy - R} L${cx + R},${cy} L${cx},${cy + R} L${cx - R},${cy} Z" class="${fill} ${OUTLINE.plain}" stroke-width="${STROKE.thin}"></path>`;
+  if (state === null) return diamond("fill-none");
   const s = stateOf("run", state);
-  return `<path d="M${cx},${cy - R} L${cx + R},${cy} L${cx},${cy + R} L${cx - R},${cy} Z" class="${FILL[s.tone]} ${OUTLINE.plain}" stroke-width="1"></path>${iconAt(s.icon, cx - 4, cy - 4, 8, TONE[s.tone].fg)}`;
+  return `${diamond(FILL[s.tone])}${iconAt(s.icon, cx - 4, cy - 4, 8, TONE[s.tone].fg)}`;
 }
 /** The glyph a claim carries: its state's, unless the state is the quiet one; then its review's, unless the claim is
  * settled (count.js), when it carries none. */
@@ -27,7 +33,7 @@ export function claimGlyph(claim) {
 /** A claim ({state, review, gating}): a circle with its state's tint and its glyph (claimGlyph); gating = thick outline. */
 export function claimMark(cx, cy, claim) {
   const s = stateOf("claim", claim.state), g = claimGlyph(claim);
-  return `<circle cx="${cx}" cy="${cy}" r="${R - (claim.gating ? 1 : 0.5)}" class="${FILL[s.tone]} ${claim.gating ? OUTLINE.gating : OUTLINE.plain}" stroke-width="${claim.gating ? 2 : 1}"></circle>${g ? iconAt(g.icon, cx - 4, cy - 4, 8, TONE[g.tone].fg) : ""}`;
+  return `<circle cx="${cx}" cy="${cy}" r="${R}" class="${FILL[s.tone]} ${claim.gating ? OUTLINE.gating : OUTLINE.plain}" stroke-width="${claim.gating ? STROKE.gating : STROKE.thin}"></circle>${g ? iconAt(g.icon, cx - 4, cy - 4, 8, TONE[g.tone].fg) : ""}`;
 }
 /** A run's audit: its state's icon and tone, 10 units across, top left at (x, y). */
 export function auditMark(x, y, state) {

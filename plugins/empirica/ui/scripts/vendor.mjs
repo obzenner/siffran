@@ -11,10 +11,10 @@ const files = [];
 const put = (src, dst) => { copyFileSync(src, dst); files.push(dst); };
 
 rmSync("vendor", { recursive: true, force: true });
-for (const d of ["vendor/basecoat/js", "vendor/lucide", "vendor/fonts"]) mkdirSync(d, { recursive: true });
+for (const d of ["vendor/basecoat", "vendor/lucide", "vendor/fonts"]) mkdirSync(d, { recursive: true });
 
 for (const s of spec.basecoat.styles) put(`node_modules/basecoat-css/dist/basecoat-${s}.cdn.min.css`, `vendor/basecoat/basecoat-${s}.css`);
-for (const j of spec.basecoat.js) put(`node_modules/basecoat-css/dist/js/${j}.min.js`, `vendor/basecoat/js/${j}.min.js`);
+// Basecoat's script is a registry of interactive components (tabs, popover, select menus); this UI uses only its CSS and native controls, so no script is vendored.
 
 const faces = spec.fonts.map((f) => {
   put(`node_modules/${f.package}/files/${f.file}`, `vendor/fonts/${f.file}`);

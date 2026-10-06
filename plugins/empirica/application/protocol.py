@@ -76,6 +76,8 @@ _GOVERNANCE_CONTROLS = copy.deepcopy(_decisions)
 _PROJECTION_CONTROLS = _GOVERNANCE_CONTROLS["controls"]
 _NOTICES = _PUBLIC_CONTRACT["settlement_notices"]
 HUMAN_WAIT_NOTICE: str = _NOTICES["human_wait"]
+#: What the Claude Stop says when the confirmation is the sole blocker: the human is asked inside report_convergence.
+EVIDENCE_REPORT_NOTICE: str = _NOTICES["evidence_report"]
 #: Template with the single ``{resource}`` placeholder, formatted with the reason's resource.
 BUDGET_EXHAUSTED_NOTICE: str = _NOTICES["budget_exhausted"]
 _AUTHOR_VIEW_LABELS = MappingProxyType(dict(_PUBLIC_CONTRACT["author_view"]["labels"]))
@@ -94,6 +96,9 @@ CEILING_BOUNDS = MappingProxyType({
     name: (schema["minimum"], schema["maximum"])
     for name, schema in _configure_ceilings.items()
 })
+#: One owner of the batch size: a receipt carries at most this many decisions, so a presentation shows no more.
+EVIDENCE_BATCH_LIMIT: int = _REQUEST_SCHEMA["$defs"]["evidenceConfirmationPayload"]["properties"][
+    "decisions"]["maxItems"]
 _LATE_ROUTE_MUST = _bootstrap["late_route_must"]
 _DEFAULT_NEXT_ACTION = _bootstrap["default_next_action"]
 if _DEFAULT_NEXT_ACTION not in _PUBLIC_CONTRACT["next_actions"]:
@@ -110,6 +115,7 @@ CONTRACT_VIEW = ContractView(
     late_route_must=_LATE_ROUTE_MUST,
     default_next_action=_DEFAULT_NEXT_ACTION,
     untrusted_delimiters=_UNTRUSTED_DELIMITERS,
+    batch_limit=EVIDENCE_BATCH_LIMIT,
 )
 
 

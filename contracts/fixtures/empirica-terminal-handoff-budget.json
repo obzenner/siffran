@@ -35,7 +35,7 @@
                   "kind": "artifact",
                   "ref": "research/G0",
                   "expect": "pass",
-                  "description": "recorded Fold-1 research attestation supporting this claim",
+                  "description": "recorded research attestation supporting this claim",
                   "observed": null
                 }
               ],

@@ -21,6 +21,8 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type { Dispatch, InvocationProvenance, Request, Response, RunSelector } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
+import type { RetrievalKind } from "./audit-retrieval.ts";
+import { SURFACE_UNRECORDED_NOTICE, confirmEvidence, evidenceConfirmationWait, observeSurface } from "./evidence-ui.ts";
 import { govern, governanceTimeout, piGovernanceContext, refreshGovernance, settlementNotice } from "./governance-ui.ts";
 import type {
   ExtensionAPI,
@@ -141,6 +143,8 @@ export interface ResolvedAuditContract {
   agentFilePath: string;
   model: string;
   agentScope: "project" | "user";
+  /** What the auditor is observed to retrieve (preflight effectiveAllowlist); recorded at start, re-sent at launch. */
+  auditRetrieval: readonly RetrievalKind[];
 }
 /** Resolves the audit launch contract through the bound owner's preflight, exact version, and inventory. */
 export type AuditContractResolver = (
@@ -213,7 +217,8 @@ export async function defaultAuditContractResolver(
     const available = ctx.modelRegistry?.getAvailable() ?? [];
     if (!available.some((item) => `${item.provider}/${item.id}` === identity))
       throw new Error(`configured auditor model is unavailable: ${model}`);
-    return { agentFilePath: admission.contract.agent_file_path, model, agentScope };
+    return { agentFilePath: admission.contract.agent_file_path, model, agentScope,
+      auditRetrieval: admission.contract.audit_retrieval };
   }
   throw new Error(unresolved);
 }
@@ -534,6 +539,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     const READ_PARAMS = PUBLIC_TOOL_SCHEMAS.empirica_read;
     const resultText = (response: Response): string => renderAuthorView(response.result);
     let governanceDialog = false;
+    let evidenceDialog = false;
     if (pi.registerTool) {
       pi.registerTool({
         name: REPORT_CONVERGENCE_TOOL,
@@ -690,8 +696,9 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           ctx.ui.notify(`${notice.text} [${ownerDetail(owner)}]`, "error");
           return;
         }
+        let startAuditor: ResolvedAuditContract;
         try {
-          await independentAuditor(CANONICAL_AUDIT_CALL, ctx, auditRuntimeOf(owner.binding));
+          startAuditor = await independentAuditor(CANONICAL_AUDIT_CALL, ctx, auditRuntimeOf(owner.binding));
         } catch (error) {
           ctx.ui.notify(`/empirica not started: ${describe(error)}`, "error");
           return;
@@ -704,6 +711,8 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             host: "pi", interactive: INTERACTIVE_BY_MODE[ctx.mode ?? ""] ?? null,
             signal: `ctx.mode=${ctx.mode ?? "unknown"}`,
             delegation: process.env[PUBLIC_TOOLS.host_profiles[HOST_PROFILE_ID].delegation_env] === "1",
+            audit_retrieval: startAuditor.auditRetrieval,
+            human_surface: ctx.hasUI ? "human" : "unavailable",
             // The observed audit runtime, recorded once with the run (receipts are derived from it).
             host_runtime: buildHostRuntime(SUBAGENTS_COMPATIBILITY, owner.binding.provenance),
           };
@@ -916,7 +925,8 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           // package other than the one that runs this audit (a reload or resume may have swapped it).
           const prepared = await trusted({ operation: "audit_prepare", run_id: runHandle,
             role_profile: roleProfile,
-            payload: { host_runtime: buildHostRuntime(SUBAGENTS_COMPATIBILITY, launch.binding.provenance) } });
+            payload: { host_runtime: buildHostRuntime(SUBAGENTS_COMPATIBILITY, launch.binding.provenance),
+              audit_retrieval: resolvedAudit.auditRetrieval } });
           if (prepared.type === "audit_refused") {
             const refusal: OwnerRefusal = { ok: false, code: "owner-changed",
               message: `this run was started under a different pi-subagents runtime than the ${SUBAGENT_TOOL} owner `
@@ -952,9 +962,24 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       if (runHandle === null) return; // no run to gate against
       try {
         const intent = event.input.intent === "stop" ? "stop" : REPORT_CONVERGENCE_INTENT;
-        const response = await dispatch(
+        const surfaceRecorded = intent !== REPORT_CONVERGENCE_INTENT || await observeSurface(runHandle, ctx, trusted);
+        let response = await dispatch(
           evaluateRunRequest(runHandle, intent, randomUUID()),
         );
+        if (intent === REPORT_CONVERGENCE_INTENT && surfaceRecorded && !evidenceDialog) {
+          // The end of a pass: a block that waits on the human is presented once, then re-evaluated.
+          evidenceDialog = true;
+          const handle = runHandle;
+          try {
+            response = await confirmEvidence(response, handle, ctx, trusted,
+              () => dispatch(evaluateRunRequest(handle, intent, randomUUID())),
+              Date.now() + governanceTimeoutMs);
+          } finally { evidenceDialog = false; }
+        }
+        // The surface could not be recorded: the core's stored observation is not trusted, so a wait for a
+        // confirmation nobody was told to ask is a block with one plain reason, never a pause.
+        if (!surfaceRecorded && evidenceConfirmationWait(response.result))
+          return { block: true, reason: `${SURFACE_UNRECORDED_NOTICE}\nhandle: ${runHandle}` };
         const decision = gateFromDecision(response.result);
         if (decision.kind === "deny" && settlementNotice(response.result) === null)
           return { block: true, reason: `${decision.reason}\nhandle: ${runHandle}` };

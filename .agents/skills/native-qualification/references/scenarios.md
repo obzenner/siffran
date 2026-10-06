@@ -1,69 +1,10 @@
----
-name: native-qualification
-description: "Qualify this checkout in an operator-present Claude Code or Pi session. Use for native acceptance after adapter/UI changes, not routine unit checks. Preserve failures and require real human consent."
-allowed-tools: [Read, Glob, Grep, Bash, Write]
----
+# Scenario ledger
 
-# Native qualification
+Record every row as `PASS`, `FAIL`, `BLOCKED` or `NOT_REACHED` with an evidence pointer. On Claude the Stop never
+pauses for evidence: it blocks and asks for `report_convergence`, and the human is asked inside that call. Pi presents
+in-process.
 
-One deliberately prepared **real host session**, not a simulated successful journey. The repository
-root is `../../..` from this skill directory; run lifecycle commands there through Make.
-`make native-qualification` only prints this entrypoint.
-
-Never answer a human consent prompt, seed handles, invent research, reopen a terminal `stopped_*`
-run, copy credentials, replace global packages, or change permissions, authentication, or user
-settings. Launch only after the operator explicitly says go. Make one launch attempt. If terminal
-creation or input delivery is uncertain, inspect that session rather than retrying. No automatic
-relaunch loops.
-
-## 1. Prepare before opening a host
-
-Read the [host registry](../../../contracts/empirica/v2/host-profiles.json) and
-[governance guide](../../../plugins/empirica/skills/empirica/references/governance.md). They are
-authoritative. Use an already prepared supported executable; an out-of-range installation is
-**BLOCKED**, not permission to upgrade global tools. Codex Empirica is unsupported for convergence.
-
-Agree with the human on the host, exact candidate checkout, small falsifiable goal and claims,
-initial limits `8/0/1`, host reviewer configuration, host decision timeout, and a fresh
-evidence directory **outside the source checkout**. Omit Empirica `--auto` in the primary scenario.
-Choose a non-destructive spike against an existing file; no source edits are needed. Git worktrees
-share durable Git shadow refs: `EMPIRICA_HOME` isolates operational files, not Git storage. Use a
-separately prepared task repository when complete Git isolation is required.
-
-Before launch:
-
-- Record HEAD, exact host/plugin/subagent versions, expected load paths, and reviewer configuration.
-  A release qualification requires a clean committed candidate because receipts bind HEAD/version.
-- For an exploratory dirty candidate, retain `git status --porcelain=v1 --untracked-files=all`, both
-  binary diffs, and a SHA-256 manifest of tracked and untracked candidate bytes. Never stage to
-  obtain a fingerprint. Mark the result non-release if source identity is incomplete.
-- Create a new evidence directory exclusively. An existing directory or launch marker requires
-  reconciliation, not deletion. Record the chosen command and a launch-requested marker before
-  sending it. Preserve normal HOME, provider/auth configuration, unrelated plugins, and permissions.
-  Set `EMPIRICA_HOME` to the evidence directory's `state` child.
-- Model switches persist: Claude `/model` rewrites `model` in `~/.claude/settings.json`, and Pi
-  `/model` updates `defaultModel`/`defaultProvider` in `~/.pi/agent/settings.json`. Snapshot these
-  settings before the session and restore them during cleanup.
-- Claude needs native MCP form elicitation. The primary checklist verifies settings `env` propagation
-  and the entrypoint signal. Configure its reviewer as described in the
-  [governance guide](../../../plugins/empirica/skills/empirica/references/governance.md).
-- For Pi, use the checkout's complete package and run the auditor-resolution inspection described in
-  `doc/testing.md`. Configure its reviewer as described in the
-  [Pi adapter guide](../../../plugins/empirica/adapters/pi/README.md#governed-initialization).
-
-After explicit go, launch one of these exact checkout overrides, inheriting the prepared environment:
-
-- `make claude-dev CLAUDE=/absolute/supported/claude ARGS="--debug-file /absolute/evidence/claude.debug.log"`
-- `make pi-dev PI=/absolute/supported/pi`
-
-Capture loaded paths, parent session ID, native transcript, and host signals. A successful terminal
-API response alone proves neither activation nor loading. Stop on any mismatch.
-
-## 2. Primary Empirica scenario
-
-These are author instructions plus human checkpoints, not a script for fabricating results. Record
-each row as `PASS`, `FAIL`, `BLOCKED`, or `NOT_REACHED` with its evidence pointer. Read state only
-through public tools and never edit operational state. Execute rows in table order.
+## A. Primary Empirica scenario (one run, in order)
 
 | Row ID | When | Human/author action | Expected observation | Evidence |
 |---|---|---|---|---|
@@ -76,29 +17,44 @@ through public tools and never edit operational state. Execute rows in table ord
 | `research` | After investigation admission | Record investigation and cited research. | Source, citation, result, and lossless obligations are retained; nothing is invented. | RunView and evidence |
 | `current_author_after_model_switch` | Between research and the spike | Human switches the main model A→B, allows one turn that records no evidence, switches back to A. | Every artifact's producer is the model that served it (A); nothing is attributed to B; the reviewer is derived from the current author A, not from B or the earliest model. | RunView attribution and host model-switch signal |
 | `spike` | After the model switch returns to A | Record one deterministic spike. | Command, input bindings, exit status, result, and lossless obligations are retained; nothing is invented. | RunView and evidence |
-| `served_reviewer_and_producers_distinct` | When audit is owed | Request one canonical auditor through the host profile. | Package path/scope is canonical; the verdict-bearing served model is observed separately from requested configuration; independence classification follows the [audit guide](../../../plugins/empirica/skills/empirica/references/audit.md#independence-reporting). | Child transcript and RunView |
+| `served_reviewer_and_producers_distinct` | When audit is owed | Request one canonical auditor through the host profile. | Package path/scope is canonical; the verdict-bearing served model is observed separately from requested configuration; independence classification follows the [audit guide](../../../../plugins/empirica/skills/empirica/references/audit.md#independence-reporting). | Child transcript and RunView |
 | `audit_stales_after_graph_change` | Optional, after a passing audit | Amend the graph, then re-evaluate. | Prior audit coverage becomes stale while configuration approval remains current; a fresh bound audit is required. | RunView before/after |
 | `restore_after_compaction` | After a current passing audit, before completion | Human triggers host compaction (`/compact`). | The restored run has the same status, obligations, usage, and audit coverage; blocked actions remain blocked; no progress is fabricated. | RunView before/after compaction |
 | `snapshot_completion` | After restore | Call the guarded completion path. | Exact `Allow(converged=true)` and matching durable terminal state. The terminal RunView keeps Required/Observed/Missing and offers only `run.inspect` guidance, no mutation actions. Prose, child pass alone, or `Allow(converged=false)` is not convergence. | Decision and terminal RunView |
 | `installed_transport_latency` | Throughout | Operator records the slowest Empirica tool/hook round trip from the retained log. | No host transport timeout, retry, or dropped tool result occurred. | Debug/host log timings |
 | `context_economy` | Throughout the primary run | Operator reviews every Empirica tool result and host warning in the retained transcript/log, then extracts the ordered Empirica tool results into a newline-delimited JSON slice and runs `make empirica-context-economy-report FILE=<slice>`. | No request for the removed full public-contract projection occurs (that GetContract target is refused as `invalid_request`) and no host "Large MCP response" warning fires. The measured object is each Empirica tool's rendered model-visible **text** (host `content` text), counted as-is in Unicode code points without JSON-decoding it, over the primary run from activation to terminal; other tools are excluded. Record maximum single/total characters and the text-only normalized envelope bytes separately. Claude/Codex MCP RunView results contain no duplicate `structuredContent`; Pi JSON remains host-internal `details`. Every author step was completed from tool input schemas and the rendered status/reasons/obligations/next calls. | Transcript/host log sizes and `empirica-context-economy-report` output |
 
-For the Pi audit row, invoke the packaged auditor once through the structured `subagent` tool
-with exactly `{"agent":"empirica.empirica-auditor","task":"Audit the host-provided dossier."}`;
-send no other fields. A rejected launch is an admission failure, so stop rather than retrying. The
-[Pi adapter guide](../../../plugins/empirica/adapters/pi/README.md#canonical-audit-call) owns the
-complete invocation and reviewer-derivation rules.
+## B. ADR-0067 evidence rows (each keeps its transcript, dialog and RunView; a converged run also its v3 receipt)
 
-For a retained Claude admission log, run
-`make empirica-claude-mcp-log-check LOG=/absolute/evidence/claude.debug.log`. After one complete
-converged trace, use `make empirica-host-receipt` with the arguments listed by `make help`, then
-`make empirica-host-live-check`. A receipt does not prove every UI checkpoint and cannot qualify
-dirty source.
+| Row ID | Setup and operator steps | Evidence to keep |
+|---|---|---|
+| `ev_verbatim_only` | Fresh run, approved. Record a workspace-path (verbatim) citation; request audit and completion. | RunView with `audit.required` and no confirmation batch; transcript. |
+| `ev_url_confirm` | Record URL research. At the end of the pass call `report_convergence` (Claude) or let the gate present (Pi); the human confirms. | Dialog transcript showing the source and claim; RunView; v3 receipt if converged. |
+| `ev_url_with_open_claim` | URL evidence plus another unresolved claim; report; the human answers the batch after the claim-leading block. | RunView showing the open claim's reason leading while the human is asked. |
+| `ev_later_cancel_timeout` | A fresh run per branch: present once and choose Later, cancel, or let the timeout expire. Do not retry the same derivation. | `prompt_error: already_presented`, a blocked Stop or gate (Claude blocks with the real reason, never a pause), RunView. |
+| `ev_reject_with_note` | Present a URL record and reject it with a note. | The obligation row with the fenced note and `claim.research_missing`; partial evidence retained; no receipt. |
+| `ev_needs_decision_only` | A graph whose only open claim is a `needs-decision`; answer it in the batch, then complete the required audit. | The decision answer; `human_owned` only after the observed auditor identity; audit transcript; v3 receipt. |
+| `ev_audit_fails_after_approval` | Approve evidence, then observe a real audit failure only if it occurs naturally. Otherwise `NOT_REACHED`. | The answer stands and `audit.failed` shows; no invented failure; no receipt. |
+| `ev_route_unavailable` | A fresh delegated, non-interactive or no-form run (or Codex); provide no dialog. | `route: unavailable`, `prompt_error: unavailable`, nobody asked, only `residual.accept` remains. |
+| `ev_over_64_items` | Create more than 64 pending items in a fresh run and present. | RunView and dialog: the first 64 only; the rest after a change. |
+| `ev_missing_or_stale_spike` | URL evidence plus a missing or stale spike on one claim; report. | `claim.spike_missing` or `claim.spike_stale` leads; no pause; transcript and RunView. |
+| `ev_long_quote` | A URL citation with a long verbatim quote; present and read the whole text. | The dialog shows the whole quote, untruncated. |
+| `ev_later_then_fresh_get_run` | After Later, call `get_run`. | The author's view says it was shown and only a changed derivation asks again. |
 
-## 3. Required refusal checks in separate fresh runs
+## C. Injected and unreachable rows: covered by deterministic tests, never claimed live
 
-Do not squeeze contradictory branches into the primary run. Execute each required row in a separate
-fresh run.
+| Situation | Deterministic test (never claimed live) |
+|---|---|
+| Interactions exhausted (`prompt_error: interaction_limit`, no dialog, the real reason). The 128-interaction ceiling is a fixed contract constant, not an operator or host setting. Native qualification does not exercise it; exhausting the production ceiling would take 128 shared interactions. | `tests/v2/test_evidence_scenarios.py::test_D_exhausted_interactions_are_a_prompt_error_not_an_answerable_wait`; `tests/v2/test_evidence_confirmation.py::test_the_real_interaction_limit_is_128` and `::test_the_human_interaction_budget_is_one_count_shared_with_governance` |
+| A record joins between the host's read and its presentation (interleaving race) | `tests/v2/test_a1_boundaries.py` (presentation key, `conflict`, one reread) |
+| The host cannot record its surface (typed Fault or exception, no UI) | `tests/v2/test_a1_boundaries.py` `FailedObservationFailsClosed`; Claude Stop in `adapters/claude/tests/test_claude_adapter.py`; Pi `test/gate.test.ts` |
+| Overlapping observations, unwritable or unreadable storage | `tests/v2/test_a1_boundaries.py` (every Claude Stop exits 2) |
+| A path spelled with `..`, `//`, a trailing slash or a colon directory | `tests/v2/test_a1_boundaries.py` `SpellingIsRefusedNotInterpreted`; `tests/test_citations.py` |
+| A failure after reservation (refunded `launch_rejected`, relaunch) | `make empirica-host-integration` |
+| Receipt omission, rolled-back or wrong repository | `scripts/tests/test_empirica_live_receipts.py` |
+| Synthetic reviewer mismatch | `tests/test_governance.py` (mixed producers, same class reviewer) |
+
+## D. Required refusal checks (each in a separate fresh run)
 
 | Row ID | Human/operator action | Expected observation | Evidence |
 |---|---|---|---|
@@ -110,34 +66,9 @@ fresh run.
 | `reviewer_preflight_refusal` | Pi required; Claude optional. Author runs on the model the host would choose as reviewer (Pi: the effective `subagents.defaultModel`), records evidence, then requests the audit. | Refused before launch as same identity class or unavailable; no child is reserved and audit usage is unchanged. End with an honest stop. | RunView and host denial |
 | `codex_negative` | Optional: invoke `$empirica <goal>` in Codex. | Visible unsupported/refusal result; no convergence claim. | Codex transcript |
 
-On Claude, `reviewer_preflight_refusal` cannot be induced without changing user settings while any
-other Claude family is pinned; record it `NOT_REACHED` with that reason. A failure *after* reservation
-(refunded `launch_rejected`, then a relaunch in the same run) is not induced natively; it is covered
-by the real-service regressions in `make empirica-host-integration`. Record that pointer in the
-result rather than a native PASS.
+## E. Methodologist sanity
 
-Large-scope viewport accessibility is an optional separate run.
-
-## 4. Small Methodologist sanity
-
-After Empirica is terminal, use Claude's `/methodologist:think` or Pi's `/think`, choose a named
-methodology as the human, and verify the six-phase plan comes from this checkout. Where MCP
-selection is exposed, retain one normal `methodologist_select` result. On Codex use `$think` or the
-implicit native simple mode, not a slash command. Codex Empirica can establish only its expected
-fail-closed refusal, never convergence qualification.
-
-## 5. Retain one compact result
-
-Retain candidate, source-manifest, release-candidate, host/profile/version, plugin/subagent and
-loaded-path facts; session/child/operation IDs; command; and host decision timeout. Then record one
-line per Row ID in the tables above:
-
-```text
-<row_id> | PASS / FAIL / BLOCKED / NOT_REACHED | <artifact pointer>
-```
-
-Add `methodologist` using the same row shape, followed by the overall result and limitations. PASS
-is valid only when every required table row passed. Stop on a required blocker, mark later rows
-NOT_REACHED, and preserve failed artifacts. One host pass does not qualify another host. `make check`
-is local regression evidence; release qualification also requires the integration and installed-host
-gates in `make release-check`.
+After Empirica is terminal, use the host's Methodologist entry (see the host reference), choose a named methodology as the
+human, and verify the six-phase plan comes from this checkout. Where MCP selection is exposed, retain one normal
+`methodologist_select` result. On Codex use `$think` or the implicit native simple mode. Codex Empirica establishes only
+its expected fail-closed refusal, never convergence. Large-scope viewport accessibility is an optional separate run.

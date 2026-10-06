@@ -198,7 +198,7 @@ class StartRunTests(unittest.TestCase):
                 self.assertEqual(command["goal"], "  exact goal  ")
                 self.assertEqual(command["invocation"], {
                     "host": "claude", "interactive": interactive,
-                    "signal": "transcript.entrypoint", "delegation": False})
+                    "signal": "transcript.entrypoint", "delegation": False, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"})
             unknown = build_start_run_request(_payload(command_args="goal"), environ={})["command"]
             self.assertIsNone(unknown["invocation"]["interactive"])
             self.assertEqual(unknown["invocation"]["signal"], "transcript.entrypoint unavailable")
@@ -505,6 +505,44 @@ class ResponseMappingTests(unittest.TestCase):
         unrelated["reasons"][0].update({"code": "audit.failed", "parameters": {},
                                         "sections": ["audit"], "message": "audit failed"})
         self.assertEqual(stop_result(_typed(unrelated)).exit_code, 2)
+
+    def test_the_stop_never_settles_for_evidence_and_directs_the_author_to_report(self) -> None:
+        from application import protocol
+        notice = getattr(protocol, "EVIDENCE_REPORT_NOTICE", "<not defined>")
+        record = "sha256:" + "a" * 64
+
+        def result(route="human", prompt_error=None, code="evidence.confirmation_required"):
+            run = json.loads(json.dumps(_valid_active_allow()["run"]))
+            run["confirmation_batch"] = {"key": "sha256:" + "b" * 64, "record_ids": [record],
+                                         "claim_ids": [], "prompt_error": prompt_error, "records": [
+                                             {"claim_id": "C0", "source_kind": "web", "source_ref": "https://example.test/x"}]}
+            parameters = {"route": route, "record_ids": [record]} if code.startswith("evidence") else {}
+            return {"type": "Block", "run": run, "reasons": [{
+                "code": code, "parameters": parameters,
+                "next_actions": ["human.confirm_evidence", "residual.accept"] if route == "human"
+                else ["residual.accept"],
+                "sections": ["evidence"], "message": "Research waits on a human."}]}
+        settled = stop_result(_typed(result()))
+        # In Claude the human is asked inside report_convergence, so a pause would end the turn unasked: block, plainly.
+        self.assertEqual((settled.exit_code, settled.stderr, settled.stdout), (2, notice + "\n", ""))
+        self.assertFalse(hasattr(protocol, "EVIDENCE_WAIT_NOTICE"))
+        self.assertEqual(stop_result(_typed(result("unavailable", "unavailable"))).exit_code, 2)  # nobody can answer
+        # The batch was shown already (Later, cancel, timeout), or the interactions are spent: nothing will
+        # ask again, so the Stop blocks with the real reason instead of pausing.
+        for error in ("already_presented", "interaction_limit"):
+            blocked = stop_result(_typed(result(prompt_error=error)))
+            self.assertEqual((blocked.exit_code, blocked.stderr), (2, "Research waits on a human.\n"), error)
+        # Another claim blocker leads: the open claim's own reason is what the Stop reports.
+        other = result(code="claim.research_missing")
+        other["reasons"][0]["message"] = "Record research for this claim."
+        self.assertEqual(stop_result(_typed(other)).stderr, "Record research for this claim.\n")
+        mixed = result()
+        mixed["reasons"].append({"code": "run.corrupt", "parameters": {}, "next_actions": [],
+                                 "sections": [], "message": "corrupt"})
+        self.assertEqual(stop_result(_typed(mixed)).exit_code, 2)
+        terminal = result()
+        terminal["run"]["status"] = "stopped_residual"
+        self.assertEqual(stop_result(_typed(terminal)).exit_code, 2)
 
     def test_stop_result_inert_allow_block_and_faults(self) -> None:
         self.assertEqual(stop_result(_typed({"type": "Inert", "reason": "no_run"})).exit_code, 0)

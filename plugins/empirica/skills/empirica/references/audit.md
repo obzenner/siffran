@@ -31,9 +31,14 @@ Ordinary conversation with another model is not a substitute.
    reject the unsupported audit attempt; do not spawn an ordinary child.
 3. Let the host inject the dossier and bind native execution. Do not expose or
    manufacture private correlation material.
-4. The auditor independently retrieves every citation, checks spike provenance,
-   searches for missing material claims, evaluates freeze honesty, and returns a
-   structured pass/fail verdict.
+4. The auditor retrieves every record the dossier marks `retrieve: true` (its host is observed to
+   reach that kind of source: the workspace, a local file, or the web) and verifies that the source
+   exists and contains the cited text, including records the service or a human already confirmed.
+   It fails a claim whose retrievable source is missing or lacks the citation. For a record it cannot
+   retrieve it judges relevance only; the dossier says when a human confirmed it (`verification.status`,
+   and the human's `note`). It also checks spike provenance, searches for missing material claims,
+   evaluates freeze honesty, and returns a structured pass/fail verdict. A `needs-decision` claim
+   answered by a human is judged for coherence only.
 5. The host observes child start and first terminal result. It privately records
    lifecycle, attribution, and a verdict only for the bound pending child.
 6. Reread the run. `GetRun` shows `obligation.audit` once every scoped gating claim is approved,
@@ -84,9 +89,10 @@ Report only what the host observed:
 - `distinct` when every covered evidence producer resolves to one concrete identity class and the verdict-producing reviewer is in a different class;
 - `same_model` when the reviewer and covered evidence producer have the same identity class;
 - `mixed` when covered evidence has more than one producer identity class;
-- `unverified` when any required producer or reviewer identity cannot be established.
+- `unverified` when any required producer or reviewer identity cannot be established;
+- `human_owned` when every reviewed claim is a human's decision with no evidence behind it: nobody produced it, so there is no producer to be independent of. The audit over the argument is still required.
 
-Only `distinct` is eligible for convergence. `same_model` means the same identity class; spawn a
+`distinct` and `human_owned` are eligible for convergence. `same_model` means the same identity class; spawn a
 new distinct auditor or accept the residual. `unverified` has the same two honest actions. `mixed`
 covered producers cannot be repaired by another auditor or by re-recording research, because all
 current research remains active. Only a spike head is superseded: if the sole differing producer is a

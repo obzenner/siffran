@@ -1,12 +1,8 @@
 {
-  "$description": "What scripts/vendor.mjs copies into vendor/ (CONVENTIONS §9). Versions come from package-lock.json.",
+  "$description": "What scripts/vendor.mjs copies into vendor/ (CONVENTIONS \u00a79). Versions come from package-lock.json.",
   "basecoat": {
     "styles": [
       "nova"
-    ],
-    "js": [
-      "basecoat",
-      "tabs"
     ]
   },
   "fonts": [

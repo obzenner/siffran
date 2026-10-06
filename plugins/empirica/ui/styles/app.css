@@ -19,7 +19,10 @@
 @layer components {
   ev-steps { display: block; }
   :where(ev-state, ev-step, ev-meter) { display: inline-flex; }
-  :where(ev-file, ev-goal, ev-legend, ev-detail, ev-history, ev-filters, ev-view) { display: block; }
+  :where(ev-file, ev-legend, ev-detail, ev-history, ev-filters, ev-more) { display: block; }
+  /* The picture is centred in its box when it is smaller than it (the text cap binds), and starts at the top-left when it
+     overflows: auto margins on a flex item do both. */
+  ev-view { display: flex; }
   .ev-grey { filter: grayscale(1); }
 }
 
@@ -33,11 +36,16 @@
   meter.ev-meter[data-full]::-moz-meter-bar { background: var(--tone-caution); }
 }
 
+/* The hint's anchor: a box the hint follows (ev-hint sets its rectangle through the CSSOM). It never takes the pointer. */
+@layer components {
+  .ev-hint-anchor { position: fixed; anchor-name: --ev-hint; pointer-events: none; visibility: hidden; }
+}
+
 /* The single top-layer hint (ev-hint): anchored to the hovered/focused element, flips when out of room. */
 @layer components {
   [popover].ev-hint {
     position: fixed; inset: auto; margin: 0; border: 0;
-    position-anchor: --ev-hint; position-area: top; position-try-fallbacks: flip-block, flip-inline;
+    position-anchor: --ev-hint; position-area: top; position-try-fallbacks: flip-block, flip-inline; position-visibility: anchors-visible;
     margin-block: var(--spacing-2xs); max-inline-size: var(--container-hint);
     white-space: normal;
   }
@@ -46,14 +54,21 @@
 /* ev-split reads these widths in px (getComputedStyle): registered as lengths, a calc() or rem resolves first. */
 @property --ev-panel { syntax: "<length>"; inherits: true; initial-value: 0px; }
 @property --ev-panel-min { syntax: "<length>"; inherits: true; initial-value: 0px; }
+@property --ev-split-step { syntax: "<length>"; inherits: true; initial-value: 0px; }
 @property --ev-main-min { syntax: "<length>"; inherits: true; initial-value: 0px; }
 
 /* ev-split: main | handle | panel. Each column scrolls on its own; the panel width is a CSS variable set by the
    element (CSSOM, not markup). */
 @layer components {
-  ev-split { --ev-panel: var(--container-panel); --ev-panel-min: var(--container-panel-min); --ev-main-min: var(--container-main-min); }
-  /* The app's main column holds the filter column too: its width, the gap, the page padding and the divider come on top. */
-  ev-split.ev-with-filters { --ev-main-min: calc(var(--container-sidebar) + 3 * var(--spacing-xl) + var(--spacing-xs) + var(--container-main-min)); }
+  ev-split { --ev-split-step: var(--container-split-step); --ev-panel: clamp(var(--container-panel-min), var(--container-panel-fluid), var(--container-panel)); --ev-panel-min: var(--container-panel-min); --ev-main-min: calc(var(--container-main-min) + 2 * var(--spacing-xl) + var(--spacing-xs)); }
+  /* From the wide breakpoint the main column holds the filter sidebar too: its width, the gap, the page padding and the
+     divider come on top. Below it the filters fold into a line above the picture and take no column. */
+  @media (width >= theme(--breakpoint-wide)) {
+    ev-split.ev-with-filters { --ev-main-min: calc(var(--container-sidebar) + 3 * var(--spacing-xl) + var(--spacing-xs) + var(--container-main-min)); }
+  }
+  /* The panel column: ev-detail fills it (a flex item is as wide as its content unless told otherwise), so nothing
+     in a detail can push the panel wider; only a <pre> scrolls sideways. */
+  ev-split > :last-child > ev-detail { flex: 1 1 0; min-inline-size: 0; }
   ev-split { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-block-size: 0; }
   ev-split[open] { grid-template-columns: minmax(0, 1fr) auto var(--ev-split-w, var(--container-panel)); }
   ev-split > * { position: relative; min-block-size: 0; overflow-y: auto; } /* relative: contains sr-only boxes */
@@ -64,3 +79,28 @@
   ev-split[open][narrow] { grid-template-columns: 0 0 minmax(0, 1fr); }
   ev-split[open][narrow] > :first-child, ev-split[open][narrow] > .ev-split-handle { visibility: hidden; }
 }
+
+/* A detail's facts: a stable grid, so the labels line up whatever the values hold. */
+@layer components {
+  .ev-facts > div { display: grid; grid-template-columns: minmax(var(--container-fact-label), 1fr) 2fr; column-gap: var(--spacing-l); }
+  .ev-facts > div > * { min-inline-size: 0; overflow-wrap: anywhere; }
+}
+
+/* The filters: a sidebar from the wide breakpoint (the body always shows and the line is gone), else one line above the
+   picture that opens the body on click. */
+@layer components {
+  .ev-fold-body { display: none; }
+  .ev-fold[data-open] > .ev-fold-body { display: block; }
+  @media (width >= theme(--breakpoint-wide)) {
+    .ev-fold-line { display: none; }
+    .ev-fold-body { display: block; }
+  }
+}
+
+/* The key: one line, its full list a layer over the picture so it never takes room from it. */
+@layer components {
+  .ev-key > summary { list-style: none; cursor: pointer; }
+  .ev-key > summary::-webkit-details-marker { display: none; }
+}
+
+/* Focus is the page-wide outline above; selection is drawn in the picture (a filled backing, marks.js RING). */

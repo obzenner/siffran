@@ -172,7 +172,8 @@
     "distinct",
     "mixed",
     "same_model",
-    "unverified"
+    "unverified",
+    "human_owned"
   ],
   "freshness_states": [
     "present",
@@ -549,7 +550,7 @@
       }
     },
     "research.record": {
-      "description": "Record one externally observed Fold-1 research citation bound to a claim.",
+      "description": "Record one externally observed research citation bound to a claim.",
       "surface": {
         "tool": "empirica_observe",
         "action": "research"
@@ -601,6 +602,10 @@
               "observed_content_digest": {
                 "type": "string",
                 "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "spike_unavailable": {
+                "type": "string",
+                "minLength": 1
               }
             }
           }
@@ -675,29 +680,6 @@
               "minLength": 1,
               "pattern": "^[^/].*$"
             }
-          }
-        }
-      }
-    },
-    "human.request_decision": {
-      "description": "Request a human decision for a residual claim.",
-      "surface": {
-        "owner": "human",
-        "operation": "decision"
-      },
-      "params": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "claim_id"
-        ],
-        "properties": {
-          "claim_id": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
-          },
-          "question": {
-            "type": "string"
           }
         }
       }
@@ -887,6 +869,18 @@
           }
         }
       }
+    },
+    "human.confirm_evidence": {
+      "description": "Show the human the pending research records and needs-decision claims in one batch: record one presentation, then submit one receipt of per-item decisions. Offered only when the run has a human ingress.",
+      "surface": {
+        "owner": "human",
+        "operation": "confirmation"
+      },
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
     }
   },
   "reasons": {
@@ -1030,7 +1024,7 @@
       "sections": [
         "evidence/research"
       ],
-      "message": "Record Fold-1 research for this claim."
+      "message": "Record research for this claim."
     },
     "claim.research_unbound": {
       "params": {
@@ -1121,20 +1115,6 @@
         "evidence/freshness"
       ],
       "message": "Spike prerequisites changed; re-gate."
-    },
-    "claim.human_decision": {
-      "params": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {}
-      },
-      "next_actions": [
-        "human.request_decision"
-      ],
-      "sections": [
-        "claims/residuals"
-      ],
-      "message": "Claim requires a human decision."
     },
     "claim.refuted": {
       "params": {
@@ -1696,7 +1676,7 @@
       "sections": [
         "audit/independence"
       ],
-      "message": "Covered evidence has mixed producer identities. Research is never superseded; if the only differing producer is a latest spike, re-run that spike under the research producer, otherwise accept the residual."
+      "message": "Covered evidence has mixed producers; re-run the latest spike under the research producer or accept the residual."
     },
     "research.citation_unverified": {
       "params": {
@@ -1711,7 +1691,8 @@
               "source_ref_form",
               "file_unavailable",
               "lines_out_of_range",
-              "text_not_found"
+              "text_not_found",
+              "spike_reason_missing"
             ]
           }
         }
@@ -1722,7 +1703,50 @@
       "sections": [
         "evidence/research"
       ],
-      "message": "Research refused: its citation is not verbatim from the cited repository file ({problem}). Cite one file as path or path:N-M and quote it exactly, joining excerpts with …."
+      "message": "Research refused ({problem}). A workspace source must be cited as one file, `path` or `path:N-M`, quoted exactly, joining excerpts with …; a code, docs or web source must be a workspace path, an http(s) URL or an absolute path outside the workspace (an absolute path inside it is refused: cite the repository-relative path); a runtime observation that is none of these must say why no spike can establish it (payload.spike_unavailable)."
+    },
+    "evidence.confirmation_required": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "route",
+          "record_ids"
+        ],
+        "properties": {
+          "route": {
+            "enum": [
+              "human",
+              "unavailable"
+            ]
+          },
+          "record_ids": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          },
+          "claim_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+            }
+          }
+        }
+      },
+      "next_actions": [
+        "human.confirm_evidence",
+        "residual.accept"
+      ],
+      "sections": [
+        "evidence/research"
+      ],
+      "message": "Waiting for a human to confirm research or answer a decision."
     }
   },
   "sections": {
@@ -1824,7 +1848,7 @@
       "clauses": [
         {
           "id": "claims/residuals/human_decision",
-          "text": "A declared human or data hold that is valid and surfaced is a residual with claim.human_decision and human.request_decision."
+          "text": "A declared human or data hold that is valid and surfaced is a residual; a needs-decision claim waiting on a human is part of the one human batch (evidence.confirmation_required)."
         },
         {
           "id": "claims/residuals/needs_decision",
@@ -1852,7 +1876,7 @@
     },
     "evidence/research": {
       "title": "Research evidence",
-      "summary": "Content-addressed Fold-1 research leaves.",
+      "summary": "Content-addressed research leaves.",
       "clauses": [
         {
           "id": "evidence/research/leaf",
@@ -1865,6 +1889,14 @@
         {
           "id": "evidence/research/missing",
           "text": "An ordinary claim with no active supporting research yields claim.research_missing with research.record."
+        },
+        {
+          "id": "evidence/research/verification",
+          "text": "A research record is verified by its class, derived from source_ref: verbatim (a workspace path, checked by the service at submission), retrievable (an http(s) URL or an absolute path, retrieved by the audit when the host's auditor is observed to cover its kind, otherwise confirmed by a human), or observed (a runtime record that is neither, confirmed by a human and carrying payload.spike_unavailable)."
+        },
+        {
+          "id": "evidence/research/confirmation",
+          "text": "A pending confirmation is part of its claim's obligation from the response that records the research. A claim whose only support waits on a human is not approved, and a run with pending human confirmations cannot report convergence. The host records one presentation of the pending set per derivation (it spends one human interaction); the human answers in one receipt that names it, one decision per item; an item left out stays pending and is not shown again until the derivation changes. A host with no human ingress leaves the requirement open as unavailable."
         }
       ]
     },
@@ -1970,7 +2002,7 @@
       "clauses": [
         {
           "id": "audit/independence/derived",
-          "text": "Independence is derived by the application as distinct, mixed, same_model, or unverified from trusted normalized identities; it is never supplied in the verdict."
+          "text": "Independence is derived by the application as distinct, mixed, same_model, or unverified from trusted normalized identities, or human_owned when every reviewed claim is a human decision with no evidence behind it; it is never supplied in the verdict."
         },
         {
           "id": "audit/independence/required",
@@ -2133,6 +2165,10 @@
         {
           "id": "trusted/ingress/evidence_sealed",
           "text": "An evidence_leaf is a deterministic spike result; its file_bindings, exit_code, command digest, prerequisite research IDs, and result digest correlate exactly and in order to the admitted sealed spike result bindings, not only to request dependent paths."
+        },
+        {
+          "id": "trusted/ingress/confirmation",
+          "text": "An evidence confirmation is one private human receipt of per-item decisions, admitted only through the run's human approval ingress as content-addressed artifacts bound to the research record or claim digest; an identical replay is Inert, a conflicting, stale or already-decided item fails closed, and it enters the claim's evidence digest so an earlier audit is stale."
         }
       ]
     },
@@ -2295,7 +2331,10 @@
   },
   "settlement_notices": {
     "human_wait": "Empirica is paused for human governance input, not converged. Investigation remains blocked; no approval was granted by this pause.",
-    "budget_exhausted": "Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this pause. Stop honestly (report_convergence intent=stop), or in deliberative mode propose a raise for human approval; in auto mode start a fresh run."
+    "evidence_wait": "Empirica is paused: research evidence is waiting for your confirmation, and the run is not converged. No confirmation was granted by this pause. The agent presents it to you at the end of its next pass; if you leave it on Later or close the dialog it is not shown again for the same work, and the run must change or be accepted as a residual.",
+    "budget_exhausted": "Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this pause. Stop honestly (report_convergence intent=stop), or in deliberative mode propose a raise for human approval; in auto mode start a fresh run.",
+    "surface_unrecorded": "Empirica cannot tell whether a human can be asked in this session, so it is not pausing for a confirmation. The run is not converged and no confirmation was granted. Report again; if this persists, change the work or accept the residual.",
+    "evidence_report": "Research evidence is waiting for your confirmation, and the run is not converged. Call report_convergence now: the human is asked inside that call. No confirmation was granted by this block."
   },
   "author_view": {
     "labels": {
@@ -2336,7 +2375,24 @@
       "contract": "Contract",
       "block": "Block",
       "fault": "Fault",
-      "inert": "Inert"
+      "inert": "Inert",
+      "waiting": "Waiting on a human:",
+      "waiting_record": "source:",
+      "waiting_claim": "decision needed on claim",
+      "waiting_for_claim": "for claim",
+      "waiting_none_error": "a human can be asked at the end of your next pass",
+      "waiting_unavailable": "no human can be asked in this session",
+      "waiting_already_presented": "already shown; only a changed derivation asks again",
+      "waiting_interaction_limit": "the human interaction limit is reached",
+      "verified_by_service": "checked by the service",
+      "confirmed_by_human": "confirmed by a human",
+      "rejected_by_human": "rejected by a human",
+      "pending_human": "waiting for a human",
+      "human_note": "human note:",
+      "decision_approve": "approved by a human",
+      "decision_reject": "rejected by a human",
+      "human_answer": "human answer:",
+      "pending_audit": "for the audit to retrieve"
     }
   }
 }

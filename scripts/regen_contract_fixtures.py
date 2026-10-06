@@ -60,6 +60,14 @@ def generated(path: Path) -> str:
         argument_audit.setdefault("findings", [])
     if isinstance(run, dict) and run:
         run["audit"] = _audit_summary(result, run)
+        # Hand-authored fixtures wait on no human unless they say so (ADR-0067).
+        run.setdefault("confirmation_batch", None)
+    # Hand-authored fixtures observed no human surface unless they say so (ADR-0067).
+    for invocation in (run.get("invocation"), document.get("invocation"),
+                       document.get("request", {}).get("command", {}).get("invocation"),
+                       document.get("state", {}).get("invocation") if isinstance(document.get("state"), dict) else None):
+        if isinstance(invocation, dict):
+            invocation.setdefault("human_surface", "unavailable")
     if isinstance(run.get("contract"), dict):
         run["contract"]["digest"] = contract_digest()
     if isinstance(governed, dict) and "proposal_digest" in governed:

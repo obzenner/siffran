@@ -89,16 +89,30 @@ help: ## Show this help (generated from target descriptions)
 
 # `check` is the fast deterministic contributor gate. Expensive filesystem/host-journey matrices
 # live under the explicit integration targets below; installed-host qualification is operator-led
-# and never runs automatically. `check-ci` omits Pi unless the runner explicitly opts in.
-.PHONY: check check-ci check-static check-core check-claude check-codex check-pi check-ui pi-governance-dialog-golden
-check: check-static check-core check-claude check-codex check-pi check-ui ## Fast contributor gate (not integration/native certification)
+# and never runs automatically. `check-ci` omits Pi and UI unless the runner explicitly opts in.
+#
+# The fast suites are declared here, once. Each is a `check-<suite>` target that runs on its own;
+# `check` hands the list to scripts/run_suites.py, which runs them in parallel (one log per suite,
+# one status line each, the full log only for a failure). Each test module belongs to exactly one
+# fast suite or to a named integration target (guarded by tests/v2/test_suite_ownership.py).
+FAST_SUITES := static core evidence observer claude codex pi ui
+CI_SUITES := static core evidence observer claude codex
+ifeq ($(PI_CHECKS),1)
+CI_SUITES += pi ui
+endif
+RUN_SUITES = $(PYTHON) $(SCRIPTS)/run_suites.py $(foreach s,$1,$(s)='$(MAKE) --no-print-directory check-$(s)')
+
+.PHONY: check check-ci check-static check-core check-evidence check-observer check-claude check-codex check-pi check-ui pi-governance-dialog-golden
+check: ## Fast contributor gate: every fast suite, in parallel (not integration/native certification)
+	@$(call RUN_SUITES,$(FAST_SUITES))
 	@printf '\n$(BOLD)Fast contributor checks passed.$(RESET)\n'
 
-check-ci: check-static check-core check-claude check-codex ## Fast contributor gate except Pi (PI_CHECKS=1 includes it)
-	@if [ "$(PI_CHECKS)" = "1" ]; then $(MAKE) check-pi check-ui; else printf '$(DIM)Pi and UI suites skipped in CI (PI_CHECKS=1 to include; they need Node)$(RESET)\n'; fi
+check-ci: ## Fast contributor gate except Pi and UI (PI_CHECKS=1 includes them), in parallel
+	@if [ "$(PI_CHECKS)" != "1" ]; then printf '$(DIM)Pi and UI suites skipped in CI (PI_CHECKS=1 to include; they need Node)$(RESET)\n'; fi
+	@$(call RUN_SUITES,$(CI_SUITES))
 	@printf '\n$(BOLD)CI checks passed.$(RESET)\n'
 
-check-static: lint validate docs-check adr-check empirica-architecture-check empirica-architecture-unit-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check empirica-context-economy-unit-check claude-subagent-models-unit-check pi-canary-unit-check pi-validator-unit-check ## Lint, manifests, docs, ADRs, architecture validator and its tests, contracts, vendor copies, activation, receipts, canary config
+check-static: lint validate docs-check adr-check empirica-architecture-check empirica-architecture-unit-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check empirica-context-economy-unit-check claude-subagent-models-unit-check pi-canary-unit-check pi-validator-unit-check skills-check suites-check ## Lint, manifests, skills, suite ownership, docs, ADRs, architecture validator and its tests, contracts, vendor copies, activation, receipts, canary config
 	@printf '$(BOLD)==> static suite ok$(RESET)\n'
 
 check-core: empirica-author-view-golden empirica-governance-dialog-golden ## Fast host-neutral contracts, malformed input, state, bridge, and governance boundaries
@@ -116,9 +130,9 @@ check-core: empirica-author-view-golden empirica-governance-dialog-golden ## Fas
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_IDENTITY_TESTS)
 	@$(PYTHON) $(EMPIRICA_HOST_RUNTIME_TESTS)
 	@$(PYTHON) $(EMPIRICA_STATE_TESTS)
-	@$(PYTHON) $(EMPIRICA_CITATION_TESTS)
-	@$(PYTHON) $(EMPIRICA_OBSERVER_TESTS)
-	@$(PYTHON) $(EMPIRICA_OBSERVER_SERVER_TESTS)
+	@cd $(PLUGINS_DIR)/empirica/tests/v2 && PYTHONPATH=..:../.. $(PYTHON) -m unittest -q test_activation_route_graph test_async_children test_audit test_blocker_projection
+	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/test_stale_audit_retry.py
+	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_audit_retrieval
 	@$(PYTHON) $(METHODOLOGIST_CORE_TESTS)
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q \
 		test_governance.StartAdmissionTests \
@@ -140,6 +154,16 @@ check-core: empirica-author-view-golden empirica-governance-dialog-golden ## Fas
 		test_governance.GovernanceServiceTests.test_graph_change_does_not_revoke_configuration_approval \
 		test_governance.GovernanceServiceTests.test_raw_submission_conflict_and_amendment_replay \
 		test_governance.GovernanceServiceTests.test_configuration_is_proposal_only_and_freeze_preserves_approval
+
+check-evidence: ## Fast evidence rules: citations, confirmation, scenarios, A1 boundaries, home isolation, host adapter contracts
+	@printf '$(BOLD)==> evidence suite$(RESET)\n'
+	@$(PYTHON) $(EMPIRICA_CITATION_TESTS)
+	@cd $(PLUGINS_DIR)/empirica/tests/v2 && PYTHONPATH=..:../.. $(PYTHON) -m unittest -q test_evidence_confirmation test_evidence_hosts test_evidence_scenarios test_a1_boundaries test_home_isolation
+
+check-observer: ## Fast observer store, projection and server tests
+	@printf '$(BOLD)==> observer suite$(RESET)\n'
+	@$(PYTHON) $(EMPIRICA_OBSERVER_TESTS)
+	@$(PYTHON) $(EMPIRICA_OBSERVER_SERVER_TESTS)
 
 check-claude: ## Fast Claude payload, lifecycle translation, and fail-closed adapter tests
 	@printf '$(BOLD)==> claude suite$(RESET)\n'
@@ -451,10 +475,10 @@ pi-canary-unit-check: ## Test that the dogfood settings and canary recipes never
 	@$(PYTHON) $(PI_CANARY_TESTS)
 
 .PHONY: empirica-host-receipt
-empirica-host-receipt: ## capture one operator-attested receipt: HOST=... TRANSCRIPT=... STATE=... CHILD_SESSION=... VERSION_OUTPUT=... COMMAND=... OUTPUT=...
-	@if [ -z "$(HOST)" ] || [ -z "$(TRANSCRIPT)" ] || [ -z "$(STATE)" ] || [ -z "$(CHILD_SESSION)" ] || [ -z "$(VERSION_OUTPUT)" ] || [ -z "$(COMMAND)" ] || [ -z "$(OUTPUT)" ]; then \
-		printf 'usage: make empirica-host-receipt HOST=claude|pi TRANSCRIPT=... STATE=... CHILD_SESSION=... VERSION_OUTPUT=... COMMAND=... OUTPUT=...\n' >&2; exit 2; fi
-	@$(PYTHON) $(SCRIPTS)/capture_empirica_live_receipt.py "$(HOST)" --transcript "$(TRANSCRIPT)" --state "$(STATE)" --child-session "$(CHILD_SESSION)" --version-output "$(VERSION_OUTPUT)" --command "$(COMMAND)" --output "$(OUTPUT)" --operator-attested
+empirica-host-receipt: ## capture one operator-attested receipt: HOST=... TRANSCRIPT=... STATE=... CHILD_SESSION=... VERSION_OUTPUT=... COMMAND=... OUTPUT=... ARTIFACTS_REPO=...
+	@if [ -z "$(HOST)" ] || [ -z "$(TRANSCRIPT)" ] || [ -z "$(STATE)" ] || [ -z "$(CHILD_SESSION)" ] || [ -z "$(VERSION_OUTPUT)" ] || [ -z "$(COMMAND)" ] || [ -z "$(OUTPUT)" ] || [ -z "$(ARTIFACTS_REPO)" ]; then \
+		printf 'usage: make empirica-host-receipt HOST=claude|pi TRANSCRIPT=... STATE=... CHILD_SESSION=... VERSION_OUTPUT=... COMMAND=... OUTPUT=... ARTIFACTS_REPO=...\n' >&2; exit 2; fi
+	@$(PYTHON) $(SCRIPTS)/capture_empirica_live_receipt.py "$(HOST)" --transcript "$(TRANSCRIPT)" --state "$(STATE)" --child-session "$(CHILD_SESSION)" --version-output "$(VERSION_OUTPUT)" --command "$(COMMAND)" --output "$(OUTPUT)" --artifacts-repo "$(ARTIFACTS_REPO)" --operator-attested
 
 .PHONY: empirica-host-live-check
 empirica-host-live-check: ## require retained installed-host Allow(converged=true) receipts
@@ -463,10 +487,19 @@ empirica-host-live-check: ## require retained installed-host Allow(converged=tru
 
 ## --- Qualify
 
+.PHONY: skills-check suites-check
+skills-check: ## Validate every SKILL.md against the Agent Skills spec, the Claude symlink and relative links (with negative controls)
+	@$(PYTHON) $(SCRIPTS)/validate_skills.py
+	@$(PYTHON) $(SCRIPTS)/tests/test_validate_skills.py
+
+suites-check: ## Test the parallel suite runner and that every test module belongs to exactly one suite
+	@$(PYTHON) $(SCRIPTS)/tests/test_run_suites.py
+	@$(PYTHON) $(SCRIPTS)/tests/test_suite_ownership.py
+
 .PHONY: native-qualification
 native-qualification: ## Print the operator-led native qualification skill entrypoint (never launches a host)
 	@printf 'Read and follow %s in a supported native host. This target launches nothing.\n' \
-		'.claude/skills/native-qualification/SKILL.md'
+		'.agents/skills/native-qualification/SKILL.md'
 
 ## --- Inspect
 

@@ -5,13 +5,14 @@ from collections.abc import Mapping
 import re
 from typing import Any
 
-from . import governance
+from . import citations, confirmation, governance
 
 from .evaluation import (EvaluationSnapshot, HOST_TIER_UNSUPPORTED, active_evidence, audit_blocker,
                          audit_operation_current, audit_passes, bootstrap_status,
                          claim_blockers, claim_digest, derive_claims,
-                         derive_claims_for_projection, digest,
-                         effective_scope_ids, evidence_digest, independence)
+                         derive_claims_for_projection, digest, dossier_artifact_ids,
+                         confirmation_batch, effective_scope_ids, evidence_digest, independence,
+                         pending_decisions, pending_human)
 
 
 def _scope(snapshot: EvaluationSnapshot) -> tuple[list[str], list[str]]:
@@ -38,6 +39,14 @@ def _reason_metadata(metadata: Mapping[str, tuple[tuple[str, ...], tuple[str, ..
     return list(next_actions), list(sections)
 
 
+def reason_actions(code: str, parameters: Mapping[str, Any] | None, actions: list[str]) -> list[str]:
+    """A reason's recovery actions as its parameters allow them: with no human ingress the human cannot be
+    asked, so ``human.confirm_evidence`` is not offered for route ``unavailable``."""
+    if code == "evidence.confirmation_required" and (parameters or {}).get("route") == "unavailable":
+        return [action for action in actions if action != "human.confirm_evidence"]
+    return actions
+
+
 def _obligation(
     obligation_id: str, required: str, observed: list[dict[str, Any]],
     missing: dict[str, Any] | None, metadata, status: str, terminal_next: list[str] | None = None,
@@ -45,7 +54,8 @@ def _obligation(
     if terminal_next is not None:
         next_actions = list(terminal_next)
     else:
-        next_actions = [] if missing is None else _reason_metadata(metadata, missing["code"])[0]
+        next_actions = [] if missing is None else reason_actions(
+            missing["code"], missing["parameters"], _reason_metadata(metadata, missing["code"])[0])
     return {"id": obligation_id, "required": required, "observed": observed,
             "missing": missing, "next": next_actions, "status": status}
 
@@ -53,10 +63,39 @@ def _obligation(
 def _residual(metadata, code: str, parameters: dict[str, Any],
               terminal_next: list[str] | None = None, **extra) -> dict[str, Any]:
     next_actions, sections = _reason_metadata(metadata, code)
+    next_actions = reason_actions(code, parameters, next_actions)
     if terminal_next is not None:
         next_actions = list(terminal_next)
     return {**extra, "code": code, "parameters": parameters,
             "next_actions": next_actions, "sections": sections}
+
+
+def _observed(snapshot: EvaluationSnapshot, item: Mapping[str, Any], stale: set[str]) -> dict[str, Any]:
+    """One active evidence record as an obligation shows it; ``confirm`` names the route of a
+    research record that still needs confirming, from the moment it is recorded."""
+    row = {"artifact_id": item["artifact_id"], "kind": item["kind"], "outcome": item["outcome"],
+           "stale": item["kind"] == "spike" and item["artifact_id"] in stale}
+    if item["kind"] != "research":
+        return row
+    route = confirmation.pending_route(snapshot, item)
+    decided = confirmation.receipt(snapshot, item)
+    return {**row, **({"confirm": route} if route is not None else {}),
+            **({"note": decided["note"]} if decided is not None and "note" in decided else {})}
+
+
+def _rejected(snapshot: EvaluationSnapshot, claim: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Research a human rejected for this wording of the claim: no longer evidence, but the human's note
+    is addressed to the author and belongs on the obligation it left open."""
+    digest_now = claim_digest(claim)
+    rows = []
+    for item in snapshot.history:
+        if (item.get("kind") == "research" and item.get("claim_id") == claim["id"]
+                and item.get("claim_digest") == digest_now and confirmation.rejected(snapshot, item)):
+            decided = confirmation.receipt(snapshot, item)
+            rows.append({"artifact_id": item["artifact_id"], "kind": "research", "outcome": item["outcome"],
+                         "stale": False, "rejected": True,
+                         **({"note": decided["note"]} if "note" in decided else {})})
+    return rows
 
 
 def _obligations(snapshot: EvaluationSnapshot, derivation: Any, states: Mapping[str, str],
@@ -84,10 +123,8 @@ def _obligations(snapshot: EvaluationSnapshot, derivation: Any, states: Mapping[
             missing = (None if blocker is None else {
                 "code": blocker["reason"], "target_claim_id": blocker["target_claim_id"],
                 "parameters": blocker["parameters"]})
-            observed = [{"artifact_id": item["artifact_id"], "kind": item["kind"],
-                         "outcome": item["outcome"],
-                         "stale": item["kind"] == "spike" and item["artifact_id"] in stale}
-                        for item in active_evidence(snapshot, claim)]
+            observed = [_observed(snapshot, item, stale) for item in active_evidence(snapshot, claim)]
+            observed += _rejected(snapshot, claim)
             row = _obligation(
                 "claim:" + claim["id"], claim["text"], observed, missing, metadata,
                 "satisfied" if states[claim["id"]] == "approved" else "residual", terminal_next)
@@ -121,6 +158,12 @@ def _residuals(snapshot: EvaluationSnapshot, derivation: Any,
         return []
     if status == "stopped_residual" and snapshot.graph:
         residuals = []
+        for claim_id, records in pending_human(snapshot, _scope(snapshot)[0]).items():
+            residuals.append(_residual(
+                metadata, "evidence.confirmation_required",
+                confirmation.parameters(snapshot, records, pending_decisions(snapshot, derivation)),
+                terminal_next,
+                claim_id=claim_id, target_claim_id=claim_id))
         for blocker in blockers:
             residuals.append(_residual(
                 metadata, blocker["reason"], blocker["parameters"], terminal_next,
@@ -146,12 +189,12 @@ def safe_text(item: object) -> str:
 # The neutral invocation facts a run view and the governance dialog show. The stored invocation may
 # carry further host-recorded members (``host_runtime``); they are persisted for receipts and never
 # projected, so no model-visible payload grows with them.
-INVOCATION_FACTS = ("host", "interactive", "signal", "delegation")
+INVOCATION_FACTS = ("host", "interactive", "signal", "delegation", "audit_retrieval", "human_surface")
 
 
 def project_invocation(invocation: Mapping) -> dict[str, Any]:
     """The shown invocation facts, in contract order; host-recorded extras are not projected."""
-    return {key: invocation[key] for key in INVOCATION_FACTS}
+    return {key: governance.plain(invocation[key]) for key in INVOCATION_FACTS}
 
 
 def governance_dialog(goal: str, value: Mapping, controls: Mapping,
@@ -189,8 +232,9 @@ def project_governance(snapshot: EvaluationSnapshot) -> dict:
     value = governance.plain(snapshot.state.governance)
     bootstrap = bootstrap_status(snapshot)
     actions = bootstrap["next_actions"]  # empty for a terminal run or when bootstrap is complete
-    value.update(interactions_remaining=governance.interactions_remaining(snapshot.state.governance),
-                 prompt_error=governance.interaction_error(snapshot.state.governance))
+    spent = confirmation.interactions(snapshot)
+    value.update(interactions_remaining=governance.interactions_remaining(snapshot.state.governance, spent),
+                 prompt_error=governance.interaction_error(snapshot.state.governance, spent))
     value.pop("receipts")
     value.pop("delegation_envelope")
     value.update(budgets=dict(snapshot.state.budgets),
@@ -259,6 +303,7 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
         "audit": {"state": audit["state"], "independence": audit["independence"],
                   "findings": audit["findings"] if audit["state"] == "failed" else []},
         "governance": project_governance(snapshot),
+        "confirmation_batch": _batch(snapshot, derivation),
         "contract": {"id": snapshot.contract_id, "version": snapshot.contract_version,
                      "digest": snapshot.contract_digest,
                      "relevant_sections": list(["protocol"] if relevant_sections is None
@@ -272,6 +317,23 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
                  "missing_capabilities": ([HOST_TIER_UNSUPPORTED[snapshot.host_tier]]
                     if snapshot.host_tier in HOST_TIER_UNSUPPORTED else [])},
     }
+
+
+def _batch(snapshot: EvaluationSnapshot, derivation: Any) -> dict[str, Any] | None:
+    """What a human would be shown now (``null`` when nothing waits), with why it cannot be presented:
+    the host presents exactly when this is not ``null`` and ``prompt_error`` is, whatever else blocks."""
+    if snapshot.graph is None or snapshot.state.status != "active":
+        return None
+    batch = confirmation_batch(snapshot, derivation)
+    if batch is None:
+        return None
+    held = {a["artifact_id"]: a for a in snapshot.history if a.get("kind") == "research"}
+    return {"key": batch["key"], "record_ids": batch["record_ids"],
+            "claim_ids": [row["claim_id"] for row in batch["claims"]],
+            # What the author reads of the batch: where each record is cited from and for which claim.
+            "records": [{"claim_id": held[i]["claim_id"], "source_kind": held[i]["source_kind"],
+                         "source_ref": held[i]["source_ref"]} for i in batch["record_ids"] if i in held],
+            "prompt_error": confirmation.prompt_error(snapshot, batch["key"])}
 
 
 def _audit(snapshot: EvaluationSnapshot) -> dict[str, Any]:
@@ -301,6 +363,26 @@ def _audit(snapshot: EvaluationSnapshot) -> dict[str, Any]:
                                          and verdict else [])}
 
 
+def _verification(snapshot: EvaluationSnapshot, record: Mapping[str, Any]) -> dict[str, Any]:
+    """The dossier's statement of how one research record is verified and what the auditor owes it."""
+    row = {"class": citations.verification_class(record["source_kind"], record["source_ref"]),
+           "status": confirmation.status(snapshot, record),
+           "retrieve": confirmation.retrieve(snapshot, record)}
+    decided = confirmation.receipt(snapshot, record)
+    if decided is None:
+        return row
+    # The human's note is addressed to the author, so the dossier carries it with the receipt.
+    return {**row, "receipt": decided["artifact_id"], **({"note": decided["note"]} if "note" in decided else {})}
+
+
+def _human_decision(snapshot: EvaluationSnapshot, claim: Mapping[str, Any]) -> dict[str, Any]:
+    """A ``needs-decision`` claim's human answer, when there is one, for the claim row."""
+    answer = confirmation.decision(snapshot, claim["id"], claim_digest(claim))
+    if answer is None:
+        return {}
+    return {"human_decision": {"outcome": answer["outcome"], "answer": answer.get("answer")}}
+
+
 def project_argument(snapshot: EvaluationSnapshot) -> dict[str, Any]:
     if snapshot.graph is None:
         raise ValueError("argument projection requires a valid graph")
@@ -318,6 +400,7 @@ def project_argument(snapshot: EvaluationSnapshot) -> dict[str, Any]:
             "wording_digest": claim_digest(claim), "state": state, "kind": claim["kind"],
             "gating": claim["id"] in gating, "evidence_digest": evidence_digest(snapshot, claim),
             "active_evidence_ids": ids,
+            **_human_decision(snapshot, claim),
         })
     artifacts: list[dict[str, Any]] = []
     for sequence, art in enumerate(snapshot.history):
@@ -331,8 +414,9 @@ def project_argument(snapshot: EvaluationSnapshot) -> dict[str, Any]:
             common.update(active=art["artifact_id"] in active_ids, outcome=art["outcome"],
                           source_kind=art["source_kind"], source_ref=art["source_ref"],
                           citation=art["citation"])
-            if "observed_content_digest" in art:
-                common["observed_content_digest"] = art["observed_content_digest"]
+            common.update({key: art[key] for key in ("observed_content_digest", "spike_unavailable")
+                           if key in art})
+            common["verification"] = _verification(snapshot, art)
         elif kind == "spike_request":
             common.update(harness_request_id=art["harness_request_id"], command=art["command"],
                           command_digest=art["command_digest"], dependent_files=art["dependent_files"],
@@ -346,7 +430,8 @@ def project_argument(snapshot: EvaluationSnapshot) -> dict[str, Any]:
                           spike_gate=art["spike_gate"], supersedes=art.get("supersedes"))
         artifacts.append(common)
     frozen_digest = None if snapshot.state.frozen_claim_ids is None else digest(gating)
-    argument_digest = digest({"graph": snapshot.graph, "evidence": [a["artifact_id"] for a in artifacts]})
+    argument_digest = digest({"graph": snapshot.graph,
+                              "evidence": dossier_artifact_ids(snapshot.history)})
     return governance.plain({
         "root_claim_id": snapshot.graph["root"], "argument_digest": argument_digest,
         "goal": snapshot.state.goal, "goal_digest": digest(snapshot.state.goal),

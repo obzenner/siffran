@@ -3,7 +3,7 @@
     "type": "Allow",
     "contract_result": {
       "target": "index",
-      "digest": "sha256:e57f48aa42474a3bb11f982b386e9aff7cf3842280545e1a97055a39537f9c1c",
+      "digest": "sha256:45fa33dc3aa269f8702ae41c002f7ee29edb005b1129e7ac65c4a33b5f8990af",
       "index": {
         "id": "empirica/public",
         "version": "3.0.0",
@@ -184,12 +184,6 @@
             "code": "claim.spike_stale",
             "sections": [
               "evidence/freshness"
-            ]
-          },
-          {
-            "code": "claim.human_decision",
-            "sections": [
-              "claims/residuals"
             ]
           },
           {
@@ -401,6 +395,12 @@
             "sections": [
               "evidence/research"
             ]
+          },
+          {
+            "code": "evidence.confirmation_required",
+            "sections": [
+              "evidence/research"
+            ]
           }
         ],
         "next_actions": [
@@ -426,7 +426,7 @@
           },
           {
             "id": "research.record",
-            "description": "Record one externally observed Fold-1 research citation bound to a claim."
+            "description": "Record one externally observed research citation bound to a claim."
           },
           {
             "id": "spike.run",
@@ -435,10 +435,6 @@
           {
             "id": "spike.regate",
             "description": "Re-gate a stale spike with current prerequisites."
-          },
-          {
-            "id": "human.request_decision",
-            "description": "Request a human decision for a residual claim."
           },
           {
             "id": "budget.raise",
@@ -467,6 +463,10 @@
           {
             "id": "governance.propose",
             "description": "Issue a task-sized configure_run (all three ceilings plus a nonblank rationale) and request a host-mediated configuration decision; cannot self-approve."
+          },
+          {
+            "id": "human.confirm_evidence",
+            "description": "Show the human the pending research records and needs-decision claims in one batch: record one presentation, then submit one receipt of per-item decisions. Offered only when the run has a human ingress."
           }
         ]
       }

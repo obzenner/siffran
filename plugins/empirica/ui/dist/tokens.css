@@ -45,8 +45,7 @@
   --ev-font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
   --font-sans: var(--ev-font-sans);  /* overrides Basecoat's Geist default */
   --font-mono: var(--ev-font-mono);
-  --duration-fast: 120ms;
-  --duration-base: 200ms;
+  --duration-grace: 150ms;
 }
 .dark {
   --background: #131312;

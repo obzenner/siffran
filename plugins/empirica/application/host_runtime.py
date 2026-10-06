@@ -21,6 +21,8 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 from typing import Any, Mapping
 
+from core.citations import spelled_canonically
+
 
 def _inside(path: object, root: object) -> bool:
     """Whether ``path`` is strictly below the absolute directory ``root`` (lexically; no filesystem).
@@ -29,6 +31,9 @@ def _inside(path: object, root: object) -> bool:
     POSIX resource limits), so a Windows-style path is rejected rather than interpreted.
     """
     if not isinstance(path, str) or not isinstance(root, str):
+        return False
+    # Spelling is refused, never interpreted: ``//``, ``.`` and ``..`` segments and a trailing slash.
+    if not all(spelled_canonically(value) for value in (path, root.rstrip("/") or "/")):
         return False
     candidate, base = PurePosixPath(path), PurePosixPath(root)
     return (candidate.is_absolute() and base.is_absolute() and candidate != base

@@ -60,7 +60,7 @@ test("the canonical auditor is accepted from every captured package, thinking le
   for (const fixture of FIXTURES) {
     const admission = admitAuditPreflight(descriptor(fixture.version), bound(fixture.cases.canonical_auditor));
     assert.deepEqual(admission, { kind: "accept", contract: {
-      agent_file_path: AUDITOR, model: "audit/reviewer",
+      agent_file_path: AUDITOR, model: "audit/reviewer", audit_retrieval: ["local", "workspace"],
       launch_contract_version: loadInventory(fixture.version)!.launch_contract_version } }, fixture.version);
   }
 });
@@ -73,7 +73,7 @@ test("a v3 contract has no modelCandidates and the seam reads contract.model; v2
     else { response.contract.model = "audit/reviewer:xhigh"; response.contract.modelCandidates = ["decoy/model:high"]; }
     assert.deepEqual(admitAuditPreflight(descriptor(fixture.version), response),
       { kind: "accept", contract: { agent_file_path: AUDITOR, model: "audit/reviewer",
-        launch_contract_version: response.contract.version } }, fixture.version);
+        audit_retrieval: ["local", "workspace"], launch_contract_version: response.contract.version } }, fixture.version);
   }
 });
 

@@ -10,7 +10,7 @@ import unittest
 from test_d7_transactions import Artifacts, Harness, Runs, Workspace, activate_investigation, traverse_history
 
 from application.transaction import Coordinator as ProductionCoordinator
-from core.citations import PROBLEMS, citation_problem, cited_file
+from core.citations import submission_problem, PROBLEMS, citation_problem, cited_file
 from core.freshness import ObservationState
 from governance_setup import TEST_INVOCATION, approve_current
 
@@ -28,20 +28,23 @@ def problem(ref: str, citation: str, content: bytes | None = SOURCE, state=PRESE
 
 
 class CitationRuleTests(unittest.TestCase):
-    def test_only_workspace_code_and_docs_sources_are_checked(self):
+    def test_only_a_workspace_path_is_checked_verbatim(self):
         self.assertEqual(cited_file("code", "src/load.py:2-3"), "src/load.py")
         self.assertEqual(cited_file("docs", "README.md"), "README.md")
-        for kind, ref in (("web", "src/load.py"), ("runtime", "src/load.py"),
-                          ("docs", "https://example.test/guide"), ("code", "/opt/lib/x.py"),
-                          ("docs", "~/notes.md")):
+        # The class follows the ref's form; the kind does not change it.
+        self.assertEqual(cited_file("web", "src/load.py"), "src/load.py")
+        for kind, ref in (("docs", "https://example.test/guide"), ("code", "/opt/lib/x.py"),
+                          ("docs", "~/notes.md"), ("runtime", "the build log")):
             with self.subTest(kind=kind, ref=ref):
                 self.assertIsNone(cited_file(kind, ref))
 
-    def test_a_ref_that_is_not_one_file_is_still_checked_and_refused(self):
+    def test_a_ref_that_is_not_one_file_is_refused_at_submission(self):
         many = "src/a.py:1-3,9; src/b.py:4"
-        self.assertEqual(cited_file("code", many), many)
-        self.assertEqual(problem(many, "def load(path):"), "source_ref_form")
-        self.assertEqual(problem("../outside.py", "def load(path):"), "source_ref_form")
+        self.assertIsNone(cited_file("code", many))
+        for ref in (many, "../outside.py", "the build log"):
+            with self.subTest(ref=ref):
+                self.assertEqual(submission_problem("code", {"source_ref": ref, "citation": "x"},
+                                                    SOURCE, PRESENT), "source_ref_form")
 
     def test_verbatim_text_is_accepted_whatever_its_whitespace(self):
         self.assertIsNone(problem("src/load.py", "def load(path):"))

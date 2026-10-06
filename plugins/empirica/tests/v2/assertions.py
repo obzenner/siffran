@@ -22,6 +22,8 @@ schema/registry lookups and structural assertions only.
 """
 from __future__ import annotations
 
+import tempfile
+import os
 import hashlib
 import json
 import re
@@ -34,6 +36,7 @@ from governance_setup import TEST_INVOCATION
 
 from adapters.identity import observe
 from core.canonical import canonical_digest
+from core.projection import reason_actions
 from driver import CITED_SOURCE, V2SeamAbsent, new_driver
 
 # ---------------------------------------------------------------------------
@@ -496,6 +499,17 @@ class ConformanceCase(unittest.TestCase):
     selection is bound through the factory only (no invented StartRun field).
     """
 
+    def setUp(self) -> None:
+        """Every case gets its own ``EMPIRICA_HOME``: nothing a case writes (operational state, the host's surface note)
+        can reach the developer's real home. Restored on teardown. ``tests/test_home_isolation.py`` is the guard."""
+        super().setUp()
+        home = tempfile.TemporaryDirectory(prefix="empirica-home-")
+        self.addCleanup(home.cleanup)
+        prior = os.environ.get("EMPIRICA_HOME")
+        os.environ["EMPIRICA_HOME"] = self.empirica_home = home.name
+        self.addCleanup(lambda: os.environ.__setitem__("EMPIRICA_HOME", prior) if prior is not None
+                        else os.environ.pop("EMPIRICA_HOME", None))
+
     # Default profile used by cases that do not assert a specific host tier.
     DEFAULT_PROFILE = "claude-code@2.1.278"
     DEFAULT_GOAL = "Prove the public contract is internally consistent."
@@ -583,7 +597,8 @@ class ConformanceCase(unittest.TestCase):
         for r in result["reasons"]:
             self.assertIn(r["code"], REASONS, f"reason code {r['code']!r} must be canonical")
             spec = REASONS[r["code"]]
-            self.assertEqual(r["next_actions"], spec["next_actions"],
+            self.assertEqual(r["next_actions"],
+                             reason_actions(r["code"], r.get("parameters"), spec["next_actions"]),
                              f"reason {r['code']} next_actions must match registry order")
             self.assertEqual(r["sections"], spec["sections"],
                              f"reason {r['code']} sections must match registry order")
@@ -639,7 +654,8 @@ class ConformanceCase(unittest.TestCase):
         else:
             self.assertEqual(r.get("parameters", {}), {},
                              f"reason {code} parameters must be empty")
-        self.assertEqual(r["next_actions"], spec["next_actions"],
+        self.assertEqual(r["next_actions"],
+                         reason_actions(code, r.get("parameters"), spec["next_actions"]),
                          f"reason {code} next_actions must match registry order")
         self.assertEqual(r["sections"], spec["sections"],
                          f"reason {code} sections must match registry order")

@@ -76,7 +76,7 @@ export function defaultSubagentsPackage(): FixturePackage {
 export function recordedInvocation(): InvocationProvenance & { host_runtime: NonNullable<InvocationProvenance["host_runtime"]> } {
   const root = "/opt/pi-subagents";
   const versions = SUBAGENTS_COMPATIBILITY.reviewed_versions;
-  return { host: "pi", interactive: true, signal: "ctx.mode=tui", delegation: false,
+  return { host: "pi", interactive: true, signal: "ctx.mode=tui", delegation: false, audit_retrieval: ["local", "workspace"], human_surface: "unavailable",
     host_runtime: { policy_id: SUBAGENTS_COMPATIBILITY.policy_id, subagents: {
       package: SUBAGENTS_COMPATIBILITY.package, version: versions[versions.length - 1]!,
       owner_path: `${root}/src/extension/index.js`, package_root: root,

@@ -56,6 +56,7 @@ interface AuthorView {
   readonly children: readonly Child[];
   readonly freshness: readonly Freshness[];
   readonly nextActions: readonly Trusted[];
+  readonly waiting: readonly string[];
 }
 
 const PUBLIC_CONTRACT = JSON.parse(readFileSync(
@@ -240,7 +241,8 @@ function valueRenderer(schema: Json): ValueRenderer | null {
   if (schema.enum !== undefined || schema.const !== undefined) return (value) => String(value);
   if (schema.type === "string") return (value, safety) => untrusted(value, safety);
   if (schema.type === "array") {
-    const item = valueRenderer(schema.items) as ValueRenderer;
+    const item = valueRenderer(schema.items);
+    if (item === null) return null; // elements are intentionally omitted (digests), so the whole array is
     const separator = isString(schema.items) ? ", " : "; ";
     return (value, safety) => (value as unknown[]).map((row) => item(row, safety)).join(separator);
   }
@@ -357,6 +359,25 @@ function requiredRationale(governance: Json): string | null {
   return governance.proposal.rationale as string | null;
 }
 
+const WAIT_STATE: Readonly<Record<string, string>> = {
+  none: "waiting_none_error", unavailable: "waiting_unavailable",
+  already_presented: "waiting_already_presented", interaction_limit: "waiting_interaction_limit",
+};
+
+/** What waits on a human, where each record is cited from and for which claim, and whether a human will be asked. */
+function waitingLines(run: Json, safety: TextSafety): readonly string[] {
+  const batch = run.confirmation_batch as Json | null | undefined;
+  if (!batch) return [];
+  const labels = LABELS as Record<string, string>;
+  return [
+    ...(batch.records as Json[]).map((row) =>
+      `  ${LABELS.waiting_record} ${row.source_kind} ${untrusted(row.source_ref, safety)} ` +
+      `${LABELS.waiting_for_claim} ${claimId(row.claim_id, safety)}`),
+    ...(batch.claim_ids as string[]).map((id) => `  ${LABELS.waiting_claim} ${claimId(id, safety)}`),
+    `  ${labels[WAIT_STATE[String(batch.prompt_error ?? "none")]]}`,
+  ];
+}
+
 /** Parse one guarded run-bearing Allow or Block result. */
 function parse(result: Json): AuthorView {
   const run = result.run as Json;
@@ -408,6 +429,7 @@ function parse(result: Json): AuthorView {
       ? (result.reasons as Json[]).map((row) => reason(row, safety)) : [],
     obligations, satisfied, residuals, children, freshness,
     nextActions: terminal ? [] : terminalNext,
+    waiting: waitingLines(run, safety),
   };
 }
 
@@ -459,6 +481,7 @@ function render(view: AuthorView): string {
   const sections: readonly [string, readonly string[]][] = [
     [LABELS.reasons, reasonLines(view.reasons)],
     [LABELS.open_obligations, obligationLines(view.obligations)],
+    [LABELS.waiting, view.waiting],
     [LABELS.satisfied_obligations, view.satisfied.map((item) => `  ${item}`)],
     [LABELS.residuals, reasonLines(view.residuals)],
     [LABELS.children, childLines(view.children)],
@@ -469,18 +492,43 @@ function render(view: AuthorView): string {
     .map(([title, lines]) => [title, ...lines].join("\n"))].join("\n\n");
 }
 
+const VERIFICATION: Readonly<Record<string, string>> = {
+  verified_by_service: "verified_by_service", confirmed_by_human: "confirmed_by_human",
+  rejected_by_human: "rejected_by_human",
+};
+
+/** Plain words for one record's verification: what the service did, what a human did, or who retrieves it. */
+function verificationLabel(verification: Json): string {
+  const labels = LABELS as Record<string, string>;
+  if (verification.status === "pending") return labels[verification.retrieve ? "pending_audit" : "pending_human"];
+  return labels[VERIFICATION[verification.status as string]];
+}
+
 /** Render the graph projection without private identity or artifact fields. */
 function argumentLines(argument: Json, safety: TextSafety): readonly string[] {
-  const claims = (argument.claims as Json[]).map((item) =>
-    `  ${claimId(item.claim_id, safety)} ${LABELS.claim_kind}${item.kind} ` +
-    `${LABELS.claim_gating}${item.gating ? "true" : "false"} ` +
-    `${LABELS.claim_state}${item.state} ${LABELS.claim_evidence}` +
-    `${item.active_evidence_ids.length ? LABELS.evidence_present : LABELS.evidence_none}: ` +
-    `${untrusted(item.text, safety)}`);
+  const labels = LABELS as Record<string, string>;
+  const claims = (argument.claims as Json[]).flatMap((item) => {
+    const decision = item.human_decision as Json | undefined;
+    return [
+      `  ${claimId(item.claim_id, safety)} ${LABELS.claim_kind}${item.kind} ` +
+      `${LABELS.claim_gating}${item.gating ? "true" : "false"} ` +
+      `${LABELS.claim_state}${item.state} ${LABELS.claim_evidence}` +
+      `${item.active_evidence_ids.length ? LABELS.evidence_present : LABELS.evidence_none}: ` +
+      `${untrusted(item.text, safety)}`,
+      ...(decision ? [`    ${labels[`decision_${decision.outcome}`]}` +
+        (decision.answer ? ` — ${LABELS.human_answer} ${untrusted(decision.answer, safety)}` : "")] : []),
+    ];
+  });
   const edges = (argument.edges as Json[]).map((item) =>
     `  ${claimId(item.from, safety)} -${item.type}-> ${claimId(item.to, safety)}`);
-  const citations = (argument.artifacts as Json[]).filter((item) => item.citation !== undefined)
-    .map((item) => `  ${untrusted(item.citation, safety)}`);
+  const citations = (argument.artifacts as Json[]).filter((item) => item.citation).flatMap((item) => {
+    const verification = item.verification as Json | undefined;
+    return [
+      `  ${untrusted(item.citation, safety)}` +
+        (verification ? ` — ${verificationLabel(verification)}` : ""),
+      ...(verification?.note ? [`    ${LABELS.human_note} ${untrusted(verification.note, safety)}`] : []),
+    ];
+  });
   return [
     `${LABELS.goal} ${untrusted(argument.goal, safety)}`,
     `${LABELS.root_claim_id} ${claimId(argument.root_claim_id, safety)}`,

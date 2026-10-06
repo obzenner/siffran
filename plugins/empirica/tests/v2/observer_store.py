@@ -20,7 +20,7 @@ from typing import Any
 import governance_setup
 from application.location import storage_id
 from application.observer import Project
-from assertions import (ConformanceCase, action_graph, action_investigate, action_research,
+from assertions import (ConformanceCase, action_graph, get_argument, get_run, action_investigate, action_research,
                         action_spike_request, evaluate, observe_action)
 from core.canonical import canonical_digest
 from core.records import Present, Revision, RunKey
@@ -121,6 +121,7 @@ class _Builder:
     def begin(self, project: str, session: str, goal: str, graph: dict, **start) -> str:
         a, drv = self.a, self.drv
         run_id = a.start_run(drv, goal=goal, project=project, session=session, **start)
+        drv.trusted_human_surface(run_id, "human")  # an attended session: evidence waits on its human
         self.store.names.setdefault(storage_id(project), project)
         a.require_route_admitted(drv, run_id)
         a.dispatch(drv, observe_action(run_id=run_id, action=action_graph(graph)))
@@ -136,6 +137,29 @@ class _Builder:
         self.a.dispatch(self.drv, observe_action(run_id=run_id, action=action_research(
             claim_id=claim, source_kind="code", result=result,
             payload={"source_ref": ref, "citation": citation})))
+
+    def cite(self, run_id: str, claim: str, source_kind: str, ref: str, citation: str, **payload):
+        """Research the service cannot check against the workspace: a URL, an absolute path or an
+        observation (its payload says why no spike could establish it)."""
+        self.a.dispatch(self.drv, observe_action(run_id=run_id, action=action_research(
+            claim_id=claim, source_kind=source_kind, result="supports",
+            payload={"source_ref": ref, "citation": citation, **payload})))
+
+    def record_ids(self, run_id: str) -> dict[str, str]:
+        """Each claim's latest research record id, from the plugin's own dossier."""
+        argument = self.a.dispatch(self.drv, get_argument(run_id=run_id))["result"]["argument"]
+        return {r["claim_id"]: r["artifact_id"] for r in argument["artifacts"] if r["kind"] == "research"}
+
+    def batch_key(self, run_id: str) -> str:
+        """The key of the batch the run shows now (a presentation names the batch it shows)."""
+        return self.a.dispatch(self.drv, get_run(run_id=run_id))["result"]["run"]["confirmation_batch"]["key"]
+
+    def present_and_answer(self, run_id: str, receipt: str, decisions: list[dict]):
+        """The host shows the waiting set once, then the human answers some of it (the rest is Later)."""
+        self.drv.trusted_evidence_presentation(
+            run_id, {"run_id": run_id, "receipt_id": receipt, "key": self.batch_key(run_id)})
+        self.drv.trusted_evidence_confirmation(
+            run_id, {"run_id": run_id, "receipt_id": receipt, "decisions": decisions})
 
     def spike(self, run_id: str, claim: str, command: str, files: dict[str, bytes], exit_code=0):
         for path, content in files.items():
@@ -270,6 +294,35 @@ def _build() -> Store:
     b.freeze(run)
     b.audit(run, "fail", ["The tolerance test never checks the wide-gamut swatches."])
     b.stamp("audit-failed", "lumen", "s-retry")
+
+    # atlas: research the service cannot check itself (ADR-0067): one record per way of being verified,
+    # and the human's answers to part of what waited for them.
+    run = b.begin("atlas", "s-verify", "Document the tile export path.", _graph(
+        "C0", [("C0", "ordinary", "The export reads every tile through one documented path."),
+               ("C1", "ordinary", "The export guide names that path."),
+               ("C2", "ordinary", "The vendor specification requires that path."),
+               ("C3", "ordinary", "The published tile format allows only that path."),
+               ("C4", "ordinary", "The nightly export log shows every tile read through it."),
+               ("C5", "ordinary", "The hosting provider's limits allow that path."),
+               ("C6", "ordinary", "Last week's run reads no tile any other way."),
+               ("C7", "needs-decision", "Keep the legacy reader for one more release.")],
+        [("C0", f"C{n}") for n in range(1, 8)]))
+    b.research(run, "C1", ref="docs/export.md")
+    b.cite(run, "C2", "docs", "/opt/vendor/tiles/SPEC.md", "every tile is read through the index")
+    b.cite(run, "C3", "web", "https://tiles.example.org/format#export", "readers must use the index")
+    b.cite(run, "C4", "runtime", "nightly export log, 2026-09-27", "tile reads: 0 outside the index",
+           spike_unavailable="The job only runs on the nightly cluster.")
+    b.cite(run, "C5", "web", "https://provider.example.net/limits", "direct tile reads are not available")
+    b.cite(run, "C6", "runtime", "export log, 2026-09-21", "no reads outside the index",
+           spike_unavailable="The run is over and its inputs are gone.")
+    b.evaluate(run, "report_convergence")
+    ids = b.record_ids(run)
+    b.present_and_answer(run, "verify-1", [
+        {"subject": "research", "artifact_id": ids["C3"], "outcome": "confirm",
+         "note": "Checked the format page myself."},
+        {"subject": "research", "artifact_id": ids["C4"], "outcome": "reject",
+         "note": "That log is from a different job."}])
+    b.stamp("verification", "atlas", "s-verify")
 
     # loose: a run whose repository was not given, so only its state can be read.
     run = b.begin("loose", "s-nohistory", "Tidy the release checklist.", _graph(

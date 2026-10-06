@@ -5,6 +5,7 @@ import type { Block, Response } from "./contract.ts";
 import { PROTOCOL } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
 import { PUBLIC_TOOLS } from "./public-tools.ts";
+import { EVIDENCE_WAIT_NOTICE, evidenceConfirmationWait } from "./evidence-ui.ts";
 import { initialState, reduce, renderLines } from "./dialog-view.ts";
 import type { Dialog, DialogDecision, DialogState, DialogTheme } from "./dialog-view.ts";
 
@@ -170,6 +171,7 @@ export const BUDGET_EXHAUSTED_NOTICE = PUBLIC_TOOLS.settlement_notices.budget_ex
  * generic gate applies. */
 export function settlementNotice(result: Response["result"]): string | null {
   if (humanApprovalWait(result)) return HUMAN_WAIT_NOTICE;
+  if (evidenceConfirmationWait(result)) return EVIDENCE_WAIT_NOTICE;
   if (!budgetExhaustedWait(result)) return null;
   const { resource } = (result as Block).reasons[0].parameters as { resource: string };
   return BUDGET_EXHAUSTED_NOTICE.replace("{resource}", () => resource);

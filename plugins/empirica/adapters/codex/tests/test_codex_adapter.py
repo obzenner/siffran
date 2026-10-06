@@ -262,7 +262,7 @@ class StartRunTests(unittest.TestCase):
         self.assertEqual(command["goal"], "  exact goal  ")
         self.assertEqual(command["invocation"], {
             "host": "codex", "interactive": None,
-            "signal": "codex hook has no interactive signal", "delegation": True})
+            "signal": "codex hook has no interactive signal", "delegation": True, "audit_retrieval": [], "human_surface": "unavailable"})
         empty = build_start_run_request(_payload(prompt="$empirica   "), environ={})
         self.assertEqual(empty["command"]["goal"], "  ")
 

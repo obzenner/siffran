@@ -7,10 +7,17 @@ import json
 import os
 import re
 import stat
+import subprocess
+import sys
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-FORMAT = "empirica-live-receipt/v2"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins" / "empirica"))
+from adapters.git.artifact_repo import ref_component, tree_path  # noqa: E402 - the one owner of the refname derivation
+from application.snapshot import HistoryCorrupt, committed_artifacts, index_artifacts, manifest_chain  # noqa: E402
+from core.records import Artifact  # noqa: E402
+
+FORMAT = "empirica-live-receipt/v3"
 _CONTRACTS = Path(__file__).resolve().parents[1] / "contracts/empirica/v2"
 _PROFILE_REGISTRY = json.loads((_CONTRACTS / "host-profiles.json").read_text())
 # Author-view headings and line labels are contract-owned; the projection is the repository JSON.
@@ -209,6 +216,130 @@ def run_handle(state_path: Path) -> str:
     payload = json.dumps({"g": int(generation.group(1)), "p": project, "s": session},
                          sort_keys=True, separators=(",", ":")).encode("utf-8")
     return "er2:" + _b64url(payload) + ":" + _b64url(hashlib.sha256(payload).digest())
+
+
+_RETRIEVAL_KINDS = ("local", "web", "workspace")
+_EVIDENCE_KINDS = ("evidence_presentation", "evidence_confirmation")
+
+
+def audit_retrieval(state: dict) -> list[str]:
+    """The retrieval kinds the run recorded for its auditor (``invocation.audit_retrieval``), checked.
+
+    A run that recorded nothing, or something that is not a sorted set of known kinds, has no honest
+    answer to the question the receipt exists to settle: whether the auditor could retrieve what it
+    was asked to verify."""
+    invocation = state.get("invocation")
+    recorded = invocation.get("audit_retrieval") if isinstance(invocation, dict) else None
+    if (not isinstance(recorded, list) or any(kind not in _RETRIEVAL_KINDS for kind in recorded)
+            or recorded != sorted(set(recorded))):
+        raise ValueError("durable state does not record a valid invocation.audit_retrieval")
+    return list(recorded)
+
+
+
+
+def _git_dir(common: Path | None, *args: str) -> str:
+    done = subprocess.run(["git", "--git-dir", str(common), *args], capture_output=True, text=True, check=False)
+    if done.returncode != 0:
+        raise ValueError(f"git {args[0]} failed: {done.stderr.strip()}")
+    return done.stdout
+
+
+def _common_dir(repo: object) -> Path | None:
+    """The canonical Git common directory of ``repo`` (a worktree of a repository shares it), or ``None``."""
+    try:
+        done = subprocess.run(["git", "-C", str(repo), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                              capture_output=True, text=True, check=False)
+    except (OSError, ValueError):
+        return None
+    return Path(done.stdout.strip()).resolve() if done.returncode == 0 and done.stdout.strip() else None
+
+
+def bind_to_recorded_repository(repo: Path, state_path: Path) -> None:
+    """The artifact store must be the repository the run itself recorded (``projects/<project>/project.json``,
+    written when the run began): the same Git common directory, so a worktree alias is legitimate. A run that
+    recorded none, or an unreadable one, binds nothing and is refused."""
+    refusal = ValueError("the artifact store is not the repository the run recorded")
+    try:
+        recorded = json.loads(state_path.parents[3].joinpath("project.json").read_text(encoding="utf-8")).get("repo")
+    except (OSError, ValueError, IndexError, AttributeError):
+        raise refusal from None
+    held, wanted = _common_dir(repo), _common_dir(recorded) if isinstance(recorded, str) and recorded else None
+    if held is None or wanted is None or held != wanted:
+        raise refusal
+
+
+def evidence_receipts(repo: Path, state_path: Path) -> list[dict[str, Any]]:
+    """Every human presentation and confirmation the run's artifact store holds, projected and sorted.
+
+    Read from the run's own ref ``refs/empirica/artifacts/<gen>/<project>/<run>`` (named by the retained
+    state path) with Git plumbing only, so a receipt cannot claim a human answer the store does not hold
+    and cannot leave one out. A converged run always holds artifacts (its research), so an absent ref means
+    the wrong repository or a drifted ref name, and fails closed instead of reading as "no human was asked"."""
+    parts = state_path.parts
+    generation = _GENERATION_DIR.fullmatch(parts[-2])
+    if generation is None or len(parts) < 6:
+        raise ValueError("durable state path does not carry canonical run identifiers")
+    bind_to_recorded_repository(repo, state_path)
+    # Always the canonical Git common directory and the full tree, whatever directory the caller named: a
+    # subdirectory of the repository is the same repository, and must not list a different (empty) tree.
+    common = _common_dir(repo)
+    git_dir = ["--git-dir", str(common)]
+    ref = f"refs/empirica/artifacts/{int(generation.group(1))}/{ref_component(parts[-5])}/{ref_component(parts[-3])}"
+    if subprocess.run(["git", *git_dir, "rev-parse", "--verify", "--quiet", ref + "^{commit}"],
+                      capture_output=True, check=False).returncode != 0:
+        raise ValueError("the artifact store holds no ref for this run, so no receipt can be checked against it")
+    listing = subprocess.run(["git", *git_dir, "ls-tree", "--full-tree", ref], capture_output=True, text=True, check=False)
+    if listing.returncode != 0:
+        raise ValueError(f"git ls-tree failed: {listing.stderr.strip()}")
+    entries = listing.stdout.splitlines()
+    # The run's retained state names the manifest it committed last. The history is the chain from that head through its
+    # ``parent`` links (the owner's own traversal): a ref rolled back below the head, or a store missing any artifact the
+    # chain references, is not the run's history. Artifacts the chain does not reference are not history and are ignored.
+    try:
+        head = json.loads(safe_read(state_path)).get("committed_artifact_head_id")
+    except (OSError, ValueError, AttributeError):
+        head = None
+    stored = []
+    for line in entries:
+        meta, _, path = line.partition("\t")
+        fields = meta.split()
+        if len(fields) != 3 or fields[1] != "blob":
+            raise ValueError("artifact store holds a non-artifact entry")
+        record = json.loads(_git_dir(common, "cat-file", "blob", fields[2]))
+        if (not isinstance(record, dict) or not isinstance(record.get("id"), str) or not isinstance(record.get("body"), str)
+                or tree_path(record["id"]) != path):
+            raise ValueError("artifact store holds a malformed artifact")
+        stored.append(Artifact(record["id"], record["body"]))
+    by_id = index_artifacts(stored)
+    try:
+        history = committed_artifacts(manifest_chain(head, by_id), by_id)
+    except HistoryCorrupt as error:
+        raise ValueError(f"the artifact store does not hold the run's committed history: {error}") from None
+    rows = []
+    for body in history:
+        if body.get("kind") not in _EVIDENCE_KINDS:
+            continue
+        if body["kind"] == "evidence_presentation":
+            rows.append({"kind": body["kind"], "receipt_id": body["receipt_id"],
+                         "artifact_id": body["artifact_id"], "record_ids": sorted(body["record_ids"]),
+                         "claim_ids": sorted(c["claim_id"] for c in body["claims"])})
+        else:
+            rows.append({"kind": body["kind"], "receipt_id": body["receipt_id"],
+                         "artifact_id": body["artifact_id"], "subject": body["subject"],
+                         "outcome": body["outcome"],
+                         "target": body["record_id"] if body["subject"] == "research" else body["claim_id"]})
+    return sorted(rows, key=lambda row: (row["kind"], row["receipt_id"], row["artifact_id"]))
+
+
+def require_answered_presentations(rows: list[dict[str, Any]]) -> None:
+    """A confirmation must answer a presentation the same store holds, and a receipt id names one."""
+    shown = [row["receipt_id"] for row in rows if row["kind"] == "evidence_presentation"]
+    if len(shown) != len(set(shown)):
+        raise ValueError("a presentation receipt id is recorded twice")
+    for row in rows:
+        if row["kind"] == "evidence_confirmation" and row["receipt_id"] not in shown:
+            raise ValueError("a human confirmation names no recorded presentation")
 
 
 def state_facts(path: Path, expected_role: str) -> tuple[dict, dict]:
@@ -698,7 +829,7 @@ def inspect(receipt: dict, host: str, expected_commit: str,
     try:
         profile, _, role = EXPECTED[host]
         if receipt.get("format") != FORMAT or receipt.get("operator_attested") is not True:
-            raise ValueError("operator-attested v2 receipt is required")
+            raise ValueError("operator-attested v3 receipt is required")
         if receipt.get("host") != host or receipt.get("profile_id") != profile:
             raise ValueError("host/capability profile mismatch")
         host_version = receipt.get("host_version")
@@ -725,6 +856,16 @@ def inspect(receipt: dict, host: str, expected_commit: str,
         facts = (inspect_claude(parent, child_rows, child, run_handle(paths["run_state"]),
                                 host_version) if host == "claude"
                  else inspect_pi(parent, child_rows, child, paths["child_session"], state))
+        if receipt.get("audit_retrieval") != audit_retrieval(state):
+            raise ValueError("receipt audit_retrieval does not equal the retrieval recorded in the durable state")
+        repo = receipt.get("artifacts_repo_path")
+        if not isinstance(repo, str) or not repo:
+            raise ValueError("the artifact store path is required to check the human receipts")
+        held = evidence_receipts(Path(repo), paths["run_state"])
+        require_answered_presentations(held)
+        if receipt.get("evidence_receipts") != held:
+            raise ValueError("receipt evidence_receipts do not equal the presentations and confirmations "
+                             "the artifact store holds for this run")
         for key, value in (("audit_child_id", child["child_id"]),
                            ("audit_native_id", child["native_id"]),
                            ("audit_operation_id", child["audit_operation_id"])):

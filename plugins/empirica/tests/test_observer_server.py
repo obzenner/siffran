@@ -19,6 +19,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from pathlib import Path
 from urllib.parse import quote
 
@@ -30,7 +31,7 @@ for _path in (_HERE / "v2", _HERE, _PLUGIN):
 
 from adapters.observer import server as server_module  # noqa: E402
 from adapters.observer.server import DEMO, Demo, Sources, serve, static_path  # noqa: E402
-from application.observer import Observer  # noqa: E402
+from application.observer import Observer, run_key  # noqa: E402
 from observer_store import DriverSource, build_store  # noqa: E402
 
 _STORE = build_store()
@@ -105,6 +106,16 @@ class ServerTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(self.served.get(path)[0].status, 404)
 
+    def test_a_detail_projects_one_run_and_not_the_store(self):
+        """Q3a-4: ``/api/run`` asks the observer for that run only."""
+        observer = Observer(DriverSource(_STORE))
+        key = next(iter(self.details))
+        with mock.patch.object(Observer, "_run", autospec=True, side_effect=Observer._run) as run:
+            detail = observer.detail(key)
+        self.assertEqual((detail, [run_key(call.args[1]) for call in run.call_args_list]),
+                         (self.details[key], [key]))
+        self.assertIsNone(observer.detail("nope"))
+
     def test_the_demo_source_is_the_vendored_fixtures(self):
         response, body = self.served.get("/api/view?source=demo")
         self.assertEqual(json.loads(body), json.loads((DEMO / "view.json").read_text(encoding="utf-8")))
@@ -128,7 +139,7 @@ class ServerTests(unittest.TestCase):
 
     def test_an_observer_that_fails_answers_500_and_the_server_goes_on(self):
         class Broken:
-            def observe(self):
+            def view(self):
                 raise RuntimeError("boom")
         served = _Served(Sources(Broken()))
         try:
@@ -226,8 +237,65 @@ class StaticPathTests(unittest.TestCase):
                     proc.kill()
 
     def test_the_demo_data_is_vendored_with_the_plugin(self):
-        view, details = Demo().observe()
-        self.assertEqual(set(details), {r["key"] for p in view["projects"] for r in p["runs"]})
+        demo = Demo()
+        keys = {r["key"] for p in demo.view()["projects"] for r in p["runs"]}
+        self.assertTrue(all(demo.detail(key)["key"] == key for key in keys))
+        self.assertIsNone(demo.detail("nope"))
+
+
+class DroppedClientTests(unittest.TestCase):
+    """A client that resets its connection while the server is writing must not take the server down (R3 M1)."""
+
+    CLI = _PLUGIN / "adapters" / "observer" / "cli.py"
+
+    def _start(self, prelude: str = ""):
+        code = prelude + f"import runpy,sys; sys.argv=[{str(self.CLI)!r},'serve','--demo','--port','0']; runpy.run_path({str(self.CLI)!r}, run_name='__main__')"
+        proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: (proc.kill(), proc.wait(), proc.stdout.close(), proc.stderr.close()))
+        line = proc.stdout.readline()
+        if "http://127.0.0.1:" not in line:
+            proc.kill()
+            self.fail(f"the server did not start: {line!r} {proc.stderr.read()[-600:]!r}")
+        return proc, int(line.split("http://127.0.0.1:")[1].split("/")[0].split()[0])
+
+    @staticmethod
+    def _reset_mid_write(port: int) -> None:
+        import socket
+        import struct
+        import time
+        for _ in range(30):
+            try:
+                s = socket.create_connection(("127.0.0.1", port))
+            except OSError:
+                return  # the server is gone
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+            s.sendall((b"GET /app/ HTTP/1.1\r\nHost: x\r\n\r\n" * 3) + b"GET /vendor/lucide/sprite.svg HTTP/1.1\r\nHost: x\r\n\r\n")
+            s.close()
+            time.sleep(0.02)
+
+    def _answers(self, port: int) -> bool:
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.request("GET", "/api/view?source=demo")
+            return conn.getresponse().status == 200
+        except OSError:
+            return False
+
+    def test_the_server_answers_after_a_client_resets_mid_write(self):
+        proc, port = self._start()
+        self._reset_mid_write(port)
+        self.assertIsNone(proc.poll(), "the server exited")
+        self.assertTrue(self._answers(port))
+
+    def test_negative_control_the_default_sigpipe_action_kills_it(self):
+        # The pre-fix behaviour, installed by hand: the same probe ends the process with SIGPIPE.
+        proc, port = self._start(f"import sys; sys.path.insert(0, {str(_PLUGIN)!r}); import signal; signal.signal(signal.SIGPIPE, signal.SIG_DFL);\nimport adapters.observer.cli as _c; _c.signal.signal = lambda *a, **k: None\n")
+        self._reset_mid_write(port)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        self.assertIsNotNone(proc.poll(), "the probe no longer detects a dying server")
 
 
 if __name__ == "__main__":

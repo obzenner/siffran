@@ -45,7 +45,24 @@ export type AuthorViewLabel =
   | "contract"
   | "block"
   | "fault"
-  | "inert";
+  | "inert"
+  | "waiting"
+  | "waiting_record"
+  | "waiting_claim"
+  | "waiting_for_claim"
+  | "waiting_none_error"
+  | "waiting_unavailable"
+  | "waiting_already_presented"
+  | "waiting_interaction_limit"
+  | "verified_by_service"
+  | "confirmed_by_human"
+  | "rejected_by_human"
+  | "pending_human"
+  | "pending_audit"
+  | "human_note"
+  | "decision_approve"
+  | "decision_reject"
+  | "human_answer";
 
 /** Contract-owned author-view headings and line labels (contract `author_view.labels`). */
 export type AuthorViewLabels = Readonly<Record<AuthorViewLabel, string>>;
@@ -60,7 +77,7 @@ export interface PublicToolsProjection {
     controls: DecisionControls;
     confirmation: { title: string; actions: string[] };
   };
-  settlement_notices: { human_wait: string; budget_exhausted: string };
+  settlement_notices: { human_wait: string; evidence_wait: string; surface_unrecorded: string; evidence_report: string; budget_exhausted: string };
   author_view: { labels: AuthorViewLabels };
 }
 

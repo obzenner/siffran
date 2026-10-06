@@ -564,6 +564,134 @@ class ContractLabelTests(unittest.TestCase):
         self.assertEqual([key for key in tagged if f"[{key}]" not in text], [])
 
 
+def sample(schema: dict, defs: dict, index: int = 0) -> object:
+    """A schema-valid instance built from the schema alone: every property (required or optional), and every array
+    non-empty with two distinct items of its element type, so no element renderer can go unexercised."""
+    if "$ref" in schema:
+        return sample(defs[schema["$ref"].rsplit("/", 1)[-1]], defs, index)
+    if "const" in schema:
+        return schema["const"]
+    if "enum" in schema:
+        return schema["enum"][index % len(schema["enum"])]
+    for key in ("anyOf", "oneOf"):
+        if key in schema:
+            return sample(next(row for row in schema[key] if row != {"type": "null"}), defs, index)
+    kind = schema.get("type")
+    if kind == "string":
+        pattern = schema.get("pattern")
+        if pattern is None:
+            return "x" * max(1, schema.get("minLength", 1)) + str(index)
+        candidates = ("sha256:" + f"{index + 1:x}" * 64, f"C{index}", f"dir/file{index}.py")
+        match = next((c for c in candidates if re.search(pattern, c)), None)
+        assert match is not None, f"no sample for pattern {pattern!r}"
+        return match
+    if kind == "integer":
+        return max(schema.get("minimum", 0), 0) + index
+    if kind == "boolean":
+        return True
+    if kind == "array":
+        count = min(schema.get("maxItems", 2), max(2, schema.get("minItems", 0)))
+        return [sample(schema["items"], defs, i) for i in range(count)]
+    if kind == "object":
+        return {name: sample(sub, defs, index) for name, sub in schema.get("properties", {}).items()}
+    raise AssertionError(f"no sample for schema {schema!r}")
+
+
+class EveryRegistryReasonRendersStrictly(unittest.TestCase):
+    """The class of defect, not one instance: every reason in the registry, with schema-built parameters (non-empty arrays
+    of every element type), and every next action, renders as readable text in strict mode with no digest and no JSON."""
+
+    CONTRACT = json.loads((ROOT / "contracts" / "empirica" / "v2" / "public-contract.json").read_text())
+    DEFS = response_schema_defs()
+
+    def reasons(self):
+        for branch in self.DEFS["reasonPayload"]["oneOf"]:
+            code = branch["properties"]["code"]["const"]
+            yield code, sample(branch["properties"]["parameters"], self.DEFS)
+
+    def check(self, result: dict, label: str) -> str:
+        self.assertTrue(validate_public_result(result), f"{label}: the sampled result is not schema-valid")
+        text = render_author_view(result, strict=True)
+        self.assertNotEqual(text, _fallback(result), f"{label}: fell back to JSON")
+        self.assertFalse(text.startswith("{"), label)
+        self.assertNotIn("sha256:", text, label)
+        return text
+
+    def test_every_registry_reason_as_a_block_reason(self):
+        count = 0
+        for code, parameters in self.reasons():
+            meta = self.CONTRACT["reasons"][code]
+            result = _load_fixture("block-open-claim")
+            result["reasons"] = [{"code": code, "message": meta["message"], "parameters": parameters,
+                                  "next_actions": meta["next_actions"], "sections": meta["sections"]}]
+            self.assertIn(code, self.check(result, code))
+            count += 1
+        self.assertEqual(count, len(self.CONTRACT["reasons"]))
+
+    def test_every_registry_reason_as_a_residual(self):
+        for code, parameters in self.reasons():
+            meta = self.CONTRACT["reasons"][code]
+            result = _load_fixture("block-open-claim")
+            result["run"]["residuals"] = [{"code": code, "parameters": parameters,
+                                           "next_actions": meta["next_actions"], "sections": meta["sections"]}]
+            self.assertIn(code, self.check(result, f"residual {code}"))
+
+    def test_every_next_action_shape(self):
+        result = _load_fixture("block-open-claim")
+        meta = self.CONTRACT["reasons"]["run.no_active"]
+        result["reasons"] = [{"code": "run.no_active", "message": meta["message"], "parameters": {},
+                              "next_actions": list(next_action_surfaces()), "sections": meta["sections"]}]
+        text = self.check(result, "all next actions")
+        for action in next_action_surfaces():
+            surface = next_action_surfaces()[action]
+            self.assertIn(author_view.render_surface(action), text, surface)
+
+    def test_the_pending_record_reason_names_its_recovery_and_hides_the_digests(self):
+        result = _load_fixture("block-open-claim")
+        meta = self.CONTRACT["reasons"]["evidence.confirmation_required"]
+        record = "sha256:" + "a" * 64
+        result["reasons"] = [{"code": "evidence.confirmation_required", "message": meta["message"],
+                              "parameters": {"route": "human", "record_ids": [record, "sha256:" + "b" * 64]},
+                              "next_actions": meta["next_actions"], "sections": meta["sections"]}]
+        text = self.check(result, "pending records")
+        self.assertIn("route=human", text)
+        self.assertIn("report_convergence intent=stop", text)
+
+
+class PendingEvidenceGoldens(unittest.TestCase):
+    """The public-boundary goldens for ``evidence.confirmation_required`` with non-empty ``record_ids``."""
+
+    GOLDEN = PLUGIN / "adapters" / "pi" / "test" / "author-view-golden"
+    RECOVERY = {"evidence-reason-askable": ("human: confirmation", "report_convergence intent=stop"),
+                "evidence-reason-later": ("human: confirmation", "report_convergence intent=stop"),
+                "evidence-reason-unavailable": ("report_convergence intent=stop",),
+                "evidence-reason-mixed": ("human: confirmation", "report_convergence intent=stop", "decision needed on claim D1"),
+                "evidence-reason-terminal-residual": ("human: confirmation", "report_convergence intent=stop")}
+
+    def test_each_state_renders_the_same_normally_and_strictly_with_recovery_and_no_digest(self):
+        for name, calls in self.RECOVERY.items():
+            result = json.loads((self.GOLDEN / f"{name}.json").read_text())["result"]
+            if name != "evidence-reason-terminal-residual":
+                self.assertTrue(result["reasons"][0]["parameters"]["record_ids"], name)
+            text = render_author_view(result, strict=True)
+            self.assertEqual(render_author_view(result), text, name)
+            self.assertFalse(text.startswith("{"), name)
+            self.assertNotIn("sha256:", text, name)
+            for call in calls:
+                self.assertIn(call, text, f"{name}: {call}")
+
+    def test_human_text_is_fenced(self):
+        result = json.loads((self.GOLDEN / "evidence-reason-mixed.json").read_text())["result"]
+        delimiters = result["run"]["untrusted_delimiters"]
+        text = render_author_view(result, strict=True)
+        for row in result["run"]["confirmation_batch"]["records"]:
+            line = next(line for line in text.splitlines() if line.strip().startswith(f"source: {row['source_kind']}"))
+            self.assertIn(delimiters["open"], line)
+            self.assertIn(delimiters["close"], line)
+            self.assertNotIn("\n", line)
+        self.assertNotIn("FORGED <<<EMPIRICA", text)  # the hostile source's delimiter text is escaped, never raw
+
+
 class TotalityTests(unittest.TestCase):
     """The renderer never raises; unexpected shapes fall back to compact JSON."""
 
