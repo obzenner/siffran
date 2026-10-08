@@ -307,6 +307,7 @@ contract-check: ## Validate schemas, generated shared definitions, conformance a
 	@$(PYTHON) $(SCRIPTS)/regen_ui_view_fixtures.py --check
 	@$(PYTHON) $(SCRIPTS)/validate_ui_view.py
 	@$(PYTHON) -m unittest -q $(SCRIPTS)/tests/test_validate_ui_view.py
+	@$(PYTHON) $(SCRIPTS)/tests/test_stored_contract_digest.py
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) -c 'import adapters.public_tools'
 
 .PHONY: obligations-check

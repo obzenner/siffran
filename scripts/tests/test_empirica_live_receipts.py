@@ -21,7 +21,7 @@ for path in (SCRIPTS, ROOT / "plugins/empirica"):
 
 from adapters.author_view import render_author_view  # noqa: E402
 from application.location import encode_handle  # noqa: E402
-from application.protocol import validate_public_result  # noqa: E402
+from application.protocol import stored, validate_public_result  # noqa: E402
 from adapters.git.artifact_repo import GitArtifactRepository  # noqa: E402
 from application.snapshot import make_artifact  # noqa: E402
 from core.freshness import observations_digest  # noqa: E402
@@ -63,7 +63,7 @@ RESULT = {"type": "Allow", "converged": True, "run": {"status": "converged",
 def fixture_result(name: str) -> dict:
     """A schema-valid public result from the conformance fixtures."""
     path = ROOT / "contracts/empirica/v2/fixtures" / f"{name}.json"
-    return json.loads(path.read_text(encoding="utf-8"))["expected"]["result"]
+    return stored(json.loads(path.read_text(encoding="utf-8")))["expected"]["result"]
 
 
 def author_text(result: dict, run_id: str = RUN_HANDLE) -> str:
@@ -489,7 +489,7 @@ class LiveReceiptTests(unittest.TestCase):
     def test_a_receipt_below_the_qualified_version_is_refused(self):
         # The profile's `version` is the receipt floor: a receipt from an older host inside the interval is refused.
         for host in EXPECTED:
-            below = ((CLAUDE_EARLIER, "2.1.278") if host == "claude" else ("1.0.9", "0.84.1", "0.99.9"))
+            below = ((CLAUDE_EARLIER, "2.1.278") if host == "claude" else ("1.0.9", "1.0.0"))
             below = [v for v in below if _version_lt(v, QUALIFIED[host])]
             self.assertTrue(below, host)
             for version in below:
@@ -503,6 +503,19 @@ class LiveReceiptTests(unittest.TestCase):
                     self.assertEqual(len(errors), 1, errors)
                     self.assertIn(f"{host} {version} is below the qualified version {QUALIFIED[host]}", errors[0])
                     self.assertIn(f"a native receipt from {host} >= {QUALIFIED[host]} is required", errors[0])
+
+    def test_a_pi_receipt_from_before_the_supported_floor_is_outside_the_interval(self):
+        """Pi below 1.0.0 is not supported at all (ADR-0069): it is not 'below the qualified version', it is outside."""
+        for version in ("0.99.0", "0.99.9"):
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as directory:
+                receipt = self.receipt(Path(directory), "pi")
+                version_path = Path(receipt["version_output_path"])
+                version_path.write_text(version + "\n", encoding="utf-8")
+                receipt["version_output_sha256"] = digest(version_path)
+                receipt["host_version"] = version
+                errors = inspect(receipt, "pi", "commit", "2.0.0")
+                self.assertEqual(len(errors), 1, errors)
+                self.assertIn(f"host version {version} is outside compatible range [1.0.0, 2.0.0)", errors[0])
 
     def test_raising_the_qualified_version_in_the_profile_asks_for_exactly_a_new_receipt(self):
         from empirica_live_receipts import require_compatible_version
@@ -532,7 +545,7 @@ class LiveReceiptTests(unittest.TestCase):
                                 inspect(receipt, "claude", "commit", "2.0.0")))
 
     def test_native_version_output_rejects_wrong_host_label_and_malformed_text(self):
-        cases = {"pi": "0.84.2 (Claude Code)\n", "claude": "Claude Code version 2.1.280\n"}
+        cases = {"pi": "0.99.2 (Claude Code)\n", "claude": "Claude Code version 2.1.280\n"}
         for host, output in cases.items():
             with self.subTest(host=host), tempfile.TemporaryDirectory() as directory:
                 receipt = self.receipt(Path(directory), host)

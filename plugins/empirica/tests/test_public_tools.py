@@ -18,7 +18,7 @@ PLUGIN = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN))
 
 from governance_setup import SIZED_RATIONALE  # noqa: E402
-from application.protocol import host_profile_id  # noqa: E402
+from application.protocol import host_profile_id, stored  # noqa: E402
 CLAUDE_PROFILE = host_profile_id("claude-code")
 
 
@@ -343,8 +343,8 @@ class McpTransportTests(unittest.TestCase):
         from adapters.public_tools import PublicTools
 
         marker = "JSON_ONLY_RUNVIEW_MARKER"
-        fixture = json.loads((PLUGIN.parents[1] / "contracts" / "empirica" / "v2" / "fixtures" /
-                              "start-bootstrap-allow.json").read_text())
+        fixture = stored(json.loads((PLUGIN.parents[1] / "contracts" / "empirica" / "v2" / "fixtures" /
+                                     "start-bootstrap-allow.json").read_text()))
         valid_result = fixture["expected"]["result"]
         valid_result["run"]["goal"] = marker
         tools = PublicTools(

@@ -30,6 +30,7 @@ AUTHOR_GUIDANCE = {
     "run.corrupt": "Stop using this run and start a fresh one; corrupt state is never repaired.",
     "graph.missing": "Submit a claim graph from the supplied context before sizing the run; no investigation is needed first.",
     "graph.invalid": "Read the run, then resubmit a closed, root-connected graph that matches the tool schema; do not change claims inside a frozen scope.",
+    "graph.root_not_gating": "Resubmit the graph with a gating root: the root is the goal-level assurance claim, and a non-gating root never converges; defer scope in non-gating claims below it.",
     "route.required": "Record the route before any investigation.",
     "investigation.required": "Once the run is approved, record the investigate witness before any native read, command, evidence, or child.",
     "route.late": "The route came after investigation began and cannot be repaired: read the residuals, then stop or start a fresh run.",
@@ -74,6 +75,7 @@ AUTHOR_GUIDANCE = {
     "governance.receipt_replay": "A superseded or conflicting decision was replayed and changed nothing: read the current proposal and act on that.",
     "governance.interaction_limit": "The dialog allowance is spent (3 per configuration, 128 per run): stop honestly or start a fresh run.",
     "governance.decision_conflict": "The submitted control and edited fields disagreed and nothing was approved: use one explicit decision path.",
+    "governance.terminal_stop_pending": "A deliberative run does not end without converging until a human agrees: nothing was granted and the run stays active. Keep working, or report again when the human is ready to be asked; the human can also tell you to continue.",
     "audit.producers_mixed": "Covered evidence has mixed producers: if only the latest spike differs, re-run it under the research producer, otherwise accept the residual.",
 }
 

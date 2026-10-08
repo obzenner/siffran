@@ -982,6 +982,20 @@
       ],
       "message": "Argument graph is malformed or unsupported."
     },
+    "graph.root_not_gating": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "graph.record"
+      ],
+      "sections": [
+        "claims/graph"
+      ],
+      "message": "The root claim must be gating: it is the goal-level assurance claim, and a run whose root is non-gating can never converge. Record the graph again with a gating root; scope you want to defer belongs in non-gating claims below it."
+    },
     "route.required": {
       "params": {
         "type": "object",
@@ -1691,6 +1705,41 @@
       "message": "The submitted control and fields conflict. Nothing was approved; use one explicit decision path.",
       "disposition": "host_recovery"
     },
+    "governance.terminal_stop_pending": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "route"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "stopped_frozen",
+              "stopped_residual",
+              "stopped_budget"
+            ]
+          },
+          "route": {
+            "enum": [
+              "human",
+              "unavailable",
+              "unobserved"
+            ]
+          }
+        }
+      },
+      "next_actions": [
+        "convergence.report",
+        "human.confirm_evidence",
+        "run.inspect"
+      ],
+      "sections": [
+        "governance"
+      ],
+      "message": "A deliberative run does not end without converging until a human agrees to the status in the parameters. Nothing was granted and the run stays active. The route in the parameters says what can happen next. route human: report again and the human is asked whether to end the run. route unobserved: report once more, which looks for a dialog and asks if one can be shown. route unavailable: this host cannot show a dialog, so the run stays active and only a host that can show a dialog can end it; keep working."
+    },
     "audit.producers_mixed": {
       "params": {
         "type": "object",
@@ -2363,7 +2412,8 @@
     "evidence_wait": "Empirica is paused: research evidence is waiting for your confirmation, and the run is not converged. No confirmation was granted by this pause. The agent presents it to you at the end of its next pass; if you leave it on Later or close the dialog it is not shown again for the same work, and the run must change or be accepted as a residual.",
     "budget_exhausted": "Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this pause. Stop honestly (report_convergence intent=stop), or in deliberative mode propose a raise for human approval; in auto mode start a fresh run.",
     "evidence_report": "Research evidence is waiting for your confirmation, and the run is not converged. Call report_convergence now: the human is asked inside that call, if this host can show a dialog. No confirmation was granted by this block.",
-    "paused_for_human": "Empirica is paused for you, not converged: {reason} Nothing was approved or confirmed by this pause, and nobody was asked. The run stays open; tell the agent how to proceed, or end it.",
+    "paused_for_human": "Empirica is paused for you, not converged: {reason} Nothing was approved or confirmed by this pause, and nobody was asked. The run stays open: tell the agent to carry out that step, or end the run.",
+    "paused_for_evidence": "Empirica is paused for you, not converged: research evidence is waiting for your confirmation. To continue, tell the agent to call report_convergence: you are asked in that call, if this host can show a dialog. Nothing was approved or confirmed by this pause, and nobody was asked.",
     "unattended_continue": "Empirica is not converged: {reason} Auto mode does not hand the turn back to you: act on it, or end honestly with report_convergence intent=stop."
   },
   "author_view": {
@@ -2411,6 +2461,7 @@
       "waiting": "Waiting on a human:",
       "waiting_record": "source:",
       "waiting_claim": "decision needed on claim",
+      "waiting_terminal": "decision needed to end the run as",
       "waiting_for_claim": "for claim",
       "waiting_none_error": "a human can be asked at the end of your next pass",
       "waiting_unavailable": "no human can be asked in this session",

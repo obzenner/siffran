@@ -33,7 +33,7 @@ class BlockerProjectionTests(ConformanceCase):
         self.assertEqual(row["missing"]["code"], expected)
         self.assertEqual(row["missing"]["parameters"], reason["parameters"])
         self.assertEqual(row["next"], reason["next_actions"])
-        stopped = self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))["result"]["run"]
+        stopped = self.stop(drv, run_id)["result"]["run"]
         terminal = self._audit_row(stopped)
         self.assertEqual(terminal["missing"]["code"], expected)
         self.assertEqual(terminal["next"], stopped["next_actions"])
@@ -50,7 +50,7 @@ class BlockerProjectionTests(ConformanceCase):
                          gate["result"]["reasons"][0]["parameters"])
         self.assertTrue(obligation["required"])
         self.assertTrue(obligation["next"])
-        stopped = self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))["result"]["run"]
+        stopped = self.stop(drv, run_id)["result"]["run"]
         self.assertEqual(stopped["status"], "stopped_residual")
         residual = next(row for row in stopped["residuals"] if row["code"] == expected)
         self.assertEqual(residual["code"], gate["result"]["reasons"][0]["code"])
@@ -89,8 +89,7 @@ class BlockerProjectionTests(ConformanceCase):
                     audit = self._audit_row(run)
                     self.assertEqual(audit["status"], "residual")
                     self.assertEqual(audit["missing"]["code"], "audit.required")
-                    stopped = self.dispatch(
-                        drv, evaluate(run_id=run_id, intent="stop"))["result"]["run"]
+                    stopped = self.stop(drv, run_id)["result"]["run"]
                     residual_codes = [row["code"] for row in stopped["residuals"]]
                     self.assertNotIn("claim.research_missing", residual_codes)
                     self.assertEqual(residual_codes, ["audit.required"])
@@ -117,8 +116,7 @@ class BlockerProjectionTests(ConformanceCase):
                 self.assert_block_reason(
                     self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence")),
                     expected)
-                stopped = self.dispatch(
-                    drv, evaluate(run_id=run_id, intent="stop"))["result"]["run"]
+                stopped = self.stop(drv, run_id)["result"]["run"]
                 self.assertEqual(stopped["status"], "stopped_residual")
                 self.assertEqual([row["code"] for row in stopped["residuals"]], [expected])
 
@@ -242,7 +240,7 @@ class BlockerProjectionTests(ConformanceCase):
         self.assertEqual(obligations["claim:M"]["required"], "Missing research text")
         self.assertEqual(obligations["claim:M"]["missing"]["code"], "claim.research_missing")
 
-        stopped = self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))["result"]["run"]
+        stopped = self.stop(drv, run_id)["result"]["run"]
         claim_residuals = [(row["claim_id"], row["target_claim_id"], row["code"])
                            for row in stopped["residuals"]]
         self.assertEqual(claim_residuals, [

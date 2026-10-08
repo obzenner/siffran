@@ -531,6 +531,29 @@ class ConformanceCase(unittest.TestCase):
 
     # ---- central dispatch (D4 spec §4) -------------------------------------
 
+    def stop(self, drv, run_id: str, **extra) -> dict:
+        """``stop`` as a whole (see ``end_run``)."""
+        return self.end_run(drv, run_id, "stop", **extra)
+
+    def end_run(self, drv, run_id: str, intent: str = "stop", **extra) -> dict:
+        """``stop`` or ``report_convergence`` that ends the run non-converged: the response that committed it. A deliberative run is first asked of its human
+        (ADR-0063 amendment); the helper answers that dialog with approval, through the trusted ingresses a host uses,
+        and evaluates again. An auto run's first answer is the final one. Tests of the consent itself do not use it."""
+        response = self.dispatch(drv, evaluate(run_id=run_id, intent=intent, **extra))
+        if not any(r["code"] == "governance.terminal_stop_pending" for r in response["result"].get("reasons", [])):
+            return response
+        drv.trusted_human_surface(run_id, "human")
+        batch = self.dispatch(drv, evaluate(run_id=run_id, intent=intent))["result"]["run"]["confirmation_batch"]
+        shown = drv.trusted_evidence_presentation(run_id, {"run_id": run_id, "receipt_id": "terminal-presented",
+                                                           "key": batch["key"]})["result"]
+        assert shown["type"] == "Allow", shown
+        decision = {"subject": "claim", "claim_id": batch["terminal"]["status"],
+                    "claim_digest": batch["terminal"]["digest"], "outcome": "approve"}
+        answered = drv.trusted_evidence_confirmation(run_id, {"run_id": run_id, "receipt_id": "terminal-presented",
+                                                              "decisions": [decision]})["result"]
+        assert answered["type"] == "Allow", answered
+        return self.dispatch(drv, evaluate(run_id=run_id, intent=intent, **extra))
+
     def dispatch(self, drv, envelope: dict) -> dict:
         """Normal dispatch: validate the request against the v2 schema, send it to the SUT,
         validate the response, return it. Every normal request goes through here so a malformed

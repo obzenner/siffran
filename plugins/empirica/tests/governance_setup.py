@@ -84,3 +84,24 @@ def approve_current(coordinator, run_id, *, author=None, auditor=None):
         decision["outcome"] = "approve"
     approved = transact(c, run_id, decision)
     assert approved["result"]["type"] == "Allow", approved
+
+
+def end_with_consent(coordinator, run_id, intent="stop"):
+    """``stop`` or ``report_convergence`` that ends the run non-converged, as the human who approves ending it: the
+    response that committed it (ADR-0063 amendment; the auto modes need no consent and answer at once)."""
+    c = coordinator
+
+    def evaluate():
+        return c.handle({"type": "EvaluateRun", "run_id": run_id, "intent": intent}, "test-end")
+    response = evaluate()
+    if not any(r["code"] == "governance.terminal_stop_pending" for r in response["result"].get("reasons", [])):
+        return response
+    c.trusted_human_surface(run_id, {"run_id": run_id, "surface": "human"})
+    batch = evaluate()["result"]["run"]["confirmation_batch"]
+    shown = c.trusted_evidence_presentation(run_id, {"run_id": run_id, "receipt_id": "test-end", "key": batch["key"]})
+    assert shown["result"]["type"] == "Allow", shown
+    decision = {"subject": "claim", "claim_id": batch["terminal"]["status"],
+                "claim_digest": batch["terminal"]["digest"], "outcome": "approve"}
+    answered = c.trusted_evidence_confirmation(run_id, {"run_id": run_id, "receipt_id": "test-end", "decisions": [decision]})
+    assert answered["result"]["type"] == "Allow", answered
+    return evaluate()

@@ -12,6 +12,7 @@ import jsonschema
 
 from application import protocol as _protocol
 from adapters import bridge as _bridge
+from core.confirmation import is_terminal
 
 READ_TOOL = "empirica_read"
 OBSERVE_TOOL = "empirica_observe"
@@ -278,16 +279,15 @@ class PublicTools:
             "request_id": str(uuid.uuid4()),
             "command": command,
         }
-        mediated = bool(self._confirm and name == REPORT_TOOL
-                        and arguments.get("intent", "report_convergence") == "report_convergence")
+        # A report presents the evidence waiting on a human; a report or a stop of a deliberative run presents the
+        # consent to end non-converged (ADR-0063 amendment). The core says which, in the batch it returns.
+        mediated = bool(self._confirm and name == REPORT_TOOL)
         try:
             if mediated:
-                # What this host can show a human is observed before the evaluation reads it; a host that could not
-                # observe says so with the evaluation, so the response does not promise a question nobody will ask.
-                failure = self._confirm.observe(arguments["run_id"]).failure
-                request = {**request, "command": _with_host_failure(command, failure)}
-            response = self._dispatch(request, self._profile_id)
-            result = response.get("result") if isinstance(response, dict) else None
+                request, result = self._evaluate_observed(request, arguments["run_id"])
+            else:
+                response = self._dispatch(request, self._profile_id)
+                result = response.get("result") if isinstance(response, dict) else None
             if not isinstance(result, dict):
                 return self._error("Empirica bridge returned no typed result.")
             if self._govern and name == OBSERVE_TOOL and arguments["action"]["kind"] == "configure_run":
@@ -314,6 +314,25 @@ class PublicTools:
         if include_internal:
             tool_result["structuredContent"] = result
         return tool_result
+
+    def _evaluate_observed(self, request: dict, run_id: str) -> tuple[dict, object]:
+        """Evaluate a mediated ``report_convergence``, with what this host can show a human observed first. A host that could
+        not observe says so with the evaluation, so the response does not promise a question nobody will ask. A stop of an
+        auto run asks nothing and needs no look: only when the core answers a stop with the consent to end a deliberative
+        run (a terminal batch) does the host look, and evaluate once more. Returns the request last sent and the result."""
+        command = request["command"]
+        stop = command.get("intent") == "stop"
+        if not stop:
+            request = {**request, "command": _with_host_failure(command, self._confirm.observe(run_id).failure)}
+        response = self._dispatch(request, self._profile_id)
+        result = response.get("result") if isinstance(response, dict) else None
+        run = result.get("run") if isinstance(result, dict) else None
+        if stop and isinstance(run, dict) and is_terminal(run.get("confirmation_batch")):
+            request = {**request, "request_id": str(uuid.uuid4()),
+                       "command": _with_host_failure(command, self._confirm.observe(run_id).failure)}
+            response = self._dispatch(request, self._profile_id)
+            result = response.get("result") if isinstance(response, dict) else None
+        return request, result
 
     @staticmethod
     def _read_argument_error(name: str, arguments: Mapping[str, object]) -> str | None:

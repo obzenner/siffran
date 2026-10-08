@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
 
-import { PROTOCOL, type Response } from "./contract.ts";
+import { PROTOCOL, isTerminalBatch, type Response } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
 import { PUBLIC_TOOLS, VENDORED_CONTRACT_DIR } from "./public-tools.ts";
 
@@ -383,6 +383,8 @@ function waitingLines(run: Json, safety: TextSafety): readonly string[] {
       `  ${LABELS.waiting_record} ${row.source_kind} ${untrusted(row.source_ref, safety)} ` +
       `${LABELS.waiting_for_claim} ${claimId(row.claim_id, safety)}`),
     ...(batch.claim_ids as string[]).map((id) => `  ${LABELS.waiting_claim} ${claimId(id, safety)}`),
+    // The terminal step of a deliberative run asks about the run, not about a claim; the status is the core's own word.
+    ...(isTerminalBatch(batch) ? [`  ${labels.waiting_terminal} ${(batch.terminal as Json).status}`] : []),
     `  ${labels[WAIT_STATE[String(batch.prompt_error ?? "none")]]}`,
   ];
 }

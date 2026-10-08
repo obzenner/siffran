@@ -270,3 +270,49 @@ test("the gate's notice for a host failure is the sole confirmation blocker's, i
   for (const error of [null, "unavailable", "unobserved", "already_presented", "interaction_limit"])
     assert.equal(evidenceHostFailure(blocked("human", error).result), null, String(error));
 });
+
+// ---- the end of a deliberative run (ADR-0063 amendment, EHB-TERM-01/02): the same dialog, one item ----------------
+
+const TERMINAL = { status: "stopped_residual", digest: "sha256:" + "e".repeat(64) } as const;
+const TERMINAL_ITEM: EvidenceItem = { subject: "claim", id: TERMINAL.status, digest: TERMINAL.digest,
+  text: "End this run as stopped_residual, without converging?" };
+const terminalBlock = (): Response => ({
+  protocol: "empirica/v2", request_id: "r",
+  result: { type: "Block", run: { id: "run-1", status: "active", confirmation_batch: {
+    key: "sha256:" + "f".repeat(64), record_ids: [], claim_ids: [TERMINAL.status], terminal: TERMINAL, records: [], prompt_error: null } },
+    reasons: [{ code: "governance.terminal_stop_pending", message: "m", sections: [], next_actions: [],
+      parameters: { status: TERMINAL.status, route: "human" } }] } } as unknown as Response);
+
+test("EHB-TERM-01: the terminal batch travels with the presentation, and the human's approval is one receipt", async () => {
+  const live = ctxFor({ selects: ["Approve"], inputs: [""] });
+  const { trusted, calls } = bridge([TERMINAL_ITEM]);
+  assert.equal(await run(live.ctx, trusted, terminalBlock()), refreshed);
+  assert.deepEqual(calls.map((c) => c.operation), ["evidence_presentation", "evidence_confirmation"]);
+  assert.deepEqual((calls[0].payload as { batch: { terminal: unknown } }).batch.terminal, TERMINAL,
+    "the evaluation that reached the end asked it: no later read of the run shows it, so the batch is handed over");
+  assert.deepEqual((calls[1].payload as { answers: unknown[] }).answers,
+    [{ subject: "claim", id: TERMINAL.status, choice: "approve", note: null }]);
+});
+
+test("EHB-TERM-02: reject, later, cancel and timeout submit nothing that grants the end", async () => {
+  for (const [label, selects] of [["reject", ["Reject"]], ["later", ["Later"]], ["cancel", [undefined]]] as const) {
+    const live = ctxFor({ selects: [...selects], inputs: [""] });
+    const { trusted, calls } = bridge([TERMINAL_ITEM]);
+    await run(live.ctx, trusted, terminalBlock());
+    const granted = calls.filter((c) => c.operation === "evidence_confirmation")
+      .flatMap((c) => (c.payload as { answers: Array<{ choice: string }> }).answers).some((a) => a.choice === "approve");
+    assert.equal(granted, false, label);
+  }
+  const expired = ctxFor({ selects: ["Approve"], inputs: [""] });
+  const { trusted, calls } = bridge([TERMINAL_ITEM]);
+  await run(expired.ctx, trusted, terminalBlock(), Date.now() - 1);
+  assert.equal(calls.some((c) => c.operation === "evidence_confirmation"), false, "an expired deadline asks nothing and submits nothing");
+});
+
+test("EHB-TERM-03: without a UI the end is not asked and the failure is the usual one", async () => {
+  const noUi = ctxFor({ selects: [], inputs: [] }, { hasUI: false });
+  const { trusted, calls } = bridge([TERMINAL_ITEM]);
+  const confirmed = await confirm(noUi.ctx, trusted, terminalBlock());
+  assert.equal(calls.length, 0);
+  assert.equal(confirmed.failure, "presentation_failed");
+});

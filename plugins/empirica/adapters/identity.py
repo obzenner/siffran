@@ -4,7 +4,7 @@ The core treats ``identity`` as an opaque equality class.  This module is the
 only runtime code that interprets provider/model spellings.
 
 Evidence for the transformations:
-* Pi appends reasoning levels such as ``:high`` (Pi 0.84.3 model IDs and the
+* Pi appends reasoning levels such as ``:high`` (Pi model IDs and the
   retained E2 probe; the exact level set is the contract's ``thinking_levels``);
   Claude transcripts may append ``[1m]``.
 * Bedrock model IDs use geo/vendor prefixes and deployment suffixes such as

@@ -16,7 +16,7 @@ from typing import Any, Mapping
 import jsonschema
 from referencing import Registry, Resource
 
-from core.canonical import canonical_digest
+from core.canonical import CONTRACT_DIGEST_PLACEHOLDER, canonical_digest, replace_string_values
 from core.evaluation import ContractView
 from .history_records import POLICY_INPUT_KEYS
 
@@ -81,9 +81,11 @@ HUMAN_WAIT_NOTICE: str = _NOTICES["human_wait"]
 EVIDENCE_REPORT_NOTICE: str = _NOTICES["evidence_report"]
 #: Template with the single ``{resource}`` placeholder.
 BUDGET_EXHAUSTED_NOTICE: str = _NOTICES["budget_exhausted"]
-#: Deliberative hand-off on a Stop continuation (ADR-0068); one ``{reason}`` placeholder.
+#: A deliberative turn end pauses with this (ADR-0068); one ``{reason}`` placeholder.
 PAUSED_FOR_HUMAN_NOTICE: str = _NOTICES["paused_for_human"]
-#: Block on a Stop continuation of an ``auto`` run, which never hands the turn back (ADR-0068); one ``{reason}``.
+#: A deliberative turn end whose sole blocker is an evidence confirmation (ADR-0068); no placeholder.
+PAUSED_FOR_EVIDENCE_NOTICE: str = _NOTICES["paused_for_evidence"]
+#: Block on a later turn end of an ``auto`` run, which never hands the turn back (ADR-0068); one ``{reason}``.
 UNATTENDED_CONTINUE_NOTICE: str = _NOTICES["unattended_continue"]
 
 
@@ -206,6 +208,17 @@ def untrusted_delimiters() -> Mapping[str, Any]:
 
 def contract_digest() -> str:
     return _DIGEST
+
+
+def stored(value: Any) -> Any:
+    """A stored fixture or golden as it is loaded: the live contract digest where the placeholder stands. Call it before
+    schema validation or comparison, never on a response under test."""
+    return replace_string_values(value, CONTRACT_DIGEST_PLACEHOLDER, _DIGEST)
+
+
+def to_stored(value: Any) -> Any:
+    """The inverse of ``stored``, for the generators: they write the placeholder, never the hash."""
+    return replace_string_values(value, _DIGEST, CONTRACT_DIGEST_PLACEHOLDER)
 
 
 def projection_controls() -> dict:

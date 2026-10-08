@@ -253,14 +253,23 @@ class MediatorTests(MediatorFixture):
         called = tools.call_internal("report_convergence", {"run_id": run_id})
         self.assertEqual(len(human.shown), 1)
         self.assertNotIn("evidence.confirmation_required", self.codes(called["structuredContent"]))
-        # A stop is not the end of a pass: nothing is presented.
+        # A stop is not the end of a pass: the pending evidence is moot, so what is presented is only the consent to end
+        # the run (ADR-0063 amendment), and declining it ends nothing.
         drv2, run2 = self.start()
         self.research(drv2, run2, "web", URL)
-        quiet = Human(accept(d1="confirm"))
-        PublicTools(CLAUDE_PROFILE, dispatch=lambda req, _p: drv2.request(req),
-                    confirm=self.mediator(drv2, quiet)).call_internal(
-            "report_convergence", {"run_id": run2, "intent": "stop"})
-        self.assertEqual(quiet.shown, [])
+        declined = Human({"action": "decline"})
+        tools2 = PublicTools(CLAUDE_PROFILE, dispatch=lambda req, _p: drv2.request(req), confirm=self.mediator(drv2, declined))
+        result = tools2.call_internal("report_convergence", {"run_id": run2, "intent": "stop"})["structuredContent"]
+        self.assertEqual(len(declined.shown), 1)
+        self.assertIn("End this run as stopped_residual", declined.shown[0][0])
+        self.assertNotIn("web source", declined.shown[0][0])  # the pending record is not asked
+        self.assertEqual(self.codes(result), ["governance.terminal_stop_pending"])
+        self.assertEqual(result["run"]["status"], "active")
+        drv3, run3 = self.start()
+        approving = Human(accept(d1="approve"))
+        tools3 = PublicTools(CLAUDE_PROFILE, dispatch=lambda req, _p: drv3.request(req), confirm=self.mediator(drv3, approving))
+        ended = tools3.call_internal("report_convergence", {"run_id": run3, "intent": "stop"})["structuredContent"]
+        self.assertEqual(ended["run"]["status"], "stopped_residual")
 
 
 class ClaudeElicitationTests(EvidenceFixture):

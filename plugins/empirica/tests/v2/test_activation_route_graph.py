@@ -345,6 +345,32 @@ class ActivationRouteGraphTests(ConformanceCase):
             self.assertEqual(after, before,
                              "a wire-refused candidate must not replace the selected graph")
 
+    def test_a_graph_whose_root_is_not_gating_is_refused_with_its_own_reason(self):
+        """ADR-0045 (amendment 2026-10-08): a root with ``gating: false`` can never converge from its children alone, so
+        the graph is refused at the graph action with ``graph.root_not_gating`` and the prior selected argument stays."""
+        def claim(cid, gating):
+            return {"id": cid, "text": f"Claim {cid}", "gating": gating, "kind": "ordinary"}
+        edge = {"from": "C0", "to": "C1", "type": "SupportedBy"}
+        refused = {"non-gating root alone": {"root": "C0", "claims": [claim("C0", False)], "edges": []},
+                   "non-gating root with a gating child": {"root": "C0", "claims": [claim("C0", False), claim("C1", True)],
+                                                           "edges": [edge]}}
+        drv = self.bind_driver("G9", "gating-root", "A root that is not gating is refused at graph time")
+        run_id = self.start_run(drv)
+        self.require_graph_admitted(drv, run_id, canonical_graph(n_claims=1))
+        before = self.dispatch(drv, get_argument(run_id=run_id))["result"]["argument"]
+        for label, candidate in refused.items():
+            with self.subTest(variant=label):
+                response = self.dispatch(drv, observe_action(run_id=run_id, action=action_graph(payload=candidate)))
+                self.assert_block_only(response, ["graph.root_not_gating"])
+                self.assertEqual(self.dispatch(drv, get_argument(run_id=run_id))["result"]["argument"], before)
+        # a non-gating CHILD is the author's own deferred scope and stays admitted; and a malformed graph with a
+        # non-gating root is still the structural reason
+        deferred = {"root": "C0", "claims": [claim("C0", True), claim("C1", False)], "edges": [edge]}
+        self.require_graph_admitted(drv, run_id, deferred)
+        detached = {"root": "C0", "claims": [claim("C0", False), claim("C1", True)], "edges": []}
+        self.assert_block_only(self.dispatch(drv, observe_action(run_id=run_id, action=action_graph(payload=detached))),
+                               ["graph.invalid"])
+
     def test_claim_ids_follow_the_one_pattern_at_wire_and_core(self):
         """Claim ids are ``[A-Za-z0-9._-]{1,64}``: boundary ids are admitted; pattern-invalid ids,
         including a trailing newline, in any graph position or an action ``claim_id`` are refused
@@ -535,7 +561,7 @@ class ActivationRouteGraphTests(ConformanceCase):
         self.assertIn(research_artifact_id, claim[0]["active_evidence_ids"],
                       "the refuting research artifact must be in the active evidence set")
         # Terminal evaluation reports exact claim.refuted/stopped_residual non-convergence.
-        stop_resp = self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))
+        stop_resp = self.stop(drv, run_id)
         stop_result = stop_resp["result"]
         self.assertFalse(stop_result.get("converged", False),
                          "a refuted root must not converge")
@@ -565,7 +591,7 @@ class ActivationRouteGraphTests(ConformanceCase):
         conflict_response = self.dispatch(
             conflict_drv, evaluate(run_id=conflict_run, intent="report_convergence"))
         self.assert_block_reason(conflict_response, "evidence.conflict")
-        self.dispatch(conflict_drv, evaluate(run_id=conflict_run, intent="stop"))
+        self.stop(conflict_drv, conflict_run)
         stopped = self.dispatch(conflict_drv, get_run(run_id=conflict_run))["result"]["run"]
         self.assertIn("evidence.conflict", {r["code"] for r in stopped["residuals"]},
                       "honest stop must preserve the conflict residual")

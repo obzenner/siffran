@@ -125,6 +125,30 @@
         }
       }
     },
+    "terminalStopPendingParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "route"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "stopped_frozen",
+            "stopped_residual",
+            "stopped_budget"
+          ]
+        },
+        "route": {
+          "enum": [
+            "human",
+            "unavailable",
+            "unobserved"
+          ]
+        }
+      }
+    },
     "auditStaleParams": {
       "type": "object",
       "additionalProperties": false,
@@ -270,6 +294,21 @@
           "properties": {
             "code": {
               "const": "graph.invalid"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "graph.root_not_gating"
             },
             "parameters": {
               "$ref": "#/$defs/emptyParams"
@@ -933,6 +972,21 @@
             },
             "parameters": {
               "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.terminal_stop_pending"
+            },
+            "parameters": {
+              "$ref": "#/$defs/terminalStopPendingParams"
             }
           }
         },
@@ -1704,6 +1758,27 @@
                   "uniqueItems": true,
                   "items": {
                     "$ref": "#/$defs/claimId"
+                  }
+                },
+                "terminal": {
+                  "description": "Present only when the batch is the terminal step of a deliberative run (ADR-0063 amendment): the one item asks whether to end the run as status. claim_ids is then [status] and digest is the wording digest a receipt decision for it carries.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "digest"
+                  ],
+                  "properties": {
+                    "status": {
+                      "enum": [
+                        "stopped_frozen",
+                        "stopped_residual",
+                        "stopped_budget"
+                      ]
+                    },
+                    "digest": {
+                      "$ref": "#/$defs/digest256"
+                    }
                   }
                 },
                 "prompt_error": {

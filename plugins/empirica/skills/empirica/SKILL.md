@@ -2,7 +2,7 @@
 name: empirica
 description: "Empirical-convergence workflow for non-trivial work whose plan is uncertain. Route before investigating, represent unknowns as claims, require cited research before deterministic spikes, discard refuted claims, and request an independently audited convergence decision. Use for design-and-implement work, architectural uncertainty, competing approaches, and risky assumptions. Host capabilities differ; run the capability preflight before promising convergence. Invoke as /empirica <goal>."
 allowed-tools: Read Glob Grep Bash Edit Write Agent TaskCreate TaskUpdate WebFetch
-compatibility: Designed for Claude Code >=2.1.278,<2.2.0, Codex CLI >=0.146.0,<0.147.0, and Pi >=0.84.1,<2.0.0 with the external pi-subagents runtime (not bundled); requires python3 for hook-backed hosts. Exact observed versions remain receipt provenance; live capabilities still gate execution.
+compatibility: Designed for Claude Code >=2.1.278,<2.2.0 and Pi >=1.0.0,<2.0.0 with the external pi-subagents runtime (not bundled); requires python3 for hook-backed hosts. Exact observed versions remain receipt provenance; live capabilities still gate execution.
 argument-hint: "[--auto] <goal>"
 ---
 
@@ -35,22 +35,19 @@ Identify the exact active host surface from the tools and lifecycle already pres
   are host-owned async children; a current pending audit settles the parent turn
   until Claude's native completion notification resumes it.
 - **Pi capability profile (qualified on `1.1.0`, compatible
-  `>=0.84.1,<2.0.0`, with external `pi-subagents` installed by the user):** continue when `/empirica`
+  `>=1.0.0,<2.0.0`, with external `pi-subagents` installed by the user):** continue when `/empirica`
   injected an opaque handle, `empirica_observe`, `empirica_read`, and `report_convergence` are present,
   and the adapter accepted exactly one active `subagent` owner (its canonical package root, exact
   version, and that package's own launch preflight). A `pi-subagents` version outside the supported range fails closed
   (the range and the reviewed versions are listed in the README); one inside it with no compat record is admitted
   and shown as not reviewed. Any other state is a `host.subagents_*`
   refusal.
-- **Codex CLI observational profile (qualified on `0.146.0`, compatible
-  `>=0.146.0,<0.147.0`):** continue when activation injected the opaque
-  handle, the public MCP tools are present, and the Stop hook is trusted; audit
-  remains explicitly unsupported because verdict-producing identity is unobservable.
+- **Codex:** Empirica does not run on Codex.
 - **Unknown, partial, or outside a qualified compatibility range:** stop as unsupported pending
   qualification rather than borrowing another profile's capabilities. After admission, consult
 [references/host-capabilities.md](references/host-capabilities.md) only to diagnose a capability failure.
 
-The three public tools return one deterministic plain-text author view on Claude, Codex, and Pi.
+The three public tools return one deterministic plain-text author view on Claude and Pi.
 Read its first-line status/governance summary, `Reasons`, `Open obligations`, and rendered `Next`
 calls directly; do not parse it as JSON or look for hidden digests/governance internals. Pi retains
 validated structured details for host UI only. The host binds and injects the private audit dossier;
@@ -68,8 +65,7 @@ A runnable convergence workflow requires all of these capabilities:
 6. request the guarded convergence decision;
 7. obtain exact run-configuration approval through supported host UI (or explicit bounded auto).
 
-If any capability is absent — including a Pi surface without one verifiable external `pi-subagents` owner, a Codex
-session with untrusted hooks, or any host missing one of the three public tools — stop before
+If any capability is absent — including a Pi surface without one verifiable external `pi-subagents` owner, or any host missing one of the three public tools — stop before
 investigation and report the exact unsupported capability. Do not imitate the missing operation
 in prose or write runtime artifacts by hand.
 
@@ -197,7 +193,7 @@ Approval is not convergence: it means the evidence passed the service's rules, n
 convinces. Before requesting the audit, read `GetArgument`, the argument the auditor will receive,
 and check that each claim follows from its cited sources alone.
 Follow its exact host procedure once: Claude launches `empirica:empirica-auditor`, Pi calls the
-packaged auditor, and Codex ends the turn without launching an ordinary child. The host owns dossier
+packaged auditor. The host owns dossier
 binding, correlation, identity observation, and verdict admission. Audit may block but cannot
 manufacture deterministic machine evidence.
 
@@ -208,8 +204,7 @@ convergence is unsupported. Do not substitute an ordinary model response.
 
 Call the host's guarded convergence operation exactly once after the graph,
 evidence, and scope are current. On Claude and Pi this is `report_convergence`
-after the bound audit. On Codex the trusted Stop hook rejects the unsupported audit attempt and
-continues to block completion.
+after the bound audit.
 
 - Only a schema-guarded `Allow` permits reporting the result.
 - `Allow(converged=true)` permits a convergence claim.

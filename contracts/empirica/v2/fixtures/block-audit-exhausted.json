@@ -31,7 +31,7 @@
         "contract": {
           "id": "empirica/public",
           "version": "3.0.0",
-          "digest": "sha256:7792155a1fd120995a9505f632bfdba1d55553f06e487ee14147e1a5a49729b5",
+          "digest": "<contract-digest>",
           "relevant_sections": [
             "budget"
           ]

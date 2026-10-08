@@ -103,7 +103,7 @@ test("each reviewed inventory records the Pi generation its package declares (pe
   const shipped = JSON.parse(readFileSync(path.join(PLUGIN, "adapters", "pi", "compat", "pi-subagents-0.75.0.json"), "utf8"));
   const { peer_pi_ai: _recorded, ...withoutPeer } = shipped;
   assert.throws(() => parseInventory(withoutPeer), /missing "peer_pi_ai"/);
-  for (const bad of ["", null, 86, [">=0.86.1"]])
+  for (const bad of ["", null, 86, [">=1.0.0"]])
     assert.throws(() => parseInventory({ ...shipped, peer_pi_ai: bad }), /peer_pi_ai must be the package's nonempty declared pi-ai peer range/);
 });
 

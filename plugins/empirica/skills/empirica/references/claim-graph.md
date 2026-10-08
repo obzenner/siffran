@@ -33,7 +33,7 @@ Each claim has exactly:
 
 - `id`: unique claim id of 1–64 characters from `A-Z a-z 0-9 . _ -` (the same rule applies to `root`, edge endpoints, and every `claim_id`);
 - `text`: falsifiable statement whose digest binds its evidence;
-- `gating`: whether it blocks the active scope;
+- `gating`: whether it blocks the active scope. The root must be `gating: true`: it is the goal-level assurance claim, and a graph with a non-gating root is refused with `graph.root_not_gating`;
 - `kind`: `ordinary`, `needs-experiment`, or `needs-decision`.
 
 Each edge has exactly `from`, `to`, and `type`. The only supported type is
@@ -57,7 +57,7 @@ Confidence and terminal state are derived projections, never graph input.
 
 ## Construction rules
 
-1. Make the root the goal-level assurance claim.
+1. Make the root the goal-level assurance claim, and make it gating. A non-gating root can never be approved from its children alone, so the run could never converge. Put scope you want to defer in non-gating claims below it.
 2. Add one gating claim for each material unknown or invariant.
 3. Attach every claim to the root through `SupportedBy`; detached claims are invalid.
 4. Use `needs-experiment` only when a deterministic command can falsify the claim.

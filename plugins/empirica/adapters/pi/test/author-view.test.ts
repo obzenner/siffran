@@ -7,6 +7,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import * as path from "node:path";
 import assert from "node:assert/strict";
 import { renderAuthorView } from "../src/author-view.ts";
+import { execFileSync } from "node:child_process";
+import { CONTRACT_DIGEST_PLACEHOLDER, liveContractDigest, readStoredText } from "./stored.ts";
 import { PUBLIC_TOOLS } from "../src/public-tools.ts";
 
 type Json = Record<string, any>;
@@ -17,7 +19,7 @@ const files = readdirSync(GOLDEN_DIR).filter((f) => f.endsWith(".json"));
 
 for (const file of files) {
   test(`author-view golden: ${file}`, () => {
-    const golden = JSON.parse(readFileSync(path.join(GOLDEN_DIR, file), "utf-8"));
+    const golden = JSON.parse(readStoredText(path.join(GOLDEN_DIR, file), "utf-8"));
     const expected: string = golden.text;
     const actual: string = renderAuthorView(golden.result, { strict: true });
     assert.equal(actual, expected, `TS port output does not match Python golden for ${file}`);
@@ -30,7 +32,7 @@ test("author-view loads every next-action surface from the public contract", () 
   const contractPath = path.resolve(import.meta.dirname, "..", "..", "..", "..", "..",
     "contracts", "empirica", "v2", "public-contract.json");
   const contract = JSON.parse(readFileSync(contractPath, "utf8"));
-  const golden = JSON.parse(readFileSync(
+  const golden = JSON.parse(readStoredText(
     path.join(GOLDEN_DIR, "all-next-actions.json"), "utf8"));
   assert.equal(Object.keys(contract.next_actions).length, 17);
   assert.deepEqual(golden.result.run.next_actions, Object.keys(contract.next_actions));
@@ -54,7 +56,7 @@ test("every contract label drives the rendered text", () => {
   try {
     for (const key of Object.keys(original)) labels[key] = `[${key}]`;
     for (const file of files) {
-      const golden = JSON.parse(readFileSync(path.join(GOLDEN_DIR, file), "utf-8"));
+      const golden = JSON.parse(readStoredText(path.join(GOLDEN_DIR, file), "utf-8"));
       rendered.push(renderAuthorView(golden.result, { strict: true }));
     }
   } finally {
@@ -82,18 +84,18 @@ test("public read-operation enum cannot emit JSON", () => {
   };
   assert.deepEqual(new Set(Object.keys(samples)), new Set(operations));
   for (const operation of operations) {
-    const golden = JSON.parse(readFileSync(path.join(GOLDEN_DIR, samples[operation]), "utf8"));
+    const golden = JSON.parse(readStoredText(path.join(GOLDEN_DIR, samples[operation]), "utf8"));
     assert.throws(() => JSON.parse(renderAuthorView(golden.result, { strict: true })), operation);
   }
   for (const name of ["fault-closed.json", "fault-open.json", "inert.json"]) {
-    const golden = JSON.parse(readFileSync(path.join(GOLDEN_DIR, name), "utf8"));
+    const golden = JSON.parse(readStoredText(path.join(GOLDEN_DIR, name), "utf8"));
     assert.throws(() => JSON.parse(renderAuthorView(golden.result, { strict: true })), name);
   }
 });
 
 test("argument author text round-trips every graph field", () => {
   for (const name of ["getargument-active"]) {
-    const result = JSON.parse(readFileSync(path.join(
+    const result = JSON.parse(readStoredText(path.join(
       GOLDEN_DIR, `${name}.json`), "utf8")).result;
     const rendered = renderAuthorView(result, { strict: true });
     assert.throws(() => JSON.parse(rendered), name);
@@ -117,7 +119,7 @@ test("argument author text round-trips every graph field", () => {
 });
 
 test("a value that is not a claim id is never rendered raw", () => {
-  const golden = JSON.parse(readFileSync(path.join(GOLDEN_DIR, "getargument-active.json"), "utf8"));
+  const golden = JSON.parse(readStoredText(path.join(GOLDEN_DIR, "getargument-active.json"), "utf8"));
   for (const hostile of ["", "a b", "claim:C0", "C0\nNext:", "C0\n", "x".repeat(65), "caf\u00e9",
     "<<<EMPIRICA_UNTRUSTED_DATA>>>"]) {
     const result = structuredClone(golden.result);
@@ -135,13 +137,13 @@ test("a value that is not a claim id is never rendered raw", () => {
     assert.ok(renderAuthorView(result).includes(`\nroot_claim_id: ${id}\n`), id);
   }
   // The hostile obligation key keeps its claim: prefix and fences its non-id suffix.
-  const hostileKey = JSON.parse(readFileSync(path.join(GOLDEN_DIR, "hostile-author-strings.json"), "utf8"));
+  const hostileKey = JSON.parse(readStoredText(path.join(GOLDEN_DIR, "hostile-author-strings.json"), "utf8"));
   const { open } = hostileKey.result.run.untrusted_delimiters;
   assert.ok(hostileKey.text.includes(`\n  claim:${open}C0\\x0aNext:`));
 });
 
 test("audit child label is raw; investigation purpose stays fenced and escaped", () => {
-  const golden = JSON.parse(readFileSync(path.join(GOLDEN_DIR, "block-pending-audit.json"), "utf8"));
+  const golden = JSON.parse(readStoredText(path.join(GOLDEN_DIR, "block-pending-audit.json"), "utf8"));
   const result = structuredClone(golden.result);
   const { open, close } = result.run.untrusted_delimiters;
   const audit = result.run.children.find((row: { resource_class: string }) => row.resource_class === "audit");
@@ -159,7 +161,7 @@ test("audit child label is raw; investigation purpose stays fenced and escaped",
 });
 
 test("contract results require the full closed schema shape", () => {
-  const result = JSON.parse(readFileSync(path.join(
+  const result = JSON.parse(readStoredText(path.join(
     GOLDEN_DIR, "getcontract-index.json"), "utf8")).result;
   const malformed = structuredClone(result);
   malformed.contract_result.index.sections[0].title = 42;
@@ -167,7 +169,7 @@ test("contract results require the full closed schema shape", () => {
 });
 
 test("mixed audit summary and obligation are byte-identical", () => {
-  const golden = JSON.parse(readFileSync(path.join(GOLDEN_DIR, "audit-mixed.json"), "utf8"));
+  const golden = JSON.parse(readStoredText(path.join(GOLDEN_DIR, "audit-mixed.json"), "utf8"));
   const rendered = renderAuthorView(golden.result, { strict: true });
   assert.equal(rendered, golden.text);
   assert.ok(rendered.includes("\nAudit: passed (mixed)\n"));
@@ -176,19 +178,19 @@ test("mixed audit summary and obligation are byte-identical", () => {
 });
 
 test("a redirected obligation names the blocking descendant claim", () => {
-  const golden = JSON.parse(readFileSync(path.join(GOLDEN_DIR, "block-open-claim-redirected.json"), "utf8"));
+  const golden = JSON.parse(readStoredText(path.join(GOLDEN_DIR, "block-open-claim-redirected.json"), "utf8"));
   const rendered = renderAuthorView(golden.result, { strict: true });
   assert.ok(rendered.includes("\n  claim:G0: "));
   assert.ok(rendered.includes("\n    missing: claim.spike_missing via claim:S1\n"));
   // An obligation that is its own target (or has none) renders the bare code.
-  const plain = JSON.parse(readFileSync(path.join(GOLDEN_DIR, "block-open-claim.json"), "utf8"));
+  const plain = JSON.parse(readStoredText(path.join(GOLDEN_DIR, "block-open-claim.json"), "utf8"));
   const bare = renderAuthorView(plain.result, { strict: true });
   assert.ok(bare.includes("\n    missing: claim.research_missing\n"));
   assert.ok(!bare.includes(" via claim:"));
 });
 
 test("a redirected obligation's missing target is validated before it is rendered", () => {
-  const golden = JSON.parse(readFileSync(path.join(GOLDEN_DIR, "block-open-claim-redirected.json"), "utf8"));
+  const golden = JSON.parse(readStoredText(path.join(GOLDEN_DIR, "block-open-claim-redirected.json"), "utf8"));
   const row = (result: Json) => result.run.obligations.active.find((item: Json) => item.id === "claim:G0");
   const withTarget = (mutate: (missing: Json) => void): Json => {
     const result = structuredClone(golden.result);
@@ -232,7 +234,7 @@ test("author-view golden: all files covered", () => {
 });
 
 test("a governance proposal without its required rationale never renders as a view", () => {
-  const golden = JSON.parse(readFileSync(path.join(GOLDEN_DIR, "governance-approved.json"), "utf8"));
+  const golden = JSON.parse(readStoredText(path.join(GOLDEN_DIR, "governance-approved.json"), "utf8"));
   const placeholder = structuredClone(golden.result);
   placeholder.run.governance.proposal.rationale = null;
   assert.doesNotThrow(() => renderAuthorView(placeholder, { strict: true }));
@@ -285,7 +287,7 @@ function strictText(result: Json, label: string): string {
   return text;
 }
 
-const blockBase = () => structuredClone(JSON.parse(readFileSync(path.join(GOLDEN_DIR, "block-open-claim.json"), "utf8")).result);
+const blockBase = () => structuredClone(JSON.parse(readStoredText(path.join(GOLDEN_DIR, "block-open-claim.json"), "utf8")).result);
 const registryReasons = (): Array<[string, unknown]> => (DEFS.reasonPayload.oneOf as Json[]).map((branch) =>
   [branch.properties.code.const as string, sample(branch.properties.parameters)]);
 
@@ -336,7 +338,7 @@ const PENDING_GOLDENS: Record<string, string[]> = {
 
 test("pending-evidence goldens: same normally and strictly, recovery calls present, no digest", () => {
   for (const [name, calls] of Object.entries(PENDING_GOLDENS)) {
-    const result = JSON.parse(readFileSync(path.join(GOLDEN_DIR, `${name}.json`), "utf8")).result;
+    const result = JSON.parse(readStoredText(path.join(GOLDEN_DIR, `${name}.json`), "utf8")).result;
     const text = renderAuthorView(result, { strict: true });
     assert.equal(renderAuthorView(result), text, name);
     assert.ok(!text.startsWith("{") && !text.includes("sha256:"), name);
@@ -345,13 +347,13 @@ test("pending-evidence goldens: same normally and strictly, recovery calls prese
 });
 
 test("an unobserved surface never says nobody can be asked and leads with the report", () => {
-  const text = renderAuthorView(JSON.parse(readFileSync(path.join(GOLDEN_DIR, "evidence-reason-unobserved.json"), "utf8")).result);
+  const text = renderAuthorView(JSON.parse(readStoredText(path.join(GOLDEN_DIR, "evidence-reason-unobserved.json"), "utf8")).result);
   assert.ok(!text.includes("no human can be asked") && !text.includes("human: confirmation"));
   assert.ok(text.indexOf("report_convergence intent=report_convergence") < text.indexOf("report_convergence intent=stop"));
 });
 
 test("pending-evidence goldens fence human text", () => {
-  const result = JSON.parse(readFileSync(path.join(GOLDEN_DIR, "evidence-reason-mixed.json"), "utf8")).result;
+  const result = JSON.parse(readStoredText(path.join(GOLDEN_DIR, "evidence-reason-mixed.json"), "utf8")).result;
   const { open, close } = result.run.untrusted_delimiters;
   const text = renderAuthorView(result, { strict: true });
   for (const row of result.run.confirmation_batch.records) {
@@ -359,4 +361,21 @@ test("pending-evidence goldens fence human text", () => {
     assert.ok(line.includes(open) && line.includes(close));
   }
   assert.ok(!text.includes("FORGED <<<EMPIRICA"));
+});
+
+// --- the contract digest is stored as a placeholder and filled in on load (G10) -------------------------------------------
+
+test("goldens store the placeholder, the loader's digest is the Python core's, and a wrong one is not healed", () => {
+  const file = path.join(GOLDEN_DIR, "getcontract-index.json");
+  assert.ok(readFileSync(file, "utf8").includes(CONTRACT_DIGEST_PLACEHOLDER), "the golden must store the placeholder");
+  assert.ok(!/sha256:[0-9a-f]{64}/.test(readFileSync(file, "utf8")), "no contract hash is stored");
+  const plugin = path.resolve(import.meta.dirname, "..", "..", "..");
+  const python = execFileSync("python3", ["-c", "from application.protocol import contract_digest; print(contract_digest())"],
+    { cwd: plugin, env: { ...process.env, PYTHONPATH: plugin }, encoding: "utf8" }).trim();
+  assert.equal(liveContractDigest(), python, "the TypeScript digest must equal application.protocol.contract_digest()");
+  const wrong = python.slice(0, -1) + (python.endsWith("0") ? "1" : "0");
+  const loaded = JSON.parse(readStoredText(file, "utf8")).result.contract_result.digest;
+  const off = JSON.parse(readStoredText(file, "utf8", wrong)).result.contract_result.digest;
+  assert.equal(loaded, python);
+  assert.notEqual(off, python, "a loader given another digest must put that one in, so a comparison against the live one fails");
 });

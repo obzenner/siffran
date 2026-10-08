@@ -42,15 +42,12 @@ class ReadmeRuntimeTests(unittest.TestCase):
     def requires(self, version):
         return activation.pi_requirement(self.peers()[version], activation.PI_PROFILE["compatibility"]["minimum"])
 
-    def table(self, versions, requires=None, receipt="pending A9", instruction=True):
-        rows = "\n".join(f"| `{v}` | `{(requires or {}).get(v, self.requires(v) if v in self.peers() else '>=0.84.1')}` "
+    def table(self, versions, requires=None, receipt="pending A9"):
+        rows = "\n".join(f"| `{v}` | `{(requires or {}).get(v, self.requires(v) if v in self.peers() else '>=1.0.0')}` "
                          f"| {receipt} | reviewed |" for v in versions)
         policy = activation.PI_PROFILE["subagents_compatibility"]
-        fallback = activation.pi_fallback({v: self.requires(v) for v in self.peers()},
-                                          activation.PI_PROFILE["compatibility"]["minimum"])
-        older = f"Pi <{fallback[0]}: `pi-subagents@{fallback[1]}`" if instruction and fallback else ""
         return (f"{activation.pi_interval(activation.PI_PROFILE)} >={policy['minimum']},<{policy['maximum_exclusive']} {policy['policy_id']} "
-                f"{activation.UNREVIEWED_DISCLOSURE} {older}\n{rows}\n")
+                f"{activation.UNREVIEWED_DISCLOSURE}\n{rows}\n")
 
     def versions(self):
         return activation.reviewed_versions()
@@ -76,29 +73,25 @@ class ReadmeRuntimeTests(unittest.TestCase):
         self.assertEqual(problems, [f"README omits the supported pi-subagents range >={policy['minimum']},<{policy['maximum_exclusive']}"])
 
     def test_a_stale_interval_or_dropped_fail_closed_sentence_is_named(self):
-        text = self.table(self.versions()).replace(activation.pi_interval(activation.PI_PROFILE), ">=0.84.1,<0.90.0")
+        text = self.table(self.versions()).replace(activation.pi_interval(activation.PI_PROFILE), ">=0.90.0,<0.91.0")
         self.assertEqual(len(activation.readme_runtime_problems(text, activation.PI_PROFILE)), 1)
         text = self.table(self.versions()).replace(activation.UNREVIEWED_DISCLOSURE, "")
         self.assertEqual(len(activation.readme_runtime_problems(text, activation.PI_PROFILE)), 1)
 
-    def test_the_requires_pi_column_is_derived_from_the_recorded_pi_ai_peer(self):
-        self.assertEqual({v: self.requires(v) for v in self.versions()},
-                         {"0.50.0": ">=0.84.1", "0.64.0": ">=0.84.1", "0.74.0": ">=0.86.1", "0.75.0": ">=0.86.1", "0.76.1": ">=0.86.1"})
-        self.assertEqual(activation.pi_fallback({v: self.requires(v) for v in self.versions()}, "0.84.1"),
-                         ("0.86.1", "0.64.0"))
+    def test_the_requires_pi_column_is_the_declared_peer_raised_to_the_floor_of_the_pi_interval(self):
+        minimum = activation.PI_PROFILE["compatibility"]["minimum"]
+        self.assertEqual(minimum, "1.0.0")  # ADR-0069: nothing older than Pi 1.0.0 is supported
+        self.assertEqual({v: self.requires(v) for v in self.versions()}, {v: ">=1.0.0" for v in self.versions()})
+        self.assertEqual(activation.pi_requirement(">=1.2.0", minimum), ">=1.2.0")  # a peer above the floor wins
 
-    def test_a_row_missing_the_recorded_pi_floor_is_named(self):
-        for version in ("0.74.0", "0.75.0", "0.76.1"):
+    def test_a_row_below_the_pi_floor_is_named(self):
+        for version in self.versions():
             with self.subTest(version=version):
-                text = self.table(self.versions(), requires={version: ">=0.84.1"})
+                text = self.table(self.versions(), requires={version: ">=0.99.0"})
                 problems = activation.readme_runtime_problems(text, activation.PI_PROFILE)
                 self.assertEqual(len(problems), 1, problems)
-                self.assertIn(f"pi-subagents {version} requires Pi '>=0.84.1'", problems[0])
-                self.assertIn("'>=0.86.1'", problems[0])
-
-    def test_a_requirement_that_the_recorded_peer_does_not_imply_is_named(self):
-        text = self.table(self.versions(), requires={"0.64.0": ">=0.86.1"})
-        self.assertEqual(len(activation.readme_runtime_problems(text, activation.PI_PROFILE)), 1)
+                self.assertIn(f"pi-subagents {version} requires Pi '>=0.99.0'", problems[0])
+                self.assertIn("'>=1.0.0'", problems[0])
 
     def test_a_table_in_the_old_shape_without_the_new_columns_is_rejected(self):
         old = "\n".join(f"| `{v}` | reviewed |" for v in self.versions())
@@ -112,16 +105,16 @@ class ReadmeRuntimeTests(unittest.TestCase):
         self.assertEqual(len(problems), len(self.versions()))
         self.assertTrue(all("native receipt exists" in p for p in problems))
 
-    def test_dropping_the_older_pi_install_instruction_is_named(self):
-        problems = activation.readme_runtime_problems(self.table(self.versions(), instruction=False), activation.PI_PROFILE)
-        self.assertEqual(problems, ["README omits the install instruction for older Pi: Pi <0.86.1: `pi-subagents@0.64.0`"])
-
     def test_a_peer_form_the_check_cannot_read_is_an_error_not_a_pass(self):
         with self.assertRaisesRegex(ValueError, "not a plain"):
-            activation.pi_requirement("^0.86.1", "0.84.1")
+            activation.pi_requirement("^1.2.3", "1.0.0")
 
     def test_the_skill_interval_is_read_from_the_contract(self):
         self.assertIn(activation.pi_interval(activation.PI_PROFILE), activation.REQUIRED_SKILL_DISCLOSURES)
+
+    def test_the_skill_claims_no_codex_range(self):
+        """G10 (ADR-0069 G10-R1): Empirica does not run on Codex, so the skill is not required to disclose a Codex range."""
+        self.assertFalse([t for t in activation.REQUIRED_SKILL_DISCLOSURES if "0.146" in t or "odex" in t])
 
 
 if __name__ == "__main__":

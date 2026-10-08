@@ -215,3 +215,9 @@ Deliberately not decided here: whether freeze should ever be *automatic* (e.g. o
 "design unchanged for K passes"). That needs evidence from real runs about what K is, and an automatic
 freeze is a scope decision made without a commitment — the property this ADR relies on. Left as a
 residual for a later record.
+
+## Amendment (2026-10-08): `stopped_frozen` also covers claims declared non-gating (records behaviour the code already has)
+
+This amendment records behaviour the code already has; it changes none. `stopped_frozen` is not reached only by an explicit `freeze`. The effective scope of a run is the claims that gate: before any freeze, the claims the graph marks `gating`; after a freeze, the frozen set (above). When the author reports convergence and every claim in scope is satisfied and audited, any claim **outside** the scope is deferred scope, and the run ends `stopped_frozen` with `converged: false` and those claims reported, with or without a `freeze` act (`frozen_claim_ids` is then absent). `report_convergence intent=stop` gives `stopped_frozen` when any claim is outside the scope and `stopped_residual` otherwise (`stopped_budget` when the passes are used up). So a claim declared non-gating in the graph is the author's own declaration that it is deferred, and the run reports it as such.
+
+Two limits keep this honest. The root claim must be gating (ADR-0045, amendment 2026-10-08), so a run cannot defer its own goal. In deliberative mode the transition to any `stopped_*` status asks the human first (ADR-0063, amendment 2026-10-08).

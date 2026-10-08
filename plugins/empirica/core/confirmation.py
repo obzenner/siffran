@@ -19,6 +19,7 @@ history and run state only (duck-typed), so they stay pure.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from . import citations, governance
@@ -40,6 +41,12 @@ HOST_FAILURES = ("surface_unrecorded", "presentation_failed")
 PROMPT_ERRORS = (UNAVAILABLE, UNOBSERVED, "already_presented", "interaction_limit")
 #: The routes a *human* is told (the observer UI).
 TOLD_ROUTES = (HUMAN, UNAVAILABLE)
+
+
+def is_terminal(batch: Any) -> bool:
+    """Whether a confirmation batch is the terminal step of a deliberative run (ADR-0063 amendment): one item that asks
+    whether to end the run as ``batch["terminal"]["status"]``. The one predicate every caller uses."""
+    return isinstance(batch, Mapping) and isinstance(batch.get("terminal"), Mapping)
 
 
 def told_route(route: str) -> str:

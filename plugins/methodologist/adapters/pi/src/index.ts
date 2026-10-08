@@ -1,4 +1,4 @@
-// Turnkey Methodologist adapter for Pi (>=0.84.1,<2.0.0).
+// Turnkey Methodologist adapter for Pi (>=1.0.0,<2.0.0).
 //
 // Bare `/think` retrieves the complete registry catalog through
 // methodologist/v1, asks the human to choose with Pi's native selector, and then

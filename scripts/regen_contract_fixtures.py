@@ -12,7 +12,7 @@ PLUGIN = ROOT / "plugins" / "empirica"
 sys.path.insert(0, str(PLUGIN))
 
 from application.protocol import (  # noqa: E402
-    contract_digest, contract_result)
+    contract_digest, contract_result, stored, to_stored)
 from core.governance import proposal_digest  # noqa: E402
 
 FIXTURES = ROOT / "contracts" / "empirica" / "v2" / "fixtures"
@@ -40,7 +40,7 @@ def _audit_summary(result: dict, run: dict) -> dict[str, object]:
 
 
 def generated(path: Path) -> str:
-    document = json.loads(path.read_text(encoding="utf-8"))
+    document = stored(json.loads(path.read_text(encoding="utf-8")))
     command = document.get("request", {}).get("command", {})
     if (command.get("type") == "GetContract" and "expected" in document
             and not document.get("refused")):
@@ -74,7 +74,7 @@ def generated(path: Path) -> str:
         goal = run["goal"]
         governed.pop("scope", None)
         governed["proposal_digest"] = proposal_digest(goal, governed)
-    return json.dumps(document, indent=2) + "\n"
+    return json.dumps(to_stored(document), indent=2) + "\n"
 
 
 def main() -> int:

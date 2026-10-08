@@ -9,7 +9,7 @@
 
 import type { ExtensionContext } from "./pi-types.ts";
 import type { EvidenceAnswer, EvidenceItem, PrivateIngress } from "./private-transport.ts";
-import type { ConfirmationBatch, HostFailure, Response } from "./contract.ts";
+import { isTerminalBatch, type ConfirmationBatch, type HostFailure, type Response } from "./contract.ts";
 import { hostFailureNotice } from "./author-view.ts";
 import { PUBLIC_TOOLS } from "./public-tools.ts";
 
@@ -24,9 +24,11 @@ export function presentableBatch(result: Response["result"]): ConfirmationBatch 
   return batch && batch.prompt_error === null ? batch : null;
 }
 
-/** True only when the confirmation is the sole blocker (the core returns it only when nothing else blocks),
- * a human can be shown it, and it has not been shown for this derivation; mirrors Python
- * `completion._evidence_confirmation_wait`. Otherwise the block stands with its real reason. */
+/** The presentation question: can THIS host show the sole evidence blocker to a human now? True only when the confirmation is
+ * the sole blocker (the core returns it only when nothing else blocks), its route is `human`, and the batch is presentable
+ * (`prompt_error` null: not shown for this derivation, interactions left). Otherwise the block stands with its real reason.
+ * It is not the turn-end question "may a report still ask" (`evidenceAskable` in turn-end.ts, which also accepts an
+ * `unobserved` surface and needs no route): that one decides what the adapter says at the end of a turn. */
 export function evidenceConfirmationWait(result: Response["result"]): boolean {
   return soleEvidenceBlock(result)
     && (result.reasons[0].parameters as { route?: string } | undefined)?.route === "human"
@@ -122,11 +124,14 @@ export async function observeSurface(runId: string, ctx: ExtensionContext, trust
 export async function confirmEvidence(response: Response, runId: string, ctx: ExtensionContext,
                                       trusted: PrivateIngress, reevaluate: (hostFailure?: HostFailure) => Promise<Response>,
                                       deadline: number): Promise<{ response: Response; failure?: HostFailure }> {
-  if (presentableBatch(response.result) === null) return { response };
+  const batch = presentableBatch(response.result);
+  if (batch === null) return { response };
   if (!ctx.hasUI || !ctx.ui.select || !ctx.ui.input) return { response, failure: "presentation_failed" };
   let shown = false;
   try {
-    const presented = await trusted({ operation: "evidence_presentation", run_id: runId, payload: {} }) as
+    // The end of a deliberative run is asked by the evaluation that reaches it: the core's batch travels with the call.
+    const presented = await trusted({ operation: "evidence_presentation", run_id: runId,
+      payload: isTerminalBatch(batch) ? { batch } : {} }) as
       { type: string; receipt_id?: string; items?: EvidenceItem[] };
     if (presented.type === "evidence_presentation" && presented.receipt_id && presented.items) {
       shown = true;

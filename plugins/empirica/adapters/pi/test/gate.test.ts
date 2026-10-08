@@ -1535,7 +1535,7 @@ test("EHB-INT-05 (PI-01): a paused, detached or stopped ordinary child is failed
 });
 
 test("EHB-TOOL-04: structuredContent is replaced together with content, so a fence in it never survives the redaction", async () => {
-  // Pi >= 0.99.0 declares `structuredContent` on tool_result and says handlers that redact `content` must also
+  // Pi (1.0.0 and later) declares `structuredContent` on tool_result and says handlers that redact `content` must also
   // replace it. The fence is a verdict whichever door it comes through: the admitted case and the refused case.
   for (const [name, event] of [
     ["a verdict", { content: [{ type: "text", text: FENCE }], structuredContent: { text: FENCE, nested: [FENCE] },
@@ -2046,6 +2046,8 @@ test("gate: a host failure shows nobody a dialog, says so with the stop next, an
     const stop = await w.pi.toolCall()({ toolName: REPORT_CONVERGENCE_TOOL, toolCallId: "tc-2", input: { intent: "stop" } }, ctx);
     assert.equal(stop, undefined, `${label}: the stop is permitted`);
     const last = w.requests.at(-1)!.command as { type: string; intent?: string; host_failure?: string };
+    // A stop looks at the surface only when the core says it waits on the human's consent to end (ADR-0063); an auto run's
+    // stop carries no host failure.
     assert.deepEqual([last.type, last.intent, last.host_failure], ["EvaluateRun", "stop", undefined], label);
   }
 });

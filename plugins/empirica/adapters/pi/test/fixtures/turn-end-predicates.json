@@ -1,0 +1,112 @@
+{
+  "about": "The two predicates of the turn end (Pi `evidenceAskable`/`auditPending`, Claude `_evidence_report_directive`/`_async_audit_wait`) answer the same question on the same results. Each case is a result of `author-view-golden/<golden>.json`, optionally patched; both suites read this file and assert the expected answers (HQ-G9-08, HQ-G9-11).",
+  "cases": [
+    {
+      "name": "evidence-reason-askable",
+      "golden": "evidence-reason-askable",
+      "evidence_askable": true,
+      "audit_pending": false
+    },
+    {
+      "name": "evidence-reason-unobserved",
+      "golden": "evidence-reason-unobserved",
+      "evidence_askable": true,
+      "audit_pending": false
+    },
+    {
+      "name": "evidence-reason-mixed",
+      "golden": "evidence-reason-mixed",
+      "evidence_askable": true,
+      "audit_pending": false
+    },
+    {
+      "name": "evidence-reason-later",
+      "golden": "evidence-reason-later",
+      "evidence_askable": false,
+      "audit_pending": false
+    },
+    {
+      "name": "evidence-reason-unavailable",
+      "golden": "evidence-reason-unavailable",
+      "evidence_askable": false,
+      "audit_pending": false
+    },
+    {
+      "name": "evidence-reason-presentation-failed",
+      "golden": "evidence-reason-presentation-failed",
+      "evidence_askable": false,
+      "audit_pending": false
+    },
+    {
+      "name": "evidence-reason-surface-unrecorded",
+      "golden": "evidence-reason-surface-unrecorded",
+      "evidence_askable": false,
+      "audit_pending": false
+    },
+    {
+      "name": "a single pending audit",
+      "golden": "block-pending-audit",
+      "evidence_askable": false,
+      "audit_pending": true
+    },
+    {
+      "name": "a pending child that is an investigation, not an audit",
+      "golden": "block-pending-audit",
+      "evidence_askable": false,
+      "audit_pending": false,
+      "patch": [
+        {
+          "path": [
+            "run",
+            "children",
+            0,
+            "resource_class"
+          ],
+          "value": "investigation"
+        }
+      ]
+    },
+    {
+      "name": "a stale-scope audit",
+      "golden": "audit-stale-scope",
+      "evidence_askable": false,
+      "audit_pending": false
+    },
+    {
+      "name": "an open claim",
+      "golden": "block-open-claim",
+      "evidence_askable": false,
+      "audit_pending": false
+    },
+    {
+      "name": "a converged run",
+      "golden": "allow-converged",
+      "evidence_askable": false,
+      "audit_pending": false
+    },
+    {
+      "name": "an askable batch that is not the sole blocker",
+      "golden": "evidence-reason-askable",
+      "evidence_askable": false,
+      "audit_pending": false,
+      "patch": [
+        {
+          "path": [
+            "reasons"
+          ],
+          "append": {
+            "code": "claim.research_missing",
+            "parameters": {},
+            "next_actions": [
+              "research.record"
+            ],
+            "sections": [
+              "obligations"
+            ],
+            "message": "Record research."
+          }
+        }
+      ]
+    }
+  ]
+}

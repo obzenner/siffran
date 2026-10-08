@@ -1295,7 +1295,8 @@ class GovernanceServiceTests(unittest.TestCase):
         # Maximal claim ids: 64 characters, the claimId ceiling (ids are ASCII by contract).
         ids = [f"{n:02d}".ljust(64, "x") for n in range(32)]
         self.assertTrue(all(len(key) == 64 for key in ids))
-        claims = [{"id": key, "text": "\U0001f600" * 2048, "kind": "needs-experiment", "gating": False} for key in ids]
+        claims = [{"id": key, "text": "\U0001f600" * 2048, "kind": "needs-experiment", "gating": n == 0}
+                  for n, key in enumerate(ids)]  # the root gates (ADR-0045); the 31 below it are deferred
         pairs = [(0, n) for n in range(1, 32)] + [(a, b) for a in range(1, 32) for b in range(a + 1, 32)]
         graph = {"root": ids[0], "claims": claims, "edges": [{"from": ids[a], "to": ids[b], "type": "SupportedBy"} for a, b in pairs[:128]]}
         self.assertTrue(valid_graph(graph))

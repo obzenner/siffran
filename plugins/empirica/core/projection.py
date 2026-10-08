@@ -7,12 +7,12 @@ from typing import Any
 
 from . import citations, confirmation, governance
 
-from .evaluation import (EvaluationSnapshot, HOST_TIER_UNSUPPORTED, active_evidence, audit_blocker,
-                         audit_operation_current, audit_passes, bootstrap_status,
-                         claim_blockers, claim_digest, derive_claims,
-                         derive_claims_for_projection, digest, dossier_artifact_ids,
-                         CONFIRMATION_REASON, confirmation_batch, effective_scope_ids, evidence_digest, independence,
-                         pending_decisions, pending_human)
+from .evaluation import (CONFIRMATION_REASON, EvaluationSnapshot, HOST_TIER_UNSUPPORTED, TERMINAL_STOP_REASON,
+                         active_evidence, audit_blocker, audit_operation_current, audit_passes, bootstrap_status,
+                         claim_blockers, claim_digest, confirmation_batch, derive_claims,
+                         derive_claims_for_projection, digest, dossier_artifact_ids, effective_scope_ids,
+                         evidence_digest, independence, pending_decisions, pending_human, pending_terminal,
+                         terminal_batch)
 
 
 def _scope(snapshot: EvaluationSnapshot) -> tuple[list[str], list[str]]:
@@ -64,10 +64,11 @@ def confirmation_next(actions: list[str], route: str | None, prompt_error: str |
 
 def confirmation_actions(code: str, parameters: Mapping[str, Any] | None, actions: list[str],
                          batch: Mapping[str, Any] | None) -> list[str]:
-    """``confirmation_next`` for a confirmation reason; every other row is unchanged. This is the one place that decides
-    the no-batch case: a confirmation reason with no batch (a terminal run, or one that cannot present) is as if nobody
-    can be asked, so it never leads with a report or offers ``human.confirm_evidence``."""
-    if code != CONFIRMATION_REASON:
+    """``confirmation_next`` for a confirmation reason (the evidence batch, or the consent to end a deliberative run); every
+    other row is unchanged. This is the one place that decides the no-batch case: a confirmation reason with no batch (a
+    terminal run, or one that cannot present) is as if nobody can be asked, so it never leads with a report or offers
+    ``human.confirm_evidence``."""
+    if code not in (CONFIRMATION_REASON, TERMINAL_STOP_REASON):
         return actions
     return confirmation_next(actions, (parameters or {}).get("route"),
                              batch["prompt_error"] if batch is not None else "unavailable")
@@ -194,14 +195,19 @@ def _obligations(snapshot: EvaluationSnapshot, derivation: Any, states: Mapping[
                 row["hold"] = "deferred"
             active.append(row)
         if not blockers:
-            blocker = audit_blocker(snapshot, derivation)
+            # What is owed at the audit position is what the gate answers there: a batch that waits on a human comes
+            # before the audit gate (``core/evaluation.py``, ADR-0067), so the view never offers the audit first.
+            batch = confirmation_batch(snapshot, derivation)
+            blocker = (None if batch is not None else audit_blocker(snapshot, derivation))
             obligation_id, required = snapshot.audit_obligation
-            missing = (None if blocker is None else {
-                "code": blocker["reason"], "target_claim_id": None,
-                "parameters": blocker["parameters"]})
+            owed = (None if batch is None and blocker is None else
+                    (CONFIRMATION_REASON, confirmation.parameters(
+                        snapshot, batch["record_ids"], [r["claim_id"] for r in batch["claims"]]))
+                    if batch is not None else (blocker["reason"], blocker["parameters"]))
+            missing = None if owed is None else {"code": owed[0], "target_claim_id": None, "parameters": owed[1]}
             active.append(_obligation(
                 obligation_id, required, [], missing, metadata,
-                "satisfied" if blocker is None else "residual", terminal_next))
+                "satisfied" if missing is None else "residual", terminal_next))
     return {"active": active, "deferred": []}
 
 
@@ -404,11 +410,20 @@ def _batch(snapshot: EvaluationSnapshot, derivation: Any) -> dict[str, Any] | No
     if snapshot.graph is None or snapshot.state.status != "active":
         return None
     batch = confirmation_batch(snapshot, derivation)
+    # The terminal step of a deliberative run (ADR-0063 amendment) is asked by the evaluation that reaches it: a stop
+    # asks it whatever evidence is pending (moot, the run is ending), a report only once nothing else is pending. The
+    # view of any other command shows the pending evidence batch, if any, and never an end nobody has asked for.
+    command = snapshot.command
+    if command.get("type") == "EvaluateRun" and (
+            status := pending_terminal(snapshot, command.get("intent", ""))) is not None:
+        batch = terminal_batch(snapshot, derivation, status)
     if batch is None:
         return None
     held = {a["artifact_id"]: a for a in snapshot.history if a.get("kind") == "research"}
     return {"key": batch["key"], "record_ids": batch["record_ids"],
-            "claim_ids": [row["claim_id"] for row in batch["claims"]],
+            # A terminal step asks about the run, not about a claim of the argument: its status is in ``terminal``.
+            "claim_ids": [] if confirmation.is_terminal(batch) else [row["claim_id"] for row in batch["claims"]],
+            **({"terminal": batch["terminal"]} if confirmation.is_terminal(batch) else {}),
             # What the author reads of the batch: where each record is cited from and for which claim.
             "records": [{"claim_id": held[i]["claim_id"], "source_kind": held[i]["source_kind"],
                          "source_ref": held[i]["source_ref"]} for i in batch["record_ids"] if i in held],

@@ -31,6 +31,25 @@ class PiValidatorTests(unittest.TestCase):
                 self.assertEqual(failed.exception.code, 2)
                 validate.assert_not_called()
 
+    def test_empirica_is_not_available_on_codex(self):
+        """G10 (ADR-0069 G10-R1): the Codex marketplace must not list Empirica; Methodologist stays."""
+        import validate_codex_adapter as codex
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            (root / ".agents" / "plugins").mkdir(parents=True)
+            listing = root / ".agents" / "plugins" / "marketplace.json"
+            def entry(name):
+                return {"name": name, "source": {"source": "local", "path": f"./plugins/{name}"}}
+            with patch.object(codex, "ROOT", root):
+                listing.write_text(json.dumps({"plugins": [entry("methodologist")]}))
+                codex.static_validate()
+                listing.write_text(json.dumps({"plugins": [entry("methodologist"), entry("empirica")]}))
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
+                    codex.static_validate()
+        self.assertIn("Empirica is not available on Codex (ADR-0069 G10-R1); remove it from .agents/plugins/marketplace.json",
+                      err.getvalue())
+
     def test_package_only_stops_before_dynamic_adapter_layers(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()

@@ -43,7 +43,7 @@ from core.records import (ABSENT, Artifact, Conflict, Corrupt, Present, Revision
 from core.run import OperationalState  # noqa: E402
 from core.governance import initial as initial_governance  # noqa: E402
 from governance_setup import (  # noqa: E402
-    TEST_INVOCATION, AUTHOR, AUDITOR, SIZED_RATIONALE, approve_current)
+    TEST_INVOCATION, AUTHOR, AUDITOR, SIZED_RATIONALE, approve_current, end_with_consent)
 from application.protocol import host_profile_id  # noqa: E402
 CLAUDE_PROFILE = host_profile_id("claude-code")
 PI_PROFILE = host_profile_id("pi")
@@ -937,7 +937,9 @@ class D7TransactionTests(unittest.TestCase):
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "graph", "payload": graph}}, "graph")
         approve_current(coordinator, run_id)
-        coordinator.handle({"type": "EvaluateRun", "run_id": run_id, "intent": "stop"}, "stop")
+        coordinator.handle({"type": "ObserveAction", "run_id": run_id, "action": {"kind": "route", "reason": "r"}}, "route")
+        coordinator.handle({"type": "ObserveAction", "run_id": run_id, "action": {"kind": "investigate"}}, "investigate")
+        end_with_consent(coordinator, run_id)  # a deliberative run ends only with its human's consent (ADR-0063)
         resolve = {"type": "ResolveRun", "selector": {"project": "p", "session": "s"}}
         self.assertEqual(coordinator.handle(resolve, "valid")["result"],
                          {"type": "Inert", "reason": "no_run"})
@@ -992,6 +994,31 @@ class D7TransactionTests(unittest.TestCase):
                 self.assertNotIn("CANARY_SELECTED_GRAPH_GOAL", json.dumps(response))
                 self.assertEqual(runs.cas_calls, writes_before)
                 self.assertEqual(len(artifacts_repo.values[key]), artifact_count)
+
+    def test_a_stored_graph_with_a_non_gating_root_is_read_back_not_run_corrupt(self):
+        """HQ-G9-04: the gating root is an admission rule (``graph.root_not_gating`` at graph time). History integrity checks
+        structure only, so a stored graph the rule would now refuse is read, never reported as a corrupt run."""
+        runs, artifacts_repo = Runs(), Artifacts()
+        coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo, PI_PROFILE, {})
+        started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION),
+                                      "selector": {"project": "p", "session": "s"}, "goal": "g"}, "start")
+        run_id = started["result"]["run"]["id"]
+        graph = {"root": "C0", "claims": [{"id": "C0", "text": "t", "gating": True, "kind": "ordinary"}], "edges": []}
+        coordinator.handle({"type": "ObserveAction", "run_id": run_id, "action": {"kind": "graph", "payload": graph}}, "g")
+        approve_current(coordinator, run_id)
+        key = next(iter(runs.data))
+        state = decode_state(runs.data[key].value)
+        stored = make_artifact({"kind": "graph", "graph": {
+            "root": "C0", "claims": [{"id": "C0", "text": "t", "gating": False, "kind": "ordinary"}], "edges": []}})
+        artifacts_repo.append(key, stored)
+        next_state = replace(state, selected_graph_artifact_id=stored.artifact_id)
+        manifest = manifest_for(state.committed_artifact_head_id, (stored,), next_state, basis_id="test")
+        artifacts_repo.append(key, manifest)
+        committed = replace(next_state, committed_artifact_head_id=manifest.artifact_id)
+        runs.data[key] = Present(encode_state(committed), Revision("non-gating"))
+        response = coordinator.handle({"type": "GetArgument", "run_id": run_id}, "arg")
+        self.assertNotEqual(response["result"]["type"], "Fault")
+        self.assertNotIn("run.corrupt", [r["code"] for r in response["result"].get("reasons", [])])
 
     def test_trusted_ingress_maps_corrupt_aggregate_to_fixed_safe_block(self):
         operations = (

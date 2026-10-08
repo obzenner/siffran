@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from adapters import confirmation
 from application import protocol
-from assertions import action_freeze, evaluate, observe_action
+from assertions import action_freeze, observe_action
 from test_evidence_confirmation import URL, WORKSPACE_REF, graph_with_decision
 from test_evidence_hosts import Human, MediatorFixture, accept
 from application.protocol import host_profile_id  # noqa: E402
@@ -27,7 +27,7 @@ class ScenarioFixture(MediatorFixture):
         return canonical_graph(n_claims=2, kind="ordinary")
 
     def stop(self, drv, run_id) -> dict:
-        return self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))["result"]
+        return self.end_run(drv, run_id, "stop")["result"]
 
 
 class HumanSurfaceCells(ScenarioFixture):

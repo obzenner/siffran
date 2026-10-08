@@ -26,7 +26,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins" / "empirica"))
 import registry_doc  # noqa: E402 - the one generator of the design document's data regions
+from core.canonical import CONTRACT_DIGEST_PLACEHOLDER, replace_string_values  # noqa: E402 - pure, no runtime state
 
 try:
     from jsonschema import Draft202012Validator
@@ -46,20 +48,21 @@ V2 = CONTRACTS / "empirica" / "v2"
 # checks derive commands/decisions/statuses/actions/child states+transitions/
 # reason IDs/next-action IDs/D2A enums+delimiters/mode fields from the loaded
 # registry (public-contract.json) and compare them to the request/response
-# schemas; no Python vocabulary table duplicates the registry. The registry and
-# host-profiles releases are frozen by one compact reviewed SHA-256 digest each
-# (a deliberate, reviewed edit is required to drift). Only algorithmic/
-# structural constants are retained below.
+# schemas; no Python vocabulary table duplicates the registry. A change to the
+# registry is reviewed in its git diff (no pinned digest: ``run.contract.digest``
+# is computed from the file and fixtures store a placeholder); the host-profiles
+# release stays frozen by one compact reviewed SHA-256 digest (a deliberate,
+# reviewed edit is required to drift). Only algorithmic/structural constants are
+# retained below.
 # --------------------------------------------------------------------------- #
-# Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
-# canonical value requires updating the matching digest deliberately.
+# The compact reviewed digest of the host-profiles registry (D2A §8/§9). Changing a
+# canonical value requires updating it deliberately.
 # A research artifact row's verification, as the argument view requires it (ADR-0067).
 VERIFICATION = {"class": "verbatim", "status": "verified_by_service", "retrieve": True}
-REVIEWED_REGISTRY_DIGEST = "sha256:7792155a1fd120995a9505f632bfdba1d55553f06e487ee14147e1a5a49729b5"
 #: The tools an auditor child may ever be given: the read-only tools and ``contact_supervisor`` (ADR-0069). The one
 #: closed list the profile's ``audit_child_tools`` is validated against; widening it is a reviewed edit of this file.
 AUDIT_CHILD_TOOL_VOCABULARY = frozenset({"read", "grep", "find", "ls", "contact_supervisor"})
-REVIEWED_HOST_PROFILES_DIGEST = "sha256:23a0aaf349ca33c7de4976853379dc55eecb8b3d628f9ff3a50243f802e9fc72"
+REVIEWED_HOST_PROFILES_DIGEST = "sha256:7200c601ae9a3ae27ec1e135a27b645f27ffc867997c0c9d79240c1299f52bfb"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
 REGISTRY_VERSION = "3.0.0"
@@ -159,8 +162,8 @@ def check_getcontract_digest(contract_result: dict, registry: dict, errors: list
 # Pure v2 checks — each takes explicit (data, errors, where).
 # --------------------------------------------------------------------------- #
 def check_identity(contract: dict, errors: list[str], where: str) -> None:
-    """Structural identity constants (id/version/protocol); vocabulary values are frozen by the
-    reviewed digest and mirrored by check_schema_mirror, not by a Python table."""
+    """Structural identity constants (id/version/protocol); vocabulary values are mirrored by
+    check_schema_mirror, not held in a Python table."""
     for field, want in (("id", REGISTRY_ID), ("version", REGISTRY_VERSION), ("protocol", PROTOCOL)):
         if contract.get(field) != want:
             errors.append(f"{where}: {field} must be {want!r}, got {contract.get(field)!r}")
@@ -172,18 +175,6 @@ def check_identity(contract: dict, errors: list[str], where: str) -> None:
         for sub in ("author", "host", "trusted"):
             if sub not in actions:
                 errors.append(f"{where}: actions.{sub} is required")
-
-
-def check_registry_digest(contract: dict, errors: list[str], where: str) -> None:
-    """Freeze the reviewed PublicContract release by one compact canonical SHA-256.
-
-    A deliberate registry edit must update REVIEWED_REGISTRY_DIGEST; this replaces every
-    per-vocabulary EXPECTED_* table with a single reviewed assertion.
-    """
-    actual = registry_digest(contract)
-    if actual != REVIEWED_REGISTRY_DIGEST:
-        errors.append(f"{where}: registry digest {actual} != reviewed "
-                      f"{REVIEWED_REGISTRY_DIGEST}")
 
 
 def check_key_sets(contract: dict, errors: list[str], where: str) -> None:
@@ -708,6 +699,45 @@ def _test_declared(path: Path, names: list[str]) -> str | None:
     return None
 
 
+def check_turn_end(doc: dict, errors: list[str], where: str, root: Path = ROOT) -> None:
+    """The turn-end table (ADR-0068) is closed: every cell names an outcome of the table's vocabulary and notices the
+    public contract defines, every row is proved for every host by scenarios that exist and together cover every control
+    mode, and every host names the table-driven scenario that enumerates its cells."""
+    table = doc.get("turn_end")
+    if not isinstance(table, dict):
+        return
+    modes = list(doc.get("control_modes") or [])
+    vocabulary = set(table.get("outcomes") or {})
+    scenarios = {s.get("id"): s for s in doc.get("scenarios", []) if isinstance(s, dict)}
+    contract_path = root / "contracts" / "empirica" / "v2" / "public-contract.json"
+    notices = set((json.loads(contract_path.read_text(encoding="utf-8")).get("settlement_notices") or {})
+                  if contract_path.is_file() else ())
+
+    def covers(ids: list, label: str) -> None:
+        unknown = [sid for sid in ids if sid not in scenarios]
+        if unknown:
+            errors.append(f"{where}: turn_end {label} names unknown scenario(s) {unknown}")
+            return
+        covered = {mode for sid in ids for mode in scenarios[sid].get("control_modes", [])}
+        if "any" not in covered and not set(modes) <= covered:
+            errors.append(f"{where}: turn_end {label} has no scenario for {sorted(set(modes) - covered)}")
+
+    for state in table.get("states", []):
+        for mode in modes:
+            cell = (state.get("outcomes") or {}).get(mode) or {}
+            if cell.get("outcome") not in vocabulary:
+                errors.append(f"{where}: turn_end state {state.get('id')} / {mode}: outcome "
+                              f"{cell.get('outcome')!r} is not in the table's vocabulary")
+            for key in cell.get("notices", []):
+                if key not in notices:
+                    errors.append(f"{where}: turn_end state {state.get('id')} / {mode}: notice {key!r} is not a "
+                                  "settlement notice of the public contract")
+        for host, ids in (state.get("scenarios") or {}).items():
+            covers(ids, f"state {state.get('id')} on {host}")
+    for host, surface in (table.get("hosts") or {}).items():
+        covers([surface.get("table_driven")], f"table-driven test of {host}")
+
+
 def check_host_boundaries(doc: dict, errors: list[str], where: str, root: Path = ROOT) -> None:
     """The host-boundary registry is data (ADR-0068): ids are unique and closed, every scenario is
     proved by tests that exist or is live-only with a qualification-ledger row that exists, each
@@ -724,6 +754,7 @@ def check_host_boundaries(doc: dict, errors: list[str], where: str, root: Path =
         if dupes:
             errors.append(f"{where}: duplicate {label} id(s) {dupes}")
     known_scenarios = set(scenario_ids)
+    check_turn_end(doc, errors, where, root)
     for e in doc.get("expectations", []):
         if e.get("boundary") not in boundary_ids:
             errors.append(f"{where}: expectation {e.get('id')} names unknown boundary {e.get('boundary')!r}")
@@ -2497,7 +2528,6 @@ def main() -> int:
         validate_schema_instance(registry, "empirica/v2", "public-contract",
                                  "contracts/empirica/v2/public-contract.json")
         check_identity(registry, errors, "public-contract")
-        check_registry_digest(registry, errors, "public-contract")
         check_key_sets(registry, errors, "public-contract")
         check_referential(registry, errors, "public-contract")
         check_clauses(registry, errors, "public-contract")
@@ -2726,7 +2756,8 @@ def main() -> int:
     digest = registry_digest(registry) if registry else ""
 
     for path in v2_fixture_paths:
-        fx = load(path)
+        # Fixtures store a placeholder where the contract's digest belongs; it is the file's own digest here.
+        fx = replace_string_values(load(path), CONTRACT_DIGEST_PLACEHOLDER, digest)
         where = str(path.relative_to(ROOT))
         request = fx.get("request", {})
         # QUAL-1: `target: full` and any removed public surface must be refused at the request
@@ -2827,7 +2858,7 @@ def run_host_boundary_negatives(doc: dict, errors: list[str], validate_schema: C
            "is not declared there", "a covering test that does not exist")
     expect(lambda d: scenario(d, "EHB-STOP-07").update(covered_by=[
         "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::AuditBoundaryTests::"
-        "test_EHB_STOP_07_deliberative_continuation_hands_off_with_the_real_reason"]),
+        "test_EHB_STOP_07_deliberative_pauses_with_the_real_reason_on_the_first_and_a_later_turn_end"]),
            "is not declared there", "a test that exists in the file but not in the named class")
     expect(lambda d: scenario(d, "EHB-STOP-07").update(covered_by=["plugins/empirica/no_such_file.py::test_x"]),
            "does not exist", "a covering file that does not exist")
@@ -2848,6 +2879,14 @@ def run_host_boundary_negatives(doc: dict, errors: list[str], validate_schema: C
         "plugins/empirica/tests/v2/test_evidence_scenarios.py::NoSuchClass::*"]),
            "is not declared there", "a wildcard after a class that does not exist")
     expect(lambda d: d["expectations"][0].update(scenarios=[]), "non-empty", "an expectation proved by no scenario", schema=True)
+    expect(lambda d: d["turn_end"]["states"][0]["outcomes"]["deliberative"].update(outcome="no-such-outcome"),
+           "is not in the table's vocabulary", "a turn-end cell outside the outcome vocabulary")
+    expect(lambda d: d["turn_end"]["states"][3]["outcomes"]["deliberative"].update(notices=["no_such_notice"]),
+           "is not a settlement notice", "a turn-end cell naming a notice the contract does not define")
+    expect(lambda d: d["turn_end"]["states"][4]["scenarios"].update(claude=["EHB-STOP-21"]),
+           "has no scenario for", "a turn-end row proved for only some control modes")
+    expect(lambda d: d["turn_end"]["hosts"]["pi"].update(table_driven="EHB-STOP-99"),
+           "unknown scenario", "a host whose table-driven scenario does not exist")
     expect(lambda d: d["expectations"][0].pop("sources"), "sources", "an expectation with no sources", schema=True)
     expect(lambda d: scenario(d, "EHB-STOP-07").update(ledger_rows=["no_such_ledger_row"]),
            "ledger row", "a named ledger row absent from the ledger")
@@ -2903,8 +2942,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         return
     d64 = "sha256:" + "f" * 64
 
-    # Registry-side mutations. Exact vocabulary freeze is now via the reviewed digest
-    # and schema mirror; a one-sided mutation must still fail precisely.
+    # Registry-side mutations. The vocabulary is held by the schema mirror and the referential checks;
+    # a one-sided mutation must still fail precisely.
     bad = copy.deepcopy(registry)
     bad["reasons"]["run.no_active"]["next_actions"].append("bogus.action")
     expect(lambda e: check_referential(bad, e, "neg"), "unknown action", "unknown action link")
@@ -2920,18 +2959,6 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     bad = copy.deepcopy(registry)
     bad["child_lifecycle"]["terminal_states"].append("bogus_state")
     expect(lambda e: check_child_lifecycle(bad, e, "neg"), "subset of states", "nonterminal listed terminal")
-    bad = copy.deepcopy(registry)
-    bad["commands"].append("Bogus")
-    expect(lambda e: check_registry_digest(bad, e, "neg"), "registry digest", "unknown command")
-    bad = copy.deepcopy(registry)
-    bad["sections"].pop("core", None)
-    expect(lambda e: check_registry_digest(bad, e, "neg"), "registry digest", "section keys drift")
-    bad = copy.deepcopy(registry)
-    bad["reasons"].pop("run.no_active", None)
-    expect(lambda e: check_registry_digest(bad, e, "neg"), "registry digest", "remove reason id")
-    bad = copy.deepcopy(registry)
-    bad["next_actions"].pop("run.start_fresh", None)
-    expect(lambda e: check_registry_digest(bad, e, "neg"), "registry digest", "remove next_action id")
     # Directive surface must resolve against the projected model tool schemas.
     bad = copy.deepcopy(registry)
     bad["next_actions"]["graph.record"]["surface"] = {"tool": "empirica_observe",
@@ -2961,12 +2988,6 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                                               private_gov_ops),
            "not in the bound report_convergence tool shape",
            "params outside report tool shape")
-    bad = copy.deepcopy(registry)
-    bad["claim_states"] = ["open", "approved"]
-    expect(lambda e: check_registry_digest(bad, e, "neg"), "registry digest", "canonical claim_states drift")
-    bad = copy.deepcopy(registry)
-    bad["untrusted_delimiters"]["open"] = "<<<WRONG>>>"
-    expect(lambda e: check_registry_digest(bad, e, "neg"), "registry digest", "canonical delimiters drift")
 
     # Host profile: independent negatives with matching diagnostics.
     # (a) wrong version -> digest detects; range -> structural version check detects.
@@ -3048,7 +3069,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         ("a retired exact-version list",
          lambda p: p["subagents_compatibility"].update(reviewed_versions=["0.50.0"]), "unknown fields ['reviewed_versions']"),
         ("a profile id that encodes a version",
-         lambda p: p.update(profile_id="pi@0.84.1+pi-subagents-foreground-audit-v1"), "profile_id must be '<host_id>+<policy_id>'"),
+         lambda p: p.update(profile_id="pi@1.1.0+pi-subagents-foreground-audit-v1"), "profile_id must be '<host_id>+<policy_id>'"),
     ):
         expect(lambda e, doc=pi_mutant(mutate): check_host_profiles(
             doc, registry, required_fixtures, e, "neg", installed), needle, label)
@@ -4458,8 +4479,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
 
     # --- D2E presentation_selector negatives (one mutation each) ---
     # The JSON registry is the SSOT; these prove the procedural integrity check rejects
-    # each class of presentation_selector corruption, and that the reviewed digest
-    # freezes it. No selector algorithm or Python mapping is implemented here.
+    # each class of presentation_selector corruption. No selector algorithm or Python mapping is implemented here.
     bad = copy.deepcopy(registry)
     bad["presentation_selector"]["context_sections"].pop("block", None)
     expect(lambda e: check_presentation_selector(bad, e, "neg"),
@@ -4484,10 +4504,6 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     bad["reasons"]["audit.pending"]["sections"].append("bogus/section")
     expect(lambda e: check_referential(bad, e, "neg"),
            "unknown section", "presentation: unknown reason section")
-    bad = copy.deepcopy(registry)
-    bad["presentation_selector"]["terminal_sections"].append("core")
-    expect(lambda e: check_registry_digest(bad, e, "neg"),
-           "registry digest", "presentation: digest drift")
 
     # --- D6-A state-schema negatives (one mutation each) ---
     if state_schema:

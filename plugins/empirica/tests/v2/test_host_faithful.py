@@ -21,6 +21,7 @@ from adapters.claude.completion import stop_result
 from adapters.claude.run_start import invocation_provenance
 from adapters.claude.transport import Response
 from adapters.public_tools import PublicTools
+from application import protocol
 from application.protocol import author_view_labels, host_profile_id
 from core import confirmation, governance
 from core.confirmation import HOST_FAILURES
@@ -213,7 +214,7 @@ class LiteralAgentOnClaude(HostFaithful):
         self.assertIn("approve", self.human.shown[0][0].lower() + str(self.human.shown[0][1]).lower())
 
     def test_a_client_without_a_form_ends_in_an_honest_stop(self):
-        drv, run_id = self.claude(form=False)
+        drv, run_id = self.claude(form=False, mode="auto")
         view = self.after_research(run_id)
         self.assertNotIn(NO_HUMAN, view)  # not known yet: the host has not looked
         outcome, calls = self.literal_agent(run_id, view)
@@ -223,7 +224,7 @@ class LiteralAgentOnClaude(HostFaithful):
         self.assertIn(NO_HUMAN, self.views[1])  # said only once the host had looked and found no form
 
     def test_a_delegated_run_ends_in_an_honest_stop_without_pretending_to_look(self):
-        drv, run_id = self.claude(delegated=True)
+        drv, run_id = self.claude(delegated=True, mode="auto")
         view = self.after_research(run_id)
         self.assertIn(NO_HUMAN, view)
         self.assertNotIn("report_convergence intent=report_convergence", next_actions(view))
@@ -232,7 +233,7 @@ class LiteralAgentOnClaude(HostFaithful):
         self.assertEqual(self.human.shown, [])
 
     def test_a_non_interactive_run_ends_in_an_honest_stop(self):
-        drv, run_id = self.claude(entrypoint="sdk-cli")
+        drv, run_id = self.claude(entrypoint="sdk-cli", mode="auto", delegated=True)
         view = self.after_research(run_id)
         self.assertIn(NO_HUMAN, view)
         self.assertEqual(self.literal_agent(run_id, view)[0], "stopped")
@@ -257,7 +258,7 @@ class LiteralAgentOnClaude(HostFaithful):
         self.assertEqual(outcome, "presented", calls)
 
     def test_the_surface_going_away_is_followed(self):
-        drv, run_id = self.claude(form=False)
+        drv, run_id = self.claude(form=False, mode="auto")
         self.surface(drv, run_id, "human")  # an earlier observation
         view = self.after_research(run_id)
         outcome, _ = self.literal_agent(run_id, view)
@@ -287,26 +288,34 @@ class StopHookLoopOnClaude(HostFaithful):
             active = True
         return stops
 
-    def test_EHB_STOP_16_a_deliberative_operator_checkpoint_ends_the_loop_in_two_stops(self):
+    def test_EHB_STOP_16_a_deliberative_operator_checkpoint_ends_the_loop_in_one_stop(self):
         drv, run_id = self.claude(mode="deliberative")
         stops = self.hook_loop(drv, run_id, lambda text: None)  # the agent stops to wait for the operator
-        self.assertLessEqual(len(stops), 2, [s.stderr or s.stdout for s in stops])
-        self.assertEqual(stops[0].exit_code, 2)  # the first Stop still blocks, with the real reason
-        message = json.loads(stops[-1].stdout)["systemMessage"]
-        self.assertEqual(stops[-1].exit_code, 0)
+        self.assertEqual(len(stops), 1, [s.stderr or s.stdout for s in stops])  # F-Q3-1: no block carries it past the checkpoint
+        message = json.loads(stops[0].stdout)["systemMessage"]
+        self.assertEqual(stops[0].exit_code, 0)
         self.assertRegex(message, r"paused.*not converged|not converged.*paused")
         self.assertIn("nobody was asked", message)
-        self.assertIn(stops[0].stderr.strip().rstrip("."), message)  # the real reason, not a stock sentence
+        self.assertIn("Record research for this claim", message)  # the real reason, not a stock sentence
         self.assertEqual(self.run_view(drv, run_id)["status"], "active")  # nothing was terminalized or approved by it
 
-    def test_EHB_STOP_16_an_evidence_directive_the_agent_ignores_is_handed_off_not_repeated(self):
+    def test_EHB_STOP_16_a_deliberative_evidence_wait_pauses_and_nobody_is_shown_a_dialog_by_the_stop(self):
         drv, run_id = self.claude(mode="deliberative")
         self.after_research(run_id)
         stops = self.hook_loop(drv, run_id, lambda text: None)
-        self.assertEqual(len(stops), 2)
-        self.assertIn("report_convergence", stops[0].stderr)  # F7: the first Stop is the directive, never a pause
+        self.assertEqual(len(stops), 1)
+        self.assertEqual(json.loads(stops[0].stdout), {"systemMessage": protocol.PAUSED_FOR_EVIDENCE_NOTICE})
         self.assertEqual(self.human.shown, [])
-        self.assertIn("nobody was asked", json.loads(stops[1].stdout)["systemMessage"])
+
+    def test_EHB_STOP_16_an_evidence_directive_the_agent_ignores_to_the_cap_in_interactive_auto(self):
+        """Interactive auto keeps the directive on every turn end (the report is what asks the human); an agent that
+        ignores it runs into Claude's own cap, which is the host's bound (`host-capped`, `stop_host_cap`)."""
+        drv, run_id = self.claude(mode="auto")
+        self.after_research(run_id)
+        stops = self.hook_loop(drv, run_id, lambda text: None)
+        self.assertEqual(len(stops), self.CAP)
+        self.assertTrue(all(s.exit_code == 2 and "report_convergence" in s.stderr for s in stops))
+        self.assertEqual(self.human.shown, [])
 
     def unattended(self, **session):
         drv, run_id = self.claude(mode="auto", **session)
@@ -324,7 +333,7 @@ class StopHookLoopOnClaude(HostFaithful):
             with self.subTest(label):
                 drv, run_id, stops, calls = self.unattended(**session)
                 self.assertEqual([s.exit_code for s in stops], [2, 2, 0], [s.stderr or s.stdout for s in stops])
-                self.assertEqual(stops[0].stderr.strip(), "Record research for this claim.")  # first Stop: unchanged
+                self.assertEqual(stops[0].stderr.strip(), "Record research for this claim.")  # an auto first turn end gives the core's reason
                 self.assertIn("intent=stop", stops[1].stderr)  # the continuation names the way out
                 self.assertIn("Record research for this claim.", stops[1].stderr)
                 self.assertEqual(calls, ["report_convergence intent=stop"])
@@ -340,11 +349,11 @@ class LiteralAgentOnPi(HostFaithful):
     and the gate observes it again, evaluates and presents at each ``report_convergence`` (``src/index.ts``). The gate
     itself is exercised by ``adapters/pi/test/gate.test.ts``; here the same core answers a Pi-ordered run."""
 
-    def pi(self, *, has_ui: bool = True, reply=None, **session):
+    def pi(self, *, has_ui: bool = True, reply=None, mode: str = "deliberative", **session):
         invocation = {"host": "pi", "interactive": True, "signal": "ctx.mode=tui", "delegation": False,
                       "audit_retrieval": ["local", "workspace"], "human_surface": "human" if has_ui else "unavailable",
                       **session}
-        drv, run_id = self.start(PI, **invocation)
+        drv, run_id = self.start(PI, mode=mode, **invocation)
         self.human = Human(reply or accept(d1="confirm"))
         confirm = self.mediator(drv, self.human if has_ui else None)
         self.tools = PublicTools(PI, dispatch=lambda request, _p: drv.request(request), confirm=confirm)
@@ -365,14 +374,14 @@ class LiteralAgentOnPi(HostFaithful):
         self.assertEqual((outcome, calls), ("presented", ["report_convergence intent=report_convergence"]))
 
     def test_url_evidence_without_a_ui_ends_in_an_honest_stop(self):
-        drv, run_id = self.pi(has_ui=False)
+        drv, run_id = self.pi(has_ui=False, mode="auto")
         view = self.after_research(run_id)
         self.assertIn(NO_HUMAN, view)
         self.assertEqual(self.literal_agent(run_id, view), ("stopped", ["report_convergence intent=stop"]))
         self.assertEqual(self.human.shown, [])
 
     def test_a_delegated_pi_run_ends_in_an_honest_stop(self):
-        drv, run_id = self.pi(delegation=True)
+        drv, run_id = self.pi(delegation=True, mode="auto")
         view = self.after_research(run_id)
         self.assertEqual(self.literal_agent(run_id, view)[0], "stopped")
         self.assertEqual(self.human.shown, [])
@@ -413,8 +422,11 @@ class HostFailure(HostFaithful):
         setattr(target, name, broken)
 
     def failing(self, *, surface: bool = False, presentation: bool = False, how: str = "fault"):
-        """A Claude run whose private ingress answers a typed Fault (``how="fault"``) or raises (``how="raise"``)."""
-        drv, run_id = self.claude()
+        """A Claude run whose private ingress answers a typed Fault (``how="fault"``) or raises (``how="raise"``).
+
+        It is an interactive ``auto`` run: the agent ends it alone with ``intent=stop``, which is what these tests are
+        about. A deliberative run cannot end without its human (ADR-0063 amendment), see the test at the end."""
+        drv, run_id = self.claude(mode="auto")
         for wanted, name in ((surface, "_surface"), (presentation, "_presentation")):
             if wanted:
                 self.inject(self.tools._confirm, name, how)
@@ -502,6 +514,20 @@ class HostFailure(HostFaithful):
         self.after_research(run_id)
         view = self.say(("report_convergence", {"run_id": run_id}))
         self.assertNotIn(NOTICE, view)
+
+    def test_a_deliberative_run_whose_host_cannot_ask_is_not_ended_by_a_stop(self):
+        """EHB-TERM-03 on Claude: with the dialog failing, the stop is answered with the closed terminal reason and the run
+        stays active; nothing is spent, approved or invented, and the notice still says nobody was asked."""
+        drv, run_id = self.claude()
+        for name in ("_surface", "_presentation"):
+            self.inject(self.tools._confirm, name, "fault")
+        self.after_research(run_id)
+        before = self.spent(drv, run_id)
+        stop = self.say(("report_convergence", {"run_id": run_id, "intent": "stop"}))
+        self.assertFalse(TERMINAL.match(stop), stop)
+        self.assertEqual(self.run_view(drv, run_id)["status"], "active")
+        self.assertIn("governance.terminal_stop_pending", stop)
+        self.assertEqual(self.spent(drv, run_id), before)
 
     def test_the_stop_directive_may_send_one_report_and_that_report_leads_to_stop(self):
         drv, run_id = self.failing(presentation=True)

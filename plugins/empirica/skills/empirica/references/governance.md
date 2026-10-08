@@ -16,7 +16,7 @@ Cancel, timeout, invalid content, stale/conflicting replies, and missing UI neve
 - **Interactive auto:** the initial complete sized proposal has one human approval episode before investigation. Dismissal, timeout, cancellation, rejection, a declined confirmation, or unavailable UI grants nothing and never falls back to delegation. After the first successful approval, non-raising changes are accepted automatically without another dialog; raises are refused. Exhaustion requires a fresh run rather than a prompt or `budget.raise` loop (ADR-0063). On exhaustion the host settles the turn with a notice instead of blocking; stop honestly with `report_convergence` `intent: "stop"` or, in deliberative mode, propose a raise for human approval.
 - **Delegated auto:** with no human present and operator-recorded `EMPIRICA_AUTO_DELEGATION=1`, proposals may be accepted only inside the fixed 8/1/2 envelope. StartRun budgets and `EMPIRICA_MAX_*` may narrow but never enlarge it. Oversize work must reduce scope or move to an approval-capable host interactively.
 
-**Ending a turn in Claude.** The first Stop on a state is unchanged in every mode (its settlements and the evidence directive included); a Stop that continues after that block is ended by the control mode, and a pause never approves, confirms or terminalizes anything. The rule is owned by ADR-0068 (and `HX-STOP-03` in `contracts/empirica/v2/host-boundaries.json`).
+**Ending a turn.** One table decides how a turn ends, by control mode and run state, the same on Claude and Pi; ADR-0068 owns it (`turn_end` in `contracts/empirica/v2/host-boundaries.json`). A pause or a settlement never approves, confirms or terminalizes anything, and in deliberative mode a step that would end the run without converging (`stopped_*`) asks the human first (`governance.terminal_stop_pending`).
 
 Reviewer configuration still comes from the host, and observed audit independence remains required for convergence.
 
@@ -24,7 +24,7 @@ Reviewer configuration still comes from the host, and observed audit independenc
 
 - **Claude:** requires client-advertised MCP form elicitation. If `CLAUDE_CODE_SUBAGENT_MODEL` is explicitly set (other than `inherit`), the host resolves it. Otherwise the adapter supplies only a resolvable alias from a family different from the observed main family. Third-party providers require the corresponding `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` pin.
 - **Pi:** requires `ctx.hasUI` for approval. Package-scope and reviewer-model derivation are owned by the [Pi adapter guide](../../../adapters/pi/README.md#governed-initialization); unavailable or same-identity-class reviewers block before launch.
-- **Codex:** no approval UI; deliberative and non-delegated auto sizing cannot be approved. Delegated auto remains inside 8/1/2, while audit remains unavailable.
+- **Codex:** Empirica does not run on Codex.
 
 Reviewer configuration is not itself evidence of independence. Audit identity classification and its fail-closed cases are owned by the [audit guide](audit.md#independence-reporting). Only exact documented model/version mappings establish identity equivalence across providers; moving/private aliases remain unknown.
 

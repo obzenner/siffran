@@ -19,7 +19,7 @@ import * as path from "node:path";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 
-import type { Dispatch, HostFailure, InvocationProvenance, Request, Response, RunSelector } from "./contract.ts";
+import { isTerminalBatch, type Dispatch, type EvaluateIntent, type HostFailure, type InvocationProvenance, type Request, type Response, type RunSelector } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
 import type { RetrievalKind } from "./audit-retrieval.ts";
 import { confirmEvidence, evidenceConfirmationWait, evidenceHostFailure, observeSurface } from "./evidence-ui.ts";
@@ -27,6 +27,7 @@ import { govern, governanceTimeout, piGovernanceContext, refreshGovernance, sett
 import type {
   ExtensionAPI,
   ExtensionContext,
+  BoundaryEvent,
   ToolCallEvent,
   ToolCallResult,
   ToolResultEvent,
@@ -58,6 +59,7 @@ import { admitAuditPreflight, withoutThinkingLevel } from "./preflight-seam.ts";
 import { loadInventory, type SubagentInventory } from "./subagent-inventory.ts";
 import { PUBLIC_TOOLS } from "./public-tools.ts";
 import { startObserver, type ObserverServer } from "./observer-ui.ts";
+import { turnEnd, type Basis } from "./turn-end.ts";
 import {
   REPORT_CONVERGENCE_INTENT,
   REPORT_CONVERGENCE_TOOL,
@@ -392,6 +394,9 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     const ownerDetail = (refusal: OwnerRefusal): string => `${refusal.code}: ${refusal.message}`;
 
     const completedAuditCalls = new Set<string>();
+    // The Pi turn-end bound (`turn-end.ts`): adapter memory only, never run state.
+    let toolResultsSeen = 0;
+    let lastContinuation: Basis | null = null;
     type ChildCorrelation = { runHandle: string; childId: string; nativeId: string };
     const children = new Map<string, ChildCorrelation>();
     const reportEvaluations = new Map<string, { intent: string; response: Response }>();
@@ -542,6 +547,26 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     const resultText = (response: Response): string => renderAuthorView(response.result);
     let governanceDialog = false;
     let evidenceDialog = false;
+    /**
+     * Evaluate a report or a stop with what this host can show a human observed first (the Python twin is
+     * `PublicTools._evaluate_observed`; the two differ only in how they reach the core). A host that could not observe says so
+     * with the evaluation (`reported`). A stop of an auto run asks nothing and needs no look: only when the core answers a stop
+     * with the consent to end a deliberative run (a terminal batch) does the host look, and evaluate once more. `mayAsk` is
+     * whether the host may now ask a human: it looked and recorded its surface, or it is a stop that needs no look.
+     */
+    const evaluateObserved = async (handle: string, intent: EvaluateIntent, ctx: ExtensionContext, trustedIngress: typeof trusted) => {
+      const look = async () => {
+        const recorded = await observeSurface(handle, ctx, trustedIngress);
+        return { mayAsk: recorded, reported: recorded ? undefined : "surface_unrecorded" as HostFailure };
+      };
+      let seen = intent === "stop" ? { mayAsk: true, reported: undefined as HostFailure | undefined } : await look();
+      let response = await dispatch(evaluateRunRequest(handle, intent, randomUUID(), seen.reported));
+      if (intent === "stop" && "run" in response.result && isTerminalBatch(response.result.run?.confirmation_batch)) {
+        seen = await look();
+        response = await dispatch(evaluateRunRequest(handle, intent, randomUUID(), seen.reported));
+      }
+      return { response, ...seen };
+    };
     if (pi.registerTool) {
       pi.registerTool({
         name: REPORT_CONVERGENCE_TOOL,
@@ -766,6 +791,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     // The verdict is parsed from the exact correlated foreground child result. Redaction happens
     // synchronously before the first await; only adapter-private ingress can admit the candidate.
     pi.on("tool_result", async (event: ToolResultEvent) => {
+      toolResultsSeen += 1;
       const ordinary = children.get(event.toolCallId);
       if (ordinary) {
         children.delete(event.toolCallId);
@@ -965,11 +991,11 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       if (runHandle === null) return; // no run to gate against
       try {
         const intent = event.input.intent === "stop" ? "stop" : REPORT_CONVERGENCE_INTENT;
-        const surfaceRecorded = intent !== REPORT_CONVERGENCE_INTENT || await observeSurface(runHandle, ctx, trusted);
-        let reported: HostFailure | undefined = surfaceRecorded ? undefined : "surface_unrecorded";
-        let response = await dispatch(evaluateRunRequest(runHandle, intent, randomUUID(), reported));
-        if (intent === REPORT_CONVERGENCE_INTENT && surfaceRecorded && !evidenceDialog) {
-          // The end of a pass: a block that waits on the human is presented once, then re-evaluated.
+        const evaluated = await evaluateObserved(runHandle, intent, ctx, trusted);
+        let { response, reported } = evaluated;
+        if (evaluated.mayAsk && !evidenceDialog) {
+          // The end of a pass (and the end of a deliberative run, ADR-0063): a block that waits on the human is
+          // presented once, then re-evaluated.
           evidenceDialog = true;
           const handle = runHandle;
           try {
@@ -996,6 +1022,25 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           reason: `empirica gate unavailable (failing closed): ${describe(error)}`,
         };
       }
+    });
+
+    // (agent_before_settle) The turn end of an active run is the registry's turn-end table (ADR-0068, `turn-end.ts`). This
+    // is the only turn-end boundary the adapter acts on (never `turn_end`), so one settle carries one notice. The run is
+    // read through the same guarded dispatch as the gate; an unreadable run ends the turn with nothing appended, because
+    // the gate at `tool_call` still holds.
+    pi.on("agent_before_settle", async (event: BoundaryEvent) => {
+      if (runHandle === null) return;
+      let action;
+      try {
+        const response = await dispatch(evaluateRunRequest(runHandle, REPORT_CONVERGENCE_INTENT, randomUUID()));
+        action = turnEnd(response.result, toolResultsSeen, lastContinuation);
+      } catch { lastContinuation = null; return; }
+      lastContinuation = action.kind === "continue" ? action.basis : null;
+      if (action.kind === "nothing") return;
+      const text = action.kind === "continue" ? action.message : action.notice;
+      if (action.kind === "no-progress") pi.appendEntry?.("empirica.turn_end", { outcome: "no-progress" });
+      const entries = [...event.entries, { type: "custom_message" as const, customType: "empirica.turn_end", content: text, display: true }];
+      return action.kind === "continue" ? { entries, continue: true } : { entries };
     });
 
     // (session_before_compact) Restore the run state after compaction — only if

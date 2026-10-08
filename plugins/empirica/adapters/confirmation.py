@@ -22,6 +22,8 @@ from uuid import uuid4
 
 from adapters import bridge
 from application import protocol
+from core.confirmation import is_terminal
+from core.evaluation import TERMINAL_STATUSES, terminal_key
 from core.projection import project_host_failure, project_prompt_error
 
 #: A decision's answer is at most this long (``evidenceConfirmationPayload``); a research note may be longer.
@@ -79,6 +81,12 @@ def build_items(argument: Mapping[str, Any], batch: Mapping[str, Any]) -> list[d
     text = {row["claim_id"]: row for row in argument.get("claims", ())}
     research = {row["artifact_id"]: row for row in argument.get("artifacts", ()) if row.get("kind") == "research"}
     items: list[dict[str, Any]] = []
+    if is_terminal(batch):
+        # The terminal step of a deliberative run (ADR-0063 amendment): one decision, no claim of the argument.
+        terminal = batch["terminal"]
+        return [{"subject": "claim", "id": terminal["status"], "digest": terminal["digest"],
+                 "text": f"End this run as {terminal['status']}, without converging? Approve to end it now; Reject "
+                         "or Later keeps it active and nothing is ended."}]
     for claim_id in batch.get("claim_ids", ()):
         if claim_id in text:
             items.append({"subject": "claim", "id": claim_id, "digest": text[claim_id]["wording_digest"],
@@ -109,20 +117,36 @@ def observe_surface(profile: str, run_id: str, can_present: bool, *,
     return OK if isinstance(result, dict) and result.get("type") != "Fault" else SURFACE_UNRECORDED
 
 
+def genuine_terminal(batch: Mapping[str, Any]) -> bool:
+    """Whether a terminal batch is internally the core's: a status it ends runs as, and the key it derives from that status
+    and digest. What a caller adds or edits breaks one of the two."""
+    ended = batch["terminal"]
+    return (ended.get("status") in TERMINAL_STATUSES and isinstance(ended.get("digest"), str)
+            and batch.get("key") == terminal_key(ended["status"], ended["digest"]))
+
+
 def present(profile: str, run_id: str, *, dispatch: Callable[..., dict] = bridge.handle,
             ingress: Callable[..., dict] = bridge.trusted_evidence_presentation,
-            ) -> tuple[str, list[dict[str, Any]]] | Outcome:
+            terminal: Mapping[str, Any] | None = None) -> tuple[str, list[dict[str, Any]]] | Outcome:
     """Record the presentation of the core's current batch, then return ``(receipt_id, items)``.
 
-    The batch is read from the run, never supplied by the caller, and the presentation names its key: the core
-    admits it only while that is still the current batch, so what is recorded as shown is exactly what the human
-    sees. When the batch changed in between the host reads again and tries once more; a second change shows
+    The batch is read from the run, or is the core's own terminal batch of the evaluation in hand (``terminal``, checked
+    below); the presentation names its key, and the core admits it only while that is still the current batch, so what is
+    recorded as shown is exactly what the human sees. When the batch changed in between the host reads again and tries once more; a second change shows
     nothing and spends nothing. Anything else (the core refuses: already presented, interaction limit, nothing
     pending; or the ingress faults, or raises) is ``PRESENTATION_FAILED``: the caller shows nothing, and the core's
     own re-evaluation words the refusal it knows (``already_presented`` and ``interaction_limit`` outrank the
-    host's report)."""
-    for _attempt in range(2):
-        batch = presentable(_call(profile, run_id, {"type": "GetRun"}, dispatch))
+    host's report).
+
+    ``terminal`` is the terminal batch of the evaluation in hand (its ``confirmation_batch`` when that carries
+    ``terminal``): the end of a deliberative run is asked by the evaluation that reaches it, so no later read of the run
+    shows it. It is shown once, and only when it is the core's own: its status is one the core ends a run as and its key is
+    the key of its status and digest (``terminal_key``), so a status or digest the core never derived is never rendered; the
+    core still admits the presentation only while that key is current."""
+    if terminal is not None and not (is_terminal(terminal) and genuine_terminal(terminal)):
+        return PRESENTATION_FAILED
+    for _attempt in range(1 if terminal else 2):
+        batch = terminal if terminal else presentable(_call(profile, run_id, {"type": "GetRun"}, dispatch))
         argument = _call(profile, run_id, {"type": "GetArgument"}, dispatch).get("argument") if batch else None
         items = build_items(argument, batch) if batch and isinstance(argument, dict) else []
         if not items:
@@ -295,7 +319,9 @@ class HostConfirmation:
             return None
         run_id = result["run"]["id"]
         try:
-            shown = present(self.profile, run_id, dispatch=self._dispatch, ingress=self._presentation)
+            batch = presentable(result)
+            shown = present(self.profile, run_id, dispatch=self._dispatch, ingress=self._presentation,
+                            terminal=batch if is_terminal(batch) else None)
         except Exception:  # noqa: BLE001 - nothing was recorded as shown
             return PRESENTATION_FAILED
         if isinstance(shown, Outcome):

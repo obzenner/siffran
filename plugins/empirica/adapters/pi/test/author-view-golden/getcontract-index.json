@@ -3,7 +3,7 @@
     "type": "Allow",
     "contract_result": {
       "target": "index",
-      "digest": "sha256:7792155a1fd120995a9505f632bfdba1d55553f06e487ee14147e1a5a49729b5",
+      "digest": "<contract-digest>",
       "index": {
         "id": "empirica/public",
         "version": "3.0.0",
@@ -134,6 +134,12 @@
           },
           {
             "code": "graph.invalid",
+            "sections": [
+              "claims/graph"
+            ]
+          },
+          {
+            "code": "graph.root_not_gating",
             "sections": [
               "claims/graph"
             ]
@@ -386,6 +392,12 @@
           },
           {
             "code": "governance.decision_conflict",
+            "sections": [
+              "governance"
+            ]
+          },
+          {
+            "code": "governance.terminal_stop_pending",
             "sections": [
               "governance"
             ]

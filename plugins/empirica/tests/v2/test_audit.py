@@ -220,7 +220,7 @@ class AuditTests(ConformanceCase):
                             "audit cannot manufacture machine evidence: C1 remains non-approved")
         # Run never converges: exact Allow converged=false and stopped_frozen (deferred
         # C1 needs-experiment cannot converge); no .get fallback.
-        ev = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
+        ev = self.end_run(drv, run_id, "report_convergence")
         result = self.assert_allow(ev, converged=False)
         self.assert_status(result["run"], "stopped_frozen")
 
@@ -278,7 +278,7 @@ class AuditTests(ConformanceCase):
         self.assertEqual(audit_row["missing"]["parameters"],
                          stale_result["reasons"][0]["parameters"])
         self.assertEqual(audit_row["next"], stale_result["reasons"][0]["next_actions"])
-        terminal = self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))["result"]["run"]
+        terminal = self.stop(drv, run_id)["result"]["run"]
         terminal_audit = next(row for row in terminal["obligations"]["active"]
                               if row["id"] == "obligation.audit")
         self.assertEqual(terminal_audit["missing"]["code"], "audit.failed")
@@ -505,10 +505,39 @@ class AuditTests(ConformanceCase):
                          "freeze.deferred residual deferred_scope_digest must match ArgumentView")
         # Evaluate remains exact stopped_frozen, converged=false; deferred scope cannot
         # become convergence.
-        ev = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
+        ev = self.end_run(drv, run_id, "report_convergence")
         result = self.assert_allow(ev, converged=False)
         self.assert_status(result["run"], "stopped_frozen")
 
+
+    def test_a_consent_to_end_leaves_the_audit_it_follows_current(self):
+        """HQ-G9-10 (ADR-0063 amendment): the human's consent to end is recorded after the audit the end depends on, and it is
+        not part of the dossier that audit bound: the review state and the argument digest are the same afterwards."""
+        drv = self.bind_driver("D9", "case-36", "A consent to end a deliberative run does not stale the audit it follows")
+        run_id = self.start_run(drv, goal=self.GOAL)
+        self.require_audit_scope(drv, run_id, deferred_kind="ordinary")
+        child_id = self.require_pending_audit_child(drv, run_id)
+        self.require_trusted_audit_attribution(drv, run_id, child_id, variant="distinct")
+        payload = self.build_audit_verdict_payload(drv, run_id, verdict="pass", scope_review="pass")
+        self.assert_valid_response(drv.trusted_audit_verdict(run_id, child_id, payload))
+        before = self.assert_argument_view(self.dispatch(drv, get_argument(run_id=run_id))["result"])
+        self.assert_audit_view(before, state="passed", independence="distinct")
+        asked = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))["result"]
+        self.assertEqual([r["code"] for r in asked["reasons"]], ["governance.terminal_stop_pending"])
+        drv.trusted_human_surface(run_id, "human")
+        batch = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))["result"]["run"]["confirmation_batch"]
+        shown = drv.trusted_evidence_presentation(run_id, {"run_id": run_id, "receipt_id": "t1", "key": batch["key"]})["result"]
+        self.assertEqual(shown["type"], "Allow")
+        decision = {"subject": "claim", "claim_id": batch["terminal"]["status"], "claim_digest": batch["terminal"]["digest"],
+                    "outcome": "approve"}
+        answered = drv.trusted_evidence_confirmation(run_id, {"run_id": run_id, "receipt_id": "t1", "decisions": [decision]})["result"]
+        self.assertEqual(answered["type"], "Allow")
+        after = self.assert_argument_view(self.dispatch(drv, get_argument(run_id=run_id))["result"])
+        self.assertEqual(self.assert_audit_view(after, state="passed", independence="distinct")["reviewed_argument_digest"],
+                         after["argument_digest"], "the audit still reviews the current argument")
+        self.assertEqual(after["argument_digest"], before["argument_digest"])
+        ended = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
+        self.assert_status(self.assert_allow(ended, converged=False)["run"], "stopped_frozen")
 
     def test_dossier_carries_goal_route_investigation_witnesses_unfrozen(self):
         """Rubric inputs: unfrozen dossier carries goal text, non-null route/investigation

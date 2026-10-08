@@ -2,7 +2,7 @@
 // evaluated by jiti with the host's own packages served as virtual modules and native resolution
 // disabled; the owner's preflight is `.ts` under `node_modules/`, which native Node refuses to load.
 // The other owner tests run under native Node, so this one loads runtime-owner.ts through the repo's
-// jiti exactly as Pi's extension loader does (Pi 0.87.1 `dist/core/extensions/loader.js:405-414`:
+// jiti exactly as Pi's extension loader does (Pi `dist/core/extensions/loader.js`:
 // `virtualModules`, `tryNative: false`, `moduleCache: false`) and binds a fixture owner whose
 // preflight imports the host peer `@earendil-works/pi-coding-agent`.
 

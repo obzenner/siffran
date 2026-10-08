@@ -13,6 +13,7 @@ from application.protocol import (
     untrusted_delimiters,
     validate_public_result,
 )
+from core.confirmation import is_terminal
 from core.freshness import valid_claim_id
 from core.governance import CEILINGS
 from core.projection import safe_text
@@ -296,6 +297,8 @@ def _waiting(run: dict[str, Any], safety: TextSafety) -> tuple[str, ...]:
         *(f"  {_LABELS['waiting_record']} {row['source_kind']} {safety.untrusted(row['source_ref'])} "
           f"{_LABELS['waiting_for_claim']} {safety.claim_id(row['claim_id'])}" for row in batch["records"]),
         *(f"  {_LABELS['waiting_claim']} {safety.claim_id(claim_id)}" for claim_id in batch["claim_ids"]),
+        # The terminal step of a deliberative run asks about the run, not about a claim; the status is the core's own word.
+        *((f"  {_LABELS['waiting_terminal']} {batch['terminal']['status']}",) if is_terminal(batch) else ()),
         f"  {_LABELS[_WAIT_STATE[batch['prompt_error']]]}",
     )
 

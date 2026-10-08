@@ -32,7 +32,7 @@ Every Pi, Claude or pi-subagents release forced an edit of several files and a n
 
 ## Decision Outcome
 
-Four decisions, G5-R1 to G5-R4. G5-R3 is recorded as not built (below).
+Four decisions, G5-R1 to G5-R4, and the host range (G9-R1). G5-R3 is recorded as not built (below).
 
 ### G5-R1 Profile ids never carry a version
 
@@ -54,6 +54,14 @@ A profile id is the host id (`claude-code`, `codex-cli`) or, for a host with an 
 
 The decision was to let a `web` record be confirmed by the audit when the auditor's own transcript shows a successful `WebFetch` for that exact `source_ref`. Its premise was checked first and did not hold well enough to build: the transcript path and WebFetch's availability to a background subagent are documented, but no captured child transcript exists with a `WebFetch` result, and the tools reference says a cross-host redirect is returned as an ordinary text result that names the target instead of following it, so a successful result is not proof the named URL was retrieved. ADR-0067's rule stays: a web record is confirmed by the audit only when the start-time `audit_retrieval` contains `web`, which no host grants, so web evidence goes to a human or ends residual. The evidence and the proposed capture are in PROGRESS ("G5 item 3"). Nothing in this ADR depends on it.
 
+### G9-R1 Pi is supported from 1.0.0, and nothing older is kept
+
+The Pi interval is `>=1.0.0,<2.0.0` and the qualified version stays `1.1.0`. Empirica acts at `agent_before_settle` (ADR-0068), whose `BoundaryResult` is not in every older Pi, and a single floor lets the adapter use it without a fallback. 5.0.0 is unreleased and carries no compatibility (ADR-0067), so every artifact that served a Pi below 1.0.0 goes: the profile's `compatibility.minimum`, the versions of `make empirica-pi-api-typecheck` (it keeps 1.0.0 and 1.1.0), shims and version branches in the Pi adapters, and the fixtures and prose that named 0.84.1, 0.86 or 0.87. A Pi below 1.0.0 is outside the interval; there is no run-start refusal for it (ADR-0052: compatibility is enforced at receipt capture and verification), but no code or test supports it. Methodologist declares the same Pi interval and follows the same rule. pi-subagents is a different package with its own range and is not affected. ADR-0052's two 2026-10-08 amendments carry the same floor.
+
+### G10-R1 Empirica has no Codex host in 5.0.0
+
+The `codex-cli` profile was never completed: Codex cannot observe the resolved auditor model, so convergence could not be supported, and the package was only ever an adapter-development aid. Empirica is therefore withheld from the Codex marketplace (`.agents/plugins/marketplace.json` lists Methodologist only), `scripts/validate_codex_adapter.py` fails if the entry returns, and the user-facing documents say Empirica does not run on Codex. The Codex package, adapter, hooks file, profile and their tests stay in the tree, dormant, until a later round removes them. Methodologist's Codex package is unchanged.
+
 ### G5-R4 The registry is data, the design document is prose, and the tables are generated
 
 `contracts/empirica/v2/host-boundaries.json` keeps only what is checked: boundary ids and names, expectation ids with their boundary, title, control-mode flag, `outcomes` (per host) and `outcomes_by_mode`, scenario ids and `sources`; and for each scenario its modes, setup, action, expected result, `covered_by`, `live_only` and `ledger_rows`. The prose that duplicated the design document (trigger, obligation, failure policy, recovery, visibility, forbidden substitutions, boundary definitions and mechanisms, the closed vocabularies) lives only in `doc/design/empirica-host-boundary-registry.md`. The parts of the document that come from the registry (each expectation's outcomes, scenario list and sources, and the acceptance matrix) sit between `BEGIN GENERATED` / `END GENERATED` markers and are written by `make registry-doc` (`scripts/registry_doc.py`); `make contract-check` fails if a region differs from what the generator writes. The validator keeps unique ids, resolving references, existing `covered_by` tests, existing ledger rows, the control-mode axis on the Stop, governance, report and surface-observation boundaries, and a negative for each of those rules. The mandatory fields and closed vocabularies of the earlier draft are not enforced.
@@ -64,7 +72,7 @@ The decision was to let a `web` record be confirmed by the audit when the audito
 * Good, because the registry and its document cannot drift, and the prose exists once.
 * Bad, because an unreviewed pi-subagents release runs with only the reviewed read-only `subagent` actions allowed during a run; the run view says so on every view.
 * Bad, because the range's upper end is a judgment (`1.0.0`) that a human must move.
-* Neutral: Claude Code and Pi host ranges were already ranges (ADR-0052) and are unchanged.
+* Neutral: Claude Code and Pi host ranges were already ranges (ADR-0052); the Pi range moved to 1.0.0 and later (G9-R1).
 
 ## Confirmation
 

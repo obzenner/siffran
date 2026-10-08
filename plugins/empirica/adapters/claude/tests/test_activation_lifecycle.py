@@ -25,7 +25,7 @@ HOOKS = PLUGIN / "hooks"
 if str(PLUGIN) not in sys.path:
     sys.path.insert(0, str(PLUGIN))
 
-from application.protocol import host_profile_id  # noqa: E402
+from application.protocol import host_profile_id, stored  # noqa: E402
 CLAUDE_PROFILE = host_profile_id("claude-code")
 
 _ENTRYPOINTS = {
@@ -187,7 +187,7 @@ class HookNativeBehaviorTests(unittest.TestCase):
     def test_run_start_injects_handle_and_public_tool_contract(self) -> None:
         from adapters.claude import lifecycle
 
-        result = json.loads((_FIXTURES / "start-bootstrap-allow.json").read_text())["expected"]["result"]
+        result = stored(json.loads((_FIXTURES / "start-bootstrap-allow.json").read_text()))["expected"]["result"]
         result["run"]["id"] = "er2:opaque:checksum"
         response = _typed(result)
         output = io.StringIO()

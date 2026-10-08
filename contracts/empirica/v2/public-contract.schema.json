@@ -787,6 +787,7 @@
         "budget_exhausted",
         "evidence_report",
         "paused_for_human",
+        "paused_for_evidence",
         "unattended_continue"
       ],
       "properties": {
@@ -811,6 +812,10 @@
           "type": "string",
           "minLength": 1,
           "pattern": "^[^{}]*\\{reason\\}[^{}]*$"
+        },
+        "paused_for_evidence": {
+          "type": "string",
+          "minLength": 1
         },
         "unattended_continue": {
           "type": "string",
@@ -873,6 +878,7 @@
             "waiting",
             "waiting_record",
             "waiting_claim",
+            "waiting_terminal",
             "waiting_for_claim",
             "waiting_none_error",
             "waiting_unavailable",
@@ -1061,6 +1067,10 @@
               "minLength": 1
             },
             "waiting_claim": {
+              "type": "string",
+              "minLength": 1
+            },
+            "waiting_terminal": {
               "type": "string",
               "minLength": 1
             },

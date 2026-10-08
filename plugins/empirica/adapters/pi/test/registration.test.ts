@@ -10,6 +10,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { renderAuthorView } from "../src/author-view.ts";
+import { readStoredText } from "./stored.ts";
 import { createEmpiricaExtension, DEFAULT_SKILLS_DIR } from "../src/index.ts";
 import type { Response } from "../src/contract.ts";
 import type { Request } from "../src/contract.ts";
@@ -154,7 +155,7 @@ test("empirica_observe configure_run fails closed when the governance ingress th
 // QUAL-2 C5 measures the final rendered text returned after mediation. The same measured
 // ceiling is enforced by Python and Pi.
 const POST_MEDIATION_CEILING = 1200;
-const APPROVED_CONFIGURE = JSON.parse(readFileSync(
+const APPROVED_CONFIGURE = JSON.parse(readStoredText(
   path.join(HERE, "fixtures", "approved-configure-runview.json"), "utf8")) as
   { type: string; converged: boolean; run: { id: string; governance: Record<string, unknown> } };
 const PRESENTATION = { dialog: {
@@ -215,7 +216,7 @@ function mediatedObserve(choice: "approve" | "dismiss"): {
 test("Pi rendered-text ceiling matches Python and covers audit-pending and terminal views", () => {
   assert.equal(POST_MEDIATION_CEILING, 1200, "Pi and Python must share the measured ceiling");
   for (const name of ["block-pending-audit", "allow-converged"]) {
-    const golden = JSON.parse(readFileSync(
+    const golden = JSON.parse(readStoredText(
       path.join(HERE, "author-view-golden", `${name}.json`), "utf8"));
     const text = renderAuthorView(golden.result);
     assert.equal(text, golden.text, `${name} must measure the final rendered text`);

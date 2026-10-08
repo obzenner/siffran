@@ -26,7 +26,7 @@ from application.protocol import (  # noqa: E402
     untrusted_delimiters,
     validate_public_result,
 )
-from application.protocol import host_profile_id  # noqa: E402
+from application.protocol import host_profile_id, stored  # noqa: E402
 PI_PROFILE = host_profile_id("pi")
 
 
@@ -71,7 +71,7 @@ ARGUMENT_FIXTURES = [
 
 
 def _load_fixture(name: str) -> dict:
-    return json.loads((FIXTURES / f"{name}.json").read_text())["expected"]["result"]
+    return stored(json.loads((FIXTURES / f"{name}.json").read_text()))["expected"]["result"]
 
 
 class NoFallbackTests(unittest.TestCase):
@@ -86,8 +86,8 @@ class NoFallbackTests(unittest.TestCase):
                 f"{name}: renderer fell back to compact JSON")
 
     def test_governance_proposal_without_rationale_never_renders_as_a_view(self):
-        golden = json.loads((PLUGIN / "adapters/pi/test/author-view-golden/governance-approved.json")
-                            .read_text())["result"]
+        golden = stored(json.loads((PLUGIN / "adapters/pi/test/author-view-golden/governance-approved.json")
+                                   .read_text()))["result"]
         placeholder = json.loads(json.dumps(golden))
         placeholder["run"]["governance"]["proposal"]["rationale"] = None
         self.assertNotEqual(render_author_view(placeholder, strict=True), _fallback(placeholder))
@@ -100,7 +100,7 @@ class NoFallbackTests(unittest.TestCase):
         mode: a renderer/schema disagreement raises instead of hiding behind the fallback."""
         rendered = 0
         for path in sorted(FIXTURES.glob("*.json")):
-            result = json.loads(path.read_text()).get("expected", {}).get("result")
+            result = stored(json.loads(path.read_text())).get("expected", {}).get("result")
             if not validate_public_result(result):
                 continue
             text = render_author_view(result, strict=True)
@@ -195,7 +195,7 @@ class RedirectedObligationTests(unittest.TestCase):
     GOLDEN = ROOT / "plugins" / "empirica" / "adapters" / "pi" / "test" / "author-view-golden"
 
     def test_redirected_obligation_names_the_blocking_claim(self):
-        golden = json.loads((self.GOLDEN / "block-open-claim-redirected.json").read_text())
+        golden = stored(json.loads((self.GOLDEN / "block-open-claim-redirected.json").read_text()))
         row = next(row for row in golden["result"]["run"]["obligations"]["active"]
                    if row["id"] == "claim:G0")
         self.assertEqual(row["missing"]["target_claim_id"], "S1")
@@ -207,7 +207,7 @@ class RedirectedObligationTests(unittest.TestCase):
 
     def test_unredirected_obligation_renders_the_bare_code(self):
         for name in ("block-open-claim", "audit-mixed"):
-            result = json.loads((self.GOLDEN / f"{name}.json").read_text())["result"]
+            result = stored(json.loads((self.GOLDEN / f"{name}.json").read_text()))["result"]
             text = render_author_view(result, strict=True)
             rows = [row for row in result["run"]["obligations"]["active"] if row["missing"]]
             self.assertTrue(rows, name)
@@ -561,7 +561,7 @@ class ContractLabelTests(unittest.TestCase):
         rendered = []
         with mock.patch.object(author_view, "_LABELS", tagged):
             for path in sorted(self.GOLDEN.glob("*.json")):
-                rendered.append(render_author_view(json.loads(path.read_text())["result"]))
+                rendered.append(render_author_view(stored(json.loads(path.read_text()))["result"]))
         text = "\n".join(rendered)
         self.assertEqual([key for key in tagged if f"[{key}]" not in text], [])
 
@@ -676,7 +676,7 @@ class PendingEvidenceGoldens(unittest.TestCase):
 
     def test_each_state_renders_the_same_normally_and_strictly_with_recovery_and_no_digest(self):
         for name, calls in self.RECOVERY.items():
-            result = json.loads((self.GOLDEN / f"{name}.json").read_text())["result"]
+            result = stored(json.loads((self.GOLDEN / f"{name}.json").read_text()))["result"]
             if name != "evidence-reason-terminal-residual":
                 self.assertTrue(result["reasons"][0]["parameters"]["record_ids"], name)
             text = render_author_view(result, strict=True)
@@ -687,13 +687,13 @@ class PendingEvidenceGoldens(unittest.TestCase):
                 self.assertIn(call, text, f"{name}: {call}")
 
     def test_an_unobserved_surface_never_says_nobody_can_be_asked_and_leads_with_the_report(self):
-        text = render_author_view(json.loads((self.GOLDEN / "evidence-reason-unobserved.json").read_text())["result"])
+        text = render_author_view(stored(json.loads((self.GOLDEN / "evidence-reason-unobserved.json").read_text()))["result"])
         self.assertNotIn("no human can be asked", text)
         self.assertNotIn("human: confirmation", text)
         self.assertLess(text.index("report_convergence intent=report_convergence"), text.index("report_convergence intent=stop"))
 
     def test_human_text_is_fenced(self):
-        result = json.loads((self.GOLDEN / "evidence-reason-mixed.json").read_text())["result"]
+        result = stored(json.loads((self.GOLDEN / "evidence-reason-mixed.json").read_text()))["result"]
         delimiters = result["run"]["untrusted_delimiters"]
         text = render_author_view(result, strict=True)
         for row in result["run"]["confirmation_batch"]["records"]:

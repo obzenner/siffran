@@ -8,7 +8,7 @@
 // Pi is never installed into the repository: each version's package is fetched with `npm pack` into a
 // scratch directory (or supplied with --roots), and `tsc --noEmit` runs against a throwaway tsconfig.
 //
-// Usage: node scripts/pi_api_typecheck.mjs [--roots '{"0.84.1":"<pi package dir>",...}']
+// Usage: node scripts/pi_api_typecheck.mjs [--roots '{"1.0.0":"<pi package dir>",...}']
 //   versions without a supplied root are fetched from the registry. Exit 1 on any mismatch.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -21,10 +21,9 @@ import { packPackage } from "./lib/npm_fetch.mjs";
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const PI_PACKAGE = "@earendil-works/pi-coding-agent";
 /**
- * The Pi versions whose declarations the mirrors are proven against: the floor, one in between, the 1.0 start,
- * the latest.
+ * The Pi versions whose declarations the mirrors are proven against: the floor (1.0.0, ADR-0069) and the latest.
  */
-export const PI_API_VERSIONS = ["0.84.1", "0.87.1", "1.0.0", "1.1.0"];
+export const PI_API_VERSIONS = ["1.0.0", "1.1.0"];
 export const MIRROR = path.join(repo, "plugins", "empirica", "adapters", "pi", "src", "pi-types.ts");
 /**
  * Every Pi adapter's hand-kept mirror, proven against Pi's own declarations at the versions in `PI_API_VERSIONS` only:

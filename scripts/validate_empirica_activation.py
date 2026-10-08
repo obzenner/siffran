@@ -58,7 +58,7 @@ def pi_interval(profile: dict) -> str:
 PI_PROFILE = pi_profile(json.loads(HOST_PROFILES.read_text(encoding="utf-8")))
 REQUIRED_SKILL_DISCLOSURES = (
     ">=2.1.278,<2.2.0", pi_interval(PI_PROFILE), "external `pi-subagents`", UNREVIEWED_DISCLOSURE,
-    ">=0.146.0,<0.147.0", "empirica_observe", "empirica_read", "report_convergence",
+    "empirica_observe", "empirica_read", "report_convergence",
 )
 
 
@@ -90,17 +90,6 @@ def pi_requirement(peer: str, host_minimum: str) -> str:
     return ">=" + max(match[1], host_minimum, key=_semver)
 
 
-def pi_fallback(requirements: dict[str, str], host_minimum: str) -> tuple[str, str] | None:
-    """``(first Pi that lacks the newest versions, newest version the oldest supported Pi satisfies)``,
-    or ``None`` when every reviewed version runs on the whole Pi interval."""
-    floors = {version: requirement[2:] for version, requirement in requirements.items()}
-    above = sorted({floor for floor in floors.values() if _semver(floor) > _semver(host_minimum)}, key=_semver)
-    if not above:
-        return None
-    fits = [version for version in floors if _semver(floors[version]) <= _semver(host_minimum)]
-    return above[0], max(fits, key=_semver)
-
-
 def readme_runtime_problems(readme_text: str, profile: dict, peers: dict[str, str] | None = None) -> list[str]:
     """How a README misstates which pi-subagents versions are supported (interval, table, fail-closed)
     and which Pi each needs (``peers``: version -> declared pi-ai peer, by default the generated inventories)."""
@@ -130,11 +119,6 @@ def readme_runtime_problems(readme_text: str, profile: dict, peers: dict[str, st
     range_text = f">={policy['minimum']},<{policy['maximum_exclusive']}"
     if range_text not in readme_text:
         problems.append(f"README omits the supported pi-subagents range {range_text}")
-    fallback = pi_fallback(requirements, minimum)
-    if fallback is not None:
-        instruction = f"Pi <{fallback[0]}: `pi-subagents@{fallback[1]}`"
-        if instruction not in readme_text:
-            problems.append(f"README omits the install instruction for older Pi: {instruction}")
     if policy["policy_id"] not in readme_text:
         problems.append(f"README omits the policy id {policy['policy_id']}")
     if UNREVIEWED_DISCLOSURE not in readme_text:

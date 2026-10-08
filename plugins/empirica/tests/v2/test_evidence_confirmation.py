@@ -204,7 +204,7 @@ class EvidenceConfirmationTests(EvidenceFixture):
         self.assertEqual(claim["next"], ["residual.accept"])
         self.assertEqual(self.present(drv, run_id)["type"], "Block")
         self.assertEqual(self.answer(drv, run_id, "r1", confirm(self.last_id(drv, run_id)))["type"], "Block")
-        stopped = self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))["result"]
+        stopped = self.stop(drv, run_id)["result"]
         residual = next(r for r in stopped["run"]["residuals"] if r["code"] == "evidence.confirmation_required")
         self.assertNotIn("human.confirm_evidence", residual["next_actions"])
 
@@ -507,3 +507,34 @@ class EvidenceConfirmationTests(EvidenceFixture):
         blocked = self.audit(drv, run_id, variant="same_model")
         self.assertEqual(blocked["reasons"][0]["code"], "audit.same_model")
         self.assertEqual(self.run_view(drv, run_id)["audit"]["independence"], "same_model")
+
+
+class ViewIsOrderedLikeTheGateTests(EvidenceFixture):
+    """ADR-0067 (2026-10-08, finding F-Q3-2): the run view orders what is owed exactly as the gate does."""
+
+    def test_a_pending_confirmation_on_an_approved_claim_is_not_followed_by_an_offer_to_audit(self):
+        """The Q3 shape: the claim is approved by a verbatim record, a second record waits on a human, nothing was audited.
+        ``EvaluateRun`` answers with the confirmation (the batch comes before the audit gate), so the view must lead
+        with it and must not offer ``child.spawn_auditor``."""
+        drv, run_id = self.start(kind="ordinary")
+        self.research(drv, run_id, "code", CITED_SOURCE[0])
+        self.research(drv, run_id, "web", URL)
+        gate = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))["result"]
+        self.assertEqual([r["code"] for r in gate["reasons"]], ["evidence.confirmation_required"])
+        self.assertEqual([c["state"] for c in self.argument(drv, run_id)["claims"]], ["approved"])
+        view = self.dispatch(drv, get_run(run_id=run_id))["result"]["run"]
+        audit = next(row for row in view["obligations"]["active"] if row["id"] == "obligation.audit")
+        self.assertEqual(audit["status"], "residual")
+        self.assertEqual(audit["missing"]["code"], "evidence.confirmation_required")
+        self.assertNotIn("child.spawn_auditor", audit["next"])
+        self.assertIn("human.confirm_evidence", audit["next"])
+        self.assertEqual(audit["missing"]["parameters"], gate["reasons"][0]["parameters"])
+
+    def test_once_the_human_has_decided_the_view_offers_the_audit(self):
+        """The ordering is the gate's, not a ban: with nothing waiting on a human the audit is what is owed."""
+        drv, run_id = self.start(kind="ordinary")
+        self.research(drv, run_id, "code", CITED_SOURCE[0])
+        view = self.dispatch(drv, get_run(run_id=run_id))["result"]["run"]
+        audit = next(row for row in view["obligations"]["active"] if row["id"] == "obligation.audit")
+        self.assertEqual(audit["missing"]["code"], "audit.required")
+        self.assertIn("child.spawn_auditor", audit["next"])

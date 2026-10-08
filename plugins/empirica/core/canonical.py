@@ -34,3 +34,19 @@ def canonical_json(value) -> str:
 def canonical_digest(value) -> str:
     """Return the SHA-256 identity of canonical UTF-8 JSON bytes."""
     return "sha256:" + hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+
+
+#: What fixtures and goldens store where the public contract's digest belongs. Any edit of the contract changes the digest,
+#: so no stored file holds it; a loader puts the live one in (``application.protocol.stored``) before it validates or compares.
+CONTRACT_DIGEST_PLACEHOLDER = "<contract-digest>"
+
+
+def replace_string_values(value, old: str, new: str):
+    """A copy of a JSON value in which every string equal to ``old`` is ``new`` (keys are never touched)."""
+    if isinstance(value, str):
+        return new if value == old else value
+    if isinstance(value, dict):
+        return {key: replace_string_values(item, old, new) for key, item in value.items()}
+    if isinstance(value, list):
+        return [replace_string_values(item, old, new) for item in value]
+    return value

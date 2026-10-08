@@ -7,7 +7,7 @@ from typing import Any
 
 from core.canonical import canonical_json
 from core.evaluation import (EvaluationSnapshot, active_spike_heads, digest,
-                             frozen_scope_invalid, valid_graph)
+                             frozen_scope_invalid, graph_refusal)
 from core import citations
 from core.freshness import FileObservation, FreshnessContractError, ObservationState, observations_digest
 from core.records import Artifact
@@ -226,7 +226,7 @@ def graph_from_history(state: OperationalState, history: tuple[dict[str, Any], .
         return None
     item = next((a for a in history if a["artifact_id"] == selected), None)
     graph = item.get("graph") if item and item.get("kind") == "graph" else None
-    if not valid_graph(graph):
+    if graph_refusal(graph, admission=False) is not None:
         raise HistoryCorrupt("selected graph is missing, malformed, or structurally invalid")
     if frozen_scope_invalid(state, graph):
         raise HistoryCorrupt("selected graph conflicts with frozen semantic identity")

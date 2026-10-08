@@ -63,7 +63,7 @@ export interface ToolDefinition {
 
 export interface CommandDefinition {
   description: string;
-  /** Pi declares `Promise<void>` in 0.84.1, 0.87.1, 1.0.0 and 1.1.0; a handler that may return nothing is not accepted. */
+  /** Pi declares `Promise<void>` in 1.0.0 and 1.1.0; a handler that may return nothing is not accepted. */
   handler: (args: string, ctx: ExtensionContext) => Promise<void>;
 }
 

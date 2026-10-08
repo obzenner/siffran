@@ -161,8 +161,30 @@ class Decision:
     observations_consulted: bool = False
 
 
+GRAPH_INVALID = "graph.invalid"
+GRAPH_ROOT_NOT_GATING = "graph.root_not_gating"
+
+
+def graph_refusal(value: Any, *, admission: bool = True) -> str | None:
+    """Why ``value`` is not a claim graph, else ``None``: ``graph.invalid`` for a structure the core cannot read, and (when
+    ``admission``) ``graph.root_not_gating`` for a well-formed graph whose root is outside the effective scope.
+
+    The root is the goal-level assurance claim, and a claim's state comes from its own evidence plus its scoped children
+    (ADR-0045), so a root outside the effective scope could never converge: that is an admission rule, applied when a
+    graph is recorded. A graph read back from history is held to the structure only (``admission=False``)."""
+    if not _well_formed_graph(value):
+        return GRAPH_INVALID
+    root = next(claim for claim in value["claims"] if claim["id"] == value["root"])
+    return GRAPH_ROOT_NOT_GATING if admission and not root["gating"] else None
+
+
 def valid_graph(value: Any) -> bool:
-    """Whether ``value`` is a well-formed claim graph (closed shape, bounded claims, edges)."""
+    """Whether ``value`` may be recorded as the claim graph (``graph_refusal`` finds nothing to refuse)."""
+    return graph_refusal(value) is None
+
+
+def _well_formed_graph(value: Any) -> bool:
+    """Whether ``value`` has the closed shape of a claim graph: bounded claims and edges, a root connected to every claim."""
     if not isinstance(value, Mapping) or set(value) != {"root", "claims", "edges"}:
         return False
     claims = value.get("claims")
@@ -279,9 +301,17 @@ def evidence_digest(snapshot: EvaluationSnapshot, claim: dict[str, Any]) -> str:
 DOSSIER_KINDS = frozenset({"research", "spike_request", "spike", confirmation.KIND})
 
 
+def _terminal_consent_record(item: Mapping[str, Any]) -> bool:
+    """A human's answer to the terminal step, not evidence about a claim. It is marked by the core when it records the
+    answer to the presentation of a terminal batch (``_confirmation_artifact``); the name of an id says nothing, because
+    a claim may be called ``stopped_budget``."""
+    return item.get("kind") == confirmation.KIND and item.get("terminal") is True
+
+
 def dossier_artifact_ids(history: tuple[dict[str, Any], ...]) -> list[str]:
-    """Ids of the artifacts the dossier covers, in history order."""
-    return [a["artifact_id"] for a in history if a.get("kind") in DOSSIER_KINDS]
+    """Ids of the artifacts the dossier covers, in history order. The consent to end the run is not among them: it is
+    given after the audit that the end depends on, and must not make that audit stale."""
+    return [a["artifact_id"] for a in history if a.get("kind") in DOSSIER_KINDS and not _terminal_consent_record(a)]
 
 
 def active_spike_heads(
@@ -375,6 +405,10 @@ def _awaiting_human(snapshot: EvaluationSnapshot, research: list[dict[str, Any]]
 
 
 CONFIRMATION_REASON = "evidence.confirmation_required"
+#: The reason a deliberative run's terminal step is blocked on the human's consent (ADR-0063 amendment, ADR-0068).
+TERMINAL_STOP_REASON = "governance.terminal_stop_pending"
+#: What a deliberative run may end as without converging; also the id of the terminal item of a confirmation batch.
+TERMINAL_STATUSES = ("stopped_frozen", "stopped_residual", "stopped_budget")
 
 
 def pending_human(snapshot: EvaluationSnapshot, scope: tuple[str, ...]) -> dict[str, list[str]]:
@@ -394,6 +428,57 @@ def pending_decisions(snapshot: EvaluationSnapshot, derivation: ClaimDerivation)
     return [c["id"] for c in snapshot.graph["claims"]
             if c["id"] in derivation.scope and c["kind"] == "needs-decision"
             and derivation.states[c["id"]] == "blocked"]
+
+
+def terminal_digest(snapshot: EvaluationSnapshot, derivation: ClaimDerivation, status: str) -> str:
+    """What a human's consent to end the run as ``status`` is bound to: the status and the run's derivation, so a changed
+    argument, evidence or frozen scope needs a new answer (the terminal item's wording digest)."""
+    return digest({"terminal": status, "derivation": derivation_digest(snapshot, derivation)})
+
+
+def terminal_key(status: str, wording: str) -> str:
+    """The key of the terminal batch for ``status`` and its wording digest. A host that holds a terminal batch checks it
+    against this before it shows it; the core admits a presentation only while the key is one of its own candidates."""
+    return digest({"terminal": status, "digest": wording})
+
+
+def terminal_consented(snapshot: EvaluationSnapshot, derivation: ClaimDerivation, status: str) -> bool:
+    """Whether a human approved ending the run as ``status`` for this derivation (an accepted receipt of the batch)."""
+    wording = terminal_digest(snapshot, derivation, status)
+    return any(_terminal_consent_record(a) and a.get("claim_id") == status and a.get("claim_digest") == wording
+               and a.get("outcome") == confirmation.APPROVE for a in snapshot.history)
+
+
+def terminal_batch(snapshot: EvaluationSnapshot, derivation: ClaimDerivation, status: str) -> dict[str, Any]:
+    """The batch of a terminal step: the one item asking whether to end the run as ``status``. It holds nothing else
+    (ADR-0063): pending evidence either comes first at a report or is moot at a stop."""
+    wording = terminal_digest(snapshot, derivation, status)
+    return {"key": terminal_key(status, wording), "record_ids": [],
+            "claims": [{"claim_id": status, "claim_digest": wording}], "terminal": {"status": status, "digest": wording}}
+
+
+def pending_terminal(snapshot: EvaluationSnapshot, intent: str) -> str | None:
+    """The ``stopped_*`` status ``intent`` would commit but for the human's consent, when this deliberative run needs it;
+    else ``None``. It is the gate itself run without the consent check, so the batch and the gate cannot disagree."""
+    if (snapshot.graph is None or snapshot.state.status != "active"
+            or snapshot.state.governance["control_mode"] != "deliberative"):
+        return None
+    hypothetical = replace(snapshot, command={"type": "EvaluateRun", "run_id": snapshot.run_id, "intent": intent})
+    decision = _evaluate(hypothetical, hypothetical.command, consent=False)
+    status = decision.intent.state.status
+    return status if decision.result_type == "Allow" and status in TERMINAL_STATUSES else None
+
+
+def batch_candidates(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> list[dict[str, Any]]:
+    """Every batch a presentation may name now: the pending evidence batch, and the terminal batch each intent (a
+    report, a stop) would ask. The presentation names its key, so the host never has to say which step asked."""
+    found = [] if (batch := confirmation_batch(snapshot, derivation)) is None else [batch]
+    for intent in ("report_convergence", "stop"):
+        if (status := pending_terminal(snapshot, intent)) is not None:
+            candidate = terminal_batch(snapshot, derivation, status)
+            if all(candidate["key"] != other["key"] for other in found):
+                found.append(candidate)
+    return found
 
 
 def confirmation_batch(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> dict[str, Any] | None:
@@ -688,13 +773,19 @@ def _confirmation_artifact(snapshot: EvaluationSnapshot, receipt_id: str,
                 "claim_id": record["claim_id"], "claim_digest": record["claim_digest"],
                 **({"note": item["note"]} if "note" in item else {})}
     else:
+        shown = confirmation.presentation(snapshot, receipt_id)
+        ended = ((shown or {}).get("terminal") or {})
         body = {"subject": "claim", "claim_id": item["claim_id"], "claim_digest": item["claim_digest"],
-                **({"answer": item["answer"]} if "answer" in item else {})}
+                **({"answer": item["answer"]} if "answer" in item else {}),
+                # The answer to the terminal item of a presentation is the consent to end; nothing else is marked.
+                **({"terminal": True} if (item["claim_id"], item["claim_digest"]) == (ended.get("status"), ended.get("digest"))
+                   else {})}
     return artifact(confirmation.KIND, {**body, **base, **stamps})
 
 
 def _human_batch_block(snapshot: EvaluationSnapshot) -> Decision | None:
-    """Why no human receipt or presentation is admitted now, else ``None``."""
+    """Why no human receipt or presentation is admitted now, else ``None``. Every record of a human's answer carries the
+    run's route and investigation witnesses, so the consent to end a run is asked only of an investigated run."""
     state = snapshot.state
     blocked = _investigation_block(snapshot)
     if blocked is not None:
@@ -716,17 +807,17 @@ def plan_evidence_presentation(snapshot: EvaluationSnapshot, payload: Mapping[st
         return blocked
     if confirmation.presentation(snapshot, payload["receipt_id"]) is not None:
         return _decision(snapshot, state, "Inert")
-    batch = confirmation_batch(snapshot, derive_claims(snapshot))
+    batch = next((b for b in batch_candidates(snapshot, derive_claims(snapshot)) if b["key"] == payload["key"]), None)
     # The presentation names the batch the host showed; any other (a record joined, a wording changed) is refused
     # and nothing is spent, so what a human was shown is exactly what is recorded as presented.
-    if batch is None or payload["key"] != batch["key"] or confirmation.presented(snapshot, batch["key"]):
+    if batch is None or confirmation.presented(snapshot, batch["key"]):
         return _decision(snapshot, state, "Fault", reason="conflict")
     if governance.interactions_remaining(
             state.governance, confirmation.interactions(snapshot))["total"] == 0:
         return _decision(snapshot, state, "Block", reason="governance.interaction_limit")
     return _decision(snapshot, state, artifacts=(artifact(confirmation.PRESENTATION, {
         "receipt_id": payload["receipt_id"], "key": batch["key"], "record_ids": batch["record_ids"],
-        "claims": batch["claims"],
+        "claims": batch["claims"], **({"terminal": batch["terminal"]} if confirmation.is_terminal(batch) else {}),
         "approval_kind": "host_ui", "route_stamp": state.route_stamp,
         "investigation_stamp": state.investigation_stamp}),))
 
@@ -753,8 +844,8 @@ def plan_evidence_confirmation(snapshot: EvaluationSnapshot, payload: Mapping[st
     others = [a for a in snapshot.history if a.get("kind") == confirmation.KIND
               and a["receipt_id"] == payload["receipt_id"]]
     shown = confirmation.presentation(snapshot, payload["receipt_id"])
-    batch = confirmation_batch(snapshot, derive_claims(snapshot))
-    if others or shown is None or batch is None or shown["key"] != batch["key"]:
+    current = {b["key"] for b in batch_candidates(snapshot, derive_claims(snapshot))}
+    if others or shown is None or shown["key"] not in current:
         return _decision(snapshot, state, "Fault", reason="conflict")
     asked = {("research", r) for r in shown["record_ids"]} | {
         ("claim", c["claim_id"], c["claim_digest"]) for c in shown["claims"]}
@@ -940,7 +1031,13 @@ def _audit_reason(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> 
 
 
 def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> Decision:
-    """Apply one validated command to the snapshot without performing I/O.
+    """Apply one validated command to the snapshot without performing I/O (see ``_evaluate``)."""
+    return _evaluate(snapshot, command, consent=True)
+
+
+def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent: bool) -> Decision:
+    """``consent=False`` is the gate without the deliberative consent to end non-converged (``pending_terminal`` asks what
+    it would have committed); ``evaluate_snapshot`` is the gate itself.
 
     Branches, in order: an invalid frozen scope blocks; a non-active (terminal) run allows only
     reads and ``stop``/``report_convergence`` evaluation and is otherwise ``Inert``; read commands
@@ -1001,8 +1098,11 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                                                 investigation_stamp=state.stamp_seq + 1))
         if akind == "graph":
             graph = action.get("payload")
-            if not valid_graph(graph) or frozen_scope_invalid(state, graph):
-                return _decision(snapshot, state, "Block", reason="graph.invalid")
+            refusal = graph_refusal(graph)
+            if refusal == GRAPH_INVALID or frozen_scope_invalid(state, graph):
+                return _decision(snapshot, state, "Block", reason=GRAPH_INVALID)
+            if refusal is not None:
+                return _decision(snapshot, state, "Block", reason=refusal)
             graph = governance.canonical_graph(graph)
             art = artifact("graph", {"graph": graph})
             return _decision(snapshot, replace(state, selected_graph_artifact_id=art["artifact_id"]),
@@ -1122,12 +1222,22 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
         derivation = derive_claims(snapshot)
         states = [(c, derivation.states[c["id"]]) for c in snapshot.graph["claims"]]
         gating = set(derivation.scope)
+
+        def end(ended: OperationalState) -> Decision:
+            """A step that ends the run without converging: a deliberative run needs the human's consent first
+            (ADR-0063 amendment); the auto modes commit as before. A refusal is never a terminal state."""
+            if (consent and state.governance["control_mode"] == "deliberative"
+                    and not terminal_consented(snapshot, derivation, ended.status)):
+                return decide(state, "Block", reason=TERMINAL_STOP_REASON,
+                              parameters={"status": ended.status, "route": confirmation.human_route(snapshot)})
+            return decide(ended)
+
         if intent == "stop":
             if state.budgets["passes_used"] >= state.budgets["max_passes"]:
-                return decide(replace(state, status="stopped_budget"))
+                return end(replace(state, status="stopped_budget"))
             deferred = [c for c, _ in states if c["id"] not in gating]
             status = "stopped_frozen" if deferred else "stopped_residual"
-            return decide(replace(state, status=status))
+            return end(replace(state, status=status))
         blockers = claim_blockers(snapshot, derivation)
         # Whatever the author can still do alone comes first; the human is asked about the rest.
         blocker = next((b for b in blockers if b["reason"] != CONFIRMATION_REASON), None)
@@ -1155,7 +1265,7 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                           parameters=blocker["parameters"], affected="obligation.audit")
         deferred = [c for c, _ in states if c["id"] not in gating]
         if deferred:
-            return decide(replace(state, status="stopped_frozen"))
+            return end(replace(state, status="stopped_frozen"))
         return decide(replace(state, status="converged"))
 
     return _decision(snapshot, state, "Fault", reason="unsupported")

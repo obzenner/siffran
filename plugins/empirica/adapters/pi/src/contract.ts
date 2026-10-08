@@ -146,8 +146,17 @@ export interface ConfirmationBatch {
   key: string;
   record_ids: string[];
   claim_ids: string[];
+  /** Only the terminal step of a deliberative run: the one item asks whether to end the run as `status`. */
+  terminal?: { status: "stopped_frozen" | "stopped_residual" | "stopped_budget"; digest: string };
   records: { claim_id: string; source_kind: string; source_ref: string }[];
   prompt_error: null | "unavailable" | "unobserved" | "already_presented" | "interaction_limit" | HostFailure;
+}
+
+/** Whether a confirmation batch is the terminal step of a deliberative run (ADR-0063): one item that asks whether to end
+ * the run as `terminal.status`. The one predicate every caller uses (Python: `core.confirmation.is_terminal`). */
+export function isTerminalBatch(batch: unknown): batch is ConfirmationBatch & { terminal: NonNullable<ConfirmationBatch["terminal"]> } {
+  return typeof batch === "object" && batch !== null && typeof (batch as ConfirmationBatch).terminal === "object"
+    && (batch as ConfirmationBatch).terminal !== null;
 }
 
 /** Minimum run fields the guard validates on Allow/Block branches. */

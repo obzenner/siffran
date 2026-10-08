@@ -5,7 +5,34 @@
   "description": "The boundaries between Empirica and its hosts, the expectations that hold at each, and the falsifiable scenarios that prove them (ADR-0068). Each scenario is covered by named tests, or is live-only and names a native-qualification ledger row.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["protocol", "title", "authority", "design_document", "ledger", "control_modes", "boundaries", "expectations", "scenarios"],
+  "required": ["protocol", "title", "authority", "design_document", "ledger", "control_modes", "turn_end", "boundaries", "expectations", "scenarios"],
+  "$defs": {
+    "cell": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome"],
+      "properties": {
+        "outcome": {"type": "string", "minLength": 1},
+        "notices": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z_]*$"}}
+      }
+    },
+    "scenarioIds": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^EHB-[A-Z]+-[0-9]{2}$"}},
+    "hostSurface": {
+      "description": "How one host expresses the outcomes of the table. `table_driven` names the scenario whose test enumerates every cell for this host and reads the expected outcome from this registry.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event", "allow", "settle", "pause", "continue", "loop_bound", "table_driven"],
+      "properties": {
+        "event": {"type": "string", "minLength": 1},
+        "allow": {"type": "string", "minLength": 1},
+        "settle": {"type": "string", "minLength": 1},
+        "pause": {"type": "string", "minLength": 1},
+        "continue": {"type": "string", "minLength": 1},
+        "loop_bound": {"type": "string", "minLength": 1},
+        "table_driven": {"type": "string", "pattern": "^EHB-[A-Z]+-[0-9]{2}$"}
+      }
+    }
+  },
   "properties": {
     "protocol": {"const": "empirica/v2"},
     "title": {"type": "string", "minLength": 1},
@@ -15,6 +42,64 @@
     "control_modes": {
       "description": "The closed control-mode axis: deliberative; interactive auto before and after its first approval; delegated auto.",
       "const": ["deliberative", "auto-interactive-pre", "auto-interactive-post", "auto-delegated"]
+    },
+    "turn_end": {
+      "description": "The turn-end table (ADR-0068): the outcome of a turn end by control mode and run state, the same on every host, and how each host maps the outcomes to its own surface. The `HX-STOP-*` expectations refer to it and the design document renders it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcomes", "states", "hosts"],
+      "properties": {
+        "outcomes": {
+          "description": "The closed outcome vocabulary of the table, with its meaning.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {"type": "string", "minLength": 1}
+        },
+        "states": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "title", "outcomes", "scenarios"],
+            "properties": {
+              "id": {"type": "string", "pattern": "^[a-z][a-z-]*$"},
+              "title": {"type": "string", "minLength": 1},
+              "outcomes": {
+                "description": "One cell per control mode: the outcome, and the keys of the public contract's `settlement_notices` the cell may show.",
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["deliberative", "auto-interactive-pre", "auto-interactive-post", "auto-delegated"],
+                "properties": {
+                  "deliberative": {"$ref": "#/$defs/cell"},
+                  "auto-interactive-pre": {"$ref": "#/$defs/cell"},
+                  "auto-interactive-post": {"$ref": "#/$defs/cell"},
+                  "auto-delegated": {"$ref": "#/$defs/cell"}
+                }
+              },
+              "scenarios": {
+                "description": "For each host, the scenarios that prove this row; together they cover every control mode.",
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["claude", "pi"],
+                "properties": {
+                  "claude": {"$ref": "#/$defs/scenarioIds"},
+                  "pi": {"$ref": "#/$defs/scenarioIds"}
+                }
+              }
+            }
+          }
+        },
+        "hosts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["claude", "pi"],
+          "properties": {
+            "claude": {"$ref": "#/$defs/hostSurface"},
+            "pi": {"$ref": "#/$defs/hostSurface"}
+          }
+        }
+      }
     },
     "boundaries": {
       "type": "array",

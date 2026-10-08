@@ -27,8 +27,7 @@ Ordinary conversation with another model is not a substitute.
    execution settle the parent turn while pending; never poll or respawn. On Pi, invoke exactly
    one canonical plugin-scoped auditor in foreground mode. Do not submit `child_reserve`:
    concrete reservation is a host protocol operation and is intentionally absent from
-   `empirica_observe`. On Codex, finish the evidence-complete turn so the trusted Stop hook can
-   reject the unsupported audit attempt; do not spawn an ordinary child.
+   `empirica_observe`.
 3. Let the host inject the dossier and bind native execution. Do not expose or
    manufacture private correlation material.
 4. The auditor retrieves every record the dossier marks `retrieve: true` (its host is observed to

@@ -289,3 +289,18 @@ Native qualification on Claude and Pi exercises a real initial approval, a human
 locked confirmation, cancellation and wait recovery, and an audit retry. Codex exercises delegated
 sizing without a dialog, envelope refusal, and non-delegated refusal. Native receipts distinguish
 configuration approval from independently audited convergence.
+
+## Amendment (2026-10-08): consent before a deliberative run ends without converging
+
+"Deliberative mode ... every later configuration change returns to the human" left one irreversible change unasked: a `report_convergence` or `stop` whose result is a `stopped_*` status (`stopped_frozen`, `stopped_residual`, `stopped_budget`) ended the run without the human. Qualification Q3 (finding F-Q3-3) ended a deliberative run `stopped_frozen` on its first report, with a deferred root, and nobody was asked.
+
+**Decision.** In deliberative mode such a step asks the human first. Auto modes are unchanged: no dialog, the transition commits as before.
+
+**The mechanism is the existing one: the evidence-confirmation batch of ADR-0067.** The terminal step is one more decision item of that batch, as a `needs-decision` claim is: the same presentation record bound to `confirmation_batch.key`, the same `prompt_error` and interaction ceiling, one receipt of per-item decisions bound to the key and the run's derivation, presented inside `report_convergence` by the same host mechanism (the Claude elicitation, the Pi in-process dialog). The item's id is the status the step would commit (carried in `confirmation_batch.terminal`; `claim_ids` stays empty, because the status is not a claim of the argument), and its wording digest binds the run's argument digest, so a changed run needs a new answer. The core marks the answer to that item as the consent when it records it, so a claim that happens to be named like a status is never mistaken for one. **Order.** At `report_convergence` a pending evidence batch comes first (the gate's own order, ADR-0067): the terminal item is asked only when nothing else is pending, and it is then the only item. For `intent=stop`, pending evidence is moot (the run is ending), so the batch holds only the terminal item. No new port, receipt kind or dialog type is added.
+
+* **Accept.** The receipt enters the evaluation, and the transition commits (`stopped_*`).
+* **Anything else.** Decline, cancel and timeout grant nothing. The run stays `active` and the result is the closed reason `governance.terminal_stop_pending` (parameters: the status and the route). As for evidence, a presentation is spent for its derivation: a changed derivation or the human telling the agent to continue asks again, within the interaction ceiling.
+* **No dialog.** On a host that cannot show one (a route `unavailable`, a failed presentation) the step stays blocked with the same reason. That fails closed: a deliberative run on such a host cannot end non-converged.
+* **Not a terminal state.** No answer other than an accepted receipt produces a terminal state, and a refusal is never one.
+
+Confirmation: per host, tests for accept, decline, cancel, timeout and no UI; a test per auto mode that the step is unchanged; a native qualification row (`terminal_stop_consent`) for Claude and Pi.

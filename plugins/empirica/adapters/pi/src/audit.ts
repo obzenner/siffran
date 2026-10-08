@@ -62,7 +62,7 @@ function redact(value: unknown): unknown {
 export function redactVerdict(event: ToolResultEvent): void {
   event.content = [{ type: "text", text: "[empirica-verdict recorded by host]" }];
   event.details = redact(event.details);
-  // Pi >= 0.99.0 carries a machine-readable copy of the result next to `content` and tells handlers that redact
+  // Pi (1.0.0 and later) carries a machine-readable copy of the result next to `content` and tells handlers that redact
   // `content` to replace it as well (Pi 1.1.0 `types.d.ts`, `ToolResultEvent.structuredContent`). Nothing here
   // consumes it, so it is dropped. Pi 1.1.0's own runner (`runner.js`) also drops it when a handler returns
   // `content` without it; the delete stays because the supported range includes earlier Pi versions and other

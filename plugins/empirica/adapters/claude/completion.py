@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from application.protocol import (
-    BUDGET_EXHAUSTED_NOTICE, EVIDENCE_REPORT_NOTICE, HUMAN_WAIT_NOTICE, PAUSED_FOR_HUMAN_NOTICE,
+    BUDGET_EXHAUSTED_NOTICE, EVIDENCE_REPORT_NOTICE, HUMAN_WAIT_NOTICE, PAUSED_FOR_EVIDENCE_NOTICE, PAUSED_FOR_HUMAN_NOTICE,
     UNATTENDED_CONTINUE_NOTICE, render_notice)
 from core.governance import expected_approval_kind
 from core.projection import ASKABLE
@@ -69,6 +69,9 @@ def _hook_stdout(result: Result) -> str:
 
 
 def _async_audit_wait(result: Result) -> bool:
+    """True only for the single pending async audit of an active run: the turn settles and its result continues the run.
+    The same rule is Pi's `auditPending`, case for case (`adapters/pi/test/fixtures/turn-end-predicates.json`); both require
+    the child to have an id."""
     run = result.run
     return (len(result.reasons) == 1 and result.reasons[0].code == "audit.pending"
         and run is not None and run.status == "active"
@@ -105,7 +108,8 @@ def _evidence_report_directive(result: Result) -> bool:
     """True only when the human confirmation is the sole blocker, a human can be asked, and the batch has not been shown.
 
     In Claude the human can be asked only inside ``report_convergence`` (MCP elicitation), so a Stop that waited would end
-    the turn with nobody asked: the Stop blocks with the directive to report instead. The core returns
+    the turn with nobody asked: an auto Stop blocks with the directive to report instead; a deliberative Stop pauses with
+    ``paused_for_evidence`` (the table is ADR-0068's). The core returns
     ``evidence.confirmation_required`` only when nothing else blocks the run. Only a ``prompt_error`` in
     ``projection.ASKABLE`` is directed (a human may be asked: no dialog is ruled out yet; the core gives such a batch a
     human route, so no route check is needed); any other value means no dialog will come, so the Stop blocks with the
@@ -128,12 +132,12 @@ def _budget_exhausted_wait(result: Result) -> bool:
             and result.reasons[0].code == "budget.exhausted")
 
 
-def _continuation_mode(result: Result) -> str | None:
-    """How a Stop *continuation* of an active run ends, read only from the run view the core returned.
+def _turn_end_mode(result: Result) -> str | None:
+    """How a turn end of an active run goes, read only from the run view the core returned.
 
     ``"pause"`` for deliberative, ``"auto"`` for every ``auto`` run (interactive before or after its first approval,
-    delegated); ``None`` for an unknown view or a run that is not active. The mode table is owned by ADR-0068 and
-    ``HX-STOP-03``."""
+    delegated); ``None`` for an unknown view or a run that is not active. The turn-end table is owned by ADR-0068 and
+    ``turn_end`` in ``host-boundaries.json``."""
     run = result.run
     if run is None or run.governance is None or run.status != "active":
         return None
@@ -157,8 +161,9 @@ def _settlement(notice: str) -> StopResult:
 def stop_result(response: object, *, stop_hook_active: bool) -> StopResult:
     """Translate a core evaluation to the Stop hook's process result; a settlement never claims convergence.
 
-    ``stop_hook_active`` is Claude's signal that this Stop follows a Stop hook's block in the same turn. The mode rules
-    for a continuation, and the condition on which they hold, are owned by ADR-0068 and ``HX-STOP-03``."""
+    The outcome is the cell of the turn-end table (ADR-0068, ``turn_end`` in ``host-boundaries.json``) for the run's
+    control mode and state. A deliberative turn end pauses, first or later, so ``stop_hook_active`` has no role there; it
+    only marks a *later* turn end of an auto chain, which gets the way out (``unattended_continue``)."""
     if not isinstance(response, Response):
         return StopResult(2, stderr="empirica completion gate returned a malformed response\n")
     result = response.result
@@ -174,12 +179,14 @@ def stop_result(response: object, *, stop_hook_active: bool) -> StopResult:
             return _settlement(render_notice(BUDGET_EXHAUSTED_NOTICE, resource=result.reasons[0]["parameters"]["resource"]))
         if _async_audit_wait(result):
             return StopResult(0, stdout=_hook_stdout(result))
-        mode = _continuation_mode(result) if stop_hook_active else None
+        mode = _turn_end_mode(result)
         if mode == "pause":
+            if _evidence_report_directive(result):
+                return _settlement(PAUSED_FOR_EVIDENCE_NOTICE)
             return _settlement(render_notice(PAUSED_FOR_HUMAN_NOTICE, reason=_reason_text(result)))
         if _evidence_report_directive(result):
             return StopResult(2, stderr=EVIDENCE_REPORT_NOTICE + "\n")
-        if mode == "auto":
+        if mode == "auto" and stop_hook_active:
             return StopResult(2, stderr=render_notice(UNATTENDED_CONTINUE_NOTICE, reason=_reason_text(result)) + "\n")
         return StopResult(2, stderr=_reason_text(result) + "\n")
     if kind == "Fault":

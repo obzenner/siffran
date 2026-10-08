@@ -136,7 +136,8 @@
     "evidence_wait": "Empirica is paused: research evidence is waiting for your confirmation, and the run is not converged. No confirmation was granted by this pause. The agent presents it to you at the end of its next pass; if you leave it on Later or close the dialog it is not shown again for the same work, and the run must change or be accepted as a residual.",
     "budget_exhausted": "Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this pause. Stop honestly (report_convergence intent=stop), or in deliberative mode propose a raise for human approval; in auto mode start a fresh run.",
     "evidence_report": "Research evidence is waiting for your confirmation, and the run is not converged. Call report_convergence now: the human is asked inside that call, if this host can show a dialog. No confirmation was granted by this block.",
-    "paused_for_human": "Empirica is paused for you, not converged: {reason} Nothing was approved or confirmed by this pause, and nobody was asked. The run stays open; tell the agent how to proceed, or end it.",
+    "paused_for_human": "Empirica is paused for you, not converged: {reason} Nothing was approved or confirmed by this pause, and nobody was asked. The run stays open: tell the agent to carry out that step, or end the run.",
+    "paused_for_evidence": "Empirica is paused for you, not converged: research evidence is waiting for your confirmation. To continue, tell the agent to call report_convergence: you are asked in that call, if this host can show a dialog. Nothing was approved or confirmed by this pause, and nobody was asked.",
     "unattended_continue": "Empirica is not converged: {reason} Auto mode does not hand the turn back to you: act on it, or end honestly with report_convergence intent=stop."
   },
   "author_view": {
@@ -184,6 +185,7 @@
       "waiting": "Waiting on a human:",
       "waiting_record": "source:",
       "waiting_claim": "decision needed on claim",
+      "waiting_terminal": "decision needed to end the run as",
       "waiting_for_claim": "for claim",
       "waiting_none_error": "a human can be asked at the end of your next pass",
       "waiting_unavailable": "no human can be asked in this session",

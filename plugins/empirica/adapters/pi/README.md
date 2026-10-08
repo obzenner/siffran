@@ -6,7 +6,7 @@ surface as the Claude and Codex adapters and owns no convergence policy.
 ## Capability profile
 
 The promoted profile is qualified on Pi `1.1.0` and admits compatible Pi releases
-`>=0.84.1,<2.0.0`; receipts still record the exact observed Pi version. The profile tier is
+`>=1.0.0,<2.0.0`; receipts still record the exact observed Pi version. The profile tier is
 `foreground_only`, with `promotion_status=promoted` after an installed-host foreground trace reached
 guarded `Allow(converged=true)`. `pi-subagents` is an external prerequisite
 (`pi install npm:pi-subagents@<reviewed version>`), never bundled or loaded by this package; it must
@@ -117,7 +117,11 @@ active, and opens no dialog and makes no private call. Mixed reasons and termina
 deny.
 
 Pi has no native completion veto; the model must call `report_convergence` before making a
-convergence claim. A turn can otherwise finish without a terminal decision.
+convergence claim. The turn end follows the turn-end table of ADR-0068, acted on at
+`agent_before_settle` only (Pi 1.0.0 and later): a deliberative run pauses with one visible notice,
+an auto run is asked to continue with the next obligation, and the adapter ends an auto chain with
+the `unattended_continue` notice when the run's observation basis has not changed since its
+previous continuation (`no-progress`).
 
 ## Validation
 

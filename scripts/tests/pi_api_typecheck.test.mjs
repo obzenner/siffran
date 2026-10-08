@@ -1,6 +1,6 @@
 // The adapter's mirrored Pi API (src/pi-types.ts) against Pi's own declarations. `make
 // empirica-pi-api-typecheck` fetches each reviewed Pi version and runs the same check; here the
-// package roots can be supplied as PI_API_ROOTS='{"0.84.1":"<pi package dir>",...}' (unsupplied
+// package roots can be supplied as PI_API_ROOTS='{"1.0.0":"<pi package dir>",...}' (unsupplied
 // versions are reported, not skipped silently). The looser mirror of 4.0 is kept as a negative
 // control: it must fail against every supplied Pi version.
 import assert from "node:assert/strict";
@@ -38,7 +38,7 @@ test("the throwaway project asserts Pi's ExtensionAPI is assignable to the mirro
   assert.deepEqual(Object.keys(files).sort(), ["check.ts", "tsconfig.json"]);
   assert.match(files["check.ts"], /export const _: Ours = piApi;/);
   assert.deepEqual(JSON.parse(files["tsconfig.json"]).compilerOptions.paths[PI_PACKAGE], ["/x/pi/dist/index.d.ts"]);
-  assert.deepEqual(PI_API_VERSIONS, ["0.84.1", "0.87.1", "1.0.0", "1.1.0"]);
+  assert.deepEqual(PI_API_VERSIONS, ["1.0.0", "1.1.0"]);
   assert.deepEqual(Object.keys(MIRRORS), ["empirica", "methodologist"], "both Pi adapters are proven against Pi's declarations");
   assert.equal(MIRRORS.empirica, MIRROR);
 });

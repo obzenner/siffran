@@ -45,6 +45,35 @@ def render_scenarios(registry: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def render_turn_end(registry: dict) -> str:
+    """The turn-end table (ADR-0068): the vocabulary, the outcome by run state and control mode, each host's surface and
+    the scenarios that prove each row."""
+    table = registry["turn_end"]
+    modes = list(registry["control_modes"])
+    lines = ["| Outcome | Meaning |", "|---|---|"]
+    lines += [f"| `{name}` | {_cell(meaning)} |" for name, meaning in table["outcomes"].items()]
+    lines += ["", "| Run state | " + " | ".join(f"`{mode}`" for mode in modes) + " |", "|---|" + "---|" * len(modes)]
+    for state in table["states"]:
+        cells = []
+        for mode in modes:
+            cell = state["outcomes"][mode]
+            notices = ", ".join(f"`{key}`" for key in cell.get("notices", []))
+            cells.append(f"`{cell['outcome']}`" + (f" ({notices})" if notices else ""))
+        lines.append(f"| {_cell(state['title'])} (`{state['id']}`) | " + " | ".join(cells) + " |")
+    surfaces = ("event", "allow", "settle", "pause", "continue", "loop_bound")
+    lines += ["", "| Host | " + " | ".join(name.replace("_", " ") for name in surfaces) + " | table-driven test |",
+              "|---|" + "---|" * (len(surfaces) + 1)]
+    for host, surface in table["hosts"].items():
+        lines.append(f"| {host} | " + " | ".join(_cell(surface[name]) for name in surfaces)
+                     + f" | `{surface['table_driven']}` |")
+    hosts = list(table["hosts"])
+    lines += ["", "| Run state | " + " | ".join(hosts) + " |", "|---|" + "---|" * len(hosts)]
+    for state in table["states"]:
+        lines.append(f"| `{state['id']}` | " + " | ".join(
+            ", ".join(f"`{sid}`" for sid in state["scenarios"][host]) for host in hosts) + " |")
+    return "\n".join(lines) + "\n"
+
+
 def render_expectation(expectation: dict) -> str:
     """The registry-owned bullets of one expectation block."""
     lines = []
@@ -63,7 +92,7 @@ def render_expectation(expectation: dict) -> str:
 
 def regions(registry: dict) -> dict[str, str]:
     """``{marker key: generated body}`` for every region the document must carry."""
-    found = {"scenarios": render_scenarios(registry)}
+    found = {"scenarios": render_scenarios(registry), "turn_end": render_turn_end(registry)}
     for expectation in registry["expectations"]:
         found[expectation["id"]] = render_expectation(expectation)
     return found

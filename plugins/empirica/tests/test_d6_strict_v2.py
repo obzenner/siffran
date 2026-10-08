@@ -46,7 +46,7 @@ if _REPO_ROOT is None:
 _PLUGIN_ROOT = _REPO_ROOT / "plugins" / "empirica"
 sys.path.insert(0, str(_PLUGIN_ROOT))
 from governance_setup import TEST_INVOCATION, SIZED_RATIONALE  # noqa: E402
-from application.protocol import host_profile_id  # noqa: E402
+from application.protocol import host_profile_id, stored  # noqa: E402
 CLAUDE_PROFILE = host_profile_id("claude-code")
 
 _V2 = _REPO_ROOT / "contracts" / "empirica" / "v2"
@@ -60,8 +60,8 @@ _VALID_ACTIVE_STATE = json.loads(
     (_V2 / "state-fixtures" / "valid-active.json").read_text(encoding="utf-8"))
 
 # Canonical failure-safe projection for every rejected persisted aggregate.
-_BLOCK_CORRUPT_FIXTURE = json.loads(
-    (_V2 / "fixtures" / "block-corrupt-state.json").read_text(encoding="utf-8"))
+_BLOCK_CORRUPT_FIXTURE = stored(json.loads(
+    (_V2 / "fixtures" / "block-corrupt-state.json").read_text(encoding="utf-8")))
 
 _PROTOCOL = _PUBLIC_CONTRACT["protocol"]
 _COMMANDS = list(_PUBLIC_CONTRACT["commands"])
@@ -77,7 +77,7 @@ _DEFAULT_PROFILE = CLAUDE_PROFILE
 _TRUSTED_FIXTURE_REQUESTS: list[dict] = []
 for _fx_name in ("observe-evidence-leaf", "observe-attribution-auditor",
                  "observe-child-event-redacted", "observe-audit-verdict"):
-    _fx = json.loads((_V2 / "fixtures" / f"{_fx_name}.json").read_text(encoding="utf-8"))
+    _fx = stored(json.loads((_V2 / "fixtures" / f"{_fx_name}.json").read_text(encoding="utf-8")))
     _TRUSTED_FIXTURE_REQUESTS.append(_fx["request"])
 
 

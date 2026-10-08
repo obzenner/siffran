@@ -25,7 +25,7 @@
             "audit",
             "audit/independence"
           ],
-          "digest": "sha256:7792155a1fd120995a9505f632bfdba1d55553f06e487ee14147e1a5a49729b5"
+          "digest": "<contract-digest>"
         },
         "obligations": {
           "active": [],

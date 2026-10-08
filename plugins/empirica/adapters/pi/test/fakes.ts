@@ -71,7 +71,7 @@ export class FakePi implements ExtensionAPI {
   /** Set to make ``getCommands`` throw. */
   commandsError: Error | null = null;
 
-  /** First-wins by tool name (Pi 0.87.1 ``extensions/runner.js:370-380``); non-records pass through untouched. */
+  /** First-wins by tool name (Pi ``extensions/runner.js``, first registrant wins); non-records pass through untouched. */
   getAllTools(): ToolInfo[] {
     if (this.inventoryError) throw this.inventoryError;
     const own: ToolInfo[] = [...this.tools.keys()].map((name) => ({ name,

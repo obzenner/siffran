@@ -2,7 +2,7 @@
 
 A plugin collection for [Claude Code](https://docs.claude.com/en/docs/claude-code), [Codex](https://developers.openai.com/codex/), and the [Pi coding agent](https://pi.dev). It packages reusable, methodology-driven workflows: formal reasoning with Methodologist and evidence-backed convergence with Empirica.
 
-The same host-neutral cores power the Claude Code, Codex, and Pi adapters.
+The same host-neutral cores power the Claude Code, Codex (Methodologist only), and Pi adapters.
 Empirica stores operational state under `~/.empirica-plugin` and durable claims
 and evidence in Git shadow refs, leaving project worktrees clean.
 
@@ -49,7 +49,6 @@ the repository marketplace:
 ```sh
 codex plugin marketplace add obzenner/siffran
 codex plugin add methodologist@siffran
-codex plugin add empirica@siffran
 ```
 
 Start a new Codex session after installation. Methodologist's shared `think`
@@ -74,21 +73,7 @@ installing, review
 small MCP adapter. The Methodologist package contains no hooks. Codex's normal
 sandbox and MCP approval policy still apply.
 
-**Empirica on Codex is work in progress and is not supported for convergence.** The exact
-Codex 0.146.0 adapter exposes the canonical public MCP tools and a fail-closed Stop gate for
-adapter development, but Codex cannot independently observe the resolved auditor model. Its
-profile is therefore `observational` with `promotion_status: wip_unsupported`; convergence blocks
-with governance/identity reasons rather than trusting configured argv. Deliberative approval
-is unavailable on Codex; explicit `--auto` can exercise the bounded experimental path but cannot
-prove the auditor identity. Do not rely on the
-experimental Codex package for an Empirica convergence claim:
-
-```text
-$empirica design and verify the retry policy
-```
-
-See [`plugins/empirica/adapters/codex/README.md`](./plugins/empirica/adapters/codex/README.md)
-for the pinned payload contract and hosted-WebSearch visibility limit.
+**Empirica is not available on Codex.** Only Methodologist is offered through the Codex marketplace (ADR-0069 G10-R1).
 
 Codex plugins are not supported in the IDE extension. Install the shared skill
 directly as a repo/user skill there if needed, and use native simple mode only.
@@ -103,7 +88,7 @@ runtime first, then the repository (which carries Empirica, the Methodologist, a
 role):
 
 ```sh
-pi install npm:pi-subagents@0.76.1   # Pi <0.86.1: npm:pi-subagents@0.64.0 (see the table below)
+pi install npm:pi-subagents@0.76.1
 pi install git:github.com/obzenner/siffran
 ```
 
@@ -115,7 +100,7 @@ only the first `subagent` registration, so a second copy is seen through its com
 or when the owner's package or version cannot be verified. A second copy is detected only while its
 extension registers commands; Pi runs and reports the first registrant, and that is the one bound.
 Admitted `pi-subagents` versions are a range, `>=0.50.0,<1.0.0`, under the policy
-`pi-subagents-foreground-audit-v1` (Pi `>=0.84.1,<2.0.0`). A version outside the supported range fails closed:
+`pi-subagents-foreground-audit-v1` (Pi `>=1.0.0,<2.0.0`). A version outside the supported range fails closed:
 `/empirica` and `configure_run` are refused with `host.subagents_version_unsupported` before any run is
 created. Inside the range a version is admitted by what the adapter observes of it, not by a list: its own
 parameter schema must declare every field the audit launch sends, and its live launch preflight must resolve
@@ -129,20 +114,19 @@ reviewed one; reviewing one means adding its compat record, preflight fixture an
 
 | `pi-subagents` | Requires Pi | Native receipt (4.1) | Status |
 |---|---|---|---|
-| `0.50.0` | `>=0.84.1` | pending A9 | reviewed; the 4.0 qualification version |
-| `0.64.0` | `>=0.84.1` | Pi 0.87.1 (A9a, `ebf426f`) | reviewed |
-| `0.74.0` | `>=0.86.1` | pending A9 | reviewed |
-| `0.75.0` | `>=0.86.1` | pending A9 | reviewed |
-| `0.76.1` | `>=0.86.1` | pending A9 | reviewed; the repository's development pin |
+| `0.50.0` | `>=1.0.0` | pending A9 | reviewed; the 4.0 qualification version |
+| `0.64.0` | `>=1.0.0` | Pi 0.87.1 (A9a, `ebf426f`) | reviewed |
+| `0.74.0` | `>=1.0.0` | pending A9 | reviewed |
+| `0.75.0` | `>=1.0.0` | pending A9 | reviewed |
+| `0.76.1` | `>=1.0.0` | pending A9 | reviewed; the repository's development pin |
 
-"Requires Pi" is each release's own declared `@earendil-works/pi-ai` peer (`>=0.80.0` for `0.50.0` and
-`0.64.0`, `>=0.86.1` for `0.74.0`, `0.75.0` and `0.76.1`), raised to the floor of the supported Pi interval. It is
+"Requires Pi" is each release's own declared `@earendil-works/pi-ai` peer, raised to the floor of the supported Pi interval (1.0.0, which every reviewed release's peer is below). It is
 recorded in `plugins/empirica/adapters/pi/compat/` and checked against this table. "Native receipt" marks
 the pairs for which an installed-host run has been recorded; `pending A9` means none has yet. The
 0.64.0 receipt is native evidence for that pair; the release receipt the live check requires must come
 from the profile's qualified Pi version or later (`host-profiles.json` `version`, today 1.1.0; A9b, pending).
 
-Install the newest reviewed version your Pi satisfies (Pi <0.86.1: `pi-subagents@0.64.0`) and pin the exact
+Install the newest reviewed version and pin the exact
 version, as in the commands above; an unpinned install may resolve to a release outside the range, which is
 refused, or to an unreviewed one inside it, which runs with only the reviewed read-only `subagent` actions allowed during a run.
 
@@ -179,7 +163,7 @@ pi install "$(pwd)"
 
 The exact Claude Code and Pi foreground profiles were promoted from installed-host observations;
 release certification additionally requires fresh operator-attested, candidate-bound structural
-receipts. Codex is explicitly `wip_unsupported` and is not part of the supported release set.
+receipts. Empirica is not available on Codex.
 `make empirica-host-live-check` requires exact receipts for Claude and Pi only; Pi and Claude async
 promotion remains separate and unsupported.
 

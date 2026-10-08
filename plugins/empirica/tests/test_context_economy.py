@@ -25,7 +25,7 @@ from application.v2 import compose
 from core.evaluation import valid_graph
 from core.projection import project_presentation
 from test_d7_transactions import Runs, Artifacts, Workspace, Harness
-from governance_setup import (AUTHOR, TEST_INVOCATION, SIZED_RATIONALE, approve_current,
+from governance_setup import (AUTHOR, TEST_INVOCATION, SIZED_RATIONALE, approve_current, end_with_consent,
                               sized_configure_run)
 from core.canonical import canonical_digest
 from application.protocol import host_profile_id  # noqa: E402
@@ -529,6 +529,9 @@ class SizeBudgetTests(_ServiceHarness):
         approve_current(self.service._coordinator, self.run_id)
         self.assertLess(self._text_size(self._read_text()), self.CEILING, "approved RunView")
         tools = PublicTools(PROFILE, dispatch=self._observe_dispatch)
+        # (the step that asks the human is a Block that carries the reason and the batch; its size is not a view's)
+        self.action("investigate")  # a human's answer is recorded only for an investigated run
+        end_with_consent(self.service._coordinator, self.run_id)
         terminal = tools.call_internal("report_convergence", {"run_id": self.run_id, "intent": "stop"})
         self.assertLess(self._text_size(terminal), self.CEILING, "terminal RunView")
 
@@ -742,12 +745,13 @@ class NextActionReachabilityTests(_ServiceHarness):
                 for reason in result.get("reasons", []) or []}
 
     def test_the_evidence_confirmation_directive_belongs_to_the_confirmation_reason_alone(self):
-        """``human.confirm_evidence`` (operation ``confirmation``) is listed by, and only by,
-        ``evidence.confirmation_required``, the reason the core emits when evidence waits on a human."""
+        """``human.confirm_evidence`` (operation ``confirmation``) is listed by, and only by, the two reasons whose
+        wait is the confirmation batch: ``evidence.confirmation_required`` (evidence waits on a human) and
+        ``governance.terminal_stop_pending`` (a deliberative run's terminal stop waits on the same batch, ADR-0063)."""
         contract = _proto._PUBLIC_CONTRACT
         listing = {code for code, reason in contract["reasons"].items()
                    if "human.confirm_evidence" in reason.get("next_actions", [])}
-        self.assertEqual(listing, {"evidence.confirmation_required"})
+        self.assertEqual(listing, {"evidence.confirmation_required", "governance.terminal_stop_pending"})
         confirmations = {d for d, row in contract["next_actions"].items()
                          if row["surface"].get("operation") == "confirmation"}
         self.assertEqual(confirmations, {"human.confirm_evidence"})

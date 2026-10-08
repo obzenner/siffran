@@ -101,9 +101,23 @@
     "kind": "research",
     "n": 3,
     "outcome": "supporting"
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "evidence_presentation",
+    "n": 4,
+    "outcome": null
+   },
+   {
+    "claim": "stopped_residual",
+    "command": null,
+    "kind": "evidence_confirmation",
+    "n": 5,
+    "outcome": null
    }
   ],
-  "version": "sha256:282c39c975c607c5a4975e6d8b9744605fe297a5180361cc28d7067855d038f0",
+  "version": "sha256:8bf6958d0fa27badaee9489d6800b87c4c75a3682728692d867a373397b286d4",
   "waiting": []
  },
  "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/2": {
@@ -261,7 +275,7 @@
     "outcome": "fail"
    }
   ],
-  "version": "sha256:6c38c50895e26757b6d3c46637d221cd20dac52802bfecc3e8624d6284e94ea9",
+  "version": "sha256:7e8b4e077825ea19a8e290db57578f9b133ff04df2bb9ff0ae49a436fdebf056",
   "waiting": []
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-39abe9247f103fe638ce5e01424e311f5a2751de1eb1f57f4e2ce6da4bc72b70/1": {
@@ -381,7 +395,7 @@
     "outcome": null
    }
   ],
-  "version": "sha256:637eb61d76fa3b1dc17e8848b45b9dea8a9b6dab41dbf8b7ca610b51d5968ebd",
+  "version": "sha256:ea18dce8015ba505d0ea27aac1879d922e37030977243f2efabdbc6027fe3241",
   "waiting": []
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e/1": {
@@ -497,9 +511,23 @@
     "kind": "research",
     "n": 3,
     "outcome": "refuting"
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "evidence_presentation",
+    "n": 4,
+    "outcome": null
+   },
+   {
+    "claim": "stopped_residual",
+    "command": null,
+    "kind": "evidence_confirmation",
+    "n": 5,
+    "outcome": null
    }
   ],
-  "version": "sha256:b62c08282c6d06ddfdce4da44f5007922a98672d55f4fec9a6d1877c22817e51",
+  "version": "sha256:ef3eb8379cb0bd42dbb7c3c601f11799d81439d6ceeba19a9e836255b7d3286d",
   "waiting": []
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9/1": {
@@ -685,7 +713,7 @@
     "outcome": "pass"
    }
   ],
-  "version": "sha256:880c22401e64a40c59a069f0c8b2c87dfcf8f952a56a6b1de7e45f0dc29a98fa",
+  "version": "sha256:da6f0549d9d390bacd3c7224f1ef054f3a4b8c09749cb8eddd12e1ce7a7fe844",
   "waiting": []
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-cb83d909b5dd5e1ef98360c4289ab9c465b1af5cab2e48d54cc3796a4d09e6c5/1": {
@@ -979,7 +1007,7 @@
     "outcome": null
    }
   ],
-  "version": "sha256:15409fa157bbc49dbcac55ce26436a4446d6cd987b458e7f75334a880fd07d0a",
+  "version": "sha256:01a9d3305909e49d5f5ab595c0567462344a908ea5d10fdc7caa1980c5a7d138",
   "waiting": [
    {
     "claim": "C5",
@@ -1203,7 +1231,7 @@
     "outcome": "supporting"
    }
   ],
-  "version": "sha256:156af604934470f5347a2572dc90bbf211be78d8461adf3492da488b79c2787e",
+  "version": "sha256:cb86b730c1b65e7a767d6f228ad8bd60a92b75ae535caf5da1f11f658126d4f4",
   "waiting": []
  },
  "s256-b5e0eee6e28efca6d6ad05d7b8a94631576037ec9e5ff6d305fe89faa0e1032e/s256-6ec97bb08344a844badedb2426721d756e040e9e77f4f26c70f203bdcb9730bd/1": {
@@ -1236,7 +1264,7 @@
   "residuals": [],
   "stale": [],
   "steps": [],
-  "version": "sha256:f4a5d5107fc8e9f0f0dd1eef99864ea00e9c18a09dffa3bc10e72878c6a34ca6",
+  "version": "sha256:c12b6923f2aec7036a66c724814de7a2509be6679cccbfe6b5a3cea2bb84f62a",
   "waiting": []
  },
  "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470/1": {
@@ -1339,9 +1367,23 @@
     "kind": "graph",
     "n": 4,
     "outcome": null
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "evidence_presentation",
+    "n": 5,
+    "outcome": null
+   },
+   {
+    "claim": "stopped_frozen",
+    "command": null,
+    "kind": "evidence_confirmation",
+    "n": 6,
+    "outcome": null
    }
   ],
-  "version": "sha256:cbcfbcc53822c1df9700bf3718f0bc007d1992d413e3708a57279f09c3d6074d",
+  "version": "sha256:0f8e77741c39677cd0b3f6b3ae9a30322d31e14a7c47fa56e9e53bebbf4fb836",
   "waiting": []
  },
  "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148/1": {
@@ -1474,9 +1516,23 @@
     "kind": "observation_basis",
     "n": 7,
     "outcome": null
+   },
+   {
+    "claim": null,
+    "command": null,
+    "kind": "evidence_presentation",
+    "n": 8,
+    "outcome": null
+   },
+   {
+    "claim": "stopped_budget",
+    "command": null,
+    "kind": "evidence_confirmation",
+    "n": 9,
+    "outcome": null
    }
   ],
-  "version": "sha256:2de416d354f3f25db37acd9567ba0468262b410a4551893482ea229c8aa55829",
+  "version": "sha256:9f2b3cfb2e705fb7a79c618ad30855d36b0b8eab4cf0cc563927c5297c8ef467",
   "waiting": []
  }
 }

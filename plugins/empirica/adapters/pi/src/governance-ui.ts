@@ -90,7 +90,7 @@ async function showDialog(ctx: ExtensionContext, dialog: Dialog, deadline: numbe
                           before?: Dialog): Promise<DialogDecision> {
   if (!ctx.ui.custom) return { type: "dismiss" };
   // Pi's RPC mode reports hasUI=true yet its `custom()` is `async () => undefined` (no component
-  // can be shown; 0.84.1-1.1.0 alike): "nothing was presented" is a dismissal, never an approval.
+  // can be shown; 1.0.0 and 1.1.0 alike): "nothing was presented" is a dismissal, never an approval.
   const decision = await ctx.ui.custom<DialogDecision | undefined>((tui, hostTheme, _keybindings, done) => {
     let state: DialogState = initialState(dialog, confirmation);
     let closed = false;

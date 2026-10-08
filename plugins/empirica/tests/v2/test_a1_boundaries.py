@@ -5,6 +5,7 @@ progress log ("A1 fix round"). The host is the shared Claude mediator with a scr
 the same rules is tested in adapters/pi/test."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from adapters import confirmation
@@ -21,6 +22,7 @@ CLAUDE_PROFILE = host_profile_id("claude-code")
 
 CONFIRMATION = "evidence.confirmation_required"
 EVIDENCE_REPORT_NOTICE = getattr(protocol, "EVIDENCE_REPORT_NOTICE", "<not defined>")
+PAUSED_FOR_EVIDENCE_NOTICE = protocol.PAUSED_FOR_EVIDENCE_NOTICE
 
 
 def typed(result: dict) -> Response:
@@ -138,13 +140,17 @@ class PresentationBindsWhatWasShown(MediatorFixture):
         self.assertIsNone(self.batch(drv, run_id)["prompt_error"])
 
 
-class ClaudeStopNeverPausesForEvidence(MediatorFixture):
-    """A2-1/A2-2 (ruling): in Claude the human can only be asked *inside* ``report_convergence`` (MCP elicitation), so a
-    Stop that pauses on a batch nobody has shown ends the turn and nobody asks. On the **first Stop** (``stop_hook_active``
-    absent, which is all this class exercises) the Stop never settles as an evidence wait: with the confirmation as the
-    sole blocker and nobody having been told otherwise it blocks (exit 2) with one plain directive to report convergence;
-    in every other case it blocks with the real reason. There is no surface note. A continuation is ended by control
-    mode (``StopModeTests``, EHB-STOP-07/08/20)."""
+class ClaudeStopEvidenceByControlMode(MediatorFixture):
+    """A2-1/A2-2 (ruling), for an **auto** run: in Claude the human can only be asked *inside* ``report_convergence`` (MCP
+    elicitation), so an auto Stop that settled on a batch nobody has shown would end the turn and nobody would ask. With
+    the confirmation as the sole blocker and nobody having been told otherwise it blocks (exit 2) with one plain
+    directive to report convergence; in every other case it blocks with the real reason. There is no surface note. A
+    deliberative turn end pauses instead, because the human is present (``StopModeTests``, EHB-STOP-21/22/23)."""
+
+    MODE = "auto"
+
+    def start(self, *args, **kwargs):
+        return super().start(*args, **{"mode": self.MODE, **kwargs})
 
     FAULT = lambda *_: {"result": {"type": "Fault", "code": "unavailable"}}  # noqa: E731
 
@@ -185,6 +191,27 @@ class ClaudeStopNeverPausesForEvidence(MediatorFixture):
                 self.assertEqual(stop.stdout, "", label)  # never a settlement
                 mediator(response, self.reevaluator(drv, run_id, look=False))
                 self.assertEqual(len(human.shown), 1 if may_show else 0, label)
+
+    def test_D_a_deliberative_stop_pauses_for_evidence_where_the_human_is_present(self):
+        """The same cells in deliberative mode: the turn ends with ``paused_for_evidence`` (or, once nobody can be asked,
+        the real reason), the run stays active, and nobody is shown a dialog by the Stop."""
+        for label, (has_form, reply, may_show) in self.cells().items():
+            with self.subTest(label):
+                drv, run_id = self.start(mode="deliberative")
+                self.research(drv, run_id, "web", URL)
+                human = Human(accept(d1="later"))
+                mediator = self.mediator(drv, human if has_form else None)
+                if reply is not None:
+                    mediator._surface = self.broken(None if reply == "raise" else reply)
+                mediator.observe(run_id)
+                stop = stop_result(typed(self.evaluated(drv, run_id)), stop_hook_active=False)
+                self.assertEqual((stop.exit_code, stop.stderr), (0, ""), label)
+                message = json.loads(stop.stdout)["systemMessage"]
+                if label != "recorded unavailable (no form)":
+                    self.assertEqual(message, PAUSED_FOR_EVIDENCE_NOTICE, label)
+                else:
+                    self.assertIn("paused for you", message)
+                self.assertEqual(human.shown, [], label)
 
     def test_D_overlapping_observations_cannot_make_the_stop_pause(self):
         """Two mediators on one run, their ingress calls interleaved (A2-1): whatever order they finish in, the Stop blocks."""
@@ -308,8 +335,8 @@ class TheAuthorReadsWhatTheHumanSees(MediatorFixture):
 class OneClaimsBlockerOrder(MediatorFixture):
     """A1-5: terminal states, then what the author can do now, then waiting on a human; the batch is still there."""
 
-    def experiment(self):
-        drv, run_id = self.start(kind="needs-experiment")
+    def experiment(self, mode="deliberative"):
+        drv, run_id = self.start(kind="needs-experiment", mode=mode)
         self.research(drv, run_id, "web", URL)
         return drv, run_id
 
@@ -334,8 +361,15 @@ class OneClaimsBlockerOrder(MediatorFixture):
         self.record_passing_spike(drv, run_id, WORKSPACE_REF)
         self.assertEqual(self.codes(self.report(drv, run_id)), [CONFIRMATION])
 
-    def test_D_claude_stop_blocks_with_the_spike_reason_and_does_not_pause(self):
+    def test_D_a_deliberative_stop_pauses_with_the_spike_reason(self):
         drv, run_id = self.experiment()
+        stop = stop_result(typed(self.report(drv, run_id)), stop_hook_active=False)
+        self.assertEqual(stop.exit_code, 0)
+        self.assertIn("spike", json.loads(stop.stdout)["systemMessage"].lower())
+        self.assertIn("paused for you", json.loads(stop.stdout)["systemMessage"])
+
+    def test_D_claude_stop_blocks_with_the_spike_reason_and_does_not_pause(self):
+        drv, run_id = self.experiment("auto")
         stop = stop_result(typed(self.report(drv, run_id)), stop_hook_active=False)
         self.assertEqual(stop.exit_code, 2)
         self.assertIn("spike", stop.stderr.lower())

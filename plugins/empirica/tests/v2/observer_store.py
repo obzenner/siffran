@@ -181,6 +181,9 @@ class _Builder:
         drv.trusted_audit_verdict(run_id, child, payload)
 
     def evaluate(self, run_id: str, intent: str):
+        """An evaluation; a stop is answered by its human first (ADR-0063 amendment), as in the attended sessions shown."""
+        if intent == "stop":
+            return self.a.stop(self.drv, run_id)
         return self.a.dispatch(self.drv, evaluate(run_id=run_id, intent=intent))
 
     def stamp(self, scenario: str, project: str, session: str):

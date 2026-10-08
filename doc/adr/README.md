@@ -65,7 +65,7 @@ Adapters share one host-neutral bridge; Claude and Pi translate into it.
 - [ADR-0032](0032-port-claude-completion-gating-to-a-gated-domain-operation-on-pi.md) — Port Claude completion gating to a gated domain operation on Pi
 - [ADR-0033](0033-activate-claude-through-the-host-neutral-bridge.md) — Activate Claude through the host-neutral bridge
 - [ADR-0038](0038-warn-when-the-checkout-is-behind-the-installed-plugin.md) — Warn when the checkout is behind the installed plugin
-- [ADR-0068](0068-record-host-boundaries-as-data-and-end-the-claude-stop-loop-by-control-mode.md) — Record host boundaries as data and end the Claude Stop loop by control mode
+- [ADR-0068](0068-record-host-boundaries-as-data-and-end-every-turn-by-control-mode.md) — Record host boundaries as data and end every turn by control mode, on every host
 - [ADR-0069](0069-admit-hosts-and-audit-runtimes-by-range-and-observed-capability.md) — Admit hosts and audit runtimes by range and observed capability
 
 ## Empirica 4.0 consolidation

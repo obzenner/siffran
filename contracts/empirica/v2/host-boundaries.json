@@ -10,6 +10,216 @@
     "auto-interactive-post",
     "auto-delegated"
   ],
+  "turn_end": {
+    "outcomes": {
+      "allow": "End the turn: the run converged and the view says so (`Allow(converged=true)` is the only convergence claim).",
+      "settle": "End the turn with the run view and no notice: exactly one audit is pending and its result continues the run.",
+      "settle-notice": "End the turn with the contract notice of the settlement; the run stays active and not converged, and nothing was approved or confirmed by the settlement.",
+      "pause": "End the turn with a contract notice that is not a convergence claim and names the real next step the human can relay to the agent; the run stays active, nobody was asked, nothing was granted. The same on a first and a later turn end.",
+      "continue": "Keep the turn going: the agent is handed the next obligation (the core's real reason; the evidence directive when a human can be asked about the sole blocker; `unattended_continue` on a later turn end of the same chain). A `continue` cell names the notice of a later turn end; the first turn end of the chain gives the core's reason, or the evidence directive where one is named.",
+      "end-no-progress": "End the turn with the `unattended_continue` notice because a host with no loop bound of its own has already continued on this observation basis; the adapter records `no-progress`."
+    },
+    "states": [
+      {
+        "id": "converged",
+        "title": "the run converged",
+        "outcomes": {
+          "deliberative": {
+            "outcome": "allow"
+          },
+          "auto-interactive-pre": {
+            "outcome": "allow"
+          },
+          "auto-interactive-post": {
+            "outcome": "allow"
+          },
+          "auto-delegated": {
+            "outcome": "allow"
+          }
+        },
+        "scenarios": {
+          "claude": [
+            "EHB-STOP-12"
+          ],
+          "pi": [
+            "EHB-STOP-29"
+          ]
+        }
+      },
+      {
+        "id": "async-audit-pending",
+        "title": "exactly one async audit is pending",
+        "outcomes": {
+          "deliberative": {
+            "outcome": "settle"
+          },
+          "auto-interactive-pre": {
+            "outcome": "settle"
+          },
+          "auto-interactive-post": {
+            "outcome": "settle"
+          },
+          "auto-delegated": {
+            "outcome": "settle"
+          }
+        },
+        "scenarios": {
+          "claude": [
+            "EHB-STOP-12"
+          ],
+          "pi": [
+            "EHB-STOP-35"
+          ]
+        }
+      },
+      {
+        "id": "settlement",
+        "title": "the sole blocker is a human governance wait or an exhausted budget",
+        "outcomes": {
+          "deliberative": {
+            "outcome": "settle-notice",
+            "notices": [
+              "human_wait",
+              "budget_exhausted"
+            ]
+          },
+          "auto-interactive-pre": {
+            "outcome": "settle-notice",
+            "notices": [
+              "human_wait",
+              "budget_exhausted"
+            ]
+          },
+          "auto-interactive-post": {
+            "outcome": "settle-notice",
+            "notices": [
+              "human_wait",
+              "budget_exhausted"
+            ]
+          },
+          "auto-delegated": {
+            "outcome": "settle-notice",
+            "notices": [
+              "human_wait",
+              "budget_exhausted"
+            ]
+          }
+        },
+        "scenarios": {
+          "claude": [
+            "EHB-STOP-03",
+            "EHB-STOP-04"
+          ],
+          "pi": [
+            "EHB-STOP-36"
+          ]
+        }
+      },
+      {
+        "id": "evidence-wait",
+        "title": "the sole blocker is an evidence confirmation a human can be asked about",
+        "outcomes": {
+          "deliberative": {
+            "outcome": "pause",
+            "notices": [
+              "paused_for_evidence"
+            ]
+          },
+          "auto-interactive-pre": {
+            "outcome": "continue",
+            "notices": [
+              "evidence_report"
+            ]
+          },
+          "auto-interactive-post": {
+            "outcome": "continue",
+            "notices": [
+              "evidence_report"
+            ]
+          },
+          "auto-delegated": {
+            "outcome": "continue",
+            "notices": [
+              "unattended_continue"
+            ]
+          }
+        },
+        "scenarios": {
+          "claude": [
+            "EHB-STOP-02",
+            "EHB-STOP-08",
+            "EHB-STOP-22"
+          ],
+          "pi": [
+            "EHB-STOP-31",
+            "EHB-STOP-32"
+          ]
+        }
+      },
+      {
+        "id": "active-other",
+        "title": "any other active, non-converged state",
+        "outcomes": {
+          "deliberative": {
+            "outcome": "pause",
+            "notices": [
+              "paused_for_human"
+            ]
+          },
+          "auto-interactive-pre": {
+            "outcome": "continue",
+            "notices": [
+              "unattended_continue"
+            ]
+          },
+          "auto-interactive-post": {
+            "outcome": "continue",
+            "notices": [
+              "unattended_continue"
+            ]
+          },
+          "auto-delegated": {
+            "outcome": "continue",
+            "notices": [
+              "unattended_continue"
+            ]
+          }
+        },
+        "scenarios": {
+          "claude": [
+            "EHB-STOP-06",
+            "EHB-STOP-07",
+            "EHB-STOP-08",
+            "EHB-STOP-21"
+          ],
+          "pi": [
+            "EHB-STOP-31",
+            "EHB-STOP-32"
+          ]
+        }
+      }
+    ],
+    "hosts": {
+      "claude": {
+        "event": "`Stop` (not fired on a user interrupt)",
+        "allow": "exit 0 with the run view",
+        "settle": "exit 0; the run view (async audit) or `systemMessage` with the notice",
+        "pause": "exit 0 with `systemMessage`",
+        "continue": "exit 2 with the reason on stderr (the real reason, or the `evidence_report` directive), and `unattended_continue` when `stop_hook_active` is true",
+        "loop_bound": "Claude's `stop_hook_active` plus its own cap of eight consecutive continuations (`host-capped` otherwise). A deliberative pause ends the turn (ADR-0068 owns the `stop_hook_active` rule).",
+        "table_driven": "EHB-STOP-23"
+      },
+      "pi": {
+        "event": "`agent_before_settle` only (never `turn_end`, so one notice per settle); Pi 1.0.0 and later",
+        "allow": "nothing is appended",
+        "settle": "nothing is appended, or a `custom_message` (`display: true`) with the settlement notice",
+        "pause": "append a `custom_message` entry (`display: true`) holding the notice, with no `continue`",
+        "continue": "`continue: true`, with the next obligation as the appended message",
+        "loop_bound": "None from the host. The adapter keeps its own: it requests a continuation only when the run's observation basis changed since the adapter's previous continuation; otherwise it ends with the `unattended_continue` notice and records `no-progress`.",
+        "table_driven": "EHB-STOP-34"
+      }
+    }
+  },
   "boundaries": [
     {
       "id": "HB-ACT",
@@ -115,7 +325,7 @@
       "boundary": "HB-ADM",
       "title": "the host version is inside the interval and a receipt is from the qualified version or later",
       "control_mode_dependent": false,
-      "outcomes": "- Claude: interval `>=2.1.278,<2.2.0`; qualified version `2.1.294`; profile id `claude-code`, which never carries a version (ADR-0069). Compatibility is enforced **at receipt capture and verification** (`scripts/empirica_live_receipts.py:require_compatible_version`), not at run start.\n- Pi: `>=0.84.1,<2.0.0` (user ruling 2026-10-08); qualified version `1.1.0`; profile id `pi+pi-subagents-foreground-audit-v1` (the policy, never a version, ADR-0069). Enforced at receipt time.\n- Both: a receipt is refused unless its host version is inside the interval and at or above the profile's qualified `version` (\"a native receipt from <host> >= <qualified version> is required\"); raising the qualified version in the profile therefore asks for exactly one new receipt.\n- Codex: exact `0.146.0`.",
+      "outcomes": "- Claude: interval `>=2.1.278,<2.2.0`; qualified version `2.1.294`; profile id `claude-code`, which never carries a version (ADR-0069). Compatibility is enforced **at receipt capture and verification** (`scripts/empirica_live_receipts.py:require_compatible_version`), not at run start.\n- Pi: `>=1.0.0,<2.0.0` (user ruling 2026-10-08; nothing older is supported, ADR-0069); qualified version `1.1.0`; profile id `pi+pi-subagents-foreground-audit-v1` (the policy, never a version, ADR-0069). Enforced at receipt time.\n- Both: a receipt is refused unless its host version is inside the interval and at or above the profile's qualified `version` (\"a native receipt from <host> >= <qualified version> is required\"); raising the qualified version in the profile therefore asks for exactly one new receipt.\n- Codex: exact `0.146.0`.",
       "scenarios": [
         "EHB-ADM-01",
         "EHB-ADM-02"
@@ -211,8 +421,8 @@
       "boundary": "HB-STOP",
       "title": "a Stop never claims convergence, and an `Allow(converged=true)` is the only success",
       "control_mode_dependent": true,
-      "outcomes": "Claude: `allow-converged` (exit 0, view) | `inert` (exit 0, silent) | `block-real-reason` (exit 2, stderr) | `block-directive-report` (exit 2, `evidence_report`) | `settle-governance-wait` (exit 0, `human_wait`) | `settle-budget-exhausted` (exit 0, `budget_exhausted`) | `settle-async-audit-pending` (exit 0, view) | `pause-for-human` (exit 0, `paused_for_human`, deliberative continuation, `HX-STOP-03`) | `block-auto-continue` (exit 2, `unattended_continue`, an `auto` continuation whose blockers are not the sole evidence directive, `HX-STOP-03`) | `fault-closed` (exit 2) | `fault-open` (exit 0, only on an explicit core `fail_direction: open`) | **`host-capped`** (Claude ends the turn after eight consecutive blocks, Empirica not consulted; Q2, `report-limitation`, never relied on). Codex: `Allow(converged=true)` or deny; every failure denies.",
-      "outcomes_by_mode": "The first Stop (`stop_hook_active` false or absent) is the same in all four modes. On a continuation: deliberative → `pause-for-human`; every auto mode → `block-auto-continue` (`block-directive-report` in the interactive auto modes when the sole blocker is the evidence directive, `HX-STOP-02`; a delegated route is `unavailable`, so it has none); auto-interactive-pre → `human_wait` or auto outcome.",
+      "outcomes": "Claude: `allow` (exit 0, view) | `inert` (exit 0, silent) | `settle-notice` (exit 0, `human_wait` or `budget_exhausted`) | `settle` (exit 0, view, one async audit) | `pause` (exit 0, `paused_for_human` or `paused_for_evidence`) | `continue` (exit 2: the real reason, `evidence_report`, or `unattended_continue`) | `fault-closed` (exit 2) | `fault-open` (exit 0, only on an explicit core `fail_direction: open`) | **`host-capped`** (Claude ends the turn after eight consecutive blocks, Empirica not consulted; Q2, `report-limitation`, never relied on). Pi: the same outcomes through its own surface (`HX-STOP-04`).",
+      "outcomes_by_mode": "The outcome by control mode and run state is the turn-end table (`turn_end`), the same on every host; this expectation owns only that `Allow(converged=true)` is the sole success.",
       "scenarios": [
         "EHB-STOP-01",
         "EHB-STOP-02",
@@ -220,29 +430,31 @@
         "EHB-STOP-04",
         "EHB-STOP-09"
       ],
-      "sources": "ADR-32, ADR-51 (async audit settlement), ADR-63 (\"The Claude Stop gate keeps its exact-reason check\"), ADR-67 (\"The Claude Stop never pauses for evidence\", amended), ADR-68, D1H §3 (Claude binding protocol item 4), CC \"Stop\"/\"Stop decision control\", Q2; CODE `P/adapters/claude/completion.py`."
+      "sources": "ADR-32, ADR-51 (async audit settlement), ADR-63 (\"The Claude Stop gate keeps its exact-reason check\"), ADR-67 (\"An interactive auto Stop never settles as an evidence wait\"), ADR-68, D1H §3 (Claude binding protocol item 4), CC \"Stop\"/\"Stop decision control\", Q2; CODE `P/adapters/claude/completion.py`."
     },
     {
       "id": "HX-STOP-02",
       "boundary": "HB-STOP",
       "title": "evidence that only a report can show goes through the directive, then the real reason",
       "control_mode_dependent": true,
-      "outcomes": "Claude: `block-directive-report` | `block-real-reason`. Pi: not applicable (the Pi gate presents in-process at `report_convergence`).",
-      "outcomes_by_mode": "The directive applies to the first Stop in every mode. On a continuation: deliberative hands the turn back (`paused_for_human`); every `auto` mode keeps the directive (the act-on-it action is the report that asks the human); with another blocker beside the evidence, an `auto` continuation takes `unattended_continue`.",
+      "outcomes": "Claude: `continue` with the `evidence_report` directive (interactive auto) | `pause` with `paused_for_evidence` (deliberative) | `continue` with the real reason (any other blocker). Pi: not applicable (the Pi gate presents in-process at `report_convergence`).",
+      "outcomes_by_mode": "Interactive auto, first and later Stop: the directive (the act-on-it action is the report that asks the human). Deliberative, any Stop: `paused_for_evidence`, which tells the human to tell the agent to report, and that they are asked in that call, if this host can show a dialog. Delegated: the route is `unavailable`, so there is no directive.",
       "scenarios": [
         "EHB-STOP-02",
-        "EHB-STOP-05"
+        "EHB-STOP-05",
+        "EHB-STOP-22"
       ],
-      "sources": "F5 (rulings A2-1/A2-2), F7, ADR-67 (\"Asking at the end of the pass\"), `public-contract.json settlement_notices.evidence_report`; tests `V2/test_a1_boundaries.py::ClaudeStopNeverPausesForEvidence::test_D_the_stop_blocks_with_the_directive_in_every_cell_and_the_mediator_shows_only_when_recorded`, `::test_the_directive_names_the_call_that_asks_the_human`, `CT/test_claude_adapter.py::test_the_stop_never_settles_for_evidence_and_directs_the_author_to_report`, `V2/test_host_faithful.py::HostFailure::test_the_stop_directive_may_send_one_report_and_that_report_leads_to_stop`."
+      "sources": "F5 (rulings A2-1/A2-2), F7, ADR-67 (\"Asking at the end of the pass\"), `public-contract.json settlement_notices.evidence_report`; tests `V2/test_a1_boundaries.py::ClaudeStopEvidenceByControlMode::test_D_the_stop_blocks_with_the_directive_in_every_cell_and_the_mediator_shows_only_when_recorded`, `::test_the_directive_names_the_call_that_asks_the_human`, `CT/test_claude_adapter.py::test_an_interactive_auto_stop_never_settles_for_evidence_and_directs_the_author_to_report`, `V2/test_host_faithful.py::HostFailure::test_the_stop_directive_may_send_one_report_and_that_report_leads_to_stop`."
     },
     {
       "id": "HX-STOP-03",
       "boundary": "HB-STOP",
-      "title": "a Stop continuation ends the hook loop by control mode, while the host keeps `stop_hook_active` set",
+      "title": "a turn end is decided by the control mode and the run state, the same on every host (the turn-end table)",
       "control_mode_dependent": true,
-      "outcomes": "Claude: `pause-for-human` | `block-auto-continue` | `block-directive-report` (interactive auto, evidence directive) | unchanged outcomes (see `HX-STOP-01`). Pi: see `HX-STOP-04`. If the host resets `stop_hook_active` between continuations, every post-tool Stop blocks again and the outcome is `host-capped` (`report-limitation`). Codex: `Stop` keeps denying; not declared.",
-      "outcomes_by_mode": "`deliberative`: first Stop `block-real-reason`/`block-directive-report`, continuation `pause-for-human`. `auto-interactive-pre`: first Stop unchanged; continuation `human_wait` when the approval can be asked, else `block-auto-continue` (`block-directive-report` when the sole blocker is the evidence directive, `EHB-STOP-20`). `auto-interactive-post`: first Stop unchanged, continuation `block-auto-continue` (`block-directive-report` for the evidence directive case). `auto-delegated`: first Stop unchanged, continuation `block-auto-continue` (a delegated route is `unavailable`, so there is no evidence directive).",
+      "outcomes": "Claude: `pause` (exit 0, `systemMessage`, `paused_for_human`/`paused_for_evidence`; the same on the first and on a later Stop; ADR-0068 owns the `stop_hook_active` rule) | `continue` (exit 2; `unattended_continue` when `stop_hook_active` is true) | unchanged settlements (see `HX-STOP-01`). If the host resets `stop_hook_active` between continuations, an auto run's post-tool Stop blocks again and the outcome is `host-capped` (`report-limitation`). Pi: `HX-STOP-04`.",
+      "outcomes_by_mode": "See the turn-end table (`turn_end`): deliberative pauses on any other active state; every auto mode continues; the settlements apply in every mode.",
       "scenarios": [
+        "EHB-STOP-05",
         "EHB-STOP-06",
         "EHB-STOP-07",
         "EHB-STOP-08",
@@ -255,20 +467,30 @@
         "EHB-STOP-17",
         "EHB-STOP-18",
         "EHB-STOP-19",
-        "EHB-STOP-20"
+        "EHB-STOP-20",
+        "EHB-STOP-21",
+        "EHB-STOP-22",
+        "EHB-STOP-23"
       ],
-      "sources": "CC \"Stop input\" and \"Stop decision control\"; Q2; ADR-0019 (G2), ADR-0051, ADR-0063, ADR-0064 interim (`fb1106b`), ADR-0067 A2-1/A2-2, ADR-0068; HEATH AS3 (`pause`); CODE `P/adapters/claude/completion.py:_continuation_mode`."
+      "sources": "CC \"Stop input\" and \"Stop decision control\"; Q2; ADR-0019 (G2), ADR-0051, ADR-0063, ADR-0064 interim (`fb1106b`), ADR-0067 A2-1/A2-2, ADR-0068; HEATH AS3 (`pause`); CODE `P/adapters/claude/completion.py:_turn_end_mode`."
     },
     {
       "id": "HX-STOP-04",
       "boundary": "HB-STOP",
-      "title": "Pi has no turn-end gate",
-      "control_mode_dependent": false,
-      "outcomes": "Pi: `ends-unconverged` (the only outcome; no notice is shown at turn end: `UNSOURCED` whether one is wanted). `agent_before_settle` (Pi `>=0.87.0`) can append entries and ensure one more provider request; the adapter does not use it, and it is absent from 0.84.1–0.86.1, which are in range.",
+      "title": "Pi ends a turn at `agent_before_settle` by the turn-end table, and bounds its own continuations",
+      "control_mode_dependent": true,
+      "outcomes": "Pi (1.0.0 and later): `allow` and `settle` append nothing (a settlement appends its notice) | `pause` (a `custom_message` with `display: true`, no `continue`) | `continue` (`continue: true`, the next obligation appended) | `end-no-progress` (the `unattended_continue` notice, `no-progress` recorded). Only `agent_before_settle` acts; `agent_settled` is a notification and `turn_end` is not used, so a settle carries one notice.",
       "scenarios": [
-        "EHB-STOP-10"
+        "EHB-STOP-29",
+        "EHB-STOP-35",
+        "EHB-STOP-36",
+        "EHB-STOP-31",
+        "EHB-STOP-32",
+        "EHB-STOP-33",
+        "EHB-STOP-34"
       ],
-      "sources": "ADR-32, `PT/registration.test.ts:68`, PI-T (`agent_before_settle`: 0.87.0 changelog line 385; `AgentSettledEvent.aborted`)."
+      "sources": "ADR-32, ADR-68, `dist/core/extensions/types.d.ts:729-779,805` and `docs/extensions.md:66,117` of Pi 1.1.0 (Q3 surface §1), PI-T (`agent_before_settle`).",
+      "outcomes_by_mode": "See the turn-end table (`turn_end`). Deliberative pauses; every auto mode continues while the run's observation basis changes between continuations and ends with `no-progress` otherwise."
     },
     {
       "id": "HX-STOP-05",
@@ -296,6 +518,22 @@
         "EHB-REPORT-03"
       ],
       "sources": "ADR-32, ADR-67, ADR-42, `PT/gate.test.ts` (\"direct tool: report_convergence execute rejects on Block with active handle\", \"gate: report_convergence tool is permitted on Allow\"), `V2/test_evidence_hosts.py::test_report_convergence_through_the_public_tool_presents_then_returns_the_refreshed_view`."
+    },
+    {
+      "id": "HX-REPORT-02",
+      "boundary": "HB-REPORT",
+      "title": "a deliberative step that would end the run without converging asks the human first",
+      "control_mode_dependent": true,
+      "outcomes": "Claude and Pi: `Block` with `governance.terminal_stop_pending` while the human has not agreed | the transition commits (`stopped_frozen`, `stopped_residual`, `stopped_budget`) once an accepted, digest-bound receipt covers it. Cancel, timeout and decline grant nothing.",
+      "outcomes_by_mode": "Deliberative only. `auto-interactive-pre`, `auto-interactive-post` and `auto-delegated` are unchanged: no dialog, the transition commits as before.",
+      "scenarios": [
+        "EHB-TERM-01",
+        "EHB-TERM-02",
+        "EHB-TERM-03",
+        "EHB-TERM-04",
+        "EHB-TERM-05"
+      ],
+      "sources": "ADR-0063 (amendment 2026-10-08), ADR-0067 (the confirmation batch), ADR-0026 (amendment 2026-10-08), Q3 findings F-Q3-3."
     },
     {
       "id": "HX-OBS-01",
@@ -348,20 +586,20 @@
       "boundary": "HB-INT",
       "title": "an interrupt ends the turn without a gate, and nothing is granted",
       "control_mode_dependent": false,
-      "outcomes": "- Claude: turn end by interrupt = **no `Stop` event** (CC); an open MCP elicitation returns `cancel` → `no-decision`; a cancelled running tool does not fire `PostToolUseFailure`. The run stays active, not converged. A `/model` cancelled with Esc did not change settings (Q2 note).\n  - Pi: `agent_settled.aborted === true` (Pi `>=0.87.0`) is observable and unused; a cancelled dialog returns `undefined` → `no-decision`; an interrupted `subagent` run returns exit 0 with a non-error \"Run paused after interrupt (<agent>)…\" result (0.76.1 `subagent-executor.js:3896`) and `finalOutput` \"Interrupted. Waiting for explicit next action.\" (`execution.js:1385`) → no verdict, `audit_failure` (`EHB-INT-03`); with a complete fence it is still a failure (`EHB-INT-04`, see `HX-AUDRES-01`).\n  - Codex: not declared.",
+      "outcomes": "- Claude: turn end by interrupt = **no `Stop` event** (CC); an open MCP elicitation returns `cancel` → `no-decision`; a cancelled running tool does not fire `PostToolUseFailure`. The run stays active, not converged. A `/model` cancelled with Esc did not change settings (Q2 note).\n  - Pi: `agent_settled.aborted === true` (Pi) is observable and unused; a cancelled dialog returns `undefined` → `no-decision`; an interrupted `subagent` run returns exit 0 with a non-error \"Run paused after interrupt (<agent>)…\" result (0.76.1 `subagent-executor.js:3896`) and `finalOutput` \"Interrupted. Waiting for explicit next action.\" (`execution.js:1385`) → no verdict, `audit_failure` (`EHB-INT-03`); with a complete fence it is still a failure (`EHB-INT-04`, see `HX-AUDRES-01`).\n  - Codex: not declared.",
       "scenarios": [
         "EHB-INT-01",
         "EHB-INT-02",
         "EHB-INT-03"
       ],
-      "sources": "CC \"Stop\" and \"PostToolUseFailure input\" (`is_interrupt`), PI-T 0.87.0 changelog line 21, PS 0.76.1 `src/runs/foreground/execution.js:1307-1313,1385`, `subagent-executor.js:3896`, ADR-63 (dismissal, cancellation, timeout), Q2 notes."
+      "sources": "CC \"Stop\" and \"PostToolUseFailure input\" (`is_interrupt`), PI-T changelog (`agent_settled.aborted`), PS 0.76.1 `src/runs/foreground/execution.js:1307-1313,1385`, `subagent-executor.js:3896`, ADR-63 (dismissal, cancellation, timeout), Q2 notes."
     },
     {
       "id": "HX-COMPACT-01",
       "boundary": "HB-COMPACT",
       "title": "compaction never changes what the run knows",
       "control_mode_dependent": false,
-      "outcomes": "- Claude: `SessionStart` matcher `compact` → `RestoreRun` → bounded run view on stdout, exit 0 always; orphaned pending audits are reconciled first (`reconcile_orphans(…, include_pending=False)`). A restore failure writes one diagnostic line and exits 0. `PreCompact` is not used (it could block compaction, which Empirica does not).\n- Pi: `session_before_compact` dispatches `RestoreRun` best-effort and returns a compaction summary carrying the handle; failure is not a gate. `session_compact` and `session_compact_failed` (≥0.84.3) are not handled.\n- Codex: `SessionStart` source `compact` re-evaluates.",
+      "outcomes": "- Claude: `SessionStart` matcher `compact` → `RestoreRun` → bounded run view on stdout, exit 0 always; orphaned pending audits are reconciled first (`reconcile_orphans(…, include_pending=False)`). A restore failure writes one diagnostic line and exits 0. `PreCompact` is not used (it could block compaction, which Empirica does not).\n- Pi: `session_before_compact` dispatches `RestoreRun` best-effort and returns a compaction summary carrying the handle; failure is not a gate. `session_compact` and `session_compact_failed` are not handled.\n- Codex: `SessionStart` source `compact` re-evaluates.",
       "scenarios": [
         "EHB-COMPACT-01",
         "EHB-COMPACT-02"
@@ -567,9 +805,9 @@
       "control_modes": [
         "any"
       ],
-      "setup": "Pi at 0.84.0, 0.84.1, 1.0.x, 1.1.0 (the profile's qualified version), 1.9.9, 2.0.0 (`>=0.84.1,<2.0.0`); Claude below its qualified version",
+      "setup": "Pi at 0.99.9, 1.0.0, 1.0.x, 1.1.0 (the profile's qualified version), 1.9.9, 2.0.0 (`>=1.0.0,<2.0.0`); Claude below its qualified version",
       "action": "capture a receipt",
-      "expected": "a receipt from the qualified version or later inside the interval (1.1.0, 1.9.9) is accepted; 0.84.0 is outside the interval and is refused; 0.84.1…1.0.x are inside the interval but below the qualified version and are refused (\"a native receipt from pi >= 1.1.0 is required\"); 2.0.0 is refused as outside the interval; Claude below its qualified version is refused the same way (\"a native receipt from claude >= <qualified> is required\"); the qualified receipt is Pi 1.1.0 (profile id `pi+pi-subagents-foreground-audit-v1`)",
+      "expected": "a receipt from the qualified version or later inside the interval (1.1.0, 1.9.9) is accepted; 0.99.9 is outside the interval and is refused; 1.0.0…1.0.x are inside the interval but below the qualified version and are refused (\"a native receipt from pi >= 1.1.0 is required\"); 2.0.0 is refused as outside the interval; Claude below its qualified version is refused the same way (\"a native receipt from claude >= <qualified> is required\"); the qualified receipt is Pi 1.1.0 (profile id `pi+pi-subagents-foreground-audit-v1`)",
       "covered_by": [
         "scripts/tests/test_empirica_live_receipts.py::test_compatible_harness_patch_versions_pass_and_are_recorded_exactly",
         "scripts/tests/test_empirica_live_receipts.py::test_a_receipt_below_the_qualified_version_is_refused",
@@ -796,9 +1034,9 @@
       "control_modes": [
         "any"
       ],
-      "setup": "Pi 0.84.1, 0.87.1, 1.0.0, 1.1.0",
+      "setup": "Pi 1.0.0, 1.1.0",
       "action": "a failed tool result, or a result carrying `structuredContent`",
-      "expected": "judged by `isError` only; `tool_result.error` is not declared in any in-range version; `structuredContent` (≥0.99.0) is dropped with the redaction of `content`, so a fence in it never survives",
+      "expected": "judged by `isError` only; `tool_result.error` is not declared in any in-range version; `structuredContent` (declared by every supported Pi) is dropped with the redaction of `content`, so a fence in it never survives",
       "covered_by": [
         "plugins/empirica/adapters/pi/test/gate.test.ts::errored auditor output is redacted",
         "plugins/empirica/adapters/pi/test/gate.test.ts::EHB-AUDRES-04 (isError): isError is the only failure signal",
@@ -810,9 +1048,11 @@
       "id": "EHB-STOP-01",
       "boundary": "HB-STOP",
       "control_modes": [
-        "any"
+        "auto-interactive-pre",
+        "auto-interactive-post",
+        "auto-delegated"
       ],
-      "setup": "run active, not converged",
+      "setup": "an `auto` run active, not converged",
       "action": "Stop",
       "expected": "C: exit 2 with real reason; no convergence claim",
       "covered_by": [
@@ -826,14 +1066,15 @@
       "id": "EHB-STOP-02",
       "boundary": "HB-STOP",
       "control_modes": [
-        "any"
+        "auto-interactive-pre",
+        "auto-interactive-post"
       ],
-      "setup": "sole blocker = evidence confirmation, route `human`/`unobserved`",
-      "action": "first Stop",
-      "expected": "C: exit 2 with the `evidence_report` directive; never `evidence_wait`",
+      "setup": "interactive `auto` run, sole blocker = evidence confirmation, route `human`/`unobserved`",
+      "action": "Stop",
+      "expected": "C: exit 2 with the `evidence_report` directive on the first and on a later Stop; never `evidence_wait`",
       "covered_by": [
-        "plugins/empirica/tests/v2/test_a1_boundaries.py::ClaudeStopNeverPausesForEvidence::test_D_the_stop_blocks_with_the_directive_in_every_cell_and_the_mediator_shows_only_when_recorded",
-        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::test_the_stop_never_settles_for_evidence_and_directs_the_author_to_report"
+        "plugins/empirica/tests/v2/test_a1_boundaries.py::ClaudeStopEvidenceByControlMode::test_D_the_stop_blocks_with_the_directive_in_every_cell_and_the_mediator_shows_only_when_recorded",
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::test_an_interactive_auto_stop_never_settles_for_evidence_and_directs_the_author_to_report"
       ],
       "ledger_rows": [
         "ev_url_confirm"
@@ -878,9 +1119,11 @@
       "id": "EHB-STOP-05",
       "boundary": "HB-STOP",
       "control_modes": [
-        "any"
+        "auto-interactive-pre",
+        "auto-interactive-post",
+        "auto-delegated"
       ],
-      "setup": "spike missing/stale plus a URL",
+      "setup": "an `auto` run, spike missing/stale plus a URL",
       "action": "Stop",
       "expected": "C: exit 2 with the spike reason; no pause",
       "covered_by": [
@@ -894,17 +1137,16 @@
       "id": "EHB-STOP-06",
       "boundary": "HB-STOP",
       "control_modes": [
-        "deliberative",
         "auto-interactive-pre",
         "auto-interactive-post",
         "auto-delegated"
       ],
-      "setup": "a non-converged Block, an evidence directive (interactive modes only: a delegated run's route is `unavailable`), a sole `budget.exhausted`, one pending async audit, a sole initial approval",
-      "action": "the **first** Stop (`stop_hook_active` false or absent)",
-      "expected": "C: same exit codes and settlements in every mode as before (the reason text is the one sentence of `_reason_text`): real reason exit 2; `evidence_report` exit 2; `budget_exhausted` exit 0; async-audit view exit 0; `human_wait` exit 0",
+      "setup": "an `auto` run: a non-converged Block, an evidence directive (interactive modes only: a delegated run's route is `unavailable`), a sole `budget.exhausted`, one pending async audit, a sole initial approval",
+      "action": "the first Stop (`stop_hook_active` false or absent)",
+      "expected": "C: real reason exit 2; `evidence_report` exit 2; `budget_exhausted` exit 0; async-audit view exit 0; `human_wait` exit 0 (the reason text is the one sentence of `_reason_text`)",
       "covered_by": [
-        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_EHB_STOP_06_the_first_stop_is_unchanged_in_every_mode",
-        "plugins/empirica/tests/v2/test_a1_boundaries.py::ClaudeStopNeverPausesForEvidence"
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_EHB_STOP_06_the_first_stop_of_an_auto_run_gives_the_reason_and_keeps_the_settlements",
+        "plugins/empirica/tests/v2/test_a1_boundaries.py::ClaudeStopEvidenceByControlMode"
       ],
       "ledger_rows": [
         "ev_url_confirm"
@@ -920,8 +1162,8 @@
       "action": "Stop with `stop_hook_active: true`",
       "expected": "C: exit 0, `paused_for_human`: \"paused for you, not converged: <real reason> Nothing was approved or confirmed by this pause, and nobody was asked.\" Never \"will be asked\"; the run stays `active`",
       "covered_by": [
-        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_EHB_STOP_07_deliberative_continuation_hands_off_with_the_real_reason",
-        "plugins/empirica/tests/v2/test_host_faithful.py::StopHookLoopOnClaude::test_EHB_STOP_16_a_deliberative_operator_checkpoint_ends_the_loop_in_two_stops"
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_EHB_STOP_07_deliberative_pauses_with_the_real_reason_on_the_first_and_a_later_turn_end",
+        "plugins/empirica/tests/v2/test_host_faithful.py::StopHookLoopOnClaude::test_EHB_STOP_16_a_deliberative_operator_checkpoint_ends_the_loop_in_one_stop"
       ],
       "ledger_rows": [
         "stop_pause_rendering"
@@ -950,30 +1192,18 @@
       "id": "EHB-STOP-09",
       "boundary": "HB-STOP",
       "control_modes": [
-        "deliberative"
+        "auto-interactive-pre",
+        "auto-interactive-post",
+        "auto-delegated"
       ],
       "setup": "Claude overrides Empirica after eight consecutive blocks",
       "action": "an operator checkpoint where the hook keeps blocking",
-      "expected": "live-only: **Q2** showed nine blocks before the override. After G3 the hook ends the loop first (a deliberative continuation ends in two Stops), so the cap is a host limit and never the plan",
+      "expected": "live-only: **Q2** showed nine blocks before the override, in a deliberative run. A deliberative run now pauses on its first Stop, so only an `auto` run can be blocked repeatedly; the cap is a host limit for it and never the plan",
       "covered_by": [],
       "live_only": "stop_host_cap",
       "ledger_rows": [
         "stop_host_cap"
       ]
-    },
-    {
-      "id": "EHB-STOP-10",
-      "boundary": "HB-STOP",
-      "control_modes": [
-        "any"
-      ],
-      "setup": "Pi turn ends with the run unconverged",
-      "action": "turn ends",
-      "expected": "P: no gate; no convergence claim; the next `report_convergence` evaluates",
-      "covered_by": [
-        "plugins/empirica/adapters/pi/test/registration.test.ts::registers tool, reviewer, and model observation lifecycle hooks"
-      ],
-      "ledger_rows": []
     },
     {
       "id": "EHB-STOP-11",
@@ -983,7 +1213,7 @@
       ],
       "setup": "interactive auto before its first approval",
       "action": "the first Stop and a continuation",
-      "expected": "C: `human_wait` settles an approvable first approval on either Stop; otherwise the first Stop is unchanged and a continuation takes the auto outcome (`unattended_continue`, or the evidence directive)",
+      "expected": "C: `human_wait` settles an approvable first approval on either Stop; otherwise an auto first turn end gives the core's reason and a continuation takes the auto outcome (`unattended_continue`, or the evidence directive)",
       "covered_by": [
         "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_EHB_STOP_11_interactive_auto_before_first_approval_keeps_human_wait_and_the_evidence_directive"
       ],
@@ -1014,7 +1244,7 @@
       "control_modes": [
         "deliberative"
       ],
-      "setup": "a Block whose run view has no governance, or whose run is not active, or two reasons",
+      "setup": "a deliberative Block whose run view has no governance, or whose run is not active, or two reasons",
       "action": "Stop with `stop_hook_active: true`",
       "expected": "C: no run view or no active run blocks (exit 2); two reasons are all named in the hand-off",
       "covered_by": [
@@ -1060,10 +1290,11 @@
       ],
       "setup": "deliberative Claude run with a literal agent that ends its turn to wait",
       "action": "the Stop hook loop",
-      "expected": "C: the loop ends in at most two Stops with \"paused … not converged … nobody was asked\"; the evidence-directive variant: the first Stop is the F7 directive, the second a hand-off, no dialog shown",
+      "expected": "C: the loop ends in at most two Stops with \"paused … not converged … nobody was asked\"",
       "covered_by": [
-        "plugins/empirica/tests/v2/test_host_faithful.py::StopHookLoopOnClaude::test_EHB_STOP_16_a_deliberative_operator_checkpoint_ends_the_loop_in_two_stops",
-        "plugins/empirica/tests/v2/test_host_faithful.py::test_EHB_STOP_16_an_evidence_directive_the_agent_ignores_is_handed_off_not_repeated"
+        "plugins/empirica/tests/v2/test_host_faithful.py::StopHookLoopOnClaude::test_EHB_STOP_16_a_deliberative_operator_checkpoint_ends_the_loop_in_one_stop",
+        "plugins/empirica/tests/v2/test_host_faithful.py::StopHookLoopOnClaude::test_EHB_STOP_16_a_deliberative_evidence_wait_pauses_and_nobody_is_shown_a_dialog_by_the_stop",
+        "plugins/empirica/tests/v2/test_host_faithful.py::StopHookLoopOnClaude::test_EHB_STOP_16_an_evidence_directive_the_agent_ignores_to_the_cap_in_interactive_auto"
       ],
       "ledger_rows": [
         "stop_pause_rendering"
@@ -1149,6 +1380,85 @@
         "plugins/empirica/tests/v2/test_budget_freeze_terminal.py::test_derivation_and_spawn_limits_block"
       ],
       "ledger_rows": []
+    },
+    {
+      "id": "EHB-TERM-01",
+      "boundary": "HB-REPORT",
+      "control_modes": [
+        "deliberative"
+      ],
+      "setup": "a deliberative run whose `report_convergence` or `stop` would end `stopped_frozen`, `stopped_residual` or `stopped_budget`; the host can show a dialog (Claude, Pi)",
+      "action": "`report_convergence` or `intent=stop`, then the human accepts",
+      "expected": "the human is asked inside the call through the evidence-confirmation presentation port; on accept the transition commits and the run is terminal with that status",
+      "covered_by": [
+        "plugins/empirica/tests/v2/test_terminal_consent.py::TerminalConsentTests::test_EHB_TERM_01_a_deliberative_stop_commits_only_after_the_human_approves",
+        "plugins/empirica/tests/v2/test_terminal_consent.py::TerminalConsentTests::test_EHB_TERM_01_the_item_is_the_status_and_binds_the_derivation",
+        "plugins/empirica/tests/v2/test_terminal_consent.py::TerminalConsentTests::test_EHB_TERM_01_an_approval_of_an_older_derivation_grants_nothing_now",
+        "plugins/empirica/adapters/pi/test/evidence-ui.test.ts::EHB-TERM-01: the terminal batch travels with the presentation, and the human's approval is one receipt"
+      ],
+      "ledger_rows": []
+    },
+    {
+      "id": "EHB-TERM-02",
+      "boundary": "HB-REPORT",
+      "control_modes": [
+        "deliberative"
+      ],
+      "setup": "the same, and the human declines, cancels or lets the dialog time out",
+      "action": "the same call",
+      "expected": "nothing is granted; the run stays `active` and the result is the closed reason `governance.terminal_stop_pending`, never a terminal state",
+      "covered_by": [
+        "plugins/empirica/tests/v2/test_terminal_consent.py::TerminalConsentTests::test_EHB_TERM_02_decline_cancel_and_timeout_grant_nothing",
+        "plugins/empirica/tests/v2/test_terminal_consent.py::TerminalConsentTests::test_EHB_TERM_02_a_spent_question_is_not_asked_again_for_the_same_derivation",
+        "plugins/empirica/adapters/pi/test/evidence-ui.test.ts::EHB-TERM-02: reject, later, cancel and timeout submit nothing that grants the end"
+      ],
+      "ledger_rows": []
+    },
+    {
+      "id": "EHB-TERM-03",
+      "boundary": "HB-REPORT",
+      "control_modes": [
+        "deliberative"
+      ],
+      "setup": "the same, on a host with no dialog (a route `unavailable`)",
+      "action": "the same call",
+      "expected": "the step stays blocked with `governance.terminal_stop_pending` (fail closed); the run stays `active`",
+      "covered_by": [
+        "plugins/empirica/tests/v2/test_terminal_consent.py::TerminalConsentTests::test_EHB_TERM_03_without_a_dialog_the_step_stays_blocked",
+        "plugins/empirica/adapters/pi/test/evidence-ui.test.ts::EHB-TERM-03: without a UI the end is not asked and the failure is the usual one"
+      ],
+      "ledger_rows": []
+    },
+    {
+      "id": "EHB-TERM-04",
+      "boundary": "HB-REPORT",
+      "control_modes": [
+        "auto-interactive-pre",
+        "auto-interactive-post",
+        "auto-delegated"
+      ],
+      "setup": "each `auto` mode, a step that would end `stopped_*`",
+      "action": "`report_convergence` or `intent=stop`",
+      "expected": "unchanged: no dialog, the transition commits as before",
+      "covered_by": [
+        "plugins/empirica/tests/v2/test_terminal_consent.py::TerminalConsentTests::test_EHB_TERM_04_every_auto_mode_ends_without_a_question"
+      ],
+      "ledger_rows": []
+    },
+    {
+      "id": "EHB-TERM-05",
+      "boundary": "HB-REPORT",
+      "control_modes": [
+        "deliberative"
+      ],
+      "setup": "Claude and Pi, a deliberative run at the terminal step",
+      "action": "the human answers the dialog (accept, then a run with decline, cancel, timeout)",
+      "expected": "as `EHB-TERM-01` and `EHB-TERM-02` on the real host",
+      "covered_by": [],
+      "ledger_rows": [
+        "terminal_stop_consent"
+      ],
+      "live_only": "terminal_stop_consent"
     },
     {
       "id": "EHB-OBS-01",
@@ -1979,12 +2289,11 @@
       "id": "EHB-STOP-19",
       "boundary": "HB-STOP",
       "control_modes": [
-        "auto-interactive-pre",
-        "deliberative"
+        "auto-interactive-pre"
       ],
       "setup": "a first approval that cannot be asked here (no MCP ingress, interactions spent, or a prompt error), so `human_wait` does not apply; the previous Stop already blocked",
       "action": "Stop with `stop_hook_active: true`",
-      "expected": "C: interactive auto before its first approval takes the auto outcome (exit 2, `unattended_continue`, `intent=stop` named), where it used to re-block with the real reason until Claude's cap; deliberative hands off with `paused_for_human`; the first Stop is the real-reason block in both",
+      "expected": "C: interactive auto before its first approval takes the auto outcome (exit 2, `unattended_continue`, `intent=stop` named), where it used to re-block with the real reason until Claude's cap; the first Stop is the real-reason block",
       "covered_by": [
         "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_EHB_STOP_19_an_approval_that_cannot_be_asked_ends_the_loop_by_mode"
       ],
@@ -1995,18 +2304,188 @@
       "boundary": "HB-STOP",
       "control_modes": [
         "auto-interactive-pre",
-        "auto-interactive-post",
-        "deliberative"
+        "auto-interactive-post"
       ],
       "setup": "the sole blocker is an evidence confirmation a human can be asked about (route `human` or `unobserved`, batch not yet shown); the previous Stop already blocked; this takes precedence over `EHB-STOP-08`",
       "action": "Stop with `stop_hook_active: true`",
-      "expected": "C: every interactive `auto` mode keeps the `evidence_report` directive (exit 2: the act-on-it action is the report that asks the human); deliberative hands off with `paused_for_human`",
+      "expected": "C: every interactive `auto` mode keeps the `evidence_report` directive (exit 2: the act-on-it action is the report that asks the human)",
       "covered_by": [
         "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_EHB_STOP_20_an_auto_continuation_keeps_the_evidence_directive_and_deliberative_hands_off"
       ],
       "ledger_rows": [
         "stop_unattended_directive"
       ]
+    },
+    {
+      "id": "EHB-STOP-21",
+      "boundary": "HB-STOP",
+      "control_modes": [
+        "deliberative"
+      ],
+      "setup": "Claude, a deliberative run, active and not converged, any blocker other than the existing settlements",
+      "action": "the **first** Stop (`stop_hook_active` false or absent) and a later one",
+      "expected": "C: exit 0 with `systemMessage` = `paused_for_human` naming the real next step; the turn ends; the run stays `active`; the result is the same whatever `stop_hook_active` is",
+      "covered_by": [
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_EHB_STOP_21_a_deliberative_turn_end_pauses_on_the_first_stop_and_on_a_later_one"
+      ],
+      "ledger_rows": [
+        "stop_first_pause",
+        "stop_pause_rendering"
+      ]
+    },
+    {
+      "id": "EHB-STOP-22",
+      "boundary": "HB-STOP",
+      "control_modes": [
+        "deliberative"
+      ],
+      "setup": "Claude, a deliberative run, the sole blocker is an evidence confirmation a human can be asked about",
+      "action": "Stop, with `stop_hook_active` false or true",
+      "expected": "C: exit 0 with `systemMessage` = `paused_for_evidence` (tell the agent to report, and you are asked in that call, if this host can show a dialog); the run stays `active`; nobody was asked",
+      "covered_by": [
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_EHB_STOP_22_a_deliberative_evidence_wait_pauses_with_the_report_step_for_the_human",
+        "plugins/empirica/tests/v2/test_a1_boundaries.py::ClaudeStopEvidenceByControlMode::test_D_a_deliberative_stop_pauses_for_evidence_where_the_human_is_present"
+      ],
+      "ledger_rows": [
+        "stop_first_pause"
+      ]
+    },
+    {
+      "id": "EHB-STOP-23",
+      "boundary": "HB-STOP",
+      "control_modes": [
+        "deliberative",
+        "auto-interactive-pre",
+        "auto-interactive-post",
+        "auto-delegated"
+      ],
+      "setup": "Claude, every control mode × run state of the turn-end table × `stop_hook_active` (false, absent, true)",
+      "action": "`stop_result` for each cell",
+      "expected": "C: the exit code, stdout and stderr class of each cell equal the outcome the registry table (`turn_end`) names for it; read from the JSON, not restated in the test",
+      "covered_by": [
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_EHB_STOP_23_every_cell_of_the_registry_turn_end_table"
+      ],
+      "ledger_rows": []
+    },
+    {
+      "id": "EHB-STOP-29",
+      "boundary": "HB-STOP",
+      "control_modes": [
+        "any"
+      ],
+      "setup": "Pi, a converged run or no run",
+      "action": "`agent_before_settle`",
+      "expected": "P: nothing is appended and no continuation is requested (a converged run, or no run)",
+      "covered_by": [
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::EHB-STOP-29: a converged run and no run append nothing"
+      ],
+      "ledger_rows": []
+    },
+    {
+      "id": "EHB-STOP-35",
+      "boundary": "HB-STOP",
+      "control_modes": [
+        "deliberative",
+        "auto-interactive-pre",
+        "auto-interactive-post",
+        "auto-delegated"
+      ],
+      "setup": "Pi, one pending async audit",
+      "action": "`agent_before_settle`",
+      "expected": "P: no continuation and nothing appended: the pending audit's result continues the run",
+      "covered_by": [
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::EHB-STOP-35: a pending audit appends nothing and requests no continuation"
+      ],
+      "ledger_rows": []
+    },
+    {
+      "id": "EHB-STOP-36",
+      "boundary": "HB-STOP",
+      "control_modes": [
+        "deliberative",
+        "auto-interactive-pre",
+        "auto-interactive-post",
+        "auto-delegated"
+      ],
+      "setup": "Pi, the sole blocker is the initial approval or an exhausted budget",
+      "action": "`agent_before_settle`",
+      "expected": "P: no continuation; the settlement notice (`human_wait`, `budget_exhausted`) is appended as a visible `custom_message`",
+      "covered_by": [
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::EHB-STOP-36: a settlement appends its notice and requests no continuation"
+      ],
+      "ledger_rows": [
+        "pi_settle_notice"
+      ]
+    },
+    {
+      "id": "EHB-STOP-31",
+      "boundary": "HB-STOP",
+      "control_modes": [
+        "deliberative"
+      ],
+      "setup": "Pi, a deliberative run, active, non-converged (including the evidence-wait case)",
+      "action": "`agent_before_settle`",
+      "expected": "P: a `custom_message` entry with `display: true` holding `paused_for_human` (or `paused_for_evidence`) is appended; no `continue`; exactly one notice per settle (`turn_end` is not used)",
+      "covered_by": [
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::EHB-STOP-31: a deliberative turn end appends one visible notice and requests no continuation"
+      ],
+      "ledger_rows": [
+        "pi_settle_notice"
+      ]
+    },
+    {
+      "id": "EHB-STOP-32",
+      "boundary": "HB-STOP",
+      "control_modes": [
+        "auto-interactive-pre",
+        "auto-interactive-post",
+        "auto-delegated"
+      ],
+      "setup": "Pi, an auto run, active, non-converged",
+      "action": "`agent_before_settle`",
+      "expected": "P: `continue: true` with the next obligation (the core's reason, or the evidence directive in the interactive modes) appended as the message",
+      "covered_by": [
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::EHB-STOP-32/33: an auto turn end continues once per change of basis and then ends with no-progress",
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::EHB-STOP-32: interactive auto hands the evidence directive and a delegated run does not"
+      ],
+      "ledger_rows": [
+        "pi_auto_continue_bound"
+      ]
+    },
+    {
+      "id": "EHB-STOP-33",
+      "boundary": "HB-STOP",
+      "control_modes": [
+        "auto-interactive-pre",
+        "auto-interactive-post",
+        "auto-delegated"
+      ],
+      "setup": "Pi, an auto run that already continued on this observation basis and whose basis has not changed",
+      "action": "`agent_before_settle` again",
+      "expected": "P: no `continue`; the `unattended_continue` notice is appended and `no-progress` is recorded; a changed basis (a new tool result, a changed run state) allows one more continuation",
+      "covered_by": [
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::EHB-STOP-32/33: an auto turn end continues once per change of basis and then ends with no-progress"
+      ],
+      "ledger_rows": [
+        "pi_auto_continue_bound"
+      ]
+    },
+    {
+      "id": "EHB-STOP-34",
+      "boundary": "HB-STOP",
+      "control_modes": [
+        "deliberative",
+        "auto-interactive-pre",
+        "auto-interactive-post",
+        "auto-delegated"
+      ],
+      "setup": "Pi, every control mode × run state of the turn-end table",
+      "action": "the settle handler for each cell",
+      "expected": "P: each cell equals the outcome the registry table (`turn_end`) names for it, read from the JSON",
+      "covered_by": [
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::EHB-STOP-34: every state x control mode x chain position of the registry turn-end table"
+      ],
+      "ledger_rows": []
     },
     {
       "id": "EHB-INT-05",

@@ -15,7 +15,7 @@ from adapters.audit_protocol import AuditProtocol, AuditProtocolError, IdentityO
 from adapters.identity import POLICY_VERSION, observe
 from core.evaluation import audit_binding
 from core.records import Corrupt, Present, Revision
-from governance_setup import SIZED_RATIONALE, TEST_INVOCATION, approve_current
+from governance_setup import SIZED_RATIONALE, TEST_INVOCATION, approve_current, end_with_consent
 from application.protocol import host_profile_id  # noqa: E402
 PI_PROFILE = host_profile_id("pi")
 
@@ -344,8 +344,7 @@ class StaleAuditRetryTests(unittest.TestCase):
     def test_corrupt_and_terminal_runs_never_recover(self):
         self.pending()
         self.change_argument()
-        self.coordinator.handle({"type": "EvaluateRun", "run_id": self.run_id,
-                                 "intent": "stop"}, "stop")
+        end_with_consent(self.coordinator, self.run_id)
         before = self.runs.data[self.key]
         with self.assertRaises(AuditProtocolError):
             self.prepare()
