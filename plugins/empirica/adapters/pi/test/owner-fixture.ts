@@ -25,6 +25,13 @@ export interface FixtureOptions {
   /** Preflight module source; default exports a sentinel-tagged ``resolveSubagentLaunchContract``. */
   readonly preflight?: string | null;
   readonly sentinel?: string;
+  /** The tool's parameter schema as Pi reports it; absent by default (a version with a compat record never needs it). */
+  readonly parameters?: unknown;
+}
+
+/** A parameter schema declaring exactly the named properties, shaped like the owner's TypeBox object. */
+export function schemaDeclaring(names: readonly string[]): unknown {
+  return { type: "object", properties: Object.fromEntries(names.map((name) => [name, { type: "string" }])) };
 }
 
 /** Create a `pi-subagents`-shaped package under ``parent`` (defaults to a fresh temp dir). */
@@ -48,7 +55,8 @@ export function makeSubagentsPackage(parent: string, options: FixtureOptions = {
   return {
     root, entry,
     tool: (overrides = {}) => ({ name: "subagent",
-      sourceInfo: { path: entry, source: "npm:pi-subagents", scope: "user", origin: "package", ...overrides } }),
+      sourceInfo: { path: entry, source: "npm:pi-subagents", scope: "user", origin: "package", ...overrides },
+      ...(options.parameters === undefined ? {} : { parameters: options.parameters }) }),
   };
 }
 
@@ -71,14 +79,13 @@ export function defaultSubagentsPackage(): FixturePackage {
 
 /**
  * The StartRun invocation of a Pi session whose runtime the contract's policy accepts: the newest
- * reviewed version at lexical paths (the Python bridge checks containment, not existence).
+ * version with a compat record at lexical paths (the Python bridge checks containment, not existence).
  */
 export function recordedInvocation(): InvocationProvenance & { host_runtime: NonNullable<InvocationProvenance["host_runtime"]> } {
   const root = "/opt/pi-subagents";
-  const versions = SUBAGENTS_COMPATIBILITY.reviewed_versions;
   return { host: "pi", interactive: true, signal: "ctx.mode=tui", delegation: false, audit_retrieval: ["local", "workspace"], human_surface: "unavailable",
     host_runtime: { policy_id: SUBAGENTS_COMPATIBILITY.policy_id, subagents: {
-      package: SUBAGENTS_COMPATIBILITY.package, version: versions[versions.length - 1]!,
+      package: SUBAGENTS_COMPATIBILITY.package, version: "0.76.1", reviewed: true,
       owner_path: `${root}/src/extension/index.js`, package_root: root,
       preflight_path: `${root}/src/api/preflight.js`, source: `${root}/index.js` } } };
 }

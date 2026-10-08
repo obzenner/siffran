@@ -113,12 +113,12 @@ ENDED = "ended"
 
 def ask_route(snapshot: EvaluationSnapshot, route: str | None, prompt_error: str | None) -> str | None:
     """The route as the human is told it. ``prompt_error`` is the run view's ``confirmation_batch.prompt_error``,
-    the one owner of whether a host will ask (the observer re-derives nothing)."""
+    the one owner of whether a host will ask; the observer only re-words it (``confirmation.told_route``)."""
     if route is None or route == confirmation.AUDIT:
         return route
     if snapshot.state.status != "active":
         return ENDED
-    return SPENT_ROUTES.get(prompt_error, route)
+    return SPENT_ROUTES.get(prompt_error, confirmation.told_route(route))
 
 
 def _record(snapshot: EvaluationSnapshot, record: Mapping[str, Any], prompt_error: str | None) -> dict[str, Any]:
@@ -189,7 +189,7 @@ def project(snapshot: EvaluationSnapshot, messages: Mapping[str, str]) -> tuple[
     scope = set(effective_scope_ids(snapshot)) if graph is not None else set()
     deciding = set(pending_decisions(snapshot, derivation)) if derivation is not None else set()
     batch = view["confirmation_batch"]
-    prompt_error = batch["prompt_error"] if batch is not None else None
+    prompt_error = confirmation.told_prompt_error(batch["prompt_error"]) if batch is not None else None
     # What waits on a human is the run view's ``confirmation_batch`` and nothing else: empty unless the run is
     # active and a host could present it. Per claim: how many of the batch's records are its, and whether it is
     # one of the batch's decisions.

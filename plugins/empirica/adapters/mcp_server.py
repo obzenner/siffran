@@ -18,6 +18,7 @@ if str(_PLUGIN_ROOT) not in sys.path:
 from adapters.public_tools import PublicTools  # noqa: E402
 from adapters.confirmation import HostConfirmation  # noqa: E402
 from adapters.governance import HostGovernance, governance_timeout  # noqa: E402
+from application.protocol import host_profile_id  # noqa: E402
 
 PROTOCOL_VERSION = "2025-11-25"
 
@@ -28,9 +29,9 @@ def profile_from_environment(environ: dict[str, str] | None = None) -> str:
     if explicit:
         return explicit
     if env.get("CLAUDE_PLUGIN_ROOT"):
-        return "claude-code@2.1.278"
+        return host_profile_id("claude-code")
     if env.get("PLUGIN_ROOT"):
-        return "codex-cli@0.146.0"
+        return host_profile_id("codex-cli")
     raise ValueError("Empirica MCP requires an exact host profile")
 
 

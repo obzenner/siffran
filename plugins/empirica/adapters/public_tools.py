@@ -28,6 +28,11 @@ Dispatch = Callable[[dict, str], dict]
 _PRIVATE_RESULT_KEYS = ("presentation", "dialog", "scope")
 
 
+def _with_host_failure(command: Mapping[str, Any], failure: str | None) -> dict[str, Any]:
+    """``command`` with the host's own failure of this call attached, when there is one."""
+    return {**command, **({"host_failure": failure} if failure else {})}
+
+
 def _contains_private(value: Any) -> bool:
     """Recursively detect any private presentation field anywhere in a model-facing result."""
     if isinstance(value, dict):
@@ -273,22 +278,27 @@ class PublicTools:
             "request_id": str(uuid.uuid4()),
             "command": command,
         }
+        mediated = bool(self._confirm and name == REPORT_TOOL
+                        and arguments.get("intent", "report_convergence") == "report_convergence")
         try:
-            if (self._confirm and name == REPORT_TOOL
-                    and arguments.get("intent", "report_convergence") == "report_convergence"):
-                # What this host can show a human is observed before the evaluation reads it.
-                self._confirm.observe(arguments["run_id"])
+            if mediated:
+                # What this host can show a human is observed before the evaluation reads it; a host that could not
+                # observe says so with the evaluation, so the response does not promise a question nobody will ask.
+                failure = self._confirm.observe(arguments["run_id"]).failure
+                request = {**request, "command": _with_host_failure(command, failure)}
             response = self._dispatch(request, self._profile_id)
             result = response.get("result") if isinstance(response, dict) else None
             if not isinstance(result, dict):
                 return self._error("Empirica bridge returned no typed result.")
             if self._govern and name == OBSERVE_TOOL and arguments["action"]["kind"] == "configure_run":
                 result = self._govern(result)
-            elif (self._confirm and name == REPORT_TOOL
-                  and arguments.get("intent", "report_convergence") == "report_convergence"):
-                # The end of a pass: a block that waits on the human is presented once, then re-evaluated.
-                result = self._confirm(result, lambda: self._dispatch(
-                    {**request, "request_id": str(uuid.uuid4())}, self._profile_id)["result"])
+            elif mediated:
+                # The end of a pass: a block that waits on the human is presented once, then re-evaluated; a batch the
+                # host could not present is evaluated again with that failure, so the response says nobody was asked.
+                result = self._confirm(result, lambda failure: self._dispatch(
+                    {**request, "request_id": str(uuid.uuid4()),
+                     "command": _with_host_failure(command, failure)},
+                    self._profile_id)["result"])
         except Exception:  # public transport or mediation failure remains a typed tool error
             return self._error("Empirica bridge unavailable.")
         if not isinstance(result, dict) or _contains_private(result):

@@ -16,6 +16,8 @@ from application import protocol
 from assertions import action_freeze, observe_action
 from test_evidence_confirmation import URL, WORKSPACE_REF
 from test_evidence_hosts import Human, MediatorFixture, accept
+from application.protocol import host_profile_id  # noqa: E402
+CLAUDE_PROFILE = host_profile_id("claude-code")
 
 CONFIRMATION = "evidence.confirmation_required"
 EVIDENCE_REPORT_NOTICE = getattr(protocol, "EVIDENCE_REPORT_NOTICE", "<not defined>")
@@ -27,6 +29,8 @@ def typed(result: dict) -> Response:
 
 class PresentationBindsWhatWasShown(MediatorFixture):
     """A1-1: the presentation names the batch key the host showed; the core admits only the current one."""
+
+    LOOKED_AT_START = True  # the presentation step follows the host's look inside one report
 
     def racing(self, drv, run_id, extra=1):
         """An ingress that adds ``extra`` unseen research records just before the first presentation lands."""
@@ -87,7 +91,7 @@ class PresentationBindsWhatWasShown(MediatorFixture):
     def test_D_an_unseen_record_is_shown_after_one_reread_and_the_presentation_names_what_was_shown(self):
         drv, run_id = self.start()
         self.research(drv, run_id, "web", URL)
-        shown = confirmation.present("claude-code@2.1.278", run_id, dispatch=lambda req, _p: drv.request(req),
+        shown = confirmation.present(CLAUDE_PROFILE, run_id, dispatch=lambda req, _p: drv.request(req),
                                      ingress=self.racing(drv, run_id))
         receipt_id, items = shown
         self.assertEqual(len(items), 2)
@@ -98,21 +102,21 @@ class PresentationBindsWhatWasShown(MediatorFixture):
         drv, run_id = self.start()
         self.research(drv, run_id, "web", URL)
         human = Human(accept(d1="confirm", d2="confirm"))
-        self.mediator_with(drv, human, self.racing(drv, run_id))(self.report(drv, run_id), lambda: self.report(drv, run_id))
+        self.mediator_with(drv, human, self.racing(drv, run_id))(self.report(drv, run_id), self.reevaluator(drv, run_id))
         self.assertEqual({r["verification"]["status"] for r in self.rows(drv, run_id)}, {"confirmed_by_human"})
 
     def test_D_partial_answers_after_the_interleaving_leave_the_rest_pending(self):
         drv, run_id = self.start()
         self.research(drv, run_id, "web", URL)
         human = Human(accept(d1="confirm", d2="later"))
-        self.mediator_with(drv, human, self.racing(drv, run_id))(self.report(drv, run_id), lambda: self.report(drv, run_id))
+        self.mediator_with(drv, human, self.racing(drv, run_id))(self.report(drv, run_id), self.reevaluator(drv, run_id))
         self.assertEqual([r["verification"]["status"] for r in self.rows(drv, run_id)], ["confirmed_by_human", "pending"])
 
     def test_D_later_after_the_interleaving_marks_only_what_was_shown_as_presented(self):
         drv, run_id = self.start()
         self.research(drv, run_id, "web", URL)
         human = Human(accept(d1="later", d2="later"))
-        self.mediator_with(drv, human, self.racing(drv, run_id))(self.report(drv, run_id), lambda: self.report(drv, run_id))
+        self.mediator_with(drv, human, self.racing(drv, run_id))(self.report(drv, run_id), self.reevaluator(drv, run_id))
         self.assertEqual(len(human.shown[0][1]["properties"]), 4)  # both records were in the dialog
         self.assertEqual(self.batch(drv, run_id)["prompt_error"], "already_presented")
         # And a record nobody saw is never spent: it arrives after the dialog and is asked on its own.
@@ -126,7 +130,8 @@ class PresentationBindsWhatWasShown(MediatorFixture):
         human = Human(accept(d1="confirm"))
         mediator = self.mediator_with(drv, human, self.racing(drv, run_id, extra=2))
         blocked = self.report(drv, run_id)
-        self.assertEqual(mediator(blocked, lambda: self.report(drv, run_id)), blocked)
+        said = mediator(blocked, self.reevaluator(drv, run_id))
+        self.assertEqual(said["run"]["confirmation_batch"]["prompt_error"], "presentation_failed")  # and it says so
         self.assertEqual(human.shown, [])
         self.assertEqual(self.interactions(drv, run_id)["total"], before)
         self.assertEqual(self.presentations(drv, run_id), [])
@@ -135,9 +140,11 @@ class PresentationBindsWhatWasShown(MediatorFixture):
 
 class ClaudeStopNeverPausesForEvidence(MediatorFixture):
     """A2-1/A2-2 (ruling): in Claude the human can only be asked *inside* ``report_convergence`` (MCP elicitation), so a
-    Stop that pauses on a batch nobody has shown ends the turn and nobody asks. The Stop never settles as an evidence
-    wait: with the confirmation as the sole blocker and nobody having been told otherwise it blocks (exit 2) with one
-    plain directive to report convergence; in every other case it blocks with the real reason. There is no surface note."""
+    Stop that pauses on a batch nobody has shown ends the turn and nobody asks. On the **first Stop** (``stop_hook_active``
+    absent, which is all this class exercises) the Stop never settles as an evidence wait: with the confirmation as the
+    sole blocker and nobody having been told otherwise it blocks (exit 2) with one plain directive to report convergence;
+    in every other case it blocks with the real reason. There is no surface note. A continuation is ended by control
+    mode (``StopModeTests``, EHB-STOP-07/08/20)."""
 
     FAULT = lambda *_: {"result": {"type": "Fault", "code": "unavailable"}}  # noqa: E731
 
@@ -168,15 +175,15 @@ class ClaudeStopNeverPausesForEvidence(MediatorFixture):
                 if reply is not None:
                     mediator._surface = self.broken(None if reply == "raise" else reply)
                 mediator.observe(run_id)
-                response = self.report(drv, run_id)
-                stop = stop_result(typed(response))
+                response = self.evaluated(drv, run_id)
+                stop = stop_result(typed(response), stop_hook_active=False)
                 if has_form or label.startswith("no UI"):
                     self.assertEqual(self.codes(response), [CONFIRMATION], label)
                 self.assertEqual(stop.exit_code, 2, label)
                 if label != "recorded unavailable (no form)":
                     self.assertEqual(stop.stderr, EVIDENCE_REPORT_NOTICE + "\n", label)
                 self.assertEqual(stop.stdout, "", label)  # never a settlement
-                mediator(response, lambda: self.report(drv, run_id))
+                mediator(response, self.reevaluator(drv, run_id, look=False))
                 self.assertEqual(len(human.shown), 1 if may_show else 0, label)
 
     def test_D_overlapping_observations_cannot_make_the_stop_pause(self):
@@ -191,7 +198,7 @@ class ClaudeStopNeverPausesForEvidence(MediatorFixture):
             return self.FAULT()
         outer._surface = outer_surface
         outer.observe(run_id)
-        self.assertEqual(stop_result(typed(self.report(drv, run_id))).exit_code, 2)
+        self.assertEqual(stop_result(typed(self.evaluated(drv, run_id)), stop_hook_active=False).exit_code, 2)
         outer._surface = good
 
     def test_D_a_failure_before_an_older_success_cannot_make_the_stop_pause(self):
@@ -206,7 +213,7 @@ class ClaudeStopNeverPausesForEvidence(MediatorFixture):
             return good(profile, run, payload)
         older._surface = older_surface
         older.observe(run_id)
-        self.assertEqual(stop_result(typed(self.report(drv, run_id))).exit_code, 2)
+        self.assertEqual(stop_result(typed(self.evaluated(drv, run_id)), stop_hook_active=False).exit_code, 2)
 
     def test_D_the_surface_note_is_gone(self):
         import importlib.util
@@ -247,7 +254,7 @@ class TheAuthorReadsWhatTheHumanSees(MediatorFixture):
     human's note and answer, fenced as untrusted text."""
 
     def tools(self, drv):
-        return PublicTools("claude-code@2.1.278", dispatch=lambda req, _p: drv.request(req))
+        return PublicTools(CLAUDE_PROFILE, dispatch=lambda req, _p: drv.request(req))
 
     def text(self, tools, name, args):
         return tools.call(name, args)["content"][0]["text"]
@@ -261,7 +268,7 @@ class TheAuthorReadsWhatTheHumanSees(MediatorFixture):
         self.assertIn(URL, text)
         self.assertIn("C0", text)
         self.assertNotIn("sha256:", text.split("Waiting on a human")[1].split("\n\n")[0])
-        self.assertIn("a human can be asked", text)
+        self.assertIn("a human is asked when you report, if this host can show a dialog", text)  # Claude has not looked yet
 
     def test_D_a_fresh_get_run_after_later_says_it_will_not_ask_again(self):
         drv, run_id = self.start()
@@ -329,12 +336,12 @@ class OneClaimsBlockerOrder(MediatorFixture):
 
     def test_D_claude_stop_blocks_with_the_spike_reason_and_does_not_pause(self):
         drv, run_id = self.experiment()
-        stop = stop_result(typed(self.report(drv, run_id)))
+        stop = stop_result(typed(self.report(drv, run_id)), stop_hook_active=False)
         self.assertEqual(stop.exit_code, 2)
         self.assertIn("spike", stop.stderr.lower())
         self.record_passing_spike(drv, run_id, WORKSPACE_REF)
         self.change_file(drv, WORKSPACE_REF)
-        stale = stop_result(typed(self.report(drv, run_id)))
+        stale = stop_result(typed(self.report(drv, run_id)), stop_hook_active=False)
         self.assertEqual(stale.exit_code, 2)
         self.assertIn("re-gate", stale.stderr.lower())
 
@@ -412,7 +419,7 @@ class TheResponseAfterAPresentationIsFresh(MediatorFixture):
     """m2: any admitted presentation is followed by a re-evaluation, whatever the human did."""
 
     def returned(self, drv, run_id, human):
-        tools = PublicTools("claude-code@2.1.278", dispatch=lambda req, _p: drv.request(req),
+        tools = PublicTools(CLAUDE_PROFILE, dispatch=lambda req, _p: drv.request(req),
                             confirm=self.mediator(drv, human))
         return tools.call_internal("report_convergence", {"run_id": run_id})["structuredContent"]
 

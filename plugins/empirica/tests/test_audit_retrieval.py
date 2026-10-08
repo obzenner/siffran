@@ -7,6 +7,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from adapters import invocation
+from application.protocol import host_profile_id  # noqa: E402
+CLAUDE_PROFILE = host_profile_id("claude-code")
 
 
 def definition(tools: str) -> Path:
@@ -19,27 +21,27 @@ class ClaudeAuditRetrievalTests(unittest.TestCase):
     def test_the_shipped_definition_covers_workspace_and_local_but_never_the_web(self):
         shipped = invocation._declared_tools(invocation._CLAUDE_AUDITOR)
         self.assertIn("WebFetch", shipped)  # declared, never observed: nothing shows it is permitted
-        self.assertEqual(invocation.audit_retrieval("claude-code@2.1.278"), ["local", "workspace"])
+        self.assertEqual(invocation.audit_retrieval(CLAUDE_PROFILE), ["local", "workspace"])
 
     def test_the_set_follows_the_definitions_tools(self):
         for tools, expected in (("Read, Glob, Grep", ["local", "workspace"]), ("Glob, Grep", []),
                                 ("WebFetch", []), ("Read", ["local", "workspace"]), ("Bash, Read", ["local", "workspace"])):
             with self.subTest(tools=tools), patch.object(invocation, "_CLAUDE_AUDITOR", definition(tools)):
-                self.assertEqual(invocation.audit_retrieval("claude-code@2.1.278"), expected)
+                self.assertEqual(invocation.audit_retrieval(CLAUDE_PROFILE), expected)
 
     def test_a_definition_without_tools_is_an_error_not_a_default(self):
         bare = Path(tempfile.mkdtemp()) / "a.md"
         bare.write_text("---\nname: a\n---\n", encoding="utf-8")
         with patch.object(invocation, "_CLAUDE_AUDITOR", bare), self.assertRaises(ValueError):
-            invocation.audit_retrieval("claude-code@2.1.278")
+            invocation.audit_retrieval(CLAUDE_PROFILE)
 
     def test_codex_has_no_auditor_and_pi_observes_its_own_set(self):
-        self.assertEqual(invocation.audit_retrieval("codex-cli@0.146.0"), [])
+        self.assertEqual(invocation.audit_retrieval(host_profile_id("codex-cli")), [])
         with self.assertRaises(KeyError):
-            invocation.audit_retrieval("pi@1.0.0")
+            invocation.audit_retrieval(host_profile_id("pi"))
 
     def test_provenance_carries_the_observed_set(self):
-        got = invocation.provenance("claude", True, "s", {}, profile_id="claude-code@2.1.278")
+        got = invocation.provenance("claude", True, "s", {}, profile_id=CLAUDE_PROFILE)
         self.assertEqual(got["audit_retrieval"], ["local", "workspace"])
 
 

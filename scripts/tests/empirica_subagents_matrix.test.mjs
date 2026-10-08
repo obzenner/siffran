@@ -25,11 +25,17 @@ test("versions are exact releases, compared numerically, never as strings", () =
   assert.equal(compareVersions("1.2.3", "1.2.3"), 0);
 });
 
-test("the matrix checks exactly the contract's reviewed versions, which are exactly the checked-in inventories", () => {
+test("the matrix checks exactly the versions with a checked-in compat record, all inside the contract's range", () => {
   const reviewed = reviewedFrom(profiles);
   const inventories = readdirSync(compat).map((file) => /^pi-subagents-(.+)\.json$/.exec(file)?.[1]).filter(Boolean);
   assert.deepEqual(reviewed.versions, inventories.sort(compareVersions));
   assert.equal(reviewed.policy_id, "pi-subagents-foreground-audit-v1");
+});
+
+test("reviewedFrom refuses a compat record outside the profile's range", () => {
+  const withPolicy = profiles.profiles.find((profile) => profile.subagents_compatibility);
+  const narrowed = { profiles: [{ ...withPolicy, subagents_compatibility: { ...withPolicy.subagents_compatibility, maximum_exclusive: "0.76.1" } }] };
+  assert.throws(() => reviewedFrom(narrowed), /compat records outside the supported range \[0\.50\.0, 0\.76\.1\): 0\.76\.1/);
 });
 
 test("reviewedFrom refuses a document with no profile, two profiles, or another package", () => {

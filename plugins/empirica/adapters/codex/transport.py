@@ -1,7 +1,7 @@
 """In-process Codex transport to the shared v2 composition bridge (D6-C C2b).
 
 The Codex hooks run in-process and reach the one shared bridge (:mod:`adapters.bridge`) with a
-fixed exact registry profile (``codex-cli@0.146.0``); there is no host default, no ``cwd`` and no
+fixed registry profile of the host; there is no host default, no ``cwd`` and no
 fallback to another host (D6-C spec §3/C2, §4).  Correlation is exact v2 (:func:`correlate`).
 """
 from __future__ import annotations
@@ -9,11 +9,12 @@ from __future__ import annotations
 from typing import Protocol
 
 from adapters import bridge
+from application.protocol import host_profile_id
 
 from .correlation import correlate
 
 #: Fixed exact registry profile supplied at bridge construction, never in a public request.
-CODEX_PROFILE_ID = "codex-cli@0.146.0"
+CODEX_PROFILE_ID = host_profile_id("codex-cli")
 
 
 class Transport(Protocol):

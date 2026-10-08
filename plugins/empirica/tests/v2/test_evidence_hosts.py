@@ -9,6 +9,10 @@ from adapters import confirmation
 from adapters.confirmation import HostConfirmation
 from adapters.public_tools import PublicTools
 from test_evidence_confirmation import EvidenceFixture, URL
+from application.protocol import host_profile_id  # noqa: E402
+CLAUDE_PROFILE = host_profile_id("claude-code")
+PI_PROFILE = host_profile_id("pi")
+CODEX_PROFILE = host_profile_id("codex-cli")
 
 
 class Human:
@@ -27,21 +31,61 @@ def accept(**content) -> dict:
 
 
 class MediatorFixture(EvidenceFixture):
-    """The real service, a scripted human and the shared Claude mediator."""
+    """The real service, a scripted human and the shared Claude mediator, in Claude's order of events: a run starts
+    with its surface unobserved and the mediator records the surface before it evaluates a report."""
+
+    SURFACE_AT_START = "unobserved"
 
     def surface(self, drv, run_id, surface: str) -> dict:
         return drv.trusted_human_surface(run_id, surface)["result"]
 
     def mediator(self, drv, human) -> HostConfirmation:
         return HostConfirmation(
-            "claude-code@2.1.278", elicit=human, timeout=lambda: 900, dispatch=lambda req, _p: drv.request(req),
+            CLAUDE_PROFILE, elicit=human, timeout=lambda: 900, dispatch=lambda req, _p: drv.request(req),
             presentation_ingress=lambda _p, run, payload: drv.trusted_evidence_presentation(run, payload),
             confirmation_ingress=lambda _p, run, payload: drv.trusted_evidence_confirmation(run, payload),
             surface_ingress=lambda _p, run, payload: drv.trusted_human_surface(run, payload["surface"]))
 
+    form = True  # whether the client declared form elicitation
+    #: A test of the presentation step starts after the host's look: in Claude the look and the presentation happen
+    #: inside one ``report_convergence``, so a run that is being presented has been looked at.
+    LOOKED_AT_START = False
+
+    def start(self, *args, **kwargs):
+        drv, run_id = super().start(*args, **kwargs)
+        if self.LOOKED_AT_START:
+            self.look(drv, run_id)
+        return drv, run_id
+
+    def look(self, drv, run_id) -> None:
+        """What Claude does first inside ``report_convergence``: record whether a form can be shown."""
+        self.mediator(drv, Human(None) if self.form else None).observe(run_id)
+
+    def report(self, drv, run_id, host_failure: str | None = None) -> dict:
+        """``report_convergence`` as Claude runs it: the host records its surface, then the core evaluates."""
+        self.look(drv, run_id)
+        return super().report(drv, run_id, host_failure)
+
+    def evaluated(self, drv, run_id, host_failure: str | None = None) -> dict:
+        """An evaluation with no look before it: what a Stop hook reads, and what a report does after the look that the
+        mediator under test already made (or failed to make); ``report`` would look again, with a mediator that works."""
+        return super().report(drv, run_id, host_failure)
+
+    def reevaluator(self, drv, run_id, *, look: bool = True):
+        """The callback a mediator is given: evaluate again, carrying the host failure it reports (looking first, or not)."""
+        evaluate = self.report if look else self.evaluated
+        return lambda failure=None: evaluate(drv, run_id, failure)
+
+    def present(self, drv, run_id, receipt="p1", key=None) -> dict:
+        """The mediator's presentation step, which follows the host's look within the same report."""
+        self.look(drv, run_id)
+        return self.present_now(drv, run_id, receipt, key)
+
     def mediate(self, drv, run_id, human, *, blocked=None) -> dict:
+        mediator = self.mediator(drv, human)
+        mediator.observe(run_id)  # Claude records the surface before the evaluation reads it
         blocked = blocked or self.report(drv, run_id)
-        return self.mediator(drv, human)(blocked, lambda: self.report(drv, run_id))
+        return mediator(blocked, self.reevaluator(drv, run_id))
 
     def left(self, drv, run_id) -> int:
         return self.interactions(drv, run_id)["total"]
@@ -69,9 +113,11 @@ class MediatorTests(MediatorFixture):
         self.assertEqual(self.codes(self.mediate(drv, run_id, Human(accept(d1="later")), blocked=blocked)), self.codes(blocked))
         self.assertEqual(self.verification(drv, run_id)["status"], "pending")
         self.assertEqual(self.left(drv, run_id), before - 1)
-        # The same pending set is not shown again until the derivation changes.
+        # The same pending set is not shown again until the derivation changes: a stale response that still offers it is
+        # evaluated again and the fresh one says it was already shown (the core's own refusal outranks the host's report).
         again = Human(accept(d1="confirm"))
-        self.assertEqual(self.mediate(drv, run_id, again, blocked=blocked), blocked)
+        fresh = self.mediate(drv, run_id, again, blocked=blocked)
+        self.assertEqual(fresh["run"]["confirmation_batch"]["prompt_error"], "already_presented")
         self.assertEqual(again.shown, [])
 
     # ---- nothing granted ------------------------------------------------------------------
@@ -100,7 +146,9 @@ class MediatorTests(MediatorFixture):
         def broken(_message, _schema):
             raise RuntimeError("the client went away")
         blocked = self.report(drv, run_id)
-        self.assertEqual(self.mediator(drv, broken)(blocked, lambda: self.fail("re-evaluated")), blocked)
+        # The presentation was recorded before the dialog raised, so the batch was shown: the fresh evaluation says so.
+        fresh = self.mediator(drv, broken)(blocked, self.reevaluator(drv, run_id))
+        self.assertEqual(fresh["run"]["confirmation_batch"]["prompt_error"], "already_presented")
         self.assertEqual(self.verification(drv, run_id)["status"], "pending")
 
     def test_without_form_elicitation_nothing_is_presented_or_spent(self):
@@ -112,7 +160,7 @@ class MediatorTests(MediatorFixture):
         self.assertEqual(self.left(drv, run_id), before)
 
     def test_route_unavailable_shows_no_dialog_and_keeps_the_requirement_visible(self):
-        drv, run_id = self.start("codex-cli@0.146.0", mode="auto", audit_retrieval=[],
+        drv, run_id = self.start(host_profile_id("codex-cli"), mode="auto", audit_retrieval=[],
                                  delegation=True, interactive=False)
         self.research(drv, run_id, "web", URL)
         human = Human(accept(d1="confirm"))
@@ -200,7 +248,7 @@ class MediatorTests(MediatorFixture):
         drv, run_id = self.start()
         self.research(drv, run_id, "web", URL)
         human = Human(accept(d1="confirm"))
-        tools = PublicTools("claude-code@2.1.278", dispatch=lambda req, _p: drv.request(req),
+        tools = PublicTools(CLAUDE_PROFILE, dispatch=lambda req, _p: drv.request(req),
                             confirm=self.mediator(drv, human))
         called = tools.call_internal("report_convergence", {"run_id": run_id})
         self.assertEqual(len(human.shown), 1)
@@ -209,7 +257,7 @@ class MediatorTests(MediatorFixture):
         drv2, run2 = self.start()
         self.research(drv2, run2, "web", URL)
         quiet = Human(accept(d1="confirm"))
-        PublicTools("claude-code@2.1.278", dispatch=lambda req, _p: drv2.request(req),
+        PublicTools(CLAUDE_PROFILE, dispatch=lambda req, _p: drv2.request(req),
                     confirm=self.mediator(drv2, quiet)).call_internal(
             "report_convergence", {"run_id": run2, "intent": "stop"})
         self.assertEqual(quiet.shown, [])
@@ -221,7 +269,7 @@ class ClaudeElicitationTests(EvidenceFixture):
     def session(self, caps: dict):
         import queue
         from adapters.mcp_server import McpSession
-        session = McpSession("claude-code@2.1.278", queue.Queue(), lambda _m: None, timeout=0.05)
+        session = McpSession(CLAUDE_PROFILE, queue.Queue(), lambda _m: None, timeout=0.05)
         session.process({"jsonrpc": "2.0", "id": "i", "method": "initialize",
                          "params": {"protocolVersion": "2025-11-25", "capabilities": caps}})
         return session
@@ -251,7 +299,7 @@ class PiPrivateBridgeTests(EvidenceFixture):
         spec = importlib.util.spec_from_file_location("empirica_pi_private_bridge", path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        return module._dispatch("pi@1.0.0", raw, payload)
+        return module._dispatch(PI_PROFILE, raw, payload)
 
     def test_presentation_relays_items_or_the_core_refusal(self):
         from unittest.mock import patch
@@ -259,10 +307,19 @@ class PiPrivateBridgeTests(EvidenceFixture):
         with patch.object(confirmation, "present", return_value=("p-1", items)):
             self.assertEqual(self.call({"operation": "evidence_presentation", "run_id": "r"}, {}),
                              {"type": "evidence_presentation", "receipt_id": "p-1", "items": items})
-        refused = {"type": "Fault", "code": "conflict"}
-        with patch.object(confirmation, "present", return_value=refused):
+        with patch.object(confirmation, "present", return_value=confirmation.PRESENTATION_FAILED):
             self.assertEqual(self.call({"operation": "evidence_presentation", "run_id": "r"}, {}),
-                             {"type": "evidence_refused", "result": refused})
+                             {"type": "evidence_refused", "result": {"failure": "presentation_failed"}})
+
+    def test_a_refusal_from_the_real_present_is_relayed_not_crashed_on(self):
+        """G6-01: ``present`` returns an ``Outcome`` when nothing can be shown; the relay must say so, in the shape the
+        Pi transport accepts (``evidence_refused`` with an object result), not unpack it as a receipt."""
+        from unittest.mock import patch
+        with patch.object(confirmation, "_call", return_value={}):  # no batch to show: the real present refuses
+            shown = confirmation.present(PI_PROFILE, "r")
+            self.assertIs(shown, confirmation.PRESENTATION_FAILED)
+            relayed = self.call({"operation": "evidence_presentation", "run_id": "r"}, {})
+        self.assertEqual(relayed, {"type": "evidence_refused", "result": {"failure": "presentation_failed"}})
 
     def test_confirmation_relays_the_receipt_or_that_nothing_was_granted(self):
         from unittest.mock import patch
@@ -270,7 +327,7 @@ class PiPrivateBridgeTests(EvidenceFixture):
         with patch.object(confirmation, "submit", return_value=None) as submit:
             self.assertEqual(self.call({"operation": "evidence_confirmation", "run_id": "r"}, payload),
                              {"type": "evidence_none"})
-            self.assertEqual(submit.call_args.args[:3], ("pi@1.0.0", "r", "p-1"))
+            self.assertEqual(submit.call_args.args[:3], (PI_PROFILE, "r", "p-1"))
         with patch.object(confirmation, "submit", return_value={"type": "Allow"}):
             self.assertEqual(self.call({"operation": "evidence_confirmation", "run_id": "r"}, payload),
                              {"type": "evidence_receipt", "result": {"type": "Allow"}})
@@ -287,7 +344,7 @@ class SurfaceFailsClosedTests(MediatorFixture):
                     raise OSError("store unavailable")
                 return {"result": {"type": "Fault", "code": "conflict", "fail_direction": "closed"}}
             return drv.trusted_human_surface(run, payload["surface"])
-        return HostConfirmation("claude-code@2.1.278", elicit=Human(accept()), timeout=lambda: 900,
+        return HostConfirmation(CLAUDE_PROFILE, elicit=Human(accept()), timeout=lambda: 900,
                                 dispatch=lambda req, _p: drv.request(req), surface_ingress=ingress)
 
     def test_a_surface_that_could_not_be_recorded_as_present_is_recorded_as_unavailable(self):
@@ -305,18 +362,19 @@ class SurfaceFailsClosedTests(MediatorFixture):
     def test_negative_control_without_the_fallback_the_stale_human_stays(self):
         drv, run_id = self.start()
         self.research(drv, run_id, "web", URL)
+        self.surface(drv, run_id, "human")  # a stale earlier observation
         broken = self._broken(drv, {"human"})
-        broken._record(run_id, True)  # the failed attempt alone, which is all the old code did
+        confirmation.observe_surface(broken.profile, run_id, True, ingress=broken._surface)  # the failed attempt alone
         self.assertIsNone(self.batch(drv, run_id)["prompt_error"], "the run still believes a human is there")
 
     def test_a_host_without_a_form_records_unavailable_and_a_recorded_one_does_not_fall_back(self):
         drv, run_id = self.start()
         self.research(drv, run_id, "web", URL)
-        HostConfirmation("claude-code@2.1.278", elicit=None,
+        HostConfirmation(CLAUDE_PROFILE, elicit=None,
                          surface_ingress=lambda _p, run, payload: drv.trusted_human_surface(run, payload["surface"])).observe(run_id)
         self.assertEqual(self.batch(drv, run_id)["prompt_error"], "unavailable")
         calls = []
-        ok = HostConfirmation("claude-code@2.1.278", elicit=Human(accept()), surface_ingress=lambda _p, run, payload: (
+        ok = HostConfirmation(CLAUDE_PROFILE, elicit=Human(accept()), surface_ingress=lambda _p, run, payload: (
             calls.append(payload["surface"]), drv.trusted_human_surface(run, payload["surface"]))[1])
         ok.observe(run_id)
         self.assertEqual((calls, self.batch(drv, run_id)["prompt_error"]), (["human"], None))

@@ -726,7 +726,7 @@
           "type": "boolean"
         },
         "host_runtime": {
-          "description": "Optional host-observed facts about the runtime that executes this host's foreground audit, recorded once with the run (Pi: the pi-subagents owner). Validated at the application boundary against the host profile's subagents_compatibility, persisted opaquely, and never interpreted or projected by the core.",
+          "description": "Optional host-observed facts about the runtime that executes this host's foreground audit, recorded once with the run (Pi: the pi-subagents owner). Validated at the application boundary against the host profile's subagents_compatibility range, persisted opaquely, and read by the core only for `reviewed` (a version with no checked-in compat record is recorded `reviewed: false` and shown in the run view; it is admitted by what the adapter observed of it, ADR-0069).",
           "type": "object",
           "additionalProperties": false,
           "required": [
@@ -777,6 +777,10 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 4096
+                },
+                "reviewed": {
+                  "type": "boolean",
+                  "description": "Whether this exact version has a checked-in compat record. false is admitted when the live preflight and the tool's parameter schema passed; it is never a refusal by itself. An absent value reads as false (not reviewed); a present value that is not a boolean is malformed."
                 }
               }
             }
@@ -795,10 +799,11 @@
           "uniqueItems": true
         },
         "human_surface": {
-          "description": "Whether the host last observed a surface to show a dialog to a human now: Claude form elicitation advertised by the client, Pi `ctx.hasUI` in the TUI or RPC. Recorded at StartRun and updated by the host's private ingress at every report_convergence. Evidence routes to a human only when this is `human`, the run is not delegated or non-interactive, and the profile has a human approval ingress (ADR-0067).",
+          "description": "Whether the host last observed a surface to show a dialog to a human now: Claude form elicitation advertised by the client, Pi `ctx.hasUI` in the TUI or RPC. Recorded at StartRun and updated by the host's private ingress at every report_convergence. `unobserved` means the host has not yet looked (Claude's start hook runs before the MCP client declares form elicitation); a host that can tell at start records `human` or `unavailable` at once. Evidence is presented to a human only when this is `human`, the run is not delegated or non-interactive, and the profile has a human approval ingress (ADR-0067); while it is `unobserved` such a run is told a human is asked when it reports, if the host can show a dialog.",
           "enum": [
             "human",
-            "unavailable"
+            "unavailable",
+            "unobserved"
           ]
         }
       }

@@ -53,8 +53,12 @@ whenever one is possible; the reason is shown to the human verbatim.
 The requirement is visible the moment the record exists: the claim's obligation row and the dossier
 (`verification: {class, status, retrieve}`) say where its confirmation goes. `confirm: audit` means the
 host's auditor retrieves the source (research awaiting audit still approves the claim; the audit gate
-covers it). `confirm: human` means a human confirms it. `confirm: unavailable` means this host has no
-human ingress: the requirement stays open, and the run can only stop as a residual.
+covers it). `confirm: human` means a human confirms it: call `report_convergence` (default intent) and the host asks them.
+`confirm: unobserved` means a human can be asked but the host has not yet looked for a dialog (Claude looks
+inside `report_convergence`): call `report_convergence` with the default intent, not `intent=stop`, and the
+human is asked in that call if the host has a dialog. `confirm: unavailable` means nobody can be asked (no
+human ingress, a delegated or non-interactive run, or a host that looked and found no dialog): the requirement
+stays open, and the run can only stop as a residual.
 
 Within one claim the blockers lead in a fixed order: the terminal states first; then what you can act
 on now, missing or stale research and then a missing or stale spike (`claim.spike_missing`,
@@ -71,7 +75,7 @@ shown. The choices are **Confirm**, **Reject** (with an optional note to you) or
 decided item is never asked again, and **Later**, a cancelled dialog and a timeout leave it pending and
 spend the presentation: it is shown again only after the derivation changes (new or reworded work, a new
 record). The human reads the whole verbatim quote; nothing is truncated. `get_run` and `get_argument` show
-you what waits (source and claim), whether a human will be asked, each citation's verification status, and
+you what waits (source and claim), whether a human is asked at your report, each citation's verification status, and
 the human's note or answer.
 A confirmed record counts; a rejected record is inactive and does not refute the claim, so find other
 evidence. A claim whose only support is research awaiting a human is not approved, and convergence
@@ -83,9 +87,7 @@ answer. The human approves it (it is then approved and human-owned) or rejects i
 decisions are asked in the same batch as research records. Do not record research to stand in for the
 decision.
 
-In Claude the human is asked inside `report_convergence`, so the Stop never pauses for a confirmation: when it is
-the only thing left, the Stop blocks and tells you to call `report_convergence`. If the host cannot record whether a
-human can be asked, it asks nobody for that call and the next report tries again.
+In Claude the human is asked inside `report_convergence`, so on its first block the Stop never pauses for a confirmation: when it is the only thing left, the Stop blocks and tells you to call `report_convergence`; a Stop that continues after that block follows ADR-0068. If the host cannot record whether a human can be asked, or cannot show the batch, nobody was asked and the report says so (its waiting line reads "the host could not … so nobody was asked"); `report_convergence` is not offered now and the first `next:` is `report_convergence intent=stop`. Stop honestly, or call `report_convergence` again after a change, because the next observation may clear the failure. A limit or refusal the run already knows is said instead ("the human interaction limit is reached", "already shown", "no human can be asked"), with the same first `next:`. If Empirica cannot be reached in that call, the tool errors with no `next:`; call `report_convergence intent=stop`. The full rule is ADR-0067.
 
 `payload.observed_content_digest` may additionally bind the bytes that were observed when the host
 can compute a SHA-256 digest.

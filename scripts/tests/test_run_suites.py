@@ -1,5 +1,8 @@
 """run_suites: a failing suite fails the run, logs are kept and separate, only failures print their log."""
+import atexit
+import itertools
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -10,10 +13,23 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "run_suites.py"
 PY = sys.executable
+# Every runner these tests start writes its durations file here, never to the user's real one.
+_SCRATCH = tempfile.mkdtemp(prefix="run-suites-test-")
+atexit.register(shutil.rmtree, _SCRATCH, ignore_errors=True)
+os.environ["RUN_SUITES_DURATIONS"] = str(Path(_SCRATCH) / "durations.json")
+_RUNS = itertools.count()
+
+
+def runner_env(**extra: str) -> dict:
+    """The environment of a runner under test: independent of the machine. A test that needs concurrency must not depend on
+    the host's load average (under ``make check`` it exceeds the CPU count and the runner admits one suite at a time), nor on
+    a durations file another test wrote (it fixes the start order). A test that needs a load or a history passes its own."""
+    return {**os.environ, "RUN_SUITES_MAX_LOAD": "1000000",
+            "RUN_SUITES_DURATIONS": str(Path(_SCRATCH) / f"durations-{next(_RUNS)}.json"), **extra}
 
 
 def run(*suites: str) -> subprocess.CompletedProcess:
-    return subprocess.run([PY, str(SCRIPT), *suites], capture_output=True, text=True, check=False)
+    return subprocess.run([PY, str(SCRIPT), *suites], capture_output=True, text=True, check=False, env=runner_env())
 
 
 def say(text: str, code: int = 0) -> str:
@@ -55,7 +71,6 @@ class RunSuites(unittest.TestCase):
 
     def test_suites_run_concurrently(self):
         sleeper = f"{PY} -c \"import time; time.sleep(1.5)\""
-        import time
         began = time.monotonic()
         done = run(f"a={sleeper}", f"b={sleeper}", f"c={sleeper}")
         self.assertEqual(done.returncode, 0)
@@ -95,7 +110,7 @@ class Lifecycle(unittest.TestCase):
 
     def start(self, *suites: str, env: dict | None = None) -> subprocess.Popen:
         process = subprocess.Popen([PY, str(SCRIPT), *suites], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                   env={**os.environ, **(env or {})})
+                                   env=runner_env(**(env or {})))
         self.addCleanup(lambda: process.poll() is None and process.kill())
         return process
 
@@ -139,7 +154,7 @@ class Lifecycle(unittest.TestCase):
             pidfile = Path(directory) / "pid"
             began = time.monotonic()
             done = subprocess.run([PY, str(SCRIPT), f"stuck={stuck(pidfile)}", f"fine={say('ok')}"], capture_output=True,
-                                  text=True, env={**os.environ, "RUN_SUITES_TIMEOUT": "1"}, timeout=30)
+                                  text=True, env=runner_env(RUN_SUITES_TIMEOUT="1"), timeout=30)
             self.assertLess(time.monotonic() - began, 15)
             self.assertEqual(done.returncode, 1)
             self.assertIn("timed out after 1 s", done.stdout)
@@ -153,7 +168,8 @@ class Lifecycle(unittest.TestCase):
                 pidfile = Path(directory) / "pid"
                 leader = (f"{PY} -c \"import subprocess,sys; p=subprocess.Popen(['sleep','300']); "
                           f"open('{pidfile}','w').write(str(p.pid)); sys.exit({code})\"")
-                done = subprocess.run([PY, str(SCRIPT), f"early={leader}"], capture_output=True, text=True, timeout=30)
+                done = subprocess.run([PY, str(SCRIPT), f"early={leader}"], capture_output=True, text=True, timeout=30,
+                                      env=runner_env())
                 self.assertEqual(done.returncode, 0 if code == 0 else 1, done.stdout)
                 grandchild = self.pid(pidfile)
                 self.addCleanup(lambda pid=grandchild: alive(pid) and os.kill(pid, signal.SIGKILL))
@@ -239,7 +255,7 @@ class Lifecycle(unittest.TestCase):
     def test_a_non_finite_timeout_is_refused(self):
         for bad in ("nan", "inf", "-inf", "Infinity"):
             done = subprocess.run([PY, str(SCRIPT), f"a={say('x')}"], capture_output=True, text=True,
-                                  env={**os.environ, "RUN_SUITES_TIMEOUT": bad})
+                                  env=runner_env(RUN_SUITES_TIMEOUT=bad))
             self.assertEqual(done.returncode, 1, bad)
             self.assertIn("RUN_SUITES_TIMEOUT", done.stderr + done.stdout, bad)
 
@@ -247,8 +263,183 @@ class Lifecycle(unittest.TestCase):
         self.assertIn("RUN_SUITES_TIMEOUT", SCRIPT.read_text())
         for bad in ("abc", "0", "-3"):
             done = subprocess.run([PY, str(SCRIPT), f"a={say('x')}"], capture_output=True, text=True,
-                                  env={**os.environ, "RUN_SUITES_TIMEOUT": bad})
+                                  env=runner_env(RUN_SUITES_TIMEOUT=bad))
             self.assertEqual(done.returncode, 1, bad)
+
+
+class LoadAware(unittest.TestCase):
+    """Load-aware admission, the progress guarantee, the JOBS cap and longest-first order (the load, the clock and the
+    sleep are injected, so no real machine load is needed)."""
+
+    def setUp(self):
+        sys.path.insert(0, str(SCRIPT.parent))
+        import run_suites
+        self.rs = run_suites
+        self.dir = Path(tempfile.mkdtemp(prefix="load-aware-"))
+        self.addCleanup(lambda: shutil.rmtree(self.dir, ignore_errors=True))
+        self.events = self.dir / "events"
+
+    def worker(self, name: str, seconds: float = 0.4, code: int = 0) -> str:
+        """A suite that records ``start <name>`` and ``end <name>`` (one O_APPEND write each) around a sleep."""
+        source = (f"import os,time\n"
+                  f"def note(t):\n"
+                  f"    fd=os.open({str(self.events)!r}, os.O_WRONLY|os.O_APPEND|os.O_CREAT); os.write(fd, t.encode()); os.close(fd)\n"
+                  f"note('start {name}\\n'); time.sleep({seconds}); note('end {name}\\n')\n"
+                  f"raise SystemExit({code})\n")
+        script = self.dir / f"{name}.py"
+        script.write_text(source)
+        return f"{PY} {script}"
+
+    def go(self, names, load, max_load, jobs=None, seconds=0.4, stall=600):
+        import io
+        suites = [(n, self.rs.shlex.split(self.worker(n, seconds))) for n in names]
+        out = io.StringIO()
+        polls = {"n": 0}
+
+        def sleep(delay):
+            polls["n"] += 1
+            if polls["n"] > stall:
+                raise AssertionError("the runner stalled: nothing was running and nothing was started")
+            time.sleep(0.01)
+
+        logdir = self.dir / "logs"
+        logdir.mkdir(exist_ok=True)
+        results = self.rs.run(suites, logdir, out=out, timeout=30, load=load, max_load=max_load, jobs=jobs, sleep=sleep)
+        text = self.events.read_text().split() if self.events.exists() else []
+        events = [" ".join(text[i:i + 2]) for i in range(0, len(text), 2)]
+        return events, out.getvalue(), results
+
+    def concurrent_peak(self, events):
+        running = peak = 0
+        for event in events:
+            running += 1 if event.startswith("start") else -1
+            peak = max(peak, running)
+        return peak
+
+    def test_high_load_runs_one_suite_at_a_time(self):
+        events, out, results = self.go(["a", "b", "c"], load=lambda: 99.0, max_load=4.0)
+        self.assertEqual(events, ["start a", "end a", "start b", "end b", "start c", "end c"])
+        self.assertTrue(all(code == 0 for code, _ in results.values()))
+
+    def test_low_load_starts_every_suite_at_once(self):
+        events, _, _ = self.go(["a", "b", "c"], load=lambda: 0.5, max_load=4.0)
+        self.assertEqual(sorted(events[:3]), ["start a", "start b", "start c"])
+        self.assertEqual(self.concurrent_peak(events), 3)
+
+    def test_queued_suites_start_when_the_load_drops_mid_run(self):
+        def started() -> bool:
+            return self.events.exists() and "start a" in self.events.read_text()
+
+        def load() -> float:
+            return 0.5 if started() else 99.0  # busy until suite a runs, then idle
+
+        events, _, _ = self.go(["a", "b", "c"], load=load, max_load=4.0, seconds=1.0)
+        self.assertEqual(events[0], "start a")
+        self.assertLess(events.index("start b"), events.index("end a"), events)
+        self.assertLess(events.index("start c"), events.index("end a"), events)
+
+    def test_something_always_runs_while_work_is_queued_whatever_the_load(self):
+        # The load never drops below the limit; the runner must still finish, one suite at a time (a stall raises).
+        events, _, results = self.go(["a", "b"], load=lambda: 1e9, max_load=0.001)
+        self.assertEqual(events, ["start a", "end a", "start b", "end b"])
+        self.assertEqual(len(results), 2)
+
+    def test_jobs_is_a_hard_cap_even_when_the_load_is_low(self):
+        events, _, _ = self.go(["a", "b", "c", "d"], load=lambda: 0.1, max_load=8.0, jobs=2)
+        self.assertEqual(self.concurrent_peak(events), 2, events)
+        self.assertEqual(sorted(e for e in events if e.startswith("end")), ["end a", "end b", "end c", "end d"])
+
+    def test_the_admission_decision_is_in_the_log_header_and_the_status_output(self):
+        _, out, _ = self.go(["a", "b"], load=lambda: 9.6, max_load=14.0)
+        self.assertIn("started at load 9.6/14", out)
+        header = (self.dir / "logs" / "a.log").read_text()
+        self.assertTrue(header.startswith("run_suites: started at load 9.6/14"), header)
+
+    def test_a_forced_start_says_so(self):
+        _, out, _ = self.go(["a"], load=lambda: 30.0, max_load=14.0)
+        self.assertIn("started at load 30.0/14 (nothing was running)", out)
+
+    def test_a_load_probe_that_fails_admits_like_an_idle_machine(self):
+        import unittest.mock as mock
+        with mock.patch.object(self.rs.os, "getloadavg", side_effect=OSError("no load average")):
+            self.assertEqual(self.rs.system_load(), 0.0)
+
+    def test_longest_first_order_comes_from_the_durations_file(self):
+        path = self.dir / "durations.json"
+        path.write_text('{"a": 1.0, "b": 80.0, "c": 5.0}')
+        suites = [("a", ["x"]), ("b", ["x"]), ("c", ["x"])]
+        self.assertEqual([n for n, _ in self.rs.order_suites(suites, path)], ["b", "c", "a"])
+
+    def test_a_suite_with_no_recorded_time_starts_before_the_known_ones(self):
+        path = self.dir / "durations.json"
+        path.write_text('{"a": 1.0, "c": 5.0}')
+        suites = [("a", ["x"]), ("b", ["x"]), ("c", ["x"])]
+        self.assertEqual([n for n, _ in self.rs.order_suites(suites, path)], ["b", "c", "a"])
+
+    def test_a_missing_or_corrupt_durations_file_keeps_the_declared_order(self):
+        suites = [("a", ["x"]), ("b", ["x"]), ("c", ["x"])]
+        declared = ["a", "b", "c"]
+        path = self.dir / "durations.json"
+        self.assertEqual([n for n, _ in self.rs.order_suites(suites, path)], declared)  # missing
+        for bad in ("not json", "[1, 2]", "null", '{"a": "slow", "b": -3, "c": NaN}', ""):
+            path.write_text(bad)
+            self.assertEqual([n for n, _ in self.rs.order_suites(suites, path)], declared, bad)
+        self.assertEqual([n for n, _ in self.rs.order_suites(suites, self.dir)], declared)  # a directory: unreadable
+
+    def test_durations_are_recorded_for_passing_suites_only_and_merged(self):
+        path = self.dir / "durations.json"
+        path.write_text('{"old": 7.0, "a": 99.0}')
+        self.rs.record_durations(path, {"a": (0, 3.5), "b": (1, 9.0), "c": ("timeout", 600.0)})
+        import json
+        self.assertEqual(json.loads(path.read_text()), {"old": 7.0, "a": 3.5})
+
+    def test_a_corrupt_durations_file_is_replaced_not_fatal(self):
+        path = self.dir / "durations.json"
+        path.write_text("garbage")
+        self.rs.record_durations(path, {"a": (0, 2.0)})
+        self.assertIn('"a"', path.read_text())
+
+    def test_the_end_to_end_runner_starts_the_longest_suite_first_and_records_times(self):
+        path = self.dir / "durations.json"
+        path.write_text('{"quick": 1.0, "slow": 60.0}')
+        done = subprocess.run([PY, str(SCRIPT), f"quick={say('q')}", f"slow={say('s')}"], capture_output=True, text=True,
+                              env=runner_env(RUN_SUITES_DURATIONS=str(path)))
+        self.assertEqual(done.returncode, 0, done.stdout)
+        starts = [line.split()[1] for line in done.stdout.splitlines() if line.strip().startswith("start")]
+        self.assertEqual(starts, ["slow", "quick"], done.stdout)
+        import json
+        self.assertEqual(sorted(json.loads(path.read_text())), ["quick", "slow"])
+        self.assertLess(json.loads(path.read_text())["slow"], 30)  # the recorded time replaced the old one
+
+    def test_jobs_and_the_load_limit_are_validated(self):
+        for name, bad in (("JOBS", "0"), ("JOBS", "-2"), ("JOBS", "two"), ("JOBS", "1.5"),
+                          ("RUN_SUITES_MAX_LOAD", "nan"), ("RUN_SUITES_MAX_LOAD", "0"), ("RUN_SUITES_MAX_LOAD", "-1"),
+                          ("RUN_SUITES_MAX_LOAD", "high"), ("RUN_SUITES_MAX_LOAD", "inf")):
+            done = subprocess.run([PY, str(SCRIPT), f"a={say('x')}"], capture_output=True, text=True,
+                                  env=runner_env(**{name: bad}))
+            self.assertEqual(done.returncode, 1, (name, bad))
+            self.assertIn(name, done.stdout + done.stderr, (name, bad))
+
+    def test_an_empty_jobs_means_no_cap(self):
+        done = subprocess.run([PY, str(SCRIPT), f"a={say('x')}", f"b={say('y')}"], capture_output=True, text=True,
+                              env=runner_env(JOBS=""))
+        self.assertEqual(done.returncode, 0, done.stdout)
+
+    def test_the_scheduling_documentation_names_what_the_runner_reads(self):
+        """doc/testing.md owns the scheduling rule: it must name every environment variable the runner reads and the
+        default durations file, and the runner and the Makefile must point at it (so the rule has one home)."""
+        import re
+        source = SCRIPT.read_text()
+        root = SCRIPT.parents[1]
+        testing = (root / "doc" / "testing.md").read_text()
+        read = set(re.findall(r'os\.environ\.get\("([A-Z_]+)"', source))
+        self.assertTrue({"JOBS", "RUN_SUITES_MAX_LOAD", "RUN_SUITES_DURATIONS", "RUN_SUITES_TIMEOUT"} <= read, read)
+        for name in sorted(read):
+            self.assertIn(f"`{name}`", testing, f"doc/testing.md does not name {name}")
+        default = re.search(r'tempfile\.gettempdir\(\)\) / "([^"]+)"', source).group(1)
+        self.assertIn(default, testing)
+        self.assertIn("doc/testing.md", source)
+        self.assertIn("doc/testing.md", (root / "Makefile").read_text())
 
 
 if __name__ == "__main__":

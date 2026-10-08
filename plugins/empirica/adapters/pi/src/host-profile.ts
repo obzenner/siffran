@@ -10,20 +10,21 @@ import { readFileSync } from "node:fs";
 import * as path from "node:path";
 
 import { VENDORED_CONTRACT_DIR } from "./public-tools.ts";
-import { HOST_PROFILE_ID } from "./stdio-transport.ts";
 
 /** The bound injected into every foreground audit launch of a host. */
 export interface AuditLaunchPolicy {
   readonly timeout_ms: number;
+  /** The only tools the auditor child may be given; the preflight's effective allowlist must be a subset. */
+  readonly audit_child_tools: readonly string[];
   readonly tool_budget: { readonly soft: number; readonly hard: number; readonly block: readonly string[] };
 }
 
-/** The external audit runtime a profile supports: exact reviewed versions under one named policy. */
+/** The external audit runtime a profile supports: a version range under one named policy (ADR-0069). */
 export interface SubagentsCompatibility {
   readonly package: string;
   readonly policy_id: string;
-  readonly reviewed_versions: readonly string[];
-  readonly unreviewed_action: "refuse";
+  readonly minimum: string;
+  readonly maximum_exclusive: string;
 }
 
 export interface HostProfiles {
@@ -55,7 +56,7 @@ function positiveInteger(value: unknown, where: string, maximum = Number.MAX_SAF
 
 function auditLaunchPolicy(value: unknown, where: string): AuditLaunchPolicy {
   const policy = record(value, where);
-  closed(policy, ["timeout_ms", "tool_budget"], where);
+  closed(policy, ["timeout_ms", "audit_child_tools", "tool_budget"], where);
   const budget = record(policy.tool_budget, `${where}.tool_budget`);
   closed(budget, ["soft", "hard", "block"], `${where}.tool_budget`);
   const soft = positiveInteger(budget.soft, `${where}.tool_budget.soft`);
@@ -65,28 +66,42 @@ function auditLaunchPolicy(value: unknown, where: string): AuditLaunchPolicy {
   if (!Array.isArray(block) || block.length === 0
       || !block.every((tool) => typeof tool === "string" && tool !== "") || new Set(block).size !== block.length)
     throw new Error(`host-profiles: ${where}.tool_budget.block must be a nonempty list of unique tool names`);
+  const child = policy.audit_child_tools;
+  if (!Array.isArray(child) || child.length === 0
+      || !child.every((tool) => typeof tool === "string" && tool !== "") || new Set(child).size !== child.length)
+    throw new Error(`host-profiles: ${where}.audit_child_tools must be a nonempty list of unique tool names`);
   return { timeout_ms: positiveInteger(policy.timeout_ms, `${where}.timeout_ms`, MAX_TIMER_MS),
+    audit_child_tools: Object.freeze([...child] as string[]),
     tool_budget: { soft, hard, block: Object.freeze([...block] as string[]) } };
 }
 
-const EXACT_VERSION = /^\d+\.\d+\.\d+$/;
+export const EXACT_VERSION = /^\d+\.\d+\.\d+$/;
+
+/** Compare two exact MAJOR.MINOR.PATCH versions numerically (negative, zero, positive). */
+export function compareVersions(left: string, right: string): number {
+  const a = left.split(".").map(Number);
+  const b = right.split(".").map(Number);
+  return (a[0] - b[0]) || (a[1] - b[1]) || (a[2] - b[2]);
+}
+
+/** Whether `version` is an exact version in `[minimum, maximum_exclusive)` of the policy. */
+export function inSubagentsRange(policy: SubagentsCompatibility, version: unknown): version is string {
+  return typeof version === "string" && EXACT_VERSION.test(version)
+    && compareVersions(version, policy.minimum) >= 0 && compareVersions(version, policy.maximum_exclusive) < 0;
+}
 
 function subagentsCompatibility(value: unknown, where: string): SubagentsCompatibility {
   const policy = record(value, where);
-  closed(policy, ["package", "policy_id", "reviewed_versions", "unreviewed_action"], where);
+  closed(policy, ["package", "policy_id", "minimum", "maximum_exclusive"], where);
   if (typeof policy.package !== "string" || !/^[a-z0-9][a-z0-9._-]*$/.test(policy.package))
     throw new Error(`host-profiles: ${where}.package must be a lowercase package name`);
   if (typeof policy.policy_id !== "string" || !/^[a-z0-9]+(-[a-z0-9]+)*-v[0-9]+$/.test(policy.policy_id))
     throw new Error(`host-profiles: ${where}.policy_id must look like name-v1`);
-  const versions = policy.reviewed_versions;
-  if (!Array.isArray(versions) || versions.length === 0
-      || !versions.every((version) => typeof version === "string" && EXACT_VERSION.test(version))
-      || new Set(versions).size !== versions.length)
-    throw new Error(`host-profiles: ${where}.reviewed_versions must be a nonempty list of unique exact versions`);
-  if (policy.unreviewed_action !== "refuse")
-    throw new Error(`host-profiles: ${where}.unreviewed_action must be "refuse"`);
-  return { package: policy.package, policy_id: policy.policy_id,
-    reviewed_versions: Object.freeze([...versions] as string[]), unreviewed_action: "refuse" };
+  const { minimum, maximum_exclusive: maximum } = policy;
+  if (typeof minimum !== "string" || typeof maximum !== "string" || !EXACT_VERSION.test(minimum) || !EXACT_VERSION.test(maximum)
+      || compareVersions(minimum, maximum) >= 0)
+    throw new Error(`host-profiles: ${where} needs exact versions with minimum below maximum_exclusive`);
+  return { package: policy.package, policy_id: policy.policy_id, minimum, maximum_exclusive: maximum };
 }
 
 /** Validate a parsed host-profiles document; throws on the first deviation. */
@@ -141,7 +156,20 @@ export function auditLaunchFields(policy: AuditLaunchPolicy): {
 
 export const HOST_PROFILES_PATH = path.join(VENDORED_CONTRACT_DIR, "host-profiles.json");
 
-const PROFILES: HostProfiles = parseHostProfiles(JSON.parse(readFileSync(HOST_PROFILES_PATH, "utf8")));
+const DOCUMENT: unknown = JSON.parse(readFileSync(HOST_PROFILES_PATH, "utf8"));
+const PROFILES: HostProfiles = parseHostProfiles(DOCUMENT);
+
+/** The id of the one profile of `hostId` in a host-profiles document; throws unless there is exactly one. */
+export function profileIdOfHost(document: unknown, hostId: string): string {
+  const rows = (record(document, "document").profiles as unknown[]).map((row) => record(row, "profile"))
+    .filter((row) => row.host_id === hostId);
+  if (rows.length !== 1 || typeof rows[0].profile_id !== "string")
+    throw new Error(`host-profiles: expected exactly one profile for host ${hostId}, found ${rows.length}`);
+  return rows[0].profile_id;
+}
+
+/** This adapter's host profile, read from the contract: Pi plus the pi-subagents foreground-audit policy. */
+export const HOST_PROFILE_ID: string = profileIdOfHost(DOCUMENT, "pi");
 
 /** The reasoning-level suffixes pi-subagents appends to a model spelling (contract `thinking_levels`). */
 export const THINKING_LEVELS: ReadonlySet<string> = new Set(PROFILES.thinking_levels);
@@ -149,5 +177,5 @@ export const THINKING_LEVELS: ReadonlySet<string> = new Set(PROFILES.thinking_le
 /** The audit bound of this adapter's host profile (contract `audit_launch_policy`). */
 export const AUDIT_LAUNCH_POLICY: AuditLaunchPolicy = auditLaunchPolicyFor(PROFILES, HOST_PROFILE_ID);
 
-/** The external audit runtime of this adapter's host profile: the reviewed versions and the policy id. */
+/** The external audit runtime of this adapter's host profile: its version range and the policy id. */
 export const SUBAGENTS_COMPATIBILITY: SubagentsCompatibility = subagentsCompatibilityFor(PROFILES, HOST_PROFILE_ID);

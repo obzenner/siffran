@@ -3,7 +3,7 @@ import * as path from "node:path";
 
 import type { Response } from "./contract.ts";
 import { runJsonProcess } from "./process-transport.ts";
-import { HOST_PROFILE_ID } from "./stdio-transport.ts";
+import { HOST_PROFILE_ID } from "./host-profile.ts";
 
 export interface AuditPlanData {
   child_id: string;

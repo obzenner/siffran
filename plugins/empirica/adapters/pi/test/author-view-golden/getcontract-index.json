@@ -3,7 +3,7 @@
     "type": "Allow",
     "contract_result": {
       "target": "index",
-      "digest": "sha256:45fa33dc3aa269f8702ae41c002f7ee29edb005b1129e7ac65c4a33b5f8990af",
+      "digest": "sha256:7792155a1fd120995a9505f632bfdba1d55553f06e487ee14147e1a5a49729b5",
       "index": {
         "id": "empirica/public",
         "version": "3.0.0",
@@ -295,6 +295,12 @@
             ]
           },
           {
+            "code": "host.subagents_tools_not_read_only",
+            "sections": [
+              "hosts/capabilities"
+            ]
+          },
+          {
             "code": "host.subagents_launch_unsupported",
             "sections": [
               "hosts/capabilities"
@@ -467,6 +473,10 @@
           {
             "id": "human.confirm_evidence",
             "description": "Show the human the pending research records and needs-decision claims in one batch: record one presentation, then submit one receipt of per-item decisions. Offered only when the run has a human ingress."
+          },
+          {
+            "id": "convergence.report",
+            "description": "Report convergence with the default intent. The host first looks for a human it can ask; when there is one it shows them the pending research records and decisions in one dialog, and when there is none the response says so."
           }
         ]
       }

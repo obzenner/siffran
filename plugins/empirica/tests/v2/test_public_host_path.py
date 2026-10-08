@@ -15,6 +15,8 @@ from assertions import (
     canonical_graph,
     observe_action,
 )
+from application.protocol import host_profile_id  # noqa: E402
+CLAUDE_PROFILE = host_profile_id("claude-code")
 
 
 class PublicHostPathTests(ConformanceCase):
@@ -23,7 +25,7 @@ class PublicHostPathTests(ConformanceCase):
             "D11", "public-host-path",
             "Public model tools drive every author transition; host-only ingress binds audit")
         run_id = self.start_run(drv, goal="Prove one host-reachable Empirica path.")
-        tools = PublicTools("claude-code@2.1.278",
+        tools = PublicTools(CLAUDE_PROFILE,
                             dispatch=lambda request, _profile: drv.request(request))
 
         def observe(action: dict) -> dict:

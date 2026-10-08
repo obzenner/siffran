@@ -4,10 +4,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { askItems, confirmEvidence, evidenceConfirmationWait, itemTitle, observeSurface } from "../src/evidence-ui.ts";
+import { askItems, confirmEvidence, evidenceConfirmationWait, evidenceHostFailure, itemTitle, observeSurface } from "../src/evidence-ui.ts";
+import { PUBLIC_TOOLS } from "../src/public-tools.ts";
 import type { EvidenceItem, PrivateIngressRequest } from "../src/private-transport.ts";
 import type { ExtensionContext } from "../src/pi-types.ts";
 import type { Response } from "../src/contract.ts";
+
+const AUTHOR_LABELS = PUBLIC_TOOLS.author_view.labels as Readonly<Record<string, string>>;
 
 const RECORD: EvidenceItem = { subject: "research", id: "sha256:" + "a".repeat(64), claim: "The API is stable.",
   source_kind: "web", source_ref: "https://example.test/spec", quote: "stable since v2", class: "retrievable" };
@@ -49,9 +52,10 @@ function bridge(items: EvidenceItem[], receipt: unknown = { type: "evidence_rece
   return { trusted, calls };
 }
 
-const run = (ctx: ExtensionContext, trusted: (r: PrivateIngressRequest) => Promise<unknown>, response = blocked(),
-             deadline = Date.now() + 60_000) =>
+const confirm = (ctx: ExtensionContext, trusted: (r: PrivateIngressRequest) => Promise<unknown>, response = blocked(),
+                 deadline = Date.now() + 60_000) =>
   confirmEvidence(response, "run-1", ctx, trusted as never, async () => refreshed, deadline);
+const run = async (...args: Parameters<typeof confirm>) => (await confirm(...args)).response;
 
 test("TUI: each item gets a select and, for a decision, a note; the answers are one receipt", async () => {
   // the first input is for the confirmed record: an empty note is simply no note
@@ -144,15 +148,19 @@ test("Later asks for no note, and an all-Later batch submits no receipt at all",
   assert.deepEqual(calls.map((c) => c.operation), ["evidence_presentation"]);
 });
 
-test("a refused presentation, a refused receipt, or an error returns the original response", async () => {
+test("a refused presentation or an error is evaluated again; a refused receipt is evaluated again as shown", async () => {
   const original = blocked();
   const { ctx } = ctxFor({ selects: ["Confirm"], inputs: [""] });
   const refused = async () => ({ type: "evidence_refused", result: { type: "Fault" } });
-  assert.equal(await run(ctx, refused, original), original);
+  assert.equal(await run(ctx, refused, original), refreshed);
   const notAllowed = bridge([RECORD], { type: "evidence_receipt", result: { type: "Fault" } });
   assert.equal(await run(ctxFor({ selects: ["Confirm"], inputs: [""] }).ctx, notAllowed.trusted, original), refreshed);
   const throwing = async () => { throw new Error("bridge down"); };
-  assert.equal(await run(ctxFor({ selects: ["Confirm"], inputs: [""] }).ctx, throwing, original), original);
+  assert.equal(await run(ctxFor({ selects: ["Confirm"], inputs: [""] }).ctx, throwing, original), refreshed);
+  // ...and when even the evaluation fails there is nothing fresher than the response in hand.
+  const down = (ctxFor({ selects: ["Confirm"], inputs: [""] }).ctx);
+  assert.equal((await confirmEvidence(original, "run-1", down, throwing as never, async () => { throw new Error("down"); },
+    Date.now() + 60_000)).response, original);
 });
 
 test("the wait notice applies only to the sole, unspent, human-answerable evidence blocker of an active run", () => {
@@ -206,4 +214,59 @@ test("observeSurface says whether the core holds the observation: a typed fault 
   const noUi = ctxFor({ selects: [], inputs: [] }, { hasUI: false }).ctx;
   assert.equal(await observeSurface("run-1", noUi, (async (r: PrivateIngressRequest) => { sent.push((r.payload as { surface: string }).surface); throw new Error("x"); }) as never), false);
   assert.deepEqual(sent, ["unavailable"]);
+});
+
+test("a presentation that faults, throws or is refused is evaluated again as presentation_failed and shows nothing", async () => {
+  const refusals: Array<[string, () => Promise<unknown>]> = [
+    ["typed fault", async () => ({ type: "Fault", code: "conflict", fail_direction: "closed" })],
+    ["thrown", async () => { throw new Error("the core went away"); }],
+    ["not a presentation", async () => ({ type: "Block" })],
+    ["no items", async () => ({ type: "evidence_presentation", receipt_id: "p-1" })]];
+  for (const [label, answer] of refusals) {
+    const { ctx, shown } = ctxFor({ selects: ["Confirm"], inputs: [""] });
+    const failures: unknown[] = [];
+    const out = (await confirmEvidence(blocked(), "run-1", ctx, answer as never, async (failure) => {
+      failures.push(failure); return refreshed; }, Date.now() + 60_000));
+    assert.equal(out.response, refreshed, label);
+    assert.equal(out.failure, "presentation_failed", label);
+    assert.deepEqual(failures, ["presentation_failed"], label);
+    assert.deepEqual(shown, [], label);
+  }
+});
+
+test("a batch that was shown is evaluated again without a failure, whatever the human did (the no-UI case is PI-04)", async () => {
+  for (const selects of [["Confirm"], ["Later"], [undefined]]) {
+    const { ctx } = ctxFor({ selects, inputs: [""] });
+    const failures: unknown[] = [];
+    await confirmEvidence(blocked(), "run-1", ctx, bridge([RECORD]).trusted as never, async (failure) => {
+      failures.push(failure); return refreshed; }, Date.now() + 60_000);
+    assert.deepEqual(failures, [undefined], String(selects));
+  }
+});
+
+test("PI-04: a presentable batch with no dialog to show it in reports presentation_failed, spending and evaluating nothing", async () => {
+  for (const options of [{ hasUI: false }, { select: false }, { input: false }]) {
+    const { ctx } = ctxFor({ selects: ["Confirm"], inputs: [""] }, options);
+    const { trusted, calls } = bridge([RECORD]);
+    const original = blocked();
+    const out = await confirm(ctx, trusted, original);
+    assert.equal(out.response, original, JSON.stringify(options));
+    assert.equal(out.failure, "presentation_failed", JSON.stringify(options));
+    assert.deepEqual(calls, [], JSON.stringify(options));
+  }
+  const { ctx } = ctxFor({ selects: ["Confirm"], inputs: [""] }, { hasUI: false });
+  const quiet = await confirm(ctx, bridge([RECORD]).trusted, blocked("unavailable"));
+  assert.equal(quiet.failure, undefined, "no presentable batch: nothing failed to be asked");
+});
+
+test("the gate's notice for a host failure is the sole confirmation blocker's, in the registry's words, with the stop next", () => {
+  for (const reason of ["surface_unrecorded", "presentation_failed"] as const) {
+    const notice = evidenceHostFailure(blocked("human", reason).result);
+    assert.equal(notice, `${AUTHOR_LABELS[`waiting_${reason}`]}\nnext: report_convergence intent=stop`);
+    assert.ok(String(notice).includes("nobody was asked"));
+    assert.equal(evidenceConfirmationWait(blocked("human", reason).result), false, "and it is never a wait");
+    assert.equal(evidenceHostFailure(blocked("human", reason, "claim.research_missing").result), null, "another blocker leads");
+  }
+  for (const error of [null, "unavailable", "unobserved", "already_presented", "interaction_limit"])
+    assert.equal(evidenceHostFailure(blocked("human", error).result), null, String(error));
 });

@@ -135,8 +135,9 @@
     "human_wait": "Empirica is paused for human governance input, not converged. Investigation remains blocked; no approval was granted by this pause.",
     "evidence_wait": "Empirica is paused: research evidence is waiting for your confirmation, and the run is not converged. No confirmation was granted by this pause. The agent presents it to you at the end of its next pass; if you leave it on Later or close the dialog it is not shown again for the same work, and the run must change or be accepted as a residual.",
     "budget_exhausted": "Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this pause. Stop honestly (report_convergence intent=stop), or in deliberative mode propose a raise for human approval; in auto mode start a fresh run.",
-    "surface_unrecorded": "Empirica cannot tell whether a human can be asked in this session, so it is not pausing for a confirmation. The run is not converged and no confirmation was granted. Report again; if this persists, change the work or accept the residual.",
-    "evidence_report": "Research evidence is waiting for your confirmation, and the run is not converged. Call report_convergence now: the human is asked inside that call. No confirmation was granted by this block."
+    "evidence_report": "Research evidence is waiting for your confirmation, and the run is not converged. Call report_convergence now: the human is asked inside that call, if this host can show a dialog. No confirmation was granted by this block.",
+    "paused_for_human": "Empirica is paused for you, not converged: {reason} Nothing was approved or confirmed by this pause, and nobody was asked. The run stays open; tell the agent how to proceed, or end it.",
+    "unattended_continue": "Empirica is not converged: {reason} Auto mode does not hand the turn back to you: act on it, or end honestly with report_convergence intent=stop."
   },
   "author_view": {
     "labels": {
@@ -146,6 +147,8 @@
       "converged": "converged=",
       "run_id": "run_id:",
       "proposal_rationale": "proposal rationale:",
+      "host_unreviewed": "host:",
+      "host_unreviewed_note": "(not reviewed; preflight passed)",
       "audit": "Audit:",
       "finding": "finding:",
       "reasons": "Reasons:",
@@ -184,8 +187,11 @@
       "waiting_for_claim": "for claim",
       "waiting_none_error": "a human can be asked at the end of your next pass",
       "waiting_unavailable": "no human can be asked in this session",
+      "waiting_unobserved": "a human is asked when you report, if this host can show a dialog",
       "waiting_already_presented": "already shown; only a changed derivation asks again",
       "waiting_interaction_limit": "the human interaction limit is reached",
+      "waiting_surface_unrecorded": "the host could not tell whether a human can be asked, so nobody was asked; stop honestly, or report again after a change",
+      "waiting_presentation_failed": "the host could not show the confirmation dialog, so nobody was asked; stop honestly, or report again after a change",
       "verified_by_service": "checked by the service",
       "confirmed_by_human": "confirmed by a human",
       "rejected_by_human": "rejected by a human",
@@ -198,13 +204,13 @@
     }
   },
   "host_profiles": {
-    "claude-code@2.1.278": {
+    "claude-code": {
       "delegation_env": "EMPIRICA_AUTO_DELEGATION"
     },
-    "codex-cli@0.146.0": {
+    "codex-cli": {
       "delegation_env": "EMPIRICA_AUTO_DELEGATION"
     },
-    "pi@0.84.1+pi-subagents-foreground-audit-v1": {
+    "pi+pi-subagents-foreground-audit-v1": {
       "delegation_env": "EMPIRICA_AUTO_DELEGATION"
     }
   },
@@ -260,7 +266,16 @@
       ]
     },
     "host.subagents_version_unsupported": {
-      "message": "The active pi-subagents runtime is not a reviewed version or does not expose the launch preflight Empirica binds. Install a reviewed version and restart the host, or accept the residual.",
+      "message": "The active pi-subagents runtime is outside the supported range, or its tool schema or launch preflight cannot carry the Empirica audit launch. Install a version inside the supported range and restart the host, or accept the residual.",
+      "sections": [
+        "hosts/capabilities"
+      ],
+      "next_actions": [
+        "residual.accept"
+      ]
+    },
+    "host.subagents_tools_not_read_only": {
+      "message": "The preflight reports a tool Empirica does not allow the auditor (the refusal names the tools), so the audit cannot be read-only. Remove the extra tool from the auditor's configuration or update pi-subagents, restart the host, and start a fresh run, or accept the residual.",
       "sections": [
         "hosts/capabilities"
       ],
@@ -269,7 +284,7 @@
       ]
     },
     "host.subagents_launch_unsupported": {
-      "message": "During an Empirica run, `subagent` accepts exactly one launch form (for example `agent` or `workflow`) or a reviewed read-only action (`list`, `status`, `models`, ...); control, mutation, and ambiguous calls are refused. Retry with a supported call, or accept the residual.",
+      "message": "During an Empirica run, `subagent` accepts exactly one launch form (for example `agent` or `workflow`) or a read-only action that the runtime's reviewed versions know (`list`, `status`, `models`, ...); control, mutation, unknown-action, and ambiguous calls are refused. Retry with a supported call, or accept the residual.",
       "sections": [
         "hosts/capabilities"
       ],

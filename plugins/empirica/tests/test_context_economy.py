@@ -28,6 +28,9 @@ from test_d7_transactions import Runs, Artifacts, Workspace, Harness
 from governance_setup import (AUTHOR, TEST_INVOCATION, SIZED_RATIONALE, approve_current,
                               sized_configure_run)
 from core.canonical import canonical_digest
+from application.protocol import host_profile_id  # noqa: E402
+CLAUDE_PROFILE = host_profile_id("claude-code")
+PI_PROFILE = host_profile_id("pi")
 
 
 def build_child_event_payload(state: str, *, native_id: str | None = None,
@@ -38,9 +41,9 @@ def build_child_event_payload(state: str, *, native_id: str | None = None,
             "fingerprint": canonical_digest({"state": state, "native_id": native_id}),
             "result_digest": result_digest}
 
-PROFILE = "pi@0.84.1+pi-subagents-foreground-audit-v1"
-CODEX = "codex-cli@0.146.0"
-CLAUDE = "claude-code@2.1.278"
+PROFILE = PI_PROFILE
+CODEX = host_profile_id("codex-cli")
+CLAUDE = CLAUDE_PROFILE
 GRAPH = {"root": "C0", "claims": [{"id": "C0", "text": "supplied uncertainty", "gating": True,
                                    "kind": "ordinary"}], "edges": []}
 CONTEXT = {"author": AUTHOR, "ingress": "pi_ui"}
@@ -415,7 +418,7 @@ class SizeBudgetTests(_ServiceHarness):
     """
 
     CEILING = 1200
-    ROLE_PROFILE = "claude-code@2.1.278"
+    ROLE_PROFILE = CLAUDE_PROFILE
 
     @staticmethod
     def _size(obj) -> int:
@@ -754,7 +757,8 @@ class NextActionReachabilityTests(_ServiceHarness):
         emits ``evidence.confirmation_required`` naming the claim and the one human next action."""
         decision_reasons = self._decision_reasons()
         self.assertEqual(decision_reasons,
-                         {"evidence.confirmation_required": ("human.confirm_evidence", "residual.accept")})
+                         {"evidence.confirmation_required": ("convergence.report", "human.confirm_evidence",
+                                                             "residual.accept")})
         contract = _proto._PUBLIC_CONTRACT
         humans = {d for d, row in contract["next_actions"].items()
                   if row["surface"].get("owner") == "human"}

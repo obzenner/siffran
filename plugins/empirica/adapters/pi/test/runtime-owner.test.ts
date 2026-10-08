@@ -13,9 +13,10 @@ import {
   subagentsProvenance, type OwnerIo, type OwnerRefusalCode, type PreflightImporter,
 } from "../src/runtime-owner.ts";
 import { launchUnsupportedReason, OWNER_REFUSAL_REASON, ownerRefusalBlock, ownerRefusalReason } from "../src/owner-refusal.ts";
-import { loadInventory } from "../src/subagent-inventory.ts";
+import { AUDIT_LAUNCH_PARAMETERS, loadInventory, reviewedActionNames } from "../src/subagent-inventory.ts";
+import { reviewedVersions } from "./compat-versions.ts";
 import { PUBLIC_TOOLS } from "../src/public-tools.ts";
-import { makeSubagentsPackage, tempParent } from "./owner-fixture.ts";
+import { makeSubagentsPackage, schemaDeclaring, tempParent } from "./owner-fixture.ts";
 
 const NO_ENV = {};
 
@@ -339,8 +340,8 @@ test("provenance records exactly what was observed, with the loaded preflight pa
   assert.ok(owner.ok);
   const bound = await resolveOwnerPreflight(owner, nodePreflightImporter, nodeOwnerIo);
   assert.ok(bound.ok);
-  assert.deepEqual(subagentsProvenance(owner, bound), {
-    package: "pi-subagents", version: "0.74.0", owner_path: realpathSync(pkg.entry),
+  assert.deepEqual(subagentsProvenance(owner, bound, true), {
+    package: "pi-subagents", version: "0.74.0", reviewed: true, owner_path: realpathSync(pkg.entry),
     package_root: realpathSync(pkg.root), preflight_path: bound.preflight_path, source: "npm:pi-subagents",
   });
 });
@@ -351,7 +352,7 @@ test("every refusal code maps to a host.subagents_* reason the contract carries,
   const codes = Object.keys(OWNER_REFUSAL_REASON) as OwnerRefusalCode[];
   assert.deepEqual([...codes].sort(), ["child-process", "missing-tool", "multiple-owners", "owner-changed",
     "owner-unobservable", "package-not-pi-subagents", "preflight-unavailable", "tool-inactive", "version-unobservable",
-    "version-unreviewed"]);
+    "version-unsupported"]);
   for (const code of codes) {
     const reason = ownerRefusalReason(code);
     assert.match(reason.code, /^host\.subagents_/, code);
@@ -362,7 +363,7 @@ test("every refusal code maps to a host.subagents_* reason the contract carries,
   assert.equal(ownerRefusalReason("multiple-owners").code, "host.subagents_duplicate_owner");
   assert.equal(ownerRefusalReason("child-process").code, "host.subagents_owner_unverified");
   assert.equal(ownerRefusalReason("preflight-unavailable").code, "host.subagents_version_unsupported");
-  assert.equal(ownerRefusalReason("version-unreviewed").code, "host.subagents_version_unsupported");
+  assert.equal(ownerRefusalReason("version-unsupported").code, "host.subagents_version_unsupported");
   assert.equal(ownerRefusalReason("tool-inactive").code, "host.subagents_tool_inactive");
 });
 
@@ -391,7 +392,7 @@ test("the contract defines every host.subagents_* reason once, each offering res
   const codes = Object.keys(PUBLIC_TOOLS.recovery).filter((code) => code.startsWith("host.subagents_")).sort();
   assert.deepEqual(codes, ["host.subagents_duplicate_owner", "host.subagents_launch_unsupported",
     "host.subagents_missing", "host.subagents_owner_unverified", "host.subagents_provenance_missing",
-    "host.subagents_tool_inactive", "host.subagents_version_unsupported"]);
+    "host.subagents_tool_inactive", "host.subagents_tools_not_read_only", "host.subagents_version_unsupported"]);
   for (const code of codes) assert.deepEqual(PUBLIC_TOOLS.recovery[code].next_actions, ["residual.accept"], code);
 });
 
@@ -401,23 +402,56 @@ const ownerAt = (version: string) => ({ ok: true as const, tool: "subagent", pac
   version, source: "x" } as never);
 
 test("resolveOwnerInventory selects the inventory of the exact version", () => {
-  for (const version of ["0.50.0", "0.64.0", "0.74.0", "0.75.0"]) {
+  for (const version of reviewedVersions()) {
     const bound = resolveOwnerInventory(ownerAt(version), (v) => loadInventory(v));
     assert.equal(bound.ok, true, version);
     if (bound.ok) assert.equal(bound.inventory.version, version);
   }
 });
 
-test("resolveOwnerInventory refuses an unreviewed version, a wrong inventory, and a version that cannot carry the bound", () => {
+test("resolveOwnerInventory refuses a version outside the range, a wrong inventory, and a version that cannot carry the bound", () => {
   const refused = (owner: never, lookup: Parameters<typeof resolveOwnerInventory>[1]) => {
     const result = resolveOwnerInventory(owner, lookup);
     return result.ok ? "ok" : result.code;
   };
-  assert.equal(refused(ownerAt("9.9.9"), (v) => loadInventory(v)), "version-unreviewed");
-  assert.equal(refused(ownerAt("0.75.0-beta.1"), (v) => loadInventory(v)), "version-unreviewed", "non-exact versions are not approximated");
-  assert.equal(refused(ownerAt("0.75.0"), () => loadInventory("0.74.0")), "version-unreviewed");
+  assert.equal(refused(ownerAt("1.0.0"), (v) => loadInventory(v)), "version-unsupported", "maximum_exclusive is outside");
+  assert.equal(refused(ownerAt("0.49.9"), (v) => loadInventory(v)), "version-unsupported");
+  assert.equal(refused(ownerAt("0.75.0-beta.1"), (v) => loadInventory(v)), "version-unsupported", "non-exact versions are not approximated");
+  assert.equal(refused(ownerAt("0.75.0"), () => loadInventory("0.74.0")), "version-unsupported");
   const noTimeout = { ...loadInventory("0.75.0")!, supports: { ...loadInventory("0.75.0")!.supports, timeoutMs: false } };
-  assert.equal(refused(ownerAt("0.75.0"), () => noTimeout), "version-unreviewed");
+  assert.equal(refused(ownerAt("0.75.0"), () => noTimeout), "version-unsupported");
+});
+
+// ADR-0069: inside the range a version with no compat record is admitted by what its own schema declares.
+const ownerWith = (version: string, parameters: unknown) => ({ ...(ownerAt(version) as object), parameters }) as never;
+
+test("resolveOwnerInventory admits a version in range with no compat record when its schema declares every audit-launch field", () => {
+  const bound = resolveOwnerInventory(ownerWith("0.99.0", schemaDeclaring([...AUDIT_LAUNCH_PARAMETERS, "workflow"])), () => undefined);
+  assert.equal(bound.ok, true);
+  if (!bound.ok) return;
+  assert.equal(bound.inventory.reviewed, false);
+  assert.equal(bound.inventory.version, "0.99.0");
+  assert.deepEqual([...bound.inventory.actions], reviewedActionNames(),
+    "its actions are the names some reviewed version has; the classifier decides which may run");
+  assert.ok(bound.inventory.actions.includes("list") && !bound.inventory.actions.includes("mission.invented"));
+  assert.equal(bound.inventory.launch_contract_version, null, "the live preflight decides the contract version");
+  assert.deepEqual([...bound.inventory.launch_forms], ["agent", "workflow"]);
+  const reviewed = resolveOwnerInventory(ownerAt("0.76.1"), (v) => loadInventory(v));
+  assert.equal(reviewed.ok && reviewed.inventory.reviewed, true, "a checked-in record marks the version reviewed");
+});
+
+test("resolveOwnerInventory refuses a version in range whose schema is missing, malformed, or lacks an audit-launch field", () => {
+  const detail = (parameters: unknown): string => {
+    const result = resolveOwnerInventory(ownerWith("0.99.0", parameters), () => undefined);
+    return result.ok ? "ok" : `${result.code}: ${result.message}`;
+  };
+  assert.match(detail(undefined), /version-unsupported: .*no compat record and the subagent tool declares no parameter schema/);
+  assert.match(detail("object"), /declares no parameter schema/);
+  assert.match(detail({ type: "object" }), /declares no parameter schema/);
+  assert.match(detail({ properties: [] }), /declares no parameter schema/);
+  for (const missing of AUDIT_LAUNCH_PARAMETERS)
+    assert.match(detail(schemaDeclaring(AUDIT_LAUNCH_PARAMETERS.filter((name) => name !== missing))),
+      new RegExp(`does not declare \\\`${missing}\\\``), missing);
 });
 
 // Pi 1.0 reports built-in tools and extensions with a `builtin:<name>` path (source-info.d.ts

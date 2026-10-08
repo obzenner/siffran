@@ -103,7 +103,7 @@ runtime first, then the repository (which carries Empirica, the Methodologist, a
 role):
 
 ```sh
-pi install npm:pi-subagents@0.75.0   # Pi <0.86.1: npm:pi-subagents@0.64.0 (see the table below)
+pi install npm:pi-subagents@0.76.1   # Pi <0.86.1: npm:pi-subagents@0.64.0 (see the table below)
 pi install git:github.com/obzenner/siffran
 ```
 
@@ -114,30 +114,37 @@ tool, when the session's slash commands show more than one loaded `pi-subagents`
 only the first `subagent` registration, so a second copy is seen through its commands, not its tool),
 or when the owner's package or version cannot be verified. A second copy is detected only while its
 extension registers commands; Pi runs and reports the first registrant, and that is the one bound.
-Only exact `pi-subagents` versions that Empirica has reviewed are supported, under the policy
-`pi-subagents-foreground-audit-v1` (Pi `>=0.84.1,<1.1.0`). An unreviewed `pi-subagents` version fails closed:
+Admitted `pi-subagents` versions are a range, `>=0.50.0,<1.0.0`, under the policy
+`pi-subagents-foreground-audit-v1` (Pi `>=0.84.1,<2.0.0`). A version outside the supported range fails closed:
 `/empirica` and `configure_run` are refused with `host.subagents_version_unsupported` before any run is
-created, however new or however similar to a reviewed one it is. A newer release is supported only after
-`make empirica-subagents-matrix-update` lists it and its inventory, preflight fixture and classifier
-cases are reviewed and added to the contract.
+created. Inside the range a version is admitted by what the adapter observes of it, not by a list: its own
+parameter schema must declare every field the audit launch sends, and its live launch preflight must resolve
+the packaged auditor, the configured model and a fresh context, and its tool allowlist may hold only the tools the profile's `audit_child_tools` allows. A version in the table below has a checked-in
+compat record and is *reviewed*. Any other version in the range is admitted, recorded as `reviewed: false`
+and shown on every run view while it stays unreviewed (`host: pi-subagents <version> (not reviewed; preflight passed)`);
+because nobody has reviewed its actions, a `subagent` action runs during a run only if some reviewed version has that
+name and the classifier calls it read-only (`list`, `status`, `models`, ...); launches are classified as usual. The
+versions in the range are admitted; only the rows of the table below are reviewed. `make empirica-subagents-matrix-update` lists releases newer than the newest
+reviewed one; reviewing one means adding its compat record, preflight fixture and classifier cases.
 
 | `pi-subagents` | Requires Pi | Native receipt (4.1) | Status |
 |---|---|---|---|
 | `0.50.0` | `>=0.84.1` | pending A9 | reviewed; the 4.0 qualification version |
 | `0.64.0` | `>=0.84.1` | Pi 0.87.1 (A9a, `ebf426f`) | reviewed |
 | `0.74.0` | `>=0.86.1` | pending A9 | reviewed |
-| `0.75.0` | `>=0.86.1` | pending A9 | reviewed; the repository's development pin |
+| `0.75.0` | `>=0.86.1` | pending A9 | reviewed |
+| `0.76.1` | `>=0.86.1` | pending A9 | reviewed; the repository's development pin |
 
 "Requires Pi" is each release's own declared `@earendil-works/pi-ai` peer (`>=0.80.0` for `0.50.0` and
-`0.64.0`, `>=0.86.1` for `0.74.0` and `0.75.0`), raised to the floor of the supported Pi interval. It is
+`0.64.0`, `>=0.86.1` for `0.74.0`, `0.75.0` and `0.76.1`), raised to the floor of the supported Pi interval. It is
 recorded in `plugins/empirica/adapters/pi/compat/` and checked against this table. "Native receipt" marks
 the pairs for which an installed-host run has been recorded; `pending A9` means none has yet. The
 0.64.0 receipt is native evidence for that pair; the release receipt the live check requires must come
-from Pi 1.0 or later (A9b, pending).
+from the profile's qualified Pi version or later (`host-profiles.json` `version`, today 1.1.0; A9b, pending).
 
 Install the newest reviewed version your Pi satisfies (Pi <0.86.1: `pi-subagents@0.64.0`) and pin the exact
-version, as in the commands above; an unpinned install may resolve to a release that is not in the table
-and will then be refused.
+version, as in the commands above; an unpinned install may resolve to a release outside the range, which is
+refused, or to an unreviewed one inside it, which runs with only the reviewed read-only `subagent` actions allowed during a run.
 
 Restart Pi after installation, or run `/reload` in an existing session. Available commands include:
 
@@ -197,7 +204,7 @@ of starting another. See
 <!-- BEGIN GENERATED: plugins (managed by the checkup skill — do not edit by hand) -->
 | Plugin | Version | Description |
 |--------|---------|-------------|
-| `methodologist` | 0.9.0 | Formal reasoning catalog — lets users choose and execute evidence-backed CS/math methodologies with traced phases and structured output. |
+| `methodologist` | 0.10.0 | Formal reasoning catalog — lets users choose and execute evidence-backed CS/math methodologies with traced phases and structured output. |
 | `empirica` | 5.0.0 | Host-neutral empirical-convergence workflow — requires exact run-configuration approval (or provenance-bound auto), cited research before spikes, per-artifact producer attribution, and a current distinct host-observed audit. Unknown or mixed identity evidence fails closed. |
 <!-- END GENERATED: plugins -->
 

@@ -36,8 +36,10 @@ from governance_setup import TEST_INVOCATION
 
 from adapters.identity import observe
 from core.canonical import canonical_digest
-from core.projection import reason_actions
+from core.projection import confirmation_actions
 from driver import CITED_SOURCE, V2SeamAbsent, new_driver
+from application.protocol import host_profile_id  # noqa: E402
+CLAUDE_PROFILE = host_profile_id("claude-code")
 
 # ---------------------------------------------------------------------------
 # Locate the accepted D2 contract registry (the SSOT — never copied into tests)
@@ -262,10 +264,12 @@ def observe_action(*, run_id: str, action: dict, observed_at: str | None = None,
 
 
 def evaluate(*, run_id: str, intent: str = "continue", observed_at: str | None = None,
-             request_id: str | None = None) -> dict:
+             request_id: str | None = None, host_failure: str | None = None) -> dict:
     cmd: dict = {"type": "EvaluateRun", "run_id": run_id, "intent": intent}
     if observed_at is not None:
         cmd["observed_at"] = observed_at
+    if host_failure is not None:
+        cmd["host_failure"] = host_failure
     return _envelope(request_id or _rid("eval"), cmd)
 
 
@@ -511,7 +515,7 @@ class ConformanceCase(unittest.TestCase):
                         else os.environ.pop("EMPIRICA_HOME", None))
 
     # Default profile used by cases that do not assert a specific host tier.
-    DEFAULT_PROFILE = "claude-code@2.1.278"
+    DEFAULT_PROFILE = CLAUDE_PROFILE
     DEFAULT_GOAL = "Prove the public contract is internally consistent."
 
     # ---- SUT binding -------------------------------------------------------
@@ -598,7 +602,7 @@ class ConformanceCase(unittest.TestCase):
             self.assertIn(r["code"], REASONS, f"reason code {r['code']!r} must be canonical")
             spec = REASONS[r["code"]]
             self.assertEqual(r["next_actions"],
-                             reason_actions(r["code"], r.get("parameters"), spec["next_actions"]),
+                             confirmation_actions(r["code"], r.get("parameters"), spec["next_actions"], None),
                              f"reason {r['code']} next_actions must match registry order")
             self.assertEqual(r["sections"], spec["sections"],
                              f"reason {r['code']} sections must match registry order")
@@ -655,7 +659,7 @@ class ConformanceCase(unittest.TestCase):
             self.assertEqual(r.get("parameters", {}), {},
                              f"reason {code} parameters must be empty")
         self.assertEqual(r["next_actions"],
-                         reason_actions(code, r.get("parameters"), spec["next_actions"]),
+                         confirmation_actions(code, r.get("parameters"), spec["next_actions"], None),
                          f"reason {code} next_actions must match registry order")
         self.assertEqual(r["sections"], spec["sections"],
                          f"reason {code} sections must match registry order")

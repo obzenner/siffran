@@ -95,6 +95,7 @@ help: ## Show this help (generated from target descriptions)
 # `check` hands the list to scripts/run_suites.py, which runs them in parallel (one log per suite,
 # one status line each, the full log only for a failure). Each test module belongs to exactly one
 # fast suite or to a named integration target (guarded by tests/v2/test_suite_ownership.py).
+# `make check JOBS=<n>` caps how many run at once; the scheduling rule is owned by doc/testing.md.
 FAST_SUITES := static core evidence observer claude codex pi ui
 CI_SUITES := static core evidence observer claude codex
 ifeq ($(PI_CHECKS),1)
@@ -103,11 +104,11 @@ endif
 RUN_SUITES = $(PYTHON) $(SCRIPTS)/run_suites.py $(foreach s,$1,$(s)='$(MAKE) --no-print-directory check-$(s)')
 
 .PHONY: check check-ci check-static check-core check-evidence check-observer check-claude check-codex check-pi check-ui pi-governance-dialog-golden
-check: ## Fast contributor gate: every fast suite, in parallel (not integration/native certification)
+check: ## Fast contributor gate: every fast suite, scheduled by load (JOBS=<n> caps; see doc/testing.md)
 	@$(call RUN_SUITES,$(FAST_SUITES))
 	@printf '\n$(BOLD)Fast contributor checks passed.$(RESET)\n'
 
-check-ci: ## Fast contributor gate except Pi and UI (PI_CHECKS=1 includes them), in parallel
+check-ci: ## Fast contributor gate except Pi and UI (PI_CHECKS=1 includes them), scheduled like check
 	@if [ "$(PI_CHECKS)" != "1" ]; then printf '$(DIM)Pi and UI suites skipped in CI (PI_CHECKS=1 to include; they need Node)$(RESET)\n'; fi
 	@$(call RUN_SUITES,$(CI_SUITES))
 	@printf '\n$(BOLD)CI checks passed.$(RESET)\n'
@@ -283,10 +284,13 @@ adr-check: ## Check ADR link health and numbering (adrs doctor)
 		printf '$(DIM)adrs not installed — skipping$(RESET)\n'; \
 	fi
 
-.PHONY: contract-check contract-fixtures contract-schemas contract-schema-generator-unit-check
+.PHONY: contract-check contract-fixtures contract-schemas contract-schema-generator-unit-check registry-doc
 contract-fixtures: ## Regenerate runtime-derived Empirica contract fixture fields and observer fixtures
 	@$(PYTHON) $(SCRIPTS)/regen_contract_fixtures.py
 	@$(PYTHON) $(SCRIPTS)/regen_ui_view_fixtures.py
+
+registry-doc: ## Rewrite the generated data regions of doc/design/empirica-host-boundary-registry.md from host-boundaries.json (contract-check fails on drift)
+	@$(PYTHON) $(SCRIPTS)/registry_doc.py
 
 contract-schemas: ## Regenerate shared Empirica schema definitions and local embeddings
 	@$(PYTHON) $(SCRIPTS)/sync_schema_defs.py
@@ -405,7 +409,7 @@ empirica-subagents-matrix: node_modules ## Integration: for each reviewed pi-sub
 empirica-subagents-matrix-update: node_modules ## List pi-subagents releases newer than the newest reviewed and print the exact review commands (promotes nothing)
 	@node --experimental-strip-types $(SCRIPTS)/empirica_subagents_matrix.mjs --update
 
-empirica-pi-api-typecheck: node_modules ## Integration: typecheck the adapter's Pi API mirror against each reviewed Pi version's declarations (fetched with npm pack)
+empirica-pi-api-typecheck: node_modules ## Integration: typecheck every Pi adapter mirror (Empirica and Methodologist) against Pi's declarations at each listed Pi version (fetched with npm pack)
 	@node $(SCRIPTS)/pi_api_typecheck.mjs
 
 pi-subagents-inventory: node_modules ## Regenerate the reviewed inventory of the pi-subagents at PACKAGE_ROOT (default: the devDependency) into adapters/pi/compat/

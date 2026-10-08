@@ -6,14 +6,16 @@ import assert from "node:assert/strict";
 import * as path from "node:path";
 
 import { auditRetrievalFrom, TOOL_RETRIEVAL } from "../src/audit-retrieval.ts";
+import { AUDIT_LAUNCH_POLICY } from "../src/host-profile.ts";
+import { reviewedVersions } from "./compat-versions.ts";
 import { admitAuditPreflight, type AuditPreflightDescriptor } from "../src/preflight-seam.ts";
 import { loadInventory } from "../src/subagent-inventory.ts";
 import { AUDITOR, bound, FIXTURES } from "./preflight-fixtures.ts";
 
 function descriptor(version: string): AuditPreflightDescriptor {
   return { version, inventory: loadInventory(version),
-    expected: { agent_file_path: AUDITOR, model: "audit/reviewer" },
-    launch: { async: false, output_mode: undefined, force_top_level_async: undefined },
+    expected: { agent_file_path: AUDITOR, model: "audit/reviewer", child_tools: AUDIT_LAUNCH_POLICY.audit_child_tools },
+    launch: { async: false, output_mode: undefined, force_top_level_async: undefined, context: "fresh" },
     canonical: (file) => path.resolve(file) };
 }
 
@@ -24,7 +26,7 @@ const retrieval = (version: string, allowlist: unknown) => {
 };
 
 test("every reviewed pi-subagents version lets the canonical auditor read files and never fetch the web", () => {
-  assert.deepEqual(FIXTURES.map((f) => f.version), ["0.50.0", "0.64.0", "0.74.0", "0.75.0"]);
+  assert.deepEqual(FIXTURES.map((f) => f.version), reviewedVersions());
   for (const fixture of FIXTURES) {
     const response = bound(fixture.cases.canonical_auditor);
     assert.ok(response.contract.tools.effectiveAllowlist.includes("read"), fixture.version);

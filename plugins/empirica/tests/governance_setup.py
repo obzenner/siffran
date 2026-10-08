@@ -16,13 +16,13 @@ TEST_INVOCATION = {"host": "test", "interactive": True,
 
 def host_runtime_for(profile_id):
     """The runtime provenance a host of ``profile_id`` records at StartRun (``None`` for a profile with
-    no external audit runtime), built from the profile's own reviewed policy."""
+    no external audit runtime), the newest checked-in-reviewed version."""
     policy = _proto.host_profile(profile_id).get("subagents_compatibility")
     if policy is None:
         return None
     root = "/opt/" + policy["package"]
     return {"policy_id": policy["policy_id"],
-            "subagents": {"package": policy["package"], "version": policy["reviewed_versions"][-1],
+            "subagents": {"package": policy["package"], "version": "0.76.1", "reviewed": True,
                           "owner_path": root + "/src/extension/index.js", "package_root": root,
                           "preflight_path": root + "/src/api/preflight.js", "source": root + "/index.ts"}}
 
@@ -67,9 +67,7 @@ def approve_current(coordinator, run_id, *, author=None, auditor=None):
                                    budgets=g["proposal"]["budgets"],
                                    rationale=SIZED_RATIONALE)}, "test-consent-configure")
         assert configured["result"]["type"] == "Allow", configured
-    ingress = "pi_ui" if c.profile_id.startswith("pi@") else "mcp_elicitation"
-    if c.profile_id.startswith("codex"):
-        ingress = "unavailable"
+    ingress = _proto.host_profile(c.profile_id)["approval_ingress"]
     context = {"author": author, "ingress": ingress}
     response = transact(c, run_id, context, context=True)
     assert response["result"]["type"] in {"Allow", "Inert"}, response

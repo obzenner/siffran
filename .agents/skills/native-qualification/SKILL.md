@@ -25,6 +25,10 @@ Read the [host registry](../../../contracts/empirica/v2/host-profiles.json) and 
 already prepared supported executable; an out-of-range installation is **BLOCKED**, not permission to upgrade global
 tools. Codex Empirica is unsupported for convergence.
 
+The operator's first message, the goal given at activation, tells the author to pause at every operator checkpoint
+(model switch, `/compact`) and wait for the operator to say go before continuing. Without it the author runs straight
+through and those rows end `NOT_REACHED`.
+
 Agree with the human on the host, the exact candidate checkout, a small falsifiable goal and claims, initial limits
 `8/0/1`, the host reviewer configuration, the host decision timeout, and a fresh evidence directory **outside the source
 checkout**. Omit Empirica `--auto` in the primary scenario. Choose a non-destructive spike against an existing file; no
@@ -47,6 +51,11 @@ Before launch:
   are named in the host reference).
 - Host specifics (launch command, elicitation, reviewer configuration, settings files): [Claude](references/claude.md),
   [Pi](references/pi.md).
+- **Start the observer UI on the run's own store before launch.** Run
+  `python3 plugins/empirica/adapters/observer/cli.py serve --home <evidence>/state --repo <task repository> --port 0`
+  from this checkout (history lives in Git, not in the store) and keep
+  its log in the evidence directory. Open the printed loopback URL where the operator can watch it. It is read-only and
+  is checked at every checkpoint (ledger row `observer_ui_live`).
 
 After explicit go, launch one of the checkout overrides in the host reference, inheriting the prepared environment.
 Capture loaded paths, parent session ID, native transcript and host signals. A successful terminal API response alone
@@ -55,7 +64,7 @@ proves neither activation nor loading. Stop on any mismatch.
 ## 2. Run the scenario ledger
 
 Execute the rows of [the ledger](references/scenarios.md) in table order: the primary run, the ADR-0067 evidence rows,
-the required refusal rows (each in a separate fresh run), then the Methodologist sanity. They are author instructions
+the required refusal rows (each in a separate fresh run), the host-boundary rows (D2, live-only), then the Methodologist sanity. They are author instructions
 plus human checkpoints, not a script for fabricating results. Record each row as `PASS`, `FAIL`, `BLOCKED` or
 `NOT_REACHED` with its evidence pointer. Read state only through public tools and never edit operational state. A row
 marked *deterministic* is covered by a named test and is never claimed live. In particular the 128-interaction ceiling is a fixed contract constant, not an operator setting: native qualification never exercises it.

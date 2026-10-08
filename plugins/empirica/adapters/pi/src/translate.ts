@@ -11,6 +11,7 @@ import {
   type Budgets,
   type EvaluateIntent,
   type FaultCode,
+  type HostFailure,
   type InvocationProvenance,
   type Request,
   type Result,
@@ -131,11 +132,12 @@ export function evaluateRunRequest(
   runId: string,
   intent: EvaluateIntent,
   requestId: string,
+  hostFailure?: HostFailure,
 ): Request {
   return {
     protocol: PROTOCOL,
     request_id: requestId,
-    command: { type: "EvaluateRun", run_id: runId, intent },
+    command: { type: "EvaluateRun", run_id: runId, intent, ...(hostFailure ? { host_failure: hostFailure } : {}) },
   };
 }
 
@@ -259,8 +261,9 @@ export function statusNotice(result: Result): Notice {
 
 // --- native subagent launch classification ----------------------------------
 //
-// Every `subagent` tool call is exactly one of four things, decided against the reviewed inventory
-// of the pi-subagents version that owns the tool (compat/pi-subagents-<version>.json):
+// Every `subagent` tool call is exactly one of four things, decided against the inventory of the
+// pi-subagents version that owns the tool (compat/pi-subagents-<version>.json, or the one observed for an in-range
+// version with no record; ADR-0069):
 //   executable  - starts exactly one child through one launch form; enters investigation + binding
 //   management  - a reviewed read-only action; inert
 //   unsupported - any other action (control, mutation, schedule, mission, worktree, unknown)

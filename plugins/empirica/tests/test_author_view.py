@@ -26,6 +26,8 @@ from application.protocol import (  # noqa: E402
     untrusted_delimiters,
     validate_public_result,
 )
+from application.protocol import host_profile_id  # noqa: E402
+PI_PROFILE = host_profile_id("pi")
 
 
 def _fallback(result: object) -> str:
@@ -419,7 +421,7 @@ class InjectionSafetyTests(unittest.TestCase):
         from test_d7_transactions import Artifacts, Harness, Runs, Workspace
 
         svc = compose(Workspace(), Harness(), Runs(), Artifacts(), None,
-                      "pi@0.84.1+pi-subagents-foreground-audit-v1", {}, None)
+                      PI_PROFILE, {}, None)
 
         def request(command):
             return svc.dispatch({"protocol": "empirica/v2", "request_id": "injection",
@@ -662,10 +664,14 @@ class PendingEvidenceGoldens(unittest.TestCase):
     """The public-boundary goldens for ``evidence.confirmation_required`` with non-empty ``record_ids``."""
 
     GOLDEN = PLUGIN / "adapters" / "pi" / "test" / "author-view-golden"
-    RECOVERY = {"evidence-reason-askable": ("human: confirmation", "report_convergence intent=stop"),
+    RECOVERY = {"evidence-reason-askable": ("report_convergence intent=report_convergence", "human: confirmation",
+                                            "report_convergence intent=stop"),
                 "evidence-reason-later": ("human: confirmation", "report_convergence intent=stop"),
                 "evidence-reason-unavailable": ("report_convergence intent=stop",),
-                "evidence-reason-mixed": ("human: confirmation", "report_convergence intent=stop", "decision needed on claim D1"),
+                "evidence-reason-unobserved": ("report_convergence intent=report_convergence", "report_convergence intent=stop",
+                                               "a human is asked when you report, if this host can show a dialog"),
+                "evidence-reason-mixed": ("report_convergence intent=report_convergence", "human: confirmation",
+                                          "report_convergence intent=stop", "decision needed on claim D1"),
                 "evidence-reason-terminal-residual": ("human: confirmation", "report_convergence intent=stop")}
 
     def test_each_state_renders_the_same_normally_and_strictly_with_recovery_and_no_digest(self):
@@ -679,6 +685,12 @@ class PendingEvidenceGoldens(unittest.TestCase):
             self.assertNotIn("sha256:", text, name)
             for call in calls:
                 self.assertIn(call, text, f"{name}: {call}")
+
+    def test_an_unobserved_surface_never_says_nobody_can_be_asked_and_leads_with_the_report(self):
+        text = render_author_view(json.loads((self.GOLDEN / "evidence-reason-unobserved.json").read_text())["result"])
+        self.assertNotIn("no human can be asked", text)
+        self.assertNotIn("human: confirmation", text)
+        self.assertLess(text.index("report_convergence intent=report_convergence"), text.index("report_convergence intent=stop"))
 
     def test_human_text_is_fenced(self):
         result = json.loads((self.GOLDEN / "evidence-reason-mixed.json").read_text())["result"]

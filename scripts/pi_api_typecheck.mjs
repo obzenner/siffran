@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// Typecheck the adapter's mirrored Pi API (plugins/empirica/adapters/pi/src/pi-types.ts) against the
-// real Pi declarations of each reviewed Pi version: `const _: Ours = piApi`. The mirror is a hand-kept
-// subset of Pi's `ExtensionAPI`; node's type stripping never checks it, so this is the only thing that
-// notices when the mirror promises something Pi does not provide (a looser label/handler/display).
+// Typecheck each Pi adapter's mirrored Pi API (plugins/empirica/adapters/pi/src/pi-types.ts and
+// plugins/methodologist/adapters/pi/src/pi-types.ts) against the real Pi declarations of each reviewed Pi
+// version: `const _: Ours = piApi`. The mirror is a hand-kept subset of Pi's `ExtensionAPI`; node's type
+// stripping never checks it, so this is the only thing that notices when the mirror promises something Pi
+// does not provide (a looser label/handler/display).
 //
 // Pi is never installed into the repository: each version's package is fetched with `npm pack` into a
 // scratch directory (or supplied with --roots), and `tsc --noEmit` runs against a throwaway tsconfig.
@@ -19,9 +20,20 @@ import { packPackage } from "./lib/npm_fetch.mjs";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const PI_PACKAGE = "@earendil-works/pi-coding-agent";
-/** The Pi versions whose declarations the mirror is proven against: both ends of the contract interval and the version in between. */
-export const PI_API_VERSIONS = ["0.84.1", "0.87.1", "1.0.0"];
+/**
+ * The Pi versions whose declarations the mirrors are proven against: the floor, one in between, the 1.0 start,
+ * the latest.
+ */
+export const PI_API_VERSIONS = ["0.84.1", "0.87.1", "1.0.0", "1.1.0"];
 export const MIRROR = path.join(repo, "plugins", "empirica", "adapters", "pi", "src", "pi-types.ts");
+/**
+ * Every Pi adapter's hand-kept mirror, proven against Pi's own declarations at the versions in `PI_API_VERSIONS` only:
+ * the supported range is declared, and each later release needs its own typecheck and receipt (ADR-0052).
+ */
+export const MIRRORS = {
+  empirica: MIRROR,
+  methodologist: path.join(repo, "plugins", "methodologist", "adapters", "pi", "src", "pi-types.ts"),
+};
 
 /** The files of a throwaway project asserting `ExtensionAPI` (Pi's) is assignable to the mirror's. */
 export function projectFiles({ piPackageRoot, mirror = MIRROR, typeRoot = path.join(repo, "node_modules", "@types") }) {
@@ -62,16 +74,19 @@ async function main(argv) {
   mkdirSync(cache, { recursive: true });
   let failed = false;
   for (const version of PI_API_VERSIONS) {
-    let result;
+    let root, fetchError;
     try {
-      const root = roots[version] ?? packPackage({ name: PI_PACKAGE, version,
+      root = roots[version] ?? packPackage({ name: PI_PACKAGE, version,
         dest: path.join(process.env.TMPDIR ?? "/tmp", "empirica-pi-api", version), cache });
-      result = typecheckAgainst({ piPackageRoot: root });
     } catch (error) {
-      result = { ok: false, output: String(error.message ?? error) };
+      fetchError = String(error.message ?? error);
     }
-    if (!result.ok) failed = true;
-    console.log(JSON.stringify({ pi: version, pass: result.ok, ...(result.ok ? {} : { output: result.output.split("\n").slice(0, 30).join("\n") }) }));
+    for (const [mirror, file] of Object.entries(MIRRORS)) {
+      const result = fetchError === undefined ? typecheckAgainst({ piPackageRoot: root, mirror: file }) : { ok: false, output: fetchError };
+      const detail = result.ok ? {} : { output: result.output.split("\n").slice(0, 30).join("\n") };
+      failed ||= !result.ok;
+      console.log(JSON.stringify({ pi: version, mirror, pass: result.ok, ...detail }));
+    }
   }
   return failed ? 1 : 0;
 }

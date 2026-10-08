@@ -50,6 +50,8 @@ from adapters.claude.restore import restore_context  # noqa: E402
 from adapters.claude.selector import SelectorError  # noqa: E402
 from adapters.claude.spawn import spawn_decision  # noqa: E402
 from adapters.claude.transport import BridgeTransport, Response  # noqa: E402
+from application.protocol import author_view_labels, host_profile_id, render_notice  # noqa: E402
+CLAUDE_PROFILE = host_profile_id("claude-code")
 
 _REQUEST_SCHEMA = json.loads(
     (PLUGIN_ROOT.parent.parent / "contracts" / "empirica" / "v2" / "request.schema.json").read_text(
@@ -91,7 +93,9 @@ class ExactV2ProfileTests(unittest.TestCase):
     """The transport reaches the shared bridge with the fixed exact Claude profile and no cwd."""
 
     def test_profile_id_is_the_exact_claude_registry_profile(self) -> None:
-        self.assertEqual(CLAUDE_PROFILE_ID, "claude-code@2.1.278")
+        profiles = json.loads((Path(__file__).resolve().parents[3] / "vendor/contracts/empirica/v2/host-profiles.json").read_text())
+        claude = [row["profile_id"] for row in profiles["profiles"] if row["host_id"] == "claude-code"]
+        self.assertEqual([CLAUDE_PROFILE_ID], claude)  # the adapter's id is the registry's, read independently
 
     def test_transport_dispatches_via_bridge_handle_with_profile_and_no_cwd(self) -> None:
         captured: dict = {}
@@ -198,7 +202,7 @@ class StartRunTests(unittest.TestCase):
                 self.assertEqual(command["goal"], "  exact goal  ")
                 self.assertEqual(command["invocation"], {
                     "host": "claude", "interactive": interactive,
-                    "signal": "transcript.entrypoint", "delegation": False, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"})
+                    "signal": "transcript.entrypoint", "delegation": False, "audit_retrieval": ["local", "workspace"], "human_surface": "unobserved"})
             unknown = build_start_run_request(_payload(command_args="goal"), environ={})["command"]
             self.assertIsNone(unknown["invocation"]["interactive"])
             self.assertEqual(unknown["invocation"]["signal"], "transcript.entrypoint unavailable")
@@ -407,6 +411,11 @@ class ChildReserveTests(unittest.TestCase):
                 build_child_reserve_request(payload, "opaque-run", **bad)
 
 
+def _stop(result: dict, **kwargs):
+    """The Stop hook's result; a first Stop (`stop_hook_active` false) unless the caller says otherwise."""
+    return stop_result(_typed(result), **{"stop_hook_active": False, **kwargs})
+
+
 class ResponseMappingTests(unittest.TestCase):
     """Honest native fail-closed response mapping for the gate events."""
 
@@ -422,20 +431,20 @@ class ResponseMappingTests(unittest.TestCase):
         for state, code in (("pending", "governance.approval_required"),
                             ("revision_pending", "governance.revision_required"),
                             ("rejected", "governance.approval_required")):
-            mapped = stop_result(_typed(result(state, code)))
+            mapped = _stop(result(state, code))
             self.assertEqual(mapped.exit_code, 0)
             notice = json.loads(mapped.stdout)
             self.assertIn("not converged", notice["systemMessage"])
             self.assertNotIn("converged", notice)
-            self.assertNotIn("decision", notice)
+            self.assertEqual(sorted(notice), ["systemMessage"])  # a notice only: no decision, no converged claim
         with patch("adapters.author_view.render_author_view",
                    side_effect=AssertionError("systemMessage must bypass author renderer")):
-            notice = json.loads(stop_result(_typed(result())).stdout)
+            notice = json.loads(_stop(result()).stdout)
             self.assertIn("systemMessage", notice)
         initial_auto = result()
         initial_auto["run"]["governance"].update({"control_mode": "auto", "first_approval": False})
         initial_auto["run"]["governance"]["context"]["interactive"] = True
-        self.assertEqual(stop_result(_typed(initial_auto)).exit_code, 0)
+        self.assertEqual(_stop(initial_auto).exit_code, 0)
         for changed in ("proposal_exhausted", "total_exhausted", "prompt_error"):
             blocked = json.loads(json.dumps(initial_auto))
             governance = blocked["run"]["governance"]
@@ -444,7 +453,7 @@ class ResponseMappingTests(unittest.TestCase):
             else:
                 governance["interactions_remaining"][changed.split("_")[0]] = 0
             with self.subTest(initial_auto=changed):
-                self.assertEqual(stop_result(_typed(blocked)).exit_code, 2)
+                self.assertEqual(_stop(blocked).exit_code, 2)
         for changed in ("auto", "delegated", "proposal_exhausted", "total_exhausted",
                         "prompt_error", "approved", "missing_context", "mixed", "terminal",
                         "mismatched_reason"):
@@ -473,7 +482,7 @@ class ResponseMappingTests(unittest.TestCase):
             elif changed == "mismatched_reason":
                 blocked["reasons"][0]["code"] = "governance.revision_required"
             with self.subTest(changed=changed):
-                self.assertEqual(stop_result(_typed(blocked)).exit_code, 2)
+                self.assertEqual(_stop(blocked).exit_code, 2)
 
     def test_sole_budget_exhausted_settles_turn_with_the_contract_notice(self) -> None:
         from application.protocol import BUDGET_EXHAUSTED_NOTICE
@@ -486,25 +495,25 @@ class ResponseMappingTests(unittest.TestCase):
                 "sections": ["budget"], "message": f"{resource} budget exhausted."}]}
         for resource in ("audit_spawn", "pass", "spawn"):
             with self.subTest(resource=resource):
-                settled = stop_result(_typed(result(resource)))
+                settled = _stop(result(resource))
                 self.assertEqual(settled.exit_code, 0)
                 self.assertEqual(settled.stderr, "")
                 notice = json.loads(settled.stdout)
                 self.assertEqual(notice, {"systemMessage":
-                                          BUDGET_EXHAUSTED_NOTICE.format(resource=resource)})
+                                          render_notice(BUDGET_EXHAUSTED_NOTICE, resource=resource)})
                 self.assertIn(resource, notice["systemMessage"])
                 self.assertNotIn("{resource}", notice["systemMessage"])
         mixed = result("audit_spawn")
         mixed["reasons"].append({"code": "run.corrupt", "parameters": {}, "next_actions": [],
                                  "sections": [], "message": "corrupt"})
-        self.assertEqual(stop_result(_typed(mixed)).exit_code, 2)
+        self.assertEqual(_stop(mixed).exit_code, 2)
         terminal = result("audit_spawn")
         terminal["run"]["status"] = "stopped_residual"
-        self.assertEqual(stop_result(_typed(terminal)).exit_code, 2)
+        self.assertEqual(_stop(terminal).exit_code, 2)
         unrelated = result("audit_spawn")
         unrelated["reasons"][0].update({"code": "audit.failed", "parameters": {},
                                         "sections": ["audit"], "message": "audit failed"})
-        self.assertEqual(stop_result(_typed(unrelated)).exit_code, 2)
+        self.assertEqual(_stop(unrelated).exit_code, 2)
 
     def test_the_stop_never_settles_for_evidence_and_directs_the_author_to_report(self) -> None:
         from application import protocol
@@ -522,40 +531,45 @@ class ResponseMappingTests(unittest.TestCase):
                 "next_actions": ["human.confirm_evidence", "residual.accept"] if route == "human"
                 else ["residual.accept"],
                 "sections": ["evidence"], "message": "Research waits on a human."}]}
-        settled = stop_result(_typed(result()))
+        settled = _stop(result())
         # In Claude the human is asked inside report_convergence, so a pause would end the turn unasked: block, plainly.
         self.assertEqual((settled.exit_code, settled.stderr, settled.stdout), (2, notice + "\n", ""))
         self.assertFalse(hasattr(protocol, "EVIDENCE_WAIT_NOTICE"))
-        self.assertEqual(stop_result(_typed(result("unavailable", "unavailable"))).exit_code, 2)  # nobody can answer
-        # The batch was shown already (Later, cancel, timeout), or the interactions are spent: nothing will
-        # ask again, so the Stop blocks with the real reason instead of pausing.
-        for error in ("already_presented", "interaction_limit"):
-            blocked = stop_result(_typed(result(prompt_error=error)))
+        self.assertEqual(_stop(result("unavailable", "unavailable")).exit_code, 2)  # nobody can answer
+        # The host has not looked for a surface yet (it does inside the report): the same directive, never a stop that
+        # leaves a human unasked.
+        unobserved = _stop(result("unobserved", "unobserved"))
+        self.assertEqual((unobserved.exit_code, unobserved.stderr, unobserved.stdout), (2, notice + "\n", ""))
+        # The batch was shown already (Later, cancel, timeout), the interactions are spent, or the host said it could
+        # not ask: nothing will ask again, so the Stop blocks with the real reason instead of pausing or directing a
+        # report that would ask nobody.
+        for error in ("already_presented", "interaction_limit", "surface_unrecorded", "presentation_failed"):
+            blocked = _stop(result(prompt_error=error))
             self.assertEqual((blocked.exit_code, blocked.stderr), (2, "Research waits on a human.\n"), error)
         # Another claim blocker leads: the open claim's own reason is what the Stop reports.
         other = result(code="claim.research_missing")
         other["reasons"][0]["message"] = "Record research for this claim."
-        self.assertEqual(stop_result(_typed(other)).stderr, "Record research for this claim.\n")
+        self.assertEqual(_stop(other).stderr, "Record research for this claim.\n")
         mixed = result()
         mixed["reasons"].append({"code": "run.corrupt", "parameters": {}, "next_actions": [],
                                  "sections": [], "message": "corrupt"})
-        self.assertEqual(stop_result(_typed(mixed)).exit_code, 2)
+        self.assertEqual(_stop(mixed).exit_code, 2)
         terminal = result()
         terminal["run"]["status"] = "stopped_residual"
-        self.assertEqual(stop_result(_typed(terminal)).exit_code, 2)
+        self.assertEqual(_stop(terminal).exit_code, 2)
 
     def test_stop_result_inert_allow_block_and_faults(self) -> None:
-        self.assertEqual(stop_result(_typed({"type": "Inert", "reason": "no_run"})).exit_code, 0)
+        self.assertEqual(_stop({"type": "Inert", "reason": "no_run"}).exit_code, 0)
         fixture_root = PLUGIN_ROOT.parents[1] / "contracts" / "empirica" / "v2" / "fixtures"
         allow_result = json.loads(
             (fixture_root / "allow-converged.json").read_text())["expected"]["result"]
-        allow = stop_result(_typed(allow_result))
+        allow = _stop(allow_result)
         self.assertEqual(allow.exit_code, 0)
         self.assertIn("Allow (converged=true)", allow.stdout)
         self.assertIn("run_id: run-fx", allow.stdout)
         pending_result = json.loads(
             (fixture_root / "block-pending-audit.json").read_text())["expected"]["result"]
-        pending = stop_result(_typed(pending_result))
+        pending = _stop(pending_result)
         self.assertEqual(pending.exit_code, 0)
         self.assertIn("audit.pending", pending.stdout)
         self.assertEqual(pending.stderr, "")
@@ -574,16 +588,16 @@ class ResponseMappingTests(unittest.TestCase):
             "code": "route.required", "parameters": {}, "next_actions": [],
             "sections": [], "message": "route first"})
         block_result["reasons"][0]["message"] = "not converged"
-        block = stop_result(_typed(block_result))
+        block = _stop(block_result)
         self.assertEqual((block.exit_code, block.stdout), (2, ""))
-        self.assertEqual(block.stderr, "not converged\nroute first\n")
+        self.assertEqual(block.stderr, "not converged route first.\n")  # one renderer for every Block path (CL-05)
         closed = stop_result(_typed({"type": "Fault", "code": "unsupported",
-                                     "fail_direction": "closed", "message": "no eval"}))
+                                     "fail_direction": "closed", "message": "no eval"}), stop_hook_active=False)
         self.assertEqual((closed.exit_code, closed.stdout), (2, ""))
         open_fault = stop_result(_typed({"type": "Fault", "code": "unavailable",
-                                         "fail_direction": "open", "message": "bridge"}))
+                                         "fail_direction": "open", "message": "bridge"}), stop_hook_active=False)
         self.assertEqual((open_fault.exit_code, open_fault.stderr), (0, "bridge\n"))
-        self.assertEqual(stop_result({"not": "a response"}).exit_code, 2)
+        self.assertEqual(stop_result({"not": "a response"}, stop_hook_active=False).exit_code, 2)
 
     def test_restore_context_renders_bounded_v2_runview(self) -> None:
         fixture = json.loads((PLUGIN_ROOT.parent.parent / "contracts" / "empirica" / "v2" /
@@ -623,6 +637,258 @@ class ResponseMappingTests(unittest.TestCase):
         self.assertTrue(blocks_on_failure(fault, fallback=FailureDirection.OPEN))
         self.assertEqual(failure_direction({}, fallback=FailureDirection.OPEN),
                          FailureDirection.OPEN)
+
+
+class StopModeTests(unittest.TestCase):
+    """EHB-STOP-06…08, 11…15, 18…20 (ADR-0068): the Claude Stop depends on the control mode, and only on a continuation.
+
+    ``stop_hook_active`` is Claude's own signal that the previous Stop already blocked this turn. With it absent or
+    false nothing changes in any mode (F5, the F7 directive, F8, ADR-0051, ADR-0063 settlements). With it true, a
+    non-converged Block that no existing settlement owns ends the hook loop: deliberative hands off with
+    ``paused_for_human``; every ``auto`` run (interactive before or after its first approval, delegated) takes the auto
+    outcome, ``unattended_continue``, except where ``human_wait`` already settles an approvable first approval, or the
+    evidence directive applies. The mode is read only from the run view the core returned."""
+
+    MODES = ("deliberative", "auto-interactive-pre", "auto-interactive-post", "auto-delegated")
+    REASON = "Record research for this claim."
+    RECORD = "sha256:" + "a" * 64
+
+    @classmethod
+    def mode(cls, mode: str, run: dict) -> dict:
+        governance = run["governance"]
+        governance["context"]["ingress"] = "mcp_elicitation"
+        if mode == "deliberative":
+            governance.update({"control_mode": "deliberative", "first_approval": False})
+            governance["context"].update({"interactive": True, "delegation": False})
+        elif mode == "auto-interactive-pre":
+            governance.update({"control_mode": "auto", "first_approval": False})
+            governance["context"].update({"interactive": True, "delegation": False})
+        elif mode == "auto-interactive-post":
+            governance.update({"control_mode": "auto", "first_approval": True})
+            governance["context"].update({"interactive": True, "delegation": False})
+        else:
+            governance.update({"control_mode": "auto", "first_approval": True})
+            governance["context"].update({"interactive": False, "delegation": True})
+        return run
+
+    @classmethod
+    def block(cls, mode: str, kind: str) -> dict:
+        run = cls.mode(mode, json.loads(json.dumps(_valid_active_allow()["run"])))
+        reason = {"code": "claim.research_missing", "parameters": {}, "affected": {"obligation_id": "claim:G0"},
+                  "next_actions": ["research.record"], "sections": ["evidence/research"], "message": cls.REASON}
+        if kind == "evidence":
+            run["confirmation_batch"] = {"key": "sha256:" + "b" * 64, "record_ids": [cls.RECORD], "claim_ids": [],
+                                         "prompt_error": None, "records": [
+                                             {"claim_id": "C0", "source_kind": "web", "source_ref": "https://example.test/x"}]}
+            reason = {"code": "evidence.confirmation_required", "parameters": {"route": "human", "record_ids": [cls.RECORD]},
+                      "next_actions": ["human.confirm_evidence"], "sections": ["evidence"],
+                      "message": "Research waits on a human."}
+        elif kind == "budget":
+            reason = {"code": "budget.exhausted", "parameters": {"resource": "pass"}, "next_actions": [],
+                      "sections": ["budget"], "message": "pass budget exhausted."}
+        elif kind == "audit_pending":
+            run["children"] = [{"child_id": "ch-1", "purpose": "audit", "resource_class": "audit", "state": "pending",
+                                "deadline": "2026-09-14T00:00:00Z"}]
+            reason = {"code": "audit.pending", "parameters": {}, "next_actions": ["child.wait"], "sections": ["audit"],
+                      "message": "An audit is pending."}
+        elif kind in ("human_wait", "approval_unanswerable"):
+            run["governance"].update({"state": "pending"})
+            if kind == "approval_unanswerable":  # the approval cannot be asked here: spent, errored or no MCP ingress
+                run["governance"]["context"]["ingress"] = "unavailable"
+            reason = {"code": "governance.approval_required", "parameters": {}, "next_actions": [], "sections": ["governance"],
+                      "message": "approval required"}
+        return {"type": "Block", "run": run, "reasons": [reason]}
+
+    stop = staticmethod(_stop)  # a first Stop unless the test says ``stop_hook_active=True``
+
+    @staticmethod
+    def notices() -> dict:
+        from application.protocol import public_contract
+        return public_contract()["settlement_notices"]
+
+    def paused(self, message):
+        return {"systemMessage": render_notice(self.notices()["paused_for_human"], reason=message)}
+
+    def test_EHB_STOP_06_the_first_stop_is_unchanged_in_every_mode(self):
+        """A first Stop (``stop_hook_active`` false; an absent key is the hook's concern, STOP_18) keeps its exit codes
+        and settlements in every mode."""
+        notices = self.notices()
+        budget, evidence, human_wait = notices["budget_exhausted"], notices["evidence_report"], notices["human_wait"]
+        for mode in self.MODES:
+            with self.subTest(mode=mode):
+                real = self.stop(self.block(mode, "real"))
+                self.assertEqual((real.exit_code, real.stdout, real.stderr), (2, "", self.REASON + "\n"))
+                if mode != "auto-delegated":  # a delegated run's route is `unavailable`: no human to ask, no directive
+                    directive = self.stop(self.block(mode, "evidence"))
+                    self.assertEqual((directive.exit_code, directive.stdout, directive.stderr), (2, "", evidence + "\n"))
+                spent = self.stop(self.block(mode, "budget"))
+                self.assertEqual((spent.exit_code, json.loads(spent.stdout), spent.stderr),
+                                 (0, {"systemMessage": render_notice(budget, resource="pass")}, ""))
+                wait = self.stop(self.block(mode, "audit_pending"))
+                self.assertEqual((wait.exit_code, wait.stderr), (0, ""))
+                self.assertNotIn("systemMessage", wait.stdout)  # the view itself, not a settlement notice
+                self.assertIn(author_view_labels()["audit"], wait.stdout)
+        for mode in ("deliberative", "auto-interactive-pre"):  # the modes whose approval is a human's
+            settled = self.stop(self.block(mode, "human_wait"))
+            self.assertEqual((settled.exit_code, json.loads(settled.stdout)), (0, {"systemMessage": human_wait}), mode)
+
+    def test_EHB_STOP_18_a_non_boolean_flag_is_not_a_continuation(self):
+        """Only the literal ``true`` Claude sends counts; a string or a number is not a signal."""
+        from adapters.claude import lifecycle
+        for value in ("true", 1, None, "yes"):
+            payload = {"session_id": "s", "cwd": ".", "stop_hook_active": value}
+            with self.subTest(value=value), \
+                 patch.object(lifecycle, "_payload", return_value=payload), \
+                 patch.object(lifecycle, "_resolve", return_value=("run", None)), \
+                 patch.object(lifecycle, "dispatch_stop", return_value=_typed(self.block("deliberative", "real"))), \
+                 patch("sys.stdout", new=StringIO()), patch("sys.stderr", new=StringIO()):
+                self.assertEqual(lifecycle.completion_main(), 2)
+
+    def test_EHB_STOP_18_the_hook_reads_stop_hook_active_from_the_payload_and_only_the_literal_true(self):
+        from adapters.claude import lifecycle
+        payload = {"session_id": "s", "cwd": ".", "stop_hook_active": True}
+        out = StringIO()
+        with patch.object(lifecycle, "_payload", return_value=payload), \
+             patch.object(lifecycle, "_resolve", return_value=("run", None)), \
+             patch.object(lifecycle, "dispatch_stop", return_value=_typed(self.block("deliberative", "real"))), \
+             patch("sys.stdout", new=out), patch("sys.stderr", new=StringIO()):
+            self.assertEqual(lifecycle.completion_main(), 0)
+        self.assertIn("paused for you", json.loads(out.getvalue())["systemMessage"])
+        payload = {"session_id": "s", "cwd": "."}  # absent: the first Stop
+        with patch.object(lifecycle, "_payload", return_value=payload), \
+             patch.object(lifecycle, "_resolve", return_value=("run", None)), \
+             patch.object(lifecycle, "dispatch_stop", return_value=_typed(self.block("deliberative", "real"))), \
+             patch("sys.stdout", new=StringIO()), patch("sys.stderr", new=StringIO()):
+            self.assertEqual(lifecycle.completion_main(), 2)
+
+    def test_EHB_STOP_07_deliberative_continuation_hands_off_with_the_real_reason(self):
+        for kind, message in (("real", self.REASON), ("evidence", "Research waits on a human.")):
+            with self.subTest(kind=kind):
+                settled = self.stop(self.block("deliberative", kind), stop_hook_active=True)
+                self.assertEqual((settled.exit_code, settled.stderr), (0, ""))
+                self.assertEqual(json.loads(settled.stdout), self.paused(message))
+                text = json.loads(settled.stdout)["systemMessage"]
+                self.assertIn(message, text)
+                self.assertIn("not converged", text)
+                self.assertIn("Nothing was approved or confirmed", text)
+                self.assertIn("nobody was asked", text)
+                self.assertNotIn("will be asked", text)
+
+    def test_EHB_STOP_08_auto_runs_block_with_the_way_out_on_a_continuation(self):
+        """A real Block on a continuation takes the auto outcome in every auto mode, never a human pause."""
+        for mode in ("auto-interactive-pre", "auto-interactive-post", "auto-delegated"):
+            with self.subTest(mode=mode):
+                blocked = self.stop(self.block(mode, "real"), stop_hook_active=True)
+                self.assertEqual((blocked.exit_code, blocked.stdout), (2, ""))
+                self.assertEqual(blocked.stderr, render_notice(self.notices()["unattended_continue"], reason=self.REASON) + "\n")
+                self.assertIn(self.REASON, blocked.stderr)
+                self.assertIn("intent=stop", blocked.stderr)
+                self.assertIn("does not hand the turn back", blocked.stderr)
+                self.assertNotIn("unattended", blocked.stderr)  # interactive auto has a human present
+
+    def test_EHB_STOP_20_an_auto_continuation_keeps_the_evidence_directive_and_deliberative_hands_off(self):
+        """An interactive auto continuation keeps the evidence directive; deliberative hands off with `paused_for_human`."""
+        directive = self.notices()["evidence_report"]
+        for mode in ("auto-interactive-pre", "auto-interactive-post"):  # a delegated run has no human route to ask
+            with self.subTest(mode=mode):
+                blocked = self.stop(self.block(mode, "evidence"), stop_hook_active=True)
+                self.assertEqual((blocked.exit_code, blocked.stdout, blocked.stderr), (2, "", directive + "\n"))
+        paused = self.stop(self.block("deliberative", "evidence"), stop_hook_active=True)
+        self.assertEqual((paused.exit_code, paused.stderr), (0, ""))
+        self.assertIn("paused for you", json.loads(paused.stdout)["systemMessage"])
+
+    def test_EHB_STOP_11_interactive_auto_before_first_approval_keeps_human_wait_and_the_evidence_directive(self):
+        notices = self.notices()
+        mode = "auto-interactive-pre"
+        for flag in ({}, {"stop_hook_active": True}):  # an approvable first approval settles on either Stop
+            settled = self.stop(self.block(mode, "human_wait"), **flag)
+            self.assertEqual(json.loads(settled.stdout), {"systemMessage": notices["human_wait"]}, flag)
+        first = self.stop(self.block(mode, "real"))  # a first Stop is unchanged
+        self.assertEqual((first.exit_code, first.stderr), (2, self.REASON + "\n"))
+        directive = self.stop(self.block(mode, "evidence"), stop_hook_active=True)
+        self.assertEqual((directive.exit_code, directive.stderr), (2, notices["evidence_report"] + "\n"))
+
+    def test_EHB_STOP_19_an_approval_that_cannot_be_asked_ends_the_loop_by_mode(self):
+        """Interactive auto before its first approval, when ``human_wait`` does not apply (no MCP ingress, a prompt error
+        or spent interactions), no longer re-blocks with the real reason until Claude's cap (ADR-0068)."""
+        for mode in ("auto-interactive-pre", "deliberative"):
+            first = self.stop(self.block(mode, "approval_unanswerable"))
+            self.assertEqual((first.exit_code, first.stderr), (2, "approval required.\n"), mode)  # the first Stop is unchanged
+        blocked = self.stop(self.block("auto-interactive-pre", "approval_unanswerable"), stop_hook_active=True)
+        self.assertEqual((blocked.exit_code, blocked.stdout), (2, ""))
+        self.assertEqual(blocked.stderr, render_notice(self.notices()["unattended_continue"], reason="approval required.") + "\n")
+        paused = self.stop(self.block("deliberative", "approval_unanswerable"), stop_hook_active=True)
+        self.assertEqual(json.loads(paused.stdout), self.paused("approval required."))
+        for spent in ({"prompt_error": "governance.interaction_limit"},  # interactions spent: human_wait does not apply
+                      {"interactions_remaining": {"proposal": 0, "total": 5}}):
+            with self.subTest(spent=spent):
+                run = self.block("auto-interactive-pre", "human_wait")
+                run["run"]["governance"].update(spent)
+                blocked = self.stop(run, stop_hook_active=True)
+                self.assertEqual(blocked.exit_code, 2)
+                self.assertIn("intent=stop", blocked.stderr)
+
+    def test_EHB_STOP_12_existing_settlements_Allow_Inert_and_Fault_are_unchanged_on_a_continuation(self):
+        notices = self.notices()
+        budget, human_wait = notices["budget_exhausted"], notices["human_wait"]
+        for mode in self.MODES:
+            with self.subTest(mode=mode):
+                spent = self.stop(self.block(mode, "budget"), stop_hook_active=True)
+                self.assertEqual(json.loads(spent.stdout), {"systemMessage": render_notice(budget, resource="pass")})
+                wait = self.stop(self.block(mode, "audit_pending"), stop_hook_active=True)
+                self.assertEqual((wait.exit_code, wait.stderr), (0, ""))
+                self.assertNotIn("paused for you", wait.stdout)
+                fault = self.stop({"type": "Fault", "code": "unavailable", "message": "core down", "fail_direction": "closed"},
+                                  stop_hook_active=True)
+                self.assertEqual((fault.exit_code, fault.stderr), (2, "core down\n"))
+                allow = _valid_active_allow()
+                self.mode(mode, allow["run"])
+                self.assertEqual(self.stop(allow, stop_hook_active=True), self.stop(allow))
+                self.assertEqual(self.stop({"type": "Inert", "reason": "no_run"}, stop_hook_active=True).exit_code, 0)
+        for mode in ("deliberative", "auto-interactive-pre"):
+            settled = self.stop(self.block(mode, "human_wait"), stop_hook_active=True)
+            self.assertEqual(json.loads(settled.stdout), {"systemMessage": human_wait}, mode)
+
+    def test_EHB_STOP_13_a_missing_view_or_a_terminal_run_blocks(self):
+        gone = self.block("deliberative", "real")
+        gone["run"]["governance"] = None
+        self.assertEqual(self.stop(gone, stop_hook_active=True).exit_code, 2)
+        terminal = self.block("deliberative", "real")
+        terminal["run"]["status"] = "stopped_residual"
+        blocked = self.stop(terminal, stop_hook_active=True)
+        self.assertEqual((blocked.exit_code, blocked.stderr), (2, self.REASON + "\n"))  # only an active run can be handed off
+
+    def test_EHB_STOP_13_several_reasons_are_handed_off_in_one_sentence(self):
+        two = self.block("deliberative", "real")
+        two["reasons"].append({"code": "run.corrupt", "parameters": {}, "next_actions": [], "sections": [], "message": "corrupt"})
+        pair = self.stop(two, stop_hook_active=True)
+        # more than one reason is still a real Block and is handed off, every reason named in one sentence
+        self.assertEqual((pair.exit_code, json.loads(pair.stdout)), (0, self.paused(self.REASON + " corrupt.")))
+
+    def test_EHB_STOP_14_the_rule_is_stateless(self):
+        for mode in ("deliberative", "auto-delegated"):
+            first = self.stop(self.block(mode, "real"), stop_hook_active=True)
+            for _ in range(3):
+                self.assertEqual(self.stop(self.block(mode, "real"), stop_hook_active=True), first)
+
+    def test_a_notice_is_rendered_only_with_exactly_its_placeholders(self):
+        template = self.notices()["unattended_continue"]
+        self.assertIn("{reason}", template)
+        for wrong in ({}, {"resource": "x"}, {"reason": "x", "resource": "y"}):
+            with self.subTest(wrong=wrong), self.assertRaises(ValueError):
+                render_notice(template, **wrong)
+        self.assertIn("{braces}", render_notice(template, reason="{braces}"))  # a value is never re-scanned
+
+    def test_EHB_STOP_15_the_notices_come_from_the_contract(self):
+        from application.protocol import public_contract
+        notices = public_contract()["settlement_notices"]
+        from application.protocol import PAUSED_FOR_HUMAN_NOTICE, UNATTENDED_CONTINUE_NOTICE
+        self.assertEqual(PAUSED_FOR_HUMAN_NOTICE, notices["paused_for_human"])
+        self.assertEqual(UNATTENDED_CONTINUE_NOTICE, notices["unattended_continue"])
+        self.assertNotIn("unattended", notices["unattended_continue"])  # an interactive auto run has a human present
+        for text in (notices["paused_for_human"], notices["unattended_continue"]):
+            self.assertEqual(text.count("{reason}"), 1)
+        self.assertNotIn("will be asked", notices["paused_for_human"])
 
 
 class AuditBoundaryTests(unittest.TestCase):
@@ -713,7 +979,7 @@ class SpawnLifecycleTests(unittest.TestCase):
         from adapters.audit_protocol import AuditLaunchPlan
         from adapters.claude.lifecycle import spawn_main
         argument = {"argument_digest": "sha256:" + "1" * 64, "claims": []}
-        plan = AuditLaunchPlan("claude-code@2.1.278", "active-run", "ch-audit",
+        plan = AuditLaunchPlan(CLAUDE_PROFILE, "active-run", "ch-audit",
                                "empirica:empirica-auditor", argument)
         payload = self._stdin({"subagent_type": "empirica:empirica-auditor",
                                "prompt": "author-controlled prompt"})
@@ -755,7 +1021,7 @@ class SpawnLifecycleTests(unittest.TestCase):
     def test_auditor_post_reservation_failure_rejects_exact_plan(self) -> None:
         from adapters.audit_protocol import AuditLaunchPlan
         from adapters.claude.lifecycle import spawn_main
-        plan = AuditLaunchPlan("claude-code@2.1.278", "active-run", "ch-audit",
+        plan = AuditLaunchPlan(CLAUDE_PROFILE, "active-run", "ch-audit",
                                "empirica:empirica-auditor", {"claims": []})
         payload = self._stdin({"subagent_type": "empirica:empirica-auditor", "prompt": "audit"})
         investigation = _typed(_active_result(), "investigate")
@@ -774,7 +1040,7 @@ class SpawnLifecycleTests(unittest.TestCase):
         """A rollback that raises a non-AuditProtocolError must still deny (quality #4)."""
         from adapters.audit_protocol import AuditLaunchPlan
         from adapters.claude.lifecycle import spawn_main
-        plan = AuditLaunchPlan("claude-code@2.1.278", "active-run", "ch-audit",
+        plan = AuditLaunchPlan(CLAUDE_PROFILE, "active-run", "ch-audit",
                                "empirica:empirica-auditor", {"claims": []})
         payload = self._stdin({"subagent_type": "empirica:empirica-auditor", "prompt": "audit"})
         investigation = _typed(_active_result(), "investigate")

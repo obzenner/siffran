@@ -7,7 +7,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { PROTOCOL, type InvocationProvenance, type Request, type Response, type Result } from "../src/contract.ts";
-import { SUBAGENTS_COMPATIBILITY } from "../src/host-profile.ts";
+import { AUDIT_LAUNCH_POLICY, SUBAGENTS_COMPATIBILITY } from "../src/host-profile.ts";
+import { auditLaunchInput } from "../src/audit-launch.ts";
 import { REPORT_CONVERGENCE_TOOL, SUBAGENT_TOOL } from "../src/translate.ts";
 import { EVIDENCE_WAIT_NOTICE } from "../src/evidence-ui.ts";
 import {
@@ -16,7 +17,7 @@ import {
 import {
   createEmpiricaExtension, DEFAULT_SKILLS_DIR, defaultAuditContractResolver, resolvePiAuditorModel,
 } from "../src/index.ts";
-import { loadInventory, type SubagentInventory } from "../src/subagent-inventory.ts";
+import { AUDIT_LAUNCH_PARAMETERS, loadInventory, type SubagentInventory } from "../src/subagent-inventory.ts";
 import { bound, FIXTURES, fixtureFor } from "./preflight-fixtures.ts";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,8 +28,10 @@ import { FakePi, FakeUi, fakeCtx } from "./fakes.ts";
 import type { ToolCallEvent, ToolInfo, ToolResultEvent } from "../src/pi-types.ts";
 import type { OwnerEnv } from "../src/runtime-owner.ts";
 import { PUBLIC_TOOLS } from "../src/public-tools.ts";
-import { defaultSubagentsPackage, makeSubagentsPackage, tempParent } from "./owner-fixture.ts";
+import { defaultSubagentsPackage, makeSubagentsPackage, schemaDeclaring, tempParent } from "./owner-fixture.ts";
 import type { PrivateIngressRequest } from "../src/private-transport.ts";
+
+const AUTHOR_LABELS = PUBLIC_TOOLS.author_view.labels as Readonly<Record<string, string>>;
 
 const HANDLE = "run-handle-1";
 
@@ -79,6 +82,32 @@ function resolverFor(version: string, options: {
   );
   return { resolve: resolve_, scopes, canonical };
 }
+
+test("EHB-AUDLAUNCH-02: the preflight is asked for the same context the real launch carries", async () => {
+  const launched = auditLaunchInput({ task: "", model: "audit/reviewer", agentScope: "user", policy: AUDIT_LAUNCH_POLICY }).context;
+  assert.equal(launched, "fresh");
+  for (const { version } of FIXTURES) {
+    const asked: unknown[] = [];
+    const r = resolverFor(version, { respond: (input) => { asked.push(input.context); return bound(fixtureFor(version).cases.canonical_auditor); } });
+    await r.resolve();
+    assert.deepEqual(asked, [launched], version);
+  }
+});
+
+test("the resolver that starts a run and launches the audit refuses an auditor given a writing tool, for every reviewed version", async () => {
+  for (const { version } of FIXTURES) {
+    for (const extra of ["edit", "write", "bash", "subagent"]) {
+      const r = resolverFor(version, { respond: () => {
+        const response = bound(fixtureFor(version).cases.canonical_auditor);
+        response.contract.tools.effectiveAllowlist = [...response.contract.tools.effectiveAllowlist, extra];
+        return response;
+      } });
+      // The refusal carries the contract's own reason message, not a free-text improvisation.
+      await assert.rejects(r.resolve(), (error: Error) => error.message.includes("tools-not-read-only")
+        && error.message.includes(PUBLIC_TOOLS.recovery["host.subagents_tools_not_read_only"].message), `${version} + ${extra}`);
+    }
+  }
+});
 
 test("production Pi auditor resolver tries project then user scope", async () => {
   for (const { version } of FIXTURES) {
@@ -165,6 +194,8 @@ interface Wired {
 interface WireOptions {
   /** The private `human_surface` ingress fails (`throw`) or answers a typed Fault (`fault`). */
   surface?: "throw" | "fault";
+  /** The private `evidence_presentation` ingress fails (`throw`) or answers a typed Fault (`fault`). */
+  presentation?: "throw" | "fault";
   /** Replaces the fixture owner registrations before ``session_start`` (default: one healthy owner). */
   owners?: ToolInfo[];
   /** Environment the owner resolver sees (default: none set). */
@@ -223,6 +254,9 @@ async function wire(
           operation_id: `sha256:${"b".repeat(64)}`,
           argument: { argument_digest: `sha256:${"a".repeat(64)}`, claims: [] } },
       };
+      if (request.operation === "evidence_presentation" && options.presentation === "throw") throw new Error("the core went away");
+      if (request.operation === "evidence_presentation" && options.presentation === "fault")
+        return { type: "Fault", code: "conflict", fail_direction: "closed" } as never;
       if (request.operation === "evidence_presentation") return { type: "evidence_presentation", receipt_id: "p-1",
         items: [{ subject: "research", id: `sha256:${"a".repeat(64)}`, claim: "C", source_kind: "web",
           source_ref: "https://example.test/x", quote: "q", class: "retrievable" }] };
@@ -262,7 +296,7 @@ function ownerHostRuntime(): NonNullable<InvocationProvenance["host_runtime"]> {
   const pkg = defaultSubagentsPackage();
   return { policy_id: SUBAGENTS_COMPATIBILITY.policy_id, subagents: { package: "pi-subagents", version: "0.74.0",
     owner_path: realpathSync(pkg.entry), package_root: realpathSync(pkg.root),
-    preflight_path: realpathSync(path.join(pkg.root, "src", "api", "preflight.ts")), source: "npm:pi-subagents" } };
+    preflight_path: realpathSync(path.join(pkg.root, "src", "api", "preflight.ts")), source: "npm:pi-subagents", reviewed: true } };
 }
 
 async function startRun(w: Wired): Promise<void> {
@@ -707,15 +741,14 @@ test("gate: only an unspent sole confirmation pauses; an open claim, a spent key
   }
 });
 
-test("gate: without a UI, or with route unavailable, the requirement stays a denial and nothing is presented", async () => {
-  for (const [route, ctx] of [["human", fakeCtx()], ["unavailable", uiCtx(["Confirm"])]] as const) {
-    const w = await wire((req) => req.command.type === "StartRun"
-      ? envelope({ type: "Allow", converged: false, run: run() }) : envelope(EVIDENCE_WAITING(route) as never));
-    await startRun(w);
-    const decision = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), ctx);
-    assert.equal(route === "human" ? decision : decision?.block, route === "human" ? undefined : true, route);
-    assert.ok(!w.privateRequests.some((request) => request.operation === "evidence_presentation"), route);
-  }
+test("gate: with route unavailable the requirement stays a denial and nothing is presented", async () => {
+  // (Route `human` with no UI is the failure to ask of "PI-04" below, never a pause.)
+  const w = await wire((req) => req.command.type === "StartRun"
+    ? envelope({ type: "Allow", converged: false, run: run() }) : envelope(EVIDENCE_WAITING("unavailable") as never));
+  await startRun(w);
+  const decision = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), uiCtx(["Confirm"]));
+  assert.equal(decision?.block, true);
+  assert.ok(!w.privateRequests.some((request) => request.operation === "evidence_presentation"));
 });
 
 function waitingRun(overrides: Record<string, unknown> = {}, context: Record<string, unknown> = {},
@@ -1057,7 +1090,8 @@ test("subagent: canonical auditor is reserved, bound, attributed, and prompt-inj
   assert.deepEqual(input.toolBudget, { soft: 20, hard: 30, block: ["read", "grep", "find", "ls"] });
   assert.equal("turnBudget" in input, false);
   assert.deepEqual(Object.keys(input).sort(),
-    ["acceptance", "agent", "agentScope", "async", "model", "task", "timeoutMs", "toolBudget"]);
+    ["acceptance", "agent", "agentScope", "async", "context", "model", "task", "timeoutMs", "toolBudget"]);
+  assert.equal(input.context, "fresh", "EHB-AUDLAUNCH-02: the real subagent call carries context:fresh");
   assert.match(String(input.task), /AUDIT DOSSIER/);
   assert.doesNotMatch(String(input.task), /AUTHOR_TASK_IS_NOT_AUTHORITY/);
   assert.equal(input.model, "bedrock/auditor-model");
@@ -1380,6 +1414,152 @@ test("errored auditor output is redacted and cannot admit a fenced verdict", asy
   assert.equal(w.privateRequests.filter((item) => item.operation === "audit_verdict").length, 0);
 });
 
+// EHB-AUDRES-04 / EHB-AUDLAUNCH-03 / EHB-INT-03: the result shapes pi-subagents 0.76.1 really returns for
+// an audit that did not run to a verdict. Each is checked against the source (execution.js / the executor):
+// a timed-out child, a forced-async start, and an interrupted run. None of them may admit a verdict.
+const FENCE = "```empirica-verdict\n{\"verdict\":\"pass\"}\n```";
+
+async function auditResultFor(toolCallId: string, event: Omit<ToolResultEvent, "toolCallId">) {
+  const child = { child_id: "ch-" + toolCallId, purpose: "audit", resource_class: "audit", state: "reserved" };
+  const w = await wire((req) => {
+    if (req.command.type === "ObserveAction")
+      return envelope({ type: "Allow", converged: false, run: { ...run(), children: [child] } as never });
+    if (req.command.type === "GetArgument")
+      return envelope({ type: "Allow", converged: false, run: run(),
+        argument: { argument_digest: `sha256:${"a".repeat(64)}`, claims: [] } } as never);
+    return envelope({ type: "Allow", converged: false, run: run() });
+  });
+  await startRun(w);
+  await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId,
+    input: { agent: "empirica.empirica-auditor", task: "audit" } }, fakeCtx());
+  const full: ToolResultEvent = { toolCallId, ...event };
+  const replacement = await (w.pi.handlers.get("tool_result") as
+    (event: ToolResultEvent, ctx: ReturnType<typeof fakeCtx>) => Promise<unknown>)(full, fakeCtx()) as
+    { content?: unknown; details?: unknown } | undefined;
+  const operations = w.privateRequests.map((item) => item.operation);
+  return { w, full, replacement, operations };
+}
+
+test("EHB-AUDRES-04: a timed-out child (isError, the fence inside details.results[0].finalOutput after the partial-output marker) is an audit failure and no verdict", async () => {
+  const partial = "Subagent timed out after 900000ms.\n\nThe run was stopped.\n\nPartial output before timeout:\n" + FENCE;
+  const { w, full, operations } = await auditResultFor("tc-timeout", {
+    isError: true,
+    content: [{ type: "text", text: partial }],
+    details: { mode: "single", results: [{ agent: "empirica.empirica-auditor", exitCode: 1, timedOut: true,
+      error: "Subagent timed out after 900000ms.", finalOutput: partial, outputPartial: true }] },
+  });
+  assert.equal(w.privateRequests.at(-1)?.operation, "audit_failure");
+  assert.equal(w.privateRequests.at(-1)?.state, "failed");
+  assert.equal(operations.includes("audit_verdict"), false);
+  assert.equal(operations.includes("audit_identity"), false);
+  assert.doesNotMatch(JSON.stringify(full.details), /```empirica-verdict/);
+  assert.doesNotMatch(JSON.stringify(full.content), /```empirica-verdict/);
+});
+
+test("EHB-AUDLAUNCH-03: a forced-async start (started-async content, details.results empty, asyncId) is an audit failure and no verdict", async () => {
+  const { w, full, operations } = await auditResultFor("tc-async", {
+    content: [{ type: "text", text: "Async: empirica.empirica-auditor [run-1]\nThe async run is detached and running in the background. " + FENCE }],
+    details: { mode: "single", runId: "run-1", results: [], asyncId: "run-1", asyncDir: "/tmp/async/run-1" },
+  });
+  assert.equal(w.privateRequests.at(-1)?.operation, "audit_failure");
+  assert.equal(w.privateRequests.at(-1)?.state, "failed");
+  assert.equal(operations.includes("audit_verdict"), false);
+  assert.doesNotMatch(JSON.stringify(full.content), /```empirica-verdict/);
+});
+
+test("EHB-INT-03: an interrupted run (exit 0, 'Run paused after interrupt', no isError, no fence) is an audit failure and no verdict", async () => {
+  const { w, operations } = await auditResultFor("tc-interrupt", {
+    content: [{ type: "text", text: "Run paused after interrupt (empirica.empirica-auditor). Waiting for explicit next action." }],
+    details: { mode: "single", results: [{ agent: "empirica.empirica-auditor", exitCode: 0, interrupted: true,
+      finalOutput: "Interrupted. Waiting for explicit next action." }] },
+  });
+  assert.equal(w.privateRequests.at(-1)?.operation, "audit_failure");
+  assert.equal(w.privateRequests.at(-1)?.state, "failed");
+  assert.equal(operations.includes("audit_verdict"), false);
+});
+
+test("EHB-INT-04: an interrupted (paused) run that carries one complete verdict fence is an audit failure and no verdict", async () => {
+  // pi-subagents marks a resumable, non-terminal child with `interrupted` (or `detached`/`stopped`) on its result
+  // row; exit 0 and no isError. A verdict is admitted only from a completed run.
+  for (const flag of ["interrupted", "detached", "stopped"] as const) {
+    const finalOutput = "Interrupted. Waiting for explicit next action.\n" + FENCE;
+    const { w, full, operations } = await auditResultFor("tc-int-b-" + flag, {
+      content: [{ type: "text", text: "Run paused after interrupt (empirica.empirica-auditor). " + FENCE }],
+      details: { mode: "single", results: [{ agent: "empirica.empirica-auditor", exitCode: 0, [flag]: true, finalOutput }] },
+    });
+    assert.equal(w.privateRequests.at(-1)?.operation, "audit_failure", flag);
+    assert.equal(w.privateRequests.at(-1)?.state, "failed", flag);
+    assert.equal(operations.includes("audit_verdict"), false, flag);
+    assert.equal(operations.includes("audit_identity"), false, flag);
+    assert.doesNotMatch(JSON.stringify(full.details), /```empirica-verdict/, flag);
+    assert.doesNotMatch(JSON.stringify(full.content), /```empirica-verdict/, flag);
+  }
+});
+
+test("EHB-INT-04 (positive control): the same fence from a completed run (no interrupted/detached/stopped) is a verdict", async () => {
+  const { operations } = await auditResultFor("tc-int-b-ok", {
+    content: [{ type: "text", text: FENCE }],
+    details: { mode: "single", results: [{ agent: "empirica.empirica-auditor", exitCode: 0, finalOutput: FENCE }] },
+  });
+  assert.equal(operations.includes("audit_verdict"), true);
+});
+
+async function ordinaryChildStates(toolCallId: string, event: Omit<ToolResultEvent, "toolCallId">) {
+  const child = { child_id: "ch-" + toolCallId, purpose: "look around", resource_class: "investigation", state: "reserved" };
+  const w = await wire((req) => envelope({ type: "Allow", converged: false,
+    run: { ...run(), children: req.command.type === "ObserveAction" ? [child] : [] } as never }));
+  await startRun(w);
+  const before = w.privateRequests.length;
+  const gate = await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId,
+    input: { agent: "worker", task: "look around" } }, fakeCtx());
+  assert.equal(gate, undefined, "the ordinary child is admitted");
+  await (w.pi.handlers.get("tool_result") as (event: ToolResultEvent, ctx: ReturnType<typeof fakeCtx>) => Promise<unknown>)(
+    { toolCallId, ...event }, fakeCtx());
+  return w.privateRequests.slice(before).filter((item) => item.operation === "child_event")
+    .map((item) => (item.payload as { state: string }).state);
+}
+
+test("EHB-INT-05 (PI-01): a paused, detached or stopped ordinary child is failed, never completed (one predicate with the audit path)", async () => {
+  for (const flag of ["interrupted", "detached", "stopped"] as const) {
+    const states = await ordinaryChildStates("tc-ord-" + flag, {
+      content: [{ type: "text", text: "Run paused. Waiting for explicit next action." }],
+      details: { mode: "single", results: [{ agent: "worker", exitCode: 0, [flag]: true, finalOutput: "partial" }] },
+    });
+    assert.deepEqual(states, ["launching", "failed"], flag);
+  }
+  const done = await ordinaryChildStates("tc-ord-ok", {
+    content: [{ type: "text", text: "done" }],
+    details: { mode: "single", results: [{ agent: "worker", exitCode: 0, finalOutput: "done" }] },
+  });
+  assert.deepEqual(done, ["launching", "pending", "completed"]);
+});
+
+test("EHB-TOOL-04: structuredContent is replaced together with content, so a fence in it never survives the redaction", async () => {
+  // Pi >= 0.99.0 declares `structuredContent` on tool_result and says handlers that redact `content` must also
+  // replace it. The fence is a verdict whichever door it comes through: the admitted case and the refused case.
+  for (const [name, event] of [
+    ["a verdict", { content: [{ type: "text", text: FENCE }], structuredContent: { text: FENCE, nested: [FENCE] },
+      details: { mode: "single", results: [{ agent: "empirica.empirica-auditor", exitCode: 0, finalOutput: FENCE }] } }],
+    ["an errored result", { isError: true, content: [{ type: "text", text: "failed" }], structuredContent: { text: FENCE },
+      details: { mode: "single", results: [{ agent: "empirica.empirica-auditor", exitCode: 1, finalOutput: "failed" }] } }],
+  ] as const) {
+    const { full, replacement } = await auditResultFor("tc-sc-" + name.replace(/\W/g, ""), event as never);
+    assert.doesNotMatch(JSON.stringify(full), /```empirica-verdict/, name + ": the event itself");
+    assert.doesNotMatch(JSON.stringify(replacement), /```empirica-verdict/, name + ": the replacement Pi applies");
+    assert.equal((full as { structuredContent?: unknown }).structuredContent, undefined, name);
+    assert.equal((replacement as { structuredContent?: unknown } | undefined)?.structuredContent, undefined, name);
+  }
+});
+
+test("EHB-AUDRES-04 (isError): isError is the only failure signal; the tool_result mirror declares no `error`", () => {
+  const types = readFileSync(new URL("../src/pi-types.ts", import.meta.url), "utf8");
+  const body = /export interface ToolResultEvent \{([\s\S]*?)\n\}/.exec(types)?.[1] ?? "";
+  assert.match(body, /isError\?: boolean/);
+  assert.doesNotMatch(body, /\berror\??:/);
+  for (const file of ["index.ts", "audit.ts"])
+    assert.doesNotMatch(readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8"), /\bevent\.error\b/, file);
+});
+
 test("non-canonical auditors stay ordinary budgeted children; model overrides get no trusted admission", async () => {
   const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }));
   await startRun(w);
@@ -1520,8 +1700,8 @@ test("subagent: a call with two launch forms is refused as unsupported before an
   assert.ok(decision?.reason?.includes(refusalReason), decision?.reason);
   assert.match(decision?.reason ?? "", /malformed: more than one launch form: agent, workflow/);
   // The guidance tells the author what IS allowed (one launch form, a reviewed read-only action), not just that something is not.
-  assert.match(refusalReason, /accepts exactly one launch form \(for example `agent` or `workflow`\) or a reviewed read-only action/);
-  assert.match(refusalReason, /control, mutation, and ambiguous calls are refused/);
+  assert.match(refusalReason, /accepts exactly one launch form \(for example `agent` or `workflow`\) or a read-only action that the runtime's reviewed versions know/);
+  assert.match(refusalReason, /control, mutation, unknown-action, and ambiguous calls are refused/);
   assert.equal(w.requests.length, before, "no investigation witness, no reservation");
   assert.deepEqual(w.privateRequests, []);
 });
@@ -1591,21 +1771,59 @@ test("subagent: the classification uses the inventory of the owner's exact versi
   assert.equal(w.requests.length, before + 2, "investigate + child_reserve");
 });
 
-test("subagent: an owner version with no reviewed inventory is refused at binding (host.subagents_version_unsupported)", async () => {
+test("subagent: an owner version outside the supported range is refused at binding (host.subagents_version_unsupported)", async () => {
+  for (const version of ["9.9.9", "1.0.0"]) {
+    const w = await wire(allowRun, true, undefined,
+      { owners: [makeSubagentsPackage(tempParent(), { version }).tool()] });
+    const ui = new FakeUi();
+    await w.pi.command("empirica").handler("goal", { ui });
+    assert.equal(w.requests.length, 0);
+    assert.ok(ui.notifications[0].message.includes(reasonMessage("host.subagents_version_unsupported")), ui.notifications[0].message);
+    assert.match(ui.notifications[0].message,
+      new RegExp(`version-unsupported: pi-subagents ${version.replaceAll(".", "\\.")} is outside the supported range >=0\\.50\\.0 <1\\.0\\.0`));
+  }
+});
+
+test("subagent: a version in range with no compat record is refused unless its own schema declares the audit launch (ADR-0069)", async () => {
   const w = await wire(allowRun, true, undefined,
-    { owners: [makeSubagentsPackage(tempParent(), { version: "9.9.9" }).tool()] });
+    { owners: [makeSubagentsPackage(tempParent(), { version: "0.99.0" }).tool()] });
   const ui = new FakeUi();
   await w.pi.command("empirica").handler("goal", { ui });
   assert.equal(w.requests.length, 0);
   assert.ok(ui.notifications[0].message.includes(reasonMessage("host.subagents_version_unsupported")), ui.notifications[0].message);
-  assert.match(ui.notifications[0].message, /version-unreviewed: pi-subagents 9\.9\.9 has no reviewed launch\/action inventory/);
+  assert.match(ui.notifications[0].message, /version-unsupported: pi-subagents 0\.99\.0 has no compat record and the subagent tool declares no parameter schema/);
+});
+
+test("subagent: a version in range with no compat record starts a run, records reviewed:false, and allows only the reviewed read-only actions", async () => {
+  const owner = makeSubagentsPackage(tempParent(), { version: "0.99.0", parameters: schemaDeclaring([...AUDIT_LAUNCH_PARAMETERS]) }).tool();
+  const w = await wire(allowRun, true, undefined, { owners: [owner] });
+  const ui = new FakeUi();
+  await w.pi.command("empirica").handler("goal", { ui });
+  const start = w.requests.find((request) => request.command.type === "StartRun");
+  assert.ok(start, "the run starts");
+  const subagents = (start!.command as { invocation: { host_runtime: { subagents: Record<string, unknown> } } }).invocation.host_runtime.subagents;
+  assert.equal(subagents.version, "0.99.0");
+  assert.equal(subagents.reviewed, false);
+  const before = w.requests.length;
+  const call = (input: Record<string, unknown>) => w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "tc-x", input }, fakeCtx());
+  // A name some reviewed version has, and the classifier calls read-only management: allowed.
+  for (const action of ["list", "status", "models", "children.list", "doctor"])
+    assert.equal(await call({ action }), undefined, `${action} is a reviewed read-only action`);
+  // A reviewed name the classifier does not call read-only, a name no reviewed version has, and validate (not
+  // documented offline for an unreviewed version) are refused with the existing reason.
+  for (const action of ["create", "delete", "interrupt", "mission.invented", "validate"]) {
+    const decision = await call({ action });
+    assert.equal((decision as { block?: boolean } | undefined)?.block, true, `${action} is refused`);
+    assert.ok(String((decision as { reason?: string }).reason).includes(refusalReason), action);
+  }
+  assert.equal(w.requests.length, before, "no management call reaches a core operation");
 });
 
 test("subagent: an unreadable inventory is an unobservable owner, a mismatched one an unreviewed version", async () => {
   const cases: Array<[(version: string) => SubagentInventory | undefined, string, RegExp]> = [
     [() => { throw new Error("inventory corrupt"); }, "host.subagents_owner_unverified", /owner-unobservable: .*inventory corrupt/],
     [(version) => ({ ...loadInventory("0.74.0")!, version: `${version}-other` }), "host.subagents_version_unsupported",
-      /version-unreviewed: the inventory selected for 0\.74\.0 describes 0\.74\.0-other/],
+      /version-unsupported: the inventory selected for 0\.74\.0 describes 0\.74\.0-other/],
   ];
   for (const [inventoryFor, reason, pattern] of cases) {
     const w = await wire(allowRun, true, undefined, { inventoryFor });
@@ -1779,20 +1997,6 @@ test("session_start reconstructs the handle; compaction carries the handle text"
   assert.equal(w.pi.entries.length, 0);
 });
 
-test("gate: a surface that could not be recorded never pauses and never shows a dialog; one plain reason blocks", async () => {
-  for (const surface of ["throw", "fault"] as const) {
-    const w = await wire((req) => req.command.type === "StartRun"
-      ? envelope({ type: "Allow", converged: false, run: run() }) : envelope(EVIDENCE_WAITING() as never), true,
-      undefined, { surface });
-    await startRun(w);
-    const ctx = uiCtx(["Confirm"]);
-    const decision = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), ctx);
-    assert.equal(decision?.block, true, surface);
-    assert.ok(String(decision?.reason).startsWith("Empirica cannot tell whether a human can be asked"), String(decision?.reason));
-    assert.ok(!w.privateRequests.some((request) => request.operation.startsWith("evidence_")), surface);
-  }
-});
-
 test("gate: a missing or stale spike on the same claim leads the block, and the waiting evidence is still presented", async () => {
   for (const code of ["claim.spike_missing", "claim.spike_stale"]) {
     const w = await wire((req) => req.command.type === "StartRun"
@@ -1802,4 +2006,91 @@ test("gate: a missing or stale spike on the same claim leads the block, and the 
     assert.deepEqual(decision, { block: true, reason: `Spike problem: ${code}.\nhandle: ${HANDLE}` }, code);
     assert.equal(w.privateRequests.filter((r) => r.operation === "evidence_presentation").length, 1, code);
   }
+});
+
+/** A core that projects the failure the host reported with the evaluation as the batch's `prompt_error`. */
+const coreEchoingHostFailure = (req: Request): Response => req.command.type === "StartRun"
+    || (req.command as { intent?: string }).intent === "stop"  // the real core ends a stop with an Allow
+  ? envelope({ type: "Allow", converged: false, run: run() })
+  : envelope(EVIDENCE_WAITING("human", (req.command as { host_failure?: string }).host_failure ?? null) as never);
+
+const HOST_FAILURE_CASES: Array<[string, WireOptions, "surface_unrecorded" | "presentation_failed"]> = [
+  ["surface throws", { surface: "throw" }, "surface_unrecorded"],
+  ["surface faults", { surface: "fault" }, "surface_unrecorded"],
+  ["presentation faults", { presentation: "fault" }, "presentation_failed"],
+  ["presentation throws", { presentation: "throw" }, "presentation_failed"],
+  ["both fail", { surface: "fault", presentation: "fault" }, "surface_unrecorded"],
+];
+
+test("gate: a host failure shows nobody a dialog, says so with the stop next, and a literal agent ends in two calls", async () => {
+  for (const [label, options, reason] of HOST_FAILURE_CASES) {
+    const w = await wire(coreEchoingHostFailure, true, undefined, options);
+    await startRun(w);
+    let shown = 0;
+    const ctx = uiCtx(["Confirm"]);
+    ctx.ui.select = async () => { shown += 1; return "Confirm"; };
+    // Call 1: the report the view led with. The gate never settles as an evidence wait for a batch nobody was shown.
+    const first = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), ctx);
+    assert.equal(first?.block, true, `${label}: must not permit, which would emit the pause notice`);
+    const text = String(first?.reason);
+    assert.ok(text.includes(AUTHOR_LABELS[`waiting_${reason}`]), `${label}: names the failure in the registry's words: ${text}`);
+    assert.match(text, /next: report_convergence intent=stop/, `${label}: stop is the next action`);
+    assert.ok(!text.includes("paused"), label);
+    assert.equal(shown, 0, label);
+    assert.ok(!w.privateRequests.some((r) => r.operation === "evidence_confirmation"), label);
+    // The evaluation that produced it carried the failure; a presentation failure is evaluated again with it.
+    const evaluations = w.requests.filter((r) => r.command.type === "EvaluateRun")
+      .map((r) => (r.command as { host_failure?: string }).host_failure);
+    assert.equal(evaluations.at(-1), reason, label);
+    // Call 2: the stop the notice named is evaluated as a stop.
+    const stop = await w.pi.toolCall()({ toolName: REPORT_CONVERGENCE_TOOL, toolCallId: "tc-2", input: { intent: "stop" } }, ctx);
+    assert.equal(stop, undefined, `${label}: the stop is permitted`);
+    const last = w.requests.at(-1)!.command as { type: string; intent?: string; host_failure?: string };
+    assert.deepEqual([last.type, last.intent, last.host_failure], ["EvaluateRun", "stop", undefined], label);
+  }
+});
+
+test("gate: a failed presentation is never reported as a wait the human was asked about", async () => {
+  const w = await wire(coreEchoingHostFailure, true, undefined, { presentation: "fault" });
+  await startRun(w);
+  const decision = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), uiCtx(["Confirm"]));
+  assert.equal(decision?.block, true, "returning undefined permits execution, which emits the pause notice");
+  assert.equal(decision?.reason, `${AUTHOR_LABELS.waiting_presentation_failed}\nnext: report_convergence intent=stop\nhandle: ${HANDLE}`);
+});
+
+test("PI-04: with no dialog available a presentable batch is the same failure to ask, never a pause", async () => {
+  // The core answers an unspent sole confirmation whatever the surface said; the host has no dialog to show it in.
+  const w = await wire((req) => req.command.type === "StartRun" ? envelope({ type: "Allow", converged: false, run: run() })
+    : envelope(EVIDENCE_WAITING() as never));
+  await startRun(w);
+  const decision = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), fakeCtx());
+  assert.equal(decision?.block, true, "undefined would permit and emit the pause notice");
+  assert.equal(decision?.reason, `${AUTHOR_LABELS.waiting_presentation_failed}\nnext: report_convergence intent=stop\nhandle: ${HANDLE}`);
+  assert.ok(!w.privateRequests.some((r) => r.operation === "evidence_presentation"));
+});
+
+test("gate: a core that did not echo the failure is not trusted to: a presentable batch nobody was shown never settles as a wait", async () => {
+  // The A6 probe: the core answers an unspent sole confirmation whatever the host reported.
+  for (const [label, options, reason] of HOST_FAILURE_CASES) {
+    const w = await wire((req) => req.command.type === "StartRun" ? envelope({ type: "Allow", converged: false, run: run() })
+      : envelope(EVIDENCE_WAITING() as never), true, undefined, options);
+    await startRun(w);
+    let shown = 0;
+    const ctx = uiCtx(["Confirm"]);
+    ctx.ui.select = async () => { shown += 1; return "Confirm"; };
+    const decision = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), ctx);
+    assert.equal(decision?.block, true, label);
+    assert.ok(String(decision?.reason).includes(AUTHOR_LABELS[`waiting_${reason}`]), `${label}: ${String(decision?.reason)}`);
+    assert.equal(shown, 0, label);
+  }
+});
+
+test("gate: a presentation the core refuses for a reason it knows is worded by the core, not as a host failure", async () => {
+  // A raced presentation: the core answers the second evaluation with its own refusal, which outranks the host's report.
+  const w = await wire((req) => req.command.type === "StartRun" ? envelope({ type: "Allow", converged: false, run: run() })
+    : envelope(EVIDENCE_WAITING("human", (req.command as { host_failure?: string }).host_failure ? "already_presented" : null) as never),
+    true, undefined, { presentation: "fault" });
+  await startRun(w);
+  const decision = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), uiCtx(["Confirm"]));
+  assert.deepEqual(decision, { block: true, reason: `Research waits on a human.\nhandle: ${HANDLE}` });
 });

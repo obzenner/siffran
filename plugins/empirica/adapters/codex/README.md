@@ -1,6 +1,6 @@
 # Empirica adapter for Codex CLI
 
-This is the exact `codex-cli@0.146.0` adapter over the shared `empirica/v2` service. It
+This is the exact `codex-cli` adapter over the shared `empirica/v2` service. It
 translates native hooks, exposes the canonical public MCP tools, and fails closed when audit is
 owed because verdict-producing identity is unobservable. Claim, evidence, budget, audit-coverage,
 and convergence rules remain in the host-neutral core.

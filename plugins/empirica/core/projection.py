@@ -11,7 +11,7 @@ from .evaluation import (EvaluationSnapshot, HOST_TIER_UNSUPPORTED, active_evide
                          audit_operation_current, audit_passes, bootstrap_status,
                          claim_blockers, claim_digest, derive_claims,
                          derive_claims_for_projection, digest, dossier_artifact_ids,
-                         confirmation_batch, effective_scope_ids, evidence_digest, independence,
+                         CONFIRMATION_REASON, confirmation_batch, effective_scope_ids, evidence_digest, independence,
                          pending_decisions, pending_human)
 
 
@@ -39,12 +39,76 @@ def _reason_metadata(metadata: Mapping[str, tuple[tuple[str, ...], tuple[str, ..
     return list(next_actions), list(sections)
 
 
-def reason_actions(code: str, parameters: Mapping[str, Any] | None, actions: list[str]) -> list[str]:
-    """A reason's recovery actions as its parameters allow them: with no human ingress the human cannot be
-    asked, so ``human.confirm_evidence`` is not offered for route ``unavailable``."""
-    if code == "evidence.confirmation_required" and (parameters or {}).get("route") == "unavailable":
-        return [action for action in actions if action != "human.confirm_evidence"]
-    return actions
+#: The ``prompt_error`` values with which a report would still ask a human: none, or only ``unobserved`` (the host looks
+#: for a dialog surface inside the report).
+ASKABLE = frozenset({None, confirmation.UNOBSERVED})
+
+
+#: The recovery actions the confirmation rule owns (adds, keeps or drops); no mode's recovery exclusion may name one.
+CONFIRMATION_ACTIONS = frozenset({"convergence.report", "human.confirm_evidence"})
+
+
+def confirmation_next(actions: list[str], route: str | None, prompt_error: str | None) -> list[str]:
+    """A confirmation row's recovery actions: the one owner of ``human.confirm_evidence`` and ``convergence.report``.
+
+    With no human to ask (route ``unavailable``) nor yet known to be askable (``unobserved``) ``human.confirm_evidence``
+    is not offered. ``convergence.report`` leads exactly when a report would ask a human (``prompt_error`` in
+    ``ASKABLE``), and is absent once the batch was shown, the interactions are spent, nobody can be asked, or the host
+    reported that it could not ask: the host presents inside the author's next report, so a reader that follows ``next:``
+    must be told to make it, and must never be told to repeat a report that asks nobody."""
+    drop = {"convergence.report"} | (CONFIRMATION_ACTIONS - {"convergence.report"}
+                                     if route in {confirmation.UNAVAILABLE, confirmation.UNOBSERVED} else set())
+    rest = [action for action in actions if action not in drop]
+    return ["convergence.report", *rest] if prompt_error in ASKABLE else rest
+
+
+def confirmation_actions(code: str, parameters: Mapping[str, Any] | None, actions: list[str],
+                         batch: Mapping[str, Any] | None) -> list[str]:
+    """``confirmation_next`` for a confirmation reason; every other row is unchanged. This is the one place that decides
+    the no-batch case: a confirmation reason with no batch (a terminal run, or one that cannot present) is as if nobody
+    can be asked, so it never leads with a report or offers ``human.confirm_evidence``."""
+    if code != CONFIRMATION_REASON:
+        return actions
+    return confirmation_next(actions, (parameters or {}).get("route"),
+                             batch["prompt_error"] if batch is not None else "unavailable")
+
+
+def project_prompt_error(result: Mapping[str, Any], prompt_error: str | None) -> dict[str, Any]:
+    """The response the core would have projected had the batch's ``prompt_error`` been this one, for a host that knows
+    something about its own call that the response it holds does not: the batch, and the recovery actions of every
+    confirmation obligation row and reason (not the residuals, which exist only on a terminal run, where there is no
+    batch), through the same rule (``confirmation_actions``). A result with no batch is returned as it is. Pure; it
+    changes nothing the core stores. The rows it patches already carry the mode's recovery exclusions, which never name a
+    confirmation action (``test_the_confirmation_rule_and_the_exclusions_commute_through_project_prompt_error``), so it
+    need not apply them."""
+    run = result.get("run")
+    batch = run.get("confirmation_batch") if isinstance(run, Mapping) else None
+    if batch is None:
+        return dict(result)
+    projected_batch = {**batch, "prompt_error": prompt_error}
+
+    def obligation(row: Mapping[str, Any]) -> dict[str, Any]:
+        missing = row["missing"] or {}
+        return {**row, "next": confirmation_actions(
+            missing.get("code", ""), missing.get("parameters"), row["next"], projected_batch)}
+
+    def reason(row: Mapping[str, Any]) -> dict[str, Any]:
+        return {**row, "next_actions": confirmation_actions(
+            row["code"], row["parameters"], row["next_actions"], projected_batch)}
+
+    projected = {**run, "confirmation_batch": projected_batch,
+                 "obligations": {**run["obligations"], "active": [obligation(r) for r in run["obligations"]["active"]]}}
+    reasons = [reason(r) for r in result.get("reasons", ())]
+    return {**result, "run": projected, **({"reasons": reasons} if "reasons" in result else {})}
+
+
+def project_host_failure(result: Mapping[str, Any], host_failure: str) -> dict[str, Any]:
+    """``project_prompt_error`` for what the host reports about its own call, the way the core applies it when it is
+    told (``confirmation.apply_host_report``): a refusal the core already knows stands."""
+    run = result.get("run")
+    batch = run.get("confirmation_batch") if isinstance(run, Mapping) else None
+    return project_prompt_error(result, confirmation.apply_host_report(batch["prompt_error"], host_failure)) \
+        if batch is not None else dict(result)
 
 
 def _obligation(
@@ -54,8 +118,7 @@ def _obligation(
     if terminal_next is not None:
         next_actions = list(terminal_next)
     else:
-        next_actions = [] if missing is None else reason_actions(
-            missing["code"], missing["parameters"], _reason_metadata(metadata, missing["code"])[0])
+        next_actions = [] if missing is None else _reason_metadata(metadata, missing["code"])[0]
     return {"id": obligation_id, "required": required, "observed": observed,
             "missing": missing, "next": next_actions, "status": status}
 
@@ -63,7 +126,6 @@ def _obligation(
 def _residual(metadata, code: str, parameters: dict[str, Any],
               terminal_next: list[str] | None = None, **extra) -> dict[str, Any]:
     next_actions, sections = _reason_metadata(metadata, code)
-    next_actions = reason_actions(code, parameters, next_actions)
     if terminal_next is not None:
         next_actions = list(terminal_next)
     return {**extra, "code": code, "parameters": parameters,
@@ -187,13 +249,13 @@ def safe_text(item: object) -> str:
 
 
 # The neutral invocation facts a run view and the governance dialog show. The stored invocation may
-# carry further host-recorded members (``host_runtime``); they are persisted for receipts and never
-# projected, so no model-visible payload grows with them.
+# carry further host-recorded members (``host_runtime``) that are not projected here (see ``project_invocation``).
 INVOCATION_FACTS = ("host", "interactive", "signal", "delegation", "audit_retrieval", "human_surface")
 
 
 def project_invocation(invocation: Mapping) -> dict[str, Any]:
-    """The shown invocation facts, in contract order; host-recorded extras are not projected."""
+    """The shown invocation facts, in contract order; host-recorded extras (``host_runtime``) are not projected here,
+    except ``package`` and ``version`` of an unreviewed runtime, which ``_unreviewed_runtime`` projects into the run view."""
     return {key: governance.plain(invocation[key]) for key in INVOCATION_FACTS}
 
 
@@ -288,10 +350,14 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
     residuals = _residuals(snapshot, derivation, blockers, metadata, terminal_next)
     control_mode = snapshot.state.governance["control_mode"]
     exclusions = snapshot.contract.recovery_exclusions[control_mode]
+    batch = _batch(snapshot, derivation)
     for residual in residuals:
-        residual["next_actions"] = recovery_actions(exclusions, residual["next_actions"])
+        residual["next_actions"] = recovery_actions(exclusions, confirmation_actions(
+            residual["code"], residual["parameters"], residual["next_actions"], batch))
     for obligation in obligations["active"]:
-        obligation["next"] = recovery_actions(exclusions, obligation["next"])
+        missing = obligation["missing"] or {}
+        obligation["next"] = recovery_actions(exclusions, confirmation_actions(
+            missing.get("code", ""), missing.get("parameters"), obligation["next"], batch))
     recovery_action = terminal_next[0] if terminal else "child.retry"
     children = [_child_summary(child, recovery_action) for child in snapshot.state.children]
     audit = _audit(snapshot)
@@ -303,7 +369,7 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
         "audit": {"state": audit["state"], "independence": audit["independence"],
                   "findings": audit["findings"] if audit["state"] == "failed" else []},
         "governance": project_governance(snapshot),
-        "confirmation_batch": _batch(snapshot, derivation),
+        "confirmation_batch": batch,
         "contract": {"id": snapshot.contract_id, "version": snapshot.contract_version,
                      "digest": snapshot.contract_digest,
                      "relevant_sections": list(["protocol"] if relevant_sections is None
@@ -315,13 +381,26 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
         "untrusted_delimiters": dict(snapshot.untrusted_delimiters),
         "host": {"profile_id": snapshot.profile_id, "tier": snapshot.host_tier,
                  "missing_capabilities": ([HOST_TIER_UNSUPPORTED[snapshot.host_tier]]
-                    if snapshot.host_tier in HOST_TIER_UNSUPPORTED else [])},
+                    if snapshot.host_tier in HOST_TIER_UNSUPPORTED else []),
+                 **_unreviewed_runtime(snapshot.state.invocation)},
     }
+
+
+def _unreviewed_runtime(invocation: Mapping) -> dict[str, Any]:
+    """``{"unreviewed_runtime": {package, version}}`` for an audit runtime recorded at StartRun without a compat
+    record (``reviewed`` false or absent; ADR-0069), else nothing. ``reviewed`` is the adapter's claim: the run view
+    reads it and nothing here verifies it."""
+    subagents = ((governance.plain(invocation).get("host_runtime") or {}).get("subagents") or {})
+    if subagents.get("reviewed") is True or not subagents:
+        return {}
+    return {"unreviewed_runtime": {"package": subagents["package"], "version": subagents["version"]}}
 
 
 def _batch(snapshot: EvaluationSnapshot, derivation: Any) -> dict[str, Any] | None:
     """What a human would be shown now (``null`` when nothing waits), with why it cannot be presented:
-    the host presents exactly when this is not ``null`` and ``prompt_error`` is, whatever else blocks."""
+    the host presents when this is not ``null`` and ``prompt_error`` is ``null`` (a report asks inside the call; one
+    whose ``prompt_error`` is ``unobserved`` first observes its surface, so it is null by the time it is evaluated;
+    see ``confirmation_next``), whatever else blocks."""
     if snapshot.graph is None or snapshot.state.status != "active":
         return None
     batch = confirmation_batch(snapshot, derivation)

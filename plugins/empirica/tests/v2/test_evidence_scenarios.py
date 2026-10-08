@@ -11,6 +11,7 @@ from application import protocol
 from assertions import action_freeze, evaluate, observe_action
 from test_evidence_confirmation import URL, WORKSPACE_REF, graph_with_decision
 from test_evidence_hosts import Human, MediatorFixture, accept
+from application.protocol import host_profile_id  # noqa: E402
 
 CONFIRMATION = "evidence.confirmation_required"
 
@@ -46,10 +47,11 @@ class HumanSurfaceCells(ScenarioFixture):
         drv, run_id = self.start()
         self.research(drv, run_id, "web", URL)
         record = self.last_id(drv, run_id)
+        self.assertEqual(self.batch(drv, run_id)["prompt_error"], "unobserved")  # Claude has not looked yet
+        reason = self.report(drv, run_id)["reasons"][0]  # the report looks first
         batch = self.batch(drv, run_id)
         self.assertEqual({k: batch[k] for k in ("record_ids", "claim_ids", "prompt_error")},
                          {"record_ids": [record], "claim_ids": [], "prompt_error": None})
-        reason = self.report(drv, run_id)["reasons"][0]
         self.assertEqual((reason["code"], reason["parameters"]),
                          (CONFIRMATION, {"route": "human", "record_ids": [record]}))
         human = Human(accept(d1="confirm"))
@@ -119,6 +121,7 @@ class HumanSurfaceCells(ScenarioFixture):
 
     def test_D_exhausted_interactions_are_a_prompt_error_not_an_answerable_wait(self):
         drv, run_id = self.start()
+        self.look(drv, run_id)
         for n in range(400):
             self.research(drv, run_id, "web", f"{URL}/{n}")
             batch = self.batch(drv, run_id)
@@ -136,11 +139,12 @@ class HumanSurfaceCells(ScenarioFixture):
 
     def test_D_a_root_needs_decision_is_asked_on_its_own_and_converges_after_an_audit(self):
         drv, run_id = self.start(kind="needs-decision")
+        self.assertEqual(self.batch(drv, run_id)["prompt_error"], "unobserved")
+        reason = self.report(drv, run_id)["reasons"][0]  # the report looks first
         batch = self.batch(drv, run_id)
         self.assertEqual((batch["record_ids"], batch["claim_ids"], batch["prompt_error"]), ([], ["C0"], None))
-        reason = self.report(drv, run_id)["reasons"][0]
         self.assertEqual((reason["code"], reason["parameters"]["claim_ids"], reason["next_actions"]),
-                         (CONFIRMATION, ["C0"], ["human.confirm_evidence", "residual.accept"]))
+                         (CONFIRMATION, ["C0"], ["convergence.report", "human.confirm_evidence", "residual.accept"]))
         human = Human(accept(d1="approve", n1="Ship it."))
         self.mediate(drv, run_id, human)
         self.assertIn("Decision needed", human.shown[0][0])
@@ -248,10 +252,11 @@ class HumanSurfaceCells(ScenarioFixture):
         self.unavailable(mode="auto", delegation=True, interactive=False)
 
     def test_D_a_client_without_form_elicitation_has_nobody_to_ask(self):
-        drv, run_id = self.start(human_surface="unavailable")
+        drv, run_id = self.start()
         self.research(drv, run_id, "web", URL)
-        mediator = self.mediator(drv, None)  # no form: the host records exactly that
-        mediator(self.report(drv, run_id), lambda: self.fail("re-evaluated"))
+        self.form = False  # the client declared no form: the host records exactly that
+        mediator = self.mediator(drv, None)
+        mediator(self.report(drv, run_id), lambda failure=None: self.fail("re-evaluated"))
         self.assertEqual(self.report(drv, run_id)["reasons"][0]["parameters"]["route"], "unavailable")
         self.assertEqual(self.run_view(drv, run_id)["invocation"]["human_surface"], "unavailable")
 
@@ -260,16 +265,16 @@ class HumanSurfaceCells(ScenarioFixture):
         self.unavailable(delegation=True)
 
     def test_the_host_observation_follows_the_session_at_each_report(self):
-        drv, run_id = self.start(human_surface="unavailable")
+        drv, run_id = self.start()
         self.research(drv, run_id, "web", URL)
-        self.assertEqual(self.batch(drv, run_id)["prompt_error"], "unavailable")
+        self.assertEqual(self.batch(drv, run_id)["prompt_error"], "unobserved")
         self.mediator(drv, Human(accept(d1="later"))).observe(run_id)
         self.assertEqual(self.run_view(drv, run_id)["invocation"]["human_surface"], "human")
         self.assertIsNone(self.batch(drv, run_id)["prompt_error"])
         self.assertEqual(self.surface(drv, run_id, "human")["type"], "Inert")  # an unchanged observation
 
     def test_codex_projects_the_same_batch_with_nobody_to_ask(self):
-        drv, run_id = self.start("codex-cli@0.146.0", mode="auto", audit_retrieval=[], delegation=True,
+        drv, run_id = self.start(host_profile_id("codex-cli"), mode="auto", audit_retrieval=[], delegation=True,
                                  interactive=False)
         self.research(drv, run_id, "web", URL)
         batch = self.batch(drv, run_id)

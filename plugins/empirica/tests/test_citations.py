@@ -13,8 +13,10 @@ from application.transaction import Coordinator as ProductionCoordinator
 from core.citations import submission_problem, PROBLEMS, citation_problem, cited_file
 from core.freshness import ObservationState
 from governance_setup import TEST_INVOCATION, approve_current
+from application.protocol import host_profile_id  # noqa: E402
+PI_PROFILE = host_profile_id("pi")
 
-PROFILE = "pi@0.84.1+pi-subagents-foreground-audit-v1"
+PROFILE = PI_PROFILE
 SOURCE = b"""def load(path):
     # Read the index once; later calls hit the cache.
     with open(path) as handle:

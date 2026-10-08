@@ -32,7 +32,7 @@ test("author-view loads every next-action surface from the public contract", () 
   const contract = JSON.parse(readFileSync(contractPath, "utf8"));
   const golden = JSON.parse(readFileSync(
     path.join(GOLDEN_DIR, "all-next-actions.json"), "utf8"));
-  assert.equal(Object.keys(contract.next_actions).length, 16);
+  assert.equal(Object.keys(contract.next_actions).length, 17);
   assert.deepEqual(golden.result.run.next_actions, Object.keys(contract.next_actions));
   for (const row of Object.values(contract.next_actions) as { surface: Record<string, string> }[]) {
     const value = row.surface;
@@ -324,10 +324,13 @@ test("the pending-record reason names its recovery and hides the digests", () =>
 });
 
 const PENDING_GOLDENS: Record<string, string[]> = {
-  "evidence-reason-askable": ["human: confirmation", "report_convergence intent=stop"],
+  "evidence-reason-askable": ["report_convergence intent=report_convergence", "human: confirmation", "report_convergence intent=stop"],
   "evidence-reason-later": ["human: confirmation", "report_convergence intent=stop"],
   "evidence-reason-unavailable": ["report_convergence intent=stop"],
-  "evidence-reason-mixed": ["human: confirmation", "report_convergence intent=stop", "decision needed on claim D1"],
+  "evidence-reason-unobserved": ["report_convergence intent=report_convergence", "report_convergence intent=stop",
+    "a human is asked when you report, if this host can show a dialog"],
+  "evidence-reason-mixed": ["report_convergence intent=report_convergence", "human: confirmation",
+    "report_convergence intent=stop", "decision needed on claim D1"],
   "evidence-reason-terminal-residual": ["human: confirmation", "report_convergence intent=stop"],
 };
 
@@ -339,6 +342,12 @@ test("pending-evidence goldens: same normally and strictly, recovery calls prese
     assert.ok(!text.startsWith("{") && !text.includes("sha256:"), name);
     for (const call of calls) assert.ok(text.includes(call), `${name}: ${call}`);
   }
+});
+
+test("an unobserved surface never says nobody can be asked and leads with the report", () => {
+  const text = renderAuthorView(JSON.parse(readFileSync(path.join(GOLDEN_DIR, "evidence-reason-unobserved.json"), "utf8")).result);
+  assert.ok(!text.includes("no human can be asked") && !text.includes("human: confirmation"));
+  assert.ok(text.indexOf("report_convergence intent=report_convergence") < text.indexOf("report_convergence intent=stop"));
 });
 
 test("pending-evidence goldens fence human text", () => {

@@ -19,10 +19,8 @@ import * as path from "node:path";
 
 import type { Dispatch, Request, Response } from "./contract.ts";
 import { assertResponse, GuardError } from "./guard.ts";
+import { HOST_PROFILE_ID } from "./host-profile.ts";
 import { runJsonProcess } from "./process-transport.ts";
-
-/** Exact Pi + pi-subagents profile required for complete foreground audit binding. */
-export const HOST_PROFILE_ID = "pi@0.84.1+pi-subagents-foreground-audit-v1";
 
 export interface StdioBridgeConfig {
   /** Executable to run (e.g. "python3"). */

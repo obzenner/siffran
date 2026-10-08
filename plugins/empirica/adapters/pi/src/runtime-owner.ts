@@ -22,7 +22,8 @@ import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import type { SlashCommandInfo, ToolInfo } from "./pi-types.ts";
-import type { SubagentInventory } from "./subagent-inventory.ts";
+import { inSubagentsRange, SUBAGENTS_COMPATIBILITY, type SubagentsCompatibility } from "./host-profile.ts";
+import { observeInventory, reviewedActionNames, type SubagentInventory } from "./subagent-inventory.ts";
 import { SUBAGENT_TOOL } from "./translate.ts";
 
 export const SUBAGENTS_PACKAGE = "pi-subagents";
@@ -42,8 +43,8 @@ export type OwnerRefusalCode =
   | "version-unobservable"
   | "child-process"
   | "preflight-unavailable"
-  /** The owner's exact version has no reviewed inventory, or one that cannot enforce the audit bound. */
-  | "version-unreviewed"
+  /** The owner's version is outside the profile's range, or its schema cannot carry the audit launch (ADR-0069). */
+  | "version-unsupported"
   /** The `subagent` tool is registered but not active (pi-subagents `toolActivation: auto|dynamic`). */
   | "tool-inactive"
   /** The session's cached owner no longer matches a fresh resolution (adapter-level invariant). */
@@ -65,6 +66,8 @@ export interface SubagentOwner {
   readonly version: string;
   /** Pi's `sourceInfo.source` for the registering extension. */
   readonly source: string;
+  /** The tool's own parameter schema as Pi reports it; read only when the version has no compat record. */
+  readonly parameters?: unknown;
 }
 
 export type OwnerResolution = ({ readonly ok: true } & SubagentOwner) | OwnerRefusal;
@@ -199,7 +202,8 @@ export function resolveSubagentOwner(
   if (roots.size > 1)
     return refuse("multiple-owners",
       `${roots.size} distinct ${SUBAGENTS_PACKAGE} packages are loaded: ${[...roots].sort().join(", ")}`);
-  return { ok: true, owner_path: ownerPath, package_root: dir, version: manifest.version, source: info.source };
+  return { ok: true, owner_path: ownerPath, package_root: dir, version: manifest.version, source: info.source,
+    ...(owners[0].parameters === undefined ? {} : { parameters: owners[0].parameters }) };
 }
 
 /** True when two successful resolutions name the same owner identity (every field, exactly). */
@@ -217,28 +221,36 @@ export interface AuditorPreflightApi {
   resolveSubagentLaunchContract(input: Record<string, unknown>): Promise<unknown>;
 }
 
-/** Everything the audit launch needs from the bound owner: its preflight, exact version, and reviewed inventory. */
+/** Everything the audit launch needs from the bound owner: its preflight, exact version, and inventory (checked-in or observed, ADR-0069). */
 export interface AuditRuntime {
   readonly preflight: AuditorPreflightApi;
   readonly version: string;
   readonly inventory: SubagentInventory;
 }
 
-/**
- * The reviewed inventory of the owner's exact version. Refuses `version-unreviewed` when none is
- * checked in (before any code of that package is loaded) or when the inventory shows the version
- * cannot carry the audit bound (`timeoutMs` and `toolBudget` launch fields).
- */
+/** The inventory of the owner's exact version, checked-in or observed; the admission rule is ADR-0069's (HX-ADM-02). */
 export function resolveOwnerInventory(
   owner: SubagentOwner, inventoryFor: (version: string) => SubagentInventory | undefined,
+  range: SubagentsCompatibility = SUBAGENTS_COMPATIBILITY,
+  knownActions: () => readonly string[] = reviewedActionNames,
 ): { readonly ok: true; readonly inventory: SubagentInventory } | OwnerRefusal {
-  const inventory = inventoryFor(owner.version);
-  if (inventory === undefined)
-    return refuse("version-unreviewed", `pi-subagents ${owner.version} has no reviewed launch/action inventory`);
+  if (!inSubagentsRange(range, owner.version))
+    return refuse("version-unsupported",
+      `pi-subagents ${owner.version} is outside the supported range >=${range.minimum} <${range.maximum_exclusive}`);
+  const checkedIn = inventoryFor(owner.version);
+  let inventory: SubagentInventory;
+  if (checkedIn !== undefined) {
+    inventory = checkedIn;
+  } else {
+    const observed = observeInventory(owner.version, owner.parameters, knownActions());
+    if (!observed.ok)
+      return refuse("version-unsupported", `pi-subagents ${owner.version} has no compat record and ${observed.detail}`);
+    inventory = observed.inventory;
+  }
   if (inventory.version !== owner.version)
-    return refuse("version-unreviewed", `the inventory selected for ${owner.version} describes ${inventory.version}`);
+    return refuse("version-unsupported", `the inventory selected for ${owner.version} describes ${inventory.version}`);
   if (!inventory.supports.timeoutMs || !inventory.supports.toolBudget)
-    return refuse("version-unreviewed",
+    return refuse("version-unsupported",
       `pi-subagents ${owner.version} cannot carry the audit bound (timeoutMs: ${inventory.supports.timeoutMs}, `
       + `toolBudget: ${inventory.supports.toolBudget})`);
   return { ok: true, inventory };
@@ -303,6 +315,8 @@ export async function resolveOwnerPreflight(
 export interface SubagentsProvenance {
   readonly package: typeof SUBAGENTS_PACKAGE;
   readonly version: string;
+  /** Whether this exact version has a checked-in compat record (false: admitted by observation, ADR-0069). */
+  readonly reviewed: boolean;
   readonly owner_path: string;
   readonly package_root: string;
   readonly preflight_path: string;
@@ -310,9 +324,10 @@ export interface SubagentsProvenance {
 }
 
 /** The provenance of a bound owner, as observed — nothing configured or assumed. */
-export function subagentsProvenance(owner: SubagentOwner, preflight: Pick<BoundPreflight, "preflight_path">): SubagentsProvenance {
+export function subagentsProvenance(owner: SubagentOwner, preflight: Pick<BoundPreflight, "preflight_path">,
+                                    reviewed: boolean): SubagentsProvenance {
   return {
-    package: SUBAGENTS_PACKAGE, version: owner.version, owner_path: owner.owner_path,
+    package: SUBAGENTS_PACKAGE, version: owner.version, reviewed, owner_path: owner.owner_path,
     package_root: owner.package_root, preflight_path: preflight.preflight_path, source: owner.source,
   };
 }

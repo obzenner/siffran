@@ -13,7 +13,7 @@
           "budget",
           "terminal"
         ],
-        "digest": "sha256:45fa33dc3aa269f8702ae41c002f7ee29edb005b1129e7ac65c4a33b5f8990af"
+        "digest": "sha256:7792155a1fd120995a9505f632bfdba1d55553f06e487ee14147e1a5a49729b5"
       },
       "obligations": {
         "active": [],
@@ -38,7 +38,7 @@
       },
       "children": [],
       "host": {
-        "profile_id": "claude-code@2.1.278",
+        "profile_id": "claude-code",
         "tier": "foreground_only",
         "missing_capabilities": [
           "host.async_unsupported"

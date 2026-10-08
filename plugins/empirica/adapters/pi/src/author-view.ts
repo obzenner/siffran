@@ -17,6 +17,7 @@ interface Header {
   readonly governance: Trusted;
   readonly runId: Trusted;
   readonly proposalRationale: Untrusted | null;
+  readonly hostNote: Trusted | null;
 }
 interface Reason {
   readonly code: Trusted;
@@ -360,9 +361,17 @@ function requiredRationale(governance: Json): string | null {
 }
 
 const WAIT_STATE: Readonly<Record<string, string>> = {
-  none: "waiting_none_error", unavailable: "waiting_unavailable",
+  none: "waiting_none_error", unavailable: "waiting_unavailable", unobserved: "waiting_unobserved",
   already_presented: "waiting_already_presented", interaction_limit: "waiting_interaction_limit",
+  surface_unrecorded: "waiting_surface_unrecorded", presentation_failed: "waiting_presentation_failed",
 };
+
+/** The notice a host-failure Block carries where only a line fits (the Pi gate's refusal): the waiting line the author view
+ * prints for this failure, then the stop it leads with. `null` unless the prompt error is a host failure. */
+export function hostFailureNotice(promptError: unknown): string | null {
+  if (promptError !== "surface_unrecorded" && promptError !== "presentation_failed") return null;
+  return `${(LABELS as Record<string, string>)[WAIT_STATE[promptError]]}\n${LABELS.next_inline} ${surface("residual.accept")}`;
+}
 
 /** What waits on a human, where each record is cited from and for which claim, and whether a human will be asked. */
 function waitingLines(run: Json, safety: TextSafety): readonly string[] {
@@ -378,6 +387,13 @@ function waitingLines(run: Json, safety: TextSafety): readonly string[] {
   ];
 }
 
+/** The one host line shown when the audit runtime was admitted by observation and has no compat record. */
+function hostNote(host: Json): Trusted | null {
+  const runtime = host.unreviewed_runtime as Json | undefined;
+  return runtime === undefined ? null
+    : trusted(`${LABELS.host_unreviewed} ${runtime.package} ${runtime.version} ${LABELS.host_unreviewed_note}`);
+}
+
 /** Parse one guarded run-bearing Allow or Block result. */
 function parse(result: Json): AuthorView {
   const run = result.run as Json;
@@ -389,6 +405,7 @@ function parse(result: Json): AuthorView {
   const header: Header = {
     resultType: trusted(resultType), status: trusted(run.status), governance: governance(run),
     runId: trusted(run.id), proposalRationale: rationale === null ? null : untrusted(rationale, safety),
+    hostNote: hostNote(run.host as Json),
   };
   const terminalNext = (run.next_actions as string[]).map(surface);
   const terminal = run.status !== "active";
@@ -476,6 +493,7 @@ function render(view: AuthorView): string {
     `${LABELS.run_id} ${view.header.runId}`,
     ...(view.header.proposalRationale === null
       ? [] : [`${LABELS.proposal_rationale} ${view.header.proposalRationale}`]),
+    ...(view.header.hostNote === null ? [] : [view.header.hostNote]),
     ...auditLines(view.audit),
   ].join("\n");
   const sections: readonly [string, readonly string[]][] = [

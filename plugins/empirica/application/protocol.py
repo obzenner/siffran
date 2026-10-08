@@ -8,6 +8,7 @@ import copy
 import functools
 import json
 import logging
+import re
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
@@ -76,10 +77,16 @@ _GOVERNANCE_CONTROLS = copy.deepcopy(_decisions)
 _PROJECTION_CONTROLS = _GOVERNANCE_CONTROLS["controls"]
 _NOTICES = _PUBLIC_CONTRACT["settlement_notices"]
 HUMAN_WAIT_NOTICE: str = _NOTICES["human_wait"]
-#: What the Claude Stop says when the confirmation is the sole blocker: the human is asked inside report_convergence.
+#: What the Claude Stop says when the confirmation is the sole blocker: report_convergence, where the host can ask.
 EVIDENCE_REPORT_NOTICE: str = _NOTICES["evidence_report"]
-#: Template with the single ``{resource}`` placeholder, formatted with the reason's resource.
+#: Template with the single ``{resource}`` placeholder.
 BUDGET_EXHAUSTED_NOTICE: str = _NOTICES["budget_exhausted"]
+#: Deliberative hand-off on a Stop continuation (ADR-0068); one ``{reason}`` placeholder.
+PAUSED_FOR_HUMAN_NOTICE: str = _NOTICES["paused_for_human"]
+#: Block on a Stop continuation of an ``auto`` run, which never hands the turn back (ADR-0068); one ``{reason}``.
+UNATTENDED_CONTINUE_NOTICE: str = _NOTICES["unattended_continue"]
+
+
 _AUTHOR_VIEW_LABELS = MappingProxyType(dict(_PUBLIC_CONTRACT["author_view"]["labels"]))
 _RECOVERY_EXCLUSIONS = {
     mode: tuple(actions)
@@ -119,6 +126,18 @@ CONTRACT_VIEW = ContractView(
 )
 
 
+def render_notice(template: str, **values: str) -> str:
+    """Fill a settlement notice's ``{name}`` placeholders by plain replacement (a core reason may carry braces).
+
+    The keys must be exactly the template's placeholders: a wrong keyword raises here, in a test, and never leaves a
+    ``{name}`` in a Stop message."""
+    if set(re.findall(r"\{([A-Za-z_]+)\}", template)) != set(values):
+        raise ValueError("a notice's placeholders and the values given differ")
+    for name, value in values.items():
+        template = template.replace("{" + name + "}", value)
+    return template
+
+
 def protocol_id() -> str:
     """Return the canonical wire protocol identifier."""
     return _PROTOCOL
@@ -156,6 +175,14 @@ def state_schema_id() -> str:
 
 def profile_ids() -> tuple[str, ...]:
     return tuple(sorted(_PROFILES))
+
+
+def host_profile_id(host_id: str) -> str:
+    """The id of the single reviewed profile of a host (``host-profiles.json`` is its only owner)."""
+    ids = [profile["profile_id"] for profile in _HOST_PROFILES["profiles"] if profile["host_id"] == host_id]
+    if len(ids) != 1:
+        raise ValueError(f"expected exactly one host profile for {host_id!r}, found {len(ids)}")
+    return ids[0]
 
 
 def host_profile(profile_id: str) -> Mapping[str, Any]:

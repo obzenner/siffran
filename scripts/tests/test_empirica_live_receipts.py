@@ -29,7 +29,7 @@ from core.records import Artifact, RunKey  # noqa: E402
 from empirica_live_receipts import (  # noqa: E402
     EXPECTED, FORMAT, _POLICIES, author_view_header, author_view_run_id, author_view_section,
     converged_report_view, digest, evidence_receipts, handback_report, host_runtime_rejection, inspect,
-    pending_audit_settlement, run_handle)
+    pending_audit_settlement, run_handle, subagents_runtime)
 
 # The durable run of the test receipts: the host stores it at projects/<p>/runs/<s>/gen-<g>/run.json
 # and its public handle encodes exactly those ids. The handle is produced by the host's own codec,
@@ -40,11 +40,11 @@ RUN_HANDLE = encode_handle(RunKey(PROJECT_ID, SESSION_ID, 1))
 OTHER_HANDLE = encode_handle(RunKey(PROJECT_ID, "s256-" + "c" * 64, 1))
 STATE_PARTS = ("projects", PROJECT_ID, "runs", SESSION_ID, "gen-1", "run.json")
 
-# The audit runtime a Pi run records when it starts (invocation.host_runtime): the newest reviewed version.
+# The audit runtime a Pi run records when it starts (invocation.host_runtime): a version with a compat record.
 PI_POLICY = _POLICIES["pi"]["subagents_compatibility"]
 PACKAGE_ROOT = "/opt/" + PI_POLICY["package"]
 PI_HOST_RUNTIME = {"policy_id": PI_POLICY["policy_id"], "subagents": {
-    "package": PI_POLICY["package"], "version": PI_POLICY["reviewed_versions"][-1],
+    "package": PI_POLICY["package"], "version": "0.76.1", "reviewed": True,
     "owner_path": PACKAGE_ROOT + "/src/extension/index.js", "package_root": PACKAGE_ROOT,
     "preflight_path": PACKAGE_ROOT + "/src/api/preflight.js", "source": PACKAGE_ROOT + "/index.js"}}
 RUNTIME_CASES = json.loads((ROOT / "plugins/empirica/tests/fixtures/host-runtime-cases.json")
@@ -117,9 +117,20 @@ def stamp(rows: list[dict], version: str) -> list[dict]:
             else row for row in rows]
 
 
-# The Pi interval extends to the whole 1.0 line only with a native receipt from Pi >= 1.0.0, so a Pi
-# receipt that is expected to pass is one from Pi 1.0.0 (ADR-0052 amendment).
-PI_RECEIPT_VERSION = "1.0.0"
+def _version_lt(left: str, right: str) -> bool:
+    return tuple(int(part) for part in left.split(".")) < tuple(int(part) for part in right.split("."))
+
+
+def _patch(version: str, delta: int) -> str:
+    major, minor, patch = (int(part) for part in version.split("."))
+    return f"{major}.{minor}.{patch + delta}"
+
+
+# A receipt must be from the profile's qualified version or later; the tests read it from the profile, so raising
+# it in `host-profiles.json` needs no edit here (ADR-0069).
+QUALIFIED = {host: _POLICIES[host]["version"] for host in EXPECTED}
+CLAUDE_EARLIER = _patch(QUALIFIED["claude"], -1)
+CLAUDE_LATER = _patch(QUALIFIED["claude"], 1)
 
 
 RETRIEVAL = ["local", "workspace"]
@@ -214,9 +225,8 @@ def record_repo(root: Path, repo: Path) -> None:
 
 class LiveReceiptTests(unittest.TestCase):
     def receipt(self, root: Path, host: str) -> dict:
-        profile, version, role = EXPECTED[host]
-        if host == "pi":
-            version = PI_RECEIPT_VERSION
+        profile, role = EXPECTED[host]
+        version = QUALIFIED[host]
         state_path = root.joinpath(*STATE_PARTS)
         state_path.parent.mkdir(parents=True, exist_ok=True)
         state = {"status": "converged", "children": [{
@@ -309,7 +319,7 @@ class LiveReceiptTests(unittest.TestCase):
         if host == "pi":
             receipt["subagents_runtime"] = {
                 **{key: PI_HOST_RUNTIME["subagents"][key] for key in (
-                    "package", "version", "owner_path", "package_root", "preflight_path")},
+                    "package", "version", "reviewed", "owner_path", "package_root", "preflight_path")},
                 "policy_id": PI_HOST_RUNTIME["policy_id"]}
         for name, path in (("transcript", transcript), ("run_state", state_path),
                            ("child_session", child_path), ("version_output", version_path)):
@@ -388,7 +398,7 @@ class LiveReceiptTests(unittest.TestCase):
                 {"type": "user", "message": {"content": [{"type": "tool_result",
                  "tool_use_id": "report-0",
                  "content": [{"type": "text", "text": block_text}]}]}},
-            ], "2.1.280")  # earlier rows legitimately predate the attested host version
+            ], CLAUDE_EARLIER)  # earlier rows legitimately predate the attested host version
         transcript = Path(receipt["transcript_path"])
         rows = [json.loads(line) for line in transcript.read_text(encoding="utf-8").splitlines()]
         if host == "claude":
@@ -461,9 +471,10 @@ class LiveReceiptTests(unittest.TestCase):
                                          "commit", "2.0.0"), [])
 
     def test_compatible_harness_patch_versions_pass_and_are_recorded_exactly(self):
-        # Pi's interval is widened to <1.1.0: the whole 1.0 line is inside it.
-        cases = (("claude", "2.1.280", "2.1.280 (Claude Code)\n"), ("pi", "1.0.0", "1.0.0\n"),
-                 ("pi", "1.0.9", "1.0.9\n"))
+        # The qualified version and any later one inside the interval; Pi's interval is the whole 1.x line.
+        cases = (("claude", QUALIFIED["claude"], f"{QUALIFIED['claude']} (Claude Code)\n"),
+                 ("claude", CLAUDE_LATER, f"{CLAUDE_LATER} (Claude Code)\n"),
+                 ("pi", QUALIFIED["pi"], f"{QUALIFIED['pi']}\n"), ("pi", "1.9.9", "1.9.9\n"))
         for host, version, native_output in cases:
             with self.subTest(host=host, version=version), tempfile.TemporaryDirectory() as directory:
                 receipt = self.receipt(Path(directory), host)
@@ -475,32 +486,36 @@ class LiveReceiptTests(unittest.TestCase):
                     self.restamp(receipt, version)
                 self.assertEqual(inspect(receipt, host, "commit", "2.0.0"), [])
 
-    def test_a_pi_receipt_from_before_1_0_0_cannot_release_the_widened_interval(self):
-        # Inside the compatible interval, but the interval's 1.x end has no native receipt: fail, naming it.
-        for version in ("0.84.1", "0.87.1", "0.99.9"):
-            with self.subTest(version=version), tempfile.TemporaryDirectory() as directory:
-                receipt = self.receipt(Path(directory), "pi")
-                version_path = Path(receipt["version_output_path"])
-                version_path.write_text(version + "\n", encoding="utf-8")
-                receipt["version_output_sha256"] = digest(version_path)
-                receipt["host_version"] = version
-                errors = inspect(receipt, "pi", "commit", "2.0.0")
-                self.assertEqual(len(errors), 1, errors)
-                self.assertIn("required pi 1.x receipt is missing", errors[0])
-                self.assertIn(f"from pi {version}", errors[0])
+    def test_a_receipt_below_the_qualified_version_is_refused(self):
+        # The profile's `version` is the receipt floor: a receipt from an older host inside the interval is refused.
+        for host in EXPECTED:
+            below = ((CLAUDE_EARLIER, "2.1.278") if host == "claude" else ("1.0.9", "0.84.1", "0.99.9"))
+            below = [v for v in below if _version_lt(v, QUALIFIED[host])]
+            self.assertTrue(below, host)
+            for version in below:
+                with self.subTest(host=host, version=version), tempfile.TemporaryDirectory() as directory:
+                    receipt = self.receipt(Path(directory), host)
+                    version_path = Path(receipt["version_output_path"])
+                    version_path.write_text(version + ("\n" if host == "pi" else " (Claude Code)\n"), encoding="utf-8")
+                    receipt["version_output_sha256"] = digest(version_path)
+                    receipt["host_version"] = version
+                    errors = inspect(receipt, host, "commit", "2.0.0")
+                    self.assertEqual(len(errors), 1, errors)
+                    self.assertIn(f"{host} {version} is below the qualified version {QUALIFIED[host]}", errors[0])
+                    self.assertIn(f"a native receipt from {host} >= {QUALIFIED[host]} is required", errors[0])
 
-    def test_the_1_x_receipt_is_required_only_while_the_interval_extends_past_1_0_0(self):
-        from empirica_live_receipts import _POLICIES, require_interval_end_receipt
-        require_interval_end_receipt("claude", "2.1.280")
-        require_interval_end_receipt("pi", "1.0.0")
-        narrowed = {**_POLICIES["pi"], "compatibility": {**_POLICIES["pi"]["compatibility"], "maximum_exclusive": "0.90.0"}}
-        with mock.patch.dict(_POLICIES, {"pi": narrowed}):
-            require_interval_end_receipt("pi", "0.87.1")
-        with self.assertRaisesRegex(ValueError, "required pi 1.x receipt is missing"):
-            require_interval_end_receipt("pi", "0.87.1")
+    def test_raising_the_qualified_version_in_the_profile_asks_for_exactly_a_new_receipt(self):
+        from empirica_live_receipts import require_compatible_version
+        for host in EXPECTED:
+            require_compatible_version(host, QUALIFIED[host])
+            raised = {**_POLICIES[host], "version": _patch(QUALIFIED[host], 1)}
+            with mock.patch.dict(_POLICIES, {host: raised}):
+                require_compatible_version(host, raised["version"])
+                with self.assertRaisesRegex(ValueError, f"a native receipt from {host} >= {raised['version']} is required"):
+                    require_compatible_version(host, QUALIFIED[host])
 
     def test_incompatible_or_misreported_harness_versions_fail(self):
-        cases = {"claude": "2.2.0", "pi": "1.1.0"}
+        cases = {"claude": "2.2.0", "pi": "2.0.0"}
         for host, version in cases.items():
             with self.subTest(host=host), tempfile.TemporaryDirectory() as directory:
                 receipt = self.receipt(Path(directory), host)
@@ -512,7 +527,7 @@ class LiveReceiptTests(unittest.TestCase):
                                     inspect(receipt, host, "commit", "2.0.0")))
         with tempfile.TemporaryDirectory() as directory:
             receipt = self.receipt(Path(directory), "claude")
-            receipt["host_version"] = "2.1.280"
+            receipt["host_version"] = CLAUDE_LATER
             self.assertTrue(any("native version output mismatch" in error for error in
                                 inspect(receipt, "claude", "commit", "2.0.0")))
 
@@ -648,9 +663,30 @@ class LiveReceiptTests(unittest.TestCase):
         self.assertEqual(self.pi_errors(), [])
         with tempfile.TemporaryDirectory() as directory:
             receipt = self.receipt(Path(directory), "pi")
-            self.assertEqual(receipt["subagents_runtime"]["version"], PI_POLICY["reviewed_versions"][-1])
+            self.assertEqual(receipt["subagents_runtime"]["version"], "0.76.1")
             self.assertEqual(set(receipt["subagents_runtime"]),
-                             {"package", "version", "owner_path", "package_root", "preflight_path", "policy_id"})
+                             {"package", "version", "reviewed", "owner_path", "package_root", "preflight_path", "policy_id"})
+
+    def test_pi_receipt_from_an_in_range_unreviewed_version_is_valid_and_records_reviewed_false(self):
+        """ADR-0069: a version inside the range with no compat record is admitted, so its qualification receipt is too."""
+        def unreviewed(state):
+            state["invocation"]["host_runtime"]["subagents"].update(version="0.99.0", reviewed=False)
+
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = self.receipt(Path(directory), "pi")
+            self.rewrite_state(receipt, unreviewed)
+            receipt["subagents_runtime"].update(version="0.99.0", reviewed=False)
+            self.assertEqual(inspect(receipt, "pi", "commit", "2.0.0"), [])
+            state = json.loads(Path(receipt["run_state_path"]).read_text(encoding="utf-8"))
+            self.assertIs(subagents_runtime(state, "pi")["reviewed"], False)
+
+    def test_pi_receipt_derives_reviewed_false_when_the_run_state_has_no_flag(self):
+        """An absent `reviewed` reads as not reviewed (shared case `reviewed-missing`), end to end in the receipt."""
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = self.receipt(Path(directory), "pi")
+            self.rewrite_state(receipt, lambda state: state["invocation"]["host_runtime"]["subagents"].pop("reviewed"))
+            receipt["subagents_runtime"]["reviewed"] = False
+            self.assertEqual(inspect(receipt, "pi", "commit", "2.0.0"), [])
 
     def test_pi_receipt_requires_subagents_runtime(self):
         errors = self.pi_errors(lambda receipt: receipt.pop("subagents_runtime"))
@@ -674,8 +710,10 @@ class LiveReceiptTests(unittest.TestCase):
             return state["invocation"]["host_runtime"]
         cases = {
             "missing": (lambda state: state["invocation"].pop("host_runtime"), "missing"),
-            "unreviewed_version": (lambda state: runtime(state)["subagents"].update(version="0.75.1"), "version"),
+            "at_the_exclusive_maximum": (lambda state: runtime(state)["subagents"].update(version="1.0.0"), "version"),
             "far_future_version": (lambda state: runtime(state)["subagents"].update(version="9.9.9"), "version"),
+            "below_the_minimum": (lambda state: runtime(state)["subagents"].update(version="0.49.9"), "version"),
+            "reviewed_not_a_boolean": (lambda state: runtime(state)["subagents"].update(reviewed="yes"), "malformed"),
             "other_policy": (lambda state: runtime(state).update(policy_id="pi-subagents-foreground-audit-v2"), "policy"),
             "other_package": (lambda state: runtime(state)["subagents"].update(package="other-subagents"), "package"),
             "preflight_outside_package": (lambda state: runtime(state)["subagents"].update(
@@ -1189,7 +1227,7 @@ class LiveReceiptTests(unittest.TestCase):
         # 8 read-after result, 9 report result. Child record 0 is the handback.
         supporting = {"launch": 1, "launch result": 2, "settlement": 4, "report call": 6,
                       "report result": 9}
-        unrelated = {0: "2.1.280", 3: "2.1.280", 7: "2.1.280", 8: "2.1.280"}
+        unrelated = {index: CLAUDE_EARLIER for index in (0, 3, 7, 8)}
 
         def attest(receipt: dict, version: str) -> None:
             path = Path(receipt["version_output_path"])
@@ -1200,18 +1238,18 @@ class LiveReceiptTests(unittest.TestCase):
             return inspect(receipt, "claude", "commit", "2.0.0")
 
         with tempfile.TemporaryDirectory() as directory:
-            receipt = self.restamp(self.receipt(Path(directory), "claude"), "2.1.287")
-            attest(receipt, "2.1.286")
+            receipt = self.restamp(self.receipt(Path(directory), "claude"), QUALIFIED["claude"])
+            attest(receipt, CLAUDE_LATER)
             errors = check(receipt)
-            self.assertTrue(any("does not match attested host version 2.1.286" in error
+            self.assertTrue(any(f"does not match attested host version {CLAUDE_LATER}" in error
                                 for error in errors), errors)
-            attest(receipt, "2.1.287")
+            attest(receipt, QUALIFIED["claude"])
             self.assertEqual(check(receipt), [])
             # Records unrelated to the lifecycle, e.g. from before an upgrade, are not judged.
-            self.restamp(receipt, "2.1.287", parent=unrelated)
+            self.restamp(receipt, QUALIFIED["claude"], parent=unrelated)
             self.assertEqual(check(receipt), [])
         for name, index in supporting.items():
-            for value in ("2.1.286", None):
+            for value in (CLAUDE_LATER, None):
                 with self.subTest(parent=name, version=value), \
                         tempfile.TemporaryDirectory() as directory:
                     receipt = self.receipt(Path(directory), "claude")
@@ -1219,7 +1257,7 @@ class LiveReceiptTests(unittest.TestCase):
                     errors = check(receipt)
                     self.assertTrue(any(f"parent record {index}" in error for error in errors),
                                     errors)
-        for value in ("2.1.286", None):
+        for value in (CLAUDE_LATER, None):
             with self.subTest(child=True, version=value), tempfile.TemporaryDirectory() as directory:
                 receipt = self.receipt(Path(directory), "claude")
                 self.restamp(receipt, receipt["host_version"], child={0: value})
@@ -1228,7 +1266,7 @@ class LiveReceiptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             # The notification is a queue-operation: no version field is fine, a wrong one is not.
             receipt = self.receipt(Path(directory), "claude")
-            self.restamp(receipt, receipt["host_version"], parent={5: "2.1.286"})
+            self.restamp(receipt, receipt["host_version"], parent={5: CLAUDE_LATER})
             errors = check(receipt)
             self.assertTrue(any("parent record 5" in error for error in errors), errors)
 

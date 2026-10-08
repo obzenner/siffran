@@ -21,6 +21,8 @@ from adapters.claude import lifecycle  # noqa: E402
 from adapters.claude.run_start import dispatch_start_run  # noqa: E402
 from adapters.public_tools import PublicTools  # noqa: E402
 from adapters.governance import HostGovernance  # noqa: E402
+from application.protocol import host_profile_id  # noqa: E402
+CLAUDE_PROFILE = host_profile_id("claude-code")
 
 
 class ClaudeReachabilityTests(unittest.TestCase):
@@ -66,9 +68,9 @@ class ClaudeReachabilityTests(unittest.TestCase):
                     started = dispatch_start_run(payload, environ={})
                     run_id = started["result"]["run"]["id"]
                     lifecycle._governance_context(payload, run_id)
-                    mediator = HostGovernance("claude-code@2.1.278", elicit=lambda _m, _s: {
+                    mediator = HostGovernance(CLAUDE_PROFILE, elicit=lambda _m, _s: {
                         "action": "accept", "content": {}})
-                    tools = PublicTools("claude-code@2.1.278", govern=mediator)
+                    tools = PublicTools(CLAUDE_PROFILE, govern=mediator)
 
                     def observe(action: dict) -> dict:
                         result = tools.call_internal("empirica_observe", {

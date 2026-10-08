@@ -15,12 +15,14 @@ own dialogs.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 import textwrap
 from typing import Any
 from uuid import uuid4
 
 from adapters import bridge
 from application import protocol
+from core.projection import project_host_failure, project_prompt_error
 
 #: A decision's answer is at most this long (``evidenceConfirmationPayload``); a research note may be longer.
 _ANSWER_LIMIT = 2000
@@ -30,6 +32,25 @@ _NOTE_LIMIT = 2048
 _RESEARCH = {"confirm": "confirm", "reject": "reject"}
 _CLAIM = {"approve": "approve", "reject": "reject"}
 CHOICES = {"research": ("later", *_RESEARCH), "claim": ("later", *_CLAIM)}
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """What a mediation step did: ``failure`` is ``None`` when it did what it was asked, else the host's own failure
+    (``core.confirmation.HOST_FAILURES``). A refusal the core already knows (already presented, interaction limit) is
+    worded by the core's re-evaluation, not named here. A step that failed is reported on the same call; it is never a
+    bare Boolean and never a silently unchanged result."""
+
+    failure: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.failure is None
+
+
+OK = Outcome()
+SURFACE_UNRECORDED = Outcome("surface_unrecorded")
+PRESENTATION_FAILED = Outcome("presentation_failed")
 
 
 def _limit(subject: str) -> int:
@@ -76,38 +97,43 @@ def build_items(argument: Mapping[str, Any], batch: Mapping[str, Any]) -> list[d
 
 
 def observe_surface(profile: str, run_id: str, can_present: bool, *,
-                    ingress: Callable[..., dict] = bridge.trusted_human_surface) -> bool:
-    """Tell the core whether this host can show a dialog to a human now; the latest observation counts. True when the
-    core took it (or already held it); False when the ingress faulted or raised, so the caller can fail closed."""
-    response = ingress(profile, run_id, {"run_id": run_id, "surface": "human" if can_present else "unavailable"})
+                    ingress: Callable[..., dict] = bridge.trusted_human_surface) -> Outcome:
+    """Tell the core whether this host can show a dialog to a human now; the latest observation counts. ``OK`` when the
+    core took it (or already held it); ``SURFACE_UNRECORDED`` when the ingress faulted or raised, so the caller can
+    fail closed and say so."""
+    try:
+        response = ingress(profile, run_id, {"run_id": run_id, "surface": "human" if can_present else "unavailable"})
+    except Exception:  # noqa: BLE001 - an unrecorded observation is reported to the caller as such
+        return SURFACE_UNRECORDED
     result = response.get("result", response) if isinstance(response, dict) else None
-    return isinstance(result, dict) and result.get("type") != "Fault"
+    return OK if isinstance(result, dict) and result.get("type") != "Fault" else SURFACE_UNRECORDED
 
 
 def present(profile: str, run_id: str, *, dispatch: Callable[..., dict] = bridge.handle,
             ingress: Callable[..., dict] = bridge.trusted_evidence_presentation,
-            ) -> tuple[str, list[dict[str, Any]]] | dict[str, Any]:
+            ) -> tuple[str, list[dict[str, Any]]] | Outcome:
     """Record the presentation of the core's current batch, then return ``(receipt_id, items)``.
 
     The batch is read from the run, never supplied by the caller, and the presentation names its key: the core
     admits it only while that is still the current batch, so what is recorded as shown is exactly what the human
     sees. When the batch changed in between the host reads again and tries once more; a second change shows
-    nothing and spends nothing. Anything else the core refuses (already presented, interaction limit, nothing
-    pending) is returned as that typed response instead, and the caller shows nothing."""
-    stored: dict[str, Any] = {"type": "Fault", "code": "unavailable", "fail_direction": "closed"}
+    nothing and spends nothing. Anything else (the core refuses: already presented, interaction limit, nothing
+    pending; or the ingress faults, or raises) is ``PRESENTATION_FAILED``: the caller shows nothing, and the core's
+    own re-evaluation words the refusal it knows (``already_presented`` and ``interaction_limit`` outrank the
+    host's report)."""
     for _attempt in range(2):
         batch = presentable(_call(profile, run_id, {"type": "GetRun"}, dispatch))
         argument = _call(profile, run_id, {"type": "GetArgument"}, dispatch).get("argument") if batch else None
         items = build_items(argument, batch) if batch and isinstance(argument, dict) else []
         if not items:
-            return {"type": "Fault", "code": "unavailable", "fail_direction": "closed"}
+            return PRESENTATION_FAILED
         receipt_id = uuid4().hex
         stored = ingress(profile, run_id, {"run_id": run_id, "receipt_id": receipt_id, "key": batch["key"]}).get("result", {})
         if stored.get("type") == "Allow":
             return receipt_id, items
         if not (stored.get("type") == "Fault" and stored.get("code") == "conflict"):
-            return stored
-    return stored
+            return PRESENTATION_FAILED
+    return PRESENTATION_FAILED
 
 
 def decisions(items: Sequence[Mapping[str, Any]], answers: object) -> list[dict[str, Any]]:
@@ -229,39 +255,51 @@ class HostConfirmation:
         self._surface = surface_ingress
         self._unrecorded = False
 
-    def observe(self, run_id: str) -> bool:
+    def observe(self, run_id: str) -> Outcome:
         """Before an evaluation: record whether a form can be shown to a human now. Never raises. A surface that could
         not be recorded as present is retried as absent; if even that is not recorded the mediator shows nothing for
-        this call (a stale stored `human` can only change the wording of the route, never cause a pause: the Claude Stop
-        does not pause for evidence at all). True when the core holds the latest observation."""
+        this call and returns ``SURFACE_UNRECORDED`` for the caller to send with the evaluation, so the author is told
+        nobody was asked. A stale stored `human` changes only the route's wording; when a Stop pauses is ADR-0068's rule.
+        ``OK`` when the core holds the latest observation."""
         can_present = self.elicit is not None
-        recorded = self._record(run_id, can_present) or (can_present and self._record(run_id, False))
-        self._unrecorded = not recorded
-        return recorded
+        outcome = observe_surface(self.profile, run_id, can_present, ingress=self._surface)
+        if not outcome.ok and can_present:
+            outcome = observe_surface(self.profile, run_id, False, ingress=self._surface)
+        self._unrecorded = not outcome.ok
+        return outcome
 
-    def _record(self, run_id: str, can_present: bool) -> bool:
+    def __call__(self, result: dict, reevaluate: Callable[[str | None], dict]) -> dict:
+        """Mediate, then return the fresh evaluation whenever the host tried to show the batch, whatever came of it. A
+        batch the host could not present is evaluated again with ``host_failure``; when that evaluation itself fails,
+        the host applies what it knows to the response in hand through the core's own rule (``project_host_failure``).
+        The original response when there was nothing to ask. Mediation never grants and never hides the typed Block."""
         try:
-            return observe_surface(self.profile, run_id, can_present, ingress=self._surface)
-        except Exception:  # noqa: BLE001 - an unrecorded observation is reported to the caller as such
-            return False
-
-    def __call__(self, result: dict, reevaluate: Callable[[], dict]) -> dict:
-        """Mediate, then return the fresh evaluation whenever the batch was shown, whatever the human did: Later, cancel,
-        timeout and a failing dialog grant nothing but spend the derivation, and the fresh response says so. The original
-        response when nothing was shown. Mediation never grants and never hides the typed Block."""
-        try:
-            return reevaluate() if self._ask(result) else result
-        except Exception:  # noqa: BLE001
+            asked = self._ask(result)
+        except Exception:  # noqa: BLE001 - nothing was recorded as shown
+            asked = PRESENTATION_FAILED
+        if asked is None:
             return result
+        try:
+            fresh = reevaluate(asked.failure)
+            if fresh.get("type") in {"Allow", "Block"}:
+                return fresh
+        except Exception:  # noqa: BLE001 - the transport is down: fall through to what this call knows
+            pass
+        return project_host_failure(result, asked.failure) if asked.failure else project_prompt_error(result, "already_presented")
 
-    def _ask(self, result: dict) -> bool:
-        """Show the core's batch once; True once a presentation was admitted (the human may then have answered or not)."""
+    def _ask(self, result: dict) -> Outcome | None:
+        """Show the core's batch once. ``None`` when there was nothing to ask (no batch the core allows presenting, no
+        form, or a surface that was not recorded), ``OK`` once a presentation was admitted (the human may then have
+        answered or not), ``PRESENTATION_FAILED`` when it could not be recorded."""
         if presentable(result) is None or self.elicit is None or self._unrecorded:
-            return False
+            return None
         run_id = result["run"]["id"]
-        shown = present(self.profile, run_id, dispatch=self._dispatch, ingress=self._presentation)
-        if isinstance(shown, dict):
-            return False
+        try:
+            shown = present(self.profile, run_id, dispatch=self._dispatch, ingress=self._presentation)
+        except Exception:  # noqa: BLE001 - nothing was recorded as shown
+            return PRESENTATION_FAILED
+        if isinstance(shown, Outcome):
+            return shown
         receipt_id, items = shown
         try:
             message, schema = form(items, self._timeout() if self._timeout else 900)
@@ -269,4 +307,4 @@ class HostConfirmation:
             submit(self.profile, run_id, receipt_id, items, answers, ingress=self._confirmation)
         except Exception:  # noqa: BLE001 - shown and spent; nothing is granted by a failure
             pass
-        return True
+        return OK

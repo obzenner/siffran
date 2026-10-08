@@ -5,13 +5,14 @@ surface as the Claude and Codex adapters and owns no convergence policy.
 
 ## Capability profile
 
-The promoted profile is qualified on Pi `0.84.1` and admits compatible Pi releases
-`>=0.84.1,<1.1.0`; receipts still record the exact observed Pi version. The profile tier is
+The promoted profile is qualified on Pi `1.1.0` and admits compatible Pi releases
+`>=0.84.1,<2.0.0`; receipts still record the exact observed Pi version. The profile tier is
 `foreground_only`, with `promotion_status=promoted` after an installed-host foreground trace reached
 guarded `Allow(converged=true)`. `pi-subagents` is an external prerequisite
 (`pi install npm:pi-subagents@<reviewed version>`), never bundled or loaded by this package; it must
-provide the structured `subagent` tool. Only the exact versions in `subagents_compatibility.reviewed_versions`
-(`contracts/empirica/v2/host-profiles.json`) are supported; any other version is refused before a run starts. Asynchronous audit execution is not supported and is never silently
+provide the structured `subagent` tool. Versions inside `subagents_compatibility` `[minimum, maximum_exclusive)`
+(`contracts/empirica/v2/host-profiles.json`) are admitted by observation (ADR-0069); a version with a checked-in
+`compat/` record is reviewed, any other is recorded `reviewed: false`. A version outside the range is refused before a run starts. Asynchronous audit execution is not supported and is never silently
 downgraded.
 
 ## Audit runtime ownership

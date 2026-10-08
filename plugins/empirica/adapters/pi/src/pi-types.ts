@@ -37,7 +37,7 @@ export interface ExtensionContext {
 
 export interface CommandDefinition {
   description?: string;
-  /** Pi declares ``Promise<void>`` in 0.84.1, 0.87.1 and 1.0.0; a handler that returns nothing is not accepted. */
+  /** Pi declares ``Promise<void>`` in 0.84.1, 0.87.1, 1.0.0 and 1.1.0; a handler that returns nothing is not accepted. */
   handler: (args: string, ctx: ExtensionContext) => Promise<void>;
 }
 
@@ -61,10 +61,12 @@ export interface ToolCallEvent {
 export interface ToolResultEvent {
   toolCallId: string;
   toolName?: string;
+  /** The only failure signal: no Pi version from 0.84.1 to 1.1.0 declares or emits `tool_result.error`. */
   isError?: boolean;
-  error?: unknown;
   details?: unknown;
   content?: unknown;
+  /** Pi >= 0.99.0: the machine-readable result; a handler that redacts `content` must replace this too. */
+  structuredContent?: unknown;
 }
 
 export interface ToolCallResult {
@@ -128,11 +130,13 @@ export interface SourceInfo {
 export interface ToolInfo {
   name: string;
   sourceInfo: SourceInfo;
+  /** The tool's own parameter schema (Pi 1.1.0 ``ToolInfo.parameters``); read only to admit an unreviewed pi-subagents. */
+  parameters?: unknown;
 }
 
 /**
  * One slash command Pi reports (mirror of ``SlashCommandInfo`` in Pi's ``dist/core/slash-commands.d.ts``
- * lines 3-8 — identical in Pi 0.84.1, 0.87.1 and 1.0.0). Extension commands carry the registering
+ * lines 3-8 — identical in Pi 0.84.1, 0.87.1, 1.0.0 and 1.1.0). Extension commands carry the registering
  * extension's ``sourceInfo``; unlike tools, Pi does not deduplicate them by name (clashes get a ``:n``
  * suffix), so every loaded extension's commands are visible.
  */

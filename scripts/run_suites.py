@@ -3,21 +3,20 @@
 
 Usage: run_suites.py NAME='COMMAND ARGS...' [NAME='COMMAND ...' ...]
 
+Scheduling: every suite runs; when each starts is the rule owned by ``doc/testing.md`` (load admission, longest first,
+the ``JOBS`` cap), not restated here.
+
 The Makefile declares the suites and passes them in; this runner only executes them. Every suite runs in its own process
 group, and its stdout and stderr go to ``<logdir>/<NAME>.log`` (a fresh temporary directory, kept and printed). One status
 line per suite shows its result and elapsed seconds, and a failed suite's log is printed the moment it fails. Exit status is
 1 if any suite failed, else 0.
 
-Limits: a suite that runs longer than ``RUN_SUITES_TIMEOUT`` seconds (a finite number, default 600) is killed and fails with
-a ``timed out`` line. Every launched process group is tracked until it has been cleaned up, even after its leader exits
-(a leader's exit is observed without reaping it, so its group id cannot be reused meanwhile). On completion, failure, timeout
-or interruption, every group still holding a process gets SIGTERM, then SIGKILL after a 5 s grace, and its leader is
-reaped; the runner then checks that every group is empty. The first SIGINT or SIGTERM is recorded and stops the run; later
-ones are deferred until cleanup has finished, which they cannot interrupt. The runner reports "every suite was stopped" only
-when that check passed, and exits 130 or 143 after an interruption. One Python process launches the children, so it needs
-nothing beyond what GNU Make 3.81 provides."""
+Limits: a suite that runs longer than ``RUN_SUITES_TIMEOUT`` seconds (a finite number, default 600) is killed and fails
+with a ``timed out`` line. The signal and cleanup rules (process groups, SIGTERM then SIGKILL, exit 130 or 143) are those of
+:func:`stop` and :func:`run`. One Python process launches the children, so it needs nothing beyond what GNU Make 3.81 provides."""
 from __future__ import annotations
 
+import json
 import math
 import os
 import shlex
@@ -27,9 +26,11 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Callable
 
 DEFAULT_TIMEOUT = 600.0
 GRACE = 5.0
+POLL = 0.05
 
 
 class Interrupted(Exception):
@@ -60,6 +61,75 @@ def timeout_seconds() -> float:
     if not math.isfinite(value) or value <= 0:
         raise SystemExit("run_suites: RUN_SUITES_TIMEOUT must be a finite positive number of seconds")
     return value
+
+
+def jobs_cap() -> int | None:
+    """``JOBS``: an optional hard cap on suites running at once; unset or empty means none."""
+    raw = os.environ.get("JOBS", "").strip()
+    if not raw:
+        return None
+    if not raw.isascii() or not raw.isdigit() or int(raw) < 1:
+        raise SystemExit(f"run_suites: JOBS must be a whole number of at least 1, got {raw!r}")
+    return int(raw)
+
+
+def max_load_limit() -> float:
+    """``RUN_SUITES_MAX_LOAD``: the 1-minute load average below which a queued suite may start (default: CPU count)."""
+    raw = os.environ.get("RUN_SUITES_MAX_LOAD", "").strip()
+    try:
+        value = float(raw) if raw else float(os.cpu_count() or 1)
+    except ValueError:
+        raise SystemExit(f"run_suites: RUN_SUITES_MAX_LOAD must be a number, got {raw!r}") from None
+    if not math.isfinite(value) or value <= 0:
+        raise SystemExit("run_suites: RUN_SUITES_MAX_LOAD must be a finite positive number")
+    return value
+
+
+def system_load() -> float:
+    """The 1-minute load average; 0.0 where it cannot be read (the runner then admits like an idle machine)."""
+    try:
+        return float(os.getloadavg()[0])
+    except (OSError, AttributeError):
+        return 0.0
+
+
+def durations_path() -> Path:
+    raw = os.environ.get("RUN_SUITES_DURATIONS", "").strip()
+    return Path(raw) if raw else Path(tempfile.gettempdir()) / "run-suites-durations.json"
+
+
+def read_durations(path: Path) -> dict[str, float]:
+    """Previous wall times by suite name. Anything unreadable, or not a finite non-negative number, is left out."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {name: float(value) for name, value in data.items()
+            if isinstance(name, str) and isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value) and value >= 0}
+
+
+def order_suites(suites: list[tuple[str, list[str]]], path: Path) -> list[tuple[str, list[str]]]:
+    """Longest first (LPT): suites with no recorded time first, in declared order, then the rest by descending time."""
+    known = read_durations(path)
+    unknown = [suite for suite in suites if suite[0] not in known]
+    timed = sorted((suite for suite in suites if suite[0] in known), key=lambda suite: -known[suite[0]])
+    return unknown + timed
+
+
+def record_durations(path: Path, results: dict[str, tuple[int | str, float]]) -> None:
+    """Merge the wall times of the suites that passed into the file (atomically); a failed suite's time is not kept, and
+    a file that cannot be written is ignored (it only orders the next run)."""
+    merged = read_durations(path)
+    merged.update({name: round(seconds, 1) for name, (code, seconds) in results.items() if code == 0})
+    try:
+        scratch = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        scratch.write_text(json.dumps(merged, sort_keys=True), encoding="utf-8")
+        os.replace(scratch, path)
+    except OSError:
+        pass
 
 
 class Launched:
@@ -136,12 +206,19 @@ def _failed(name: str, code: int | str, seconds: float, logdir: Path, out, note:
 
 
 def run(suites: list[tuple[str, list[str]]], logdir: Path, out=sys.stdout,
-        timeout: float = DEFAULT_TIMEOUT) -> dict[str, tuple[int | str, float]]:
-    """Start every suite at once; return ``{name: (exit_code, seconds)}``. Prints status lines (and a failed suite's log)
-    as each suite finishes. After the suites finish, fail, time out or are interrupted, every launched group is cleaned up
-    (see :func:`stop`); a group that cannot be emptied fails the run. An interruption raises :class:`Interrupted` once
+        timeout: float = DEFAULT_TIMEOUT, *, load: Callable[[], float] = system_load,
+        max_load: float | None = None, jobs: int | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic) -> dict[str, tuple[int | str, float]]:
+    """Start the suites in the given order as the admission rule in ``doc/testing.md`` allows; return
+    ``{name: (exit_code, seconds)}``.
+
+    Prints a start line (also at the top of the suite's log), a status line as each suite finishes, and a failed
+    suite's log. When the suites finish, fail, time out or are interrupted, every launched group is cleaned up (see
+    :func:`stop`); a group that cannot be emptied fails the run. An interruption raises :class:`Interrupted` once
     cleanup is done."""
-    started = time.monotonic()
+    started = clock()
+    limit = max_load if max_load is not None else max_load_limit()
     launched: dict[str, Launched] = {}
     running: dict[str, Launched] = {}
     results: dict[str, tuple[int | str, float]] = {}
@@ -158,8 +235,23 @@ def run(suites: list[tuple[str, list[str]]], logdir: Path, out=sys.stdout,
     clean = True
     try:
         try:
-            for name, command in suites:
+            queue = list(suites)
+            queued_since = clock()
+
+            def start_next(now_load: float) -> None:
+                nonlocal queued_since
+                name, command = queue.pop(0)
+                waited = clock() - queued_since
+                note = f"started at load {now_load:.1f}/{limit:g}"
+                if now_load >= limit:
+                    note += " (nothing was running)"
+                if waited >= 1.0:
+                    note += f" after waiting {waited:.0f}s"
+                queued_since = clock()
                 log = open(logdir / f"{name}.log", "wb")  # noqa: SIM115 - closed by stop()
+                log.write(f"run_suites: {note}\n".encode())
+                log.flush()
+                print(f"  start {name:<10} {note}", file=out, flush=True)
                 try:
                     process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                                                start_new_session=True)
@@ -168,12 +260,21 @@ def run(suites: list[tuple[str, list[str]]], logdir: Path, out=sys.stdout,
                     log.close()
                     results[name] = (127, 0.0)
                     _failed(name, 127, 0.0, logdir, out)
-                    continue
-                launched[name] = running[name] = Launched(process, log, time.monotonic())
-            while running:
+                    return
+                launched[name] = running[name] = Launched(process, log, clock())
+
+            def admit() -> None:
+                while queue and (jobs is None or len(running) < jobs):
+                    now_load = load()
+                    if running and not now_load < limit:
+                        break  # busy: wait; with nothing running one suite always starts (progress guarantee)
+                    start_next(now_load)
+
+            admit()
+            while running or queue:
                 for name, entry in list(running.items()):
                     code = entry.poll()
-                    elapsed = time.monotonic() - entry.began
+                    elapsed = clock() - entry.began
                     if code is None and elapsed > timeout:
                         entry.log.write(f"\nrun_suites: {name} timed out after {timeout:g} s and was killed\n".encode())
                         entry.log.flush()
@@ -189,8 +290,9 @@ def run(suites: list[tuple[str, list[str]]], logdir: Path, out=sys.stdout,
                         entry.log.flush()
                         _failed(name, code, elapsed, logdir, out,
                                 f"  timed out after {timeout:g} s" if code == "timeout" else "")
-                time.sleep(0.05)
-            print(f"  total       {time.monotonic() - started:6.1f}s (wall)", file=out, flush=True)
+                admit()
+                sleep(POLL)
+            print(f"  total       {clock() - started:6.1f}s (wall)", file=out, flush=True)
         except Interrupted:
             pass
         finally:
@@ -209,16 +311,20 @@ def run(suites: list[tuple[str, list[str]]], logdir: Path, out=sys.stdout,
 def main(arguments: list[str]) -> int:
     suites = parse(arguments)
     timeout = timeout_seconds()
+    jobs, limit, history = jobs_cap(), max_load_limit(), durations_path()
+    suites = order_suites(suites, history)
     logdir = Path(tempfile.mkdtemp(prefix="suites-"))
-    print(f"==> {len(suites)} suites in parallel; logs in {logdir}; per-suite timeout {timeout:g} s", flush=True)
+    print(f"==> {len(suites)} suites, load-aware (limit {limit:g}, jobs {jobs if jobs else 'uncapped'}, longest first); "
+          f"logs in {logdir}; per-suite timeout {timeout:g} s", flush=True)
     try:
-        results = run(suites, logdir, timeout=timeout)
+        results = run(suites, logdir, timeout=timeout, max_load=limit, jobs=jobs)
     except Interrupted as interruption:
         claim = ("every suite was stopped" if interruption.stopped
                  else "some processes could not be verified stopped (their groups may still be running)")
         reason = f"interrupted (signal {interruption.signum})" if interruption.signum else "cleanup failed"
         print(f"\nrun_suites: {reason}; {claim}", flush=True)
         return 128 + interruption.signum if interruption.signum else 1
+    record_durations(history, results)
     failed = [name for name, _ in suites if results[name][0] != 0]
     if failed:
         print(f"\nFAILED: {', '.join(failed)}", flush=True)

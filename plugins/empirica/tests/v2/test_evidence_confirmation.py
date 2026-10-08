@@ -17,6 +17,7 @@ from core import governance as core_governance
 from core.evaluation import dossier_artifact_ids, evidence_digest
 from driver import CITED_SOURCE
 from governance_setup import TEST_INVOCATION
+from application.protocol import host_profile_id  # noqa: E402
 
 URL = "https://example.test/spec"
 ABSOLUTE = "/opt/vendor/lib/notes.md"
@@ -44,13 +45,21 @@ def graph_with_decision() -> dict:
 
 
 class EvidenceFixture(ConformanceCase):
-    """Starting a run, recording research and reading the dossier; shared by the host-mediator tests."""
+    """Starting a run, recording research and reading the dossier; shared by the host-mediator tests.
+
+    ``SURFACE_AT_START`` is what the host has observed when the run starts, and the order of events each host really
+    follows. Pi observes ``ctx.hasUI`` at start, so a test that calls the core's trusted ingresses directly (a host
+    that already has its surface) starts ``human``. Claude has not looked at start (``unobserved``) and records the
+    surface only inside ``report_convergence``: ``MediatorFixture`` and ``test_host_faithful`` start that way and
+    observe exactly where Claude does."""
+
+    SURFACE_AT_START = "human"
 
     def start(self, profile: str | None = None, *, graph: dict | None = None, kind: str = "ordinary",
               mode: str = "deliberative", **invocation):
         drv = self.bind_driver("ADR-0067", "slice-1", "verification classes", profile_id=profile)
         run_id = self.start_run(drv, goal="Confirm what the service cannot verify.",
-                                control_mode=mode, invocation={**TEST_INVOCATION, "human_surface": "human", **invocation})
+                                control_mode=mode, invocation={**TEST_INVOCATION, "human_surface": self.SURFACE_AT_START, **invocation})
         self.dispatch(drv, observe_action(run_id=run_id, action=action_route(reason="route")))
         self.dispatch(drv, observe_action(
             run_id=run_id, action=action_graph(graph or canonical_graph(kind=kind))))
@@ -83,8 +92,8 @@ class EvidenceFixture(ConformanceCase):
         return [row["confirm"] for o in self.run_view(drv, run_id)["obligations"]["active"]
                 for row in o["observed"] if row.get("confirm")]
 
-    def report(self, drv, run_id) -> dict:
-        return self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))["result"]
+    def report(self, drv, run_id, host_failure: str | None = None) -> dict:
+        return self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence", host_failure=host_failure))["result"]
 
     def codes(self, result: dict) -> list[str]:
         return [r["code"] for r in result.get("reasons", [])]
@@ -92,11 +101,14 @@ class EvidenceFixture(ConformanceCase):
     def claim(self, drv, run_id, claim_id="C0") -> dict:
         return next(c for c in self.argument(drv, run_id)["claims"] if c["claim_id"] == claim_id)
 
-    def present(self, drv, run_id, receipt="p1", key=None) -> dict:
-        """Present the batch the run shows now (the presentation names the key it was shown under)."""
+    def present_now(self, drv, run_id, receipt="p1", key=None) -> dict:
+        """The core's presentation ingress, with no host step before it: the batch the run shows now, under the key it
+        was shown under. A host fixture overrides ``present`` to add the host's own step first."""
         shown = key or (self.run_view(drv, run_id)["confirmation_batch"] or {}).get("key")
         return drv.trusted_evidence_presentation(
             run_id, {"run_id": run_id, "receipt_id": receipt, "key": shown})["result"]
+
+    present = present_now
 
     def answer(self, drv, run_id, receipt, *decisions) -> dict:
         return drv.trusted_evidence_confirmation(run_id, receipt_of(run_id, receipt, *decisions))["result"]
@@ -176,7 +188,7 @@ class EvidenceConfirmationTests(EvidenceFixture):
         self.assertNotIn("evidence.confirmation_required", self.codes(self.report(drv, run_id)))
 
     def test_without_a_human_ingress_a_record_is_unavailable_from_the_moment_it_is_recorded(self):
-        drv, run_id = self.start("codex-cli@0.146.0", mode="auto", audit_retrieval=[],
+        drv, run_id = self.start(host_profile_id("codex-cli"), mode="auto", audit_retrieval=[],
                                  delegation=True, interactive=False)
         for kind, ref, extra in (("web", URL, {}), ("runtime", NO_REF, {"spike_unavailable": "No harness."})):
             with self.subTest(kind=kind):
@@ -220,7 +232,8 @@ class EvidenceConfirmationTests(EvidenceFixture):
         blocked = self.report(drv, run_id)
         reason = blocked["reasons"][0]
         self.assertEqual(reason["parameters"], {"route": "human", "record_ids": [self.last_id(drv, run_id)]})
-        self.assertEqual(reason["next_actions"], ["human.confirm_evidence", "residual.accept"])
+        # The surface is observed (this host has it from the start), so the report is how the human is asked.
+        self.assertEqual(reason["next_actions"], ["convergence.report", "human.confirm_evidence", "residual.accept"])
 
     def test_the_gate_holds_even_when_another_record_already_approves_the_claim(self):
         drv, run_id = self.start()

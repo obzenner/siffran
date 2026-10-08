@@ -13,7 +13,8 @@ from core.evaluation import (READ_COMMANDS, SPAWN_BUDGET, Decision, EvaluationSn
                              evaluate_snapshot, frozen_scope_invalid, plan_evidence_confirmation, plan_evidence_presentation,
                              plan_spike_request,
                              plan_spike_result, valid_attribution)
-from core.projection import project_argument, project_runview, project_presentation, reason_actions, recovery_actions
+from core.projection import (confirmation_actions, project_argument, project_runview, project_presentation,
+                             recovery_actions)
 from core.ports import RunRepository
 from core.records import Conflict, Corrupt, RunKey
 from core.run import OperationalState, delegated_auto, effective_ceilings, start_admission
@@ -793,11 +794,12 @@ class Coordinator:
         return {"protocol": _proto.protocol_id(), "request_id": request_id, "result": result}
 
     def _reason(self, code: str, parameters: dict[str, Any] | None = None,
-                affected: str | None = None, *, exclusions: tuple[str, ...] = ()):
+                affected: str | None = None):
+        """A reason row with the contract's own recovery actions; a Block built from a snapshot adjusts them (see
+        ``_block_from_snapshot``)."""
         spec = _proto.public_contract()["reasons"][code]
-        next_actions = recovery_actions(exclusions, reason_actions(code, parameters, list(spec["next_actions"])))
         row = {"code": code, "parameters": parameters or {},
-               "next_actions": next_actions, "sections": list(spec["sections"]),
+               "next_actions": list(spec["next_actions"]), "sections": list(spec["sections"]),
                "message": spec["message"]}
         if affected:
             row["affected"] = {"obligation_id": affected}
@@ -808,13 +810,13 @@ class Coordinator:
                              *, presentation: bool = False):
         self.last_snapshot = snapshot
         control_mode = snapshot.state.governance["control_mode"]
-        reason = self._reason(
-            code, parameters, affected,
-            exclusions=snapshot.contract.recovery_exclusions[control_mode],
-        )
+        reason = self._reason(code, parameters, affected)
         run = project_runview(snapshot, select_sections(
             _proto.public_contract(), "block", [code],
             snapshot.state.status if snapshot.state.status != "active" else None))
+        reason["next_actions"] = recovery_actions(
+            snapshot.contract.recovery_exclusions[control_mode],
+            confirmation_actions(code, parameters, reason["next_actions"], run["confirmation_batch"]))
         result = {"type": "Block", "run": run, "reasons": [reason]}
         if presentation:
             result["presentation"] = project_presentation(snapshot)

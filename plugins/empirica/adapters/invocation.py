@@ -32,10 +32,10 @@ def audit_retrieval(profile_id: str) -> list[str]:
 
     Claude reads the plugin-owned auditor definition; Codex has no auditor. Pi observes its own set from
     the live preflight in TypeScript and sends it, so it has no answer here."""
-    family = profile_id.split("@")[0]
-    if family == "codex-cli":
+    host = _proto.host_profile(profile_id)["host_id"]
+    if host == "codex-cli":
         return []
-    if family != "claude-code":
+    if host != "claude-code":
         raise KeyError(profile_id)
     kinds = {kind for tool in _declared_tools(_CLAUDE_AUDITOR) for kind in _CLAUDE_TOOL_RETRIEVAL.get(tool, ())}
     return sorted(kinds)
@@ -48,13 +48,14 @@ def provenance(
     environ: Mapping[str, str],
     *,
     profile_id: str,
-    human_surface: str = "unavailable",
+    human_surface: str = "unobserved",
 ) -> dict[str, object]:
     """Build the canonical attested invocation provenance shape.
 
     ``human_surface`` is what the host observes it can show a human at start; a host that cannot yet tell
-    (Claude's hook runs before the MCP client has declared form elicitation) starts ``unavailable`` and
-    updates it through the private ingress at every ``report_convergence``."""
+    (Claude's hook runs before the MCP client has declared form elicitation) starts ``unobserved`` and records
+    ``human`` or ``unavailable`` through the private ingress inside ``report_convergence``. A host that knows at
+    start (Pi's ``ctx.hasUI``) or has no human ingress at all (Codex) passes its answer."""
     delegation_env = _proto.host_profile(profile_id)["delegation_env"]
     return {
         "host": host,

@@ -25,6 +25,9 @@ HOOKS = PLUGIN / "hooks"
 if str(PLUGIN) not in sys.path:
     sys.path.insert(0, str(PLUGIN))
 
+from application.protocol import host_profile_id  # noqa: E402
+CLAUDE_PROFILE = host_profile_id("claude-code")
+
 _ENTRYPOINTS = {
     "run_start.py": "run_start_main",
     "spawn_gate.py": "spawn_main",
@@ -120,6 +123,23 @@ class ClaudeAuditorAliasTests(unittest.TestCase):
         self.assertEqual(self._alias("claude-sonnet-5", env), "opus")
         with self.assertRaisesRegex(RuntimeError, "ANTHROPIC_DEFAULT_FABLE_MODEL"):
             self._alias("claude-opus-4-8", env)
+
+    # The user's core configuration: Bedrock, main Opus 4.8 [1m], Opus/Sonnet/Haiku pinned. The
+    # reviewer family follows the *observed* main model and the pins, in REVIEWER_FAMILIES order.
+    BEDROCK = {"CLAUDE_CODE_USE_BEDROCK": "1",
+               "ANTHROPIC_DEFAULT_OPUS_MODEL": "eu.anthropic.claude-opus-4-8[1m]",
+               "ANTHROPIC_DEFAULT_SONNET_MODEL": "eu.anthropic.claude-sonnet-5-5",
+               "ANTHROPIC_DEFAULT_HAIKU_MODEL": "eu.anthropic.claude-haiku-5-5"}
+
+    def test_EHB_MODEL_04_bedrock_main_opus_with_all_pins_reviews_on_sonnet(self):
+        self.assertEqual(self._alias("eu.anthropic.claude-opus-4-8[1m]", dict(self.BEDROCK)), "sonnet")
+
+    def test_EHB_MODEL_05_bedrock_main_opus_without_the_sonnet_pin_falls_to_haiku(self):
+        env = {key: value for key, value in self.BEDROCK.items() if key != "ANTHROPIC_DEFAULT_SONNET_MODEL"}
+        self.assertEqual(self._alias("eu.anthropic.claude-opus-4-8[1m]", env), "haiku")
+
+    def test_EHB_MODEL_06_bedrock_main_sonnet_with_all_pins_reviews_on_opus(self):
+        self.assertEqual(self._alias("eu.anthropic.claude-sonnet-5-5", dict(self.BEDROCK)), "opus")
 
     def test_unobservable_main_family_fails_closed_with_pin_guidance(self):
         with self.assertRaisesRegex(RuntimeError, "CLAUDE_CODE_SUBAGENT_MODEL"):
@@ -472,7 +492,7 @@ class TransportProfileTests(unittest.TestCase):
         with patch_target(bridge, "handle", fake_handle):
             from adapters.claude.run_start import dispatch_start_run
             dispatch_start_run(_payload(command_args="prove X"), environ={})
-        self.assertEqual(captured["profile_id"], "claude-code@2.1.278")
+        self.assertEqual(captured["profile_id"], CLAUDE_PROFILE)
         self.assertEqual(captured["command_type"], "StartRun")
 
 

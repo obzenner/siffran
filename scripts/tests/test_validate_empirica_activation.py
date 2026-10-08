@@ -37,7 +37,7 @@ class ReadmeRuntimeTests(unittest.TestCase):
     """The README's supported-versions table is the contract's reviewed list, nothing else."""
 
     def peers(self):
-        return activation.recorded_peers(activation.PI_PROFILE["subagents_compatibility"])
+        return activation.recorded_peers()
 
     def requires(self, version):
         return activation.pi_requirement(self.peers()[version], activation.PI_PROFILE["compatibility"]["minimum"])
@@ -49,11 +49,11 @@ class ReadmeRuntimeTests(unittest.TestCase):
         fallback = activation.pi_fallback({v: self.requires(v) for v in self.peers()},
                                           activation.PI_PROFILE["compatibility"]["minimum"])
         older = f"Pi <{fallback[0]}: `pi-subagents@{fallback[1]}`" if instruction and fallback else ""
-        return (f"{activation.pi_interval(activation.PI_PROFILE)} {policy['policy_id']} "
+        return (f"{activation.pi_interval(activation.PI_PROFILE)} >={policy['minimum']},<{policy['maximum_exclusive']} {policy['policy_id']} "
                 f"{activation.UNREVIEWED_DISCLOSURE} {older}\n{rows}\n")
 
     def versions(self):
-        return activation.PI_PROFILE["subagents_compatibility"]["reviewed_versions"]
+        return activation.reviewed_versions()
 
     def test_the_committed_readme_is_accepted(self):
         self.assertEqual(activation.readme_runtime_problems(README.read_text(encoding="utf-8"), activation.PI_PROFILE), [])
@@ -65,9 +65,15 @@ class ReadmeRuntimeTests(unittest.TestCase):
         problems = activation.readme_runtime_problems(self.table(self.versions()[1:]), activation.PI_PROFILE)
         self.assertEqual(problems, [f"README supported-versions table has no row for pi-subagents {self.versions()[0]}"])
 
-    def test_an_unreviewed_version_in_the_table_is_named(self):
+    def test_a_version_with_no_compat_record_in_the_table_is_named(self):
         problems = activation.readme_runtime_problems(self.table([*self.versions(), "9.9.9"]), activation.PI_PROFILE)
-        self.assertEqual(problems, ["README lists pi-subagents 9.9.9, which the contract does not review"])
+        self.assertEqual(problems, ["README lists pi-subagents 9.9.9, which has no compat record"])
+
+    def test_a_readme_that_omits_the_supported_range_is_named(self):
+        policy = activation.PI_PROFILE["subagents_compatibility"]
+        text = self.table(self.versions()).replace(f">={policy['minimum']},<{policy['maximum_exclusive']}", "")
+        problems = activation.readme_runtime_problems(text, activation.PI_PROFILE)
+        self.assertEqual(problems, [f"README omits the supported pi-subagents range >={policy['minimum']},<{policy['maximum_exclusive']}"])
 
     def test_a_stale_interval_or_dropped_fail_closed_sentence_is_named(self):
         text = self.table(self.versions()).replace(activation.pi_interval(activation.PI_PROFILE), ">=0.84.1,<0.90.0")
@@ -77,12 +83,12 @@ class ReadmeRuntimeTests(unittest.TestCase):
 
     def test_the_requires_pi_column_is_derived_from_the_recorded_pi_ai_peer(self):
         self.assertEqual({v: self.requires(v) for v in self.versions()},
-                         {"0.50.0": ">=0.84.1", "0.64.0": ">=0.84.1", "0.74.0": ">=0.86.1", "0.75.0": ">=0.86.1"})
+                         {"0.50.0": ">=0.84.1", "0.64.0": ">=0.84.1", "0.74.0": ">=0.86.1", "0.75.0": ">=0.86.1", "0.76.1": ">=0.86.1"})
         self.assertEqual(activation.pi_fallback({v: self.requires(v) for v in self.versions()}, "0.84.1"),
                          ("0.86.1", "0.64.0"))
 
     def test_a_row_missing_the_recorded_pi_floor_is_named(self):
-        for version in ("0.74.0", "0.75.0"):
+        for version in ("0.74.0", "0.75.0", "0.76.1"):
             with self.subTest(version=version):
                 text = self.table(self.versions(), requires={version: ">=0.84.1"})
                 problems = activation.readme_runtime_problems(text, activation.PI_PROFILE)
@@ -116,7 +122,6 @@ class ReadmeRuntimeTests(unittest.TestCase):
 
     def test_the_skill_interval_is_read_from_the_contract(self):
         self.assertIn(activation.pi_interval(activation.PI_PROFILE), activation.REQUIRED_SKILL_DISCLOSURES)
-        self.assertEqual(activation.pi_interval(activation.PI_PROFILE), ">=0.84.1,<1.1.0")
 
 
 if __name__ == "__main__":

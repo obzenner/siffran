@@ -31,7 +31,7 @@ def main() -> int:
         ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
     plugin_version = json.loads(
         (repo / "plugins/empirica/.claude-plugin/plugin.json").read_text(encoding="utf-8"))["version"]
-    profile, _, role = EXPECTED[args.host]
+    profile, role = EXPECTED[args.host]
     host_version = native_version(args.host, args.version_output)
     require_compatible_version(args.host, host_version)
     state, child = state_facts(args.state, role)

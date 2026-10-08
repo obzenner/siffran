@@ -19,13 +19,15 @@ export interface AuditLaunchDecision {
  */
 export function preflightLaunch(request: Record<string, unknown>): {
   readonly async: unknown; readonly output_mode: unknown; readonly force_top_level_async: unknown;
+  readonly context: unknown;
 } {
-  return { async: request.async, output_mode: request.outputMode, force_top_level_async: request.forceTopLevelAsync };
+  return { async: request.async, output_mode: request.outputMode, force_top_level_async: request.forceTopLevelAsync,
+    context: request.context };
 }
 
 /**
- * The host-owned launch fields: the dossier task, the resolved model and scope, a foreground run,
- * the read-only acceptance exemption, and the contract-owned timeout and tool budget. pi-subagents may
+ * The host-owned launch fields: the dossier task, the resolved model and scope, a foreground run, the read-only
+ * acceptance exemption, an explicit fresh context, and the contract-owned timeout and tool budget. pi-subagents may
  * classify the original author call before the task is replaced, so the acceptance exemption is explicit:
  * a canonical auditor must not be assigned writer evidence gates by extension ordering.
  */
@@ -35,6 +37,10 @@ export function auditLaunchInput(decision: AuditLaunchDecision): Record<string, 
     model: decision.model,
     agentScope: decision.agentScope,
     async: false,
+    // pi-subagents resolves an omitted `context` from the operator's `defaultSubagentContext` (0.64.0 and
+    // later), which can be `fork`: the auditor would then inherit the author's transcript. Every reviewed
+    // version declares `context`, so the pin is explicit. The author may not send it (canonicalAuditorInputError).
+    context: "fresh",
     acceptance: { level: "none",
       reason: "Empirica's bound canonical auditor is read-only and has its own verdict contract." },
     ...auditLaunchFields(decision.policy),

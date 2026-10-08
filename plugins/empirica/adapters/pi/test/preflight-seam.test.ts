@@ -8,12 +8,14 @@ import { readdirSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { THINKING_LEVELS } from "../src/host-profile.ts";
+import { AUDIT_LAUNCH_POLICY, THINKING_LEVELS } from "../src/host-profile.ts";
 import {
   ACCEPTED_LAUNCH_CONTRACT_VERSIONS, admitAuditPreflight, withoutThinkingLevel,
   type AuditPreflightDescriptor,
 } from "../src/preflight-seam.ts";
-import { COMPAT_DIR, loadInventory } from "../src/subagent-inventory.ts";
+import { AUDIT_LAUNCH_PARAMETERS, COMPAT_DIR, loadInventory, observeInventory, reviewedActionNames } from "../src/subagent-inventory.ts";
+import { schemaDeclaring } from "./owner-fixture.ts";
+import { reviewedVersions } from "./compat-versions.ts";
 import { AUDITOR, bound, FIXTURES } from "./preflight-fixtures.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -23,8 +25,8 @@ const VERSIONS = FIXTURES.map((fixture) => fixture.version);
 function descriptor(version: string, overrides: Partial<AuditPreflightDescriptor> = {}): AuditPreflightDescriptor {
   return {
     version, inventory: loadInventory(version),
-    expected: { agent_file_path: AUDITOR, model: "audit/reviewer" },
-    launch: { async: false, output_mode: undefined, force_top_level_async: undefined },
+    expected: { agent_file_path: AUDITOR, model: "audit/reviewer", child_tools: AUDIT_LAUNCH_POLICY.audit_child_tools },
+    launch: { async: false, output_mode: undefined, force_top_level_async: undefined, context: "fresh" },
     canonical: (file) => path.resolve(file),
     ...overrides,
   };
@@ -34,7 +36,7 @@ const refusal = (admission: ReturnType<typeof admitAuditPreflight>) =>
   admission.kind === "refuse" ? admission.code : `accepted ${JSON.stringify(admission.contract)}`;
 
 test("fixtures exist for both launch-contract generations, each with a reviewed inventory", () => {
-  assert.deepEqual(VERSIONS, ["0.50.0", "0.64.0", "0.74.0", "0.75.0"]);
+  assert.deepEqual(VERSIONS, reviewedVersions(), "a fixture for exactly every reviewed version");
   for (const fixture of FIXTURES) {
     assert.ok(loadInventory(fixture.version), `no inventory for ${fixture.version}`);
     assert.ok(ACCEPTED_LAUNCH_CONTRACT_VERSIONS.includes(bound(fixture.cases.canonical_auditor).contract.version));
@@ -60,8 +62,7 @@ test("the canonical auditor is accepted from every captured package, thinking le
   for (const fixture of FIXTURES) {
     const admission = admitAuditPreflight(descriptor(fixture.version), bound(fixture.cases.canonical_auditor));
     assert.deepEqual(admission, { kind: "accept", contract: {
-      agent_file_path: AUDITOR, model: "audit/reviewer", audit_retrieval: ["local", "workspace"],
-      launch_contract_version: loadInventory(fixture.version)!.launch_contract_version } }, fixture.version);
+      agent_file_path: AUDITOR, model: "audit/reviewer", audit_retrieval: ["local", "workspace"] } }, fixture.version);
   }
 });
 
@@ -73,7 +74,7 @@ test("a v3 contract has no modelCandidates and the seam reads contract.model; v2
     else { response.contract.model = "audit/reviewer:xhigh"; response.contract.modelCandidates = ["decoy/model:high"]; }
     assert.deepEqual(admitAuditPreflight(descriptor(fixture.version), response),
       { kind: "accept", contract: { agent_file_path: AUDITOR, model: "audit/reviewer",
-        audit_retrieval: ["local", "workspace"], launch_contract_version: response.contract.version } }, fixture.version);
+        audit_retrieval: ["local", "workspace"] } }, fixture.version);
   }
 });
 
@@ -101,11 +102,11 @@ test("the seam refuses a substituted model, with or without a thinking level", (
     const response = bound(fixture.cases.canonical_auditor);
     for (const configured of ["audit/other", "other/reviewer", "audit/reviewer:0"])
       assert.equal(refusal(admitAuditPreflight(
-        descriptor(fixture.version, { expected: { agent_file_path: AUDITOR, model: configured } }), response)),
+        descriptor(fixture.version, { expected: { agent_file_path: AUDITOR, model: configured, child_tools: AUDIT_LAUNCH_POLICY.audit_child_tools } }), response)),
       "model-substituted", `${fixture.version} ${configured}`);
     // A configured level is irrelevant to identity: the model, not its level, is compared.
     assert.equal(admitAuditPreflight(descriptor(fixture.version,
-      { expected: { agent_file_path: AUDITOR, model: "audit/reviewer:max" } }), response).kind, "accept");
+      { expected: { agent_file_path: AUDITOR, model: "audit/reviewer:max", child_tools: AUDIT_LAUNCH_POLICY.audit_child_tools } }), response).kind, "accept");
   }
 });
 
@@ -169,13 +170,31 @@ test("the seam refuses forced-async, non-foreground, and non-inline launch reque
   const fixture = FIXTURES.at(-1)!;
   const response = bound(fixture.cases.canonical_auditor);
   const launch = (overrides: Partial<AuditPreflightDescriptor["launch"]>) =>
-    descriptor(fixture.version, { launch: { async: false, output_mode: undefined, force_top_level_async: undefined, ...overrides } });
+    descriptor(fixture.version, { launch: { async: false, output_mode: undefined, force_top_level_async: undefined, context: "fresh", ...overrides } });
   assert.equal(refusal(admitAuditPreflight(launch({ force_top_level_async: true }), response)), "forced-async");
   for (const value of [true, undefined, null, "false", 0])
     assert.equal(refusal(admitAuditPreflight(launch({ async: value }), response)), "not-foreground", String(value));
   assert.equal(refusal(admitAuditPreflight(launch({ output_mode: "file-only" }), response)), "output-mode-not-inline");
   assert.equal(refusal(admitAuditPreflight(launch({ output_mode: "other" }), response)), "output-mode-not-inline");
   assert.equal(admitAuditPreflight(launch({ output_mode: "inline", force_top_level_async: false }), response).kind, "accept");
+});
+
+test("EHB-AUDLAUNCH-02: the seam refuses a launch whose context is not fresh, and a preflight that resolved another context", () => {
+  const fixture = FIXTURES.at(-1)!;
+  const response = bound(fixture.cases.canonical_auditor);
+  const launch = (overrides: Partial<AuditPreflightDescriptor["launch"]>) =>
+    descriptor(fixture.version, { launch: { async: false, output_mode: undefined, force_top_level_async: undefined, context: "fresh", ...overrides } });
+  for (const value of [undefined, "fork", "profile", null, ""])
+    assert.equal(refusal(admitAuditPreflight(launch({ context: value }), response)), "context-not-fresh", String(value));
+  assert.equal(admitAuditPreflight(launch({ context: "fresh" }), response).kind, "accept");
+  for (const fixture of FIXTURES) {
+    const forked = bound(fixture.cases.canonical_auditor);
+    forked.contract.context = "fork";
+    assert.equal(refusal(admitAuditPreflight(descriptor(fixture.version), forked)), "context-not-fresh", fixture.version);
+    const silent = bound(fixture.cases.canonical_auditor);
+    delete silent.contract.context;
+    assert.equal(refusal(admitAuditPreflight(descriptor(fixture.version), silent)), "context-not-fresh", `${fixture.version} reports no context`);
+  }
 });
 
 test("the seam refuses responses that are not a preflight answer", () => {
@@ -222,4 +241,59 @@ test("withoutThinkingLevel takes its levels from the data it is given, not from 
   assert.equal(withoutThinkingLevel("a/b:turbo", new Set(["turbo"])), "a/b");
   assert.equal(withoutThinkingLevel("a/b:high", new Set(["turbo"])), "a/b:high");
   assert.equal(withoutThinkingLevel("a/b:high", new Set()), "a/b:high");
+});
+
+test("an auditor given any tool outside audit_child_tools is refused for every version, reviewed or observed", () => {
+  const observed = observeInventory("0.99.0", schemaDeclaring(AUDIT_LAUNCH_PARAMETERS), reviewedActionNames());
+  assert.equal(observed.ok, true);
+  const inventories = [...VERSIONS.map((version) => ({ version, inventory: loadInventory(version) })),
+    { version: "0.99.0", inventory: observed.ok ? observed.inventory : undefined }];
+  for (const { version, inventory } of inventories) {
+    const fixture = FIXTURES.find((f) => f.version === (version === "0.99.0" ? "0.76.1" : version))!;
+    for (const extra of ["edit", "write", "bash", "subagent"]) {
+      const response = bound(fixture.cases.canonical_auditor);
+      response.contract.protocol.packageVersion = version;
+      response.contract.tools.effectiveAllowlist = [...response.contract.tools.effectiveAllowlist, extra];
+      const admission = admitAuditPreflight(descriptor(version, { inventory }), response);
+      assert.equal(refusal(admission), "tools-not-read-only", `${version} + ${extra}`);
+      if (admission.kind === "refuse") assert.match(admission.detail, new RegExp(`"${extra}"`));
+    }
+  }
+});
+
+test("the five-tool set the 0.74/0.75/0.76.1 packages emit (with contact_supervisor) is admitted", () => {
+  for (const fixture of FIXTURES.filter((f) => ["0.74.0", "0.75.0", "0.76.1"].includes(f.version))) {
+    const response = bound(fixture.cases.canonical_auditor);
+    assert.deepEqual(response.contract.tools.effectiveAllowlist, ["read", "grep", "find", "ls", "contact_supervisor"]);
+    assert.equal(admitAuditPreflight(descriptor(fixture.version), response).kind, "accept", fixture.version);
+  }
+});
+
+// ADR-0069: a version with no compat record is admitted by the seam alone, so each property of the preflight and
+// of the launch request must refuse it with its own code.
+test("an observed inventory (no compat record) is admitted by a good preflight and refused for each broken property", () => {
+  const observed = observeInventory("0.99.0", schemaDeclaring(AUDIT_LAUNCH_PARAMETERS), reviewedActionNames());
+  assert.equal(observed.ok, true);
+  if (!observed.ok) return;
+  const inventory = observed.inventory;
+  assert.equal(inventory.launch_contract_version, null);
+  const good = () => { const response = bound(FIXTURES.at(-1)!.cases.canonical_auditor); response.contract.protocol.packageVersion = "0.99.0"; return response; };
+  const launch = (patch: Partial<AuditPreflightDescriptor["launch"]>) =>
+    descriptor("0.99.0", { inventory, launch: { async: false, output_mode: undefined, force_top_level_async: undefined, context: "fresh", ...patch } });
+  assert.equal(admitAuditPreflight(descriptor("0.99.0", { inventory }), good()).kind, "accept");
+  const cases: Array<[string, AuditPreflightDescriptor, unknown, string]> = [
+    ["async launch", launch({ async: true }), good(), "not-foreground"],
+    ["forced async", launch({ force_top_level_async: true }), good(), "forced-async"],
+    ["output not inline", launch({ output_mode: "file" }), good(), "output-mode-not-inline"],
+    ["launch context fork", launch({ context: "fork" }), good(), "context-not-fresh"],
+    ["response context fork", launch({}), Object.assign(good(), { contract: { ...good().contract, context: "fork" } }), "context-not-fresh"],
+    ["unknown contract version", launch({}), Object.assign(good(), { contract: { ...good().contract, version: 9 } }), "launch-contract-version"],
+    ["package version differs", launch({}), (() => { const r = good(); r.contract.protocol.packageVersion = "0.98.0"; return r; })(), "owner-version-mismatch"],
+    ["shadowed auditor", launch({}), (() => { const r = good(); r.contract.agent.filePath = "/shadow/auditor.md"; return r; })(), "agent-not-canonical"],
+    ["substituted model", descriptor("0.99.0", { inventory, expected: { agent_file_path: AUDITOR, model: "other/model", child_tools: AUDIT_LAUNCH_POLICY.audit_child_tools } }), good(), "model-substituted"],
+    ["a writing tool", launch({}), (() => { const r = good(); r.contract.tools.effectiveAllowlist.push("bash"); return r; })(), "tools-not-read-only"],
+    ["preflight refused", launch({}), { ok: false, message: "no" }, "preflight-refused"],
+    ["not an object", launch({}), "nope", "malformed-response"],
+  ];
+  for (const [label, d, response, code] of cases) assert.equal(refusal(admitAuditPreflight(d, response)), code, label);
 });

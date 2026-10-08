@@ -45,13 +45,14 @@ class TextSafety:
 
 @dataclass(frozen=True)
 class Header:
-    """First-line result, run, governance summary, and public proposal rationale."""
+    """First-line result, run, governance summary, public proposal rationale, and the unreviewed-runtime note."""
 
     result_type: Trusted
     status: Trusted
     governance: Trusted
     run_id: Trusted
     proposal_rationale: Untrusted | None
+    host_note: Trusted | None = None
 
 
 @dataclass(frozen=True)
@@ -281,8 +282,9 @@ def _child_label(row: dict[str, Any], safety: TextSafety) -> Trusted | Untrusted
     return safety.untrusted(row["purpose"])
 
 
-_WAIT_STATE = {None: "waiting_none_error", "unavailable": "waiting_unavailable",
-               "already_presented": "waiting_already_presented", "interaction_limit": "waiting_interaction_limit"}
+_WAIT_STATE = {None: "waiting_none_error", "unavailable": "waiting_unavailable", "unobserved": "waiting_unobserved",
+               "already_presented": "waiting_already_presented", "interaction_limit": "waiting_interaction_limit",
+               "surface_unrecorded": "waiting_surface_unrecorded", "presentation_failed": "waiting_presentation_failed"}
 
 
 def _waiting(run: dict[str, Any], safety: TextSafety) -> tuple[str, ...]:
@@ -307,9 +309,12 @@ def _parse(result: dict[str, Any]) -> AuthorView:
     if result_type == "Allow":
         result_type += f" ({_LABELS['converged']}{'true' if result['converged'] else 'false'})"
     rationale = run["governance"]["proposal"]["rationale"] if run["governance"] is not None else None
+    unreviewed = run["host"].get("unreviewed_runtime")
+    host_note = (Trusted(f"{_LABELS['host_unreviewed']} {unreviewed['package']} {unreviewed['version']} "
+                         f"{_LABELS['host_unreviewed_note']}") if unreviewed is not None else None)
     header = Header(Trusted(result_type), Trusted(run["status"]), _governance(run),
                     Trusted(run["id"]),
-                    safety.untrusted(rationale) if rationale is not None else None)
+                    safety.untrusted(rationale) if rationale is not None else None, host_note)
     terminal_next = tuple(render_surface(action) for action in run["next_actions"])
     terminal = run["status"] != "active"
     obligations = tuple(
@@ -405,6 +410,7 @@ def _render(view: AuthorView) -> str:
             f"{_LABELS['run_id']} {view.header.run_id}",
             *((f"{_LABELS['proposal_rationale']} {view.header.proposal_rationale}",)
               if view.header.proposal_rationale is not None else ()),
+            *((view.header.host_note,) if view.header.host_note is not None else ()),
             *_audit_lines(view.audit))
     sections = (
         (_LABELS["reasons"], _reason_lines(view.reasons)),

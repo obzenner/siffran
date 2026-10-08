@@ -785,8 +785,9 @@
         "human_wait",
         "evidence_wait",
         "budget_exhausted",
-        "surface_unrecorded",
-        "evidence_report"
+        "evidence_report",
+        "paused_for_human",
+        "unattended_continue"
       ],
       "properties": {
         "human_wait": {
@@ -802,13 +803,19 @@
           "minLength": 1,
           "pattern": "^[^{}]*\\{resource\\}[^{}]*$"
         },
-        "surface_unrecorded": {
-          "type": "string",
-          "minLength": 1
-        },
         "evidence_report": {
           "type": "string",
           "minLength": 1
+        },
+        "paused_for_human": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^{}]*\\{reason\\}[^{}]*$"
+        },
+        "unattended_continue": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^{}]*\\{reason\\}[^{}]*$"
         }
       }
     },
@@ -829,6 +836,8 @@
             "converged",
             "run_id",
             "proposal_rationale",
+            "host_unreviewed",
+            "host_unreviewed_note",
             "audit",
             "finding",
             "reasons",
@@ -867,8 +876,11 @@
             "waiting_for_claim",
             "waiting_none_error",
             "waiting_unavailable",
+            "waiting_unobserved",
             "waiting_already_presented",
             "waiting_interaction_limit",
+            "waiting_surface_unrecorded",
+            "waiting_presentation_failed",
             "verified_by_service",
             "confirmed_by_human",
             "rejected_by_human",
@@ -901,6 +913,14 @@
               "minLength": 1
             },
             "proposal_rationale": {
+              "type": "string",
+              "minLength": 1
+            },
+            "host_unreviewed": {
+              "type": "string",
+              "minLength": 1
+            },
+            "host_unreviewed_note": {
               "type": "string",
               "minLength": 1
             },
@@ -1061,6 +1081,18 @@
               "minLength": 1
             },
             "waiting_interaction_limit": {
+              "type": "string",
+              "minLength": 1
+            },
+            "waiting_surface_unrecorded": {
+              "type": "string",
+              "minLength": 1
+            },
+            "waiting_presentation_failed": {
+              "type": "string",
+              "minLength": 1
+            },
+            "waiting_unobserved": {
               "type": "string",
               "minLength": 1
             },

@@ -21,6 +21,7 @@ sys.path.insert(0, str(PLUGIN))
 
 from adapters.author_view import render_author_view, validate_public_result  # noqa: E402
 from application.protocol import contract_result, next_action_surfaces  # noqa: E402
+from core.projection import confirmation_actions  # noqa: E402
 
 FIXTURES = ROOT / "contracts" / "empirica" / "v2" / "fixtures"
 GOLDEN_DIR = ROOT / "plugins" / "empirica" / "adapters" / "pi" / "test" / "author-view-golden"
@@ -141,9 +142,10 @@ def _synthetic_results() -> list[tuple[str, object]]:
                                                   "parameters": {}},
                        next=list(failed_metadata["next_actions"]))
 
-    # What waits on a human (the batch), in each of the four states a human can be in, with a hostile source.
+    # What waits on a human (the batch), in each state a human can be in, with a hostile source.
     waiting = {}
-    for state in (None, "unavailable", "already_presented", "interaction_limit"):
+    for state in (None, "unavailable", "unobserved", "already_presented", "interaction_limit",
+                  "surface_unrecorded", "presentation_failed"):
         view = copy.deepcopy(open_claim)
         view["run"]["confirmation_batch"] = {
             "key": "sha256:" + "5" * 64, "record_ids": ["sha256:" + "6" * 64, "sha256:" + "7" * 64],
@@ -166,17 +168,23 @@ def _synthetic_results() -> list[tuple[str, object]]:
         parameters = {"route": route, "record_ids": records, **({"claim_ids": list(claim_ids)} if claim_ids else {})}
         view["reasons"] = [{"code": "evidence.confirmation_required", "message": meta["message"],
                             "parameters": parameters, "sections": meta["sections"],
-                            "next_actions": meta["next_actions"] if route == "human" else ["residual.accept"]}]
+                            "next_actions": confirmation_actions(
+                                "evidence.confirmation_required", parameters, list(meta["next_actions"]),
+                                view["run"]["confirmation_batch"])}]
         return view
 
     evidence = {"evidence-reason-askable": evidence_reason("human", None),
                 "evidence-reason-later": evidence_reason("human", "already_presented"),
                 "evidence-reason-unavailable": evidence_reason("unavailable", "unavailable"),
+                "evidence-reason-unobserved": evidence_reason("unobserved", "unobserved"),
+                "evidence-reason-surface-unrecorded": evidence_reason("unobserved", "surface_unrecorded"),
+                "evidence-reason-presentation-failed": evidence_reason("human", "presentation_failed"),
                 "evidence-reason-mixed": evidence_reason("human", None, ["D1"])}
     stopped = copy.deepcopy(json.loads((FIXTURES / "allow-stopped-budget.json").read_text())["expected"]["result"])
     stopped["run"]["residuals"] = [{"code": "evidence.confirmation_required", "sections": meta["sections"],
                                     "parameters": {"route": "human", "record_ids": records},
-                                    "next_actions": meta["next_actions"]}]
+                                    "next_actions": confirmation_actions(
+                                        "evidence.confirmation_required", {"route": "human"}, list(meta["next_actions"]), None)}]
     evidence["evidence-reason-terminal-residual"] = stopped
 
     # The author reads what the human answered: every verification status, the note, the decision and its answer.
@@ -195,7 +203,12 @@ def _synthetic_results() -> list[tuple[str, object]]:
         {**claim, "claim_id": "D2", "kind": "needs-decision", "state": "discarded",
          "human_decision": {"outcome": "reject", "answer": None}}]
 
+    # A Pi run whose pi-subagents was admitted by observation (no compat record) says so once, under the header (ADR-0069).
+    unreviewed_runtime = copy.deepcopy(bootstrap)
+    unreviewed_runtime["run"]["host"]["unreviewed_runtime"] = {"package": "pi-subagents", "version": "0.99.0"}
+
     return [
+        ("host-unreviewed-runtime", unreviewed_runtime),
         *waiting.items(),
         *evidence.items(),
         ("getargument-human-answers", answered),

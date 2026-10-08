@@ -1,6 +1,6 @@
 # `@siffran/methodologist-pi`
 
-Turnkey Pi 0.84.1 package for the shared Methodologist plugin. It registers
+Turnkey Pi package (Pi `>=0.84.1,<2.0.0`) for the shared Methodologist plugin. It registers
 `/think`, contributes the existing `think` skill, retrieves the complete catalog
 from the host-neutral `methodologist/v1` bridge, and starts the methodology the
 user selects. The bridge calls the shared

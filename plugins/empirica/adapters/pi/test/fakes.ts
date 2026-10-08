@@ -2,6 +2,8 @@
 // registration, translation, gating, and guard behaviour, with no Pi runtime
 // and no network.
 
+import { readFileSync } from "node:fs";
+import { HOST_PROFILES_PATH } from "../src/host-profile.ts";
 import type {
   CommandDefinition,
   ExtensionAPI,
@@ -149,4 +151,12 @@ export class FakePi implements ExtensionAPI {
     }
     return handler;
   }
+}
+
+/** The profile id of a host as `host-profiles.json` declares it: the one place a test learns an id. */
+export function contractProfileId(hostId: string): string {
+  const document = JSON.parse(readFileSync(HOST_PROFILES_PATH, "utf8")) as { profiles: { host_id: string; profile_id: string }[] };
+  const ids = document.profiles.filter((profile) => profile.host_id === hostId).map((profile) => profile.profile_id);
+  if (ids.length !== 1) throw new Error(`expected one profile for ${hostId}, found ${ids.length}`);
+  return ids[0];
 }

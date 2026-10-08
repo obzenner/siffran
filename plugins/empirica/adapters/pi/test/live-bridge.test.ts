@@ -15,12 +15,13 @@ import { mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createStdioBridgeDispatch, HOST_PROFILE_ID } from "../src/stdio-transport.ts";
+import { HOST_PROFILE_ID } from "../src/host-profile.ts";
+import { createStdioBridgeDispatch } from "../src/stdio-transport.ts";
 import { startRunRequest, startRunNotice, resolveRunRequest, evaluateRunRequest, observeActionRequest, getRunRequest } from "../src/translate.ts";
 import { govern, refreshGovernance, piGovernanceContext } from "../src/governance-ui.ts";
 import { createPrivateIngress } from "../src/private-transport.ts";
 import { runJsonProcess } from "../src/process-transport.ts";
-import { fakeCtx } from "./fakes.ts";
+import { contractProfileId, fakeCtx } from "./fakes.ts";
 import { recordedInvocation } from "./owner-fixture.ts";
 import type { Response } from "../src/contract.ts";
 
@@ -303,7 +304,7 @@ test(
 test(
   "live bridge: the exact profile is set in the transport env (no default)",
   () => {
-    assert.equal(HOST_PROFILE_ID, "pi@0.84.1+pi-subagents-foreground-audit-v1");
+    assert.equal(HOST_PROFILE_ID, contractProfileId("pi"));
   },
 );
 

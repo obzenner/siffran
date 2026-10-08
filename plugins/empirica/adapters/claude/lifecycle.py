@@ -423,7 +423,7 @@ def completion_main() -> int:
         handle, _ = _resolve(payload, strict=True)
         if handle is None:
             return 0  # exact no-active-run response → nothing to gate
-        mapped = stop_result(dispatch_stop(payload, handle))
+        mapped = stop_result(dispatch_stop(payload, handle), stop_hook_active=payload.get("stop_hook_active") is True)
     except SelectorError:
         return 0  # malformed non-session Stop events retain observational behavior
     except Exception as exc:  # noqa: BLE001 - completion is the fail-closed boundary

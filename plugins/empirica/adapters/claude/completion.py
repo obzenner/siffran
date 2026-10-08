@@ -5,8 +5,11 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from application.protocol import BUDGET_EXHAUSTED_NOTICE, EVIDENCE_REPORT_NOTICE, HUMAN_WAIT_NOTICE
+from application.protocol import (
+    BUDGET_EXHAUSTED_NOTICE, EVIDENCE_REPORT_NOTICE, HUMAN_WAIT_NOTICE, PAUSED_FOR_HUMAN_NOTICE,
+    UNATTENDED_CONTINUE_NOTICE, render_notice)
 from core.governance import expected_approval_kind
+from core.projection import ASKABLE
 from .correlation import PROTOCOL, request_id as new_request_id
 from .fail_direction import FailureDirection, blocks_on_failure
 from .route import observed_at
@@ -99,20 +102,20 @@ def _human_approval_wait(result: Result) -> bool:
 
 
 def _evidence_report_directive(result: Result) -> bool:
-    """True only when the human confirmation is the sole blocker, a human can be asked, and the batch has
-    not been shown yet. The Stop then blocks with the directive to report convergence (the human is asked inside
-    that call); it never pauses.
+    """True only when the human confirmation is the sole blocker, a human can be asked, and the batch has not been shown.
 
-    The core returns ``evidence.confirmation_required`` only when nothing else blocks the run, and projects
-    ``confirmation_batch.prompt_error``: ``already_presented`` (Later, cancel or timeout already spent this
-    derivation), ``interaction_limit`` and ``unavailable`` all mean no dialog will come, so the Stop keeps
-    blocking with the real reason and the author changes the work or accepts the residual."""
+    In Claude the human can be asked only inside ``report_convergence`` (MCP elicitation), so a Stop that waited would end
+    the turn with nobody asked: the Stop blocks with the directive to report instead. The core returns
+    ``evidence.confirmation_required`` only when nothing else blocks the run. Only a ``prompt_error`` in
+    ``projection.ASKABLE`` is directed (a human may be asked: no dialog is ruled out yet; the core gives such a batch a
+    human route, so no route check is needed); any other value means no dialog will come, so the Stop blocks with the
+    real reason."""
     run = result.run
     if run is None or run.status != "active" or len(result.reasons) != 1:
         return False
     reason, batch = result.reasons[0], run.get("confirmation_batch")
-    return (reason.code == "evidence.confirmation_required" and reason["parameters"].get("route") == "human"
-            and batch is not None and batch["prompt_error"] is None)
+    return (reason.code == "evidence.confirmation_required"
+            and batch is not None and batch["prompt_error"] in ASKABLE)
 
 
 def _budget_exhausted_wait(result: Result) -> bool:
@@ -125,15 +128,37 @@ def _budget_exhausted_wait(result: Result) -> bool:
             and result.reasons[0].code == "budget.exhausted")
 
 
+def _continuation_mode(result: Result) -> str | None:
+    """How a Stop *continuation* of an active run ends, read only from the run view the core returned.
+
+    ``"pause"`` for deliberative, ``"auto"`` for every ``auto`` run (interactive before or after its first approval,
+    delegated); ``None`` for an unknown view or a run that is not active. The mode table is owned by ADR-0068 and
+    ``HX-STOP-03``."""
+    run = result.run
+    if run is None or run.governance is None or run.status != "active":
+        return None
+    control_mode = run.governance["control_mode"]
+    return {"deliberative": "pause", "auto": "auto"}.get(control_mode)
+
+
+def _reason_text(result: Result) -> str:
+    """The core's own reason text for every blocker, as one sentence ending in punctuation (the reason-bearing Block paths use it)."""
+    text = " ".join(" ".join(row.message or "" for row in result.reasons).split())
+    text = text or "the run is not complete."
+    return text if text[-1] in ".!?" else text + "."
+
+
 def _settlement(notice: str) -> StopResult:
     """Exit 0 with a contract-owned ``systemMessage`` and no claim of convergence."""
     return StopResult(0, stdout=json.dumps(
         {"systemMessage": notice}, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n")
 
 
-def stop_result(response: object) -> StopResult:
-    """Settle human/async waits and budget exhaustion nonterminally; never convert their service
-    Block to convergence."""
+def stop_result(response: object, *, stop_hook_active: bool) -> StopResult:
+    """Translate a core evaluation to the Stop hook's process result; a settlement never claims convergence.
+
+    ``stop_hook_active`` is Claude's signal that this Stop follows a Stop hook's block in the same turn. The mode rules
+    for a continuation, and the condition on which they hold, are owned by ADR-0068 and ``HX-STOP-03``."""
     if not isinstance(response, Response):
         return StopResult(2, stderr="empirica completion gate returned a malformed response\n")
     result = response.result
@@ -145,18 +170,18 @@ def stop_result(response: object) -> StopResult:
     if kind == "Block":
         if _human_approval_wait(result):
             return _settlement(HUMAN_WAIT_NOTICE)
-        if _evidence_report_directive(result):
-            # Never a pause: in Claude the human is asked inside report_convergence (MCP elicitation), so a Stop that
-            # waited would end the turn with nobody asked. Block with the one directive that gets the human asked.
-            return StopResult(2, stderr=EVIDENCE_REPORT_NOTICE + "\n")
         if _budget_exhausted_wait(result):
-            return _settlement(BUDGET_EXHAUSTED_NOTICE.format(
-                resource=result.reasons[0]["parameters"]["resource"]))
+            return _settlement(render_notice(BUDGET_EXHAUSTED_NOTICE, resource=result.reasons[0]["parameters"]["resource"]))
         if _async_audit_wait(result):
             return StopResult(0, stdout=_hook_stdout(result))
-        messages = [row.message or row.code for row in result.reasons]
-        text = "\n".join(value for value in messages if value)
-        return StopResult(2, stderr=(text or "empirica run is not complete") + "\n")
+        mode = _continuation_mode(result) if stop_hook_active else None
+        if mode == "pause":
+            return _settlement(render_notice(PAUSED_FOR_HUMAN_NOTICE, reason=_reason_text(result)))
+        if _evidence_report_directive(result):
+            return StopResult(2, stderr=EVIDENCE_REPORT_NOTICE + "\n")
+        if mode == "auto":
+            return StopResult(2, stderr=render_notice(UNATTENDED_CONTINUE_NOTICE, reason=_reason_text(result)) + "\n")
+        return StopResult(2, stderr=_reason_text(result) + "\n")
     if kind == "Fault":
         text = result.message or "empirica completion gate fault"
         if blocks_on_failure(response, fallback=FailureDirection.CLOSED):

@@ -3,7 +3,7 @@
 
 Every reason code and its ``next_actions`` are read from
 ``contracts/empirica/v2/public-contract.json``; next actions are rendered exactly as the author
-view renders them. The one author sentence per reason lives in ``AUTHOR_GUIDANCE`` below and must
+view renders them. The imperative guidance per reason lives in ``AUTHOR_GUIDANCE`` below and must
 cover the contract's reason codes exactly, so a new or removed code fails here until it is written.
 
 Usage: gen_recovery_reference.py [--check]   (default writes the file)
@@ -36,7 +36,7 @@ AUTHOR_GUIDANCE = {
     "claim.research_missing": "Record cited research for the named claim; it may support or refute it.",
     "claim.research_unbound": "The research cites an earlier claim text: record new research for the current claim text.",
     "research.citation_unverified": "The record was refused: re-read the source and quote it exactly (a workspace file as `path` or `path:N-M`, `…` between excerpts), cite an http(s) URL or an absolute path for a source outside the workspace (an absolute path inside it is refused: use the repository-relative path), or, for a runtime observation, say why no spike can establish it (`spike_unavailable`); never paraphrase.",
-    "evidence.confirmation_required": "Research or a decision waits on a human. Keep working; the host shows the pending set once per derivation and the human answers in one receipt, and convergence waits for the answers. In Claude the human is asked inside `report_convergence`: if the Stop blocks you with the directive to report convergence, call it. After Later, cancel or timeout only a changed derivation (a decision, new or changed research, a changed claim) asks again; otherwise stop with the residual (`residual.accept`). With no human ingress (route `unavailable`), run the session in an interactive UI or stop with the residual (`residual.accept`).",
+    "evidence.confirmation_required": "Research or a decision waits on a human: keep working, and when the Stop blocks you with the directive, call `report_convergence` (the human is asked inside it, if this host can show a dialog); after Later, cancel or timeout, or with no human ingress, stop with the residual (`residual.accept`); only a changed derivation asks again.",
     "claim.spike_missing": "Request a deterministic spike for the named `needs-experiment` claim.",
     "claim.spike_prerequisite_missing": "Record supporting research for the claim first, then request the spike.",
     "claim.spike_stale": "The spike's inputs changed: request it again against the current research and dependent files.",
@@ -57,8 +57,9 @@ AUTHOR_GUIDANCE = {
     "host.subagents_tool_inactive": "The `subagent` tool is registered but not active: call `subagents_enable` and retry, or set pi-subagents `toolActivation: eager` and reload the host; a restart alone does not change this. Or accept the residual.",
     "host.subagents_owner_unverified": "The active audit runtime cannot be proven (owner, package, or version unobservable, or a subagent child process): do not retry blindly; restart the host with one supported runtime, or accept the residual.",
     "host.subagents_duplicate_owner": "Two extensions register the `subagent` tool: remove the duplicate, restart the host, and start a fresh run, or accept the residual.",
-    "host.subagents_version_unsupported": "The active pi-subagents is not a reviewed version or lacks the launch preflight: install a reviewed version and restart, or accept the residual.",
-    "host.subagents_launch_unsupported": "During a run `subagent` accepts exactly one launch form or a reviewed read-only action (`list`, `status`, ...); control, mutation and ambiguous calls are refused: retry with a supported call, or accept the residual.",
+    "host.subagents_version_unsupported": "The active pi-subagents is outside the supported range, or its schema or launch preflight cannot carry the audit launch: install a version inside the range and restart, or accept the residual.",
+    "host.subagents_tools_not_read_only": "The preflight would give the auditor a tool Empirica does not allow it (the refusal names it): remove it from the auditor's configuration or update pi-subagents, restart, and start fresh, or accept the residual.",
+    "host.subagents_launch_unsupported": "During a run `subagent` accepts exactly one launch form or a read-only action the reviewed versions know (`list`, `status`, ...); control, mutation, unknown-action and ambiguous calls are refused: retry with a supported call, or accept the residual.",
     "host.subagents_provenance_missing": "The run or receipt lacks the exact pi-subagents version and owner path: recapture a provenance-complete run; this one is not evidence.",
     "freeze.deferred": "Deferred claims stay residual: accept them when you stop, or investigate them before freezing.",
     "governance.auto_invocation_required": "Auto needs an interactive invocation or operator-set `EMPIRICA_AUTO_DELEGATION=1`: run interactively or have the operator set it, then start fresh.",
@@ -82,7 +83,8 @@ HEADER = """\
 Generated from `contracts/empirica/v2/public-contract.json` by `scripts/gen_recovery_reference.py`
 (`make empirica-recovery-reference`); do not edit by hand. Reason codes and next actions are the
 contract's; the author guidance column is the one sentence to act on. Next actions are shown as the
-text view renders them.
+text view renders them. The list is the contract's full set; the run view may omit some of these, and the
+confirmation row's guidance says which.
 
 | Reason | Next actions | Author guidance |
 |---|---|---|

@@ -19,10 +19,10 @@ import * as path from "node:path";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 
-import type { Dispatch, InvocationProvenance, Request, Response, RunSelector } from "./contract.ts";
+import type { Dispatch, HostFailure, InvocationProvenance, Request, Response, RunSelector } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
 import type { RetrievalKind } from "./audit-retrieval.ts";
-import { SURFACE_UNRECORDED_NOTICE, confirmEvidence, evidenceConfirmationWait, observeSurface } from "./evidence-ui.ts";
+import { confirmEvidence, evidenceConfirmationWait, evidenceHostFailure, observeSurface } from "./evidence-ui.ts";
 import { govern, governanceTimeout, piGovernanceContext, refreshGovernance, settlementNotice } from "./governance-ui.ts";
 import type {
   ExtensionAPI,
@@ -36,12 +36,13 @@ import {
   type PrivateIngressRequest, type PrivateOperation, type PrivateResponses,
 } from "./private-transport.ts";
 import {
-  lifecycleEvent, redactVerdict, resultDigest, resultText as auditResultText, verdictFromText,
+  childNotTerminal, lifecycleEvent, redactVerdict, resultDigest, resultText as auditResultText, verdictFromText,
 } from "./audit.ts";
 import {
   identityFromSessionJsonl, sessionFileFromDetails,
 } from "./audit-identity.ts";
-import { createStdioBridgeDispatch, defaultBridgeConfig, HOST_PROFILE_ID } from "./stdio-transport.ts";
+import { HOST_PROFILE_ID } from "./host-profile.ts";
+import { createStdioBridgeDispatch, defaultBridgeConfig } from "./stdio-transport.ts";
 import { renderAuthorView } from "./author-view.ts";
 import {
   nodeOwnerIo, nodePreflightImporter, resolveOwnerInventory, resolveOwnerPreflight, resolveSubagentOwner, sameOwner,
@@ -49,7 +50,7 @@ import {
   type AuditRuntime, type BoundPreflight, type OwnerEnv, type OwnerIo, type OwnerRefusal,
   type PreflightImporter, type SubagentOwner, type SubagentsProvenance,
 } from "./runtime-owner.ts";
-import { launchUnsupportedReason, ownerRefusalBlock, ownerRefusalReason } from "./owner-refusal.ts";
+import { launchUnsupportedReason, ownerRefusalBlock, ownerRefusalReason, seamRefusalMessage } from "./owner-refusal.ts";
 import { AUDIT_LAUNCH_POLICY, SUBAGENTS_COMPATIBILITY } from "./host-profile.ts";
 import { buildHostRuntime } from "./host-runtime.ts";
 import { auditLaunchInput, preflightLaunch } from "./audit-launch.ts";
@@ -186,7 +187,7 @@ export async function defaultAuditContractResolver(
   const model = resolvePiAuditorModel(global, project, main);
   const descriptor = {
     version: runtime.version, inventory: runtime.inventory,
-    expected: { agent_file_path: String(input.expectedAgent), model },
+    expected: { agent_file_path: String(input.expectedAgent), model, child_tools: AUDIT_LAUNCH_POLICY.audit_child_tools },
     // The launch request the adapter sends (`tool_call` applies the same `auditLaunchInput`; the task
     // and scope are irrelevant to the checked fields). forceTopLevelAsync lives in pi-subagents'
     // private config file and is not observable through the public preflight: it is undefined here and
@@ -199,7 +200,7 @@ export async function defaultAuditContractResolver(
     const response = await runtime.preflight.resolveSubagentLaunchContract({
       agent: String(input.agent),
       task: typeof input.task === "string" ? input.task : undefined,
-      context: "fresh", model, agentScope, cwd,
+      context: descriptor.launch.context as string, model, agentScope, cwd,
       availableModels: ctx.modelRegistry?.getAvailable(),
     });
     const admission = admitAuditPreflight(descriptor, response);
@@ -209,9 +210,11 @@ export async function defaultAuditContractResolver(
         unresolved = `auditor package unresolvable (${admission.code}: ${admission.detail})`;
         continue;
       }
+      const contractMessage = seamRefusalMessage(admission.code);
       throw new Error(admission.code === "model-substituted"
         ? "configured auditor model was substituted by preflight"
-        : `pi-subagents preflight refused (${admission.code}): ${admission.detail}`);
+        : `pi-subagents preflight refused (${admission.code}): ${admission.detail}`
+          + (contractMessage === undefined ? "" : `. ${contractMessage}`));
     }
     const identity = withoutThinkingLevel(model);
     const available = ctx.modelRegistry?.getAvailable() ?? [];
@@ -246,7 +249,7 @@ export interface EmpiricaPiDeps {
   ownerEnv?: OwnerEnv;
   /** Owner-anchored module resolution and loading (default: ``require.resolve`` from the owner + ``import``). */
   preflightImporter?: PreflightImporter;
-  /** The reviewed inventory of an exact pi-subagents version (default: the checked-in ``compat/`` files). */
+  /** The checked-in inventory of an exact pi-subagents version, if any (default: the ``compat/`` files; ADR-0069). */
   inventoryFor?: (version: string) => SubagentInventory | undefined;
 }
 
@@ -303,8 +306,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     ?? ((input, ctx, runtime) => defaultAuditContractResolver(input, ctx, { runtime }));
   const ownerIo = deps.ownerIo ?? nodeOwnerIo;
   const preflightImporter = deps.preflightImporter ?? nodePreflightImporter;
-  // The checked-in inventories are exactly the contract's reviewed versions (contract-check and
-  // host-profile.test.ts), and buildHostRuntime re-checks the version when a run starts.
+  // A checked-in inventory marks a reviewed version; the admission rule is ADR-0069's (HX-ADM-02).
   const inventoryFor = deps.inventoryFor ?? ((version: string) => loadInventory(version));
   // Read once at load: a malformed EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS fails extension load with its message
   // instead of surfacing mid-run inside a configure_run that already dispatched.
@@ -338,14 +340,14 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       try {
         const resolved = resolveSubagentOwner(pi.getAllTools(), pi.getCommands(), ownerIo, ownerEnv());
         if (!resolved.ok) return { kind: "refused", refusal: resolved };
-        // The inventory is selected before any code of the owner is loaded: an unreviewed version
-        // is refused without importing its preflight.
+        // A version outside the range, or one whose schema cannot carry the audit launch, is refused before its
+        // preflight is imported; an in-range unreviewed version's preflight is imported (ADR-0069 trade-offs).
         const reviewed = resolveOwnerInventory(resolved, inventoryFor);
         if (!reviewed.ok) return { kind: "refused", refusal: reviewed };
         const preflight = await resolveOwnerPreflight(resolved, preflightImporter, ownerIo);
         if (!preflight.ok) return { kind: "refused", refusal: preflight };
         return { kind: "bound", binding: { owner: resolved, preflight, inventory: reviewed.inventory,
-          provenance: subagentsProvenance(resolved, preflight) } };
+          provenance: subagentsProvenance(resolved, preflight, reviewed.inventory.reviewed) } };
       } catch (error) {
         return { kind: "refused", refusal: { ok: false, code: "owner-unobservable",
           message: `the pi-subagents owner could not be observed: ${describe(error)}` } };
@@ -770,7 +772,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         const text = auditResultText(event);
         await trusted({ operation: "child_event", run_id: ordinary.runHandle,
           child_id: ordinary.childId, payload: lifecycleEvent("launching", ordinary.nativeId) });
-        if (event.isError === true || event.error !== undefined) {
+        if (event.isError === true || childNotTerminal(event)) {
           await trusted({ operation: "child_event", run_id: ordinary.runHandle,
             child_id: ordinary.childId, payload: lifecycleEvent("failed", ordinary.nativeId) });
         } else {
@@ -791,8 +793,9 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         return;
       }
       const text = auditResultText(event);
+      const notTerminal = childNotTerminal(event);
       redactVerdict(event);
-      const verdict = verdictFromText(text);
+      const verdict = notTerminal ? null : verdictFromText(text);
       const sessionFile = sessionFileFromDetails(event.details);
       const session = verdict && sessionFile ? readAuditSession(sessionFile) : null;
       const identity = verdict && session
@@ -804,7 +807,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           operation: "audit_start", run_id: correlation.runHandle,
           native_id: correlation.nativeId, plan: correlation.plan,
         });
-        if (event.isError === true || event.error !== undefined) {
+        if (event.isError === true || notTerminal) {
           await trusted({ operation: "audit_failure", run_id: correlation.runHandle,
             native_id: correlation.nativeId, plan: correlation.plan, state: "failed" });
           reconciled = true;
@@ -852,7 +855,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           return { block: true, reason: `empirica governance context unavailable: ${describe(error)}` };
         }
       }
-      // Every subagent call is classified against the bound owner's reviewed inventory before anything
+      // Every subagent call is classified against the bound owner's inventory (checked-in or observed) before anything
       // else happens: a refusal here never records an investigation, reserves a child, or launches.
       let launch: { call: SubagentCallClassification; binding: OwnerBinding } | undefined;
       if (runHandle !== null && (event.toolName === subagentToolName || event.toolName === SUBAGENT_TOOL)) {
@@ -963,23 +966,24 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       try {
         const intent = event.input.intent === "stop" ? "stop" : REPORT_CONVERGENCE_INTENT;
         const surfaceRecorded = intent !== REPORT_CONVERGENCE_INTENT || await observeSurface(runHandle, ctx, trusted);
-        let response = await dispatch(
-          evaluateRunRequest(runHandle, intent, randomUUID()),
-        );
+        let reported: HostFailure | undefined = surfaceRecorded ? undefined : "surface_unrecorded";
+        let response = await dispatch(evaluateRunRequest(runHandle, intent, randomUUID(), reported));
         if (intent === REPORT_CONVERGENCE_INTENT && surfaceRecorded && !evidenceDialog) {
           // The end of a pass: a block that waits on the human is presented once, then re-evaluated.
           evidenceDialog = true;
           const handle = runHandle;
           try {
-            response = await confirmEvidence(response, handle, ctx, trusted,
-              () => dispatch(evaluateRunRequest(handle, intent, randomUUID())),
+            const confirmed = await confirmEvidence(response, handle, ctx, trusted,
+              (hostFailure) => dispatch(evaluateRunRequest(handle, intent, randomUUID(), hostFailure)),
               Date.now() + governanceTimeoutMs);
+            response = confirmed.response;
+            reported = confirmed.failure;
           } finally { evidenceDialog = false; }
         }
-        // The surface could not be recorded: the core's stored observation is not trusted, so a wait for a
-        // confirmation nobody was told to ask is a block with one plain reason, never a pause.
-        if (!surfaceRecorded && evidenceConfirmationWait(response.result))
-          return { block: true, reason: `${SURFACE_UNRECORDED_NOTICE}\nhandle: ${runHandle}` };
+        // The host could not record its surface or could not show the batch, and the core said so: nobody was asked,
+        // so the block names that and leads to stop. It is never a pause for a human who was not shown the batch.
+        const hostFailure = evidenceHostFailure(response.result, reported);
+        if (hostFailure !== null) return { block: true, reason: `${hostFailure}\nhandle: ${runHandle}` };
         const decision = gateFromDecision(response.result);
         if (decision.kind === "deny" && settlementNotice(response.result) === null)
           return { block: true, reason: `${decision.reason}\nhandle: ${runHandle}` };

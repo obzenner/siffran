@@ -16,8 +16,10 @@ from adapters.identity import POLICY_VERSION, observe
 from core.evaluation import audit_binding
 from core.records import Corrupt, Present, Revision
 from governance_setup import SIZED_RATIONALE, TEST_INVOCATION, approve_current
+from application.protocol import host_profile_id  # noqa: E402
+PI_PROFILE = host_profile_id("pi")
 
-PROFILE = "pi@0.84.1+pi-subagents-foreground-audit-v1"
+PROFILE = PI_PROFILE
 
 
 class StaleAuditRetryTests(unittest.TestCase):

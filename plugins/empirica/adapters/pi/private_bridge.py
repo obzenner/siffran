@@ -96,8 +96,8 @@ def _audit_verdict(profile: str, raw: dict, payload: dict):
 def _evidence_presentation(profile: str, raw: dict, payload: dict):
     """Record the presentation and hand back the items to show (shared flow: adapters/confirmation.py)."""
     shown = confirmation.present(profile, raw["run_id"])
-    if isinstance(shown, dict):
-        return {"type": "evidence_refused", "result": shown}
+    if isinstance(shown, confirmation.Outcome):  # nothing was shown or spent; the host reports presentation_failed
+        return {"type": "evidence_refused", "result": {"failure": shown.failure}}
     receipt_id, items = shown
     return {"type": "evidence_presentation", "receipt_id": receipt_id, "items": items}
 

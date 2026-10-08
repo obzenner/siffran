@@ -14,6 +14,8 @@ export type AuthorViewLabel =
   | "converged"
   | "run_id"
   | "proposal_rationale"
+  | "host_unreviewed"
+  | "host_unreviewed_note"
   | "audit"
   | "finding"
   | "reasons"
@@ -54,6 +56,8 @@ export type AuthorViewLabel =
   | "waiting_unavailable"
   | "waiting_already_presented"
   | "waiting_interaction_limit"
+  | "waiting_surface_unrecorded"
+  | "waiting_presentation_failed"
   | "verified_by_service"
   | "confirmed_by_human"
   | "rejected_by_human"
@@ -77,7 +81,8 @@ export interface PublicToolsProjection {
     controls: DecisionControls;
     confirmation: { title: string; actions: string[] };
   };
-  settlement_notices: { human_wait: string; evidence_wait: string; surface_unrecorded: string; evidence_report: string; budget_exhausted: string };
+  settlement_notices: { human_wait: string; evidence_wait: string; evidence_report: string; budget_exhausted: string;
+    paused_for_human: string; unattended_continue: string };
   author_view: { labels: AuthorViewLabels };
 }
 

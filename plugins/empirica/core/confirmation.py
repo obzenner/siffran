@@ -6,6 +6,9 @@ confirmation the service cannot give. Its *route* is derived, never stored:
 * ``audit`` — a ``retrievable`` record whose retrieval kind the host's auditor is observed to cover
   (``invocation.audit_retrieval``); the audit gate confirms it.
 * ``human`` — every other record, when a human can be shown a dialog now (``human_available``).
+* ``unobserved`` — every other record, when the run could be asked (a human ingress, interactive or not known
+  otherwise, not delegated) but the host has not yet observed a surface (it looks inside ``report_convergence``). The
+  requirement stays open and the author is told a human is asked when it reports, if the host can show a dialog.
 * ``unavailable`` — every other record, when nobody can; the requirement stays open.
 
 A human is shown the pending set once per derivation: the host records an ``evidence_presentation``
@@ -22,12 +25,32 @@ from . import citations, governance
 
 KIND = "evidence_confirmation"
 PRESENTATION = "evidence_presentation"
-AUDIT, HUMAN, UNAVAILABLE = "audit", "human", "unavailable"
+AUDIT, HUMAN, UNAVAILABLE, UNOBSERVED = "audit", "human", "unavailable", "unobserved"
 CONFIRM, REJECT, APPROVE = "confirm", "reject", "approve"
 VERIFIED_BY_SERVICE, CONFIRMED_BY_HUMAN, REJECTED_BY_HUMAN, PENDING = (
     "verified_by_service", "confirmed_by_human", "rejected_by_human", "pending")
 #: The routes that wait on a human (the ones the end-of-pass gate holds the run for).
-HUMAN_ROUTES = (HUMAN, UNAVAILABLE)
+HUMAN_ROUTES = (HUMAN, UNAVAILABLE, UNOBSERVED)
+#: What a host reports when it could not do the mediation a report asks of it (``EvaluateRun.host_failure``): it could
+#: not record whether a human can be asked, or could not show the batch. A fact about one call, never stored.
+HOST_FAILURES = ("surface_unrecorded", "presentation_failed")
+#: The ``confirmation_batch.prompt_error`` values the core derives from the run itself (null when a dialog may be shown).
+#: What a host reports about one call (``HOST_FAILURES``) is projected into that call's response only and never stored,
+#: so no later reader of the run (the observer UI) sees it.
+PROMPT_ERRORS = (UNAVAILABLE, UNOBSERVED, "already_presented", "interaction_limit")
+#: The routes a *human* is told (the observer UI).
+TOLD_ROUTES = (HUMAN, UNAVAILABLE)
+
+
+def told_route(route: str) -> str:
+    """The route as a human is told it: an unobserved surface reads as the ordinary pending question (``human``), because
+    the host looks for the surface at the author's next report. The one place ``unobserved`` is told as ``human``."""
+    return HUMAN if route == UNOBSERVED else route
+
+
+def told_prompt_error(prompt_error: str | None) -> str | None:
+    """``prompt_error`` as a human is told it: ``unobserved`` is no error (see ``told_route``)."""
+    return None if prompt_error == UNOBSERVED else prompt_error
 
 
 def audit_retrieval(snapshot: Any) -> frozenset[str]:
@@ -35,21 +58,24 @@ def audit_retrieval(snapshot: Any) -> frozenset[str]:
     return frozenset(snapshot.state.invocation["audit_retrieval"])
 
 
-def human_available(snapshot: Any) -> bool:
-    """Whether a human can be shown a dialog now: the profile has a human approval ingress *and* the host
-    last observed a surface to present one (``invocation.human_surface``), in a run that is neither
-    delegated nor non-interactive. The capability alone is not enough: a host without a form or UI, and a delegated
-    run, have the ingress on paper and nobody to ask."""
+def human_route(snapshot: Any) -> str:
+    """Where everything that waits on a human goes, from the run and what its host has observed.
+
+    ``unavailable`` for a profile without a human approval ingress, a delegated run and a non-interactive run, whatever
+    the host observes (they have the ingress on paper and nobody to ask); otherwise the host's last observation of its
+    surface (``invocation.human_surface``): ``human``, ``unavailable``, or ``unobserved`` while it has not looked."""
     context = snapshot.state.governance["context"]
     invocation = snapshot.state.invocation
-    return (context["approval_capability"] == governance.HUMAN_CONFIGURATION
-            and invocation["human_surface"] == HUMAN
-            and not invocation["delegation"] and invocation["interactive"] is not False)
+    if (context["approval_capability"] != governance.HUMAN_CONFIGURATION
+            or invocation["delegation"] or invocation["interactive"] is False):
+        return UNAVAILABLE
+    surface = invocation["human_surface"]
+    return surface if surface in (HUMAN, UNOBSERVED) else UNAVAILABLE
 
 
-def human_route(snapshot: Any) -> str:
-    """Where everything that waits on a human goes: ``human`` with an approval ingress, else ``unavailable``."""
-    return HUMAN if human_available(snapshot) else UNAVAILABLE
+def human_available(snapshot: Any) -> bool:
+    """Whether a human can be shown a dialog now: the host has observed a surface (``human_route`` is ``human``)."""
+    return human_route(snapshot) == HUMAN
 
 
 def record_route(snapshot: Any, record: Any) -> str | None:
@@ -137,13 +163,25 @@ def presented(snapshot: Any, key: str) -> bool:
 
 
 def prompt_error(snapshot: Any, key: str) -> str | None:
-    """Why the batch with this key cannot be presented now, else ``None``: ``unavailable`` (nobody to ask),
-    ``already_presented`` (a changed derivation is the only thing that asks again) or
-    ``interaction_limit`` (the run's human interactions are spent). Mirrors ``governance.prompt_error``."""
-    if not human_available(snapshot):
-        return UNAVAILABLE
+    """Why the batch with this key cannot be presented now, else ``None``. In order: ``unavailable`` (nobody to ask),
+    ``already_presented`` (a changed derivation is the only thing that asks again), ``interaction_limit`` (the run's
+    human interactions are spent; known, so it comes before anything the host has yet to find out), then what the host
+    reports about *this* call: its ``host_failure`` (``surface_unrecorded`` or ``presentation_failed``: it could not
+    record its surface or could not show the batch, so nobody was asked) and ``unobserved`` (it has not looked for a
+    surface; it looks inside its next report). Mirrors ``governance.prompt_error``."""
+    route = human_route(snapshot)
+    if route == UNAVAILABLE:
+        return route
     if presented(snapshot, key):
         return "already_presented"
     if governance.interactions_remaining(snapshot.state.governance, interactions(snapshot))["total"] == 0:
         return "interaction_limit"
-    return None
+    return apply_host_report(UNOBSERVED if route == UNOBSERVED else None, snapshot.command.get("host_failure"))
+
+
+def apply_host_report(prompt_error: str | None, host_failure: str | None) -> str | None:
+    """The ``prompt_error`` once the host's report of this call is applied: a failure replaces only what a report would
+    still have asked about (nothing, or ``unobserved``); a refusal the core already knows stands. The one rule both
+    ``prompt_error`` and the in-process projection of a failure (``projection.project_host_failure``) use. The host's
+    report is one of ``HOST_FAILURES`` (the request schema's enum)."""
+    return host_failure if host_failure and prompt_error in {None, UNOBSERVED} else prompt_error

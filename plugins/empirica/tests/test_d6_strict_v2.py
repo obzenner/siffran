@@ -46,6 +46,8 @@ if _REPO_ROOT is None:
 _PLUGIN_ROOT = _REPO_ROOT / "plugins" / "empirica"
 sys.path.insert(0, str(_PLUGIN_ROOT))
 from governance_setup import TEST_INVOCATION, SIZED_RATIONALE  # noqa: E402
+from application.protocol import host_profile_id  # noqa: E402
+CLAUDE_PROFILE = host_profile_id("claude-code")
 
 _V2 = _REPO_ROOT / "contracts" / "empirica" / "v2"
 _PUBLIC_CONTRACT = json.loads((_V2 / "public-contract.json").read_text(encoding="utf-8"))
@@ -69,7 +71,7 @@ _STATUSES = list(_PUBLIC_CONTRACT["statuses"])
 _CHILD_STATES = list(_PUBLIC_CONTRACT["child_lifecycle"]["states"])
 _CHILD_TERMINAL = list(_PUBLIC_CONTRACT["child_lifecycle"]["terminal_states"])
 _PROFILES = {p["profile_id"]: p for p in _HOST_PROFILES["profiles"]}
-_DEFAULT_PROFILE = "claude-code@2.1.278"
+_DEFAULT_PROFILE = CLAUDE_PROFILE
 
 # --- Accepted observe fixture requests for the four trusted actions ---
 _TRUSTED_FIXTURE_REQUESTS: list[dict] = []

@@ -38,7 +38,7 @@ STALE_PI_RUNTIME_TERMS = ("pi-subagents@0.50.0", "pi-subagents 0.50.0", "package
 HOST_PROFILES = Path("contracts/empirica/v2/host-profiles.json")
 README = Path("README.md")
 COMPAT_DIR = ROOT / "adapters/pi/compat"
-UNREVIEWED_DISCLOSURE = "unreviewed `pi-subagents` version fails closed"
+UNREVIEWED_DISCLOSURE = "outside the supported range fails closed"
 
 
 def pi_profile(document: dict) -> dict:
@@ -69,10 +69,16 @@ def _semver(text: str) -> tuple[int, int, int]:
     return int(match[1]), int(match[2]), int(match[3])
 
 
-def recorded_peers(policy: dict) -> dict[str, str]:
+def reviewed_versions() -> list[str]:
+    """The versions with a checked-in compat record, ascending: the reviewed ones (ADR-0069)."""
+    return sorted((path.name.removeprefix("pi-subagents-").removesuffix(".json")
+                   for path in COMPAT_DIR.glob("pi-subagents-*.json")), key=_semver)
+
+
+def recorded_peers() -> dict[str, str]:
     """``{version: declared pi-ai peer range}`` from the generated inventories (never retyped)."""
     return {version: json.loads((COMPAT_DIR / f"pi-subagents-{version}.json").read_text(encoding="utf-8"))["peer_pi_ai"]
-            for version in policy["reviewed_versions"]}
+            for version in reviewed_versions()}
 
 
 def pi_requirement(peer: str, host_minimum: str) -> str:
@@ -99,15 +105,15 @@ def readme_runtime_problems(readme_text: str, profile: dict, peers: dict[str, st
     """How a README misstates which pi-subagents versions are supported (interval, table, fail-closed)
     and which Pi each needs (``peers``: version -> declared pi-ai peer, by default the generated inventories)."""
     policy = profile["subagents_compatibility"]
-    peers = recorded_peers(policy) if peers is None else peers
+    peers = recorded_peers() if peers is None else peers
     minimum = profile["compatibility"]["minimum"]
-    requirements = {version: pi_requirement(peers[version], minimum) for version in policy["reviewed_versions"]}
+    requirements = {version: pi_requirement(peers[version], minimum) for version in reviewed_versions()}
     problems = []
     if pi_interval(profile) not in readme_text:
         problems.append(f"README omits the Pi interval {pi_interval(profile)}")
     rows = {match[1]: match for match in re.finditer(
         r"^\|\s*`(\d+\.\d+\.\d+)`\s*\|\s*`([^`|]*)`\s*\|\s*([^|]*?)\s*\|", readme_text, re.MULTILINE)}
-    for version in policy["reviewed_versions"]:
+    for version in reviewed_versions():
         if not re.search(rf"^\|\s*`?{re.escape(version)}`?\s*\|", readme_text, re.MULTILINE):
             problems.append(f"README supported-versions table has no row for pi-subagents {version}")
         elif version not in rows:
@@ -119,8 +125,11 @@ def readme_runtime_problems(readme_text: str, profile: dict, peers: dict[str, st
             if not rows[version][3]:
                 problems.append(f"README row for pi-subagents {version} does not say whether a native receipt exists")
     table = set(re.findall(r"^\|\s*`?(\d+\.\d+\.\d+)`?\s*\|", readme_text, re.MULTILINE))
-    for version in sorted(table - set(policy["reviewed_versions"])):
-        problems.append(f"README lists pi-subagents {version}, which the contract does not review")
+    for version in sorted(table - set(reviewed_versions())):
+        problems.append(f"README lists pi-subagents {version}, which has no compat record")
+    range_text = f">={policy['minimum']},<{policy['maximum_exclusive']}"
+    if range_text not in readme_text:
+        problems.append(f"README omits the supported pi-subagents range {range_text}")
     fallback = pi_fallback(requirements, minimum)
     if fallback is not None:
         instruction = f"Pi <{fallback[0]}: `pi-subagents@{fallback[1]}`"

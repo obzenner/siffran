@@ -33,13 +33,15 @@ export interface InvocationProvenance {
   /** The retrieval kinds the audit child is observed to cover (ADR-0067); recorded once, re-observed at audit launch. */
   audit_retrieval: readonly ("local" | "web" | "workspace")[];
   /** Whether the host can show a dialog to a human now (Pi: `ctx.hasUI`); sent again at every report_convergence. */
-  human_surface: "human" | "unavailable";
-  /** Host-recorded audit-runtime provenance (host-runtime.ts); persisted with the run, never shown. */
+  human_surface: "human" | "unavailable" | "unobserved";
+  /** Host-recorded audit-runtime provenance (host-runtime.ts); persisted with the run, shown only when not reviewed. */
   host_runtime?: {
     policy_id: string;
     subagents: {
       package: string; version: string; owner_path: string; package_root: string;
       preflight_path: string; source: string;
+      /** Whether this exact version has a checked-in compat record (false: admitted by observation, ADR-0069). */
+      reviewed: boolean;
     };
   };
 }
@@ -82,11 +84,15 @@ export interface GetContractCommand {
   section_id?: string;
 }
 
+/** What a host reports when it could not do the mediation a report asks of it (nobody was asked); never stored. */
+export type HostFailure = "surface_unrecorded" | "presentation_failed";
+
 export interface EvaluateRunCommand {
   type: "EvaluateRun";
   run_id: string;
   intent: EvaluateIntent;
   observed_at?: string | null;
+  host_failure?: HostFailure;
 }
 
 export interface RestoreRunCommand {
@@ -141,7 +147,7 @@ export interface ConfirmationBatch {
   record_ids: string[];
   claim_ids: string[];
   records: { claim_id: string; source_kind: string; source_ref: string }[];
-  prompt_error: null | "unavailable" | "already_presented" | "interaction_limit";
+  prompt_error: null | "unavailable" | "unobserved" | "already_presented" | "interaction_limit" | HostFailure;
 }
 
 /** Minimum run fields the guard validates on Allow/Block branches. */

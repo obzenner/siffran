@@ -12,8 +12,8 @@
   "profiles": [
     {
       "host_id": "claude-code",
-      "profile_id": "claude-code@2.1.278",
-      "version": "2.1.278",
+      "profile_id": "claude-code",
+      "version": "2.1.294",
       "compatibility": {
         "minimum": "2.1.278",
         "maximum_exclusive": "2.2.0"
@@ -48,11 +48,11 @@
     },
     {
       "host_id": "pi",
-      "profile_id": "pi@0.84.1+pi-subagents-foreground-audit-v1",
-      "version": "0.84.1",
+      "profile_id": "pi+pi-subagents-foreground-audit-v1",
+      "version": "1.1.0",
       "compatibility": {
         "minimum": "0.84.1",
-        "maximum_exclusive": "1.1.0"
+        "maximum_exclusive": "2.0.0"
       },
       "current_tier": "foreground_only",
       "audit_execution": "foreground",
@@ -82,6 +82,13 @@
       "approval_ingress": "pi_ui",
       "audit_launch_policy": {
         "timeout_ms": 900000,
+        "audit_child_tools": [
+          "read",
+          "grep",
+          "find",
+          "ls",
+          "contact_supervisor"
+        ],
         "tool_budget": {
           "soft": 20,
           "hard": 30,
@@ -96,18 +103,13 @@
       "subagents_compatibility": {
         "package": "pi-subagents",
         "policy_id": "pi-subagents-foreground-audit-v1",
-        "reviewed_versions": [
-          "0.50.0",
-          "0.64.0",
-          "0.74.0",
-          "0.75.0"
-        ],
-        "unreviewed_action": "refuse"
+        "minimum": "0.50.0",
+        "maximum_exclusive": "1.0.0"
       }
     },
     {
       "host_id": "codex-cli",
-      "profile_id": "codex-cli@0.146.0",
+      "profile_id": "codex-cli",
       "version": "0.146.0",
       "compatibility": {
         "minimum": "0.146.0",

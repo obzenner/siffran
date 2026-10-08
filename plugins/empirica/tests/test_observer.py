@@ -38,6 +38,8 @@ from application.observer import Observer  # noqa: E402
 from assertions import (action_graph, action_investigate, action_research, action_route,  # noqa: E402
                         get_argument, get_run, observe_action, start_run)
 from observer_store import DriverSource, _Builder, _graph, build_store  # noqa: E402
+from application.protocol import host_profile_id  # noqa: E402
+CLAUDE_PROFILE = host_profile_id("claude-code")
 
 _STORE = build_store()
 
@@ -545,7 +547,7 @@ def _git(cwd, *args):
 class FilesystemStoreTests(unittest.TestCase):
     """The real adapters: a run started through the bridge in a temporary repository."""
 
-    PROFILE = "claude-code@2.1.278"
+    PROFILE = CLAUDE_PROFILE
 
     @classmethod
     def setUpClass(cls):

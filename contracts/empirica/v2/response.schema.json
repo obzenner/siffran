@@ -719,6 +719,21 @@
           ],
           "properties": {
             "code": {
+              "const": "host.subagents_tools_not_read_only"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
               "const": "host.subagents_launch_unsupported"
             },
             "parameters": {
@@ -1088,7 +1103,8 @@
                 "enum": [
                   "audit",
                   "human",
-                  "unavailable"
+                  "unavailable",
+                  "unobserved"
                 ]
               },
               "note": {
@@ -1278,6 +1294,25 @@
             "minLength": 1
           },
           "uniqueItems": true
+        },
+        "unreviewed_runtime": {
+          "description": "Present only when the external audit runtime was admitted by observation and has no checked-in compat record (ADR-0069): the package and exact version.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "package",
+            "version"
+          ],
+          "properties": {
+            "package": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]*$"
+            },
+            "version": {
+              "type": "string",
+              "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+            }
+          }
         }
       }
     },
@@ -1638,7 +1673,7 @@
           ]
         },
         "confirmation_batch": {
-          "description": "What a human would be shown now, or null when nothing waits on one. The host presents exactly when this is not null and prompt_error is null, whatever else blocks the run. record_ids and claim_ids are exactly the items one presentation shows (at most the receipt's decision limit); prompt_error says why it cannot be shown: unavailable (nobody to ask), already_presented (only a changed derivation asks again) or interaction_limit.",
+          "description": "What a human would be shown now, or null when nothing waits on one. The host presents exactly when this is not null and prompt_error is null, whatever else blocks the run. record_ids and claim_ids are exactly the items one presentation shows (at most the receipt's decision limit); prompt_error says why it cannot be shown: unavailable (nobody to ask), unobserved (the host has not looked for a surface; it asks inside the next report), already_presented (only a changed derivation asks again), interaction_limit, or, when the host reported it for this call, surface_unrecorded or presentation_failed (nobody was asked).",
           "anyOf": [
             {
               "type": "null"
@@ -1675,8 +1710,11 @@
                   "enum": [
                     null,
                     "unavailable",
+                    "unobserved",
                     "already_presented",
-                    "interaction_limit"
+                    "interaction_limit",
+                    "surface_unrecorded",
+                    "presentation_failed"
                   ]
                 },
                 "records": {
@@ -3184,7 +3222,7 @@
           "type": "boolean"
         },
         "host_runtime": {
-          "description": "Optional host-observed facts about the runtime that executes this host's foreground audit, recorded once with the run (Pi: the pi-subagents owner). Validated at the application boundary against the host profile's subagents_compatibility, persisted opaquely, and never interpreted or projected by the core.",
+          "description": "Optional host-observed facts about the runtime that executes this host's foreground audit, recorded once with the run (Pi: the pi-subagents owner). Validated at the application boundary against the host profile's subagents_compatibility range, persisted opaquely, and read by the core only for `reviewed` (a version with no checked-in compat record is recorded `reviewed: false` and shown in the run view; it is admitted by what the adapter observed of it, ADR-0069).",
           "type": "object",
           "additionalProperties": false,
           "required": [
@@ -3235,6 +3273,10 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 4096
+                },
+                "reviewed": {
+                  "type": "boolean",
+                  "description": "Whether this exact version has a checked-in compat record. false is admitted when the live preflight and the tool's parameter schema passed; it is never a refusal by itself. An absent value reads as false (not reviewed); a present value that is not a boolean is malformed."
                 }
               }
             }
@@ -3253,10 +3295,11 @@
           "uniqueItems": true
         },
         "human_surface": {
-          "description": "Whether the host last observed a surface to show a dialog to a human now: Claude form elicitation advertised by the client, Pi `ctx.hasUI` in the TUI or RPC. Recorded at StartRun and updated by the host's private ingress at every report_convergence. Evidence routes to a human only when this is `human`, the run is not delegated or non-interactive, and the profile has a human approval ingress (ADR-0067).",
+          "description": "Whether the host last observed a surface to show a dialog to a human now: Claude form elicitation advertised by the client, Pi `ctx.hasUI` in the TUI or RPC. Recorded at StartRun and updated by the host's private ingress at every report_convergence. `unobserved` means the host has not yet looked (Claude's start hook runs before the MCP client declares form elicitation); a host that can tell at start records `human` or `unavailable` at once. Evidence is presented to a human only when this is `human`, the run is not delegated or non-interactive, and the profile has a human approval ingress (ADR-0067); while it is `unobserved` such a run is told a human is asked when it reports, if the host can show a dialog.",
           "enum": [
             "human",
-            "unavailable"
+            "unavailable",
+            "unobserved"
           ]
         }
       }
@@ -3571,7 +3614,8 @@
         "route": {
           "enum": [
             "human",
-            "unavailable"
+            "unavailable",
+            "unobserved"
           ]
         },
         "record_ids": {

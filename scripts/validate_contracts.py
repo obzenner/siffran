@@ -25,6 +25,9 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import registry_doc  # noqa: E402 - the one generator of the design document's data regions
+
 try:
     from jsonschema import Draft202012Validator
     from referencing import Registry, Resource
@@ -52,8 +55,11 @@ V2 = CONTRACTS / "empirica" / "v2"
 # canonical value requires updating the matching digest deliberately.
 # A research artifact row's verification, as the argument view requires it (ADR-0067).
 VERIFICATION = {"class": "verbatim", "status": "verified_by_service", "retrieve": True}
-REVIEWED_REGISTRY_DIGEST = "sha256:45fa33dc3aa269f8702ae41c002f7ee29edb005b1129e7ac65c4a33b5f8990af"
-REVIEWED_HOST_PROFILES_DIGEST = "sha256:31f7dde3ecdb24e97e88ad8c6812db2f85ff039b0199ddbf0c4e0443de0f9d1b"
+REVIEWED_REGISTRY_DIGEST = "sha256:7792155a1fd120995a9505f632bfdba1d55553f06e487ee14147e1a5a49729b5"
+#: The tools an auditor child may ever be given: the read-only tools and ``contact_supervisor`` (ADR-0069). The one
+#: closed list the profile's ``audit_child_tools`` is validated against; widening it is a reviewed edit of this file.
+AUDIT_CHILD_TOOL_VOCABULARY = frozenset({"read", "grep", "find", "ls", "contact_supervisor"})
+REVIEWED_HOST_PROFILES_DIGEST = "sha256:23a0aaf349ca33c7de4976853379dc55eecb8b3d628f9ff3a50243f802e9fc72"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
 REGISTRY_VERSION = "3.0.0"
@@ -522,17 +528,20 @@ def inventory_versions(compat_dir: Path) -> frozenset[str]:
     return frozenset(found)
 
 
+def _semver_tuple(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in version.split("."))
+
+
 def check_subagents_compatibility(profile: dict, pwhere: str, inventory_versions: frozenset[str] | None,
                                   errors: list[str]) -> None:
-    """The external-runtime policy of a foreground-audit profile (Empirica 4.1 D5/D6).
+    """The external-runtime policy of a foreground-audit profile (Empirica 4.1 D5/D6; ADR-0069).
 
-    Exactly the foreground hosts declare it; the profile id is ``<host>@<version>+<policy_id>``, so an
-    id can never encode a range or a runtime version; ``reviewed_versions`` are exact, unique and
-    ascending. ``inventory_versions`` is the set of checked-in reviewed inventories
-    (``adapters/pi/compat/pi-subagents-<version>.json``); when supplied it must equal
-    ``reviewed_versions``. The contract list is the reviewed decision and the inventories are the
-    evidence for it, so promoting a version is an explicit edit of both, never an implicit side effect
-    of generating a file; neither can drift from the other unnoticed."""
+    Exactly the foreground hosts declare it; the profile id is ``<host>+<policy_id>``, so an id can
+    never encode a range or a version. The policy is a half-open version range
+    ``[minimum, maximum_exclusive)``: a version inside it is admitted by what the adapter observes of it,
+    and a version with a checked-in compat record (``adapters/pi/compat/pi-subagents-<version>.json``) is
+    additionally *reviewed*. ``inventory_versions`` is the set of those records; when supplied every one
+    must lie inside the range (a record outside it could never be used, so it is dead evidence)."""
     policy = profile.get("subagents_compatibility")
     foreground = profile.get("audit_execution") == "foreground"
     if foreground and policy is None:
@@ -541,25 +550,22 @@ def check_subagents_compatibility(profile: dict, pwhere: str, inventory_versions
         errors.append(f"{pwhere}: subagents_compatibility applies only to foreground-audit hosts")
     if not isinstance(policy, dict):
         return
-    expected_id = f"{profile.get('host_id')}@{profile.get('version')}+{policy.get('policy_id')}"
+    expected_id = f"{profile.get('host_id')}+{policy.get('policy_id')}"
     if profile.get("profile_id") != expected_id:
-        errors.append(f"{pwhere}: profile_id must be '<host_id>@<version>+<policy_id>' = {expected_id!r}")
-    if policy.get("unreviewed_action") != "refuse":
-        errors.append(f"{pwhere}: subagents_compatibility.unreviewed_action must be 'refuse'")
-    reviewed = policy.get("reviewed_versions")
-    if not isinstance(reviewed, list) or not reviewed \
-            or not all(isinstance(v, str) and _EXACT_SEMVER.fullmatch(v) for v in reviewed):
-        errors.append(f"{pwhere}: reviewed_versions must be a nonempty list of exact MAJOR.MINOR.PATCH versions")
+        errors.append(f"{pwhere}: profile_id must be '<host_id>+<policy_id>' = {expected_id!r}")
+    minimum, maximum = policy.get("minimum"), policy.get("maximum_exclusive")
+    if not all(isinstance(v, str) and _EXACT_SEMVER.fullmatch(v) for v in (minimum, maximum)):
+        errors.append(f"{pwhere}: subagents_compatibility minimum and maximum_exclusive must be exact MAJOR.MINOR.PATCH versions")
         return
-    if len(set(reviewed)) != len(reviewed):
-        errors.append(f"{pwhere}: reviewed_versions must be unique")
-    if reviewed != sorted(reviewed, key=lambda v: tuple(int(part) for part in v.split("."))):
-        errors.append(f"{pwhere}: reviewed_versions must be in ascending version order")
-    if inventory_versions is not None and set(reviewed) != inventory_versions:
-        errors.append(
-            f"{pwhere}: reviewed_versions {sorted(reviewed)} != checked-in inventories {sorted(inventory_versions)} "
-            f"(missing inventory: {sorted(set(reviewed) - inventory_versions)}; "
-            f"inventory not reviewed: {sorted(inventory_versions - set(reviewed))})")
+    if _semver_tuple(minimum) >= _semver_tuple(maximum):
+        errors.append(f"{pwhere}: subagents_compatibility minimum must be below maximum_exclusive")
+        return
+    if set(policy) - {"package", "policy_id", "minimum", "maximum_exclusive"}:
+        errors.append(f"{pwhere}: subagents_compatibility has unknown fields {sorted(set(policy) - {'package', 'policy_id', 'minimum', 'maximum_exclusive'})}")
+    outside = sorted(v for v in (inventory_versions or ())
+                     if not _semver_tuple(minimum) <= _semver_tuple(v) < _semver_tuple(maximum))
+    if outside:
+        errors.append(f"{pwhere}: compat records outside the supported range [{minimum}, {maximum}): {outside}")
 
 
 def check_host_profiles(profiles_doc: dict, contract: dict, known_fixture_ids: set,
@@ -586,6 +592,8 @@ def check_host_profiles(profiles_doc: dict, contract: dict, known_fixture_ids: s
             errors.append(f"{where}.profiles[{i}]: duplicate profile_id {pid!r}")
         seen_ids.add(pid)
         pwhere = f"{where}.profiles[{i}] ({pid})"
+        if "subagents_compatibility" not in profile and pid != profile.get("host_id"):
+            errors.append(f"{pwhere}: a profile without an external-runtime policy has the host id as its profile_id")
         version = profile.get("version", "")
         if not isinstance(version, str) or RANGE_OPS.search(version):
             errors.append(f"{pwhere}: qualification version {version!r} must be exact")
@@ -632,6 +640,18 @@ def check_host_profiles(profiles_doc: dict, contract: dict, known_fixture_ids: s
             if isinstance(budget, dict) and isinstance(budget.get("soft"), int) \
                     and isinstance(budget.get("hard"), int) and budget["soft"] > budget["hard"]:
                 errors.append(f"{pwhere}: audit_launch_policy.tool_budget.soft must not exceed hard")
+            child_tools = policy.get("audit_child_tools")
+            if isinstance(child_tools, list):
+                for tool in child_tools:
+                    if tool not in AUDIT_CHILD_TOOL_VOCABULARY:
+                        errors.append(f"{pwhere}: audit_launch_policy.audit_child_tools names {tool!r}, which is "
+                                      f"outside the auditor vocabulary (read-only tools plus contact_supervisor) {sorted(AUDIT_CHILD_TOOL_VOCABULARY)}")
+            blocked = budget.get("block") if isinstance(budget, dict) else None
+            if isinstance(child_tools, list) and isinstance(blocked, list):
+                for tool in blocked:
+                    if tool not in child_tools:
+                        errors.append(f"{pwhere}: audit_launch_policy.tool_budget.block names {tool!r}, "
+                                      f"which is not in audit_child_tools")
     levels = profiles_doc.get("thinking_levels")
     if not isinstance(levels, list) or not levels or len(set(levels)) != len(levels) \
             or not all(isinstance(level, str) and re.fullmatch(r"[a-z]+", level) for level in levels):
@@ -648,6 +668,118 @@ def check_host_profiles(profiles_doc: dict, contract: dict, known_fixture_ids: s
     if actual != REVIEWED_HOST_PROFILES_DIGEST:
         errors.append(f"{where}: host-profiles digest {actual} != reviewed "
                       f"{REVIEWED_HOST_PROFILES_DIGEST}")
+
+
+def _test_declared(path: Path, names: list[str]) -> str | None:
+    """The first name in ``names`` that is not declared in ``path``, else None.
+
+    Python: each name is a ``def``/``class`` of exactly that name, and a name after a class is looked up inside that
+    class's block. Node: the name is the start of a ``test("<title>`` / ``it(`` / ``describe(`` title. ``*`` stands for
+    every test of the preceding class."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return names[0] if names else None
+    scope = text
+    for position, name in enumerate(names):
+        if name == "*":
+            # A wildcard stands for the tests of the class before it: there must be one, and it must hold a test.
+            if position == 0 or names[position - 1] == "*":
+                return name
+            if path.suffix == ".py" and re.search(r"^\s*(?:async\s+)?def\s+test", scope, re.M) is None:
+                return f"{names[position - 1]}::*"
+            if path.suffix != ".py" and re.search(
+                    rf"""^\s*describe(?:\.\w+)?\(\s*["'`]{re.escape(names[position - 1])}""", text, re.M) is None:
+                return f"{names[position - 1]}::*"  # a Node wildcard follows a describe block
+            continue
+        if path.suffix == ".py":
+            found = re.search(rf"^( *)(?:async\s+)?(?:def|class)\s+{re.escape(name)}\b", scope, re.M)
+            if found is None:
+                return name
+            indent, rest = len(found.group(1)), scope[found.end():].split("\n")
+            body = [rest[0]]
+            for line in rest[1:]:
+                if line.strip() and len(line) - len(line.lstrip()) <= indent:
+                    break
+                body.append(line)
+            scope = "\n".join(body)
+        elif re.search(rf"""^\s*(?:test|it|describe)(?:\.\w+)?\(\s*["'`]{re.escape(name)}""", scope, re.M) is None:
+            return name
+    return None
+
+
+def check_host_boundaries(doc: dict, errors: list[str], where: str, root: Path = ROOT) -> None:
+    """The host-boundary registry is data (ADR-0068): ids are unique and closed, every scenario is
+    proved by tests that exist or is live-only with a qualification-ledger row that exists, each
+    control-mode-dependent expectation covers all four modes, and the design document's generated
+    regions equal what ``make registry-doc`` writes from the registry (ADR-0069)."""
+    modes = doc.get("control_modes") or []
+    boundary_ids = [b.get("id") for b in doc.get("boundaries", []) if isinstance(b, dict)]
+    expectation_ids = [e.get("id") for e in doc.get("expectations", []) if isinstance(e, dict)]
+    scenarios = [s for s in doc.get("scenarios", []) if isinstance(s, dict)]
+    scenario_ids = [s.get("id") for s in scenarios]
+    for label, ids in (("boundary", boundary_ids), ("expectation", expectation_ids),
+                       ("scenario", scenario_ids)):
+        dupes = sorted({i for i in ids if ids.count(i) > 1})
+        if dupes:
+            errors.append(f"{where}: duplicate {label} id(s) {dupes}")
+    known_scenarios = set(scenario_ids)
+    for e in doc.get("expectations", []):
+        if e.get("boundary") not in boundary_ids:
+            errors.append(f"{where}: expectation {e.get('id')} names unknown boundary {e.get('boundary')!r}")
+        for sid in e.get("scenarios", []):
+            if sid not in known_scenarios:
+                errors.append(f"{where}: expectation {e.get('id')} names unknown scenario {sid}")
+        if e.get("control_mode_dependent"):
+            covered: set[str] = set()
+            for s in scenarios:
+                if s.get("id") in e.get("scenarios", []):
+                    covered.update(s.get("control_modes", []))
+            if "any" not in covered and not set(modes) <= covered:
+                errors.append(f"{where}: control-mode-dependent expectation {e.get('id')} has no scenario "
+                              f"for {sorted(set(modes) - covered)}")
+    for key in ("HB-STOP", "HB-GOV", "HB-REPORT", "HB-OBS"):
+        if not any(e.get("boundary") == key and e.get("control_mode_dependent")
+                   for e in doc.get("expectations", [])):
+            errors.append(f"{where}: {key} must carry a control-mode-dependent expectation")
+    attached = {sid for e in doc.get("expectations", []) for sid in e.get("scenarios", [])}
+    for sid in sorted(known_scenarios - attached):
+        errors.append(f"{where}: scenario {sid} belongs to no expectation")
+    ledger_path = root / str(doc.get("ledger", ""))
+    ledger_text = ledger_path.read_text(encoding="utf-8") if ledger_path.is_file() else ""
+    if not ledger_text:
+        errors.append(f"{where}: ledger {doc.get('ledger')!r} is missing")
+    ledger_rows = set(re.findall(r"^\| `([a-z][a-z0-9_]*)` \|", ledger_text, re.M))
+    for s in scenarios:
+        sid = s.get("id")
+        live = s.get("live_only")
+        if s.get("boundary") not in boundary_ids:
+            errors.append(f"{where}: scenario {sid} names unknown boundary {s.get('boundary')!r}")
+        if not s.get("covered_by") and not live:
+            errors.append(f"{where}: scenario {sid} has no covering test and is not live-only")
+        if live and live not in ledger_rows:
+            errors.append(f"{where}: scenario {sid} is live-only but the ledger has no row {live!r}")
+        for row in s.get("ledger_rows", []):
+            if row not in ledger_rows:
+                errors.append(f"{where}: scenario {sid} names ledger row {row!r} that does not exist")
+        for ref in s.get("covered_by", []):
+            path_part, *names = ref.split("::")
+            file = root / path_part
+            if not file.is_file():
+                errors.append(f"{where}: scenario {sid} covered_by file {path_part!r} does not exist")
+                continue
+            missing = _test_declared(file, names)
+            if missing is not None:
+                errors.append(f"{where}: scenario {sid} covered_by {path_part}::{missing!r} is not declared there")
+    design = root / str(doc.get("design_document", ""))
+    if not design.is_file():
+        errors.append(f"{where}: design document {doc.get('design_document')!r} is missing")
+        return
+    try:
+        for problem in registry_doc.drift(doc, design.read_text(encoding="utf-8")):
+            errors.append(f"{where}: design document: {problem}")
+    except (KeyError, TypeError) as exc:  # a registry the generator cannot render is already reported by the schema
+        errors.append(f"{where}: design document cannot be generated from the registry ({exc!r})")
 
 
 def _scan_banned(obj: Any, errors: list[str], where: str, path: str) -> None:
@@ -2470,6 +2602,15 @@ def main() -> int:
     else:
         errors.append("contracts/empirica/v2/host-profiles.json: required v2 host profiles are missing")
 
+    # --- host-boundary registry (ADR-0068) ---
+    host_boundaries_doc = load(V2 / "host-boundaries.json")
+    if host_boundaries_doc:
+        validate_schema_instance(host_boundaries_doc, "empirica/v2", "host-boundaries",
+                                 "contracts/empirica/v2/host-boundaries.json")
+        check_host_boundaries(host_boundaries_doc, errors, "host-boundaries")
+    else:
+        errors.append("contracts/empirica/v2/host-boundaries.json: the host-boundary registry is missing")
+
     # --- schema↔registry mirror ---
     req_schema = schemas.get(("empirica/v2", "request"), {})
     res_schema = schemas.get(("empirica/v2", "response"), {})
@@ -2637,6 +2778,8 @@ def main() -> int:
             check_trusted_payload(request, result, registry,
                                   errors, f"{where}")
 
+    if host_boundaries_doc:
+        run_host_boundary_negatives(host_boundaries_doc, errors, validate_schema_instance)
     # --- in-memory negative cases: one mutation each, expected substring ---
     run_negatives(registry, host_profiles_doc, v2_names, res_schema, req_schema,
                   state_schema, load(V2 / "public-tools.json"), errors, validate_schema_instance,
@@ -2648,6 +2791,92 @@ def main() -> int:
     print(f"ok: {len(schemas)} schemas, {len(fixture_paths)} fixtures, "
           f"{len(v2_fixture_paths)} v2 fixtures")
     return 0
+
+
+def run_host_boundary_negatives(doc: dict, errors: list[str], validate_schema: Callable) -> None:
+    """One mutation per host-boundary rule, each with the diagnostic it must produce (ADR-0068)."""
+    import copy
+
+    def expect(mutate: Callable[[dict], None], expected: str, label: str, schema: bool = False) -> None:
+        bad = copy.deepcopy(doc)
+        mutate(bad)
+        local: list[str] = []
+        if schema:
+            before = len(errors)
+            validate_schema(bad, "empirica/v2", "host-boundaries", "neg")
+            local = errors[before:]
+            del errors[before:]
+        else:
+            check_host_boundaries(bad, local, "neg")
+        if not local:
+            errors.append(f"NEG host-boundaries {label}: expected rejection but none produced")
+        elif not any(expected in e for e in local):
+            errors.append(f"NEG host-boundaries {label}: no diagnostic contains {expected!r}; got {local}")
+
+    def scenario(d: dict, sid: str) -> dict:
+        return next(x for x in d["scenarios"] if x["id"] == sid)
+
+    expect(lambda d: d["scenarios"].append(copy.deepcopy(d["scenarios"][0])),
+           "duplicate scenario id", "duplicate scenario id")
+    expect(lambda d: d["expectations"].append(copy.deepcopy(d["expectations"][0])),
+           "duplicate expectation id", "duplicate expectation id")
+    expect(lambda d: scenario(d, "EHB-STOP-07").update(covered_by=[], ledger_rows=[]),
+           "no covering test", "a scenario with neither a test nor a live-only row")
+    expect(lambda d: scenario(d, "EHB-STOP-07").update(covered_by=[
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::test_that_was_never_written"]),
+           "is not declared there", "a covering test that does not exist")
+    expect(lambda d: scenario(d, "EHB-STOP-07").update(covered_by=[
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::AuditBoundaryTests::"
+        "test_EHB_STOP_07_deliberative_continuation_hands_off_with_the_real_reason"]),
+           "is not declared there", "a test that exists in the file but not in the named class")
+    expect(lambda d: scenario(d, "EHB-STOP-07").update(covered_by=["plugins/empirica/no_such_file.py::test_x"]),
+           "does not exist", "a covering file that does not exist")
+    expect(lambda d: scenario(d, "EHB-STOP-09").update(live_only="no_such_ledger_row"),
+           "has no row", "a live-only row absent from the ledger")
+    expect(lambda d: scenario(d, "EHB-STOP-07").update(covered_by=[
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::*"]),
+           "is not declared there", "a wildcard that follows no class")
+    expect(lambda d: scenario(d, "EHB-STOP-07").update(covered_by=[
+        "plugins/empirica/adapters/pi/test/gate.test.ts::"
+        "the resolver that starts a run and launches the audit refuses an auditor given a writing tool, "
+        "for every reviewed version::*"]),
+           "is not declared there", "a wildcard after a Node test that is not a describe block")
+    expect(lambda d: scenario(d, "EHB-STOP-07").update(covered_by=[
+        "scripts/tests/fixtures/class_holding_no_test.py::HoldsNoTest::*"]),
+           "is not declared there", "a wildcard after a Python class that holds no test")
+    expect(lambda d: scenario(d, "EHB-PRES-01").update(covered_by=[
+        "plugins/empirica/tests/v2/test_evidence_scenarios.py::NoSuchClass::*"]),
+           "is not declared there", "a wildcard after a class that does not exist")
+    expect(lambda d: d["expectations"][0].update(scenarios=[]), "non-empty", "an expectation proved by no scenario", schema=True)
+    expect(lambda d: d["expectations"][0].pop("sources"), "sources", "an expectation with no sources", schema=True)
+    expect(lambda d: scenario(d, "EHB-STOP-07").update(ledger_rows=["no_such_ledger_row"]),
+           "ledger row", "a named ledger row absent from the ledger")
+    expect(lambda d: d["scenarios"].append({**copy.deepcopy(d["scenarios"][0]), "id": "EHB-ACT-99"}),
+           "is stale", "a scenario the design document does not show")
+    expect(lambda d: scenario(d, "EHB-ACT-01").update(expected="changed in the registry only"),
+           "is stale", "a registry edit the design document has not been regenerated for")
+    expect(lambda d: d["expectations"].append({**copy.deepcopy(d["expectations"][0]), "id": "HX-ACT-99", "scenarios": []}),
+           "no generated region 'HX-ACT-99'", "an expectation the design document has no region for")
+    expect(lambda d: d["expectations"][0]["scenarios"].append("EHB-ACT-98"),
+           "names unknown scenario", "an expectation naming a scenario that does not exist")
+    expect(lambda d: ([d["scenarios"].remove(scenario(d, "EHB-ACT-05"))]
+                      + [e["scenarios"].remove("EHB-ACT-05") for e in d["expectations"]
+                         if "EHB-ACT-05" in e["scenarios"]]),
+           "is stale", "a design-document scenario the registry lacks")
+    expect(lambda d: scenario(d, "EHB-STOP-07").update(covered_by=[
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::test_EHB_STOP_07"]),
+           "is not declared there", "a covering name that is only a prefix of a test")
+    expect(lambda d: [x.update(control_modes=["deliberative"]) for x in d["scenarios"]
+                      if x["id"] in next(e for e in d["expectations"]
+                                         if e["id"] == "HX-STOP-03")["scenarios"]],
+           "has no scenario for", "a control-mode-dependent expectation missing a mode")
+    expect(lambda d: [e.update(control_mode_dependent=False) for e in d["expectations"]
+                      if e["boundary"] == "HB-STOP"],
+           "must carry a control-mode-dependent expectation", "HB-STOP not control-mode dependent")
+    expect(lambda d: scenario(d, "EHB-STOP-07").update(control_modes=["sometimes"]),
+           "is not one of", "a control mode outside the axis", schema=True)
+    expect(lambda d: d["expectations"][0].update(boundary="HB-NOWHERE"),
+           "unknown boundary", "an expectation on an unknown boundary")
 
 
 def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: set,
@@ -2757,7 +2986,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     # (c) extra unknown profile ID -> digest + structural detect.
     bad_extra = copy.deepcopy(host_profiles_doc)
     bad_extra["profiles"].append({
-        "host_id": "x", "profile_id": "x@1.0", "version": "1.0", "current_tier": "foreground_only",
+        "host_id": "x", "profile_id": "x", "version": "1.0", "current_tier": "foreground_only",
         "required_fixture_ids": [], "required_live_probe_ids": ["p"],
         "promotion_status": "pending_live",
         "input_private": "unverified", "output_private": False, "unsupported_reason_ids": [],
@@ -2785,11 +3014,20 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         "audit_launch_policy"]["tool_budget"]["soft"] = 31
     expect(lambda e: check_host_profiles(bad_budget, registry, required_fixtures, e, "neg"),
            "soft must not exceed hard", "tool budget soft above hard")
+    bad_child_tools = copy.deepcopy(host_profiles_doc)
+    next(p for p in bad_child_tools["profiles"] if p.get("host_id") == "pi")[
+        "audit_launch_policy"]["audit_child_tools"] = ["read"]
+    expect(lambda e: check_host_profiles(bad_child_tools, registry, required_fixtures, e, "neg"),
+           "is not in audit_child_tools", "a budgeted tool the auditor child may not be given")
+    bad_writer = copy.deepcopy(host_profiles_doc)
+    next(p for p in bad_writer["profiles"] if p.get("host_id") == "pi")[
+        "audit_launch_policy"]["audit_child_tools"].append("bash")
+    expect(lambda e: check_host_profiles(bad_writer, registry, required_fixtures, e, "neg"),
+           "outside the auditor vocabulary (read-only tools plus contact_supervisor)", "a writing tool the auditor child may be given")
     # (g) external-runtime policy: dropped, unreviewed inventory, missing inventory, order, id encoding.
     # Hermetic baseline: pretend exactly the reviewed versions are installed, so each mutant changes one fact
     # (the real directory is compared in main()).
-    installed = frozenset(next(p for p in host_profiles_doc["profiles"] if p.get("host_id") == "pi")
-                          ["subagents_compatibility"]["reviewed_versions"])
+    installed = frozenset({"0.50.0", "0.76.1"})
 
     def pi_mutant(mutate):
         doc = copy.deepcopy(host_profiles_doc)
@@ -2799,20 +3037,18 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     for label, mutate, needle in (
         ("foreground host without subagents_compatibility",
          lambda p: p.pop("subagents_compatibility"), "must declare subagents_compatibility"),
-        ("a reviewed version with no checked-in inventory",
-         lambda p: p["subagents_compatibility"]["reviewed_versions"].append("9.9.9"), "missing inventory: ['9.9.9']"),
-        ("a checked-in inventory that was never reviewed",
-         lambda p: p["subagents_compatibility"]["reviewed_versions"].remove("0.64.0"), "inventory not reviewed: ['0.64.0']"),
-        ("reviewed versions out of order",
-         lambda p: p["subagents_compatibility"]["reviewed_versions"].reverse(), "ascending version order"),
-        ("duplicate reviewed version",
-         lambda p: p["subagents_compatibility"]["reviewed_versions"].append("0.50.0"), "must be unique"),
-        ("a version range as a reviewed version",
-         lambda p: p["subagents_compatibility"].update(reviewed_versions=[">=0.50.0"]), "exact MAJOR.MINOR.PATCH"),
-        ("a profile id that does not carry the policy id",
-         lambda p: p.update(profile_id="pi@0.84.1"), "profile_id must be '<host_id>@<version>+<policy_id>'"),
-        ("an unknown unreviewed action",
-         lambda p: p["subagents_compatibility"].update(unreviewed_action="warn"), "unreviewed_action must be 'refuse'"),
+        ("a compat record above the range",
+         lambda p: p["subagents_compatibility"].update(maximum_exclusive="0.76.1"), "compat records outside the supported range [0.50.0, 0.76.1): ['0.76.1']"),
+        ("a compat record below the range",
+         lambda p: p["subagents_compatibility"].update(minimum="0.51.0"), "compat records outside the supported range [0.51.0, 1.0.0): ['0.50.0']"),
+        ("an inverted range",
+         lambda p: p["subagents_compatibility"].update(minimum="1.0.0", maximum_exclusive="0.50.0"), "minimum must be below maximum_exclusive"),
+        ("a prerelease as the maximum",
+         lambda p: p["subagents_compatibility"].update(maximum_exclusive="1.0.0-beta.1"), "must be exact MAJOR.MINOR.PATCH"),
+        ("a retired exact-version list",
+         lambda p: p["subagents_compatibility"].update(reviewed_versions=["0.50.0"]), "unknown fields ['reviewed_versions']"),
+        ("a profile id that encodes a version",
+         lambda p: p.update(profile_id="pi@0.84.1+pi-subagents-foreground-audit-v1"), "profile_id must be '<host_id>+<policy_id>'"),
     ):
         expect(lambda e, doc=pi_mutant(mutate): check_host_profiles(
             doc, registry, required_fixtures, e, "neg", installed), needle, label)
@@ -3051,7 +3287,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                "freshness": {"changes": []}, "children": [], "next_actions": [],
                "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
                                         "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
-               "host": {"profile_id": "claude-code@2.1.278", "tier": "foreground_only",
+               "host": {"profile_id": "claude-code", "tier": "foreground_only",
                         "missing_capabilities": ["host.async_unsupported"]}}
 
     # (a) old partial RunView omitting required fields is schema-rejected.
@@ -4004,7 +4240,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                               "digest": d64, "relevant_sections": sections or ["audit"]},
                 "obligations": {"active": [], "deferred": []}, "residuals": [],
                 "freshness": {"changes": []}, "children": children or [],
-                "host": {"profile_id": "claude-code@2.1.278", "tier": "foreground_only",
+                "host": {"profile_id": "claude-code", "tier": "foreground_only",
                           "missing_capabilities": []}}
 
     def _artifacts() -> list:

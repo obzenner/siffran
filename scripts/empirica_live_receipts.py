@@ -31,10 +31,7 @@ for _receipt_host, (_host_id, _role) in _RECEIPT_HOSTS.items():
     _profile = next(profile for profile in _PROFILE_REGISTRY["profiles"]
                     if profile["host_id"] == _host_id and profile["promotion_status"] == "promoted")
     _POLICIES[_receipt_host] = _profile
-EXPECTED = {
-    host: (policy["profile_id"], policy["version"], _RECEIPT_HOSTS[host][1])
-    for host, policy in _POLICIES.items()
-}
+EXPECTED = {host: (policy["profile_id"], _RECEIPT_HOSTS[host][1]) for host, policy in _POLICIES.items()}
 MAX_TRACE_BYTES = 128 << 20
 _VERSION_OUTPUT = {
     "claude": re.compile(r"^([0-9]+\.[0-9]+\.[0-9]+)(?:\s+\(Claude Code\))?\s*$"),
@@ -87,7 +84,13 @@ def _version_tuple(value: str) -> tuple[int, int, int]:
 
 
 def require_compatible_version(host: str, version: str) -> None:
-    compatibility = _POLICIES[host]["compatibility"]
+    """A receipt's host is inside the profile's interval and at or above the profile's qualified version.
+
+    The qualified version is the profile's ``version``: raising it asks for exactly one new receipt, from that
+    release or a later one in the interval (ADR-0069).
+    """
+    policy = _POLICIES[host]
+    compatibility = policy["compatibility"]
     current = _version_tuple(version)
     minimum = _version_tuple(compatibility["minimum"])
     maximum = _version_tuple(compatibility["maximum_exclusive"])
@@ -95,27 +98,10 @@ def require_compatible_version(host: str, version: str) -> None:
         raise ValueError(
             f"host version {version} is outside compatible range "
             f"[{compatibility['minimum']}, {compatibility['maximum_exclusive']})")
-
-
-# The first release of a widened upper end of a host's interval that needs its own native receipt. Pi's
-# interval was widened past 0.90 to the whole 1.0 line (ADR-0052 amendment) on the condition that an
-# installed Pi 1.0.0 run exists: until the receipt is from Pi >= 1.0.0 the widening is provisional, so a
-# receipt from an older Pi cannot release it. If the interval is narrowed back to end at or below this
-# release, the rule no longer applies.
-_WIDENED_END_RELEASE = {"pi": "1.0.0"}
-
-
-def require_interval_end_receipt(host: str, version: str) -> None:
-    """Refuse a receipt from before the first release of a provisionally widened interval."""
-    first = _WIDENED_END_RELEASE.get(host)
-    if first is None:
-        return
-    maximum = _POLICIES[host]["compatibility"]["maximum_exclusive"]
-    if _version_tuple(maximum) > _version_tuple(first) and _version_tuple(version) < _version_tuple(first):
+    if current < _version_tuple(policy["version"]):
         raise ValueError(
-            f"the {host} interval extends to {maximum} (exclusive), which is admitted only with a native "
-            f"receipt from {host} >= {first}; this receipt is from {host} {version}, so the required "
-            f"{host} {first.split('.')[0]}.x receipt is missing")
+            f"{host} {version} is below the qualified version {policy['version']}, so a native receipt "
+            f"from {host} >= {policy['version']} is required")
 
 
 def digest(path: Path) -> str:
@@ -659,8 +645,17 @@ def inspect_claude(parent: list[dict], child_rows: list[dict], child: dict, run:
         "auditor": {"provider_id": "anthropic", "model_id": child_message["model"]},
         "verdict": child_verdict,
     }
-_SUBAGENTS_RECORDED = ("package", "version", "owner_path", "package_root", "preflight_path", "source")
-_SUBAGENTS_RECEIPT = ("package", "version", "owner_path", "package_root", "preflight_path")
+_SUBAGENTS_RECORDED = ("package", "version", "reviewed", "owner_path", "package_root", "preflight_path", "source")
+_SUBAGENTS_RECEIPT = ("package", "version", "reviewed", "owner_path", "package_root", "preflight_path")
+_SEMVER = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
+
+
+def _version_in_range(version: Any, minimum: str, maximum_exclusive: str) -> bool:
+    """Whether ``version`` is an exact semver in ``[minimum, maximum_exclusive)`` (numeric comparison)."""
+    if not isinstance(version, str) or _SEMVER.fullmatch(version) is None:
+        return False
+    parts = tuple(int(part) for part in version.split("."))
+    return tuple(int(p) for p in minimum.split(".")) <= parts < tuple(int(p) for p in maximum_exclusive.split("."))
 
 
 def _inside(path: Any, root: Any) -> bool:
@@ -686,14 +681,18 @@ def host_runtime_rejection(policy: dict | None, host_runtime: Any) -> str | None
     if not isinstance(host_runtime, dict) or not isinstance(host_runtime.get("subagents"), dict):
         return "malformed"
     subagents = host_runtime["subagents"]
-    if set(host_runtime) != {"policy_id", "subagents"} or set(subagents) != set(_SUBAGENTS_RECORDED):
+    optional = {"reviewed"}  # an absent value reads as not reviewed
+    if set(host_runtime) != {"policy_id", "subagents"} \
+            or not set(_SUBAGENTS_RECORDED) - optional <= set(subagents) <= set(_SUBAGENTS_RECORDED):
         return "malformed"
     if host_runtime["policy_id"] != policy["policy_id"]:
         return "policy"
     if subagents["package"] != policy["package"]:
         return "package"
-    if subagents["version"] not in policy["reviewed_versions"]:
+    if not _version_in_range(subagents["version"], policy["minimum"], policy["maximum_exclusive"]):
         return "version"
+    if "reviewed" in subagents and not isinstance(subagents["reviewed"], bool):  # absent reads as not reviewed
+        return "malformed"
     if not (_inside(subagents["owner_path"], subagents["package_root"])
             and _inside(subagents["preflight_path"], subagents["package_root"])):
         return "paths"
@@ -705,7 +704,8 @@ def subagents_runtime(state: dict, host: str) -> dict | None:
 
     ``None`` for a host whose profile has no external audit runtime (Claude); for Pi it is the exact
     package, version, owner file, package root and preflight module the host recorded when the run
-    started, plus the policy id, after they are checked against the profile's reviewed versions.
+    started, plus the policy id and whether the version had a compat record, after they are checked against the
+    profile's version range (ADR-0069).
     """
     policy = _POLICIES[host].get("subagents_compatibility")
     invocation = state.get("invocation")
@@ -716,7 +716,8 @@ def subagents_runtime(state: dict, host: str) -> dict | None:
     if policy is None:
         return None
     subagents = recorded["subagents"]
-    return {**{key: subagents[key] for key in _SUBAGENTS_RECEIPT}, "policy_id": recorded["policy_id"]}
+    return {**{key: subagents.get(key, False if key == "reviewed" else None) for key in _SUBAGENTS_RECEIPT},
+            "policy_id": recorded["policy_id"]}
 
 
 def inspect_pi(parent: list[dict], child_rows: list[dict], child: dict,
@@ -827,7 +828,7 @@ def inspect(receipt: dict, host: str, expected_commit: str,
             expected_plugin_version: str) -> list[str]:
     errors = []
     try:
-        profile, _, role = EXPECTED[host]
+        profile, role = EXPECTED[host]
         if receipt.get("format") != FORMAT or receipt.get("operator_attested") is not True:
             raise ValueError("operator-attested v3 receipt is required")
         if receipt.get("host") != host or receipt.get("profile_id") != profile:
@@ -836,7 +837,6 @@ def inspect(receipt: dict, host: str, expected_commit: str,
         if not isinstance(host_version, str):
             raise ValueError("exact observed host version is required")
         require_compatible_version(host, host_version)
-        require_interval_end_receipt(host, host_version)
         if receipt.get("plugin_version") != expected_plugin_version:
             raise ValueError("release plugin version mismatch")
         if receipt.get("release_commit") != expected_commit:

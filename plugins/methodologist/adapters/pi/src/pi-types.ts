@@ -63,7 +63,8 @@ export interface ToolDefinition {
 
 export interface CommandDefinition {
   description: string;
-  handler: (args: string, ctx: ExtensionContext) => Promise<void> | void;
+  /** Pi declares `Promise<void>` in 0.84.1, 0.87.1, 1.0.0 and 1.1.0; a handler that may return nothing is not accepted. */
+  handler: (args: string, ctx: ExtensionContext) => Promise<void>;
 }
 
 export interface ResourcesDiscoverEvent {

@@ -22,8 +22,10 @@ from application.snapshot import traverse_history
 from test_d7_transactions import Runs, Artifacts, Workspace, Harness
 from governance_setup import (AUTHOR, AUDITOR, TEST_INVOCATION, SIZED_RATIONALE,
                               sized_configure_run)
+from application.protocol import host_profile_id  # noqa: E402
+PI_PROFILE = host_profile_id("pi")
 
-PROFILE = "pi@0.84.1+pi-subagents-foreground-audit-v1"
+PROFILE = PI_PROFILE
 GRAPH = {"root": "C0", "claims": [{"id": "C0", "text": "supplied uncertainty", "gating": True,
                                    "kind": "ordinary"}], "edges": []}
 CONTEXT = {"author": AUTHOR, "ingress": "pi_ui"}

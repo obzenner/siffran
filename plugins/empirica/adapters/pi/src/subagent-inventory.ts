@@ -1,42 +1,62 @@
-// The reviewed launch/action inventory of one pi-subagents version (Empirica 4.1, D4).
+// The launch/action inventory of one pi-subagents version (Empirica 4.1, D4; ADR-0069).
 //
-// Inventories are generated — `scripts/gen_pi_subagents_inventory.mjs` reads a package's own
+// A reviewed inventory is generated — `scripts/gen_pi_subagents_inventory.mjs` reads a package's own
 // parameter schema and action dispatch list — and checked in under `compat/`, one file per exact
-// version. The adapter selects the inventory of the owner's exact version and refuses an owner with
-// none, so a pi-subagents release whose surface nobody has reviewed cannot be classified by
-// analogy with another. This module only validates and loads those files.
+// version. A version inside the profile's range with no such file is admitted by observation (`observeInventory`);
+// the admission rule is owned by ADR-0069 and HX-ADM-02 and is not restated here. Its action list is the union of
+// the reviewed versions' (`reviewedActionNames`) and its launch-contract version comes from the live
+// preflight. This module validates, loads and observes; it never classifies a call.
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { EXACT_VERSION } from "./host-profile.ts";
 
 /** The top-level `subagent` parameters that start an execution, across every reviewed version. */
 export const LAUNCH_FORMS = ["agent", "workflowScript", "workflowScriptPath", "workflow", "resume"] as const;
 export type LaunchForm = typeof LAUNCH_FORMS[number];
 
-export interface SubagentInventory {
+/** What the adapter consumes of any inventory, reviewed or observed. */
+interface InventoryFacts {
   readonly version: string;
-  /** The package's declared `peerDependencies["@earendil-works/pi-ai"]`: the Pi generation it needs. */
-  readonly peer_pi_ai: string;
-  /** The `contract.version` this package's launch preflight emits (observed, not assumed). */
-  readonly launch_contract_version: number;
   readonly launch_forms: readonly LaunchForm[];
   readonly actions: readonly string[];
   readonly supports: {
-    readonly turnBudget: boolean;
     readonly toolBudget: boolean;
     readonly timeoutMs: boolean;
-    readonly workflow: "absent" | "string" | "boolean|string";
-    readonly disabledFeatures: boolean;
     /** `validate` is documented as offline (statically checks a workflow without launching children). */
     readonly validateOffline: boolean;
   };
 }
 
+/** A checked-in compat record: everything the review recorded. */
+export interface ReviewedInventory extends InventoryFacts {
+  readonly reviewed: true;
+  /** The package's declared `peerDependencies["@earendil-works/pi-ai"]`: the Pi generation it needs. */
+  readonly peer_pi_ai: string;
+  /** The `contract.version` this package's launch preflight emits (observed, not assumed). */
+  readonly launch_contract_version: number;
+  readonly supports: InventoryFacts["supports"] & {
+    readonly turnBudget: boolean;
+    readonly workflow: "absent" | "string" | "boolean|string";
+    readonly disabledFeatures: boolean;
+  };
+}
+
+/** What an in-range version with no record gives: the facts the adapter consumes. The two bound flags are declared by
+ * its schema (not observed to be enforced) and `validateOffline` is false because nothing documents it as offline. */
+export interface ObservedInventory extends InventoryFacts {
+  readonly reviewed: false;
+  /** Unknown until the live preflight answers; the seam accepts any version it knows. */
+  readonly launch_contract_version: null;
+}
+
+export type SubagentInventory = ReviewedInventory | ObservedInventory;
+
 /** Directory of the checked-in inventories (inside the plugin, so an installed copy carries them). */
 export const COMPAT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "compat");
 
-const EXACT_VERSION = /^\d+\.\d+\.\d+$/;
 
 function record(value: unknown, where: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value))
@@ -59,7 +79,7 @@ function stringList(value: unknown, where: string): string[] {
 }
 
 /** Validate a parsed inventory document (closed shape); throws on the first deviation. */
-export function parseInventory(document: unknown): SubagentInventory {
+export function parseInventory(document: unknown): Omit<ReviewedInventory, "reviewed"> {
   const doc = record(document, "document");
   exactKeys(doc, ["version", "peer_pi_ai", "launch_contract_version", "launch_forms", "actions", "supports"], "document");
   if (typeof doc.version !== "string" || !EXACT_VERSION.test(doc.version))
@@ -83,7 +103,37 @@ export function parseInventory(document: unknown): SubagentInventory {
     throw new Error("pi-subagents inventory: supports.workflow must be absent, string, or boolean|string");
   if (supports.validateOffline === true && !actions.includes("validate"))
     throw new Error("pi-subagents inventory: validateOffline requires the validate action");
-  return doc as unknown as SubagentInventory;
+  return doc as unknown as Omit<ReviewedInventory, "reviewed">;
+}
+
+/**
+ * The `subagent` parameters the audit launch sends (audit-launch.ts) plus the launch form it uses. A
+ * package whose own schema lacks one of them cannot carry the launch, so it is not admitted.
+ */
+export const AUDIT_LAUNCH_PARAMETERS = [
+  "agent", "task", "model", "agentScope", "async", "context", "acceptance", "timeoutMs", "toolBudget",
+] as const;
+
+/**
+ * Admit a version that has no compat record from what the owner's tool declares. Returns the observed
+ * inventory (its actions are `knownActions`, the names some reviewed version has), or the name of the first
+ * audit-launch parameter the tool's schema does not declare.
+ */
+export function observeInventory(version: string, parameters: unknown, knownActions: readonly string[]):
+  { readonly ok: true; readonly inventory: ObservedInventory } | { readonly ok: false; readonly detail: string } {
+  const properties = parameters !== null && typeof parameters === "object"
+    ? (parameters as { properties?: unknown }).properties : undefined;
+  if (properties === null || typeof properties !== "object" || Array.isArray(properties))
+    return { ok: false, detail: "the subagent tool declares no parameter schema" };
+  const declared = properties as Record<string, unknown>;
+  const missing = AUDIT_LAUNCH_PARAMETERS.find((name) => !(name in declared));
+  if (missing !== undefined) return { ok: false, detail: `the subagent tool's schema does not declare \`${missing}\`` };
+  return { ok: true, inventory: {
+    reviewed: false, version, launch_contract_version: null,
+    launch_forms: LAUNCH_FORMS.filter((form) => form in declared), actions: [...knownActions],
+    // The schema declares both bound fields (AUDIT_LAUNCH_PARAMETERS); `validate` is never taken as offline.
+    supports: { toolBudget: true, timeoutMs: true, validateOffline: false },
+  } };
 }
 
 /** File reads for inventory loading, injected so absence and corruption are testable. */
@@ -108,7 +158,7 @@ export const nodeInventoryIo: InventoryIo = {
  * for any version that is not a plain `MAJOR.MINOR.PATCH` release). A present but malformed file,
  * or one that names a different version, is a defect and throws.
  */
-export function loadInventory(version: string, dir: string = COMPAT_DIR, io: InventoryIo = nodeInventoryIo): SubagentInventory | undefined {
+export function loadInventory(version: string, dir: string = COMPAT_DIR, io: InventoryIo = nodeInventoryIo): ReviewedInventory | undefined {
   if (!EXACT_VERSION.test(version)) return undefined;
   const file = path.join(dir, `pi-subagents-${version}.json`);
   const text = io.readText(file);
@@ -116,5 +166,14 @@ export function loadInventory(version: string, dir: string = COMPAT_DIR, io: Inv
   const inventory = parseInventory(JSON.parse(text));
   if (inventory.version !== version)
     throw new Error(`pi-subagents inventory: ${file} describes ${inventory.version}, not ${version}`);
-  return inventory;
+  return { reviewed: true as const, ...inventory };
+}
+
+/** The union of the actions of every checked-in inventory, sorted: the action names some reviewed version has. */
+export function reviewedActionNames(dir: string = COMPAT_DIR): string[] {
+  const names = new Set<string>();
+  for (const file of readdirSync(dir).filter((name) => /^pi-subagents-\d+\.\d+\.\d+\.json$/.test(name)))
+    for (const action of loadInventory(file.slice("pi-subagents-".length, -".json".length), dir)?.actions ?? [])
+      names.add(action);
+  return [...names].sort();
 }

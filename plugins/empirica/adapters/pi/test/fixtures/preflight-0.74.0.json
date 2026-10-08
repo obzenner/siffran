@@ -29,7 +29,7 @@
             "source": "package",
             "filePath": "{{AUDITOR_FILE}}",
             "definitionProjectionVersion": 2,
-            "definitionDigest": "0efedc5cca3d0eae9c885f925ab8e175c9ffc1fa254f566aadec99c4651d53a1",
+            "definitionDigest": "7b951e1112aad421b28e4cc7fac017be26638377a5c06058c4ff550107bef757",
             "shadowedCandidates": []
           },
           "context": "fresh",
@@ -122,8 +122,8 @@
               "message": "No sessionRoot/sessionDir was supplied; exact child session paths require the Pi host session-root policy."
             }
           ],
-          "launchContractDigest": "cb1479d05fad77f8f4f9ed6555780edcecf4ed875f746a0eb1e095c937224db0",
-          "digest": "eabf07f1fde9d28e2505c19829d6b782cad2aad6fe8564617867ad764453cd46"
+          "launchContractDigest": "8e7e5cee7f6dc373cd89b9323946427652573d1bfefbbb1eafd4ef05ab1131ed",
+          "digest": "edc692103b8ba81ecf3e9fb8435ee088a474a000ac3c8b42a1981aab2cb64bd3"
         }
       }
     },

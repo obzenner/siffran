@@ -36,7 +36,7 @@ from core import citations, confirmation  # noqa: E402
 from core.observer import message_problems, ENDED, EVIDENCE_KINDS, REVIEW_STATES, SPENT_ROUTES  # noqa: E402
 
 #: The routes a pending human-owned confirmation can read as: where it goes, or why nobody will ask.
-HUMAN_ASK = {*confirmation.HUMAN_ROUTES, *SPENT_ROUTES.values(), ENDED}
+HUMAN_ASK = {*confirmation.TOLD_ROUTES, *SPENT_ROUTES.values(), ENDED}
 
 
 def _load(path: Path) -> Any:
@@ -94,10 +94,11 @@ def mirror_problems(view_schema: dict, run_schema: dict, reg: dict, state_schema
           confirmation.REJECTED_BY_HUMAN, confirmation.PENDING}, "core.confirmation statuses"),
         ("record route", _enum(record, "route"),
          {confirmation.AUDIT, *HUMAN_ASK}, "core.confirmation routes + core.observer spent routes"),
-        ("waiting route", _enum(waiting, "route"), set(confirmation.HUMAN_ROUTES) | set(SPENT_ROUTES.values()),
-         "core.confirmation.HUMAN_ROUTES + core.observer.SPENT_ROUTES"),
+        ("waiting route", _enum(waiting, "route"), set(confirmation.TOLD_ROUTES) | set(SPENT_ROUTES.values()),
+         "core.confirmation.TOLD_ROUTES + core.observer.SPENT_ROUTES"),
         ("run prompt_error", _enum(detail, "prompt_error"),
-         {"unavailable", "already_presented", "interaction_limit"}, "core.confirmation.prompt_error"),
+         set(confirmation.PROMPT_ERRORS) - {confirmation.UNOBSERVED},
+         "core.confirmation.PROMPT_ERRORS (the observer tells unobserved as no error: confirmation.told_prompt_error)"),
         ("decision outcome", _enum(decision, "outcome"), {confirmation.APPROVE, confirmation.REJECT},
          "core.confirmation decisions"),
         ("decision route", _enum(decision, "route"), set(HUMAN_ASK), "core.confirmation + core.observer routes"),
