@@ -55,7 +55,7 @@ The interim UI had its own reader, which re-derived claim states and audit curre
 ### Serving
 
 - **Server:** `adapters/observer/server.py` (`cli.py serve`) uses the standard library only.
-- **Network:** it binds to 127.0.0.1 and serves GET and HEAD only. A `Host` header other than this server's loopback address is refused, which defeats DNS rebinding.
+- **Network:** it binds to 127.0.0.1 and serves GET and HEAD only. A `Host` header other than `127.0.0.1`, `localhost` or `empirica.localhost` with this server's own port is refused, which defeats DNS rebinding. The CLI prints and opens `http://empirica.localhost:<port>/app/` (browsers resolve `*.localhost` to loopback) and prints the `127.0.0.1` address as a fallback; the port logic is unchanged.
 - **Origin:** it sends no CORS headers and a Content-Security-Policy that allows only its own origin.
 - **Files:** static files come from an allowlist under `plugins/empirica/ui`. Symlinks out of the tree and dotfiles are refused.
 - **Endpoints:**

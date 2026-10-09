@@ -91,6 +91,21 @@ settles. The deterministic half of every one is a named test; here the operator 
 | `webfetch_capture` | Claude, any control mode: in one audit have the auditor fetch one same-host URL and one cross-host redirecting URL with `WebFetch`. Keep the auditor's `agent_transcript_path` file (SubagentStop payload). | Evidence only: record the exact `WebFetch` tool_use and tool_result shape (error flag, content, whether the URL and the redirect target appear). Nothing in Empirica credits it yet. `EHB-AUDRES-07`. | Child transcript file, hook log |
 | `auditor_contact_supervisor` | Pi, foreground audit: have the auditor call `contact_supervisor` with `need_decision`. | Record whether the call blocks to the audit timeout or the child detaches. No verdict is admitted either way (timeout = `isError`; detached = non-terminal, `EHB-INT-04`). `EHB-AUDRES-08`. | Pi trace, audit result |
 
+
+## D3. Auto-mode human steps (ADR-0063; interactive auto, each in a fresh run unless a row says otherwise)
+
+Auto asks the human once, for the first approval, and nowhere else. These rows record that on the real host; the
+deterministic half is `tests/test_governance.py` and `tests/v2/test_terminal_consent.py` (`EHB-TERM-04`). Run them in
+interactive auto (`--auto` from an interactive session); the delegated and non-interactive refusals are rows
+`delegated_auto_admission` and `noninteractive_auto_refusal` above.
+
+| Row ID | Human/operator action | Expected observation | Evidence |
+|---|---|---|---|
+| `auto_first_approval` | Claude and Pi, interactive auto: start with a goal, let the author propose `configure_run`, and approve the one dialog (edit a ceiling if you like). Then carry on through research and at least one more `configure_run` or graph change. | Exactly one configuration dialog (the first approval); after it, no configuration dialog appears again in the run. | Dialog count in the transcript, RunView `governance` |
+| `auto_revision_no_dialog` | After the approval, the author submits a non-raising `configure_run` (for example, lowering passes, but not below what is used). | Accepted without a dialog: the run view shows the new ceilings and the revision count. The material-revision allowance (`governance.revision_exhausted` after 8) is a deterministic test; do not exhaust it live. | RunView before and after, transcript |
+| `auto_raise_refused` | After the approval, the author submits a raising `configure_run` (any ceiling above the approved one). | Refused with the closed reason `governance.auto_ceiling`; no dialog, nothing granted, the approved ceilings are unchanged. (A raise before the first approval is allowed: it is the seed.) | Tool result, RunView |
+| `auto_evidence_directive` | Claude, interactive auto after the approval: record web research (a URL that needs a human) and end the turn without reporting. | The Stop **blocks** (exit 2) with the `evidence_report` directive ("Call report_convergence now: the human is asked inside that call"); it does not pause. The agent calls `report_convergence`, the evidence dialog asks the human, and after confirmation the audit runs and the run converges (one audit). `EHB-STOP-20`. | Hook log (`--debug-file`), dialog, transcript, RunView |
+| `auto_terminal_no_consent` | Claude and Pi, interactive auto: leave a non-gating claim open and call `report_convergence intent=stop`. | The run ends `stopped_frozen` (or the status the core names) with **no** consent dialog: the end-of-run question is asked of deliberative runs only (ADR-0063 amendment: auto is unchanged). `EHB-TERM-04`. | Transcript, RunView, dialog count |
 ## E. Methodologist sanity
 
 After Empirica is terminal, use the host's Methodologist entry (see the host reference), choose a named methodology as the

@@ -78,12 +78,17 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.served.server.server_address[0], "127.0.0.1")
 
     def test_a_request_for_another_host_is_refused(self):
-        for host in ("evil.example", f"evil.example:{self.served.port}", "127.0.0.1", ""):
+        port = self.served.port
+        for host in ("evil.example", f"evil.example:{port}", "127.0.0.1", "",
+                     f"empirica.localhost:{port + 1}", f"evil.localhost:{port}", f"empirica.localhost.evil.com:{port}",
+                     f"x.empirica.localhost:{port}", "empirica.localhost"):
             with self.subTest(host=host):
                 response, _ = self.served.get("/api/view", host=host)
                 self.assertEqual(response.status, 403)
-        response, _ = self.served.get("/api/view", host=f"localhost:{self.served.port}")
-        self.assertEqual(response.status, 200)
+        for host in (f"localhost:{port}", f"127.0.0.1:{port}", f"empirica.localhost:{port}"):
+            with self.subTest(host=host):
+                response, _ = self.served.get("/api/view", host=host)
+                self.assertEqual(response.status, 200)
 
     def test_the_summary_is_the_observer_s_with_its_token_as_etag(self):
         response, body = self.served.get("/api/view")
@@ -218,7 +223,8 @@ class StaticPathTests(unittest.TestCase):
                    "--port", str(served.port)]
             again = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
             self.assertEqual((again.returncode, again.stdout.strip()),
-                             (0, f"Empirica observer (already running): http://127.0.0.1:{served.port}/app/?data=demo"))
+                             (0, f"Empirica observer (already running): http://empirica.localhost:{served.port}/app/?data=demo\n"
+                              f"  If your browser does not resolve *.localhost: http://127.0.0.1:{served.port}/app/?data=demo"))
         finally:
             served.close()
         self.assertFalse(cli.running(served.port, "demo"), "nothing answers once it stopped")
@@ -229,7 +235,9 @@ class StaticPathTests(unittest.TestCase):
                                "--repo", "/definitely/not/a/repo"],  # the demo opens no store, so this is unread
                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as proc:
             try:
-                self.assertIn(b"http://127.0.0.1:", proc.stdout.readline())
+                first = proc.stdout.readline()
+                self.assertRegex(first, rb"^Empirica observer: http://empirica\.localhost:\d+/app/\?data=demo  \(Ctrl-C to stop\)")
+                self.assertRegex(proc.stdout.readline(), rb"^  If your browser does not resolve \*\.localhost: http://127\.0\.0\.1:\d+/app/\?data=demo")
                 proc.stdin.close()
                 self.assertEqual(proc.wait(timeout=10), 0)
             finally:
@@ -253,10 +261,10 @@ class DroppedClientTests(unittest.TestCase):
         proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.addCleanup(lambda: (proc.kill(), proc.wait(), proc.stdout.close(), proc.stderr.close()))
         line = proc.stdout.readline()
-        if "http://127.0.0.1:" not in line:
+        if "http://empirica.localhost:" not in line:
             proc.kill()
             self.fail(f"the server did not start: {line!r} {proc.stderr.read()[-600:]!r}")
-        return proc, int(line.split("http://127.0.0.1:")[1].split("/")[0].split()[0])
+        return proc, int(line.split("http://empirica.localhost:")[1].split("/")[0].split()[0])
 
     @staticmethod
     def _reset_mid_write(port: int) -> None:

@@ -171,7 +171,7 @@ promotion remains separate and unsupported.
 
 The Empirica plugin ships a read-only observer UI: every project, run and claim in your store, with
 how they relate, and the detail of whatever you click. It is served by the plugin itself on
-127.0.0.1 and updates while runs progress.
+127.0.0.1 (at `empirica.localhost:<port>`) and updates while runs progress.
 
 | Host | Start it with |
 |---|---|

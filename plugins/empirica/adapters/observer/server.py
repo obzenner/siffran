@@ -6,8 +6,10 @@
                                              ``serve`` of the same store on the same port reuses it
     GET /app/, /gallery/, ...                the UI's files (an allowlist under plugins/empirica/ui)
 
-Security: bound to 127.0.0.1 only. Only GET and HEAD are served. A request whose ``Host`` is not this
-server's loopback address is refused, which defeats DNS rebinding. No CORS headers are sent, so
+Security: bound to 127.0.0.1 only. Only GET and HEAD are served. A request whose ``Host`` is not one of this
+server's three names with its own port (``127.0.0.1``, ``localhost``, ``empirica.localhost``) is refused, which
+defeats DNS rebinding: browsers resolve ``*.localhost`` to the loopback address without asking DNS, so the name the
+CLI prints, ``empirica.localhost:<port>``, tells the tab apart from other local servers, and no other name is taken. No CORS headers are sent, so
 another origin cannot read a response. A Content-Security-Policy allows only this origin. Nothing is
 written: the observer reads, and the server only reads files from the allowlist.
 
@@ -34,6 +36,8 @@ PLUGIN = Path(__file__).resolve().parents[2]
 UI = PLUGIN / "ui"
 DEMO = PLUGIN / "vendor/contracts/empirica-ui-view/v1/fixtures"
 HOST = "127.0.0.1"
+#: The name the CLI prints and opens; the host check accepts exactly this with the server's own port.
+NAME = "empirica.localhost"
 #: What the UI may load: top-level folders and files under ``UI``, by extension.
 SERVED_DIRS = ("app", "gallery", "elements", "dist", "vendor", "copy")
 SERVED_FILES = ("states.json", "catalogue.json", "icons.json")
@@ -148,7 +152,7 @@ def handler_for(sources: Sources, root: Path = UI):
 
         def _host_ok(self) -> bool:
             port = self.server.server_address[1]
-            return self.headers.get("Host") in {f"{HOST}:{port}", f"localhost:{port}"}
+            return self.headers.get("Host") in {f"{HOST}:{port}", f"localhost:{port}", f"{NAME}:{port}"}
 
         def do_HEAD(self):
             self.do_GET()

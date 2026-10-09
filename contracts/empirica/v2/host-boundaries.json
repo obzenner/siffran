@@ -1445,7 +1445,9 @@
       "covered_by": [
         "plugins/empirica/tests/v2/test_terminal_consent.py::TerminalConsentTests::test_EHB_TERM_04_every_auto_mode_ends_without_a_question"
       ],
-      "ledger_rows": []
+      "ledger_rows": [
+        "auto_terminal_no_consent"
+      ]
     },
     {
       "id": "EHB-TERM-05",
@@ -2315,7 +2317,8 @@
         "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_EHB_STOP_20_an_auto_continuation_keeps_the_evidence_directive_and_deliberative_hands_off"
       ],
       "ledger_rows": [
-        "stop_unattended_directive"
+        "stop_unattended_directive",
+        "auto_evidence_directive"
       ]
     },
     {

@@ -215,8 +215,8 @@ class MediatorTests(MediatorFixture):
     def test_the_form_is_flat_primitive_and_unlike_the_configuration_form(self):
         items = [{"subject": "research", "id": "r1", "record_ids": ["r1"], "claims": [{"id": "C0", "text": "C"}],
                   "source_kind": "web", "source_ref": URL, "quote": "q", "class": "retrievable",
-                  "title": "t1", "note_title": "n1"},
-                 {"subject": "claim", "id": "C1", "digest": "d", "text": "T", "title": "t2", "note_title": "n2"}]
+                  "title": "t1", "description": "d1", "note_title": "n1"},
+                 {"subject": "claim", "id": "C1", "digest": "d", "text": "T", "title": "t2", "description": "d2", "note_title": "n2"}]
         message, schema = confirmation.form(items, 900)
         self.assertEqual(set(schema["properties"]), {"d1", "n1", "d2", "n2"})
         for key, prop in schema["properties"].items():
@@ -233,7 +233,7 @@ class MediatorTests(MediatorFixture):
         self.assertIn("2. Decision needed", message)
         observed = {"subject": "research", "id": "r3", "record_ids": ["r3"], "claims": [{"id": "C0", "text": "C"}],
                     "source_kind": "runtime", "source_ref": "none", "quote": "q", "class": "observed",
-                    "reason": "No harness.", "title": "t3", "note_title": "n3"}
+                    "reason": "No harness.", "title": "t3", "description": "d3", "note_title": "n3"}
         self.assertIn("Why no deterministic check: No harness.", confirmation.form([observed], 900)[0])
 
     # ---- F-Q4-2: every field names its subject; one source with one quote is one item -----------------------------
@@ -268,22 +268,28 @@ class MediatorTests(MediatorFixture):
         self.assertEqual([r["verification"]["status"] for r in self.rows(drv, run_id)],
                          ["confirmed_by_human", "rejected_by_human"])
 
-    def test_each_field_title_names_its_subject_in_short_form(self):
-        """Claude collapses the long message ("+21 more lines") and shows the field titles, so each names its source and the
-        claims it is for. The limit is the width the dialog showed uncut (72 columns, the wrap of the message lines)."""
+    def test_a_field_has_a_short_title_and_its_details_in_the_description(self):
+        """F-Q5-1: Claude cuts a field title at about 45 columns and collapses the message, so the title is short and the
+        item (claims, quote prefix, question) is the property's ``description``, which Claude renders under the field."""
+        from adapters.confirmation import DESCRIPTION_LIMIT, TITLE_LIMIT
         drv, run_id = self.two_claims()
         long_ref = "https://example.test/" + "a-very-long-path-segment/" * 6 + "spec"
-        self.research(drv, run_id, "web", "https://www.example.test/spec", claim="C0")
+        self.research(drv, run_id, "web", "https://www.example.test/spec", claim="C0", citation="The required name field: " + "x" * 400)
         self.research(drv, run_id, "web", long_ref, claim="C1")
         human = Human(accept())
         self.mediate(drv, run_id, human)
         properties = human.shown[0][1]["properties"]
-        self.assertEqual(properties["d1"]["title"], "1. example.test/spec: does it say the quoted text? (C0)")
-        self.assertEqual(properties["n1"]["title"], "1. Note on example.test/spec (optional)")
-        self.assertTrue(properties["d2"]["title"].startswith("2. example.test/a-very-long-path"), properties["d2"]["title"])
-        self.assertTrue(properties["d2"]["title"].endswith("does it say the quoted text? (C1)"))
-        for key, prop in properties.items():
-            self.assertLessEqual(len(prop["title"]), 72, key)
+        self.assertEqual(properties["d1"]["title"], "1. example.test/spec")
+        self.assertTrue(properties["d2"]["title"].startswith("2. example.test/a-very-long"), properties["d2"]["title"])
+        self.assertEqual(properties["n1"]["title"], "1. Note (optional)")
+        self.assertNotIn("description", properties["n1"])
+        for key in ("d1", "d2", "n1", "n2"):
+            self.assertLessEqual(len(properties[key]["title"]), TITLE_LIMIT, key)
+        description = properties["d1"]["description"]
+        self.assertTrue(description.startswith('For C0 · Quote: "The required name field: xxx'), description)
+        self.assertTrue(description.endswith("…\" · Does the page say this?"), description)
+        self.assertLessEqual(len(description), DESCRIPTION_LIMIT)
+        self.assertIn("For C1", properties["d2"]["description"])
 
     def test_a_decision_field_names_the_claim_it_asks_about(self):
         drv, run_id = self.start(graph=graph_with_decision())
@@ -291,7 +297,22 @@ class MediatorTests(MediatorFixture):
         self.mediate(drv, run_id, human)
         properties = human.shown[0][1]["properties"]
         self.assertEqual(properties["d1"]["title"], "1. Your decision on C1")
-        self.assertEqual(properties["n1"]["title"], "1. Your answer on C1 (optional)")
+        self.assertTrue(properties["d1"]["description"].startswith("C1 · "), properties["d1"]["description"])
+        self.assertEqual(properties["n1"]["title"], "1. Note (optional)")
+
+    def test_the_item_lines_of_the_message_come_before_the_boilerplate(self):
+        """F-Q5-1: a host that collapses the message shows its first lines; they carry the content, not the instructions."""
+        drv, run_id = self.start(graph=graph_with_decision())
+        self.research(drv, run_id, "web", URL)
+        human = Human(accept())
+        self.mediate(drv, run_id, human)
+        lines = human.shown[0][0].splitlines()
+        self.assertTrue(lines[0].startswith("Empirica · "))
+        item = next(i for i, line in enumerate(lines) if line.startswith("1. "))
+        boiler = next(i for i, line in enumerate(lines) if line.startswith("Decide each item"))
+        self.assertLess(item, boiler)
+        self.assertLess(boiler, next(i for i, line in enumerate(lines) if line.startswith("Accept = ")))
+        self.assertEqual(lines[1], "", "the heading, then the items")
 
     def test_a_batch_is_presentable_only_without_a_prompt_error_and_whatever_the_reason(self):
         def view(batch, code="claim.research_missing"):
@@ -355,7 +376,7 @@ class ClaudeElicitationTests(EvidenceFixture):
     def test_the_batch_is_a_separate_form_from_the_configuration_review(self):
         from adapters import governance
         self.assertNotEqual(confirmation.form.__module__, governance.review_form.__module__)
-        _, schema = confirmation.form([{"subject": "claim", "id": "C1", "digest": "d", "text": "T", "title": "t",
+        _, schema = confirmation.form([{"subject": "claim", "id": "C1", "digest": "d", "text": "T", "title": "t", "description": "d",
                                         "note_title": "n"}], 60)
         self.assertFalse({"max_passes", "max_spawns", "max_audit_spawns"} & set(schema["properties"]))
 

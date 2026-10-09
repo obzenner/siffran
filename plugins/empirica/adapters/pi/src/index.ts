@@ -681,7 +681,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     }
 
     pi.registerCommand("empirica-ui", {
-      description: "Open the Empirica observer UI: every run in your store, read-only, on 127.0.0.1.",
+      description: "Open the Empirica observer UI: every run in your store, read-only, on this machine (empirica.localhost).",
       handler: async (_args, ctx) => {
         const first = observer === null;
         if (observer === null) {

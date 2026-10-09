@@ -29,6 +29,15 @@ from core.projection import project_host_failure, project_prompt_error
 #: A decision's answer is at most this long (``evidenceConfirmationPayload``); a research note may be longer.
 _ANSWER_LIMIT = 2000
 _NOTE_LIMIT = 2048
+#: The one owner of the dialog's lengths (Pi renders what is built here). Claude cuts an elicitation field ``title`` at about
+#: 45 visible columns (claude-5 Q5) and collapses the long ``message``, but renders a property's ``description`` under the
+#: field: so a title is at most ``TITLE_LIMIT`` columns with its "n. " prefix, the item is the description (at most
+#: ``DESCRIPTION_LIMIT``, its quote shortened with "…"), and the message keeps the full record, wrapped at ``_WIDTH``.
+TITLE_LIMIT = 40
+DESCRIPTION_LIMIT = 200
+_WIDTH = 72
+_PREFIX = 4  # "64. ": a batch holds at most 64 items
+NOTE_TITLE = "Note (optional)"
 
 #: choice -> the core outcome; ``later`` is deliberately absent (an omitted item).
 _RESEARCH = {"confirm": "confirm", "reject": "reject"}
@@ -55,13 +64,6 @@ SURFACE_UNRECORDED = Outcome("surface_unrecorded")
 PRESENTATION_FAILED = Outcome("presentation_failed")
 
 
-#: A field title is at most this many columns with its "n. " prefix. Claude collapses the long elicitation message
-#: ("+21 more lines", claude-4 Q4) and shows only the field titles; it published no title limit, and 72 columns is the
-#: width its dialog showed uncut (the message lines wrap at 72 plus a 3-column indent). Pi shows the same text.
-TITLE_LIMIT = 72
-_PREFIX = 4  # "64. ": a batch holds at most 64 items
-
-
 def _limit(subject: str) -> int:
     return _ANSWER_LIMIT if subject == "claim" else _NOTE_LIMIT
 
@@ -84,14 +86,14 @@ def _claim_list(ids: Sequence[str]) -> str:
 
 
 def _research_titles(item: dict[str, Any]) -> None:
-    """The short field titles of a research item: its source and the claims it is for (the long quote stays in the
-    message). The question is the same for both hosts, so each reads the item alike."""
+    """The short field title of a research item (its source) and its description: the claims it is for, a prefix of the
+    quote (the full quote stays in the message) and the question. Both hosts read the same text."""
     ids = _claim_list([claim["id"] for claim in item["claims"]])
-    ref = short_ref(item["source_ref"])
-    question = "is the observation right?" if item["class"] == "observed" else "does it say the quoted text?"
-    tail = f": {question} ({ids})"
-    item["title"] = _fit(ref, TITLE_LIMIT - _PREFIX - len(tail)) + tail
-    item["note_title"] = "Note on " + _fit(ref, TITLE_LIMIT - _PREFIX - len("Note on  (optional)")) + " (optional)"
+    question = "Is the observation right?" if item["class"] == "observed" else "Does the page say this?"
+    head, tail = f"For {ids} · Quote: \"", f"\" · {question}"
+    item["title"] = _fit(short_ref(item["source_ref"]), TITLE_LIMIT - _PREFIX)
+    item["description"] = head + _fit(item["quote"], DESCRIPTION_LIMIT - len(head) - len(tail) - 1).rstrip(" ") + tail
+    item["note_title"] = NOTE_TITLE
 
 
 def presentable(result: object) -> dict[str, Any] | None:
@@ -123,13 +125,16 @@ def build_items(argument: Mapping[str, Any], batch: Mapping[str, Any]) -> list[d
         return [{"subject": "claim", "id": status, "digest": terminal["digest"], "terminal": True,
                  "text": f"End this run as {status}, without converging? Approve to end it now; Reject "
                          "or Later keeps it active and nothing is ended.",
-                 "title": f"End the run as {status}, not converged?",
-                 "note_title": f"Your answer on ending as {status} (optional)"}]
+                 "title": _fit(f"End the run as {status}?", TITLE_LIMIT - _PREFIX),
+                 "description": f"Not converged. Approve ends the run now as {status}; Reject or Later keeps it active.",
+                 "note_title": NOTE_TITLE}]
     for claim_id in batch.get("claim_ids", ()):
         if claim_id in text:
             items.append({"subject": "claim", "id": claim_id, "digest": text[claim_id]["wording_digest"],
-                          "text": text[claim_id]["text"], "title": f"Your decision on {claim_id}",
-                          "note_title": f"Your answer on {claim_id} (optional)"})
+                          "text": text[claim_id]["text"],
+                          "title": _fit(f"Your decision on {claim_id}", TITLE_LIMIT - _PREFIX),
+                          "description": _fit(f"{claim_id} · {text[claim_id]['text']}", DESCRIPTION_LIMIT),
+                          "note_title": NOTE_TITLE})
     # One source quoted the same way for several claims is one question: the human reads the quote once, and the
     # answer is recorded as a decision for every record it groups (the receipt still decides per record).
     grouped: dict[tuple[str, str], dict[str, Any]] = {}
@@ -266,7 +271,7 @@ def submit(profile: str, run_id: str, receipt_id: str, items: Sequence[Mapping[s
 
 
 def _lines(text: str, indent: str = "   ") -> list[str]:
-    return textwrap.wrap(text, width=72, initial_indent=indent, subsequent_indent=indent,
+    return textwrap.wrap(text, width=_WIDTH, initial_indent=indent, subsequent_indent=indent,
                          break_long_words=True, break_on_hyphens=False) or [indent]
 
 
@@ -286,17 +291,18 @@ def form(items: Sequence[Mapping[str, Any]], timeout: float) -> tuple[str, dict[
     minutes = f"{timeout / 60:g} min" if timeout >= 60 else f"{timeout:g} sec"
     ending = len(items) == 1 and bool(items[0].get("terminal"))
     heading = "end this run without converging?" if ending else "evidence that needs you"
-    message = [f"Empirica · {heading}  (" + minutes + ")",
-               "Decide each item. Leave it on Later to decide another time.",
-               "Accept = send these decisions · Decline/Esc = send none", ""]
+    message = [f"Empirica · {heading}  (" + minutes + ")", ""]
     properties: dict[str, Any] = {}
     for number, item in enumerate(items, 1):
         message += _item_text(number, item)
         properties[f"d{number}"] = {
-            "type": "string", "title": f"{number}. {item['title']}",
+            "type": "string", "title": f"{number}. {item['title']}", "description": item["description"],
             "enum": list(CHOICES[item["subject"]]), "default": "later"}
         properties[f"n{number}"] = {
             "type": "string", "title": f"{number}. {item['note_title']}", "maxLength": _limit(item["subject"])}
+    # The items come first: a host that collapses the message shows its first lines, which should carry the content.
+    message += ["", "Decide each item. Leave it on Later to decide another time.",
+                "Accept = send these decisions · Decline/Esc = send none"]
     return "\n".join(message), {"type": "object", "properties": properties, "required": []}
 
 

@@ -57,8 +57,8 @@ type AuditRefusedResponse = Readonly<{ type: "audit_refused"; reason: "runtime_c
 export type EvidenceItem =
   | { subject: "research"; id: string; record_ids: string[]; claims: Array<{ id: string; text: string }>;
       source_kind: string; source_ref: string; quote: string; class: string; reason?: string;
-      title: string; note_title: string }
-  | { subject: "claim"; id: string; digest: string; text: string; terminal?: true; title: string; note_title: string };
+      title: string; description: string; note_title: string }
+  | { subject: "claim"; id: string; digest: string; text: string; terminal?: true; title: string; description: string; note_title: string };
 export interface EvidenceAnswer { subject: "research" | "claim"; id: string; choice: string; note: string | null }
 /** The presentation is recorded (and has spent one interaction) or the core refused it. */
 type EvidencePresentationResponse =

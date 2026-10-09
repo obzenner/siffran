@@ -110,13 +110,23 @@ def running(port: int, want: str) -> bool:
     return isinstance(about, dict) and about.get("observer") == ABOUT and about.get("identity") == want
 
 
+def announce(label: str, port: int, page: str, suffix: str = "") -> str:
+    """Print where the observer is and return the address to open: ``empirica.localhost`` (a name of its own, which a
+    browser resolves to this machine), then the loopback address for a browser that does not resolve ``*.localhost``.
+    The first line is the one a launcher reads."""
+    from adapters.observer.server import NAME
+    url = f"http://{NAME}:{port}{page}"
+    print(f"{label}: {url}{suffix}", flush=True)
+    print(f"  If your browser does not resolve *.localhost: http://127.0.0.1:{port}{page}", flush=True)
+    return url
+
+
 def _serve(args, source: StoreSource | None) -> int:
     from adapters.observer.server import Sources, serve
     store = identity(source, args.repo or [])
     page = "/app/" + ("?data=demo" if args.demo else "")
     if running(args.port, store):  # the same store is already served: use that one
-        url = f"http://127.0.0.1:{args.port}{page}"
-        print(f"Empirica observer (already running): {url}", flush=True)
+        url = announce("Empirica observer (already running)", args.port, page)
         if args.open:
             webbrowser.open(url)
         return 0
@@ -125,8 +135,7 @@ def _serve(args, source: StoreSource | None) -> int:
         server = serve(sources, args.port)
     except OSError:
         server = serve(sources, 0)
-    url = f"http://127.0.0.1:{server.server_address[1]}{page}"
-    print(f"Empirica observer: {url}  (Ctrl-C to stop)", flush=True)
+    url = announce("Empirica observer", server.server_address[1], page, "  (Ctrl-C to stop)")
     if args.open:
         webbrowser.open(url)
     if args.exit_with_stdin:

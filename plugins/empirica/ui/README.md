@@ -3,7 +3,7 @@
 A read-only view of the Empirica run store for people: every project, run and claim, how they relate,
 and the detail of what you click. It reads only the plugin's observer
 (`application/observer.py`, contract [`empirica-ui-view/v1`](../../../contracts/empirica-ui-view/v1/README.md)),
-which the plugin serves on 127.0.0.1 (`adapters/observer/server.py`). Why it is built this way:
+which the plugin serves on 127.0.0.1 (`adapters/observer/server.py`), at `http://empirica.localhost:<port>/app/`. Why it is built this way:
 ADR-0065.
 
 ## Start it
@@ -19,6 +19,11 @@ without a recorded location (created by an earlier plugin version), pass `--repo
 
 A second start for the same store opens the observer already listening on the default port (8765)
 instead of starting another. If something else holds that port, each start gets its own free port.
+
+The printed (and opened) address is `http://empirica.localhost:<port>/app/`: browsers resolve `*.localhost` to this
+machine, and the name tells the tab apart from other local servers. The server answers only to `empirica.localhost`,
+`localhost` and `127.0.0.1` with its own port (a rebinding guard). The start also prints the `127.0.0.1` address, for a
+browser that does not resolve `*.localhost`.
 
 ## What is here
 

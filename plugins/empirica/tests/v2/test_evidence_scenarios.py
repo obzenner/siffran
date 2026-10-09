@@ -340,7 +340,7 @@ class BatchSizeCells(ScenarioFixture):
         self.assertIsNotNone(confirmation.answers_from_form({"action": "accept", "content": {"d1": "confirm"}}, items))
 
     def test_a_decision_answer_is_at_most_2000_characters(self):
-        items = [{"subject": "claim", "id": "C1", "digest": "d", "text": "T", "title": "t", "note_title": "n"}]
+        items = [{"subject": "claim", "id": "C1", "digest": "d", "text": "T", "title": "t", "description": "d", "note_title": "n"}]
         long_answer = [{"subject": "claim", "id": "C1", "choice": "approve", "note": "x" * 2001}]
         self.assertEqual(confirmation.decisions(items, long_answer), [])
         self.assertEqual(len(confirmation.decisions(items, [{**long_answer[0], "note": "x" * 2000}])), 1)

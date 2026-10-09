@@ -54,14 +54,15 @@ export function evidenceHostFailure(result: Response["result"], reported?: HostF
 }
 
 /** What the human reads above the choices; the labels are the whole vocabulary of the dialog. The first line is the
- * heading, the second the item's own short title (the same text Claude shows as its field title), then the detail. The end
- * of a deliberative run has its own heading: it is not evidence. */
+ * heading, the second the item's own short title and the third its description (the same texts Claude shows as the field
+ * title and under the field; both are built in `adapters/confirmation.py`, the one owner of their lengths), then the full
+ * detail. The end of a deliberative run has its own heading: it is not evidence. */
 export function itemTitle(item: EvidenceItem, number: number, count: number): string {
   const head = item.subject === "claim" && item.terminal
     ? "Empirica · end this run without converging?"
     : `Empirica · evidence that needs you (${number} of ${count})`;
-  if (item.subject === "claim") return `${head}\n${item.title}\n${item.text}`;
-  const lines = [head, item.title, `${item.source_kind} source: ${item.source_ref}`, `Quote: "${item.quote}"`,
+  if (item.subject === "claim") return `${head}\n${item.title}\n${item.description}\n${item.text}`;
+  const lines = [head, item.title, item.description, `${item.source_kind} source: ${item.source_ref}`, `Quote: "${item.quote}"`,
     ...item.claims.map((claim) => `For claim ${claim.id}: ${claim.text}`)];
   if (item.reason) lines.push(`Why no deterministic check: ${item.reason}`);
   return lines.join("\n");

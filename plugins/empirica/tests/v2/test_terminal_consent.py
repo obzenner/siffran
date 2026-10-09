@@ -46,8 +46,10 @@ class TerminalConsentTests(MediatorFixture):
         status = "stopped_residual"
         self.assertEqual(message.splitlines()[0], "Empirica · end this run without converging?  (15 min)")
         self.assertNotIn("evidence that needs you", message)
-        self.assertEqual(schema["properties"]["d1"]["title"], f"1. End the run as {status}, not converged?")
-        self.assertEqual(schema["properties"]["n1"]["title"], f"1. Your answer on ending as {status} (optional)")
+        self.assertEqual(schema["properties"]["d1"]["title"], f"1. End the run as {status}?")
+        self.assertEqual(schema["properties"]["d1"]["description"],
+                         f"Not converged. Approve ends the run now as {status}; Reject or Later keeps it active.")
+        self.assertEqual(schema["properties"]["n1"]["title"], "1. Note (optional)")
 
     def test_EHB_TERM_01_the_item_is_the_status_and_binds_the_derivation(self):
         drv, run_id = self.start(kind="ordinary")

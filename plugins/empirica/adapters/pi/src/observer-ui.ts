@@ -1,6 +1,6 @@
 /**
  * ``/empirica-ui``: the observer UI for this machine's Empirica store, served by the plugin's own observer
- * (``adapters/observer/cli.py serve``) on 127.0.0.1 and opened in the default browser. One server per
+ * (``adapters/observer/cli.py serve``) on this machine (127.0.0.1, named empirica.localhost) and opened in the default browser. One server per
  * extension instance: a second ``/empirica-ui`` reports the running one; ``session_shutdown`` stops it. It is
  * started with ``--exit-with-stdin`` on a pipe this process holds, so it also ends when Pi does, however Pi ends.
  * Nothing here reads or judges runs; the observer does, read-only.
@@ -13,7 +13,8 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** The observer's command line, shipped beside this adapter in the plugin. */
 export const OBSERVER_CLI = path.resolve(HERE, "..", "..", "observer", "cli.py");
-const URL_PATTERN = /http:\/\/127\.0\.0\.1:\d+\/app\/\S*/;
+/** The first address the CLI prints (`empirica.localhost`); the next line, the loopback fallback, is not read. */
+const URL_PATTERN = /http:\/\/empirica\.localhost:\d+\/app\/\S*/;
 
 export interface ObserverServer {
   readonly url: string;

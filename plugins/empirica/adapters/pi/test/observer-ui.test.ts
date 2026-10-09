@@ -21,9 +21,11 @@ async function withEmptyHome(body: (home: string) => Promise<void>): Promise<voi
 test("the launcher starts the observer, which serves the store summary on 127.0.0.1", () => withEmptyHome(async (home) => {
   const server = await startObserver(home, { open: false });
   try {
-    assert.match(server.url, /^http:\/\/127\.0\.0\.1:\d+\/app\/$/);
+    assert.match(server.url, /^http:\/\/empirica\.localhost:\d+\/app\/$/);
     assert.equal(server.reused, false);
-    const view = await (await fetch(new URL("/api/view", server.url))).json() as { contract: string; projects: unknown[] };
+    // The test resolves no *.localhost name: it asks the loopback address, with the server's own name as the Host.
+    const loopback = new URL("/api/view", server.url.replace("empirica.localhost", "127.0.0.1"));
+    const view = await (await fetch(loopback)).json() as { contract: string; projects: unknown[] };
     assert.deepEqual([view.contract, view.projects], ["empirica-ui-view/v1", []]);
   } finally { server.stop(); }
 }));
@@ -32,7 +34,7 @@ test("a server that ends is reported as ended, and its stop is harmless after", 
   const server = await startObserver(home, { open: false });
   server.stop();
   await server.exited;
-  await assert.rejects(fetch(new URL("/api/view", server.url)));
+  await assert.rejects(fetch(new URL("/api/view", server.url.replace("empirica.localhost", "127.0.0.1"))));
   server.stop();
 }));
 
@@ -63,11 +65,12 @@ test("an observer that exits before serving rejects with its reason", async () =
 test("a command that reuses a running observer resolves to it, marked as reused", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "empirica-observer-"));
   const script = path.join(dir, "reuse.py");  // prints what cli.py serve prints when it reuses, then ends
-  writeFileSync(script, 'print("Empirica observer (already running): http://127.0.0.1:8765/app/")\n');
+  writeFileSync(script, 'print("Empirica observer (already running): http://empirica.localhost:8765/app/")\n'
+    + 'print("  If your browser does not resolve *.localhost: http://127.0.0.1:8765/app/")\n');
   try {
     for (let i = 0; i < 20; i++) {  // it ends at once: its end must never win over its last line
       const reused = await startObserver(dir, { open: false, script });
-      assert.deepEqual([reused.url, reused.reused], ["http://127.0.0.1:8765/app/", true]);
+      assert.deepEqual([reused.url, reused.reused], ["http://empirica.localhost:8765/app/", true]);
       await reused.exited;
     }
   } finally { rmSync(dir, { recursive: true, force: true }); }
