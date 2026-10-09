@@ -184,21 +184,22 @@ def _synthetic_results() -> list[tuple[str, object]]:
     # a message that reads true on every route; its next actions follow the route.
     terminal_meta = contract["reasons"]["governance.terminal_stop_pending"]
 
-    def terminal_reason(route, prompt_error):
+    def terminal_reason(route, prompt_error, case):
         view = copy.deepcopy(open_claim)
         view["run"]["confirmation_batch"] = {
             "key": "sha256:" + "8" * 64, "record_ids": [], "claim_ids": [], "records": [], "prompt_error": prompt_error,
             "terminal": {"status": "stopped_residual", "digest": "sha256:" + "9" * 64}}
-        parameters = {"status": "stopped_residual", "route": route}
-        view["reasons"] = [{"code": "governance.terminal_stop_pending", "message": terminal_meta["message"],
+        parameters = {"status": "stopped_residual", "route": route, "case": case}
+        view["reasons"] = [{"code": "governance.terminal_stop_pending",
+                            "message": terminal_meta["case_messages"][case].format(status="stopped_residual"),
                             "parameters": parameters, "sections": terminal_meta["sections"],
                             "next_actions": confirmation_actions(
                                 "governance.terminal_stop_pending", parameters, list(terminal_meta["next_actions"]),
                                 view["run"]["confirmation_batch"])}]
         return view
 
-    evidence["terminal-stop-pending-human"] = terminal_reason("human", None)
-    evidence["terminal-stop-pending-unavailable"] = terminal_reason("unavailable", "unavailable")
+    evidence["terminal-stop-pending-human"] = terminal_reason("human", None, "ask")
+    evidence["terminal-stop-pending-unavailable"] = terminal_reason("unavailable", "unavailable", "unavailable")
     stopped = copy.deepcopy(stored(json.loads((FIXTURES / "allow-stopped-budget.json").read_text()))["expected"]["result"])
     stopped["run"]["residuals"] = [{"code": "evidence.confirmation_required", "sections": meta["sections"],
                                     "parameters": {"route": "human", "record_ids": records},

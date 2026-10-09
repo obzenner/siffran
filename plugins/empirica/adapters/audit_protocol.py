@@ -105,7 +105,10 @@ class AuditProtocol:
         }})
         result = reserved.get("result", {})
         if not isinstance(result, Mapping) or result.get("type") != "Allow":
-            raise AuditProtocolError("audit reservation denied")
+            # The core's own words for why (e.g. the confirmation that comes before the audit), never the adapter's.
+            reasons = result.get("reasons") if isinstance(result, Mapping) else None
+            said = reasons[0].get("message") if isinstance(reasons, list) and reasons and isinstance(reasons[0], Mapping) else None
+            raise AuditProtocolError("audit reservation denied" + (f": {said}" if isinstance(said, str) and said else ""))
         run = result.get("run", {})
         children = run.get("children", []) if isinstance(run, Mapping) else []
         candidates = [child for child in children if isinstance(child, Mapping)

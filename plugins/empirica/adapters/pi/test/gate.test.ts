@@ -258,8 +258,10 @@ async function wire(
       if (request.operation === "evidence_presentation" && options.presentation === "fault")
         return { type: "Fault", code: "conflict", fail_direction: "closed" } as never;
       if (request.operation === "evidence_presentation") return { type: "evidence_presentation", receipt_id: "p-1",
-        items: [{ subject: "research", id: `sha256:${"a".repeat(64)}`, claim: "C", source_kind: "web",
-          source_ref: "https://example.test/x", quote: "q", class: "retrievable" }] };
+        items: [{ subject: "research", id: `sha256:${"a".repeat(64)}`, record_ids: [`sha256:${"a".repeat(64)}`],
+          claims: [{ id: "C1", text: "C" }], source_kind: "web", source_ref: "https://example.test/x", quote: "q",
+          class: "retrievable", title: "example.test/x: does it say the quoted text? (C1)",
+          note_title: "Note on example.test/x (optional)" }] };
       if (request.operation === "evidence_confirmation") return { type: "evidence_receipt", result: { type: "Allow" } };
       if (request.operation === "audit_verdict")
         return { type: "audit_verdict", admitted: true };

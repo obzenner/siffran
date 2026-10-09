@@ -130,7 +130,8 @@
       "additionalProperties": false,
       "required": [
         "status",
-        "route"
+        "route",
+        "case"
       ],
       "properties": {
         "status": {
@@ -145,6 +146,16 @@
             "human",
             "unavailable",
             "unobserved"
+          ]
+        },
+        "case": {
+          "enum": [
+            "ask",
+            "declined",
+            "unobserved",
+            "unavailable",
+            "interaction_limit",
+            "host_failed"
           ]
         }
       }

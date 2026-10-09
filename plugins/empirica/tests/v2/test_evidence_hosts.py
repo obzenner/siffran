@@ -8,7 +8,8 @@ from __future__ import annotations
 from adapters import confirmation
 from adapters.confirmation import HostConfirmation
 from adapters.public_tools import PublicTools
-from test_evidence_confirmation import EvidenceFixture, URL
+from assertions import canonical_graph
+from test_evidence_confirmation import EvidenceFixture, URL, graph_with_decision
 from application.protocol import host_profile_id  # noqa: E402
 CLAUDE_PROFILE = host_profile_id("claude-code")
 PI_PROFILE = host_profile_id("pi")
@@ -212,8 +213,10 @@ class MediatorTests(MediatorFixture):
         self.assertEqual(confirmation.decisions(items, half), [])  # one bad answer withdraws them all
 
     def test_the_form_is_flat_primitive_and_unlike_the_configuration_form(self):
-        items = [{"subject": "research", "id": "r1", "claim": "C", "source_kind": "web", "source_ref": URL,
-                  "quote": "q", "class": "retrievable"}, {"subject": "claim", "id": "C1", "digest": "d", "text": "T"}]
+        items = [{"subject": "research", "id": "r1", "record_ids": ["r1"], "claims": [{"id": "C0", "text": "C"}],
+                  "source_kind": "web", "source_ref": URL, "quote": "q", "class": "retrievable",
+                  "title": "t1", "note_title": "n1"},
+                 {"subject": "claim", "id": "C1", "digest": "d", "text": "T", "title": "t2", "note_title": "n2"}]
         message, schema = confirmation.form(items, 900)
         self.assertEqual(set(schema["properties"]), {"d1", "n1", "d2", "n2"})
         for key, prop in schema["properties"].items():
@@ -226,11 +229,69 @@ class MediatorTests(MediatorFixture):
         self.assertNotIn("approve all", message.lower())
         # What the human reads, per item: the source, the claim it supports, and the decision (decisions listed in order).
         self.assertIn(f"web source: {URL}", message)
-        self.assertIn("For claim: C", message)
+        self.assertIn("For claim C0: C", message)
         self.assertIn("2. Decision needed", message)
-        observed = {"subject": "research", "id": "r3", "claim": "C", "source_kind": "runtime", "source_ref": "none",
-                    "quote": "q", "class": "observed", "reason": "No harness."}
+        observed = {"subject": "research", "id": "r3", "record_ids": ["r3"], "claims": [{"id": "C0", "text": "C"}],
+                    "source_kind": "runtime", "source_ref": "none", "quote": "q", "class": "observed",
+                    "reason": "No harness.", "title": "t3", "note_title": "n3"}
         self.assertIn("Why no deterministic check: No harness.", confirmation.form([observed], 900)[0])
+
+    # ---- F-Q4-2: every field names its subject; one source with one quote is one item -----------------------------
+
+    def two_claims(self):
+        drv, run_id = self.start(graph=canonical_graph(n_claims=2, kind="ordinary"))
+        return drv, run_id
+
+    def test_one_source_with_the_same_quote_is_one_item_for_every_claim_and_decides_every_record(self):
+        drv, run_id = self.two_claims()
+        self.research(drv, run_id, "web", URL, claim="C0")
+        self.research(drv, run_id, "web", URL, claim="C1")
+        human = Human(accept(d1="confirm", n1="  fine  "))
+        self.mediate(drv, run_id, human)
+        message, schema = human.shown[0]
+        self.assertEqual(set(schema["properties"]), {"d1", "n1"}, "two records of one source and quote are one item")
+        self.assertIn("For claim C0:", message)
+        self.assertIn("For claim C1:", message)
+        self.assertEqual(message.count("Quote:"), 1)
+        rows = self.rows(drv, run_id)
+        self.assertEqual([r["verification"]["status"] for r in rows], ["confirmed_by_human"] * 2,
+                         "one answer is recorded as a decision per record")
+        self.assertEqual({r["verification"].get("note") for r in rows}, {"fine"})
+
+    def test_a_different_quote_from_the_same_source_is_a_different_item(self):
+        drv, run_id = self.two_claims()
+        self.research(drv, run_id, "web", URL, claim="C0")
+        self.research(drv, run_id, "web", URL, claim="C1", citation="a different passage of the same page")
+        human = Human(accept(d1="confirm", d2="reject"))
+        self.mediate(drv, run_id, human)
+        self.assertEqual(set(human.shown[0][1]["properties"]), {"d1", "n1", "d2", "n2"})
+        self.assertEqual([r["verification"]["status"] for r in self.rows(drv, run_id)],
+                         ["confirmed_by_human", "rejected_by_human"])
+
+    def test_each_field_title_names_its_subject_in_short_form(self):
+        """Claude collapses the long message ("+21 more lines") and shows the field titles, so each names its source and the
+        claims it is for. The limit is the width the dialog showed uncut (72 columns, the wrap of the message lines)."""
+        drv, run_id = self.two_claims()
+        long_ref = "https://example.test/" + "a-very-long-path-segment/" * 6 + "spec"
+        self.research(drv, run_id, "web", "https://www.example.test/spec", claim="C0")
+        self.research(drv, run_id, "web", long_ref, claim="C1")
+        human = Human(accept())
+        self.mediate(drv, run_id, human)
+        properties = human.shown[0][1]["properties"]
+        self.assertEqual(properties["d1"]["title"], "1. example.test/spec: does it say the quoted text? (C0)")
+        self.assertEqual(properties["n1"]["title"], "1. Note on example.test/spec (optional)")
+        self.assertTrue(properties["d2"]["title"].startswith("2. example.test/a-very-long-path"), properties["d2"]["title"])
+        self.assertTrue(properties["d2"]["title"].endswith("does it say the quoted text? (C1)"))
+        for key, prop in properties.items():
+            self.assertLessEqual(len(prop["title"]), 72, key)
+
+    def test_a_decision_field_names_the_claim_it_asks_about(self):
+        drv, run_id = self.start(graph=graph_with_decision())
+        human = Human(accept())
+        self.mediate(drv, run_id, human)
+        properties = human.shown[0][1]["properties"]
+        self.assertEqual(properties["d1"]["title"], "1. Your decision on C1")
+        self.assertEqual(properties["n1"]["title"], "1. Your answer on C1 (optional)")
 
     def test_a_batch_is_presentable_only_without_a_prompt_error_and_whatever_the_reason(self):
         def view(batch, code="claim.research_missing"):
@@ -294,7 +355,8 @@ class ClaudeElicitationTests(EvidenceFixture):
     def test_the_batch_is_a_separate_form_from_the_configuration_review(self):
         from adapters import governance
         self.assertNotEqual(confirmation.form.__module__, governance.review_form.__module__)
-        _, schema = confirmation.form([{"subject": "claim", "id": "C1", "digest": "d", "text": "T"}], 60)
+        _, schema = confirmation.form([{"subject": "claim", "id": "C1", "digest": "d", "text": "T", "title": "t",
+                                        "note_title": "n"}], 60)
         self.assertFalse({"max_passes", "max_spawns", "max_audit_spawns"} & set(schema["properties"]))
 
 

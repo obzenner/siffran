@@ -12,11 +12,16 @@ import type { Response } from "../src/contract.ts";
 
 const AUTHOR_LABELS = PUBLIC_TOOLS.author_view.labels as Readonly<Record<string, string>>;
 
-const RECORD: EvidenceItem = { subject: "research", id: "sha256:" + "a".repeat(64), claim: "The API is stable.",
-  source_kind: "web", source_ref: "https://example.test/spec", quote: "stable since v2", class: "retrievable" };
-const OBSERVED: EvidenceItem = { ...RECORD, id: "sha256:" + "b".repeat(64), source_kind: "runtime",
-  source_ref: "deploy output", class: "observed", reason: "Needs production credentials." };
-const DECISION: EvidenceItem = { subject: "claim", id: "C1", digest: "sha256:" + "c".repeat(64), text: "Ship it?" };
+const RECORD: EvidenceItem = { subject: "research", id: "sha256:" + "a".repeat(64), record_ids: ["sha256:" + "a".repeat(64)],
+  claims: [{ id: "C0", text: "The API is stable." }, { id: "C2", text: "The API is documented." }],
+  source_kind: "web", source_ref: "https://example.test/spec", quote: "stable since v2", class: "retrievable",
+  title: "example.test/spec: does it say the quoted text? (C0, C2)", note_title: "Note on example.test/spec (optional)" };
+const OBSERVED: EvidenceItem = { ...RECORD, id: "sha256:" + "b".repeat(64), record_ids: ["sha256:" + "b".repeat(64)],
+  claims: [{ id: "C0", text: "The API is stable." }], source_kind: "runtime",
+  source_ref: "deploy output", class: "observed", reason: "Needs production credentials.",
+  title: "deploy output: is the observation right? (C0)", note_title: "Note on deploy output (optional)" };
+const DECISION: EvidenceItem = { subject: "claim", id: "C1", digest: "sha256:" + "c".repeat(64), text: "Ship it?",
+  title: "Your decision on C1", note_title: "Your answer on C1 (optional)" };
 
 const BATCH = (promptError: string | null = null) => ({ key: "sha256:" + "d".repeat(64), record_ids: [RECORD.id],
   claim_ids: [], prompt_error: promptError });
@@ -77,11 +82,30 @@ test("TUI: each item gets a select and, for a decision, a note; the answers are 
 
 test("the dialog shows the source, the verbatim quote, the claim and the reason no spike could decide it", () => {
   const title = itemTitle(OBSERVED, 2, 3);
-  for (const text of ["2 of 3", "runtime source: deploy output", 'Quote: "stable since v2"', "For claim: The API is stable.",
+  for (const text of ["2 of 3", "runtime source: deploy output", 'Quote: "stable since v2"', "For claim C0: The API is stable.",
     "Why no deterministic check: Needs production credentials."]) assert.ok(title.includes(text), text);
+  const grouped = itemTitle(RECORD, 1, 1);
+  assert.ok(grouped.includes("For claim C0: The API is stable.") && grouped.includes("For claim C2: The API is documented."),
+    "one source quoted for two claims is one item that lists both");
   assert.ok(itemTitle(DECISION, 1, 1).includes("Ship it?"));
   const long = itemTitle({ ...RECORD, quote: `${"x".repeat(900)} THE QUALIFICATION AT THE END` }, 1, 1);
   assert.ok(long.includes("THE QUALIFICATION AT THE END") && !long.includes("…"), "the human reads the whole quote");
+});
+
+test("F-Q4-2: the dialog names its subject on the first line, the note dialog names it too, and the end has its own heading", async () => {
+  const live = ctxFor({ selects: ["Confirm", "Approve"], inputs: ["", ""] });
+  const { trusted } = bridge([RECORD, DECISION]);
+  await run(live.ctx, trusted);
+  const [first, second] = live.shown.filter((s) => s.kind === "select");
+  assert.equal(first.title.split("\n")[0], "Empirica · evidence that needs you (1 of 2)");
+  assert.equal(first.title.split("\n")[1], "example.test/spec: does it say the quoted text? (C0, C2)");
+  assert.equal(second.title.split("\n")[1], "Your decision on C1");
+  assert.deepEqual(live.shown.filter((s) => s.kind === "input").map((s) => s.title),
+    ["Note on example.test/spec (optional)", "Your answer on C1 (optional)"]);
+  const ending = itemTitle(TERMINAL_ITEM, 1, 1).split("\n");
+  assert.equal(ending[0], "Empirica · end this run without converging?");
+  assert.equal(ending[1], "End the run as stopped_residual, not converged?");
+  assert.ok(!ending.join("\n").includes("evidence that needs you"));
 });
 
 test("RPC-like: standard select/input work without a custom component", async () => {
@@ -274,8 +298,9 @@ test("the gate's notice for a host failure is the sole confirmation blocker's, i
 // ---- the end of a deliberative run (ADR-0063 amendment, EHB-TERM-01/02): the same dialog, one item ----------------
 
 const TERMINAL = { status: "stopped_residual", digest: "sha256:" + "e".repeat(64) } as const;
-const TERMINAL_ITEM: EvidenceItem = { subject: "claim", id: TERMINAL.status, digest: TERMINAL.digest,
-  text: "End this run as stopped_residual, without converging?" };
+const TERMINAL_ITEM: EvidenceItem = { subject: "claim", id: TERMINAL.status, digest: TERMINAL.digest, terminal: true,
+  text: "End this run as stopped_residual, without converging?", title: "End the run as stopped_residual, not converged?",
+  note_title: "Your answer on ending as stopped_residual (optional)" };
 const terminalBlock = (): Response => ({
   protocol: "empirica/v2", request_id: "r",
   result: { type: "Block", run: { id: "run-1", status: "active", confirmation_batch: {

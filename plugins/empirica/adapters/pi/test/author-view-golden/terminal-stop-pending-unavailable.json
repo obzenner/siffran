@@ -102,10 +102,11 @@
     "reasons": [
       {
         "code": "governance.terminal_stop_pending",
-        "message": "A deliberative run does not end without converging until a human agrees to the status in the parameters. Nothing was granted and the run stays active. The route in the parameters says what can happen next. route human: report again and the human is asked whether to end the run. route unobserved: report once more, which looks for a dialog and asks if one can be shown. route unavailable: this host cannot show a dialog, so the run stays active and only a host that can show a dialog can end it; keep working.",
+        "message": "Ending the run as stopped_residual needs a human's agreement, and this host cannot show a dialog, so the run stays active and only a host that can show a dialog can end it; keep working.",
         "parameters": {
           "status": "stopped_residual",
-          "route": "unavailable"
+          "route": "unavailable",
+          "case": "unavailable"
         },
         "sections": [
           "governance"
@@ -116,5 +117,5 @@
       }
     ]
   },
-  "text": "Block active — no governance\nrun_id: run-fx\nAudit: required\n\nReasons:\n  governance.terminal_stop_pending: A deliberative run does not end without converging until a human agrees to the status in the parameters. Nothing was granted and the run stays active. The route in the parameters says what can happen next. route human: report again and the human is asked whether to end the run. route unobserved: report once more, which looks for a dialog and asks if one can be shown. route unavailable: this host cannot show a dialog, so the run stays active and only a host that can show a dialog can end it; keep working.\n    params: route=unavailable; status=stopped_residual\n    next: empirica_read GetRun\n\nOpen obligations:\n  claim:G0: <<<EMPIRICA_UNTRUSTED_DATA>>>The public contract is internally consistent.<<<END_EMPIRICA_UNTRUSTED_DATA>>>\n    missing: claim.research_missing\n    next: empirica_observe kind=research\n\nWaiting on a human:\n  decision needed to end the run as stopped_residual\n  no human can be asked in this session\n\nSatisfied obligations:\n  obligation.route\n  obligation.graph\n  obligation.approval\n  obligation.investigation"
+  "text": "Block active — no governance\nrun_id: run-fx\nAudit: required\n\nReasons:\n  governance.terminal_stop_pending: Ending the run as stopped_residual needs a human's agreement, and this host cannot show a dialog, so the run stays active and only a host that can show a dialog can end it; keep working.\n    params: case=unavailable; route=unavailable; status=stopped_residual\n    next: empirica_read GetRun\n\nOpen obligations:\n  claim:G0: <<<EMPIRICA_UNTRUSTED_DATA>>>The public contract is internally consistent.<<<END_EMPIRICA_UNTRUSTED_DATA>>>\n    missing: claim.research_missing\n    next: empirica_observe kind=research\n\nWaiting on a human:\n  decision needed to end the run as stopped_residual\n  no human can be asked in this session\n\nSatisfied obligations:\n  obligation.route\n  obligation.graph\n  obligation.approval\n  obligation.investigation"
 }

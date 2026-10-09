@@ -80,7 +80,7 @@ A **pause** ends the turn with a contract notice and no convergence claim, wheth
 
 ### The notices
 
-The contract owns every notice (`settlement_notices`); an adapter renders only those. A pause notice names the next step the human can relay to the agent. `paused_for_human` carries the core's real reason in one `{reason}` placeholder, rendered by one function (`render_notice`); `paused_for_evidence` says to tell the agent to call `report_convergence`, and that the human is asked in that call, if this host can show a dialog. No notice says a human *will be* asked. The reason is the core's own text for every blocker, several reasons joined in one sentence.
+The contract owns every notice (`settlement_notices`); an adapter renders only those. A pause notice names the next step the human can relay to the agent. `paused_for_human` carries the core's real reason in one `{reason}` placeholder, rendered by one function (`render_notice`); when the end of a deliberative run is what waits, that reason is the core's one-case text of `governance.terminal_stop_pending` (declined, no dialog, interactions spent), never a text for the other cases (G11); `paused_for_evidence` says to tell the agent to call `report_convergence`, and that the human is asked in that call, if this host can show a dialog. No notice says a human *will be* asked. The reason is the core's own text for every blocker, several reasons joined in one sentence.
 
 ### Host boundaries as data
 

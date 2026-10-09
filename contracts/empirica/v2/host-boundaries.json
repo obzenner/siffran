@@ -1406,10 +1406,12 @@
       ],
       "setup": "the same, and the human declines, cancels or lets the dialog time out",
       "action": "the same call",
-      "expected": "nothing is granted; the run stays `active` and the result is the closed reason `governance.terminal_stop_pending`, never a terminal state",
+      "expected": "nothing is granted; the run stays `active` and the result is the closed reason `governance.terminal_stop_pending` with the one text for its case, never a terminal state; the next explicit stop asks again, within the interaction ceiling",
       "covered_by": [
         "plugins/empirica/tests/v2/test_terminal_consent.py::TerminalConsentTests::test_EHB_TERM_02_decline_cancel_and_timeout_grant_nothing",
-        "plugins/empirica/tests/v2/test_terminal_consent.py::TerminalConsentTests::test_EHB_TERM_02_a_spent_question_is_not_asked_again_for_the_same_derivation",
+        "plugins/empirica/tests/v2/test_terminal_consent.py::TerminalConsentTests::test_EHB_TERM_02_a_declined_end_is_asked_again_by_the_next_explicit_stop",
+        "plugins/empirica/tests/v2/test_terminal_consent.py::TerminalConsentTests::test_EHB_TERM_02_every_stop_may_ask_again_until_the_interactions_are_spent",
+        "plugins/empirica/tests/v2/test_terminal_consent.py::TerminalConsentTests::test_the_message_is_rendered_for_the_actual_case_only",
         "plugins/empirica/adapters/pi/test/evidence-ui.test.ts::EHB-TERM-02: reject, later, cancel and timeout submit nothing that grants the end"
       ],
       "ledger_rows": []

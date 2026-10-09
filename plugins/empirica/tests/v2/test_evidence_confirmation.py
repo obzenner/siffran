@@ -10,8 +10,8 @@ from __future__ import annotations
 from unittest import mock
 
 from assertions import (
-    ConformanceCase, action_freeze, action_graph, action_investigate, action_research, action_route,
-    canonical_graph, evaluate, get_argument, get_run, observe_action,
+    ConformanceCase, action_child_reserve, action_freeze, action_graph, action_investigate, action_research,
+    action_route, canonical_graph, evaluate, get_argument, get_run, observe_action,
 )
 from core import governance as core_governance
 from core.evaluation import dossier_artifact_ids, evidence_digest
@@ -455,9 +455,12 @@ class EvidenceConfirmationTests(EvidenceFixture):
         self.research(drv, run_id, "code", WORKSPACE_REF)
         self.research(drv, run_id, "web", URL)
         record = self.last_id(drv, run_id)
+        # The audit is only reachable once the batch was shown (ADR-0067, F-Q4-1); the human answers it afterwards. The
+        # freeze changes the derivation, so the batch is shown after it.
+        self.dispatch(drv, observe_action(run_id=run_id, action=action_freeze()))
+        self.present(drv, run_id, "p1")
         self.audit(drv, run_id)
         self.assertEqual(self.run_view(drv, run_id)["audit"]["state"], "passed")
-        self.present(drv, run_id, "p1")
         self.assertEqual(self.answer(drv, run_id, "p1", confirm(record))["type"], "Allow")
         self.assertEqual(self.run_view(drv, run_id)["audit"]["state"], "failed")
         self.assertEqual(self.report(drv, run_id)["reasons"][0]["code"], "audit.failed")
@@ -507,6 +510,55 @@ class EvidenceConfirmationTests(EvidenceFixture):
         blocked = self.audit(drv, run_id, variant="same_model")
         self.assertEqual(blocked["reasons"][0]["code"], "audit.same_model")
         self.assertEqual(self.run_view(drv, run_id)["audit"]["independence"], "same_model")
+
+
+class AuditLaunchIsOrderedLikeTheViewTests(EvidenceFixture):
+    """ADR-0067 (2026-10-09, finding F-Q4-1): the audit reservation yields to the confirmation the view and the gate put
+    first, whenever a report would ask a human; when nobody can be asked the audit stays reachable."""
+
+    def audit(self, drv, run_id) -> dict:
+        return self.dispatch(drv, observe_action(run_id=run_id, action=action_child_reserve(
+            purpose="audit", resource_class="audit", role_profile=self.DEFAULT_PROFILE, execution="foreground")))["result"]
+
+    def q4_shape(self, **invocation):
+        """The claim is approved by a verbatim record, a web record waits on a human, nothing was audited."""
+        drv, run_id = self.start(kind="ordinary", **invocation)
+        self.research(drv, run_id, "code", CITED_SOURCE[0])
+        self.research(drv, run_id, "web", URL)
+        return drv, run_id
+
+    def test_the_audit_is_refused_while_a_confirmation_waits_for_a_human(self):
+        drv, run_id = self.q4_shape()
+        gate = self.report(drv, run_id)
+        refused = self.audit(drv, run_id)
+        self.assertEqual((refused["type"], self.codes(refused)), ("Block", ["evidence.confirmation_required"]))
+        self.assertEqual(refused["reasons"][0]["parameters"], gate["reasons"][0]["parameters"])
+        view = self.run_view(drv, run_id)
+        self.assertEqual(view["children"], [])
+        self.assertEqual(view["governance"]["budgets"]["audit_spawns_used"], 0)
+
+    def test_the_audit_is_admitted_after_the_confirmation(self):
+        drv, run_id = self.q4_shape()
+        self.present(drv, run_id, "p1")
+        self.answer(drv, run_id, "p1", confirm(self.last_id(drv, run_id)))
+        self.assertEqual(self.audit(drv, run_id)["type"], "Allow")
+
+    def test_the_audit_is_admitted_when_nobody_can_be_asked(self):
+        """``unavailable``: the batch stays pending, and the audit must not be held for a human who cannot come."""
+        drv, run_id = self.q4_shape(human_surface="unavailable")
+        self.assertEqual(self.run_view(drv, run_id)["confirmation_batch"]["prompt_error"], "unavailable")
+        self.assertEqual(self.audit(drv, run_id)["type"], "Allow")
+
+    def test_the_audit_is_admitted_once_the_batch_was_shown_and_left_for_later(self):
+        drv, run_id = self.q4_shape()
+        self.present(drv, run_id, "p1")
+        self.assertEqual(self.run_view(drv, run_id)["confirmation_batch"]["prompt_error"], "already_presented")
+        self.assertEqual(self.audit(drv, run_id)["type"], "Allow")
+
+    def test_an_unobserved_surface_still_holds_the_audit_for_the_report_that_will_ask(self):
+        drv, run_id = self.q4_shape(human_surface="unobserved")
+        self.assertEqual(self.run_view(drv, run_id)["confirmation_batch"]["prompt_error"], "unobserved")
+        self.assertEqual(self.codes(self.audit(drv, run_id)), ["evidence.confirmation_required"])
 
 
 class ViewIsOrderedLikeTheGateTests(EvidenceFixture):

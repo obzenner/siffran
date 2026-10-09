@@ -142,7 +142,7 @@ Apply the folds in order:
    bears on this claim; generic precedent is not evidence for a repository-specific claim.
    One source per record, quoted exactly: the service refuses a workspace citation that is not
    verbatim in the cited file and lines (`research.citation_unverified`); a URL or an absolute path
-   is retrieved by the auditor where its host can, otherwise confirmed by the human; a `runtime`
+   is retrieved by the auditor only where its host is observed to, otherwise confirmed by the human when you report, before the audit; a `runtime`
    observation must say why no spike can establish it (`spike_unavailable`) and is always confirmed
    by the human ([references/evidence.md](references/evidence.md), [references/audit.md](references/audit.md)
    step 4). What still needs a confirmation is in the obligation as soon as the record exists; the
@@ -188,7 +188,7 @@ language. When budgets, a stall, or scope closure matter, read
 
 ## 5. Obtain independent audit
 
-When every in-scope gating claim is approved, read [references/audit.md](references/audit.md).
+When every in-scope gating claim is approved and no record waits on a human (the human confirms when you report, before the audit), read [references/audit.md](references/audit.md).
 Approval is not convergence: it means the evidence passed the service's rules, not that it
 convinces. Before requesting the audit, read `GetArgument`, the argument the auditor will receive,
 and check that each claim follows from its cited sources alone.

@@ -1016,6 +1016,51 @@ class GovernanceServiceTests(unittest.TestCase):
             self.assertEqual(used(), 1)
 
 
+    def test_private_bridge_audit_prepare_waits_for_the_confirmation_the_view_puts_first(self):
+        """F-Q4-1 on the Pi path: the same private ``audit_prepare`` refuses with the core's own reason while a human is
+        about to be asked, and reserves once the batch was shown (or when nobody can be asked)."""
+        from adapters.pi import private_bridge
+        from adapters.audit_protocol import AuditProtocol, AuditProtocolError
+        from adapters.identity import observe
+        from governance_setup import approve_current
+        self.prepare()
+        approve_current(self.service._coordinator, self.run_id)
+        self.assertEqual(self.action("investigate")["type"], "Allow")
+        self.assertEqual(self.action("research", claim_id="C0", source_kind="web", result="supports", payload={
+            "source_ref": "https://example.test/spec", "citation": "observed"})["type"], "Allow")
+        c = self.service._coordinator
+        c.trusted_human_surface(self.run_id, {"run_id": self.run_id, "surface": "human"})
+
+        def make_protocol(profile, **_kw):
+            return AuditProtocol(profile, audit_retrieval=["local", "workspace"], dispatch=lambda r, _p: self.service.dispatch(r),
+                child_event_ingress=lambda _p, r, ch, v: c.trusted_child_event(r, ch, v),
+                attribution_ingress=lambda _p, r, v: c.trusted_attribution(
+                    r, {**v, **observe(v.get("provider_id"), v.get("model_id"), source=v["source"]),
+                        "observed_by": "host"}),
+                verdict_ingress=lambda _p, r, ch, v: c.trusted_audit_verdict(r, ch, v),
+                plan_ingress=lambda _p, r, ch: c.trusted_audit_plan(r, ch))
+
+        class BridgeShim:
+            def trusted_host_runtime(_self, _profile, run_id):
+                return self.service.trusted_host_runtime(run_id=run_id)
+
+        def prepare():
+            return private_bridge._dispatch(PROFILE, {"operation": "audit_prepare", "run_id": self.run_id,
+                "role_profile": "empirica:empirica-auditor"}, {"audit_retrieval": ["local", "workspace"]})
+
+        with mock.patch.object(private_bridge, "AuditProtocol", make_protocol), \
+             mock.patch.object(private_bridge, "bridge", BridgeShim()):
+            with self.assertRaises(AuditProtocolError) as refused:
+                prepare()
+            self.assertIn("audit reservation denied", str(refused.exception))
+            self.assertEqual(len(self.view()["children"]), 0)
+            self.assertEqual(self.view()["governance"]["budgets"]["audit_spawns_used"], 0)
+            batch = self.view()["confirmation_batch"]
+            shown = c.trusted_evidence_presentation(self.run_id, {"run_id": self.run_id, "receipt_id": "p1", "key": batch["key"]})
+            self.assertEqual(shown["result"]["type"], "Allow", shown)
+            self.assertEqual(prepare()["type"], "audit_plan")  # the batch was shown: a report would not ask again
+
+
     def test_audit_prepare_refuses_a_runtime_other_than_the_one_recorded_at_start(self):
         """B3 review defect 1: the runtime is recorded once, at StartRun. A reload or resume may put another
         (also reviewed) package behind `subagent`; the private audit_prepare must then refuse closed — no

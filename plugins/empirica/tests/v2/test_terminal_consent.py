@@ -37,6 +37,18 @@ class TerminalConsentTests(MediatorFixture):
         self.assertIn("End this run as stopped_residual", human.shown[0][0])
         self.assertEqual(self.status(drv, run_id), "stopped_residual")
 
+    def test_the_terminal_dialog_has_its_own_heading_and_its_fields_name_what_they_decide(self):
+        """F-Q4-2: not "evidence that needs you"; the visible field says what is being decided."""
+        drv, run_id = self.start(kind="ordinary")
+        human = Human(accept(d1="approve"))
+        self.end(drv, run_id, human)
+        message, schema = human.shown[0]
+        status = "stopped_residual"
+        self.assertEqual(message.splitlines()[0], "Empirica · end this run without converging?  (15 min)")
+        self.assertNotIn("evidence that needs you", message)
+        self.assertEqual(schema["properties"]["d1"]["title"], f"1. End the run as {status}, not converged?")
+        self.assertEqual(schema["properties"]["n1"]["title"], f"1. Your answer on ending as {status} (optional)")
+
     def test_EHB_TERM_01_the_item_is_the_status_and_binds_the_derivation(self):
         drv, run_id = self.start(kind="ordinary")
         batch = self.looked_batch(drv, run_id)
@@ -83,7 +95,7 @@ class TerminalConsentTests(MediatorFixture):
                 view = render_author_view(result)
                 message = result["reasons"][0]["message"]
                 self.assertIn(f"route={route}", view)
-                self.assertIn(f"route {route}:", message, "each route has its own sentence in the message")
+                self.assertIn(f"case={result['reasons'][0]['parameters']['case']}", view, "the case is rendered with the route")
                 actions = result["reasons"][0]["next_actions"]
                 if route == "unavailable":
                     self.assertNotIn("report_convergence intent=report_convergence", view.split("Open obligations")[0])
@@ -134,14 +146,106 @@ class TerminalConsentTests(MediatorFixture):
                 self.assertEqual(result["run"]["status"], "active")
                 self.assertEqual(self.status(drv, run_id), "active")
 
-    def test_EHB_TERM_02_a_spent_question_is_not_asked_again_for_the_same_derivation(self):
+    def test_EHB_TERM_02_a_declined_end_is_asked_again_by_the_next_explicit_stop(self):
+        """F-Q4-3: the question is spent per request, not per derivation. After a decline the human can still agree: the
+        next stop that reaches the end asks again (ADR-0063 amendment: "the human telling the agent to continue asks again")."""
         drv, run_id = self.start(kind="ordinary")
-        human = Human({"action": "decline"})
-        self.end(drv, run_id, human)
-        again = self.end(drv, run_id, human)
-        self.assertEqual(len(human.shown), 1)
-        self.assertEqual(self.codes(again), [ASK])
-        self.assertEqual(again["run"]["confirmation_batch"]["prompt_error"], "already_presented")
+        first = Human({"action": "decline"})
+        declined = self.end(drv, run_id, first)
+        self.assertEqual(self.codes(declined), [ASK])
+        self.assertEqual(declined["reasons"][0]["parameters"]["case"], "declined")
+        self.assertNotIn("convergence.report", declined["reasons"][0]["next_actions"],
+                         "the agent does not re-ask on its own: the human tells it to stop again")
+        second = Human(accept(d1="approve"))
+        ended = self.end(drv, run_id, second)
+        self.assertEqual(len(second.shown), 1, "asked again")
+        self.assertEqual(ended["run"]["status"], "stopped_residual")
+
+    def test_EHB_TERM_02_every_stop_may_ask_again_until_the_interactions_are_spent(self):
+        from unittest import mock
+        from core import governance as core_governance
+        with mock.patch.object(core_governance, "MAX_INTERACTIONS", 6):
+            drv, run_id = self.start(kind="ordinary")
+            human = Human({"action": "decline"})
+            spent = self.interactions(drv, run_id)["total"]
+            self.assertGreaterEqual(spent, 1)
+            for n in range(spent):
+                case = self.end(drv, run_id, human)["reasons"][0]["parameters"]["case"]
+                self.assertEqual(case, "declined" if n < spent - 1 else "interaction_limit", n)
+            self.assertEqual(len(human.shown), spent)
+            last = self.end(drv, run_id, human)
+            self.assertEqual(len(human.shown), spent, "nobody can be asked once the ceiling is spent")
+            self.assertEqual(last["reasons"][0]["parameters"]["case"], "interaction_limit")
+            self.assertIn("can no longer ask you", last["reasons"][0]["message"])
+            self.assertEqual(self.status(drv, run_id), "active")
+
+    def test_the_message_is_rendered_for_the_actual_case_only(self):
+        """F-Q4-3: one sentence the human can act on, chosen by the core from the route and the prompt error (or a declined
+        answer); never the text of the other cases."""
+        cases = {"ask": "nobody has been asked yet", "declined": "You declined ending the run as stopped_residual. Tell the agent to stop again to be asked, or keep working.",
+                 "unobserved": "has not yet looked for a dialog", "unavailable": "only a host that can show a dialog can end it",
+                 "interaction_limit": "can no longer ask you", "host_failed": "could not ask"}
+
+        def message_of(result):
+            return result["reasons"][0]["parameters"]["case"], result["reasons"][0]["message"]
+
+        seen: dict[str, str] = {}
+        drv, run_id = self.start(kind="ordinary")
+        self.look(drv, run_id)
+        case, message = message_of(self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))["result"])
+        seen[case] = message
+        case, message = message_of(self.dispatch(drv, evaluate(run_id=run_id, intent="stop", host_failure="presentation_failed"))["result"])
+        seen[case] = message
+        self.end(drv, run_id, Human({"action": "decline"}))
+        case, message = message_of(self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))["result"])
+        seen[case] = message
+        drv, run_id = self.start(kind="ordinary", human_surface="unobserved")
+        case, message = message_of(self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))["result"])
+        seen[case] = message
+        drv, run_id = self.start(kind="ordinary", human_surface="unavailable")
+        case, message = message_of(self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))["result"])
+        seen[case] = message
+        from unittest import mock
+        from core import governance as core_governance
+        with mock.patch.object(core_governance, "MAX_INTERACTIONS", 6):
+            drv, run_id = self.start(kind="ordinary")
+            for _ in range(self.interactions(drv, run_id)["total"]):
+                self.end(drv, run_id, Human({"action": "decline"}))
+            case, message = message_of(self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))["result"])
+            seen[case] = message
+        self.assertEqual(set(seen), set(cases))
+        for case, message in seen.items():
+            with self.subTest(case=case):
+                self.assertIn(cases[case], message)
+                self.assertIn("stopped_residual", message)
+                for other, text in cases.items():
+                    if other != case:
+                        self.assertNotIn(text, message, f"the {case} text carries the {other} text")
+                self.assertNotIn("route human:", message)
+
+    def test_the_stop_pause_names_the_pending_decision_when_it_is_the_blocker(self):
+        """F-Q4-3 (3): a deliberative pause reads the core's reason. When the end is what waits, that reason is the one-case
+        sentence about the decision; when something else is owed (the audit), the pause names that instead."""
+        import json as _json
+        from adapters.claude.completion import stop_result
+        from adapters.claude.transport import Response
+
+        def pause(result):
+            response = Response.from_envelope({"request_id": "s"}, {"protocol": "empirica/v2", "request_id": "s", "result": result})
+            stopped = stop_result(response, stop_hook_active=False)
+            self.assertEqual(stopped.exit_code, 0)
+            return _json.loads(stopped.stdout)["systemMessage"]
+
+        drv, run_id = self.start(kind="ordinary")
+        self.end(drv, run_id, Human({"action": "decline"}))
+        waiting = pause(self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))["result"])
+        self.assertIn("You declined ending the run as stopped_residual", waiting)
+        self.assertNotIn("route human:", waiting)
+        drv, run_id = self.start(kind="ordinary")
+        self.research(drv, run_id, "code", CITED_SOURCE[0])
+        owed = pause(self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))["result"])
+        self.assertNotIn("declined", owed)
+        self.assertNotIn("ending the run", owed)
 
     # ---- EHB-TERM-03: no dialog ----------------------------------------------------------------------
 

@@ -503,6 +503,16 @@ def confirmation_batch(snapshot: EvaluationSnapshot, derivation: ClaimDerivation
     return {"key": key, "record_ids": shown_records, "claims": rows}
 
 
+def human_batch(snapshot: EvaluationSnapshot, derivation: ClaimDerivation,
+                blockers: tuple[dict[str, Any], ...] | None = None) -> dict[str, Any] | None:
+    """The batch the gate asks a human about now: the pending batch, once nothing the author can do alone is left. The
+    one predicate the report, the audit reservation and (as ``confirmation_batch``) the view's audit row order by."""
+    blockers = claim_blockers(snapshot, derivation) if blockers is None else blockers
+    if any(b["reason"] != CONFIRMATION_REASON for b in blockers):
+        return None
+    return confirmation_batch(snapshot, derivation)
+
+
 def _spike_requirement(snapshot: EvaluationSnapshot, claim: Mapping[str, Any], derivation: ClaimDerivation,
                        research: list[dict[str, Any]],
                        spikes: list[dict[str, Any]]) -> tuple[str, dict[str, Any], bool] | None:
@@ -810,7 +820,8 @@ def plan_evidence_presentation(snapshot: EvaluationSnapshot, payload: Mapping[st
     batch = next((b for b in batch_candidates(snapshot, derive_claims(snapshot)) if b["key"] == payload["key"]), None)
     # The presentation names the batch the host showed; any other (a record joined, a wording changed) is refused
     # and nothing is spent, so what a human was shown is exactly what is recorded as presented.
-    if batch is None or confirmation.presented(snapshot, batch["key"]):
+    # The terminal question is spent per request: each explicit stop that reaches it may be presented again (bounded below).
+    if batch is None or (confirmation.presented(snapshot, batch["key"]) and not confirmation.is_terminal(batch)):
         return _decision(snapshot, state, "Fault", reason="conflict")
     if governance.interactions_remaining(
             state.governance, confirmation.interactions(snapshot))["total"] == 0:
@@ -1169,6 +1180,15 @@ def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent:
                 return blocked
             execution = action["execution"]
             resource_class = action["resource_class"]
+            if resource_class == "audit" and snapshot.graph is not None:
+                # The audit gate comes after the confirmation the view and the report put first (ADR-0067): an audit
+                # launched while a human is about to be asked would be staled by the answer and spend its spawn.
+                derivation = derive_claims(snapshot)
+                batch = human_batch(snapshot, derivation)
+                if batch is not None and confirmation.prompt_error(snapshot, batch["key"]) in confirmation.ASKABLE:
+                    return _decision(snapshot, state, "Block", reason=CONFIRMATION_REASON,
+                                     parameters=confirmation.parameters(
+                                         snapshot, batch["record_ids"], [r["claim_id"] for r in batch["claims"]]))
             if (execution == "async" and snapshot.host_tier != "full_async"
                     and not (resource_class == "audit"
                              and snapshot.host_audit_execution == "async")):
@@ -1228,8 +1248,12 @@ def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent:
             (ADR-0063 amendment); the auto modes commit as before. A refusal is never a terminal state."""
             if (consent and state.governance["control_mode"] == "deliberative"
                     and not terminal_consented(snapshot, derivation, ended.status)):
+                key = terminal_key(ended.status, terminal_digest(snapshot, derivation, ended.status))
+                case = confirmation.terminal_case(confirmation.prompt_error(snapshot, key, terminal=True),
+                                                  confirmation.presented(snapshot, key))
                 return decide(state, "Block", reason=TERMINAL_STOP_REASON,
-                              parameters={"status": ended.status, "route": confirmation.human_route(snapshot)})
+                              parameters={"status": ended.status, "route": confirmation.human_route(snapshot),
+                                          "case": case})
             return decide(ended)
 
         if intent == "stop":
@@ -1241,7 +1265,7 @@ def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent:
         blockers = claim_blockers(snapshot, derivation)
         # Whatever the author can still do alone comes first; the human is asked about the rest.
         blocker = next((b for b in blockers if b["reason"] != CONFIRMATION_REASON), None)
-        batch = confirmation_batch(snapshot, derivation) if blocker is None else None
+        batch = human_batch(snapshot, derivation, blockers)
         if batch is not None:
             return decide(state, "Block", reason=CONFIRMATION_REASON,
                           parameters=confirmation.parameters(

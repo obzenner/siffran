@@ -39,6 +39,9 @@ HOST_FAILURES = ("surface_unrecorded", "presentation_failed")
 #: What a host reports about one call (``HOST_FAILURES``) is projected into that call's response only and never stored,
 #: so no later reader of the run (the observer UI) sees it.
 PROMPT_ERRORS = (UNAVAILABLE, UNOBSERVED, "already_presented", "interaction_limit")
+#: The ``prompt_error`` values with which a report would still ask a human: none, or only ``unobserved`` (the host looks
+#: for a dialog surface inside the report). The one place a caller learns whether a human is about to be asked.
+ASKABLE = frozenset({None, UNOBSERVED})
 #: The routes a *human* is told (the observer UI).
 TOLD_ROUTES = (HUMAN, UNAVAILABLE)
 
@@ -169,17 +172,49 @@ def presented(snapshot: Any, key: str) -> bool:
     return any(item.get("kind") == PRESENTATION and item["key"] == key for item in snapshot.history)
 
 
-def prompt_error(snapshot: Any, key: str) -> str | None:
+#: The cases of ``governance.terminal_stop_pending``, one per thing a human or an author can do next; the contract holds
+#: one text per case (``case_messages``) and the core picks it (``terminal_case``).
+TERMINAL_CASES = ("ask", "declined", "unobserved", "unavailable", "interaction_limit", "host_failed")
+
+
+def terminal_case(prompt_error: str | None, declined: bool) -> str:
+    """Which text of ``governance.terminal_stop_pending`` is true now, from the batch's ``prompt_error`` (the route is in it:
+    ``unavailable``, ``unobserved``) and whether the human already declined this end for this derivation (it was presented
+    and no consent followed). The one mapping; ``projection.project_prompt_error`` uses it too."""
+    if prompt_error in {"unavailable", UNOBSERVED, "interaction_limit"}:
+        return prompt_error
+    if prompt_error == "already_presented":  # a host that showed it and could not evaluate again: the human has answered
+        return "declined"
+    if prompt_error is not None:
+        return "host_failed"
+    return "declined" if declined else "ask"
+
+
+def reason_text(spec: Mapping[str, Any], parameters: Mapping[str, Any]) -> str:
+    """The text of a reason: the contract's ``message``, or, when the reason has ``case_messages`` and its parameters name a
+    ``case``, that case's text with the parameters filled in. The one place the text is chosen; nothing in an adapter words it."""
+    templates = spec.get("case_messages")
+    case = parameters.get("case")
+    if not templates or case not in templates:
+        return spec["message"]
+    return templates[case].format_map({k: v for k, v in parameters.items() if isinstance(v, str)})
+
+
+def prompt_error(snapshot: Any, key: str, *, terminal: bool = False) -> str | None:
     """Why the batch with this key cannot be presented now, else ``None``. In order: ``unavailable`` (nobody to ask),
     ``already_presented`` (a changed derivation is the only thing that asks again), ``interaction_limit`` (the run's
     human interactions are spent; known, so it comes before anything the host has yet to find out), then what the host
     reports about *this* call: its ``host_failure`` (``surface_unrecorded`` or ``presentation_failed``: it could not
     record its surface or could not show the batch, so nobody was asked) and ``unobserved`` (it has not looked for a
-    surface; it looks inside its next report). Mirrors ``governance.prompt_error``."""
+    surface; it looks inside its next report). Mirrors ``governance.prompt_error``.
+
+    The terminal step of a deliberative run (``terminal``) is never ``already_presented``: its question is spent per request,
+    not per derivation, so each explicit stop that reaches it may ask again, bounded by ``interaction_limit`` (ADR-0063
+    amendment, F-Q4-3)."""
     route = human_route(snapshot)
     if route == UNAVAILABLE:
         return route
-    if presented(snapshot, key):
+    if presented(snapshot, key) and not terminal:
         return "already_presented"
     if governance.interactions_remaining(snapshot.state.governance, interactions(snapshot))["total"] == 0:
         return "interaction_limit"

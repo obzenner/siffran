@@ -55,8 +55,43 @@ SURFACE_UNRECORDED = Outcome("surface_unrecorded")
 PRESENTATION_FAILED = Outcome("presentation_failed")
 
 
+#: A field title is at most this many columns with its "n. " prefix. Claude collapses the long elicitation message
+#: ("+21 more lines", claude-4 Q4) and shows only the field titles; it published no title limit, and 72 columns is the
+#: width its dialog showed uncut (the message lines wrap at 72 plus a 3-column indent). Pi shows the same text.
+TITLE_LIMIT = 72
+_PREFIX = 4  # "64. ": a batch holds at most 64 items
+
+
 def _limit(subject: str) -> int:
     return _ANSWER_LIMIT if subject == "claim" else _NOTE_LIMIT
+
+
+def _fit(text: str, room: int) -> str:
+    return text if len(text) <= room else text[:max(1, room - 1)].rstrip() + "…"
+
+
+def short_ref(ref: str) -> str:
+    """A source as a person scans it: no scheme, no ``www.``, no trailing slash."""
+    for scheme in ("https://", "http://"):
+        if ref.lower().startswith(scheme):
+            ref = ref[len(scheme):]
+            break
+    return (ref[4:] if ref.startswith("www.") else ref).rstrip("/")
+
+
+def _claim_list(ids: Sequence[str]) -> str:
+    return ", ".join(ids) if len(ids) <= 4 else ", ".join(ids[:3]) + f" +{len(ids) - 3}"
+
+
+def _research_titles(item: dict[str, Any]) -> None:
+    """The short field titles of a research item: its source and the claims it is for (the long quote stays in the
+    message). The question is the same for both hosts, so each reads the item alike."""
+    ids = _claim_list([claim["id"] for claim in item["claims"]])
+    ref = short_ref(item["source_ref"])
+    question = "is the observation right?" if item["class"] == "observed" else "does it say the quoted text?"
+    tail = f": {question} ({ids})"
+    item["title"] = _fit(ref, TITLE_LIMIT - _PREFIX - len(tail)) + tail
+    item["note_title"] = "Note on " + _fit(ref, TITLE_LIMIT - _PREFIX - len("Note on  (optional)")) + " (optional)"
 
 
 def presentable(result: object) -> dict[str, Any] | None:
@@ -84,23 +119,40 @@ def build_items(argument: Mapping[str, Any], batch: Mapping[str, Any]) -> list[d
     if is_terminal(batch):
         # The terminal step of a deliberative run (ADR-0063 amendment): one decision, no claim of the argument.
         terminal = batch["terminal"]
-        return [{"subject": "claim", "id": terminal["status"], "digest": terminal["digest"],
-                 "text": f"End this run as {terminal['status']}, without converging? Approve to end it now; Reject "
-                         "or Later keeps it active and nothing is ended."}]
+        status = terminal["status"]
+        return [{"subject": "claim", "id": status, "digest": terminal["digest"], "terminal": True,
+                 "text": f"End this run as {status}, without converging? Approve to end it now; Reject "
+                         "or Later keeps it active and nothing is ended.",
+                 "title": f"End the run as {status}, not converged?",
+                 "note_title": f"Your answer on ending as {status} (optional)"}]
     for claim_id in batch.get("claim_ids", ()):
         if claim_id in text:
             items.append({"subject": "claim", "id": claim_id, "digest": text[claim_id]["wording_digest"],
-                          "text": text[claim_id]["text"]})
+                          "text": text[claim_id]["text"], "title": f"Your decision on {claim_id}",
+                          "note_title": f"Your answer on {claim_id} (optional)"})
+    # One source quoted the same way for several claims is one question: the human reads the quote once, and the
+    # answer is recorded as a decision for every record it groups (the receipt still decides per record).
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
     for record_id in batch.get("record_ids", ()):
         row = research.get(record_id)
         if row is None:
             continue
-        item = {"subject": "research", "id": record_id, "claim": text.get(row["claim_id"], {}).get("text", ""),
-                "source_kind": row["source_kind"], "source_ref": row["source_ref"],
-                "quote": row["citation"], "class": row["verification"]["class"]}
-        if row.get("spike_unavailable"):
+        key = (row["source_ref"], row["citation"])
+        claim = {"id": row["claim_id"], "text": text.get(row["claim_id"], {}).get("text", "")}
+        if key not in grouped:
+            grouped[key] = {"subject": "research", "id": record_id, "record_ids": [], "claims": [],
+                            "source_kind": row["source_kind"], "source_ref": row["source_ref"],
+                            "quote": row["citation"], "class": row["verification"]["class"]}
+            items.append(grouped[key])
+        item = grouped[key]
+        item["record_ids"].append(record_id)
+        if all(claim["id"] != other["id"] for other in item["claims"]):
+            item["claims"].append(claim)
+        if row.get("spike_unavailable") and "reason" not in item:
             item["reason"] = row["spike_unavailable"]
-        items.append(item)
+    for item in items:
+        if item["subject"] == "research":
+            _research_titles(item)
     return items
 
 
@@ -186,14 +238,15 @@ def decisions(items: Sequence[Mapping[str, Any]], answers: object) -> list[dict[
             continue
         note = note.strip() if isinstance(note, str) else ""
         if subject == "research":
-            row: dict[str, Any] = {"subject": "research", "artifact_id": ident, "outcome": _RESEARCH[choice]}
-            if note:
-                row["note"] = note
-        else:
-            row = {"subject": "claim", "claim_id": ident, "claim_digest": item["digest"],
-                   "outcome": _CLAIM[choice]}
-            if note:
-                row["answer"] = note
+            for record_id in item.get("record_ids", [ident]):
+                row: dict[str, Any] = {"subject": "research", "artifact_id": record_id, "outcome": _RESEARCH[choice]}
+                if note:
+                    row["note"] = note
+                out.append(row)
+            continue
+        row = {"subject": "claim", "claim_id": ident, "claim_digest": item["digest"], "outcome": _CLAIM[choice]}
+        if note:
+            row["answer"] = note
         out.append(row)
     return out
 
@@ -221,7 +274,8 @@ def _item_text(number: int, item: Mapping[str, Any]) -> list[str]:
     if item["subject"] == "claim":
         return [f"{number}. Decision needed", *_lines(item["text"])]
     head = [f"{number}. {item['source_kind']} source: {item['source_ref']}"]
-    body = [*_lines(f'Quote: "{item["quote"]}"'), *_lines(f"For claim: {item['claim']}")]
+    body = [*_lines(f'Quote: "{item["quote"]}"'),
+            *(line for claim in item["claims"] for line in _lines(f"For claim {claim['id']}: {claim['text']}"))]
     if item.get("reason"):
         body += _lines("Why no deterministic check: " + item["reason"])
     return head + body
@@ -230,20 +284,19 @@ def _item_text(number: int, item: Mapping[str, Any]) -> list[str]:
 def form(items: Sequence[Mapping[str, Any]], timeout: float) -> tuple[str, dict[str, Any]]:
     """Map the batch to one flat MCP form: per item an enum decision and an optional note or answer."""
     minutes = f"{timeout / 60:g} min" if timeout >= 60 else f"{timeout:g} sec"
-    message = ["Empirica · evidence that needs you  (" + minutes + ")",
+    ending = len(items) == 1 and bool(items[0].get("terminal"))
+    heading = "end this run without converging?" if ending else "evidence that needs you"
+    message = [f"Empirica · {heading}  (" + minutes + ")",
                "Decide each item. Leave it on Later to decide another time.",
                "Accept = send these decisions · Decline/Esc = send none", ""]
     properties: dict[str, Any] = {}
     for number, item in enumerate(items, 1):
         message += _item_text(number, item)
-        claim = item["subject"] == "claim"
         properties[f"d{number}"] = {
-            "type": "string", "title": f"{number}. " + ("Your decision" if claim else "Is the source sound?"),
+            "type": "string", "title": f"{number}. {item['title']}",
             "enum": list(CHOICES[item["subject"]]), "default": "later"}
         properties[f"n{number}"] = {
-            "type": "string", "title": f"{number}. " + ("Your answer (optional)" if claim
-                                                         else "Note to the author (optional)"),
-            "maxLength": _limit(item["subject"])}
+            "type": "string", "title": f"{number}. {item['note_title']}", "maxLength": _limit(item["subject"])}
     return "\n".join(message), {"type": "object", "properties": properties, "required": []}
 
 
@@ -309,7 +362,9 @@ class HostConfirmation:
                 return fresh
         except Exception:  # noqa: BLE001 - the transport is down: fall through to what this call knows
             pass
-        return project_host_failure(result, asked.failure) if asked.failure else project_prompt_error(result, "already_presented")
+        reasons = protocol.public_contract()["reasons"]
+        return (project_host_failure(result, asked.failure, reasons) if asked.failure
+                else project_prompt_error(result, "already_presented", reasons))
 
     def _ask(self, result: dict) -> Outcome | None:
         """Show the core's batch once. ``None`` when there was nothing to ask (no batch the core allows presenting, no

@@ -605,6 +605,13 @@
                 "start_refused",
                 "host_recovery"
               ]
+            },
+            "case_messages": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "minProperties": 1
             }
           }
         }

@@ -53,12 +53,16 @@ export function evidenceHostFailure(result: Response["result"], reported?: HostF
   return projected ?? (reported !== undefined && evidenceConfirmationWait(result) ? hostFailureNotice(reported) : null);
 }
 
-/** What the human reads above the choices; the labels are the whole vocabulary of the dialog. */
+/** What the human reads above the choices; the labels are the whole vocabulary of the dialog. The first line is the
+ * heading, the second the item's own short title (the same text Claude shows as its field title), then the detail. The end
+ * of a deliberative run has its own heading: it is not evidence. */
 export function itemTitle(item: EvidenceItem, number: number, count: number): string {
-  const head = `Empirica · evidence that needs you (${number} of ${count})`;
-  if (item.subject === "claim") return `${head}\nA decision is needed:\n${item.text}`;
-  const lines = [head, `${item.source_kind} source: ${item.source_ref}`, `Quote: "${item.quote}"`,
-    `For claim: ${item.claim}`];
+  const head = item.subject === "claim" && item.terminal
+    ? "Empirica · end this run without converging?"
+    : `Empirica · evidence that needs you (${number} of ${count})`;
+  if (item.subject === "claim") return `${head}\n${item.title}\n${item.text}`;
+  const lines = [head, item.title, `${item.source_kind} source: ${item.source_ref}`, `Quote: "${item.quote}"`,
+    ...item.claims.map((claim) => `For claim ${claim.id}: ${claim.text}`)];
   if (item.reason) lines.push(`Why no deterministic check: ${item.reason}`);
   return lines.join("\n");
 }
@@ -82,8 +86,7 @@ export async function askItems(items: readonly EvidenceItem[], ctx: ExtensionCon
     const choice = picked.toLowerCase();
     let note: string | null = null;
     if (choice !== "later") {
-      const typed = await ui.input(item.subject === "claim" ? "Your answer (optional)" : "Note to the author (optional)",
-        undefined, { timeout: Math.max(1, deadline - Date.now()) });
+      const typed = await ui.input(item.note_title, undefined, { timeout: Math.max(1, deadline - Date.now()) });
       if (typed === undefined) return null;
       note = typed.trim() === "" ? null : typed;
     }
@@ -115,7 +118,8 @@ export async function observeSurface(runId: string, ctx: ExtensionContext, trust
  * one receipt and return the response to act on, with the host failure to report (`failure`, `undefined` when the
  * batch was shown or there was none). Once the batch was shown, the run is evaluated again whatever the human did:
  * Later, cancel and timeout grant nothing but spend this derivation, and the fresh response says so
- * (`prompt_error: already_presented`) instead of promising another dialog. A batch that could not be presented (the
+ * (`prompt_error: already_presented`) instead of promising another dialog; the end of a deliberative run is spent per request
+ * instead (its response says `case: declined`, and the next explicit stop asks again). A batch that could not be presented (the
  * ingress faulted, threw, or refused) is evaluated again with `presentation_failed`, so the response says nobody was
  * asked; the core's own refusal (`already_presented`, `interaction_limit`) outranks it. A presentable batch with no
  * dialog to show it in is the same failure to ask: nothing is spent and nothing is evaluated, but `failure` says so,

@@ -13,6 +13,7 @@ from core.evaluation import (READ_COMMANDS, SPAWN_BUDGET, Decision, EvaluationSn
                              evaluate_snapshot, frozen_scope_invalid, plan_evidence_confirmation, plan_evidence_presentation,
                              plan_spike_request,
                              plan_spike_result, valid_attribution)
+from core import confirmation
 from core.projection import (confirmation_actions, project_argument, project_runview, project_presentation,
                              recovery_actions)
 from core.ports import RunRepository
@@ -800,7 +801,7 @@ class Coordinator:
         spec = _proto.public_contract()["reasons"][code]
         row = {"code": code, "parameters": parameters or {},
                "next_actions": list(spec["next_actions"]), "sections": list(spec["sections"]),
-               "message": spec["message"]}
+               "message": confirmation.reason_text(spec, parameters or {})}
         if affected:
             row["affected"] = {"obligation_id": affected}
         return row

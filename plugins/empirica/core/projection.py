@@ -39,9 +39,7 @@ def _reason_metadata(metadata: Mapping[str, tuple[tuple[str, ...], tuple[str, ..
     return list(next_actions), list(sections)
 
 
-#: The ``prompt_error`` values with which a report would still ask a human: none, or only ``unobserved`` (the host looks
-#: for a dialog surface inside the report).
-ASKABLE = frozenset({None, confirmation.UNOBSERVED})
+ASKABLE = confirmation.ASKABLE
 
 
 #: The recovery actions the confirmation rule owns (adds, keeps or drops); no mode's recovery exclusion may name one.
@@ -70,11 +68,16 @@ def confirmation_actions(code: str, parameters: Mapping[str, Any] | None, action
     ``human.confirm_evidence``."""
     if code not in (CONFIRMATION_REASON, TERMINAL_STOP_REASON):
         return actions
-    return confirmation_next(actions, (parameters or {}).get("route"),
-                             batch["prompt_error"] if batch is not None else "unavailable")
+    prompt_error = batch["prompt_error"] if batch is not None else "unavailable"
+    if (parameters or {}).get("case") == "declined":
+        # The human has just answered no: the agent is not sent to ask again by itself. The human's own word ("stop")
+        # does, and the batch stays askable for that request (``prompt_error`` is not changed).
+        prompt_error = "already_presented"
+    return confirmation_next(actions, (parameters or {}).get("route"), prompt_error)
 
 
-def project_prompt_error(result: Mapping[str, Any], prompt_error: str | None) -> dict[str, Any]:
+def project_prompt_error(result: Mapping[str, Any], prompt_error: str | None,
+                         reasons: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """The response the core would have projected had the batch's ``prompt_error`` been this one, for a host that knows
     something about its own call that the response it holds does not: the batch, and the recovery actions of every
     confirmation obligation row and reason (not the residuals, which exist only on a terminal run, where there is no
@@ -86,7 +89,9 @@ def project_prompt_error(result: Mapping[str, Any], prompt_error: str | None) ->
     batch = run.get("confirmation_batch") if isinstance(run, Mapping) else None
     if batch is None:
         return dict(result)
-    projected_batch = {**batch, "prompt_error": prompt_error}
+    terminal = confirmation.is_terminal(batch)
+    # The terminal question is spent per request: a shown one is not "already presented", it is a declined end.
+    projected_batch = {**batch, "prompt_error": None if terminal and prompt_error == "already_presented" else prompt_error}
 
     def obligation(row: Mapping[str, Any]) -> dict[str, Any]:
         missing = row["missing"] or {}
@@ -94,6 +99,7 @@ def project_prompt_error(result: Mapping[str, Any], prompt_error: str | None) ->
             missing.get("code", ""), missing.get("parameters"), row["next"], projected_batch)}
 
     def reason(row: Mapping[str, Any]) -> dict[str, Any]:
+        row = _recased(row, prompt_error, reasons)
         return {**row, "next_actions": confirmation_actions(
             row["code"], row["parameters"], row["next_actions"], projected_batch)}
 
@@ -103,12 +109,24 @@ def project_prompt_error(result: Mapping[str, Any], prompt_error: str | None) ->
     return {**result, "run": projected, **({"reasons": reasons} if "reasons" in result else {})}
 
 
-def project_host_failure(result: Mapping[str, Any], host_failure: str) -> dict[str, Any]:
+def _recased(row: Mapping[str, Any], prompt_error: str | None, reasons: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    """The terminal-step reason with the case (and, given the contract's reasons, the text) that is true for this
+    ``prompt_error``; every other row as it is."""
+    if row["code"] != TERMINAL_STOP_REASON:
+        return row
+    parameters = {**row["parameters"], "case": confirmation.terminal_case(
+        prompt_error, row["parameters"].get("case") == "declined")}
+    text = confirmation.reason_text(reasons[row["code"]], parameters) if reasons else row.get("message")
+    return {**row, "parameters": parameters, **({"message": text} if text is not None else {})}
+
+
+def project_host_failure(result: Mapping[str, Any], host_failure: str,
+                         reasons: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """``project_prompt_error`` for what the host reports about its own call, the way the core applies it when it is
     told (``confirmation.apply_host_report``): a refusal the core already knows stands."""
     run = result.get("run")
     batch = run.get("confirmation_batch") if isinstance(run, Mapping) else None
-    return project_prompt_error(result, confirmation.apply_host_report(batch["prompt_error"], host_failure)) \
+    return project_prompt_error(result, confirmation.apply_host_report(batch["prompt_error"], host_failure), reasons) \
         if batch is not None else dict(result)
 
 
@@ -427,7 +445,7 @@ def _batch(snapshot: EvaluationSnapshot, derivation: Any) -> dict[str, Any] | No
             # What the author reads of the batch: where each record is cited from and for which claim.
             "records": [{"claim_id": held[i]["claim_id"], "source_kind": held[i]["source_kind"],
                          "source_ref": held[i]["source_ref"]} for i in batch["record_ids"] if i in held],
-            "prompt_error": confirmation.prompt_error(snapshot, batch["key"])}
+            "prompt_error": confirmation.prompt_error(snapshot, batch["key"], terminal=confirmation.is_terminal(batch))}
 
 
 def _audit(snapshot: EvaluationSnapshot) -> dict[str, Any]:

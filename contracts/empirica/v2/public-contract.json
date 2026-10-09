@@ -1711,7 +1711,8 @@
         "additionalProperties": false,
         "required": [
           "status",
-          "route"
+          "route",
+          "case"
         ],
         "properties": {
           "status": {
@@ -1727,6 +1728,16 @@
               "unavailable",
               "unobserved"
             ]
+          },
+          "case": {
+            "enum": [
+              "ask",
+              "declined",
+              "unobserved",
+              "unavailable",
+              "interaction_limit",
+              "host_failed"
+            ]
           }
         }
       },
@@ -1738,7 +1749,15 @@
       "sections": [
         "governance"
       ],
-      "message": "A deliberative run does not end without converging until a human agrees to the status in the parameters. Nothing was granted and the run stays active. The route in the parameters says what can happen next. route human: report again and the human is asked whether to end the run. route unobserved: report once more, which looks for a dialog and asks if one can be shown. route unavailable: this host cannot show a dialog, so the run stays active and only a host that can show a dialog can end it; keep working."
+      "message": "A deliberative run does not end without converging until a human agrees to the status in the parameters. Nothing was granted and the run stays active. The case in the parameters says which text applies; the core chooses it from the route, the reason a dialog cannot be shown, and whether the human already declined this end.",
+      "case_messages": {
+        "ask": "Ending the run as {status} needs a human's agreement, and nobody has been asked yet. Stop again (report_convergence intent=stop) and the human is asked whether to end the run.",
+        "declined": "You declined ending the run as {status}. Tell the agent to stop again to be asked, or keep working.",
+        "unobserved": "Ending the run as {status} needs a human's agreement, and this host has not yet looked for a dialog. Stop again (report_convergence intent=stop): the host looks, and asks if one can be shown.",
+        "unavailable": "Ending the run as {status} needs a human's agreement, and this host cannot show a dialog, so the run stays active and only a host that can show a dialog can end it; keep working.",
+        "interaction_limit": "This run can no longer ask you: its human interactions are spent, so it cannot be ended as {status} without converging. It can still end by converging; keep working toward that.",
+        "host_failed": "Ending the run as {status} needs a human's agreement, and the host could not ask (it could not record its dialog or could not show the question), so nobody was asked and the run stays active. Stop again to try again."
+      }
     },
     "audit.producers_mixed": {
       "params": {
