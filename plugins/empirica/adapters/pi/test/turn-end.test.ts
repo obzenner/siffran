@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { PROTOCOL, type Request, type Response, type Result } from "../src/contract.ts";
 import { createEmpiricaExtension, DEFAULT_SKILLS_DIR } from "../src/index.ts";
 import { PUBLIC_TOOLS } from "../src/public-tools.ts";
-import { auditPending, basisOf, evidenceAskable, fill, turnEnd, type Basis } from "../src/turn-end.ts";
+import { auditPending, evidenceAskable, fill, turnEnd, type Basis } from "../src/turn-end.ts";
 import { FakePi, fakeCtx } from "./fakes.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -36,7 +36,7 @@ function governance(mode: Mode, pending = false) {
 }
 
 function block(mode: Mode, kind: "real" | "budget" | "evidence" | "audit" | "human_wait" = "real"): Result {
-  const run: Record<string, unknown> = { id: HANDLE, status: "active", governance: governance(mode, kind === "human_wait"),
+  const run: Record<string, unknown> = { id: HANDLE, status: "active", basis: "sha256:0", governance: governance(mode, kind === "human_wait"),
     confirmation_batch: null, children: [] };
   let reason: Record<string, unknown> = { code: "claim.research_missing", message: REASON };
   if (kind === "budget") reason = { code: "budget.exhausted", parameters: { resource: "pass" }, message: "pass budget exhausted." };
@@ -54,7 +54,7 @@ function block(mode: Mode, kind: "real" | "budget" | "evidence" | "audit" | "hum
 }
 
 const CONVERGED = { type: "Allow", converged: true, run: { id: HANDLE, status: "converged" } } as unknown as Result;
-const basis = (n: number): Basis => ({ signature: "x", toolResults: n });
+const basis = (n: number): Basis => `sha256:${n}`;
 
 /** The Result for one state of the registry table in one mode, or null where the state cannot arise there. */
 function cell(state: string, mode: Mode, notice?: string): Result | null {
@@ -77,8 +77,8 @@ test("EHB-STOP-34: every state x control mode x chain position of the registry t
         const result = cell(state.id, mode, name);
         if (result === null) continue;
         // chain position: no previous continuation, a previous one on an older basis, and one on the same basis
-        for (const [label, previous] of [["first", null], ["later", basis(0)], ["stalled", basisOf(result, 1)]] as const) {
-          const full = turnEnd(result, 1, previous);
+        for (const [label, previous] of [["first", null], ["later", basis(99)], ["stalled", (result as { run: { basis: string } }).run.basis]] as const) {
+          const full = turnEnd(result, previous);
           const got = full.kind === "continue" ? { kind: full.kind, message: full.message } : full;  // the basis is the adapter's own
           const reason = ((result as { reasons?: Array<{ message?: string }> }).reasons ?? []).map((r) => r.message).join(" ");
           const where = `${state.id} / ${mode} / ${name} / ${label}`;
@@ -107,22 +107,22 @@ test("EHB-STOP-34: every state x control mode x chain position of the registry t
 test("a run that is not active, a fault and an inert answer end the turn with nothing appended", () => {
   const terminal = block("deliberative") as { run: { status: string } };
   terminal.run = { ...terminal.run, status: "stopped_residual" };
-  assert.deepEqual(turnEnd(terminal as never, 0, null), { kind: "nothing" });
-  assert.deepEqual(turnEnd({ type: "Inert", reason: "no_run" }, 0, null), { kind: "nothing" });
-  assert.deepEqual(turnEnd({ type: "Fault", code: "unavailable", fail_direction: "closed" }, 0, null), { kind: "nothing" });
+  assert.deepEqual(turnEnd(terminal as never, null), { kind: "nothing" });
+  assert.deepEqual(turnEnd({ type: "Inert", reason: "no_run" }, null), { kind: "nothing" });
+  assert.deepEqual(turnEnd({ type: "Fault", code: "unavailable", fail_direction: "closed" }, null), { kind: "nothing" });
 });
 
-test("a blocker that changes is progress even when no tool result arrived", () => {
-  const first = turnEnd(block("auto-interactive-post"), 5, null);
+test("a blocker that changes is progress", () => {
+  const first = turnEnd(block("auto-interactive-post"), null);
   assert.equal(first.kind, "continue");
   const other = block("auto-interactive-post") as { reasons: Array<Record<string, unknown>> };
-  other.reasons = [{ code: "claim.spike_missing", message: "Run a spike." }];
-  assert.equal(turnEnd(other as never, 5, basisOfFirst(block("auto-interactive-post"), 5)).kind, "continue");
-  assert.equal(turnEnd(block("auto-interactive-post"), 5, basisOfFirst(block("auto-interactive-post"), 5)).kind, "no-progress");
+  (other as unknown as { run: { basis: string } }).run.basis = "sha256:other";  // the core's basis moves with the blocker
+  assert.equal(turnEnd(other as never, basisOfFirst(block("auto-interactive-post"))).kind, "continue");
+  assert.equal(turnEnd(block("auto-interactive-post"), basisOfFirst(block("auto-interactive-post"))).kind, "no-progress");
 });
 
-function basisOfFirst(result: Result, seen: number): Basis {
-  const got = turnEnd(result, seen, null);
+function basisOfFirst(result: Result): Basis {
+  const got = turnEnd(result, null);
   assert.equal(got.kind, "continue");
   return (got as { basis: Basis }).basis;
 }
@@ -133,12 +133,13 @@ function envelope(result: Result): Response {
   return { protocol: PROTOCOL, request_id: "x", result };
 }
 
-async function wired(answer: () => Result) {
+async function wired(answer: (revision: number) => Result) {
+  let revision = 0;  // a change of what the core projects of the run's work (research recorded, a claim approved)
   const pi = new FakePi();
   const requests: Request[] = [];
   createEmpiricaExtension({
     dispatch: (request) => { requests.push(request); return { ...envelope(request.command.type === "StartRun" ? ({ type: "Allow", converged: false,
-      run: { id: HANDLE, status: "active" } } as never) : answer()), request_id: request.request_id }; },
+      run: { id: HANDLE, status: "active" } } as never) : answer(revision)), request_id: request.request_id }; },
     deriveSelector: () => ({ project: "p", session: "s" }),
     privateIngress: async () => ({ protocol: PROTOCOL, request_id: "trusted-governance",
       result: { type: "Inert", reason: "unsupported_host_event", run: { id: HANDLE, status: "active" } } }) as never,
@@ -153,7 +154,7 @@ async function wired(answer: () => Result) {
     (pi.handlers.get("agent_before_settle") as (e: unknown, c: unknown) => Promise<{ entries?: unknown[]; continue?: boolean } | undefined>)(
       { type: "agent_before_settle", ...event }, fakeCtx("/work"));
   const toolResult = () => (pi.handlers.get("tool_result") as (e: unknown) => Promise<unknown>)({ toolCallId: "t", toolName: "read", content: [] });
-  return { pi, requests, settle, toolResult };
+  return { pi, requests, settle, toolResult, change: () => { revision += 1; } };
 }
 
 test("EHB-STOP-31: a deliberative turn end appends one visible notice and requests no continuation", async () => {
@@ -181,6 +182,19 @@ test("EHB-STOP-29: a converged run and no run append nothing", async () => {
   createEmpiricaExtension({ dispatch: () => { throw new Error("no run: no evaluation"); }, deriveSelector: () => ({ project: "p", session: "s" }),
     privateIngress: async () => ({}) as never, ownerEnv: {}, resolveAuditContract: async () => { throw new Error("n/a"); } })(none);
   assert.equal(await (none.handlers.get("agent_before_settle") as (e: unknown, c: unknown) => Promise<unknown>)({ entries: [], continue: false }, fakeCtx("/work")), undefined);
+});
+
+test("G16 H-02: a run that converges at the turn end is retired like an explicit report (tombstone, then read-only)", async () => {
+  const w = await wired(() => CONVERGED);
+  assert.equal(await w.settle(), undefined);
+  assert.equal(w.pi.entries.some((entry) => entry.customType === "empirica.run.done"
+    && (entry.data as { runHandle?: string }).runHandle === HANDLE), true, "the journal tombstone is written");
+  const before = w.requests.length;
+  await w.settle();
+  assert.equal(w.requests.length, before, "no further evaluation: the handle is retired");
+  const read = await (w.pi.tools.get("empirica_read") as { execute: (...a: unknown[]) => Promise<{ content: Array<{ text: string }> }> })
+    .execute("t", { operation: "GetRun" }, undefined, undefined, fakeCtx("/work"));
+  assert.doesNotMatch(read.content[0].text, /No active Empirica run/, "a retained handle still answers reads");
 });
 
 // --- one rule per question, the same answers as Claude (HQ-G9-08, HQ-G9-11) ----------------------------------------
@@ -212,7 +226,11 @@ test("HQ-G9-11: a pending audit child without an id is not the audit to wait for
 });
 
 test("EHB-STOP-32/33: an auto turn end continues once per change of basis and then ends with no-progress", async () => {
-  const w = await wired(() => block("auto-interactive-post"));
+  const w = await wired((revision) => {
+    const view = block("auto-interactive-post") as unknown as { run: Record<string, unknown> };
+    view.run.basis = `sha256:${revision}`;
+    return view as never;
+  });
   const first = await w.settle();
   assert.equal(first?.continue, true);
   assert.equal((first?.entries?.[0] as { content: string }).content, REASON);
@@ -222,10 +240,36 @@ test("EHB-STOP-32/33: an auto turn end continues once per change of basis and th
   assert.deepEqual(w.pi.entries.at(-1), { customType: "empirica.turn_end", data: { outcome: "no-progress" } });
   const afterStall = await w.settle();  // the chain was ended: a later settle may continue once more
   assert.equal(afterStall?.continue, true);
-  await w.toolResult();  // progress: a tool result arrived since the continuation
+  w.change();  // progress: the run's observation basis changed since the continuation
   const later = await w.settle();
   assert.equal(later?.continue, true);
   assert.equal((later?.entries?.[0] as { content: string }).content, fill(NOTICES.unattended_continue, { reason: REASON }));
+});
+
+test("INVARIANT (G17b item 2): across turn ends, any run of read-only calls earns at most one continuation; a changed basis earns one more", async () => {
+  // Every sequence of up to 6 events between turn ends, each a read-only tool result ("read") or a recorded observation
+  // ("record", which moves the core's basis). The oracle: the first turn end continues, a later one continues iff the
+  // basis differs from the one at the last continuation.
+  const events = ["read", "record"] as const;
+  const sequences: Array<Array<(typeof events)[number]>> = [[]];
+  for (let length = 1; length <= 6; length += 1)
+    for (let n = 0; n < 2 ** length; n += 1) sequences.push(Array.from({ length }, (_, i) => events[(n >> i) & 1]));
+  for (const sequence of sequences) {
+    const w = await wired((revision) => {
+      const view = block("auto-delegated") as unknown as { run: Record<string, unknown> };
+      view.run.basis = `sha256:${revision}`;
+      return view as never;
+    });
+    let revision = 0;
+    let lastContinued: number | null = null;
+    for (const event of sequence) {
+      if (event === "read") await w.toolResult(); else { w.change(); revision += 1; }
+      const out = await w.settle();
+      const expected: boolean = lastContinued === null || lastContinued !== revision;
+      assert.equal(out?.continue === true, expected, `${sequence.join(",")}`);
+      lastContinued = out?.continue === true ? revision : null;  // a notice ends the chain: the next settle starts a new one
+    }
+  }
 });
 
 test("EHB-STOP-32: interactive auto hands the evidence directive and a delegated run does not", async () => {

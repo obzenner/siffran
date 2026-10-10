@@ -307,6 +307,13 @@ class ClaudeAuditLaunchOrderTests(unittest.TestCase):
                             self.assertIn("anthropic/claude-fable-1", said)
                             self.assertIn("anthropic/claude-opus-4-8", said)
                             self.assertEqual(audits(), [], "refused before any spawn")
+                    # G17 H2-02: an explicit alias override runs on its pin; `sonnet` pinned to the producer is refused
+                    with patch.dict(os.environ, {"CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
+                                                 "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-fable-1"}):
+                        code, said = self.launch(agent)
+                    self.assertEqual(code, 2, said)
+                    self.assertIn("anthropic/claude-fable-1", said)
+                    self.assertEqual(audits(), [], "refused before any spawn")
                     budgets = tools.call_internal("empirica_read", {"run_id": run_id, "operation": "GetRun"}
                                                   )["structuredContent"]["run"]["governance"]["budgets"]
                     self.assertEqual(budgets["audit_spawns_used"], 0)

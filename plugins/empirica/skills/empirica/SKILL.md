@@ -17,9 +17,7 @@ translate host events and expose capabilities. Never edit operational state unde
 `~/.empirica-plugin/` or knowledge under `refs/empirica/*` directly. Never create Empirica state under `.claude/`, `.codex/`, or `.pi/`.
 
 > **Upgrading from 4.x to 5.0.** Old runs, artifacts and receipts are not migrated and fail closed; start
-> a fresh session. A URL now needs a human on Claude and Pi, and a delegated or non-interactive run
-> cannot confirm. v3 live receipts need a fresh operator capture. The wire family stays `empirica/v2`;
-> the plugin version is 5.0.0.
+> a fresh session. See "Upgrading from 4.x to 5.0" in the repository README.
 
 ## 0. Adopt the stance and preflight the host
 
@@ -45,7 +43,7 @@ Identify the exact active host surface from the tools and lifecycle already pres
 - **Non-interactive Pi or Claude (print, JSON, SDK):** no human can approve a configuration or confirm evidence, so a
   deliberative run is refused. Auto runs only with the operator's `EMPIRICA_AUTO_DELEGATION=1`; without it the start is
   refused with the reason on stderr and exit code 1.
-- **Codex:** Empirica does not run on Codex.
+- **Codex:** Empirica is not available on Codex.
 - **Unknown, partial, or outside a qualified compatibility range:** stop as unsupported pending
   qualification rather than borrowing another profile's capabilities. After admission, consult
 [references/host-capabilities.md](references/host-capabilities.md) only to diagnose a capability failure.
@@ -145,15 +143,11 @@ Apply the folds in order:
    bears on this claim; generic precedent is not evidence for a repository-specific claim.
    One source per record, quoted exactly: the service refuses a workspace citation that is not
    verbatim in the cited file and lines (`research.citation_unverified`); a URL or an absolute path
-   is retrieved by the auditor only where its host is observed to, otherwise confirmed by the human when you report, before the audit; a `runtime`
-   observation must say why no spike can establish it (`spike_unavailable`) and is always confirmed
-   by the human ([references/evidence.md](references/evidence.md), [references/audit.md](references/audit.md)
-   step 4). What still needs a confirmation is in the obligation as soon as the record exists; the
-   human is asked once, at the end of the pass (`evidence.confirmation_required`), and again only after
-   the derivation changes. Within one claim a missing or stale spike leads the block and the human batch
-   waits behind it (still shown at the end of the pass); the batch is capped at 64 items, decisions
-   first. A `needs-decision` claim is the exception: it is human-owned and needs no research. A summary of
-   what a source says is not a citation.
+   is retrieved by the auditor where its host is observed to, otherwise confirmed by a human; a `runtime`
+   observation must say why no spike can establish it (`spike_unavailable`) and is always confirmed by a
+   human. What still needs a confirmation, who asks, when, and how often is owned by
+   [references/evidence.md](references/evidence.md) ("What still needs confirming"); a `needs-decision`
+   claim is human-owned and needs no research. A summary of what a source says is not a citation.
 2. **Spike second only for `needs-experiment`.** After supporting research,
    request a deterministic command and its non-empty dependent-file set through
    the service. The service captures immutable bytes, runs the harness once, and
@@ -191,7 +185,7 @@ language. When budgets, a stall, or scope closure matter, read
 
 ## 5. Obtain independent audit
 
-When every in-scope gating claim is approved and no record waits on a human (the human confirms when you report, before the audit), read [references/audit.md](references/audit.md).
+Once confirmations are done (report first; the core refuses an audit while one is pending) and every in-scope gating claim is approved, read [references/audit.md](references/audit.md).
 Approval is not convergence: it means the evidence passed the service's rules, not that it
 convinces. Before requesting the audit, read `GetArgument`, the argument the auditor will receive,
 and check that each claim follows from its cited sources alone.

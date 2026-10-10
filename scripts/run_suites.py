@@ -3,8 +3,7 @@
 
 Usage: run_suites.py NAME='COMMAND ARGS...' [NAME='COMMAND ...' ...]
 
-Scheduling: every suite runs; when each starts is the rule owned by ``doc/testing.md`` (load admission, longest first,
-the ``JOBS`` cap), not restated here.
+Scheduling: every suite runs; when each starts (load admission, longest first, the ``JOBS`` cap) is stated in ``doc/testing.md``.
 
 The Makefile declares the suites and passes them in; this runner only executes them. Every suite runs in its own process
 group, and its stdout and stderr go to ``<logdir>/<NAME>.log`` (a fresh temporary directory, kept and printed). One status
@@ -13,7 +12,7 @@ line per suite shows its result and elapsed seconds, and a failed suite's log is
 
 Limits: a suite that runs longer than ``RUN_SUITES_TIMEOUT`` seconds (a finite number, default 600) is killed and fails
 with a ``timed out`` line. The signal and cleanup rules (process groups, SIGTERM then SIGKILL, exit 130 or 143) are those of
-:func:`stop` and :func:`run`. One Python process launches the children, so it needs nothing beyond what GNU Make 3.81 provides."""
+:func:`stop` and :func:`run`."""
 from __future__ import annotations
 
 import json

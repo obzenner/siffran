@@ -8,7 +8,7 @@ its common directory must be the one the run recorded). Then validate with `make
 A v3 receipt carries `audit_retrieval` (equal to `invocation.audit_retrieval` in the retained state) and
 `evidence_receipts`: every human presentation and confirmation the run's committed manifest chain references, re-derived
 from the store. A non-converged run gets no receipt; preserve the partial evidence instead. `python3 scripts/receipt_args.py`
-checks that the named paths exist and are outside the checkout without running anything.
+checks that the named files exist and are outside the checkout, and that `ARTIFACTS_REPO` is a directory, without running anything.
 
 Retain the dialogs and logs too: the receipt proves retained state, identity and artifact binding, not each UI checkpoint.
 Context economy: extract the ordered Empirica tool results to a newline-delimited JSON slice and run

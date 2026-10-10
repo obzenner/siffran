@@ -3,7 +3,8 @@ approves; the auto modes are unchanged. The consent is the ADR-0067 confirmation
 by the evaluation that reaches the terminal step, and nothing but an accepted receipt produces a terminal state."""
 from __future__ import annotations
 
-from assertions import evaluate
+from assertions import action_graph, action_investigate, action_route, canonical_graph, evaluate, observe_action
+from governance_setup import AUTHOR, TEST_INVOCATION
 from test_evidence_confirmation import graph_with_decision
 from core.evaluation import TERMINAL_STATUSES
 from driver import CITED_SOURCE
@@ -25,6 +26,100 @@ class TerminalConsentTests(MediatorFixture):
 
     def status(self, drv, run_id) -> str:
         return self.run_view(drv, run_id)["status"]
+
+    # ---- G16 CORE-01: a stop is always askable ------------------------------------------------------
+
+    def test_CORE_01_a_stop_is_askable_from_route_and_graph_onward_and_needs_no_approval_or_investigation(self):
+        """Ending a run never requires approving or starting its work: route, graph, then stop gives the dialog, and approving
+        it gives `stopped_residual` (before this, the batch was projected but its presentation was refused)."""
+        drv = self.bind_driver("G16", "core-01", "stop before approval")
+        run_id = self.start_run(drv, goal="Cancel before investigating",
+                                invocation={**TEST_INVOCATION, "human_surface": "human"})
+        self.dispatch(drv, observe_action(run_id=run_id, action=action_route(reason="review")))
+        self.dispatch(drv, observe_action(run_id=run_id, action=action_graph(canonical_graph(kind="ordinary"))))
+        context = drv._service.trusted_governance_context(run_id=run_id, payload={"author": AUTHOR, "ingress": "mcp_elicitation"})
+        self.assertEqual(context["result"]["type"], "Allow")
+        human = Human(accept(d1="approve"))
+        result = self.end(drv, run_id, human)
+        self.assertEqual(len(human.shown), 1, "the dialog was shown")
+        self.assertEqual(result["run"]["status"], "stopped_residual")
+        self.assertEqual(self.status(drv, run_id), "stopped_residual")
+
+    def test_CORE2_01_before_a_route_nothing_has_started_so_a_stop_ends_without_a_question_nobody_could_answer(self):
+        """G17 CORE2-01 (Astra's GRAPH_NO_ROUTE): with a graph but no route the terminal batch was projected with
+        `prompt_error: null` although its presentation is refused (`route.required`), and the mediator reported a host dialog
+        failure. The batch is projected only where it is admissible, so before a route the stop just ends the run."""
+        drv = self.bind_driver("G17", "core2-01", "graph before route")
+        run_id = self.start_run(drv, goal="Stop before any route", invocation={**TEST_INVOCATION, "human_surface": "human"})
+        self.dispatch(drv, observe_action(run_id=run_id, action=action_graph(canonical_graph(kind="ordinary"))))
+        drv._service.trusted_governance_context(run_id=run_id, payload={"author": AUTHOR, "ingress": "mcp_elicitation"})
+        from core.evaluation import batch_candidates, derive_claims
+        snapshot = self.snapshot(drv, run_id)
+        self.assertEqual([b for b in batch_candidates(snapshot, derive_claims(snapshot)) if "terminal" in b], [],
+                         "no terminal batch is offered where its presentation would be refused")
+        stop = self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))["result"]
+        self.assertNotEqual(self.codes(stop), [ASK], "no question that cannot be presented")
+        human = Human(accept(d1="approve"))
+        result = self.end(drv, run_id, human)
+        self.assertEqual(result["run"]["status"], "stopped_residual")
+        self.assertEqual(len(human.shown), 0, "nobody was asked: nothing had started")
+
+    def test_CORE2_01_the_batch_is_projected_exactly_where_its_presentation_is_admitted(self):
+        """With route and graph the batch is projected and its presentation is admitted: one predicate for both."""
+        drv = self.bind_driver("G17", "core2-01-route", "route then graph")
+        run_id = self.start_run(drv, goal="Stop after route", invocation={**TEST_INVOCATION, "human_surface": "human"})
+        self.dispatch(drv, observe_action(run_id=run_id, action=action_route(reason="review")))
+        self.dispatch(drv, observe_action(run_id=run_id, action=action_graph(canonical_graph(kind="ordinary"))))
+        drv._service.trusted_governance_context(run_id=run_id, payload={"author": AUTHOR, "ingress": "mcp_elicitation"})
+        batch = self.looked_batch(drv, run_id)
+        self.assertIsNone(batch["prompt_error"])
+        self.assertEqual(self.present_now(drv, run_id, "p1", batch["key"])["type"], "Allow")
+
+    def test_CORE_01_a_terminal_question_asked_before_approval_leaves_a_run_that_carries_on_readable(self):
+        """The record of the question carries no investigation witness; once the run is approved and investigated it must still
+        read (not `run.corrupt`) and can still be ended with the human's later answer."""
+        drv = self.bind_driver("G16", "core-01-carry-on", "stop, then carry on")
+        run_id = self.start_run(drv, goal="Ask, then carry on", invocation={**TEST_INVOCATION, "human_surface": "human"})
+        self.dispatch(drv, observe_action(run_id=run_id, action=action_route(reason="review")))
+        self.dispatch(drv, observe_action(run_id=run_id, action=action_graph(canonical_graph(kind="ordinary"))))
+        drv._service.trusted_governance_context(run_id=run_id, payload={"author": AUTHOR, "ingress": "mcp_elicitation"})
+        self.assertEqual(self.end(drv, run_id, Human(accept(d1="later")))["run"]["status"], "active")
+        drv.approve_governance(run_id)
+        self.dispatch(drv, observe_action(run_id=run_id, action=action_investigate()))
+        self.assertEqual(self.run_view(drv, run_id)["status"], "active")
+        self.assertEqual(self.end(drv, run_id, Human(accept(d1="approve")))["run"]["status"], "stopped_residual")
+
+    def test_CORE_01_a_stop_is_askable_while_a_revised_configuration_is_unapproved(self):
+        drv, run_id = self.start(kind="ordinary")
+        self.look(drv, run_id)
+        view = self.run_view(drv, run_id)
+        revision = {"kind": "configure_run", "budgets": view["governance"]["proposal"]["budgets"],
+                    "rationale": "The operator has not approved this revised plan."}
+        self.assertEqual(self.dispatch(drv, observe_action(run_id=run_id, action=revision))["result"]["type"], "Allow")
+        human = Human(accept(d1="approve"))
+        self.assertEqual(self.end(drv, run_id, human)["run"]["status"], "stopped_residual")
+        self.assertEqual(len(human.shown), 1)
+
+    def test_CORE_02_a_human_confirmation_that_changes_the_dossier_makes_an_older_terminal_answer_stale(self):
+        """An old terminal presentation could authorize stopping after a receipt changed the argument it bound: add a verbatim
+        record and a pending URL to an approved claim, ask the end, confirm the URL in a second presentation, then answer the
+        old question. The consent binds the dossier, so the answer is refused and the next stop asks again."""
+        from test_evidence_confirmation import URL, confirm
+        drv, run_id = self.start(kind="ordinary")
+        self.research(drv, run_id, "code", CITED_SOURCE[0])
+        self.research(drv, run_id, "web", URL)
+        record = self.last_id(drv, run_id)
+        before = self.argument(drv, run_id)["argument_digest"]
+        terminal = self.looked_batch(drv, run_id)
+        self.assertEqual(self.present_now(drv, run_id, "terminal-old", terminal["key"])["type"], "Allow")
+        self.assertEqual(self.present_now(drv, run_id, "evidence-new")["type"], "Allow")
+        self.assertEqual(self.answer(drv, run_id, "evidence-new", confirm(record))["type"], "Allow")
+        self.assertNotEqual(self.argument(drv, run_id)["argument_digest"], before, "the argument changed")
+        self.assertNotEqual(self.looked_batch(drv, run_id)["key"], terminal["key"], "the question is a new one")
+        stale = self.answer(drv, run_id, "terminal-old", self.approve(terminal))
+        self.assertNotEqual(stale["type"], "Allow", stale)
+        self.assertEqual(self.status(drv, run_id), "active")
+        self.assertEqual(self.codes(self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))["result"]), [ASK])
 
     # ---- EHB-TERM-01: accept -------------------------------------------------------------------------
 

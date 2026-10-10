@@ -28,6 +28,7 @@
           "human_surface": "unavailable"
         },
         "status": "active",
+        "basis": "sha256:d9a25a79200993f7e0c83b1858f4a69d1a0e04a29fc11116571a8d46ac8b76e2",
         "contract": {
           "id": "empirica/public",
           "version": "4.0.0",

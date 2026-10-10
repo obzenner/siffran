@@ -32,7 +32,7 @@ Every Pi, Claude or pi-subagents release forced an edit of several files and a n
 
 ## Decision Outcome
 
-Four decisions, G5-R1 to G5-R4, and the host range (G9-R1). G5-R3 is recorded as not built (below).
+The decisions below (G5-R1 to G5-R4, the host range G9-R1, and G10-R1), with the G6 amendment. G5-R3 is recorded as not built (below).
 
 ### G5-R1 Profile ids never carry a version
 
@@ -56,7 +56,7 @@ The decision was to let a `web` record be confirmed by the audit when the audito
 
 ### G9-R1 Pi is supported from 1.0.0, and nothing older is kept
 
-The Pi interval is `>=1.0.0,<2.0.0` and the qualified version stays `1.1.0`. Empirica acts at `agent_before_settle` (ADR-0068), whose `BoundaryResult` is not in every older Pi, and a single floor lets the adapter use it without a fallback. 5.0.0 is unreleased and carries no compatibility (ADR-0067), so every artifact that served a Pi below 1.0.0 goes: the profile's `compatibility.minimum`, the versions of `make empirica-pi-api-typecheck` (it keeps 1.0.0 and 1.1.0), shims and version branches in the Pi adapters, and the fixtures and prose that named 0.84.1, 0.86 or 0.87. A Pi below 1.0.0 is outside the interval; there is no run-start refusal for it (ADR-0052: compatibility is enforced at receipt capture and verification), but no code or test supports it. Methodologist declares the same Pi interval and follows the same rule. pi-subagents is a different package with its own range and is not affected. ADR-0052's two 2026-10-08 amendments carry the same floor.
+The Pi interval is `>=1.0.0,<2.0.0` and the qualified version stays `1.1.0`. Empirica acts at `agent_before_settle` (ADR-0068), whose `BoundaryResult` is not in every older Pi, and a single floor lets the adapter use it without a fallback. 5.0.0 carries no compatibility with earlier state (ADR-0067), so every artifact that served a Pi below 1.0.0 goes: the profile's `compatibility.minimum`, the versions of `make empirica-pi-api-typecheck` (it keeps 1.0.0 and 1.1.0), shims and version branches in the Pi adapters, and the fixtures and prose that named 0.84.1, 0.86 or 0.87. A Pi below 1.0.0 is outside the interval; there is no run-start refusal for it (ADR-0052: compatibility is enforced at receipt capture and verification), but no code or test supports it. Methodologist declares the same Pi interval and follows the same rule. pi-subagents is a different package with its own range and is not affected. ADR-0052's two 2026-10-08 amendments carry the same floor.
 
 ### G10-R1 Empirica has no Codex host in 5.0.0
 

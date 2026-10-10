@@ -22,7 +22,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { isTerminalBatch, type Dispatch, type EvaluateIntent, type HostFailure, type InvocationProvenance, type Request, type Response, type RunSelector } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
 import type { RetrievalKind } from "./audit-retrieval.ts";
-import { confirmEvidence, evidenceConfirmationWait, evidenceHostFailure, observeSurface } from "./evidence-ui.ts";
+import { canPresent, confirmEvidence, evidenceConfirmationWait, evidenceHostFailure, observeSurface } from "./evidence-ui.ts";
 import { govern, governanceTimeout, piGovernanceContext, refreshGovernance, settlementNotice } from "./governance-ui.ts";
 import type {
   ExtensionAPI,
@@ -227,8 +227,9 @@ export async function defaultAuditContractResolver(
   const global = settings.getGlobalSettings();
   const project = settings.getProjectSettings();
   const main = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
-  const model = typeof input.preferredModel === "string" ? input.preferredModel : resolvePiAuditorModel(global, project, main);
-  const source = typeof input.preferredModel === "string" ? "enabledModels" as const : piAuditorModelSource(global, project);
+  const preferred = typeof input.preferredModel === "string" ? input.preferredModel : undefined;
+  const model = preferred ?? resolvePiAuditorModel(global, project, main);
+  const source = preferred !== undefined ? "enabledModels" as const : piAuditorModelSource(global, project);
   const descriptor = {
     version: runtime.version, inventory: runtime.inventory,
     expected: { agent_file_path: String(input.expectedAgent), model, child_tools: AUDIT_LAUNCH_POLICY.audit_child_tools },
@@ -477,19 +478,20 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
 
     const completedAuditCalls = new Set<string>();
     // The Pi turn-end bound (`turn-end.ts`): adapter memory only, never run state.
-    let toolResultsSeen = 0;
     let lastContinuation: Basis | null = null;
     type ChildCorrelation = { runHandle: string; childId: string; nativeId: string };
     const children = new Map<string, ChildCorrelation>();
     const reportEvaluations = new Map<string, { intent: string; response: Response }>();
-    const terminalStatus = (response: Response): boolean => {
+    /**
+     * The one owner of ending a run (G17b): every path that can see a terminal result calls it (the gate that evaluates a
+     * report, the explicit `report_convergence`, and `agent_before_settle`). A terminal result writes the journal tombstone,
+     * keeps the handle readable (`retiredHandle`) and stops gating (`runHandle` null). It is idempotent: with no active
+     * handle a further terminal result does nothing.
+     */
+    const onTerminal = (response: Response): void => {
       const result = response.result;
-      if (result.type !== "Allow") return false;
-      return new Set(["converged", "stopped_budget", "stopped_frozen", "stopped_residual"])
-        .has(String(result.run.status));
-    };
-    const retireTerminal = (response: Response): void => {
-      if (!runHandle || !terminalStatus(response)) return;
+      if (!runHandle || result.type !== "Allow"
+          || !["converged", "stopped_budget", "stopped_frozen", "stopped_residual"].includes(String(result.run.status))) return;
       pi.appendEntry?.("empirica.run.done", { runHandle });
       retiredHandle = runHandle;
       runHandle = null;
@@ -693,7 +695,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           const decision = gateFromDecision(response.result);
           if (decision.kind === "deny")
             throw new Error(`${decision.reason}\nhandle: ${runHandle ?? "terminal"}`);
-          retireTerminal(response);
+          onTerminal(response);
           return { content: [{ type: "text", text: resultText(response) }], details: response.result };
         },
       });
@@ -844,7 +846,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             signal: `ctx.mode=${ctx.mode ?? "unknown"}`,
             delegation: process.env[PUBLIC_TOOLS.host_profiles[HOST_PROFILE_ID].delegation_env] === "1",
             audit_retrieval: startAuditor.auditRetrieval,
-            human_surface: ctx.hasUI ? "human" : "unavailable",
+            human_surface: canPresent(ctx) ? "human" : "unavailable",
             // The observed audit runtime, recorded once with the run (receipts are derived from it).
             host_runtime: buildHostRuntime(SUBAGENTS_COMPATIBILITY, owner.binding.provenance),
           };
@@ -868,13 +870,22 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
               ? new Promise<boolean>((resolve) => { onAgentStart = () => resolve(true); setTimeout(() => resolve(false), kickoffStartMs); })
               : null;
             pi.sendUserMessage(kickoff, { deliverAs: "followUp" });
+            // No UI: "started" is said only once the agent has started; a kickoff that never starts is a visible failure.
+            const begun = started === null ? true : await started;
+            if (!begun) {
+              say(ctx, diagnostics, `/empirica: the agent did not start within ${Math.round(kickoffStartMs / 1000)} s, so nothing ran. `
+                + `The run ${runHandle} is still open and nothing was approved by it: send a message to continue it in this session, `
+                + "or end it with report_convergence intent=stop.", "error");
+              onAgentStart = null;
+              return;
+            }
             const notice = startRunNotice(result);
             say(ctx, diagnostics, notice.text, notice.type);
             if (startAuditor.replaced !== undefined)
               say(ctx, diagnostics, `empirica: auditor: ${startAuditor.model} (picked from enabledModels; ${startAuditor.replaced} `
                 + "is in your model's class)", "info");
             // No UI: do not return (and so do not let Pi dispose the session) until the started run is idle.
-            if (started !== null && await started) await ctx.waitForIdle?.();
+            if (started !== null) await ctx.waitForIdle?.();
             onAgentStart = null;
             return;
           }
@@ -908,7 +919,6 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     // The verdict is parsed from the exact correlated foreground child result. Redaction happens
     // synchronously before the first await; only adapter-private ingress can admit the candidate.
     pi.on("tool_result", async (event: ToolResultEvent) => {
-      toolResultsSeen += 1;
       const ordinary = children.get(event.toolCallId);
       if (ordinary) {
         children.delete(event.toolCallId);
@@ -1140,6 +1150,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         if (decision.kind === "deny" && settlementNotice(response.result) === null)
           return { block: true, reason: `${decision.reason}\nhandle: ${runHandle}` };
         reportEvaluations.set(event.toolCallId, { intent, response });
+        onTerminal(response);  // the core has ended the run: the adapter stops gating it now, not only when `execute` runs
         return; // permit; execute consumes this exact guarded result
       } catch (error) {
         // The gate is the trust boundary: an unavailable core fails closed.
@@ -1159,7 +1170,8 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       let action;
       try {
         const response = await dispatch(evaluateRunRequest(runHandle, REPORT_CONVERGENCE_INTENT, randomUUID()));
-        action = turnEnd(response.result, toolResultsSeen, lastContinuation);
+        action = turnEnd(response.result, lastContinuation);
+        onTerminal(response);
       } catch { lastContinuation = null; return; }
       lastContinuation = action.kind === "continue" ? action.basis : null;
       if (action.kind === "nothing") return;

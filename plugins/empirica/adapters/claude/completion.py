@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 
 from application.protocol import (
     BUDGET_EXHAUSTED_NOTICE, EVIDENCE_REPORT_NOTICE, HUMAN_WAIT_NOTICE, PAUSED_FOR_EVIDENCE_NOTICE, PAUSED_FOR_HUMAN_NOTICE,
@@ -107,9 +109,7 @@ def _human_approval_wait(result: Result) -> bool:
 def _evidence_report_directive(result: Result) -> bool:
     """True only when the human confirmation is the sole blocker, a human can be asked, and the batch has not been shown.
 
-    In Claude the human can be asked only inside ``report_convergence`` (MCP elicitation), so a Stop that waited would end
-    the turn with nobody asked: an auto Stop blocks with the directive to report instead; a deliberative Stop pauses with
-    ``paused_for_evidence`` (the table is ADR-0068's). The core returns
+    What a turn end does with it is the turn-end table (``_turn_end_mode``). The core returns
     ``evidence.confirmation_required`` only when nothing else blocks the run. Only a ``prompt_error`` in
     ``projection.ASKABLE`` is directed (a human may be asked: no dialog is ruled out yet; the core gives such a batch a
     human route, so no route check is needed); any other value means no dialog will come, so the Stop blocks with the
@@ -146,10 +146,35 @@ def _turn_end_mode(result: Result) -> str | None:
 
 
 def _reason_text(result: Result) -> str:
-    """The core's own reason text for every blocker, as one sentence ending in punctuation (the reason-bearing Block paths use it)."""
+    """The core's own reason text for every blocker, as one sentence ending in punctuation (every blocking Stop message)."""
     text = " ".join(" ".join(row.message or "" for row in result.reasons).split())
     text = text or "the run is not complete."
     return text if text[-1] in ".!?" else text + "."
+
+
+def _basis_file(payload: Mapping[str, object]) -> Path:
+    session = "".join(ch for ch in str(payload.get("session_id", "")) if ch.isalnum() or ch in "-_")[:80] or "session"
+    return Path(tempfile.gettempdir()) / f"empirica-stop-basis-{session}"
+
+
+def unchanged_basis(payload: Mapping[str, object], result: Result) -> bool:
+    """Remember the core's ``run.basis`` for this session and say whether it is the one the previous Stop remembered. The
+    adapter composes nothing: progress is the core's basis (``core.evaluation.progress_basis``), on every host. Unreadable or
+    unwritable memory, or a view without a basis, reads as "changed": the continuation is repeated and Claude's own cap of
+    eight bounds it."""
+    basis = result.run.get("basis") if result.run is not None else None
+    if not isinstance(basis, str):
+        return False
+    path = _basis_file(payload)
+    try:
+        previous = path.read_text(encoding="utf-8") if path.exists() else None
+    except OSError:
+        previous = None
+    try:
+        path.write_text(basis, encoding="utf-8")
+    except OSError:
+        return False
+    return previous == basis
 
 
 def _settlement(notice: str) -> StopResult:
@@ -158,7 +183,7 @@ def _settlement(notice: str) -> StopResult:
         {"systemMessage": notice}, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n")
 
 
-def stop_result(response: object, *, stop_hook_active: bool) -> StopResult:
+def stop_result(response: object, *, stop_hook_active: bool, no_progress: bool = False) -> StopResult:
     """Translate a core evaluation to the Stop hook's process result; a settlement never claims convergence.
 
     The outcome is the cell of the turn-end table (ADR-0068, ``turn_end`` in ``host-boundaries.json``) for the run's
@@ -184,6 +209,8 @@ def stop_result(response: object, *, stop_hook_active: bool) -> StopResult:
             if _evidence_report_directive(result):
                 return _settlement(PAUSED_FOR_EVIDENCE_NOTICE)
             return _settlement(render_notice(PAUSED_FOR_HUMAN_NOTICE, reason=_reason_text(result)))
+        if mode == "auto" and stop_hook_active and no_progress:  # continued once already and the core's basis did not move
+            return _settlement(render_notice(UNATTENDED_CONTINUE_NOTICE, reason=_reason_text(result)))
         if _evidence_report_directive(result):
             return StopResult(2, stderr=EVIDENCE_REPORT_NOTICE + "\n")
         if mode == "auto" and stop_hook_active:

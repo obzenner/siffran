@@ -36,6 +36,7 @@
         "id": "run-fx",
         "goal": "Prove the public contract is internally consistent.",
         "status": "active",
+        "basis": "sha256:9f236719263aa5b3fb97ecfa52e925519a0105360144986f101ce029776bf409",
         "contract": {
           "id": "empirica/public",
           "version": "4.0.0",

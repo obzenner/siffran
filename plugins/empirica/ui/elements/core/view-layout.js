@@ -44,8 +44,8 @@ function rows(items, maxW, gap) {
 }
 
 /**
- * A project's label wrapped to at most `lines` lines of `cap` characters, broken at its " · " separators first (they
- * separate facts), then at spaces; what still does not fit ends in an ellipsis (the full label is in the hint, the
+ * A project's label wrapped to at most `lines` lines of `cap` characters, broken only at its " · " separators (they
+ * separate facts); a part longer than `cap`, or what is left past the last line, ends in an ellipsis (the full label is in the hint, the
  * panel and the breadcrumb). A label never sets a box wider than `cap` characters.
  */
 export function wrapLabel(text, cap = U.labelCap, lines = U.labelLines) {

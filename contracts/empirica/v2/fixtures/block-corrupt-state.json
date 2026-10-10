@@ -17,6 +17,7 @@
         "id": "run-corrupt",
         "goal": "Unsupported run state.",
         "status": "active",
+        "basis": "sha256:33efc3ac20f86b6208ed5ea0b4ee64058bf8ca4847a5cdd74045d9df40df20ff",
         "contract": {
           "id": "empirica/public",
           "version": "4.0.0",

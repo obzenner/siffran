@@ -43,10 +43,10 @@ panel, on click.
 | audit (the contract's audit states) | a separate audit symbol on the run | ✓ | |
 | diagnostic: why it was not read in full (older format, unreadable, history not found, missing or damaged, files unavailable) | its symbol, in the audit symbol's place | | ✓ |
 | claims approved of total ("5/6") | number | | |
-| goal | | | ✓ (hover: shortened) |
+| goal | | | ✓ |
 | author, auditor and its independence, governance | | | ✓ |
 | budgets (passes, spawns, audit spawns) | | | ✓ |
-| what is left (residuals), audit findings: each in the plugin's words and, where it is about a claim, a link to that claim by its text | | | ✓ |
+| what is left (residuals: each in the plugin's words, with a link to its claim where it has one) and audit findings (plain words) | | | ✓ |
 | what waits for the human (ADR-0067): the claims whose research or decision awaits a confirmation, titled by where the confirmation goes | | | ✓ |
 | history (steps: kind and outcome) | | | ✓ |
 | last changed | order: newest first | | ✓ |
@@ -106,7 +106,7 @@ earlier run to the later), `╔═╗` project.
 
 - **R1. Everything at once.** Every project, run and claim in the data is in the view at the same time: no
   expanding or collapsing, and no scrolling while the picture fits at its smallest scale. When there are many, the
-  marks get smaller, down to 8 px; past that the picture scrolls inside its box rather than become unreadable
+  marks get smaller, down to 11 px; past that the picture scrolls inside its box rather than become unreadable
   (Balance below). A run without claims is its run mark alone.
 - **R2. Each entity type is distinct.** Project = region with a label, run = diamond, claim = circle. No shape is
   used for two entity types.
@@ -158,7 +158,7 @@ each, and every edge between them; `make ui-browser` takes each edge in a fresh 
 Measured in screen pixels, at 1440 × 900, 1280 × 720, 1920 × 1080, 1024 × 768 and 800 × 600, on the demo data, a
 dense store (about 60 runs) and a single run (`tests/browser.layout.mjs`):
 
-- **The picture** scales within bounds (`catalogue.json` `picture`): a mark at least 8 px, text 11 to 16 px (text is
+- **The picture** scales within bounds (`catalogue.json` `picture`): a mark at least 11 px, text 11 to 16 px (text is
   sized apart from the topology). The scale is the largest that fits the picture's box, capped only where the
   labels reach 16 px; marks grow with the text, so the picture covers at least 60% of its area's width or height
   unless that cap binds, every mark has a transparent target of at least 24 px. Only at the smallest scale

@@ -22,6 +22,13 @@ function claimLink(r, id, href) {
 function residual(x, r, href) {
   return `<span class="flex flex-col items-start gap-3xs"><span>${esc(x.message)}</span>${x.claim ? claimLink(r, x.claim, href) : ""}</span>`;
 }
+/** The waiting items grouped by the route each waits on, in the order the routes first appear: one heading per route. */
+function byRoute(waiting) {
+  const groups = new Map();
+  for (const w of waiting) groups.set(w.route, [...(groups.get(w.route) ?? []), w]);
+  return [...groups];
+}
+
 /** A claim that waits on the human: which, and for what (its sources, its decision). */
 function waitingItem(w, r, href) {
   const what = [w.records ? count("waiting.records", w.records) : "", w.decision ? t("waiting.decision") : ""].filter(Boolean);
@@ -89,7 +96,7 @@ export function runDetail(r, d = null, href = null) {
       ...(r.updated === null ? [] : [{ label: t("fact.when"), value: when(r.updated) }]),
     ],
     parts: [
-      ...(d?.waiting.length ? [{ label: label("route", d.waiting[0].route), html: list(d.waiting.map((w) => waitingItem(w, r, href))) }] : []),
+      ...byRoute(d?.waiting ?? []).map(([route, items]) => ({ label: label("route", route), html: list(items.map((w) => waitingItem(w, r, href))) })),
       ...(d?.residuals.length ? [{ label: t("fact.residuals"), html: list(d.residuals.map((x) => residual(x, r, href))) }] : []),
       ...(a?.findings.length ? [{ label: t("fact.findings"), html: list(a.findings.map((x) => `<span>${esc(x)}</span>`)) }] : []),
       ...(d?.steps.length ? [{ label: t("fact.history"), children: [{ tag: "ev-history", data: { steps: d.steps, claims: r.claims } }] }] : []),

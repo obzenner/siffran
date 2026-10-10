@@ -30,7 +30,7 @@ from core.projection import project_host_failure, project_prompt_error
 _ANSWER_LIMIT = 2000
 _NOTE_LIMIT = 2048
 #: The one owner of the dialog's lengths (Pi renders what is built here). Claude cuts an elicitation field ``title`` at about
-#: 45 visible columns (claude-5 Q5) and collapses the long ``message``, but renders a property's ``description`` under the
+#: 45 visible columns and collapses the long ``message``, but renders a property's ``description`` under the
 #: field: so a title is at most ``TITLE_LIMIT`` columns with its "n. " prefix, the item is the description (at most
 #: ``DESCRIPTION_LIMIT``, its quote shortened with "…"), and the message keeps the full record, wrapped at ``_WIDTH``.
 TITLE_LIMIT = 40
@@ -378,11 +378,11 @@ class HostConfirmation:
         """Show the core's batch once. ``None`` when there was nothing to ask (no batch the core allows presenting, no
         form, or a surface that was not recorded), ``OK`` once a presentation was admitted (the human may then have
         answered or not), ``PRESENTATION_FAILED`` when it could not be recorded."""
-        if presentable(result) is None or self.elicit is None or self._unrecorded:
+        batch = presentable(result)
+        if batch is None or self.elicit is None or self._unrecorded:
             return None
         run_id = result["run"]["id"]
         try:
-            batch = presentable(result)
             shown = present(self.profile, run_id, dispatch=self._dispatch, ingress=self._presentation,
                             terminal=batch if is_terminal(batch) else None)
         except Exception:  # noqa: BLE001 - nothing was recorded as shown

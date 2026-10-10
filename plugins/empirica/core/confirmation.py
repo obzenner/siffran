@@ -41,7 +41,7 @@ HOST_FAILURES = ("surface_unrecorded", "presentation_failed")
 #: so no later reader of the run (the observer UI) sees it.
 PROMPT_ERRORS = (UNAVAILABLE, UNOBSERVED, "already_presented", "interaction_limit")
 #: The ``prompt_error`` values under which an explicit report may show the batch: none, or only that it was shown before
-#: (a Later, a cancel or a timeout granted nothing). ``interaction_limit`` is the bound and ends it (G14, ADR-0067).
+#: (a Later, a cancel or a timeout granted nothing). ``interaction_limit`` is the bound and ends it (ADR-0067).
 REPRESENTABLE = (None, "already_presented")
 #: The ``prompt_error`` values with which a report would still ask a human: none, or only ``unobserved`` (the host looks
 #: for a dialog surface inside the report). The one place a caller learns whether a human is about to be asked.
@@ -186,11 +186,6 @@ def presented(snapshot: Any, key: str) -> bool:
     return any(item.get("kind") == PRESENTATION and item["key"] == key for item in snapshot.history)
 
 
-#: The cases of ``governance.terminal_stop_pending``, one per thing a human or an author can do next; the contract holds
-#: one text per case (``case_messages``) and the core picks it (``terminal_case``).
-TERMINAL_CASES = ("ask", "declined", "unobserved", "unavailable", "interaction_limit", "host_failed")
-
-
 def terminal_case(prompt_error: str | None, declined: bool) -> str:
     """Which text of ``governance.terminal_stop_pending`` is true now, from the batch's ``prompt_error`` (the route is in it:
     ``unavailable``, ``unobserved``) and whether the human already declined this end for this derivation (it was presented
@@ -221,11 +216,11 @@ def prompt_error(snapshot: Any, key: str, *, terminal: bool = False) -> str | No
     explicit report may, ``REPRESENTABLE``), then what the host
     reports about *this* call: its ``host_failure`` (``surface_unrecorded`` or ``presentation_failed``: it could not
     record its surface or could not show the batch, so nobody was asked) and ``unobserved`` (it has not looked for a
-    surface; it looks inside its next report). Mirrors ``governance.prompt_error``.
+    surface; it looks inside its next report). Mirrors ``governance.interaction_error`` for the ceiling.
 
     The terminal step of a deliberative run (``terminal``) is never ``already_presented``: its question is spent per request,
     not per derivation, so each explicit stop that reaches it may ask again, bounded by ``interaction_limit`` (ADR-0063
-    amendment, F-Q4-3)."""
+    amendment)."""
     route = human_route(snapshot)
     if route == UNAVAILABLE:
         return route

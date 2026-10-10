@@ -47,7 +47,7 @@ class ReadmeRuntimeTests(unittest.TestCase):
                          f"| {receipt} | reviewed |" for v in versions)
         policy = activation.PI_PROFILE["subagents_compatibility"]
         return (f"{activation.pi_interval(activation.PI_PROFILE)} >={policy['minimum']},<{policy['maximum_exclusive']} {policy['policy_id']} "
-                f"{activation.UNREVIEWED_DISCLOSURE}\n{rows}\n")
+                f"{activation.SUPPORT_RANGE_DISCLOSURE}\n{rows}\n")
 
     def versions(self):
         return activation.reviewed_versions()
@@ -75,7 +75,7 @@ class ReadmeRuntimeTests(unittest.TestCase):
     def test_a_stale_interval_or_dropped_fail_closed_sentence_is_named(self):
         text = self.table(self.versions()).replace(activation.pi_interval(activation.PI_PROFILE), ">=0.90.0,<0.91.0")
         self.assertEqual(len(activation.readme_runtime_problems(text, activation.PI_PROFILE)), 1)
-        text = self.table(self.versions()).replace(activation.UNREVIEWED_DISCLOSURE, "")
+        text = self.table(self.versions()).replace(activation.SUPPORT_RANGE_DISCLOSURE, "")
         self.assertEqual(len(activation.readme_runtime_problems(text, activation.PI_PROFILE)), 1)
 
     def test_the_requires_pi_column_is_the_declared_peer_raised_to_the_floor_of_the_pi_interval(self):

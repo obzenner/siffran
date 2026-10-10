@@ -207,12 +207,12 @@ class GovernanceTransitionMatrixTests(unittest.TestCase):
         self.assertIsNone(g["proposal"]["rationale"])
         decision = {"run_id": "r", "receipt_id": "x", "proposal_digest": g["proposal_digest"],
                     "plan_revision": 0, "approval_kind": "host_ui", "outcome": "present"}
-        self.assertEqual(governance.decision_error("r", _capable(g), decision),
+        self.assertEqual(governance.decision_error("r", _capable(g), decision, 0),
                          "governance.approval_required")
         submission = {k: v for k, v in decision.items() if k != "outcome"}
         submission["submission"] = {"action": "approve", "configuration": {
             "budgets": g["proposal"]["budgets"]}}
-        self.assertEqual(governance.decision_error("r", _capable(g), submission),
+        self.assertEqual(governance.decision_error("r", _capable(g), submission, 0),
                          "governance.approval_required")
 
     # --- initial proposal above the seed is allowed before the first approval ---
@@ -325,7 +325,7 @@ class GovernanceTransitionMatrixTests(unittest.TestCase):
                         "proposal_digest": gov["proposal_digest"],
                         "plan_revision": gov["plan_revision"], "approval_kind": "auto",
                         "outcome": "approve"}
-            self.assertEqual(governance.decision_error("r", gov, decision),
+            self.assertEqual(governance.decision_error("r", gov, decision, 0),
                              "governance.approval_unavailable")
 
     # --- a human amendment keeps the rationale ---

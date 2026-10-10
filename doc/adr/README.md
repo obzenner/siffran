@@ -28,14 +28,14 @@ Deterministic evidence and a distinct, host-observed audit gate convergence; rou
 - [ADR-0013](0013-deterministic-gate-is-the-trust-boundary-agentic-review-is-a-secondary-sensor.md) — Deterministic gate is the trust boundary; agentic review is a secondary sensor
 - [ADR-0020](0020-mandatory-run-protocol-routing-fan-out-and-evidence-bound-verification.md) — Mandatory run protocol: claim graph, two-fold validation, fan-out, and independent audit
 - [ADR-0025](0025-per-claim-audit-verdicts-keyed-on-claim-and-evidence-digests.md) — Per-claim audit verdicts keyed on claim and evidence digests
-- [ADR-0066](0066-check-workspace-citations-verbatim-when-research-is-submitted.md) — Check workspace citations verbatim when research is submitted
-- [ADR-0067](0067-verify-every-research-record-by-its-class-and-surface-every-confirmation-it-still-needs.md) — Verify every research record by its class and surface every confirmation it still needs (proposed)
 - [ADR-0027](0027-restore-per-graph-audit-freshness-argument-digest-refutation-coverage-and-sample-counts.md) — Restore per-graph audit freshness: argument digest, refutation coverage, and sample counts
 - [ADR-0048](0048-hard-gate-route-before-investigation.md) — Hard-gate route before investigation
 - [ADR-0050](0050-bound-stale-pending-audit-replacement-to-audit-capacity.md) — Bound stale pending-audit replacement to audit capacity
 - [ADR-0051](0051-separate-managed-audit-execution-from-generic-child-tier.md) — Separate managed-audit execution from the generic child tier
 - [ADR-0052](0052-separate-harness-compatibility-from-receipt-provenance.md) — Separate harness compatibility from receipt provenance
 - [ADR-0056](0056-align-bootstrap-admission-and-agent-guidance.md) — Align bootstrap admission and agent guidance
+- [ADR-0066](0066-check-workspace-citations-verbatim-when-research-is-submitted.md) — Check workspace citations verbatim when research is submitted
+- [ADR-0067](0067-verify-every-research-record-by-its-class-and-surface-every-confirmation-it-still-needs.md) — Verify every research record by its class and surface every confirmation it still needs (proposed)
 
 ## Governance and budgets
 
@@ -74,3 +74,7 @@ Withdrawn modes stay withdrawn and the legacy theta/unknowns/race models are ret
 
 - [ADR-0061](0061-withdraw-the-cli-exec-and-multi-provider-run-modes-from-empirica-4-0.md) — Withdraw the cli_exec and multi_provider run modes from Empirica 4.0
 - [ADR-0062](0062-retire-confidence-theta-spec-unknowns-and-racing-convergence-models.md) — Retire confidence theta spec unknowns and racing convergence models
+
+## Labels in the records
+
+Some records cite round and finding labels (`G14`, `F-Q4-3`, `A6-1`, `Q3`, `R3`, `m1`). They name build rounds, qualification findings and review findings of the 5.0.0 work, kept outside this repository (research notes and operator evidence); the rule each one names is written out in the record that cites it, and no decision depends on opening the source.

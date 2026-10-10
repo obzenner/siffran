@@ -48,6 +48,5 @@ Deterministic unit/integration tests are not native human-approval or installed-
 
 ## Upgrading from 4.x to 5.0
 
-Old runs, artifacts and receipts are not migrated and fail closed. To move over, start a fresh session.
-URLs now need a human on Claude and Pi; delegated and non-interactive runs cannot confirm. v3 live receipts
-need a fresh operator capture. The wire family `empirica/v2` is distinct from the plugin version 5.0.0.
+Old runs, artifacts and receipts are not migrated and fail closed; start a fresh session. The full upgrade
+note is in the repository README ("Upgrading from 4.x to 5.0").

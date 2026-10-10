@@ -10,6 +10,8 @@
 // request — but a caller that compiles against these types must not assume they
 // are authoritative for any field not listed here.
 
+import type { RetrievalKind } from "./audit-retrieval.ts";
+
 export const PROTOCOL = "empirica/v2";
 
 // --- request: outbound subset only -----------------------------------------
@@ -31,8 +33,8 @@ export interface InvocationProvenance {
   signal: string;
   delegation: boolean;
   /** The retrieval kinds the audit child is observed to cover (ADR-0067); recorded once, re-observed at audit launch. */
-  audit_retrieval: readonly ("local" | "web" | "workspace")[];
-  /** Whether the host can show a dialog to a human now (Pi: `ctx.hasUI`); sent again at every report_convergence. */
+  audit_retrieval: readonly RetrievalKind[];
+  /** Whether the host can show a dialog to a human now (Pi: `canPresent(ctx)`, a UI with `select` and `input`); sent again at every report_convergence. */
   human_surface: "human" | "unavailable" | "unobserved";
   /** Host-recorded audit-runtime provenance (host-runtime.ts); persisted with the run, shown only when not reviewed. */
   host_runtime?: {
@@ -163,6 +165,8 @@ export function isTerminalBatch(batch: unknown): batch is ConfirmationBatch & { 
 export interface RunSnapshot {
   id: string;
   status: RunStatus;
+  /** The core's progress basis (a digest; `core.evaluation.progress_basis`): the one thing a host compares to know whether the run moved. */
+  basis?: string;
   /** What a human would be shown now, or null (the core's projection; the host presents when `prompt_error` is null). */
   confirmation_batch?: ConfirmationBatch | null;
   [key: string]: unknown;

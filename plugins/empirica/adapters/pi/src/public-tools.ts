@@ -59,6 +59,7 @@ export type AuthorViewLabel =
   | "waiting_interaction_limit"
   | "waiting_surface_unrecorded"
   | "waiting_presentation_failed"
+  | "waiting_unobserved"
   | "verified_by_service"
   | "confirmed_by_human"
   | "rejected_by_human"

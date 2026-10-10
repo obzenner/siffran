@@ -3,8 +3,10 @@
 // The decision is the registry's turn-end table (`turn_end` in `contracts/empirica/v2/host-boundaries.json`), the same on
 // every host; this file maps it to Pi's surface and owns the one thing Pi does not give: a loop bound. Pi has no host cap
 // on continuations ("guard continuation conditions"), so an auto run is asked to continue only while it makes progress.
-// Progress means: a blocker changed, or a tool result arrived, since the adapter's previous continuation. That memory is
-// in-process adapter state, never run state, and a restart allows at most one extra continuation.
+// Progress means the run's `basis` changed since the adapter's previous continuation. The basis is the core's
+// (`core.evaluation.progress_basis`, a field of the run view: the blockers and the run state an author's or a host's action
+// can change); the adapter composes nothing and counts nothing, so a read of the run or of a file is never progress. That
+// memory is in-process adapter state, never run state, and a restart allows at most one extra continuation.
 
 import type { Response } from "./contract.ts";
 import { budgetExhaustedWait, humanApprovalWait, BUDGET_EXHAUSTED_NOTICE, HUMAN_WAIT_NOTICE } from "./governance-ui.ts";
@@ -14,13 +16,8 @@ type Result = Response["result"];
 
 const NOTICES = PUBLIC_TOOLS.settlement_notices;
 
-/** What was observed when the adapter last asked an auto run to continue. */
-export interface Basis {
-  /** The blockers (code and parameters) of the run at that moment. */
-  signature: string;
-  /** How many tool results the adapter had seen. */
-  toolResults: number;
-}
+/** What was observed when the adapter last asked an auto run to continue: the core's `run.basis`. */
+export type Basis = string;
 
 type TurnEnd =
   /** Append nothing: the run converged, an audit is pending, the run is not active, or it cannot be read. */
@@ -73,13 +70,8 @@ function controlMode(result: Result): "deliberative" | "auto" | null {
   return mode === "deliberative" || mode === "auto" ? mode : null;
 }
 
-export function basisOf(result: Result, toolResults: number): Basis {
-  const reasons = result.type === "Block" ? result.reasons : [];
-  return { signature: JSON.stringify(reasons.map((reason) => [reason.code, reason.parameters ?? null])), toolResults };
-}
-
-/** The turn-end table for one evaluation of the run, the number of tool results seen, and the previous continuation. */
-export function turnEnd(result: Result, toolResults: number, previous: Basis | null): TurnEnd {
+/** The turn-end table for one evaluation of the run and the previous continuation's basis. */
+export function turnEnd(result: Result, previous: Basis | null): TurnEnd {
   if (!activeBlock(result)) return { kind: "nothing" };  // converged or terminal, inert or faulted: the gate at tool_call holds
   if (humanApprovalWait(result)) return { kind: "notice", notice: HUMAN_WAIT_NOTICE };
   if (budgetExhaustedWait(result)) {
@@ -93,10 +85,12 @@ export function turnEnd(result: Result, toolResults: number, previous: Basis | n
   const askable = evidenceAskable(result);
   if (mode === "deliberative")
     return { kind: "notice", notice: askable ? NOTICES.paused_for_evidence : fill(NOTICES.paused_for_human, { reason }) };
-  const basis = basisOf(result, toolResults);
+  const basis: Basis = String((result.run as { basis?: unknown }).basis ?? "");
   const wayOut = fill(NOTICES.unattended_continue, { reason });
-  if (previous === null) return { kind: "continue", message: askable ? NOTICES.evidence_report : reason, basis };
-  if (previous.signature === basis.signature && previous.toolResults === basis.toolResults)
+  // The first continuation hands the agent the core's own reason; later ones, the way out (the evidence directive is the
+  // one exception and is kept, ADR-0068).
+  const message = askable ? NOTICES.evidence_report : previous === null ? reason : wayOut;
+  if (previous !== null && previous === basis)
     return { kind: "no-progress", notice: wayOut };
-  return { kind: "continue", message: askable ? NOTICES.evidence_report : wayOut, basis };
+  return { kind: "continue", message, basis };
 }

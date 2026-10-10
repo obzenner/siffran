@@ -5,7 +5,7 @@
 // UI (print, JSON) nothing is shown: a presentable batch then blocks with the presentation_failed notice.
 //
 // Fail closed: a cancelled or timed-out dialog, a missing UI, or any error submits nothing beyond the
-// presentation already recorded, and grants nothing. "Later" is an omitted item.
+// presentation already recorded, and grants nothing. "Later" is sent as `choice: later`; the core records it as nothing decided.
 
 import type { ExtensionContext } from "./pi-types.ts";
 import type { EvidenceAnswer, EvidenceItem, PrivateIngress } from "./private-transport.ts";
@@ -16,19 +16,29 @@ import { PUBLIC_TOOLS } from "./public-tools.ts";
 export const EVIDENCE_REASON = "evidence.confirmation_required";
 export const EVIDENCE_WAIT_NOTICE = PUBLIC_TOOLS.settlement_notices.evidence_wait;
 
+/** The confirmation batch of an active run, whatever its `prompt_error`. */
+function activeBatch(result: Response["result"]): ConfirmationBatch | null {
+  const run = "run" in result ? result.run : undefined;
+  return run?.status === "active" ? run.confirmation_batch ?? null : null;
+}
+
+/** Whether this host can show a human the dialogs now: a UI with `select` and `input` (print and JSON mode have none).
+ * The one definition: the run records `human_surface` with it at start and at every report. */
+export function canPresent(ctx: ExtensionContext): boolean {
+  return Boolean(ctx.hasUI && ctx.ui?.select && ctx.ui?.input);
+}
+
 /** The batch a human can be shown now: the core projects it whatever else blocks the run, and says in
  * `prompt_error` why it cannot be shown. The host presents exactly when there is one and no error. */
 export function presentableBatch(result: Response["result"]): ConfirmationBatch | null {
-  const run = "run" in result ? result.run : undefined;
-  const batch = run?.status === "active" ? run.confirmation_batch : null;
+  const batch = activeBatch(result);
   return batch && batch.prompt_error === null ? batch : null;
 }
 
 /** The batch an explicit report may show (`confirmEvidence`): presentable, or only already shown, which Later, cancel and
  * timeout leave open. The core's interaction ceiling bounds it (`interaction_limit` is not here). Python: `REPRESENTABLE`. */
 export function askableBatch(result: Response["result"]): ConfirmationBatch | null {
-  const run = "run" in result ? result.run : undefined;
-  const batch = run?.status === "active" ? run.confirmation_batch : null;
+  const batch = activeBatch(result);
   return batch && (batch.prompt_error === null || batch.prompt_error === "already_presented") ? batch : null;
 }
 
@@ -85,7 +95,7 @@ const LABELS: Readonly<Record<EvidenceItem["subject"], readonly string[]>> = {
 export async function askItems(items: readonly EvidenceItem[], ctx: ExtensionContext,
                                deadline: number): Promise<EvidenceAnswer[] | null> {
   const ui = ctx.ui;
-  if (!ctx.hasUI || !ui.select || !ui.input) return null;
+  if (!canPresent(ctx) || !ui.select || !ui.input) return null;  // canPresent is the rule; the tests narrow the types
   const answers: EvidenceAnswer[] = [];
   for (const [index, item] of items.entries()) {
     if (Date.now() >= deadline) return null;
@@ -111,7 +121,7 @@ export async function askItems(items: readonly EvidenceItem[], ctx: ExtensionCon
  * the core was never told a question would be asked. A typed fault is a failure like a thrown error.
  */
 export async function observeSurface(runId: string, ctx: ExtensionContext, trusted: PrivateIngress): Promise<boolean> {
-  const present = Boolean(ctx.hasUI && ctx.ui.select && ctx.ui.input);
+  const present = canPresent(ctx);
   const record = async (surface: "human" | "unavailable"): Promise<boolean> => {
     try {
       const reply = await trusted({ operation: "human_surface", run_id: runId, payload: { surface } }) as
@@ -139,7 +149,7 @@ export async function confirmEvidence(response: Response, runId: string, ctx: Ex
                                       deadline: number): Promise<{ response: Response; failure?: HostFailure }> {
   const batch = askableBatch(response.result);
   if (batch === null) return { response };
-  if (!ctx.hasUI || !ctx.ui.select || !ctx.ui.input) return { response, failure: "presentation_failed" };
+  if (!canPresent(ctx)) return { response, failure: "presentation_failed" };
   let shown = false;
   try {
     // The end of a deliberative run is asked by the evaluation that reaches it: the core's batch travels with the call.

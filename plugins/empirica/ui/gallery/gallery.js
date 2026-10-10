@@ -2,7 +2,7 @@
 // data (the plugin's own runs, served as source=demo). Page code may assemble and wire elements; it never derives
 // states (E4).
 import "../elements/index.js";
-import { esc, optionLabel, statesOf, stepOf, t } from "../elements/core/element.js";
+import { TONE, esc, optionLabel, statesOf, stepOf, t } from "../elements/core/element.js";
 import { claimDetail, fileDetail, projectDetail, runDetail, stepDetail } from "../elements/templates/details.js";
 import { Client } from "../app/client.js";
 import { apply } from "../app/filter.js";
@@ -12,10 +12,6 @@ const { tones: TONES } = catalogue;
 const SWATCH = {
   positive: "bg-tone-positive", negative: "bg-tone-negative", caution: "bg-tone-caution", info: "bg-tone-info",
   human: "bg-tone-human", audit: "bg-tone-audit", neutral: "bg-tone-neutral",
-};
-const TINT = {
-  positive: "bg-tone-positive-tint", negative: "bg-tone-negative-tint", caution: "bg-tone-caution-tint", info: "bg-tone-info-tint",
-  human: "bg-tone-human-tint", audit: "bg-tone-audit-tint", neutral: "bg-tone-neutral-tint",
 };
 // The demo data, and every run's detail (the gallery shows the run with the longest history).
 const client = new Client("demo");
@@ -60,7 +56,7 @@ const bar = `<div class="mx-auto flex max-w-page flex-wrap items-center justify-
 
 const colours = section("colours", `<div class="grid grid-cols-2 gap-m sm:grid-cols-4">${TONES.map((tone) => `
   <div class="flex flex-col gap-xs rounded-l border border-border p-s">
-    <div class="flex gap-2xs"><span class="h-xl flex-1 rounded-s ${SWATCH[tone]}"></span><span class="h-xl flex-1 rounded-s ${TINT[tone]}"></span></div>
+    <div class="flex gap-2xs"><span class="h-xl flex-1 rounded-s ${SWATCH[tone]}"></span><span class="h-xl flex-1 rounded-s ${TONE[tone].tint}"></span></div>
     <span class="text-s">${t(`tone.${tone}`)}</span>
   </div>`).join("")}</div>`);
 

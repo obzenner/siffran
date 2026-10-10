@@ -38,7 +38,7 @@ Rules that follow from this:
 - `Makefile` — the project lifecycle; `make help` is the entry point
 - `scripts/` — validators the Makefile calls (manifest checks, doc-drift check, version bump)
 - `.claude-plugin/marketplace.json` — marketplace catalog listing all available plugins
-- `.agents/plugins/marketplace.json` — Codex marketplace catalog for both plugins
+- `.agents/plugins/marketplace.json` — Codex marketplace catalog for Methodologist (Empirica is withheld from it, ADR-0069 G10-R1)
 - `plugins/<name>/.claude-plugin/plugin.json` — plugin manifest (name, version, description)
 - `plugins/<name>/.codex-plugin/plugin.json` — Codex-specific package manifest
 - `plugins/<name>/skills/<skill-name>/SKILL.md` — skill definition (frontmatter + instructions)

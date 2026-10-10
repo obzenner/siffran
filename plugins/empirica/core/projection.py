@@ -12,7 +12,7 @@ from .evaluation import (CONFIRMATION_REASON, EvaluationSnapshot, HOST_TIER_UNSU
                          claim_blockers, claim_digest, confirmation_batch, derive_claims,
                          derive_claims_for_projection, digest, dossier_artifact_ids, effective_scope_ids,
                          evidence_digest, independence, pending_decisions, pending_human, pending_terminal,
-                         terminal_batch)
+                         progress_basis, terminal_batch)
 
 
 def _scope(snapshot: EvaluationSnapshot) -> tuple[list[str], list[str]]:
@@ -54,8 +54,7 @@ def confirmation_next(actions: list[str], route: str | None, prompt_error: str |
     ``ASKABLE``), and is absent once the batch was shown, the interactions are spent, nobody can be asked, or the host
     reported that it could not ask: the host presents inside the author's next report, so a reader that follows ``next:``
     must be told to make it, and must never be told to repeat a report that asks nobody."""
-    drop = {"convergence.report"} | (CONFIRMATION_ACTIONS - {"convergence.report"}
-                                     if route in {confirmation.UNAVAILABLE, confirmation.UNOBSERVED} else set())
+    drop = CONFIRMATION_ACTIONS if route in {confirmation.UNAVAILABLE, confirmation.UNOBSERVED} else {"convergence.report"}
     rest = [action for action in actions if action not in drop]
     return ["convergence.report", *rest] if prompt_error in ASKABLE else rest
 
@@ -75,7 +74,7 @@ def confirmation_actions(code: str, parameters: Mapping[str, Any] | None, action
         prompt_error = "already_presented"
     elif code == CONFIRMATION_REASON and prompt_error == "already_presented":
         # Shown and left open, with interactions left (the ceiling outranks "already shown"): an explicit report asks
-        # again, so the recovery leads with it, like the reason's text (G15 F-P2-3).
+        # again, so the recovery leads with it, like the reason's text.
         prompt_error = None
     return confirmation_next(actions, (parameters or {}).get("route"), prompt_error)
 
@@ -87,8 +86,7 @@ def project_prompt_error(result: Mapping[str, Any], prompt_error: str | None,
     confirmation obligation row and reason (not the residuals, which exist only on a terminal run, where there is no
     batch), through the same rule (``confirmation_actions``). A result with no batch is returned as it is. Pure; it
     changes nothing the core stores. The rows it patches already carry the mode's recovery exclusions, which never name a
-    confirmation action (``test_the_confirmation_rule_and_the_exclusions_commute_through_project_prompt_error``), so it
-    need not apply them."""
+    confirmation action, so it need not apply them."""
     run = result.get("run")
     batch = run.get("confirmation_batch") if isinstance(run, Mapping) else None
     if batch is None:
@@ -109,12 +107,12 @@ def project_prompt_error(result: Mapping[str, Any], prompt_error: str | None,
 
     projected = {**run, "confirmation_batch": projected_batch,
                  "obligations": {**run["obligations"], "active": [obligation(r) for r in run["obligations"]["active"]]}}
-    reasons = [reason(r) for r in result.get("reasons", ())]
-    return {**result, "run": projected, **({"reasons": reasons} if "reasons" in result else {})}
+    projected_reasons = [reason(r) for r in result.get("reasons", ())]
+    return {**result, "run": projected, **({"reasons": projected_reasons} if "reasons" in result else {})}
 
 
 def _recased(row: Mapping[str, Any], prompt_error: str | None, reasons: Mapping[str, Any] | None) -> Mapping[str, Any]:
-    """The terminal-step reason with the case (and, given the contract's reasons, the text) that is true for this
+    """The confirmation or terminal-step reason with the case (and, given the contract's reasons, the text) that is true for this
     ``prompt_error``; every other row as it is."""
     if row["code"] == CONFIRMATION_REASON:
         parameters = {**{k: v for k, v in row["parameters"].items() if k != "asking"}, **confirmation.asking(prompt_error)}
@@ -397,6 +395,7 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
         "id": snapshot.run_id, "goal": snapshot.state.goal,
         "invocation": project_invocation(governance.plain(snapshot.state.invocation)),
         "status": snapshot.state.status,
+        "basis": progress_basis(snapshot, blockers),
         # A failed verdict's findings are what the author must act on; pass findings stay in GetArgument.
         "audit": {"state": audit["state"], "independence": audit["independence"],
                   "findings": audit["findings"] if audit["state"] == "failed" else []},

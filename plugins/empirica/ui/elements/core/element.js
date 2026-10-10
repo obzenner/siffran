@@ -67,7 +67,7 @@ export const TONE = {
 };
 
 /** Shorten prose for a level-1 hint (D: ≤ 60 characters). Presentation only. */
-export function clip(text, n = 48) {
+export function clip(text, n = 60) {
   const s = String(text ?? "").replace(/\s+/g, " ").trim();
   return s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
 }

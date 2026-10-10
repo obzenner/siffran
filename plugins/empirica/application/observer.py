@@ -264,8 +264,8 @@ def _unnamed(first_run: float | None, grain: int = 0) -> str:
 
 
 def _tell_apart(rows: list[dict[str, Any]]) -> None:
-    """Make the labels of the unnamed projects unique within this view by the finest fact they share least: the
-    day, else the minute, else the second, else the millisecond their first run began. Never a goal (a goal is
+    """Make the labels of the unnamed projects unique within this view by the coarsest of day, minute, second
+    or millisecond (of their first run) that makes each label unique. Never a goal (a goal is
     never a title), an id or a position."""
     unnamed = [r for r in rows if r["name"] is None]
     for grain in range(4):
@@ -278,11 +278,7 @@ def _tell_apart(rows: list[dict[str, Any]]) -> None:
         if not duplicated:
             return
         # only the projects still sharing a label are told finer; the rest keep their coarser, shorter one
-        coarse = {id(r): r["label"] for r in unnamed if r["label"] not in duplicated}
-        unnamed = [r for r in unnamed if id(r) not in coarse]
-        for row in rows:
-            if id(row) in coarse:
-                row["label"] = coarse[id(row)]
+        unnamed = [r for r in unnamed if r["label"] in duplicated]
 
 
 def _version(base_digest: str, observation_digest: str) -> str:

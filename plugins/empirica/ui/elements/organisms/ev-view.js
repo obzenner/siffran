@@ -10,7 +10,7 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 /**
  * The view (VIEW.md): every project, run and claim it is given, with their relationships, in one picture that
- * scales to fit its box (R1) within bounds in screen pixels (catalogue.json `picture`): marks at least 8 px and growing with the text, text 11 to
+ * scales to fit its box (R1) within bounds in screen pixels (catalogue.json `picture`): marks at least 11 px and growing with the text, text 11 to
  * 16 px, hit targets at least 24 px. Only past the smallest scale does the picture scroll.
  * - A project is a labelled region (the observer's label for it); its label is the project's one target (R2).
  * - A run is a diamond with its state's colour and glyph, its approved-of-total count and its audit's mark, or the
@@ -96,7 +96,7 @@ class EvView extends EvElement {
     // Scale: what fits, kept within the bounds that keep marks calm and text legible. Text and targets are sized in
     // screen pixels whatever the scale, so they are converted back to picture units here. A label is drawn at least
     // text_px.min wide-ish whatever the scale, so the room a project reserves for its label grows as the scale falls;
-    // the scale is found by trying that a few times (it converges at once: it only ever shrinks the picture).
+    // the scale is found by trying that a few times (it converges within a few passes: it only ever shrinks the picture).
     const M = U.margin, mark = 2 * R, minScale = Math.max(PIC.mark_px.min, PIC.mark_label_ratio * PIC.text_px.min) / mark, maxScale = PIC.text_px.max / U.labelText;
     const fitOf = (L) => Math.min(this.#size.width / (L.width + 2 * M), this.#size.height / (L.height + 2 * M));
     let L = viewLayout(d.projects, this.#size, (p) => { const s = shape(p); return { chars: s.chars, lines: s.lines }; }, minScale), scale = clamp(fitOf(L), minScale, maxScale);

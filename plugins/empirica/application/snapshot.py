@@ -15,7 +15,7 @@ from core.run import OperationalState
 from core.governance import proposal_digest
 from . import protocol as _proto
 from .history_records import (
-    MANIFEST_KEYS, MANIFEST_KIND, MANIFEST_VERSION, OBSERVATION_BASIS_KEYS,
+    HISTORY_KINDS, MANIFEST_KEYS, MANIFEST_KIND, MANIFEST_VERSION, OBSERVATION_BASIS_KEYS,
     OBSERVATION_BASIS_KIND, OBSERVATION_BASIS_VERSION, OBSERVATION_ROW_KEYS,
     OBSERVATION_SOURCE_KEYS, POLICY_INPUT_KEYS,
 )
@@ -235,9 +235,18 @@ def graph_from_history(state: OperationalState, history: tuple[dict[str, Any], .
 
 def validate_investigation_history(state: OperationalState,
                                    history: tuple[dict[str, Any], ...]) -> None:
-    evidence_kinds = {"research", "spike_request", "spike", "attribution", "audit_verdict",
-                      "evidence_confirmation", "evidence_presentation"}
-    evidence = [item for item in history if item.get("kind") in evidence_kinds]
+    # Every kind of a committed manifest but the graph and the observation basis carries the route-order witnesses.
+    evidence_kinds = set(HISTORY_KINDS) - {"graph", OBSERVATION_BASIS_KIND}
+    # The consent to end a run (a terminal presentation or its answer) is not investigation evidence: ending never requires
+    # starting the work, so it may be recorded before the investigation and must stay valid after it. It still
+    # carries the run's route witness.
+    for item in history:
+        if item.get("kind") in {"evidence_presentation", "evidence_confirmation"} and (
+                isinstance(item.get("terminal"), (dict, bool)) and item.get("terminal")):
+            if type(item.get("route_stamp")) is not int or item["route_stamp"] != state.route_stamp:
+                raise HistoryCorrupt("terminal consent conflicts with the route-order witness")
+    evidence = [item for item in history if item.get("kind") in evidence_kinds
+                and not (isinstance(item.get("terminal"), (dict, bool)) and item.get("terminal"))]
     if not evidence:
         return
     if state.route_stamp is None or state.investigation_stamp is None:

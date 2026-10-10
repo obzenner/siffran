@@ -4,7 +4,7 @@ import * as path from "node:path";
 
 import { PROTOCOL, isTerminalBatch, type Response } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
-import { PUBLIC_TOOLS, VENDORED_CONTRACT_DIR } from "./public-tools.ts";
+import { PUBLIC_TOOLS, VENDORED_CONTRACT_DIR, type AuthorViewLabel } from "./public-tools.ts";
 
 type Trusted = string & { readonly __trusted: unique symbol };
 type Untrusted = string & { readonly __untrusted: unique symbol };
@@ -243,7 +243,7 @@ function valueRenderer(schema: Json): ValueRenderer | null {
   if (schema.type === "string") return (value, safety) => untrusted(value, safety);
   if (schema.type === "array") {
     const item = valueRenderer(schema.items);
-    if (item === null) return null; // elements are intentionally omitted (digests), so the whole array is
+    if (item === null) return null; // elements are intentionally omitted (digests), so the whole array is omitted
     const separator = isString(schema.items) ? ", " : "; ";
     return (value, safety) => (value as unknown[]).map((row) => item(row, safety)).join(separator);
   }
@@ -360,7 +360,7 @@ function requiredRationale(governance: Json): string | null {
   return governance.proposal.rationale as string | null;
 }
 
-const WAIT_STATE: Readonly<Record<string, string>> = {
+const WAIT_STATE: Readonly<Record<string, AuthorViewLabel>> = {
   none: "waiting_none_error", unavailable: "waiting_unavailable", unobserved: "waiting_unobserved",
   already_presented: "waiting_already_presented", interaction_limit: "waiting_interaction_limit",
   surface_unrecorded: "waiting_surface_unrecorded", presentation_failed: "waiting_presentation_failed",

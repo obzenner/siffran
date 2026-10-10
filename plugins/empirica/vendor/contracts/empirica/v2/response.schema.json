@@ -1455,6 +1455,7 @@
         "id",
         "goal",
         "status",
+        "basis",
         "audit",
         "contract",
         "obligations",
@@ -1487,6 +1488,10 @@
             "stopped_frozen",
             "stopped_budget"
           ]
+        },
+        "basis": {
+          "$ref": "#/$defs/digest256",
+          "description": "The core's progress basis: a digest of the blockers and of the run state an author's or a host's action can change. Reads never change it; a host remembers the value at its last continuation and compares only that."
         },
         "audit": {
           "$ref": "#/$defs/auditSummary"
@@ -1805,7 +1810,7 @@
           ]
         },
         "confirmation_batch": {
-          "description": "What a human would be shown now, or null when nothing waits on one. The host presents exactly when this is not null and prompt_error is null, whatever else blocks the run. record_ids and claim_ids are exactly the items one presentation shows (at most the receipt's decision limit); prompt_error says why it cannot be shown: unavailable (nobody to ask), unobserved (the host has not looked for a surface; it asks inside the next report), already_presented (only a changed derivation asks again), interaction_limit, or, when the host reported it for this call, surface_unrecorded or presentation_failed (nobody was asked).",
+          "description": "What a human would be shown now, or null when nothing waits on one. The host presents exactly when this is not null and prompt_error is null, whatever else blocks the run. record_ids and claim_ids are exactly the items one presentation shows (at most the receipt's decision limit); prompt_error says why it cannot be shown: unavailable (nobody to ask), unobserved (the host has not looked for a surface; it asks inside the next report), already_presented (an explicit report_convergence asks again, within the interaction limit), interaction_limit, or, when the host reported it for this call, surface_unrecorded or presentation_failed (nobody was asked).",
           "anyOf": [
             {
               "type": "null"

@@ -38,7 +38,7 @@ STALE_PI_RUNTIME_TERMS = ("pi-subagents@0.50.0", "pi-subagents 0.50.0", "package
 HOST_PROFILES = Path("contracts/empirica/v2/host-profiles.json")
 README = Path("README.md")
 COMPAT_DIR = ROOT / "adapters/pi/compat"
-UNREVIEWED_DISCLOSURE = "outside the supported range fails closed"
+SUPPORT_RANGE_DISCLOSURE = "outside the supported range fails closed"
 
 
 def pi_profile(document: dict) -> dict:
@@ -57,7 +57,7 @@ def pi_interval(profile: dict) -> str:
 
 PI_PROFILE = pi_profile(json.loads(HOST_PROFILES.read_text(encoding="utf-8")))
 REQUIRED_SKILL_DISCLOSURES = (
-    ">=2.1.278,<2.2.0", pi_interval(PI_PROFILE), "external `pi-subagents`", UNREVIEWED_DISCLOSURE,
+    ">=2.1.278,<2.2.0", pi_interval(PI_PROFILE), "external `pi-subagents`", SUPPORT_RANGE_DISCLOSURE,
     "empirica_observe", "empirica_read", "report_convergence",
 )
 
@@ -121,8 +121,8 @@ def readme_runtime_problems(readme_text: str, profile: dict, peers: dict[str, st
         problems.append(f"README omits the supported pi-subagents range {range_text}")
     if policy["policy_id"] not in readme_text:
         problems.append(f"README omits the policy id {policy['policy_id']}")
-    if UNREVIEWED_DISCLOSURE not in readme_text:
-        problems.append(f"README omits: {UNREVIEWED_DISCLOSURE}")
+    if SUPPORT_RANGE_DISCLOSURE not in readme_text:
+        problems.append(f"README omits: {SUPPORT_RANGE_DISCLOSURE}")
     return problems
 
 

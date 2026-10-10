@@ -16,8 +16,8 @@
       "settle": "End the turn with the run view and no notice: exactly one audit is pending and its result continues the run.",
       "settle-notice": "End the turn with the contract notice of the settlement; the run stays active and not converged, and nothing was approved or confirmed by the settlement.",
       "pause": "End the turn with a contract notice that is not a convergence claim and names the real next step the human can relay to the agent; the run stays active, nobody was asked, nothing was granted. The same on a first and a later turn end.",
-      "continue": "Keep the turn going: the agent is handed the next obligation (the core's real reason; the evidence directive when a human can be asked about the sole blocker; `unattended_continue` on a later turn end of the same chain). A `continue` cell names the notice of a later turn end; the first turn end of the chain gives the core's reason, or the evidence directive where one is named.",
-      "end-no-progress": "End the turn with the `unattended_continue` notice because a host with no loop bound of its own has already continued on this observation basis; the adapter records `no-progress`."
+      "continue": "Keep the turn going: the agent is handed the next obligation (the core's real reason; the evidence directive when a human can be asked about the sole blocker; `unattended_continue` on a later turn end of the same chain, except the evidence directive: it is the one exception and is kept on later turn ends while the observation basis changes). Progress is one fact with one owner: the core's `run.basis` (`core.evaluation.progress_basis`), which both hosts remember at their last continuation and compare, and nothing else; on an unchanged basis the turn ends instead (`end-no-progress`). A `continue` cell names the notice of a later turn end; the first turn end of the chain gives the core's reason, or the evidence directive where one is named.",
+      "end-no-progress": "End the turn with the `unattended_continue` notice because the host has already continued once on this observation basis (the core's `run.basis`); Pi records `no-progress`."
     },
     "states": [
       {
@@ -205,8 +205,8 @@
         "allow": "exit 0 with the run view",
         "settle": "exit 0; the run view (async audit) or `systemMessage` with the notice",
         "pause": "exit 0 with `systemMessage`",
-        "continue": "exit 2 with the reason on stderr (the real reason, or the `evidence_report` directive), and `unattended_continue` when `stop_hook_active` is true",
-        "loop_bound": "Claude's `stop_hook_active` plus its own cap of eight consecutive continuations (`host-capped` otherwise). A deliberative pause ends the turn (ADR-0068 owns the `stop_hook_active` rule).",
+        "continue": "exit 2 with the reason on stderr (the real reason, or the `evidence_report` directive), and `unattended_continue` when `stop_hook_active` is true; the evidence directive is the exception and stays on a later turn end; on any later turn end whose `run.basis` is the one the previous Stop saw, the turn ends (exit 0) with `unattended_continue`",
+        "loop_bound": "Claude's `stop_hook_active` plus its own cap of eight consecutive continuations (`host-capped` otherwise). A deliberative pause ends the turn (ADR-0068 owns the `stop_hook_active` rule). The adapter adds the same rule as Pi: it remembers the core's `run.basis` per session and a continuation on an unchanged basis ends with `unattended_continue`; the cap is the backstop, no longer the bound that matters.",
         "table_driven": "EHB-STOP-23"
       },
       "pi": {
@@ -215,7 +215,7 @@
         "settle": "nothing is appended, or a `custom_message` (`display: true`) with the settlement notice",
         "pause": "append a `custom_message` entry (`display: true`) holding the notice, with no `continue`",
         "continue": "`continue: true`, with the next obligation as the appended message",
-        "loop_bound": "None from the host. The adapter keeps its own: it requests a continuation only when the run's observation basis changed since the adapter's previous continuation; otherwise it ends with the `unattended_continue` notice and records `no-progress`.",
+        "loop_bound": "None from the host. The adapter keeps its own: it requests a continuation only when the core's `run.basis` changed since the adapter's previous continuation; otherwise it ends with the `unattended_continue` notice and records `no-progress`.",
         "table_driven": "EHB-STOP-34"
       }
     }
@@ -490,7 +490,7 @@
         "EHB-STOP-34"
       ],
       "sources": "ADR-32, ADR-68, `dist/core/extensions/types.d.ts:729-779,805` and `docs/extensions.md:66,117` of Pi 1.1.0 (Q3 surface §1), PI-T (`agent_before_settle`).",
-      "outcomes_by_mode": "See the turn-end table (`turn_end`). Deliberative pauses; every auto mode continues while the run's observation basis changes between continuations and ends with `no-progress` otherwise."
+      "outcomes_by_mode": "See the turn-end table (`turn_end`). Deliberative pauses; every auto mode continues while the core's `run.basis` changes between continuations and ends with `no-progress` otherwise."
     },
     {
       "id": "HX-STOP-05",
@@ -2313,9 +2313,10 @@
       ],
       "setup": "the sole blocker is an evidence confirmation a human can be asked about (route `human` or `unobserved`, batch not yet shown); the previous Stop already blocked; this takes precedence over `EHB-STOP-08`",
       "action": "Stop with `stop_hook_active: true`",
-      "expected": "C: every interactive `auto` mode keeps the `evidence_report` directive (exit 2: the act-on-it action is the report that asks the human)",
+      "expected": "C: every interactive `auto` mode keeps the `evidence_report` directive (exit 2: the act-on-it action is the report that asks the human) while the core's `run.basis` changes; on an unchanged basis the turn ends (exit 0) with `unattended_continue`, the way out",
       "covered_by": [
-        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_EHB_STOP_20_an_auto_continuation_keeps_the_evidence_directive_and_deliberative_hands_off"
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_EHB_STOP_20_an_auto_continuation_keeps_the_evidence_directive_and_deliberative_hands_off",
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_INVARIANT_across_turn_ends_read_only_calls_earn_one_continuation_and_a_changed_basis_one_more"
       ],
       "ledger_rows": [
         "stop_unattended_directive",
@@ -2468,7 +2469,7 @@
       ],
       "setup": "Pi, an auto run that already continued on this observation basis and whose basis has not changed",
       "action": "`agent_before_settle` again",
-      "expected": "P: no `continue`; the `unattended_continue` notice is appended and `no-progress` is recorded; a changed basis (a new tool result, a changed run state) allows one more continuation",
+      "expected": "P: no `continue`; the `unattended_continue` notice is appended and `no-progress` is recorded; a changed `run.basis` (the core's digest of the blockers and the run state recorded work can change) allows one more continuation; a tool result that leaves it as it was, such as a read of the run, does not",
       "covered_by": [
         "plugins/empirica/adapters/pi/test/turn-end.test.ts::EHB-STOP-32/33: an auto turn end continues once per change of basis and then ends with no-progress"
       ],

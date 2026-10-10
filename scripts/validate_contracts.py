@@ -55,13 +55,13 @@ V2 = CONTRACTS / "empirica" / "v2"
 # reviewed edit is required to drift). Only algorithmic/structural constants are
 # retained below.
 # --------------------------------------------------------------------------- #
-# The compact reviewed digest of the host-profiles registry (D2A §8/§9). Changing a
-# canonical value requires updating it deliberately.
 # A research artifact row's verification, as the argument view requires it (ADR-0067).
 VERIFICATION = {"class": "verbatim", "status": "verified_by_service", "retrieve": True}
 #: The tools an auditor child may ever be given: the read-only tools and ``contact_supervisor`` (ADR-0069). The one
 #: closed list the profile's ``audit_child_tools`` is validated against; widening it is a reviewed edit of this file.
 AUDIT_CHILD_TOOL_VOCABULARY = frozenset({"read", "grep", "find", "ls", "contact_supervisor"})
+# The compact reviewed digest of the host-profiles registry (D2A §8/§9). Changing a
+# canonical value requires updating it deliberately.
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:7200c601ae9a3ae27ec1e135a27b645f27ffc867997c0c9d79240c1299f52bfb"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
@@ -3302,6 +3302,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
 
     # D2A §8/§9 negatives: one mutation each with its own expected diagnostic substring.
     full_rv = {"governance": None, "confirmation_batch": None, "id": "r", "goal": "g", "status": "active",
+               "basis": "sha256:" + "5" * 64,
                "audit": {"state": "required", "independence": "unverified", "findings": []},
                "contract": {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
                "obligations": {"active": [], "deferred": []}, "residuals": [],

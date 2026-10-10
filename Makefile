@@ -94,7 +94,7 @@ help: ## Show this help (generated from target descriptions)
 # The fast suites are declared here, once. Each is a `check-<suite>` target that runs on its own;
 # `check` hands the list to scripts/run_suites.py, which runs them in parallel (one log per suite,
 # one status line each, the full log only for a failure). Each test module belongs to exactly one
-# fast suite or to a named integration target (guarded by tests/v2/test_suite_ownership.py).
+# fast suite or to a named integration target (guarded by scripts/tests/test_suite_ownership.py).
 # `make check JOBS=<n>` caps how many run at once; the scheduling rule is owned by doc/testing.md.
 FAST_SUITES := static core evidence observer claude codex pi ui
 CI_SUITES := static core evidence observer claude codex
@@ -670,7 +670,7 @@ empirica-public-tools-sync: vendor-contracts ## Regenerate public tool schemas a
 
 # --- Empirica observer UI ---------------------------------------------------------------------
 # The UI ships built: plugins/empirica/ui holds its committed dist/ and vendor/. Its Node toolchain
-# (ui/package.json) is dev-only and is needed only to rebuild those.
+# (plugins/empirica/ui/package.json) is dev-only and is needed only to rebuild those.
 .PHONY: ui ui-demo ui-install ui-tokens ui-vendor ui-css ui-contrast ui-browser ui-build
 ui: ## Serve the observer UI for your Empirica store on 127.0.0.1 (REPO=<checkout> adds a repository for runs without a recorded location)
 	@$(PYTHON) $(EMPIRICA_OBSERVE) serve --open $(if $(REPO),--repo "$(REPO)")

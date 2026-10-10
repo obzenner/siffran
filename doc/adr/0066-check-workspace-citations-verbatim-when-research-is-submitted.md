@@ -43,13 +43,13 @@ Chosen option: check the citation against the cited workspace file when the reco
 
 ### The check
 
-For a `code` or `docs` research record whose `source_ref` is a workspace path, the application captures that one file through the workspace port, and the core checks:
+For a research record of any `source_kind` whose `source_ref` is a workspace path (ADR-0067 names this class `verbatim`), the application captures that one file through the workspace port, and the core checks:
 
 * `source_ref` is one repo-relative file, optionally with line ranges (`path`, `path:40`, `path:40-63`, `path:40-63,70-72`);
 * the file is present and readable, and the cited lines exist;
 * the citation appears within those lines verbatim. Whitespace runs compare as one space, and excerpts joined by an ellipsis (`…`, or three full stops) must each appear, in order.
 
-Otherwise the record is refused with the new reason `research.citation_unverified` (`problem`: `source_ref_form`, `file_unavailable`, `lines_out_of_range` or `text_not_found`; next action `research.record`) and nothing is recorded. A URL or an absolute path, and the `runtime` and `web` kinds, are not checked here: the auditor retrieves them.
+Otherwise the record is refused with the new reason `research.citation_unverified` (`problem`: `source_ref_form`, `file_unavailable`, `lines_out_of_range` or `text_not_found`; next action `research.record`) and nothing is recorded. A URL or an absolute path is not checked here (the auditor retrieves it where its host is observed to, otherwise the human confirms it, ADR-0067), and a `runtime` observation with no workspace path is confirmed by the human.
 
 ### Consequences
 

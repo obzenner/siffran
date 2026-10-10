@@ -99,20 +99,19 @@ tool, when the session's slash commands show more than one loaded `pi-subagents`
 only the first `subagent` registration, so a second copy is seen through its commands, not its tool),
 or when the owner's package or version cannot be verified. A second copy is detected only while its
 extension registers commands; Pi runs and reports the first registrant, and that is the one bound.
-Admitted `pi-subagents` versions are a range, `>=0.50.0,<1.0.0`, under the policy
+Supported `pi-subagents` versions are a range, `>=0.50.0,<1.0.0`, under the policy
 `pi-subagents-foreground-audit-v1` (Pi `>=1.0.0,<2.0.0`). A version outside the supported range fails closed:
 `/empirica` and `configure_run` are refused with `host.subagents_version_unsupported` before any run is
 created. Inside the range a version is admitted by what the adapter observes of it, not by a list: its own
 parameter schema must declare every field the audit launch sends, and its live launch preflight must resolve
 the packaged auditor, the configured model and a fresh context, and its tool allowlist may hold only the tools the profile's `audit_child_tools` allows. A version in the table below has a checked-in
-compat record and is *reviewed*. Any other version in the range is admitted, recorded as `reviewed: false`
+compat record and is *reviewed*. Any other version in the range is admitted by observation, recorded as `reviewed: false`
 and shown on every run view while it stays unreviewed (`host: pi-subagents <version> (not reviewed; preflight passed)`);
 because nobody has reviewed its actions, a `subagent` action runs during a run only if some reviewed version has that
-name and the classifier calls it read-only (`list`, `status`, `models`, ...); launches are classified as usual. The
-versions in the range are admitted; only the rows of the table below are reviewed. `make empirica-subagents-matrix-update` lists releases newer than the newest
+name and the classifier calls it read-only (`list`, `status`, `models`, ...); launches are classified as usual. `make empirica-subagents-matrix-update` lists releases newer than the newest
 reviewed one; reviewing one means adding its compat record, preflight fixture and classifier cases.
 
-| `pi-subagents` | Requires Pi | Native receipt (4.1) | Status |
+| `pi-subagents` | Pi floor (supported) | Native receipt (4.1) | Status |
 |---|---|---|---|
 | `0.50.0` | `>=1.0.0` | pending A9 | reviewed; the 4.0 qualification version |
 | `0.64.0` | `>=1.0.0` | Pi 0.87.1 (A9a, `ebf426f`) | reviewed |
@@ -163,7 +162,7 @@ pi install "$(pwd)"
 
 The exact Claude Code and Pi foreground profiles were promoted from installed-host observations;
 release certification additionally requires fresh operator-attested, candidate-bound structural
-receipts. Empirica is not available on Codex.
+receipts.
 
 ### Supported surfaces
 

@@ -57,7 +57,7 @@ Confidence and terminal state are derived projections, never graph input.
 
 ## Construction rules
 
-1. Make the root the goal-level assurance claim, and make it gating. A non-gating root can never be approved from its children alone, so the run could never converge. Put scope you want to defer in non-gating claims below it.
+1. Make the root the goal-level assurance claim (gating, see above). Put scope you want to defer in non-gating claims below it.
 2. Add one gating claim for each material unknown or invariant.
 3. Attach every claim to the root through `SupportedBy`; detached claims are invalid.
 4. Use `needs-experiment` only when a deterministic command can falsify the claim.

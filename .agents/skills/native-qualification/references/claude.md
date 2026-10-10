@@ -4,8 +4,8 @@
 - Claude needs native MCP form elicitation; that is how the human is asked inside `report_convergence`.
 - Activation is the user command `/empirica:empirica <goal>`. A model-invoked skill or read, or ordinary pasted chat,
   does not activate.
-- The Stop hook never pauses for evidence on its first block. When the only blocker is a human confirmation it blocks (exit 2) with one
-  directive (`settlement_notices.evidence_report`): call `report_convergence`; the human is asked inside that call, if this host can show a dialog. Any other reason blocks with the real reason.
+- Interactive auto: when the only blocker is a human confirmation the Stop blocks (exit 2) with one directive
+  (`settlement_notices.evidence_report`): call `report_convergence`; the human is asked inside that call, if this host can show a dialog. Deliberative: the turn ends with `paused_for_evidence`. Any other reason blocks (auto) with the real reason, or pauses (deliberative).
 - A Stop continuation (`stop_hook_active: true`) is ended by control mode (ADR-0068, `HX-STOP-03`). Claude's own cap of
   eight continuations is a host limit, never the plan. Ledger rows: `stop_flag_reset`, `stop_pause_rendering`,
   `stop_unattended_directive`, `stop_host_cap`.

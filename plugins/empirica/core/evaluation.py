@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import partial
 from types import MappingProxyType
@@ -301,6 +301,29 @@ def evidence_digest(snapshot: EvaluationSnapshot, claim: dict[str, Any]) -> str:
 DOSSIER_KINDS = frozenset({"research", "spike_request", "spike", confirmation.KIND})
 
 
+#: The artifacts that are the work of the run: what an author or a human records. A presentation (a host showing a batch) and
+#: the observation basis are not work, so they never move ``progress_basis``.
+PROGRESS_KINDS = frozenset({"graph", "research", "spike_request", "spike", "attribution", "audit_verdict", confirmation.KIND})
+
+
+def progress_basis(snapshot: EvaluationSnapshot, blockers: Sequence[Mapping[str, Any]]) -> str:
+    """The one owner of "did the run move" (ADR-0068): a digest of the blockers (code and parameters) and of the run state that
+    an author's or a host's action can change: status, the bootstrap facts, the governance revision, the graph, the frozen scope, every recorded
+    artifact of the work, the audit children's states. A read (``GetRun``, ``GetArgument``), a presentation and the budget
+    counters, which move on every evaluation, never change it. Hosts remember the value at their last continuation and compare
+    only that."""
+    state = snapshot.state
+    return digest({
+        "status": state.status, "facts": _bootstrap_facts(snapshot),
+        "governance": [state.governance.get("plan_revision"), state.governance.get("proposal_digest")],
+        "blockers": [[b["reason"], b["parameters"]] for b in blockers],
+        "graph": snapshot.graph,
+        "frozen": None if state.frozen_claim_ids is None else sorted(state.frozen_claim_ids),
+        "work": [a["artifact_id"] for a in snapshot.history if a.get("kind") in PROGRESS_KINDS],
+        "children": [[c["child_id"], c["state"]] for c in state.children],
+    })
+
+
 def _terminal_consent_record(item: Mapping[str, Any]) -> bool:
     """A human's answer to the terminal step, not evidence about a claim. It is marked by the core when it records the
     answer to the presentation of a terminal batch (``_confirmation_artifact``); the name of an id says nothing, because
@@ -431,9 +454,11 @@ def pending_decisions(snapshot: EvaluationSnapshot, derivation: ClaimDerivation)
 
 
 def terminal_digest(snapshot: EvaluationSnapshot, derivation: ClaimDerivation, status: str) -> str:
-    """What a human's consent to end the run as ``status`` is bound to: the status and the run's derivation, so a changed
-    argument, evidence or frozen scope needs a new answer (the terminal item's wording digest)."""
-    return digest({"terminal": status, "derivation": derivation_digest(snapshot, derivation)})
+    """What a human's consent to end the run as ``status`` is bound to: the status, the run's derivation and the dossier (the
+    graph and every artifact of it, a human's confirmation receipts included but never the terminal consents themselves), so
+    a changed argument, evidence, receipt or frozen scope needs a new answer (the terminal item's wording digest)."""
+    return digest({"terminal": status, "derivation": derivation_digest(snapshot, derivation),
+                   "dossier": digest({"graph": snapshot.graph, "evidence": dossier_artifact_ids(snapshot.history)})})
 
 
 def terminal_key(status: str, wording: str) -> str:
@@ -457,11 +482,29 @@ def terminal_batch(snapshot: EvaluationSnapshot, derivation: ClaimDerivation, st
             "claims": [{"claim_id": status, "claim_digest": wording}], "terminal": {"status": status, "digest": wording}}
 
 
+def terminal_askable(snapshot: EvaluationSnapshot) -> bool:
+    """Whether the consent to end the run can be asked at all: a route is recorded and a graph is selected (nothing is
+    started before a route, so a stop then ends the run without a question). The one predicate of the projection of the
+    terminal batch, of the gate that asks it and of the admission of its presentation (``_human_batch_block``)."""
+    return terminal_unaskable(snapshot) is None
+
+
+def terminal_unaskable(snapshot: EvaluationSnapshot) -> tuple[str, str | None] | None:
+    """Why the consent to end the run cannot be asked yet, as ``(reason, affected)``, else ``None``: the one place that reads the
+    route and the graph for it."""
+    facts = _bootstrap_facts(snapshot)
+    if not facts["route.recorded"]:
+        return "route.required", "obligation.route"
+    if not facts["graph.selected"]:
+        return "graph.missing", None
+    return None
+
+
 def pending_terminal(snapshot: EvaluationSnapshot, intent: str) -> str | None:
     """The ``stopped_*`` status ``intent`` would commit but for the human's consent, when this deliberative run needs it;
     else ``None``. It is the gate itself run without the consent check, so the batch and the gate cannot disagree."""
     if (snapshot.graph is None or snapshot.state.status != "active"
-            or snapshot.state.governance["control_mode"] != "deliberative"):
+            or snapshot.state.governance["control_mode"] != "deliberative" or not terminal_askable(snapshot)):
         return None
     hypothetical = replace(snapshot, command={"type": "EvaluateRun", "run_id": snapshot.run_id, "intent": intent})
     decision = _evaluate(hypothetical, hypothetical.command, consent=False)
@@ -566,7 +609,7 @@ def claim_blockers(snapshot: EvaluationSnapshot,
         elif claim_conflicted(snapshot, claim):
             reason = "evidence.conflict"
         elif (spike := _spike_requirement(snapshot, claim, derivation, research, spikes)) and spike[2]:
-            # What the author can do now comes before waiting on a human (A1-5); the batch is still projected.
+            # What the author can do now comes before waiting on a human; the batch is still projected.
             reason, parameters = spike[0], spike[1]
         elif awaiting := _awaiting_human(snapshot, research):
             reason, parameters = "evidence.confirmation_required", confirmation.parameters(
@@ -580,7 +623,7 @@ def claim_blockers(snapshot: EvaluationSnapshot,
                 for item in snapshot.history)
             reason = ("claim.research_unbound" if historical_research
                       else "claim.research_missing")
-        if reason in CLAIM_NAMED_REASONS:  # the reason's text names the claim to discharge, not "this claim" (G15)
+        if reason in CLAIM_NAMED_REASONS:  # the reason's text names the claim to discharge, not "this claim"
             parameters = {**parameters, "claim_id": target_id}
         blockers.append({"claim_id": claim_id, "target_claim_id": target_id,
                          "reason": reason, "parameters": parameters})
@@ -799,12 +842,15 @@ def _confirmation_artifact(snapshot: EvaluationSnapshot, receipt_id: str,
     return artifact(confirmation.KIND, {**body, **base, **stamps})
 
 
-def _human_batch_block(snapshot: EvaluationSnapshot) -> Decision | None:
-    """Why no human receipt or presentation is admitted now, else ``None``. Every record of a human's answer carries the
-    run's route and investigation witnesses, so the consent to end a run is asked only of an investigated run."""
+def _human_batch_block(snapshot: EvaluationSnapshot, *, terminal: bool = False) -> Decision | None:
+    """Why no human receipt or presentation is admitted now, else ``None``. An evidence batch is asked only of an investigated
+    run (every record of a human's answer carries the run's route and investigation witnesses). The consent to end a run is
+    its own admission: ending never requires approving or starting the work, so a route and a graph are enough."""
     state = snapshot.state
-    blocked = _investigation_block(snapshot)
-    if blocked is not None:
+    if terminal:
+        if (why := terminal_unaskable(snapshot)) is not None:
+            return _decision(snapshot, state, "Block", reason=why[0], affected=why[1])
+    elif (blocked := _investigation_block(snapshot)) is not None:
         return blocked
     if snapshot.graph is None or frozen_scope_invalid(state, snapshot.graph):
         return _decision(snapshot, state, "Block", reason="graph.invalid")
@@ -818,14 +864,16 @@ def plan_evidence_presentation(snapshot: EvaluationSnapshot, payload: Mapping[st
 
     The receipt id names the presentation; sending it again is ``Inert``. A presentation of nothing is a conflict. Each
     presentation spends one human interaction, so the interaction ceiling is what bounds asking: a batch left on Later,
-    cancelled or timed out may be shown again by an explicit report (G14, ADR-0067); only the host's explicit
-    ``report_convergence`` presents, never a Stop pause or an auto continuation."""
+    cancelled or timed out may be shown again by an explicit report (ADR-0067); only the host's explicit
+    ``report_convergence`` presents (either intent: a report or a stop), never the Stop hook's pause or an auto continuation."""
     state = snapshot.state
-    if (blocked := _human_batch_block(snapshot)) is not None:
+    wanted = None if snapshot.graph is None else next(
+        (b for b in batch_candidates(snapshot, derive_claims(snapshot)) if b["key"] == payload["key"]), None)
+    if (blocked := _human_batch_block(snapshot, terminal=confirmation.is_terminal(wanted))) is not None:
         return blocked
     if confirmation.presentation(snapshot, payload["receipt_id"]) is not None:
         return _decision(snapshot, state, "Inert")
-    batch = next((b for b in batch_candidates(snapshot, derive_claims(snapshot)) if b["key"] == payload["key"]), None)
+    batch = wanted
     # The presentation names the batch the host showed; any other (a record joined, a wording changed) is refused
     # and nothing is spent, so what a human was shown is exactly what is recorded as presented.
     # A batch already shown may be shown again by the next explicit report (bounded below by the interaction ceiling).
@@ -850,7 +898,8 @@ def plan_evidence_confirmation(snapshot: EvaluationSnapshot, payload: Mapping[st
     decided differently fails closed, and so does a receipt id reused for other content. Nothing is
     admitted unless every decision is."""
     state = snapshot.state
-    if (blocked := _human_batch_block(snapshot)) is not None:
+    shown_first = confirmation.presentation(snapshot, payload["receipt_id"])
+    if (blocked := _human_batch_block(snapshot, terminal=confirmation.is_terminal(shown_first))) is not None:
         return blocked
     items = payload["decisions"]
     planned = [_confirmation_artifact(snapshot, payload["receipt_id"], item) for item in items]
@@ -929,7 +978,7 @@ def audit_attributions(
 def audit_exclusions(snapshot: EvaluationSnapshot) -> list[str]:
     """The opaque identity classes an auditor must not run on: the current author's and every producer of the evidence an
     audit would cover (sorted). The verdict check refuses an auditor equal to one of them (``independence``), so a launch
-    on one of them would spend a spawn on a verdict that cannot count; the reservation refuses it first (G15)."""
+    on one of them would spend a spawn on a verdict that cannot count; the reservation refuses it first."""
     by_id = {item.get("artifact_id"): item for item in snapshot.history}
     producers = [by_id.get(artifact_id, {}).get("producer") for artifact_id in covered_artifact_ids(snapshot)]
     classes = {identity_pair(producer) for producer in [_producer(snapshot.state), *producers]}
@@ -1272,7 +1321,7 @@ def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent:
         def end(ended: OperationalState) -> Decision:
             """A step that ends the run without converging: a deliberative run needs the human's consent first
             (ADR-0063 amendment); the auto modes commit as before. A refusal is never a terminal state."""
-            if (consent and state.governance["control_mode"] == "deliberative"
+            if (consent and state.governance["control_mode"] == "deliberative" and terminal_askable(snapshot)
                     and not terminal_consented(snapshot, derivation, ended.status)):
                 key = terminal_key(ended.status, terminal_digest(snapshot, derivation, ended.status))
                 case = confirmation.terminal_case(confirmation.prompt_error(snapshot, key, terminal=True),

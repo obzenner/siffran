@@ -91,22 +91,21 @@ class ClaudeAuditorAliasTests(unittest.TestCase):
         # non-mapping ``message``; a valid verdict next to a corrupt row must not be read
         # as a valid transcript (that let an auditor child complete and the run converge).
         from adapters.claude.lifecycle import (
-            _parse_current_assistant_model, _parse_transcript_contents, _parse_transcript_handbacks)
+            _audit_outcome, _parse_current_assistant_model)
         verdict = json.dumps({"message": {"role": "assistant", "model": "claude-opus-4-6",
                                            "content": [{"type": "tool_use", "name": "SubagentHandback",
-                                                        "input": {"message": "verdict"}}]}})
+                                                        "input": {"message": "```empirica-verdict\n" + json.dumps({"verdict": "pass", "findings": []}) + "\n```"}}]}})
         with tempfile.TemporaryDirectory() as directory:
             transcript = Path(directory) / "auditor.jsonl"
             for malformed in (None, [], "broken"):
                 with self.subTest(message=malformed):
                     transcript.write_text(
                         verdict + "\n" + json.dumps({"message": malformed}) + "\n", encoding="utf-8")
-                    self.assertEqual(_parse_transcript_handbacks(str(transcript)), (False, []))
-                    self.assertEqual(_parse_transcript_contents(str(transcript)), ([], None))
+                    self.assertEqual(_audit_outcome(str(transcript)), (None, None))
                     self.assertIsNone(_parse_current_assistant_model(str(transcript)))
             # Positive control: rows without a message field are not messages and are skipped.
             transcript.write_text(verdict + "\n" + json.dumps({"type": "summary"}) + "\n", encoding="utf-8")
-            self.assertEqual(_parse_transcript_handbacks(str(transcript)), (True, ["verdict"]))
+            self.assertEqual(_audit_outcome(str(transcript)), ({"verdict": "pass", "findings": []}, "claude-opus-4-6"))
 
     def test_anthropic_api_chooses_first_distinct_family(self):
         self.assertEqual(self._alias("claude-fable-5-1", {}), "opus")

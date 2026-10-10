@@ -379,7 +379,8 @@ test("/empirica records every Pi mode and operator delegation", async () => {
         if (delegated) process.env.EMPIRICA_AUTO_DELEGATION = "1";
         else delete process.env.EMPIRICA_AUTO_DELEGATION;
         const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }));
-        await w.pi.command("empirica").handler("goal", { ui: new FakeUi(), mode, hasUI: interactive });
+        const ui = Object.assign(new FakeUi(), { select: async () => undefined, input: async () => undefined });
+        await w.pi.command("empirica").handler("goal", { ui, mode, hasUI: interactive });
         if (w.requests[0].command.type === "StartRun") assert.deepEqual(w.requests[0].command.invocation,
           { host: "pi", interactive, signal: `ctx.mode=${mode}`, delegation: delegated, audit_retrieval: ["local", "workspace"], human_surface: interactive ? "human" : "unavailable", host_runtime: ownerHostRuntime() });
       }
@@ -387,6 +388,18 @@ test("/empirica records every Pi mode and operator delegation", async () => {
   } finally {
     if (prior === undefined) delete process.env.EMPIRICA_AUTO_DELEGATION;
     else process.env.EMPIRICA_AUTO_DELEGATION = prior;
+  }
+});
+
+test("G16 P-04: the start records a human surface only where the report could show a dialog (hasUI with select and input)", async () => {
+  for (const [ui, expected] of [
+    [Object.assign(new FakeUi(), { select: async () => undefined, input: async () => undefined }), "human"],
+    [new FakeUi(), "unavailable"],  // hasUI is true but there is no select/input: the same host fails to present at the report
+  ] as const) {
+    const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+    await w.pi.command("empirica").handler("goal", { ui, mode: "tui", hasUI: true });
+    const start = w.requests[0].command;
+    assert.equal(start.type === "StartRun" ? start.invocation?.human_surface : null, expected);
   }
 });
 
@@ -485,6 +498,20 @@ test("a kickoff that never starts a run does not hold a no-UI command forever", 
   const ctx = { ui: new FakeUi(), mode: "json" as const, hasUI: false, waitForIdle: async () => { waited += 1; } };
   await w.pi.command("empirica").handler("goal", ctx);
   assert.equal(waited, 0, "no run began, so there is nothing to wait for");
+});
+
+test("G16 H-03: a kickoff that never starts is a visible failure that names the retained run, not a success", async () => {
+  const d = diagnostics();
+  const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }), true, undefined,
+    { diagnostics: d, kickoffStartMs: 25 });
+  w.pi.startsRunOnUserMessage = false;
+  await w.pi.command("empirica").handler("goal", { ui: new FakeUi(), mode: "print" as const, hasUI: false, waitForIdle: async () => undefined });
+  assert.equal(d.failures, 1, "a nonzero exit is requested");
+  const said = d.lines.join("\n");
+  assert.match(said, /did not start/);
+  assert.match(said, /run run-handle-1 is still open/);
+  assert.match(said, /report_convergence intent=stop/);
+  assert.doesNotMatch(said, /\/empirica started/, "never reported as started");
 });
 
 test("with a UI a notice goes to the UI and not to stderr or the exit code", async () => {
@@ -2324,4 +2351,35 @@ test("gate: a presentation the core refuses for a reason it knows is worded by t
   await startRun(w);
   const decision = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), uiCtx(["Confirm"]));
   assert.deepEqual(decision, { block: true, reason: `Research waits on a human.\nhandle: ${HANDLE}` });
+});
+
+// --- G17b item 4: one owner of ending a run (`onTerminal`) ------------------------------------------------------------
+
+test("INVARIANT: every path that sees a terminal result ends the run once: tombstone, a working read, idempotent", async () => {
+  const paths: Record<string, (w: Wired) => unknown> = {
+    gate: (w) => w.pi.toolCall()({ toolName: "report_convergence", toolCallId: "tc-g", input: {} }, { ui: new FakeUi() } as never),
+    execute: (w) => execTool(w, "report_convergence"),
+    settle: (w) => (w.pi.handlers.get("agent_before_settle") as (e: unknown, c: unknown) => Promise<unknown>)(
+      { type: "agent_before_settle", entries: [], continue: false }, fakeCtx("/work")),
+  };
+  const sequences: string[][] = [];
+  for (const first of Object.keys(paths)) {
+    sequences.push([first]);
+    for (const second of Object.keys(paths)) sequences.push([first, second]);
+  }
+  for (const sequence of sequences) {
+    for (const [status, converged] of [["converged", true], ["stopped_residual", false], ["stopped_budget", false]] as const) {
+      const w = await wire((req) => req.command.type === "StartRun"
+        ? envelope({ type: "Allow", converged: false, run: run() })
+        : envelope({ type: "Allow", converged, run: run(status) }));
+      await startRun(w);
+      for (const name of sequence) {
+        try { await paths[name](w); } catch { /* execute after a gate that already ended the run reports "no active run" */ }
+        const tombstones = w.pi.entries.filter((entry) => entry.customType === "empirica.run.done");
+        assert.equal(tombstones.length, 1, `${sequence.join("+")}/${status}: after ${name}`);
+      }
+      const read = await execTool(w, "empirica_read", { operation: "GetRun" }) as { content: Array<{ text: string }> };
+      assert.doesNotMatch(read.content[0].text, /No active Empirica run/, `${sequence.join("+")}: a read after the end works`);
+    }
+  }
 });

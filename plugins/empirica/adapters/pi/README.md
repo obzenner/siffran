@@ -9,7 +9,7 @@ The promoted profile is qualified on Pi `1.1.0` and admits compatible Pi release
 `>=1.0.0,<2.0.0`; receipts still record the exact observed Pi version. The profile tier is
 `foreground_only`, with `promotion_status=promoted` after an installed-host foreground trace reached
 guarded `Allow(converged=true)`. `pi-subagents` is an external prerequisite
-(`pi install npm:pi-subagents@<reviewed version>`), never bundled or loaded by this package; it must
+(`pi install npm:pi-subagents@<a version in the supported range>`), never bundled or loaded by this package; it must
 provide the structured `subagent` tool. Versions inside `subagents_compatibility` `[minimum, maximum_exclusive)`
 (`contracts/empirica/v2/host-profiles.json`) are admitted by observation (ADR-0069); a version with a checked-in
 `compat/` record is reviewed, any other is recorded `reviewed: false`. A version outside the range is refused before a run starts. Asynchronous audit execution is not supported and is never silently
@@ -120,7 +120,7 @@ Pi has no native completion veto; the model must call `report_convergence` befor
 convergence claim. The turn end follows the turn-end table of ADR-0068, acted on at
 `agent_before_settle` only (Pi 1.0.0 and later): a deliberative run pauses with one visible notice,
 an auto run is asked to continue with the next obligation, and the adapter ends an auto chain with
-the `unattended_continue` notice when the run's observation basis has not changed since its
+the `unattended_continue` notice when the core's `run.basis` has not changed since its
 previous continuation (`no-progress`).
 
 ## Validation

@@ -107,7 +107,7 @@ export function parseInventory(document: unknown): Omit<ReviewedInventory, "revi
 }
 
 /**
- * The `subagent` parameters the audit launch sends (audit-launch.ts) plus the launch form it uses. A
+ * The `subagent` parameters the audit launch sends (audit-launch.ts). A
  * package whose own schema lacks one of them cannot carry the launch, so it is not admitted.
  */
 export const AUDIT_LAUNCH_PARAMETERS = [

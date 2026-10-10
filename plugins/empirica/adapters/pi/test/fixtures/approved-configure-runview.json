@@ -16,6 +16,7 @@
       "human_surface": "unavailable"
     },
     "status": "active",
+    "basis": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
     "governance": {
       "state": "approved",
       "control_mode": "deliberative",

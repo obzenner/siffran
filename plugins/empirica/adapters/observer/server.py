@@ -36,7 +36,7 @@ PLUGIN = Path(__file__).resolve().parents[2]
 UI = PLUGIN / "ui"
 DEMO = PLUGIN / "vendor/contracts/empirica-ui-view/v1/fixtures"
 HOST = "127.0.0.1"
-#: The name the CLI prints and opens; the host check accepts exactly this with the server's own port.
+#: The name the CLI prints and opens; the host check (`_host_ok`) also accepts the two loopback names, with the server's own port.
 NAME = "empirica.localhost"
 #: What the UI may load: top-level folders and files under ``UI``, by extension.
 SERVED_DIRS = ("app", "gallery", "elements", "dist", "vendor", "copy")

@@ -10,6 +10,7 @@ assertions are intentionally absent: those surfaces are deleted and must not be 
 from __future__ import annotations
 
 import json
+import uuid
 import sys
 import unittest
 from io import StringIO
@@ -751,7 +752,7 @@ class StopModeTests(unittest.TestCase):
     def hook(self, payload_extra: dict, result: dict):
         """The exit code, stdout and stderr of the real completion hook for a core response and a payload."""
         from adapters.claude import lifecycle
-        payload = {"session_id": "s", "cwd": ".", **payload_extra}
+        payload = {"session_id": "s-" + uuid.uuid4().hex, "cwd": ".", **payload_extra}  # a fresh stop memory per call unless the test names a session
         out, err = StringIO(), StringIO()
         with patch.object(lifecycle, "_payload", return_value=payload), \
              patch.object(lifecycle, "_resolve", return_value=("run", None)), \
@@ -815,6 +816,30 @@ class StopModeTests(unittest.TestCase):
         paused = self.stop(self.block("deliberative", "evidence"), stop_hook_active=True)
         self.assertEqual((paused.exit_code, paused.stderr), (0, ""))
         self.assertEqual(json.loads(paused.stdout), {"systemMessage": self.notices()["paused_for_evidence"]})
+
+    def test_INVARIANT_across_turn_ends_read_only_calls_earn_one_continuation_and_a_changed_basis_one_more(self):
+        """G17b item 2 (the Pi twin is `turn-end.test.ts`): every sequence of up to 6 events between Stops, each a read-only call
+        (the core's `run.basis` is unchanged) or a recorded observation (it moves), for the evidence directive and for a plain
+        auto reason. A Stop that continues is exit 2; a continuation (`stop_hook_active`) on the basis the previous Stop saw
+        ends with `unattended_continue` (exit 0)."""
+        import uuid
+        for kind in ("real", "evidence"):
+            for length in range(0, 7):
+                for pattern in range(2 ** length):
+                    events = ["record" if (pattern >> i) & 1 else "read" for i in range(length)]
+                    session = {"session_id": "basis-" + uuid.uuid4().hex}
+                    revision, active, previous = 0, False, None
+                    for step in [None, *events]:
+                        if step == "record":
+                            revision += 1
+                        view = self.block("auto-interactive-post", kind)
+                        view["run"]["basis"] = "sha256:" + format(revision, "064x")
+                        code, out, _ = self.hook({**session, **({"stop_hook_active": True} if active else {})}, view)
+                        expected = (not active) or previous != revision
+                        self.assertEqual(code == 2, expected, (kind, events, step))
+                        if not expected:
+                            self.assertIn("intent=stop", json.loads(out)["systemMessage"])
+                        active, previous = code == 2, revision
 
     def test_EHB_STOP_11_interactive_auto_before_first_approval_keeps_human_wait_and_the_evidence_directive(self):
         notices = self.notices()
@@ -1176,7 +1201,20 @@ class SpawnLifecycleTests(unittest.TestCase):
         with self.assertRaises(AuditProtocolError):
             self._alias_after_switch([self.SONNET, self.FABLE, self.OPUS, "anthropic/claude-haiku-4-5"])
 
-    def _launch(self, env: dict, excluded: list[str], refusal: str | None = None):
+    def test_a_pinned_alias_target_in_the_excluded_set_is_skipped_and_the_chosen_identity_is_checked(self) -> None:
+        """G16 H-04: `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` says what an alias runs. Fable is pinned to the model that produced the
+        evidence, so it is skipped; the alias picked is the next one, and its pinned concrete identity goes into the reservation."""
+        env = {"CLAUDE_CODE_USE_BEDROCK": "1", "ANTHROPIC_DEFAULT_FABLE_MODEL": "claude-sonnet-5",
+               "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4-8"}
+        with patch.object(lifecycle, "_parse_current_assistant_model", return_value="claude-haiku-4-5"):
+            self.assertEqual(lifecycle._auditor_alias({"transcript_path": "m"}, env, ["anthropic/claude-sonnet-5"]), "opus")
+            self.assertEqual(lifecycle._auditor_alias({"transcript_path": "m"}, env, []), "fable")
+        code, prepare, out, _ = self._launch(env, ["anthropic/claude-sonnet-5"])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["hookSpecificOutput"]["updatedInput"]["model"], "opus")
+        self.assertEqual(prepare.call_args.kwargs["auditor_identity"], "anthropic/claude-opus-4-8")
+
+    def _launch(self, env: dict, excluded: list[str], refusal: str | None = None, judge=None):
         from adapters.audit_protocol import AuditorExcluded, AuditLaunchPlan
         plan = AuditLaunchPlan(CLAUDE_PROFILE, "active-run", "ch-audit", "empirica:empirica-auditor", {"claims": []})
         refuse = AuditorExcluded(refusal, excluded) if refusal else None
@@ -1186,7 +1224,7 @@ class SpawnLifecycleTests(unittest.TestCase):
              patch("adapters.claude.lifecycle._governance_context"), \
              patch("adapters.claude.lifecycle._main_model", return_value="claude-sonnet-4-6"), \
              patch("adapters.claude.lifecycle.AuditProtocol.exclusions", return_value=excluded), \
-             patch("adapters.claude.lifecycle.AuditProtocol.prepare", return_value=plan, side_effect=refuse) as prepare, \
+             patch("adapters.claude.lifecycle.AuditProtocol.prepare", return_value=plan, side_effect=judge or refuse) as prepare, \
              patch.dict("os.environ", env, clear=False), \
              patch("sys.stdin", new=self._stdin({"subagent_type": "empirica:empirica-auditor", "prompt": "audit"})), \
              patch("sys.stdout", new=out), patch("sys.stderr", new=err):
@@ -1204,8 +1242,48 @@ class SpawnLifecycleTests(unittest.TestCase):
                 self.assertIn(text, err + out)
         code, prepare, out, _ = self._launch({"CLAUDE_CODE_SUBAGENT_MODEL": "claude-haiku-4-5"}, [self.SONNET, self.OPUS])
         self.assertEqual(code, 0)
-        self.assertEqual(prepare.call_args.kwargs.get("auditor_identity"), None)  # outside the set: nothing to refuse
+        self.assertEqual(prepare.call_args.kwargs.get("auditor_identity"), "anthropic/claude-haiku-4-5")  # resolved, outside the set
         self.assertNotIn('"model"', out)
+
+    def test_INVARIANT_an_alias_is_refused_exactly_when_its_resolved_identity_or_unpinned_family_is_excluded(self) -> None:
+        """G17b item 3: every alias x {unpinned, pinned to an excluded model, pinned to an allowed one} x {the automatic pick,
+        an explicit override}. The core is emulated by its one rule (refuse an identity in the set). Excluded: sonnet-4-6 (the
+        main model), opus-4-6 and fable-1. An alias is refused iff its pin names an excluded model, or it is unpinned and its
+        family is excluded."""
+        import itertools
+        from unittest.mock import DEFAULT
+        from adapters.audit_protocol import AuditorExcluded, AuditProtocolError
+        excluded = [self.SONNET, self.OPUS, self.FABLE]
+        pins = {"unpinned": None, "excluded": "claude-fable-1", "allowed": "claude-haiku-4-5"}
+        aliases = ("fable", "opus", "sonnet", "haiku")
+        families_excluded = {"fable", "opus", "sonnet"}
+
+        def refused(alias: str, state: str) -> bool:
+            return state == "excluded" or (state == "unpinned" and alias in families_excluded)
+
+        def env_for(states: dict) -> dict:
+            return {f"ANTHROPIC_DEFAULT_{a.upper()}_MODEL": pins[st] for a, st in states.items() if pins[st]}
+
+        for combo in itertools.product(pins, repeat=len(aliases)):  # the automatic pick, over every pin state of all aliases
+            states = dict(zip(aliases, combo))
+            expected = next((a for a in aliases if a != "sonnet" and not refused(a, states[a])), None)
+            with patch.object(lifecycle, "_parse_current_assistant_model", return_value="claude-sonnet-4-6"):
+                if expected is None:
+                    with self.assertRaises(AuditProtocolError):
+                        lifecycle._auditor_alias({"transcript_path": "m"}, env_for(states), excluded)
+                else:
+                    self.assertEqual(lifecycle._auditor_alias({"transcript_path": "m"}, env_for(states), excluded),
+                                     expected, states)
+
+        def judge(*_args, **kwargs):
+            if kwargs.get("auditor_identity") in excluded:
+                raise AuditorExcluded("excluded", excluded)
+            return DEFAULT
+
+        for alias, state in itertools.product(aliases, pins):  # an explicit override
+            env = {"CLAUDE_CODE_SUBAGENT_MODEL": alias, **env_for({alias: state})}
+            code, _, out, err = self._launch(env, excluded, judge=judge)
+            self.assertEqual(code == 2, refused(alias, state), (alias, state, code, out, err))
 
     def test_durable_plan_rejects_missing_operation_or_wrong_role(self) -> None:
         from adapters.claude.lifecycle import _parse_durable_plan
@@ -1252,22 +1330,6 @@ class SpawnLifecycleTests(unittest.TestCase):
                  patch("sys.stdin", new=payload):
                 self.assertEqual(subagent_stop_main(), 0)
         self.assertEqual(deliver.call_args.args[2], verdict)
-
-    def test_handback_extraction_preserves_legacy_and_rejects_ambiguity(self) -> None:
-        from adapters.claude.lifecycle import _parse_transcript_handbacks
-        with TemporaryDirectory() as directory:
-            transcript = Path(directory) / "child.jsonl"
-            transcript.write_text(json.dumps({"message": {"role": "assistant", "content": [
-                {"type": "text", "text": "legacy final output"}]}}) + "\n")
-            self.assertEqual(_parse_transcript_handbacks(str(transcript)), (True, []))
-            transcript.write_text("\n".join(json.dumps({"message": {
-                "role": "assistant", "content": [{"type": "tool_use",
-                    "name": "SubagentHandback", "input": {"message": value}}]}})
-                for value in ("first", "second")) + "\n")
-            self.assertEqual(_parse_transcript_handbacks(str(transcript)),
-                             (True, ["first", "second"]))
-            transcript.write_text(transcript.read_text() + "{")
-            self.assertEqual(_parse_transcript_handbacks(str(transcript)), (False, []))
 
     def test_subagent_stop_does_not_fallback_past_an_unreadable_handback_transcript(self) -> None:
         from adapters.claude.lifecycle import subagent_stop_main
@@ -1329,6 +1391,87 @@ class SpawnLifecycleTests(unittest.TestCase):
                  patch("sys.stdin", new=payload):
                 self.assertEqual(subagent_stop_main(), 0)
         self.assertEqual(deliver.call_args.args[2], verdict)
+
+    def test_the_verdict_bearing_message_itself_must_carry_the_one_served_model(self) -> None:
+        """G16 H-01: a verdict message with no served model (or `<synthetic>`) used to inherit an earlier message's model."""
+        from adapters.claude.lifecycle import subagent_stop_main
+        fence = "```empirica-verdict\n" + json.dumps({"verdict": "pass", "findings": ["ok"]}) + "\n```"
+        resolved = ("active-run", _typed(_active_result(children=[{
+            "child_id": "ch-audit", "purpose": "audit", "resource_class": "audit", "state": "pending"}])).result)
+
+        def run(final_model: object) -> tuple[object, object]:
+            final = {"role": "assistant", "content": [{"type": "text", "text": fence}]}
+            if final_model is not ...:
+                final["model"] = final_model
+            with TemporaryDirectory() as directory:
+                transcript = Path(directory) / "child.jsonl"
+                transcript.write_text(json.dumps({"message": {"role": "assistant", "model": "claude-opus-4-8",
+                                                              "content": "Starting audit."}}) + "\n"
+                                      + json.dumps({"message": final}) + "\n")
+                payload = StringIO(json.dumps({"agent_type": "empirica:empirica-auditor", "agent_id": "native-1",
+                                               "agent_transcript_path": str(transcript), "last_assistant_message": fence}))
+                with patch("adapters.claude.lifecycle._resolve", return_value=resolved), \
+                     patch("adapters.claude.lifecycle.application_bridge.trusted_audit_plan",
+                           return_value={"operation_id": "sha256:" + "2" * 64, "role_profile": "empirica:empirica-auditor",
+                                         "argument": {"argument_digest": "sha256:" + "1" * 64, "claims": []}}), \
+                     patch("adapters.claude.lifecycle.application_bridge.trusted_resolve_child", return_value="ch-audit"), \
+                     patch("adapters.claude.lifecycle.AuditProtocol.observe_reviewer"), \
+                     patch("adapters.claude.lifecycle.AuditProtocol.observe_failure") as failed, \
+                     patch("adapters.claude.lifecycle.AuditProtocol.observe_verdict", return_value=True) as deliver, \
+                     patch("sys.stdin", new=payload), patch("sys.stderr", new=StringIO()) as err:
+                    self.assertEqual(subagent_stop_main(), 0)
+            return (failed.call_count, deliver.call_count), err.getvalue()
+
+        for label, model in (("missing", ...), ("synthetic", "<synthetic>"), ("empty", ""), ("another model", "claude-sonnet-5")):
+            with self.subTest(label):
+                counts, said = run(model)
+                self.assertEqual(counts, (1, 0))
+                self.assertIn("served model is unobservable or mixed", said)
+        self.assertEqual(run("claude-opus-4-8")[0], (0, 1), "the bearer carries the one served model")
+
+    def test_the_selected_verdict_and_its_owning_message_are_taken_together(self) -> None:
+        """G17 H2-01 (Astra's handback-hidden variants): a final message holding BOTH a text fence and a handback is the owner
+        of the handback verdict; its own model is the one that counts, never an earlier message's."""
+        from adapters.claude.lifecycle import subagent_stop_main
+        fence = "```empirica-verdict\n" + json.dumps({"verdict": "pass", "findings": ["ok"]}) + "\n```"
+        resolved = ("active-run", _typed(_active_result(children=[{
+            "child_id": "ch-audit", "purpose": "audit", "resource_class": "audit", "state": "pending"}])).result)
+
+        def run(final_model: object, *, hidden: bool = True, earlier_model: object = "claude-opus-4-8") -> tuple[int, int]:
+            content = [{"type": "text", "text": fence}]
+            if hidden:
+                content.append({"type": "tool_use", "name": "SubagentHandback", "input": {"message": fence}})
+            final = {"role": "assistant", "content": content}
+            if final_model is not ...:
+                final["model"] = final_model
+            with TemporaryDirectory() as directory:
+                transcript = Path(directory) / "child.jsonl"
+                transcript.write_text(json.dumps({"message": {"role": "assistant", "model": earlier_model,
+                                                              "content": fence if hidden else "Starting."}}) + "\n"
+                                      + json.dumps({"message": final}) + "\n")
+                payload = StringIO(json.dumps({"agent_type": "empirica:empirica-auditor", "agent_id": "native-1",
+                                               "agent_transcript_path": str(transcript)}))
+                with patch("adapters.claude.lifecycle._resolve", return_value=resolved), \
+                     patch("adapters.claude.lifecycle.application_bridge.trusted_audit_plan",
+                           return_value={"operation_id": "sha256:" + "2" * 64, "role_profile": "empirica:empirica-auditor",
+                                         "argument": {"argument_digest": "sha256:" + "1" * 64, "claims": []}}), \
+                     patch("adapters.claude.lifecycle.application_bridge.trusted_resolve_child", return_value="ch-audit"), \
+                     patch("adapters.claude.lifecycle.AuditProtocol.observe_reviewer"), \
+                     patch("adapters.claude.lifecycle.AuditProtocol.observe_failure") as failed, \
+                     patch("adapters.claude.lifecycle.AuditProtocol.observe_verdict", return_value=True) as deliver, \
+                     patch("sys.stdin", new=payload), patch("sys.stderr", new=StringIO()):
+                    self.assertEqual(subagent_stop_main(), 0)
+            return failed.call_count, deliver.call_count
+
+        for label, model in (("hidden handback, missing model", ...), ("hidden handback, synthetic", "<synthetic>")):
+            with self.subTest(label):
+                self.assertEqual(run(model), (1, 0))
+        self.assertEqual(run("claude-opus-4-8"), (0, 1), "a normal audit still delivers")
+        self.assertEqual(run("claude-sonnet-5"), (1, 0), "known mixed models fail closed")
+        for label, model in (("plain missing", ...), ("plain synthetic", "<synthetic>")):
+            with self.subTest(label):
+                self.assertEqual(run(model, hidden=False), (1, 0))
+        self.assertEqual(run("claude-opus-4-8", hidden=False), (0, 1))
 
     def test_subagent_stop_fails_closed_on_two_conflicting_verdict_fences(self) -> None:
         """Negative control: two different valid fences in assistant text, handback
@@ -1502,49 +1645,76 @@ class ObservationalHookDiagnosticTests(unittest.TestCase):
 
 
 class TranscriptIdentityTests(unittest.TestCase):
+    """The reviewer's model is the served model of the message that carries the verdict (``_audit_outcome``)."""
+    FENCE = "```empirica-verdict\n" + json.dumps({"verdict": "pass", "findings": ["ok"]}) + "\n```"
+
     def _observe(self, rows):
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "child.jsonl"
             path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
-            models, final = lifecycle._parse_transcript_contents(str(path))
-            return (models[0] if len(models) == 1 else None), final
+            return lifecycle._audit_outcome(str(path))[1]
+
+    def _row(self, model, content):
+        return {"message": {"role": "assistant", "model": model, "content": content}}
 
     def test_single_served_model_ignores_synthetic_rows(self):
-        rows = [
-            {"message": {"role": "assistant", "model": "<synthetic>", "content": "retry"}},
-            {"message": {"role": "assistant", "model": "eu.anthropic.claude-opus-4-8",
-                         "content": "verdict"}},
-        ]
-        self.assertEqual(self._observe(rows), ("eu.anthropic.claude-opus-4-8", "verdict"))
+        rows = [self._row("<synthetic>", "retry"), self._row("eu.anthropic.claude-opus-4-8", self.FENCE)]
+        self.assertEqual(self._observe(rows), "eu.anthropic.claude-opus-4-8")
 
     def test_empty_string_model_rows_are_not_served_models(self):
-        rows = [
-            {"message": {"role": "assistant", "model": "", "content": "retry"}},
-            {"message": {"role": "assistant", "model": "eu.anthropic.claude-opus-4-8",
-                         "content": "verdict"}},
-        ]
-        self.assertEqual(self._observe(rows), ("eu.anthropic.claude-opus-4-8", "verdict"))
-        with TemporaryDirectory() as tmp:
-            path = Path(tmp) / "child.jsonl"
-            path.write_text(json.dumps(rows[0]) + "\n")
-            self.assertEqual(lifecycle._parse_transcript_contents(str(path)), ([], "retry"))
+        rows = [self._row("", "retry"), self._row("eu.anthropic.claude-opus-4-8", self.FENCE)]
+        self.assertEqual(self._observe(rows), "eu.anthropic.claude-opus-4-8")
+        self.assertIsNone(self._observe([self._row("", self.FENCE)]))
 
     def test_synthetic_only_and_mid_transcript_switch_are_unobservable(self):
-        synthetic = [{"message": {"role": "assistant", "model": "<synthetic>",
-                                    "content": "error"}}]
-        self.assertEqual(self._observe(synthetic), (None, "error"))
-        switched = [
-            {"message": {"role": "assistant", "model": "model-a", "content": "a"}},
-            {"message": {"role": "assistant", "model": "model-b", "content": "b"}},
-        ]
-        self.assertEqual(self._observe(switched), (None, "b"))
+        self.assertIsNone(self._observe([self._row("<synthetic>", self.FENCE)]))
+        self.assertIsNone(self._observe([self._row("model-a", "a"), self._row("model-b", self.FENCE)]))
 
     def test_malformed_transcript_discards_partial_observation(self):
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "child.jsonl"
-            path.write_text(json.dumps({"message": {"role": "assistant", "model": "model-a"}})
-                            + "\n{broken\n")
-            self.assertEqual(lifecycle._parse_transcript_contents(str(path)), ([], None))
+            path.write_text(json.dumps(self._row("model-a", self.FENCE)) + "\n{broken\n")
+            self.assertEqual(lifecycle._audit_outcome(str(path)), (None, None))
+
+    def test_INVARIANT_the_verdict_is_delivered_iff_one_verdict_is_owned_by_the_one_served_model(self):
+        """G17b item 1: every transcript of 1-3 messages, each with a text verdict / a handback verdict / both / neither
+        (identical or different) and a model observed / missing / synthetic / another, against an oracle written from the rule:
+        delivered iff exactly one distinct verdict is carried, every message that carries it served the one non-synthetic
+        model of the whole transcript, and the reported reviewer is that model."""
+        import itertools
+        A = "```empirica-verdict\n" + json.dumps({"verdict": "pass", "findings": ["a"]}) + "\n```"
+        B = "```empirica-verdict\n" + json.dumps({"verdict": "fail", "findings": ["b"]}) + "\n```"
+        fences = {None: None, "A": A, "B": B}
+        models = {"X": "claude-opus-4-8", "Y": "claude-sonnet-5", "missing": ..., "synthetic": "<synthetic>"}
+
+        def message(text, handback, model):
+            content = []
+            if text:
+                content.append({"type": "text", "text": fences[text]})
+            else:
+                content.append({"type": "text", "text": "Working."})
+            if handback:
+                content.append({"type": "tool_use", "name": "SubagentHandback", "input": {"message": fences[handback]}})
+            row = {"role": "assistant", "content": content}
+            if models[model] is not ...:
+                row["model"] = models[model]
+            return row
+
+        spec = list(itertools.product((None, "A", "B"), (None, "A", "B"), tuple(models)))
+        cases = 0
+        for count in (1, 2, 3):
+            for combo in itertools.product(spec, repeat=count):
+                rows = [message(*item) for item in combo]
+                with patch.object(lifecycle, "_parse_transcript_messages", return_value=rows):
+                    verdict, model = lifecycle._audit_outcome("t")
+                carried = {v for text, handback, _ in combo for v in (text, handback) if v}
+                carriers = [m for text, handback, m in combo if text or handback]
+                real = {m for _, _, m in combo if m in ("X", "Y")}
+                expect_model = next(iter(real)) if len(carried) == 1 and len(real) == 1 and set(carriers) == real else None
+                self.assertEqual(verdict is not None, len(carried) == 1, combo)
+                self.assertEqual(model, models[expect_model] if expect_model else None, combo)
+                cases += 1
+        self.assertGreater(cases, 40000)
 
     def test_subagent_cannot_admit_main_author_evidence(self):
         payload = StringIO(json.dumps({

@@ -18,6 +18,7 @@
         "id": "run-fx",
         "goal": "Prove the public contract is internally consistent.",
         "status": "stopped_budget",
+        "basis": "sha256:9e8745d6be67c59d3117de33ccbb253b19887274a1a49440b51a79d7f86e7f3e",
         "contract": {
           "id": "empirica/public",
           "version": "4.0.0",

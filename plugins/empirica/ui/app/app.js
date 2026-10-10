@@ -36,7 +36,7 @@ document.getElementById("bar").innerHTML = `<div class="flex flex-wrap items-cen
 </div>`;
 document.getElementById("source").addEventListener("change", (e) => { location.search = new URLSearchParams({ data: e.target.value }); });
 // What the header says for each answer the client can give (none for a good one).
-const STATUS = { offline: "app.status.offline", error: "app.status.error", missing: "app.status.missing", invalid: "app.status.invalid" };
+const STATUS = { offline: "app.status.offline", error: "app.status.error", missing: "app.status.missing", invalid: "app.status.invalid", page: "app.status.page" };
 const status = (key) => { document.getElementById("status").textContent = key ? t(key) : ""; };
 
 const main = document.getElementById("main");
@@ -209,7 +209,7 @@ const MARKS = {
 };
 /** Focus goes where the user was: the mark of what was left (found by what it is, not by the node). Where the view is
  * hidden behind the panel, it goes to the panel's title; where the view is still being drawn (it takes its size from
- * the page after the panel closes), the mark is waited for, a few frames at most. */
+ * the page after the panel closes), the mark is waited for, up to 20 frames. */
 function refocus(from, tries = 20) {
   // A step or a file has no mark in the view: focus goes to the nearest level above it that has (its run).
   const left = markedOf(from, byKey) ?? from;
@@ -298,12 +298,12 @@ function refresh(v) {
 }
 async function poll() {
   try {
-    const r = await client.view();
+    const r = await client.view();  // reports every outcome as a value; it never throws
     status(STATUS[r.status] ?? null);
     if (r.status === "changed") refresh(r.view);
   } catch (e) {
     console.error(e);
-    status(STATUS.invalid);  // the last good view stays on screen
+    status(STATUS.page);  // a bug in drawing, not in the observer's answer; the last good view stays on screen
   } finally {
     setTimeout(poll, catalogue.poll_ms);
   }

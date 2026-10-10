@@ -165,7 +165,7 @@ def admission(governance: Mapping) -> str | None:
             "governance.approval_required")
 
 
-def interactions_remaining(governance: Mapping, confirmations: int = 0) -> dict:
+def interactions_remaining(governance: Mapping, confirmations: int) -> dict:
     """Host-dialog presentations left: ``proposal`` for the current plan revision and ``total``.
 
     The one count of human interactions: a configuration receipt and an evidence presentation (ADR-0067,
@@ -177,7 +177,7 @@ def interactions_remaining(governance: Mapping, confirmations: int = 0) -> dict:
             "total": max(0, MAX_INTERACTIONS - len(receipts) - confirmations)}
 
 
-def interaction_error(governance: Mapping, confirmations: int = 0) -> str | None:
+def interaction_error(governance: Mapping, confirmations: int) -> str | None:
     """``governance.interaction_limit`` once either interaction allowance is spent, else ``None``."""
     if min(interactions_remaining(governance, confirmations).values()) == 0:
         return "governance.interaction_limit"
@@ -227,7 +227,7 @@ def configuration_error(state, proposed: Mapping) -> str | None:
 def ceiling_bound(governance: Mapping) -> str:
     """Which text of ``governance.auto_ceiling`` is true (its ``bound``): ``approved`` once a first approval fixed the ceilings (an interactive
     run is held to what it approved), else ``envelope`` (a delegated run is held to the operator's envelope). The core
-    chooses; the contract holds one text per case (F-Q6-2)."""
+    chooses; the contract holds one text per case."""
     return "approved" if governance["first_approval"] else "envelope"
 
 
@@ -257,7 +257,7 @@ def resolve_submission(governance: Mapping, submission: Mapping,
 
 
 def decision_error(run_id: str, governance: Mapping, decision: Mapping,
-                   confirmations: int = 0) -> str | None:
+                   confirmations: int) -> str | None:
     """Validate one governance decision against current policy; ``inert`` signals an exact
     historical replay that must not reopen authority."""
     outcome = decision.get("outcome")

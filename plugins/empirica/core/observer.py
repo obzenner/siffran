@@ -90,7 +90,7 @@ def _step(n: int, item: Mapping[str, Any]) -> dict[str, Any]:
 
 
 #: The reason families the observer shows a human as a claim's blocker or a run's residual, and what such a message
-#: may be: one plain sentence (the presentation rules live in recovery.md and the settlement notices, R3 M3).
+#: may be: one plain sentence (the presentation rules live in recovery.md and the settlement notices).
 UI_REASON_FAMILIES = ("claim.", "evidence.", "audit.", "budget.", "freeze.", "child.")
 UI_MESSAGE_LIMIT = 120
 UI_MESSAGE_BANNED = ("derivation", "receipt", "fold")

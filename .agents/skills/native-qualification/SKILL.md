@@ -25,7 +25,7 @@ Q6): the text arrives as a plain message and no run starts. Keep the whole activ
 Read the [host registry](../../../contracts/empirica/v2/host-profiles.json) and the
 [governance guide](../../../plugins/empirica/skills/empirica/references/governance.md). They are authoritative. Use an
 already prepared supported executable; an out-of-range installation is **BLOCKED**, not permission to upgrade global
-tools. Codex Empirica is unsupported for convergence.
+tools. Empirica is not available on Codex.
 
 The operator's first message, the goal given at activation, tells the author to pause at every operator checkpoint
 (model switch, `/compact`) and wait for the operator to say go before continuing. Without it the author runs straight

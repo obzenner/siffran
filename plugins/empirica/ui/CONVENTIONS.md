@@ -32,7 +32,7 @@
 5. **No runtime build.** Dev-only Node tools produce committed artefacts. The shipped UI is static files served
    from 127.0.0.1 or opened from disk, with no CDN and no network.
 6. **No slop.** No dead code, no unused tokens, classes, copy keys or elements, no commented-out code, and no
-   "just in case" options. **[enforced: lint + unused-key check]**
+   "just in case" options. **[enforced: `scripts/audit.mjs` unused-key and unused-token checks; planned: the lint]**
 
 ## 1. Layout of the tree
 
@@ -87,11 +87,10 @@ Nobody runs `npx` by hand. **[enforced: Makefile]**
     `state-failed`, …);
   - **component**, rarely and only when a semantic token isn't enough (`badge-verified-bg`).
 
-  Elements and pages may use semantic and component tokens only. **[enforced: tailwind theme contains only
-  semantic/component tokens]**
+  Elements and pages may use semantic and component tokens only. **[enforced: `scripts/audit.mjs` T1/T8 over the Tailwind theme and the sources; planned: a theme-only lint]**
 - **T3. Tailwind defaults are erased**: `--color-*: initial; --spacing-*: initial; --text-*: initial;
   --radius-*: initial; --shadow-*: initial;`. Only our tokens exist, so an off-palette class does not compile.
-  **[enforced: no-unknown-classes]**
+  **[planned: no-unknown-classes lint; `dist/ui.css` is built from our tokens only]**
 - **T4a.** **Use a Basecoat component wherever one exists** (`card`, `badge`, `item`, `btn`, `select`, `tabs`),
   adding only tone classes. This keeps our elements thin and lets the Basecoat style pack (shape, roundness, density)
   apply everywhere. **[review]**
@@ -158,7 +157,7 @@ Nobody runs `npx` by hand. **[enforced: Makefile]**
   - At most three text sizes on one screen. **[review]**
 - **V7. Room to breathe:**
   - Spacing comes **only** from layout primitives (§4, `L*`); atoms never carry outer margins.
-  - The default gap between unrelated groups is `l` or more. **[enforced: restricted classes m-*/mx-*/... inside
+  - The default gap between unrelated groups is `l` or more. **[planned: restricted classes m-*/mx-*/... inside
     atoms]**
 
 ## 4. Elements: atomic design (E) and layout (L)
@@ -166,12 +165,12 @@ Nobody runs `npx` by hand. **[enforced: Makefile]**
 Hierarchy (Brad Frost): **atoms → molecules → organisms → templates → pages**.
 
 - **E1. Custom elements, light DOM, `ev-` prefix**, one file per element at the right level. There is no shadow
-  DOM, so Tailwind and Basecoat apply and the DOM stays inspectable. **[enforced: manifest + path check]**
+  DOM, so Tailwind and Basecoat apply and the DOM stays inspectable. **[planned: manifest + path check]**
 - **E2. Inputs:**
   - Attributes for scalars (`state`, `kind`, `count`, `label-key`).
   - The `.data` property for structured input (a claim, a graph).
   - Attribute values come from closed vocabularies, declared as enums in JSDoc, so they land in the manifest.
-    **[enforced: manifest enum check]**
+    **[planned: manifest enum check]**
 - **E3. Rendering is a pure function of inputs.**
   - No `fetch`, no timers, no global state, no reading other elements.
   - Re-render on `attributeChangedCallback` and on a `.data` setter. **[review; `scripts/audit.mjs` finds an observed attribute nothing sets (E10)]**
@@ -201,7 +200,7 @@ Hierarchy (Brad Frost): **atoms → molecules → organisms → templates → pa
   - keyboard reachable if interactive;
   - visible focus.
 
-  **[enforced: axe-core on the gallery]**
+  **[planned: axe-core on the gallery]**
 - **E9. Atom budget.** Atoms take ≤ 4 attributes, molecules compose atoms and add only layout, and organisms own
   interaction state such as selection and expansion. An element that outgrows its level moves up. **[review]**
 
@@ -232,7 +231,7 @@ Every element declares which levels it supports, in JSDoc, recorded in the manif
 | **2 detail** | a short card in the side panel | click / Enter | plain sentences, the 3–6 facts a reviewer acts on |
 | **3 technical** | ids, digests, commands, raw JSON | "Technical details" disclosure inside the panel | the only place codes and hashes appear |
 
-- **D1.** Level 0 never shows ids, digests, sequence numbers or abbreviations. **[enforced: copy lint on level-0/1
+- **D1.** Level 0 never shows ids, digests, sequence numbers or abbreviations. **[planned: copy lint on level-0/1
   keys]**
 - **D2.** Detail opens in **one non-modal side panel** (`ev-split`) next to the content, never in a sheet that covers
   or blurs it. The main view stays visible and scrollable, and the divider is draggable (and keyboard-movable), with
@@ -258,8 +257,7 @@ Every element declares which levels it supports, in JSDoc, recorded in the manif
 
 - **C1.**
   - Every visible string is a key in `copy/en.json`; no literals in elements or pages.
-  - The copy catalogue also holds the accessible names and the level-1 hints. **[enforced: lint for string
-    literals in render output; unused-key check]**
+  - The copy catalogue also holds the accessible names and the level-1 hints. **[enforced: `scripts/audit.mjs` literal-text and unused-key checks]**
 - **C2. Empirica's vocabulary, unchanged.**
   - Labels use the plugin's own terms: claim, claim graph, research, spike, spike request, audit, auditor, author,
     governance, observation, passes, spawns, audit spawns, needs-experiment / needs-decision / ordinary, and the run
@@ -306,7 +304,7 @@ Every element declares which levels it supports, in JSDoc, recorded in the manif
   - **axe-core:** 0 violations;
   - **visual snapshots:** light, dark, greyscale, no-JS and narrow (360 px).
 
-  **[enforced: ui-check]**
+  **[planned: ui-check]**
 - **G3.** A design change is reviewed on the gallery first and assembled into pages second. **[review]**
 - **G4.** Every vocabulary in `states.json` is shown by the gallery, each value (`catalogue.json`
   `gallery_state_domains`, or `gallery_other_domains` for those its step strip shows). **[enforced: audit G4]**

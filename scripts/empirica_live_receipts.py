@@ -15,6 +15,8 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins" / "empirica"))
 from adapters.git.artifact_repo import ref_component, tree_path  # noqa: E402 - the one owner of the refname derivation
 from application.snapshot import HistoryCorrupt, committed_artifacts, index_artifacts, manifest_chain  # noqa: E402
+from core import confirmation  # noqa: E402
+from core.citations import RETRIEVAL_KINDS  # noqa: E402
 from core.records import Artifact  # noqa: E402
 
 FORMAT = "empirica-live-receipt/v3"
@@ -204,8 +206,8 @@ def run_handle(state_path: Path) -> str:
     return "er2:" + _b64url(payload) + ":" + _b64url(hashlib.sha256(payload).digest())
 
 
-_RETRIEVAL_KINDS = ("local", "web", "workspace")
-_EVIDENCE_KINDS = ("evidence_presentation", "evidence_confirmation")
+_RETRIEVAL_KINDS = RETRIEVAL_KINDS  # the owners' vocabularies (core.citations, core.confirmation), not copies
+_EVIDENCE_KINDS = (confirmation.PRESENTATION, confirmation.KIND)
 
 
 def audit_retrieval(state: dict) -> list[str]:
@@ -654,8 +656,7 @@ def _version_in_range(version: Any, minimum: str, maximum_exclusive: str) -> boo
     """Whether ``version`` is an exact semver in ``[minimum, maximum_exclusive)`` (numeric comparison)."""
     if not isinstance(version, str) or _SEMVER.fullmatch(version) is None:
         return False
-    parts = tuple(int(part) for part in version.split("."))
-    return tuple(int(p) for p in minimum.split(".")) <= parts < tuple(int(p) for p in maximum_exclusive.split("."))
+    return _version_tuple(minimum) <= _version_tuple(version) < _version_tuple(maximum_exclusive)
 
 
 def _inside(path: Any, root: Any) -> bool:
@@ -681,9 +682,10 @@ def host_runtime_rejection(policy: dict | None, host_runtime: Any) -> str | None
     if not isinstance(host_runtime, dict) or not isinstance(host_runtime.get("subagents"), dict):
         return "malformed"
     subagents = host_runtime["subagents"]
-    optional = {"reviewed"}  # an absent value reads as not reviewed
-    if set(host_runtime) != {"policy_id", "subagents"} \
-            or not set(_SUBAGENTS_RECORDED) - optional <= set(subagents) <= set(_SUBAGENTS_RECORDED):
+    required = set(_SUBAGENTS_RECORDED) - {"reviewed"}  # an absent `reviewed` reads as not reviewed
+    if set(host_runtime) != {"policy_id", "subagents"}:
+        return "malformed"
+    if not required <= set(subagents) or not set(subagents) <= set(_SUBAGENTS_RECORDED):
         return "malformed"
     if host_runtime["policy_id"] != policy["policy_id"]:
         return "policy"

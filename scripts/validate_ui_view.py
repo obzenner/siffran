@@ -16,7 +16,6 @@ Three kinds of check, each a pure function returning one line per problem:
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import sys
@@ -33,6 +32,7 @@ sys.path.insert(0, str(ROOT / "plugins/empirica"))
 
 from application.history_records import HISTORY_KINDS  # noqa: E402
 from core import citations, confirmation  # noqa: E402
+from core.canonical import canonical_digest  # noqa: E402
 from core.observer import message_problems, ENDED, EVIDENCE_KINDS, REVIEW_STATES, SPENT_ROUTES  # noqa: E402
 
 #: The routes a pending human-owned confirmation can read as: where it goes, or why nobody will ask.
@@ -121,8 +121,7 @@ def token_of(view: dict) -> str:
     in order (compact, sorted)."""
     pairs = [[p["id"], p["name"], p["repo"], [[run["key"], run["version"]] for run in p["runs"]]]
              for p in view["projects"]]
-    text = json.dumps(pairs, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return canonical_digest(pairs)
 
 
 def _newest(run: dict) -> tuple:

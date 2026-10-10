@@ -35,7 +35,8 @@ RETRIEVAL_KINDS = (LOCAL, WEB, WORKSPACE)
 PROBLEMS = ("source_ref_form", "file_unavailable", "lines_out_of_range", "text_not_found",
             "spike_reason_missing")
 
-_REF = re.compile(r"\A(?P<path>[^\s:;,]+)(?::(?P<lines>\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*))?\Z")
+_SELECTOR = re.compile(r"\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*")
+_REF = re.compile(rf"\A(?P<path>[^\s:;,]+)(?::(?P<lines>{_SELECTOR.pattern}))?\Z")
 _URL = re.compile(r"\Ahttps?://\S+\Z", re.IGNORECASE)
 _ELLIPSIS = re.compile(r"\s*(?:…|\.\.\.)\s*")
 
@@ -79,7 +80,6 @@ def cited_file(source_kind: str, source_ref: str) -> str | None:
     return _workspace_path(source_ref)
 
 
-_SELECTOR = re.compile(r"\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*")
 _SUFFIX = re.compile(r":([0-9,\-]*)\Z")
 
 
@@ -87,7 +87,7 @@ def split_selector(ref: str) -> tuple[str, str | None] | None:
     """``(path, selector)`` for a ref, or ``None`` when its suffix is malformed or ambiguous.
 
     Only a trailing ``:N``, ``:N-M`` or comma-separated list of those is a line selector; everything before it is
-    the path, colons included. A trailing ``:`` followed by nothing, or by digits, commas and dashes that do not form
+    the path, colons included (a workspace ref excludes colons: ``_REF`` refuses them in the path). A trailing ``:`` followed by nothing, or by digits, commas and dashes that do not form
     the grammar (``:12-``, ``:1,,2``), is refused rather than cut at an arbitrary colon."""
     ref = ref.strip()
     suffix = _SUFFIX.search(ref)
