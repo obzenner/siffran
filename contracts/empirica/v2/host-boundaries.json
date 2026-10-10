@@ -579,7 +579,7 @@
         "EHB-DLG-06",
         "EHB-DLG-07"
       ],
-      "sources": "ADR-67 (\"One decision per item\", \"Human receipt\"), HEATH AS3; tests `V2/test_evidence_hosts.py::MediatorTests::test_cancel_timeout_decline_and_malformed_answers_grant_nothing`, `::test_later_grants_nothing_and_the_presentation_stays_spent`, `::test_a_dialog_that_raises_grants_nothing`, `V2/test_evidence_scenarios.py::BatchSizeCells::test_a_decline_or_cancel_that_carries_content_grants_nothing`, `PT/evidence-ui.test.ts`."
+      "sources": "ADR-67 (\"One decision per item\", \"Human receipt\"), HEATH AS3; tests `V2/test_evidence_hosts.py::MediatorTests::test_cancel_timeout_decline_and_malformed_answers_grant_nothing`, `::test_later_grants_nothing_and_an_explicit_report_asks_again_within_the_ceiling`, `::test_a_dialog_that_raises_grants_nothing`, `V2/test_evidence_scenarios.py::BatchSizeCells::test_a_decline_or_cancel_that_carries_content_grants_nothing`, `PT/evidence-ui.test.ts`."
     },
     {
       "id": "HX-INT-01",
@@ -1577,11 +1577,12 @@
       "control_modes": [
         "any"
       ],
-      "setup": "already presented, derivation unchanged",
+      "setup": "already presented and left on Later, cancel or timeout, derivation unchanged",
       "action": "report",
-      "expected": "`already_presented`; not asked again",
+      "expected": "the view says `already_presented` and nothing asks again by itself; an explicit report asks again, one interaction each, until `interaction_limit`",
       "covered_by": [
-        "plugins/empirica/tests/v2/test_evidence_scenarios.py::HumanSurfaceCells::test_D_later_cancel_and_timeout_are_spent_and_a_changed_derivation_asks_again"
+        "plugins/empirica/tests/v2/test_evidence_scenarios.py::HumanSurfaceCells::test_D_later_cancel_and_timeout_grant_nothing_and_an_explicit_report_asks_again",
+        "plugins/empirica/tests/v2/test_evidence_hosts.py::MediatorTests::test_asking_again_stops_at_the_interaction_ceiling"
       ],
       "ledger_rows": [
         "ev_later_then_fresh_get_run"
@@ -1688,7 +1689,7 @@
       "action": "Later",
       "expected": "`no-decision`, derivation spent",
       "covered_by": [
-        "plugins/empirica/tests/v2/test_evidence_hosts.py::MediatorTests::test_later_grants_nothing_and_the_presentation_stays_spent"
+        "plugins/empirica/tests/v2/test_evidence_hosts.py::MediatorTests::test_later_grants_nothing_and_an_explicit_report_asks_again_within_the_ceiling"
       ],
       "ledger_rows": [
         "ev_later_cancel_timeout"

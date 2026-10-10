@@ -808,10 +808,12 @@ def _human_batch_block(snapshot: EvaluationSnapshot) -> Decision | None:
 
 
 def plan_evidence_presentation(snapshot: EvaluationSnapshot, payload: Mapping[str, Any]) -> Decision:
-    """Purely record that the host showed the human the batch it names, once per batch key.
+    """Purely record that the host showed the human the batch it names.
 
-    The receipt id names the presentation; sending it again is ``Inert``. A second presentation of a key
-    already presented, or of nothing, is a conflict. Each presentation spends one human interaction."""
+    The receipt id names the presentation; sending it again is ``Inert``. A presentation of nothing is a conflict. Each
+    presentation spends one human interaction, so the interaction ceiling is what bounds asking: a batch left on Later,
+    cancelled or timed out may be shown again by an explicit report (G14, ADR-0067); only the host's explicit
+    ``report_convergence`` presents, never a Stop pause or an auto continuation."""
     state = snapshot.state
     if (blocked := _human_batch_block(snapshot)) is not None:
         return blocked
@@ -820,8 +822,8 @@ def plan_evidence_presentation(snapshot: EvaluationSnapshot, payload: Mapping[st
     batch = next((b for b in batch_candidates(snapshot, derive_claims(snapshot)) if b["key"] == payload["key"]), None)
     # The presentation names the batch the host showed; any other (a record joined, a wording changed) is refused
     # and nothing is spent, so what a human was shown is exactly what is recorded as presented.
-    # The terminal question is spent per request: each explicit stop that reaches it may be presented again (bounded below).
-    if batch is None or (confirmation.presented(snapshot, batch["key"]) and not confirmation.is_terminal(batch)):
+    # A batch already shown may be shown again by the next explicit report (bounded below by the interaction ceiling).
+    if batch is None:
         return _decision(snapshot, state, "Fault", reason="conflict")
     if governance.interactions_remaining(
             state.governance, confirmation.interactions(snapshot))["total"] == 0:
@@ -1166,7 +1168,8 @@ def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent:
                     ceiling = next(k for k, used in governance.CEILINGS.items() if proposed["budgets"][k] < state.budgets[used])
                     resource = governance.BUDGETS[ceiling].resource
                     return _decision(snapshot, state, "Block", reason="budget.exhausted", parameters={"resource": resource})
-                return _decision(snapshot, state, "Block", reason=reason)
+                return _decision(snapshot, state, "Block", reason=reason,
+                                 parameters=governance.refusal_parameters(state.governance, reason))
             if reason := governance.revision_error(state.governance, state.goal, proposed):
                 return _decision(snapshot, state, "Block", reason=reason)
             try:

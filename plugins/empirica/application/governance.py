@@ -72,7 +72,8 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                 if outcome == "approve":
                     reason = policy.configuration_error(state, governed["proposal"])
                     if reason:
-                        return c._block_from_snapshot(snapshot, rid, reason, presentation=True)
+                        return c._block_from_snapshot(snapshot, rid, reason, policy.refusal_parameters(governed, reason),
+                                                      presentation=True)
                     governed.update(state="approved", approved_digest=governed["proposal_digest"],
                                     approval_kind=payload["approval_kind"], first_approval=True)
                     next_state = replace(state,
@@ -82,7 +83,8 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                     proposed = {**decision["amendment"],
                                 "rationale": governed["proposal"]["rationale"]}
                     if reason := policy.configuration_error(state, proposed):
-                        return c._block_from_snapshot(snapshot, rid, reason, presentation=True)
+                        return c._block_from_snapshot(snapshot, rid, reason, policy.refusal_parameters(governed, reason),
+                                                      presentation=True)
                     if reason := policy.revision_error(governed, state.goal, proposed):
                         return c._block_from_snapshot(snapshot, rid, reason, presentation=True)
                     governed = policy.revise(state.goal, governed, proposal=proposed)

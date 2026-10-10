@@ -1,6 +1,6 @@
 {
   "id": "empirica/public",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "protocol": "empirica/v2",
   "commands": [
     "StartRun",
@@ -1587,7 +1587,17 @@
       "params": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "required": [
+          "bound"
+        ],
+        "properties": {
+          "bound": {
+            "enum": [
+              "approved",
+              "envelope"
+            ]
+          }
+        }
       },
       "next_actions": [
         "run.start_fresh",
@@ -1596,7 +1606,12 @@
       "sections": [
         "governance"
       ],
-      "message": "Auto cannot increase operational ceilings, including audit retries, and a delegated proposal cannot exceed the 8/1/2 policy envelope. Reduce scope or use an approval-capable host interactively; after exhaustion, start a fresh run with the larger approved size."
+      "message": "Auto cannot increase operational ceilings, including audit retries. The bound in the parameters says which text applies; the core chooses it from whether the run was already approved.",
+      "case_messages": {
+        "approved": "Auto cannot raise the approved ceilings; lower or keep them, or start a fresh run with a larger approved size.",
+        "envelope": "A delegated proposal cannot exceed the 8/1/2 policy envelope (or the narrower limit the operator set): reduce scope, or use an approval-capable host interactively."
+      },
+      "case_parameter": "bound"
     },
     "governance.budget_contradictory": {
       "params": {
@@ -1993,7 +2008,7 @@
         },
         {
           "id": "evidence/research/confirmation",
-          "text": "A pending confirmation is part of its claim's obligation from the response that records the research. A claim whose only support waits on a human is not approved, and a run with pending human confirmations cannot report convergence. The host records one presentation of the pending set per derivation (it spends one human interaction); the human answers in one receipt that names it, one decision per item; an item left out stays pending and is not shown again until the derivation changes. A host with no human ingress leaves the requirement open as unavailable."
+          "text": "A pending confirmation is part of its claim's obligation from the response that records the research. A claim whose only support waits on a human is not approved, and a run with pending human confirmations cannot report convergence. The host records a presentation of the pending set (it spends one human interaction); the human answers in one receipt that names it, one decision per item; an item left out stays pending, and nothing asks again by itself, but the next explicit report may show it again until the run's human interactions are spent. A host with no human ingress leaves the requirement open as unavailable."
         }
       ]
     },
@@ -2428,7 +2443,7 @@
   },
   "settlement_notices": {
     "human_wait": "Empirica is paused for human governance input, not converged. Investigation remains blocked; no approval was granted by this pause.",
-    "evidence_wait": "Empirica is paused: research evidence is waiting for your confirmation, and the run is not converged. No confirmation was granted by this pause. The agent presents it to you at the end of its next pass; if you leave it on Later or close the dialog it is not shown again for the same work, and the run must change or be accepted as a residual.",
+    "evidence_wait": "Empirica is paused: research evidence is waiting for your confirmation, and the run is not converged. No confirmation was granted by this pause. The agent presents it to you at the end of its next pass; if you leave it on Later or close the dialog it is shown again only when you tell the agent to report once more (each showing spends one of the run's human interactions), and otherwise the run must change or be accepted as a residual.",
     "budget_exhausted": "Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this pause. Stop honestly (report_convergence intent=stop), or in deliberative mode propose a raise for human approval; in auto mode start a fresh run.",
     "evidence_report": "Research evidence is waiting for your confirmation, and the run is not converged. Call report_convergence now: the human is asked inside that call, if this host can show a dialog. No confirmation was granted by this block.",
     "paused_for_human": "Empirica is paused for you, not converged: {reason} Nothing was approved or confirmed by this pause, and nobody was asked. The run stays open: tell the agent to carry out that step, or end the run.",
@@ -2485,7 +2500,7 @@
       "waiting_none_error": "a human can be asked at the end of your next pass",
       "waiting_unavailable": "no human can be asked in this session",
       "waiting_unobserved": "a human is asked when you report, if this host can show a dialog",
-      "waiting_already_presented": "already shown; only a changed derivation asks again",
+      "waiting_already_presented": "already shown; an explicit report_convergence asks again, within the interaction limit",
       "waiting_interaction_limit": "the human interaction limit is reached",
       "waiting_surface_unrecorded": "the host could not tell whether a human can be asked, so nobody was asked; stop honestly, or report again after a change",
       "waiting_presentation_failed": "the host could not show the confirmation dialog, so nobody was asked; stop honestly, or report again after a change",

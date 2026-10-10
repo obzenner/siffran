@@ -1712,10 +1712,26 @@ class GovernanceServiceTests(unittest.TestCase):
 
     def test_delegated_auto_envelope_refuses_oversize_before_first_approval(self):
         self._prepare_auto(DELEGATED_INVOCATION)
-        self.assertEqual(self.action(**sized_configure_run(
+        refused = self.action(**sized_configure_run(
             budgets={**SIZED_BUDGETS, "max_passes": 9}, rationale=SIZED_RATIONALE))
-            ["reasons"][0]["code"], "governance.auto_ceiling")
+        self.assertEqual(refused["reasons"][0]["code"], "governance.auto_ceiling")
         self.assertEqual(self.view()["governance"]["state"], "pending")
+        # F-Q6-2: the envelope case says the envelope, and none of the other case.
+        row = refused["reasons"][0]
+        self.assertEqual(row["parameters"], {"bound": "envelope"})
+        self.assertIn("8/1/2", row["message"])
+        self.assertNotIn("approved ceilings", row["message"])
+
+    def test_the_approved_ceilings_case_is_worded_for_the_approved_ceilings(self):
+        """F-Q6-2: after the first approval an interactive run is held to what it approved; it must not be told about a
+        delegated policy envelope it was never under."""
+        self._prepare_auto(DELEGATED_INVOCATION)
+        self.assertEqual(self.admit(self.decision(approval_kind="auto"))["type"], "Allow")
+        row = self.action(**sized_configure_run(
+            budgets={**SIZED_BUDGETS, "max_passes": 9}, rationale=SIZED_RATIONALE))["reasons"][0]
+        self.assertEqual(row["parameters"], {"bound": "approved"})
+        self.assertEqual(row["message"], "Auto cannot raise the approved ceilings; lower or keep them, or start a fresh run "
+                                         "with a larger approved size.")
 
     def test_every_ceiling_raise_is_refused_after_auto_approval(self):
         interactive = {"host": "test", "interactive": True,

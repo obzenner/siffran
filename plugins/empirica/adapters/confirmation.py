@@ -22,7 +22,7 @@ from uuid import uuid4
 
 from adapters import bridge
 from application import protocol
-from core.confirmation import is_terminal
+from core.confirmation import REPRESENTABLE, is_terminal
 from core.evaluation import TERMINAL_STATUSES, terminal_key
 from core.projection import project_host_failure, project_prompt_error
 
@@ -100,10 +100,12 @@ def presentable(result: object) -> dict[str, Any] | None:
     """The run view's ``confirmation_batch`` when a human can be shown it now, else ``None``.
 
     The core projects the batch whatever else blocks the run and says why it cannot be shown
-    (``prompt_error``); the host presents exactly when there is a batch and no error. It decides nothing."""
+    (``prompt_error``); the host presents exactly when there is a batch and no error, or the only thing against it is that
+    it was already shown (``already_presented``): this runs only inside an explicit ``report_convergence``, which may ask
+    again, and the core's interaction ceiling (``interaction_limit``) bounds it. It decides nothing."""
     run = result.get("run") if isinstance(result, dict) else None
     batch = run.get("confirmation_batch") if isinstance(run, dict) else None
-    return batch if isinstance(batch, dict) and batch.get("prompt_error") is None else None
+    return batch if isinstance(batch, dict) and batch.get("prompt_error") in REPRESENTABLE else None
 
 
 def _call(profile: str, run_id: str, command: dict, dispatch: Callable[..., dict]) -> dict[str, Any]:

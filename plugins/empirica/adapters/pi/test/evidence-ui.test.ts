@@ -130,9 +130,19 @@ test("print and JSON (no UI), or a UI without select/input: nothing is presented
   }
 });
 
+test("G14: a batch left on Later is shown again by an explicit report, until the core's ceiling says otherwise", async () => {
+  for (const [promptError, asks] of [[null, 1], ["already_presented", 1], ["interaction_limit", 0], ["unavailable", 0]] as const) {
+    const { ctx } = ctxFor({ selects: ["Confirm"], inputs: [""] });
+    const { trusted, calls } = bridge([RECORD]);
+    const result = await run(ctx, trusted, blocked("human", promptError));
+    assert.equal(calls.filter((call) => call.operation === "evidence_presentation").length, asks, String(promptError));
+    assert.equal(result === refreshed, asks === 1, String(promptError));
+  }
+});
+
 test("nothing is presented without a batch the core says can be shown; another blocker does not stop it", async () => {
   const noBatch = { ...blocked(), result: { ...blocked().result, run: { id: "run-1", status: "active", confirmation_batch: null } } } as unknown as Response;
-  for (const response of [blocked("unavailable"), blocked("human", "already_presented"), blocked("human", "interaction_limit"),
+  for (const response of [blocked("unavailable"), blocked("human", "interaction_limit"),
     noBatch, refreshed]) {
     const { ctx } = ctxFor({ selects: ["Confirm"], inputs: [""] });
     const { trusted, calls } = bridge([RECORD]);

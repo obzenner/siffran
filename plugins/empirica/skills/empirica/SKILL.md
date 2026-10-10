@@ -42,6 +42,9 @@ Identify the exact active host surface from the tools and lifecycle already pres
   (the range and the reviewed versions are listed in the README); one inside it with no compat record is admitted
   and shown as not reviewed. Any other state is a `host.subagents_*`
   refusal.
+- **Non-interactive Pi or Claude (print, JSON, SDK):** no human can approve a configuration or confirm evidence, so a
+  deliberative run is refused. Auto runs only with the operator's `EMPIRICA_AUTO_DELEGATION=1`; without it the start is
+  refused with the reason on stderr and exit code 1.
 - **Codex:** Empirica does not run on Codex.
 - **Unknown, partial, or outside a qualified compatibility range:** stop as unsupported pending
   qualification rather than borrowing another profile's capabilities. After admission, consult

@@ -65,7 +65,7 @@ AUDIT_CHILD_TOOL_VOCABULARY = frozenset({"read", "grep", "find", "ls", "contact_
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:7200c601ae9a3ae27ec1e135a27b645f27ffc867997c0c9d79240c1299f52bfb"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
-REGISTRY_VERSION = "3.0.0"
+REGISTRY_VERSION = "4.0.0"
 PROTOCOL = "empirica/v2"
 # Structural D1 constants that have no canonical-JSON vocabulary of their own: edge
 # types and research source kinds. Artifact kind/outcome/spike-gate vocabularies ARE

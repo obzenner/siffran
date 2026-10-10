@@ -303,4 +303,6 @@ configuration approval from independently audited convergence.
 * **No dialog.** On a host that cannot show one (a route `unavailable`, a failed presentation) the step stays blocked with the same reason. That fails closed: a deliberative run on such a host cannot end non-converged.
 * **Not a terminal state.** No answer other than an accepted receipt produces a terminal state, and a refusal is never one.
 
+The auto-ceiling refusal (`governance.auto_ceiling`) is worded for its case, chosen by the core as the `bound` parameter: `approved` after a first approval ("Auto cannot raise the approved ceilings"), `envelope` before it in a delegated run (the 8/1/2 policy envelope or the narrower limit the operator set), so an interactive run is never told about an envelope it was not under (G14).
+
 Confirmation: per host, tests for accept, decline, cancel, timeout and no UI; a test per auto mode that the step is unchanged; a native qualification row (`terminal_stop_consent`) for Claude and Pi.

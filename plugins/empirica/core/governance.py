@@ -224,6 +224,18 @@ def configuration_error(state, proposed: Mapping) -> str | None:
     return None  # before first approval, interactive auto / deliberative: schema bounds only
 
 
+def ceiling_bound(governance: Mapping) -> str:
+    """Which text of ``governance.auto_ceiling`` is true (its ``bound``): ``approved`` once a first approval fixed the ceilings (an interactive
+    run is held to what it approved), else ``envelope`` (a delegated run is held to the operator's envelope). The core
+    chooses; the contract holds one text per case (F-Q6-2)."""
+    return "approved" if governance["first_approval"] else "envelope"
+
+
+def refusal_parameters(governance: Mapping, reason: str) -> dict[str, str]:
+    """The typed parameters of a configuration refusal: only ``governance.auto_ceiling`` has any (its ``bound``)."""
+    return {"bound": ceiling_bound(governance)} if reason == "governance.auto_ceiling" else {}
+
+
 def resolve_submission(governance: Mapping, submission: Mapping,
                        actions: tuple[tuple[str, Mapping], ...]) -> tuple[dict | None, str | None]:
     """Resolve one raw human choice using the finite application-supplied policy.

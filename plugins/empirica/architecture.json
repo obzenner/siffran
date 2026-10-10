@@ -150,7 +150,7 @@
   "required_contract_references": {
     "public_contract": "contracts/empirica/v2/public-contract.json",
     "id": "empirica/public",
-    "version": "3.0.0",
+    "version": "4.0.0",
     "protocol": "empirica/v2"
   },
   "required_profile_references": {

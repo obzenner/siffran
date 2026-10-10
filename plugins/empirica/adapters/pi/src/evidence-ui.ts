@@ -24,6 +24,14 @@ export function presentableBatch(result: Response["result"]): ConfirmationBatch 
   return batch && batch.prompt_error === null ? batch : null;
 }
 
+/** The batch an explicit report may show (`confirmEvidence`): presentable, or only already shown, which Later, cancel and
+ * timeout leave open. The core's interaction ceiling bounds it (`interaction_limit` is not here). Python: `REPRESENTABLE`. */
+export function askableBatch(result: Response["result"]): ConfirmationBatch | null {
+  const run = "run" in result ? result.run : undefined;
+  const batch = run?.status === "active" ? run.confirmation_batch : null;
+  return batch && (batch.prompt_error === null || batch.prompt_error === "already_presented") ? batch : null;
+}
+
 /** The presentation question: can THIS host show the sole evidence blocker to a human now? True only when the confirmation is
  * the sole blocker (the core returns it only when nothing else blocks), its route is `human`, and the batch is presentable
  * (`prompt_error` null: not shown for this derivation, interactions left). Otherwise the block stands with its real reason.
@@ -129,7 +137,7 @@ export async function observeSurface(runId: string, ctx: ExtensionContext, trust
 export async function confirmEvidence(response: Response, runId: string, ctx: ExtensionContext,
                                       trusted: PrivateIngress, reevaluate: (hostFailure?: HostFailure) => Promise<Response>,
                                       deadline: number): Promise<{ response: Response; failure?: HostFailure }> {
-  const batch = presentableBatch(response.result);
+  const batch = askableBatch(response.result);
   if (batch === null) return { response };
   if (!ctx.hasUI || !ctx.ui.select || !ctx.ui.input) return { response, failure: "presentation_failed" };
   let shown = false;

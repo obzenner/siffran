@@ -154,7 +154,7 @@ function validContractResult(value: unknown): boolean {
   if (value.target === "index") {
     const index = value.index;
     return objectWithKeys(index, ["id", "version", "sections", "reasons", "next_actions"])
-      && index.id === "empirica/public" && index.version === "3.0.0"
+      && index.id === "empirica/public" && index.version === "4.0.0"
       && rows(index.sections, ["id", "title"], ["id", "title"])
       && Array.isArray(index.reasons) && unique(index.reasons) && index.reasons.every((reason) =>
         objectWithKeys(reason, ["code", "sections"]) && text(reason.code)

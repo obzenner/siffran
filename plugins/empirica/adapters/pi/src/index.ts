@@ -27,6 +27,7 @@ import { govern, governanceTimeout, piGovernanceContext, refreshGovernance, sett
 import type {
   ExtensionAPI,
   ExtensionContext,
+  NotifyType,
   BoundaryEvent,
   ToolCallEvent,
   ToolCallResult,
@@ -148,6 +149,12 @@ export interface ResolvedAuditContract {
   agentScope: "project" | "user";
   /** What the auditor is observed to retrieve (preflight effectiveAllowlist); recorded at start, re-sent at launch. */
   auditRetrieval: readonly RetrievalKind[];
+  /** Where the model came from: an explicit per-agent override, a default/the main model, or a pick from `enabledModels`. */
+  source?: "override" | "default" | "main" | "enabledModels";
+  /** The models the user enabled, in Pi's order, as `provider/id` and available now (candidates for another class). */
+  candidates?: readonly string[];
+  /** Set when the model was picked from `enabledModels`: the configured model it replaced. */
+  replaced?: string;
 }
 /** Resolves the audit launch contract through the bound owner's preflight, exact version, and inventory. */
 export type AuditContractResolver = (
@@ -169,6 +176,38 @@ export function resolvePiAuditorModel(global: Record<string, unknown>, project: 
   return model;
 }
 
+/** Whether the auditor model is an explicit per-agent override (never replaced), a default, or the main model. */
+export function piAuditorModelSource(global: Record<string, unknown>, project: Record<string, unknown>)
+    : "override" | "default" | "main" {
+  const subagents = (scope: Record<string, unknown>) => scope.subagents as Record<string, unknown> | undefined;
+  const override = (scope: Record<string, unknown>) =>
+    (subagents(scope)?.agentOverrides as Record<string, { model?: unknown }> | undefined)?.["empirica.empirica-auditor"]?.model;
+  if (typeof override(project) === "string" || typeof override(global) === "string") return "override";
+  return typeof subagents(project)?.defaultModel === "string" || typeof subagents(global)?.defaultModel === "string"
+    ? "default" : "main";
+}
+
+/**
+ * The models the user enabled (Pi `enabledModels`: project settings replace user settings, as Pi documents), expanded
+ * against the models available now, in the user's order. An entry is `provider/id` or `id`, with an optional trailing
+ * thinking level, and may use `*` globs (the `--models` pattern format).
+ */
+export function enabledAuditorCandidates(global: Record<string, unknown>, project: Record<string, unknown>,
+                                         available: ReadonlyArray<{ provider: string; id: string }>): string[] {
+  const listed = [project.enabledModels, global.enabledModels].find((value) => Array.isArray(value)) as unknown[] | undefined;
+  const out: string[] = [];
+  for (const entry of listed ?? []) {
+    if (typeof entry !== "string") continue;
+    const pattern = withoutThinkingLevel(entry);
+    const glob = new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")}$`, "i");
+    for (const model of available) {
+      const full = `${model.provider}/${model.id}`;
+      if ((glob.test(full) || glob.test(model.id)) && !out.includes(full)) out.push(full);
+    }
+  }
+  return out;
+}
+
 interface PiSettingsApi {
   SettingsManager: { create(cwd: string, agentDir?: string): {
     getGlobalSettings(): Record<string, unknown>; getProjectSettings(): Record<string, unknown> } };
@@ -186,7 +225,8 @@ export async function defaultAuditContractResolver(
   const global = settings.getGlobalSettings();
   const project = settings.getProjectSettings();
   const main = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
-  const model = resolvePiAuditorModel(global, project, main);
+  const model = typeof input.preferredModel === "string" ? input.preferredModel : resolvePiAuditorModel(global, project, main);
+  const source = typeof input.preferredModel === "string" ? "enabledModels" as const : piAuditorModelSource(global, project);
   const descriptor = {
     version: runtime.version, inventory: runtime.inventory,
     expected: { agent_file_path: String(input.expectedAgent), model, child_tools: AUDIT_LAUNCH_POLICY.audit_child_tools },
@@ -223,7 +263,8 @@ export async function defaultAuditContractResolver(
     if (!available.some((item) => `${item.provider}/${item.id}` === identity))
       throw new Error(`configured auditor model is unavailable: ${model}`);
     return { agentFilePath: admission.contract.agent_file_path, model, agentScope,
-      auditRetrieval: admission.contract.audit_retrieval };
+      auditRetrieval: admission.contract.audit_retrieval, source,
+      candidates: enabledAuditorCandidates(global, project, available) };
   }
   throw new Error(unresolved);
 }
@@ -251,6 +292,10 @@ export interface EmpiricaPiDeps {
   ownerEnv?: OwnerEnv;
   /** Owner-anchored module resolution and loading (default: ``require.resolve`` from the owner + ``import``). */
   preflightImporter?: PreflightImporter;
+  /** Where a notice goes when there is no UI (default: the process's stderr and exit code). */
+  diagnostics?: Diagnostics;
+  /** How long a no-UI `/empirica` waits for its kickoff to start a run before it stops waiting (default 15 s). */
+  kickoffStartMs?: number;
   /** The checked-in inventory of an exact pi-subagents version, if any (default: the ``compat/`` files; ADR-0069). */
   inventoryFor?: (version: string) => SubagentInventory | undefined;
 }
@@ -272,6 +317,39 @@ const AUDIT_STILL_OPEN = "The run is still active and nothing was spent: once th
   + "again. Do not stop the run because of this refusal.";
 /** The audit launch /empirica checks before starting a run: the one the skill tells the author to make. */
 const CANONICAL_AUDIT_CALL = { agent: "empirica.empirica-auditor", task: "Audit the host-provided dossier." };
+
+/**
+ * Where a notice goes when Pi has no UI. Print and JSON mode have none (`ctx.hasUI` is false; Pi docs `extensions.md`:
+ * "JSON and print modes have no UI"), so `ctx.ui.notify` shows nothing there and a refusal would end silently with exit
+ * 0 (claude/pi qualification F-Q6P-1). The text then goes to stderr, as Pi writes its own extension errors there
+ * (`print-mode.js`), and a warning or error asks for a failing exit by `process.exitCode`, which Pi keeps when its own result is 0
+ * (`main.js`: `if (exitCode !== 0) process.exitCode = exitCode`). stdout stays the model's answer or the JSON stream.
+ */
+export interface Diagnostics { write(text: string): void; fail(): void }
+const PROCESS_DIAGNOSTICS: Diagnostics = {
+  write: (text) => { process.stderr.write(`${text}\n`); },
+  fail: () => { process.exitCode = 1; },
+};
+
+/** Show a notice to the person: in the UI when there is one, else on stderr (an error also fails the exit). */
+function say(ctx: ExtensionContext, diagnostics: Diagnostics, message: string, type: NotifyType = "info"): void {
+  if (ctx.hasUI === false || ctx.mode === "print" || ctx.mode === "json") {
+    diagnostics.write(type === "info" ? message : `${type}: ${message}`);
+    if (type !== "info") diagnostics.fail();
+    return;
+  }
+  ctx.ui.notify(message, type);
+}
+
+/**
+ * With no UI (print and JSON mode) Pi ends the session when the command's promise settles: `print-mode.js` does
+ * `await session.prompt("/empirica …")` and then `runtimeHost.dispose()`, while `pi.sendUserMessage` (the kickoff) is
+ * fire-and-forget (`agent-session.js` `bindExtensions`, `.catch(...)` and no await), so the run it starts is torn down at
+ * once: the ctx goes stale, `turn_end could not resolve the persisted assistant entry ID` is raised per turn and no work
+ * is done (F-Q6P-2). The command therefore waits, with no UI, until the run it started is idle. This bounds the wait for
+ * the run to *start*; the run itself is bounded by the run's own budgets and, in auto, by the no-progress rule.
+ */
+const KICKOFF_START_MS = 15_000;
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -308,6 +386,8 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     ?? ((input, ctx, runtime) => defaultAuditContractResolver(input, ctx, { runtime }));
   const ownerIo = deps.ownerIo ?? nodeOwnerIo;
   const preflightImporter = deps.preflightImporter ?? nodePreflightImporter;
+  const diagnostics = deps.diagnostics ?? PROCESS_DIAGNOSTICS;
+  const kickoffStartMs = deps.kickoffStartMs ?? KICKOFF_START_MS;
   // A checked-in inventory marks a reviewed version; the admission rule is ADR-0069's (HX-ADM-02).
   const inventoryFor = deps.inventoryFor ?? ((version: string) => loadInventory(version));
   // Read once at load: a malformed EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS fails extension load with its message
@@ -435,20 +515,38 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
                                       runtime: AuditRuntime): Promise<ResolvedAuditContract> => {
       const expectedAgent = path.resolve(skillsDir, "..", "agents", "pi", "empirica-auditor.md");
       const resolved = await resolveAuditContract({ ...input, expectedAgent }, ctx, runtime);
-      const [auditorProvider, auditorModel] = modelPair(resolved.model, "pi-subagents");
       const author = piGovernanceContext(ctx).author as Record<string, unknown> | null;
       const authorIdentity = await trusted({ operation: "classify_identity",
         payload: author ?? { provider_id: null, model_id: null, source: "pi-context" } });
-      const reviewerIdentity = await trusted({ operation: "classify_identity",
-        payload: { provider_id: auditorProvider, model_id: auditorModel, source: "pi-subagents-preflight" } });
+      const identityOf = (model: string) => {
+        const [provider, id] = modelPair(model, "pi-subagents");
+        return trusted({ operation: "classify_identity",
+          payload: { provider_id: provider, model_id: id, source: "pi-subagents-preflight" } });
+      };
+      const reviewerIdentity = await identityOf(resolved.model);
       if (authorIdentity === null)
         throw new Error("main author identity unobservable; select a concrete model");
       if (reviewerIdentity === null)
         throw new Error(`reviewer identity unobservable; ${AUDITOR_MODEL_FIX}`);
-      if (authorIdentity.identity === reviewerIdentity.identity)
-        throw new Error(`the auditor would run on your own model (${resolved.model}), so its audit could not `
-          + `count as independent; ${AUDITOR_MODEL_FIX}`);
-      return resolved;
+      if (authorIdentity.identity !== reviewerIdentity.identity) return resolved;
+      // Same class as the author. An explicit override is the user's word and is never replaced. Otherwise the first model
+      // the user enabled that is available and of another class becomes the auditor (the same pick Claude's
+      // `_auditor_alias` makes); identity is still proven only by the child session the launch observes.
+      if (resolved.source !== "override") {
+        for (const candidate of resolved.candidates ?? []) {
+          if (candidate === resolved.model) continue;
+          let picked: ResolvedAuditContract;
+          try {
+            picked = await resolveAuditContract({ ...input, expectedAgent, preferredModel: candidate }, ctx, runtime);
+          } catch { continue; }
+          const identity = await identityOf(picked.model);
+          if (identity !== null && identity.identity !== authorIdentity.identity)
+            return { ...picked, source: "enabledModels", replaced: resolved.model };
+        }
+      }
+      throw new Error(`the auditor would run on your own model (${resolved.model}), so its audit could not `
+        + `count as independent; ${resolved.source === "override" ? "" : "no model in enabledModels is available in another class either; "}`
+        + AUDITOR_MODEL_FIX);
     };
 
     pi.on("resources_discover", () => ({ skillPaths: [skillsDir] }));
@@ -651,7 +749,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             // No run can be sized or approved for an audit that cannot launch.
             const owner = currentOwner();
             if (!owner.ok) {
-              ctx.ui.notify(`empirica: configure_run refused [${ownerDetail(owner)}]`, "error");
+              say(ctx, diagnostics, `empirica: configure_run refused [${ownerDetail(owner)}]`, "error");
               const current = await dispatch(getRunRequest(runHandle, randomUUID()));
               const run = (current.result.type === "Allow" || current.result.type === "Block")
                 ? current.result.run : undefined;
@@ -692,26 +790,28 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         }
         try {
           const server = await observer;
-          ctx.ui.notify(`Empirica observer${first && !server.reused ? "" : " (already running)"}: ${server.url}`, "info");
+          say(ctx, diagnostics, `Empirica observer${first && !server.reused ? "" : " (already running)"}: ${server.url}`, "info");
         } catch (error) {
           observer = null;
-          ctx.ui.notify(`/empirica-ui could not start the observer: ${describe(error)}`, "error");
+          say(ctx, diagnostics, `/empirica-ui could not start the observer: ${describe(error)}`, "error");
         }
       },
     });
+
+    let onAgentStart: (() => void) | null = null;
+    pi.on("agent_start", () => { onAgentStart?.(); });
 
     pi.registerCommand("empirica", {
       description: "Start a complete Empirica v2 convergence run.",
       handler: async (args, ctx) => {
         if (ctx.isIdle?.() === false) {
-          ctx.ui.notify("/empirica requires an idle session; retry after the current turn finishes.",
-            "warning");
+          say(ctx, diagnostics, "/empirica requires an idle session; retry after the current turn finishes.", "warning");
           return;
         }
         const parsed = parseInvocationFlags(args);
         const goal = parsed.goal;
         if (parsed.unknownFlags.length) {
-          ctx.ui.notify(`empirica: not started — unknown flags: ${parsed.unknownFlags.join(" ")}`, "error");
+          say(ctx, diagnostics, `empirica: not started — unknown flags: ${parsed.unknownFlags.join(" ")}`, "error");
           return;
         }
         // Convergence needs the independent audit, which Pi can only launch through the external
@@ -720,14 +820,14 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         const owner = currentOwner();
         if (!owner.ok) {
           const notice = startRunNotice(ownerRefusalBlock(owner.code));
-          ctx.ui.notify(`${notice.text} [${ownerDetail(owner)}]`, "error");
+          say(ctx, diagnostics, `${notice.text} [${ownerDetail(owner)}]`, "error");
           return;
         }
         let startAuditor: ResolvedAuditContract;
         try {
           startAuditor = await independentAuditor(CANONICAL_AUDIT_CALL, ctx, auditRuntimeOf(owner.binding));
         } catch (error) {
-          ctx.ui.notify(`/empirica not started: ${describe(error)}`, "error");
+          say(ctx, diagnostics, `/empirica not started: ${describe(error)}`, "error");
           return;
         }
         try {
@@ -759,12 +859,24 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             // Extension-injected slash commands are not passed through Pi's
             // interactive skill expander. Render the canonical SKILL.md itself
             // so no adapter-local workflow copy can drift.
+            const started = ctx.hasUI === false || ctx.mode === "print" || ctx.mode === "json"
+              ? new Promise<boolean>((resolve) => { onAgentStart = () => resolve(true); setTimeout(() => resolve(false), kickoffStartMs); })
+              : null;
             pi.sendUserMessage(kickoff, { deliverAs: "followUp" });
+            const notice = startRunNotice(result);
+            say(ctx, diagnostics, notice.text, notice.type);
+            if (startAuditor.replaced !== undefined)
+              say(ctx, diagnostics, `empirica: auditor: ${startAuditor.model} (picked from enabledModels; ${startAuditor.replaced} `
+                + "is in your model's class)", "info");
+            // No UI: do not return (and so do not let Pi dispose the session) until the started run is idle.
+            if (started !== null && await started) await ctx.waitForIdle?.();
+            onAgentStart = null;
+            return;
           }
           const notice = startRunNotice(result);
-          ctx.ui.notify(notice.text, notice.type);
+          say(ctx, diagnostics, notice.text, notice.type);
         } catch (error) {
-          ctx.ui.notify(`/empirica could not start a run: ${describe(error)}`, "error");
+          say(ctx, diagnostics, `/empirica could not start a run: ${describe(error)}`, "error");
         }
       },
     });

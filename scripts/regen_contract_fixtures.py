@@ -12,7 +12,7 @@ PLUGIN = ROOT / "plugins" / "empirica"
 sys.path.insert(0, str(PLUGIN))
 
 from application.protocol import (  # noqa: E402
-    contract_digest, contract_result, stored, to_stored)
+    contract_digest, contract_result, public_contract, stored, to_stored)
 from core.governance import proposal_digest  # noqa: E402
 
 FIXTURES = ROOT / "contracts" / "empirica" / "v2" / "fixtures"
@@ -70,11 +70,25 @@ def generated(path: Path) -> str:
             invocation.setdefault("human_surface", "unavailable")
     if isinstance(run.get("contract"), dict):
         run["contract"]["digest"] = contract_digest()
+    _live_contract_label(document)
     if isinstance(governed, dict) and "proposal_digest" in governed:
         goal = run["goal"]
         governed.pop("scope", None)
         governed["proposal_digest"] = proposal_digest(goal, governed)
     return json.dumps(to_stored(document), indent=2) + "\n"
+
+
+def _live_contract_label(node) -> None:
+    """The contract's version is the contract's own: every reference to ``empirica/public`` states the live one (G14 D5), so a
+    label change is one edit of ``public-contract.json``, not one per fixture."""
+    if isinstance(node, dict):
+        if node.get("id") == "empirica/public" and "version" in node:
+            node["version"] = public_contract()["version"]
+        for value in node.values():
+            _live_contract_label(value)
+    elif isinstance(node, list):
+        for value in node:
+            _live_contract_label(value)
 
 
 def main() -> int:

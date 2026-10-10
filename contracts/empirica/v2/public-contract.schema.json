@@ -44,7 +44,7 @@
       "const": "empirica/public"
     },
     "version": {
-      "const": "3.0.0"
+      "const": "4.0.0"
     },
     "protocol": {
       "const": "empirica/v2"
@@ -612,6 +612,10 @@
                 "type": "string"
               },
               "minProperties": 1
+            },
+            "case_parameter": {
+              "type": "string",
+              "minLength": 1
             }
           }
         }

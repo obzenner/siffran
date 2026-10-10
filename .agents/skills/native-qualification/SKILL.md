@@ -20,6 +20,8 @@ report; they never answer, launch, or declare a pass.
 
 ## 1. Prepare before opening a host
 
+**Keep the activation short.** Claude does not expand a skill invocation longer than about 900 characters (observed in
+Q6): the text arrives as a plain message and no run starts. Keep the whole activation, goal included, under about 650.
 Read the [host registry](../../../contracts/empirica/v2/host-profiles.json) and the
 [governance guide](../../../plugins/empirica/skills/empirica/references/governance.md). They are authoritative. Use an
 already prepared supported executable; an out-of-range installation is **BLOCKED**, not permission to upgrade global

@@ -12,6 +12,13 @@
   launch is an admission failure, so stop rather than retrying. The
   [Pi adapter guide](../../../../plugins/empirica/adapters/pi/README.md#canonical-audit-call) owns the invocation and
   the reviewer-derivation rules.
-- `reviewer_preflight_refusal` is required on Pi: the author runs on the model the host would choose as reviewer (the
-  effective `subagents.defaultModel`).
+- **Auditor selection (G14, ADR-0060 amendment).** An explicit `agentOverrides["empirica.empirica-auditor"].model` is
+  used as written. Otherwise, if the default or main model is in the author's identity class, `/empirica` picks the first
+  model of Pi `enabledModels` (project, else user) that is available and in another class, and its start notice says
+  `auditor: <model> (picked from enabledModels; <replaced> is in your model's class)`. Record that line.
+- `reviewer_preflight_refusal` is required on Pi. Since the pick above, the default no longer reproduces it: make the
+  author's class the only one in `enabledModels`, or set an explicit same-class auditor override, then expect the
+  refusal (`no model in enabledModels is available in another class` or `would run on your own model`).
+- **Print and JSON mode** (`pi -p`, `--mode json`) have no UI: notices go to stderr and a refusal exits 1. Auto needs
+  `EMPIRICA_AUTO_DELEGATION=1` there; deliberative cannot be approved without a human, so it is refused.
 - Methodologist sanity: `/think`.

@@ -164,6 +164,21 @@ pi install "$(pwd)"
 The exact Claude Code and Pi foreground profiles were promoted from installed-host observations;
 release certification additionally requires fresh operator-attested, candidate-bound structural
 receipts. Empirica is not available on Codex.
+
+### Supported surfaces
+
+| Surface | Deliberative | Auto, human present | Auto, delegated (`EMPIRICA_AUTO_DELEGATION=1`) |
+|---|---|---|---|
+| Claude Code, interactive session | Supported | Supported | n/a |
+| Claude Code, non-interactive (`-p`, SDK) | Refused: nobody can approve the configuration | Refused: auto needs the delegation | Supported; nobody can confirm evidence, so URL research stays unconfirmed |
+| Pi TUI and RPC | Supported | Supported | Supported |
+| Pi print and JSON (`pi -p`, `--mode json`) | Refused: nobody can approve | Refused: auto needs the delegation | Supported; notices go to stderr, the command waits for the run it started, a refusal exits 1; nobody can confirm evidence |
+| Codex | Not available | Not available | Not available |
+
+A refusal in print mode is written to stderr and exits 1. Rows qualified only by deterministic tests (Claude Esc mid-turn,
+the Pi auditor calling `contact_supervisor`, Pi compaction failure) are listed in
+`.agents/skills/native-qualification/references/scenarios.md`, section C.
+
 `make empirica-host-live-check` requires exact receipts for Claude and Pi only; Pi and Claude async
 promotion remains separate and unsupported.
 

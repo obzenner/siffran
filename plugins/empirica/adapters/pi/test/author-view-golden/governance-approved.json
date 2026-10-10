@@ -66,7 +66,7 @@
       },
       "contract": {
         "id": "empirica/public",
-        "version": "3.0.0",
+        "version": "4.0.0",
         "digest": "sha256:aa5a3d52b597af56d32d567ad5ec440710333f7ada4acf7cc6c7a8ed90072a9e",
         "relevant_sections": []
       },

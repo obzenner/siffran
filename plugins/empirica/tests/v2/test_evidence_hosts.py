@@ -5,7 +5,10 @@ host decides no policy: these tests pin that it asks once, maps answers one item
 nothing on cancel, timeout, malformed input or a stale presentation."""
 from __future__ import annotations
 
+from unittest import mock
+
 from adapters import confirmation
+from core import governance as core_governance
 from adapters.confirmation import HostConfirmation
 from adapters.public_tools import PublicTools
 from assertions import canonical_graph
@@ -106,7 +109,9 @@ class MediatorTests(MediatorFixture):
         row = self.verification(drv, run_id)
         self.assertEqual((row["status"], row["note"]), ("rejected_by_human", "Wrong system."))
 
-    def test_later_grants_nothing_and_the_presentation_stays_spent(self):
+    def test_later_grants_nothing_and_an_explicit_report_asks_again_within_the_ceiling(self):
+        """G14 (F-Q6-1): Later is not a final answer. The view says it was shown (nothing pushes the author to ask again by
+        itself), but the next explicit report shows it again, one interaction each, and the ceiling ends it."""
         drv, run_id = self.start()
         self.research(drv, run_id, "web", URL)
         before = self.left(drv, run_id)
@@ -114,12 +119,38 @@ class MediatorTests(MediatorFixture):
         self.assertEqual(self.codes(self.mediate(drv, run_id, Human(accept(d1="later")), blocked=blocked)), self.codes(blocked))
         self.assertEqual(self.verification(drv, run_id)["status"], "pending")
         self.assertEqual(self.left(drv, run_id), before - 1)
-        # The same pending set is not shown again until the derivation changes: a stale response that still offers it is
-        # evaluated again and the fresh one says it was already shown (the core's own refusal outranks the host's report).
+        self.assertEqual(self.batch(drv, run_id)["prompt_error"], "already_presented")
         again = Human(accept(d1="confirm"))
-        fresh = self.mediate(drv, run_id, again, blocked=blocked)
-        self.assertEqual(fresh["run"]["confirmation_batch"]["prompt_error"], "already_presented")
-        self.assertEqual(again.shown, [])
+        self.mediate(drv, run_id, again)
+        self.assertEqual(len(again.shown), 1, "the explicit report asked again")
+        self.assertEqual(self.verification(drv, run_id)["status"], "confirmed_by_human")
+        self.assertEqual(self.left(drv, run_id), before - 2)
+
+    def test_a_pause_or_a_continuation_never_asks_again_by_itself(self):
+        """G14: only the mediator inside an explicit report presents. A Stop reads the same view (no mediator) and asks
+        nobody, and the view it reads does not lead the author to report again."""
+        drv, run_id = self.start()
+        self.research(drv, run_id, "web", URL)
+        human = Human(accept(d1="later"))
+        self.mediate(drv, run_id, human)
+        spent = self.left(drv, run_id)
+        for _ in range(3):
+            stopped = self.evaluated(drv, run_id)  # what a Stop hook / a settle reads
+            self.assertEqual(stopped["run"]["confirmation_batch"]["prompt_error"], "already_presented")
+            self.assertNotEqual(stopped["reasons"][0]["next_actions"][0], "convergence.report")
+        self.assertEqual((len(human.shown), self.left(drv, run_id)), (1, spent))
+
+    def test_asking_again_stops_at_the_interaction_ceiling(self):
+        with mock.patch.object(core_governance, "MAX_INTERACTIONS", 3):
+            drv, run_id = self.start()
+            self.research(drv, run_id, "web", URL)
+            human = Human(accept(d1="later"))
+            budget = self.left(drv, run_id)
+            for _ in range(budget + 5):
+                self.mediate(drv, run_id, human)
+            self.assertEqual(self.left(drv, run_id), 0)
+            self.assertEqual(self.batch(drv, run_id)["prompt_error"], "interaction_limit")
+            self.assertEqual(len(human.shown), budget, "asked once per remaining interaction, no more")
 
     # ---- nothing granted ------------------------------------------------------------------
 
@@ -314,14 +345,17 @@ class MediatorTests(MediatorFixture):
         self.assertLess(boiler, next(i for i, line in enumerate(lines) if line.startswith("Accept = ")))
         self.assertEqual(lines[1], "", "the heading, then the items")
 
-    def test_a_batch_is_presentable_only_without_a_prompt_error_and_whatever_the_reason(self):
+    def test_a_batch_is_presentable_without_a_prompt_error_or_when_only_already_shown_and_whatever_the_reason(self):
         def view(batch, code="claim.research_missing"):
             return {"type": "Block", "reasons": [{"code": code}], "run": {"id": "r", "confirmation_batch": batch}}
         ready = {"key": "k", "record_ids": [], "claim_ids": ["C1"], "prompt_error": None}
         self.assertEqual(confirmation.presentable(view(ready)), ready)  # another blocker leads; the human is still asked
-        for other in (view(None), {"type": "Allow"}, None, view({**ready, "prompt_error": "already_presented"}),
-                      view({**ready, "prompt_error": "interaction_limit"}),
-                      view({**ready, "prompt_error": "unavailable"})):
+        shown = {**ready, "prompt_error": "already_presented"}
+        self.assertEqual(confirmation.presentable(view(shown)), shown)  # G14: an explicit report may ask again
+        for other in (view(None), {"type": "Allow"}, None,
+                      view({**ready, "prompt_error": "interaction_limit"}),  # the ceiling ends it
+                      view({**ready, "prompt_error": "unavailable"}), view({**ready, "prompt_error": "unobserved"}),
+                      view({**ready, "prompt_error": "presentation_failed"})):
             self.assertIsNone(confirmation.presentable(other))
 
     # ---- through the public tool ----------------------------------------------------------

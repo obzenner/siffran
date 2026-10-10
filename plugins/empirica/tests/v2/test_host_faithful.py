@@ -239,14 +239,15 @@ class LiteralAgentOnClaude(HostFaithful):
         self.assertEqual(self.literal_agent(run_id, view)[0], "stopped")
         self.assertEqual(self.human.shown, [])
 
-    def test_a_later_answer_spends_the_derivation_and_the_agent_stops_instead_of_looping(self):
+    def test_a_later_answer_stops_the_agent_from_looping_and_an_explicit_report_asks_again(self):
         drv, run_id = self.claude(reply=accept(d1="later"))
         outcome, calls = self.literal_agent(run_id, self.after_research(run_id))
         self.assertEqual(outcome, "presented", calls)
-        view = self.say(("report_convergence", {"run_id": run_id}))
+        self.assertEqual(len(self.human.shown), 1, "the agent that follows `next:` asked once and stopped")
+        view = self.say(("report_convergence", {"run_id": run_id}))  # the human asked for it: an explicit report (G14)
         self.assertIn("already shown", view)
         self.assertNotIn("report_convergence intent=report_convergence", next_actions(view))
-        self.assertEqual(len(self.human.shown), 1)
+        self.assertEqual(len(self.human.shown), 2)
 
     def test_new_research_after_an_observation_is_asked_again(self):  # a human surface observed earlier
         drv, run_id = self.claude(reply=accept(d1="later"))

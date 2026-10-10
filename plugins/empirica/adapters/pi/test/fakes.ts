@@ -115,7 +115,12 @@ export class FakePi implements ExtensionAPI {
                   options?: { deliverAs?: "steer" | "followUp" }): void {
     this.userMessages.push(content);
     this.userMessageOptions.push(options);
+    // Pi starts the run on a later tick (`agent-session.js` `prompt()` awaits input handlers first) and announces it.
+    const started = this.handlers.get("agent_start");
+    if (this.startsRunOnUserMessage && typeof started === "function") queueMicrotask(() => { void (started as () => unknown)(); });
   }
+  /** Whether a user message starts a run, as Pi does when the session is idle (default). */
+  startsRunOnUserMessage = true;
 
   registerCommand(name: string, def: CommandDefinition): void {
     this.commands.set(name, def);

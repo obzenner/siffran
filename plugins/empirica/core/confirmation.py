@@ -39,6 +39,9 @@ HOST_FAILURES = ("surface_unrecorded", "presentation_failed")
 #: What a host reports about one call (``HOST_FAILURES``) is projected into that call's response only and never stored,
 #: so no later reader of the run (the observer UI) sees it.
 PROMPT_ERRORS = (UNAVAILABLE, UNOBSERVED, "already_presented", "interaction_limit")
+#: The ``prompt_error`` values under which an explicit report may show the batch: none, or only that it was shown before
+#: (a Later, a cancel or a timeout granted nothing). ``interaction_limit`` is the bound and ends it (G14, ADR-0067).
+REPRESENTABLE = (None, "already_presented")
 #: The ``prompt_error`` values with which a report would still ask a human: none, or only ``unobserved`` (the host looks
 #: for a dialog surface inside the report). The one place a caller learns whether a human is about to be asked.
 ASKABLE = frozenset({None, UNOBSERVED})
@@ -168,7 +171,8 @@ def interactions(snapshot: Any) -> int:
 
 
 def presented(snapshot: Any, key: str) -> bool:
-    """Whether the batch with this key was already shown to a human (each key is shown once)."""
+    """Whether the batch with this key was already shown to a human. The run view then reads ``already_presented`` (nothing
+    pushes the author to ask again by itself); an explicit report may still show it again, within the interaction ceiling."""
     return any(item.get("kind") == PRESENTATION and item["key"] == key for item in snapshot.history)
 
 
@@ -192,9 +196,9 @@ def terminal_case(prompt_error: str | None, declined: bool) -> str:
 
 def reason_text(spec: Mapping[str, Any], parameters: Mapping[str, Any]) -> str:
     """The text of a reason: the contract's ``message``, or, when the reason has ``case_messages`` and its parameters name a
-    ``case``, that case's text with the parameters filled in. The one place the text is chosen; nothing in an adapter words it."""
+    ``case`` (or the parameter the reason's ``case_parameter`` names), that case's text with the parameters filled in. The one place the text is chosen; nothing in an adapter words it."""
     templates = spec.get("case_messages")
-    case = parameters.get("case")
+    case = parameters.get(spec.get("case_parameter", "case"))
     if not templates or case not in templates:
         return spec["message"]
     return templates[case].format_map({k: v for k, v in parameters.items() if isinstance(v, str)})
@@ -202,8 +206,9 @@ def reason_text(spec: Mapping[str, Any], parameters: Mapping[str, Any]) -> str:
 
 def prompt_error(snapshot: Any, key: str, *, terminal: bool = False) -> str | None:
     """Why the batch with this key cannot be presented now, else ``None``. In order: ``unavailable`` (nobody to ask),
-    ``already_presented`` (a changed derivation is the only thing that asks again), ``interaction_limit`` (the run's
-    human interactions are spent; known, so it comes before anything the host has yet to find out), then what the host
+    ``interaction_limit`` (the run's human interactions are spent: nothing asks again, so it says so even for a batch
+    already shown), ``already_presented`` (shown and left open: nothing pushes the author to ask again by itself, but an
+    explicit report may, ``REPRESENTABLE``), then what the host
     reports about *this* call: its ``host_failure`` (``surface_unrecorded`` or ``presentation_failed``: it could not
     record its surface or could not show the batch, so nobody was asked) and ``unobserved`` (it has not looked for a
     surface; it looks inside its next report). Mirrors ``governance.prompt_error``.
@@ -214,10 +219,10 @@ def prompt_error(snapshot: Any, key: str, *, terminal: bool = False) -> str | No
     route = human_route(snapshot)
     if route == UNAVAILABLE:
         return route
-    if presented(snapshot, key) and not terminal:
-        return "already_presented"
     if governance.interactions_remaining(snapshot.state.governance, interactions(snapshot))["total"] == 0:
         return "interaction_limit"
+    if presented(snapshot, key) and not terminal:
+        return "already_presented"
     return apply_host_report(UNOBSERVED if route == UNOBSERVED else None, snapshot.command.get("host_failure"))
 
 

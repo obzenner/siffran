@@ -414,7 +414,7 @@ The host finishes responding and would hand control to the human. **One table de
 <!-- BEGIN GENERATED: HX-DLG-01 (make registry-doc) -->
 - **outcomes.** Claude: MCP `accept` (decoded per item) | `decline` | `cancel` | timeout | exception. Pi: select/input return | `undefined` | timeout | exception. Closed result for both: `confirmed` | `rejected` | `no-decision`.
 - **conformance_scenarios.** `EHB-DLG-03`, `EHB-DLG-04`, `EHB-DLG-05`, `EHB-DLG-06`, `EHB-DLG-07`
-- **sources.** ADR-67 ("One decision per item", "Human receipt"), HEATH AS3; tests `V2/test_evidence_hosts.py::MediatorTests::test_cancel_timeout_decline_and_malformed_answers_grant_nothing`, `::test_later_grants_nothing_and_the_presentation_stays_spent`, `::test_a_dialog_that_raises_grants_nothing`, `V2/test_evidence_scenarios.py::BatchSizeCells::test_a_decline_or_cancel_that_carries_content_grants_nothing`, `PT/evidence-ui.test.ts`.
+- **sources.** ADR-67 ("One decision per item", "Human receipt"), HEATH AS3; tests `V2/test_evidence_hosts.py::MediatorTests::test_cancel_timeout_decline_and_malformed_answers_grant_nothing`, `::test_later_grants_nothing_and_an_explicit_report_asks_again_within_the_ceiling`, `::test_a_dialog_that_raises_grants_nothing`, `V2/test_evidence_scenarios.py::BatchSizeCells::test_a_decline_or_cancel_that_carries_content_grants_nothing`, `PT/evidence-ui.test.ts`.
 <!-- END GENERATED -->
 
 #### HX-INT-01 — an interrupt ends the turn without a gate, and nothing is granted
@@ -645,7 +645,7 @@ Each row is falsifiable: it names the setup, the action, and the expected observ
 | `EHB-PRES-01` | any | URL evidence | report | one batch, one dialog, items ≤64, decisions first | 2 tests; ledger `ev_url_confirm`, `ev_over_64_items` |
 | `EHB-PRES-02` | any | batch changes between read and show | report | key mismatch: one re-read; a second change shows and spends nothing | 1 test |
 | `EHB-PRES-03` | any | long verbatim quote | present | the whole quote is shown | 1 test; ledger `ev_long_quote` |
-| `EHB-PRES-04` | any | already presented, derivation unchanged | report | `already_presented`; not asked again | 1 test; ledger `ev_later_then_fresh_get_run` |
+| `EHB-PRES-04` | any | already presented and left on Later, cancel or timeout, derivation unchanged | report | the view says `already_presented` and nothing asks again by itself; an explicit report asks again, one interaction each, until `interaction_limit` | 2 tests; ledger `ev_later_then_fresh_get_run` |
 | `EHB-PRES-05` | any | 128 interactions spent | report | `interaction_limit`; stop honestly | 1 test |
 | `EHB-PRES-06` | any | presentation made stale during the dialog | answer | refused, nothing granted | 1 test |
 | `EHB-DLG-01` | any | configuration dialog | explicit Reject | `declined` recorded; nothing approved | 1 test |

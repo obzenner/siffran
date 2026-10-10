@@ -82,7 +82,7 @@ class HumanSurfaceCells(ScenarioFixture):
 
     # ---- H: Later, cancel, timeout ----------------------------------------------------------
 
-    def test_D_later_cancel_and_timeout_are_spent_and_a_changed_derivation_asks_again(self):
+    def test_D_later_cancel_and_timeout_grant_nothing_and_an_explicit_report_asks_again(self):
         for label, reply in (("later", accept(d1="later")), ("cancel", {"action": "cancel"}), ("timeout", None)):
             with self.subTest(label):
                 drv, run_id = self.start()
@@ -90,10 +90,11 @@ class HumanSurfaceCells(ScenarioFixture):
                 self.mediate(drv, run_id, Human(reply))
                 self.assertEqual(self.batch(drv, run_id)["prompt_error"], "already_presented")
                 self.assertEqual(self.codes(self.report(drv, run_id)), [CONFIRMATION])  # still the reason
+                # Nothing pushes the author to ask again (the view says shown); an explicit report does (G14).
                 again = Human(accept(d1="confirm"))
                 self.mediate(drv, run_id, again)
-                self.assertEqual(again.shown, [])  # not shown again
-                self.research(drv, run_id, "web", URL + "/changed")  # a changed derivation
+                self.assertEqual(len(again.shown), 1)
+                self.research(drv, run_id, "web", URL + "/changed")  # a changed derivation is new, too
                 self.assertIsNone(self.batch(drv, run_id)["prompt_error"])
 
     def test_the_route_changing_never_makes_a_presented_key_new(self):

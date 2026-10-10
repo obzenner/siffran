@@ -62,7 +62,7 @@
     },
     "prompt_error": {
       "enum": ["unavailable", "already_presented", "interaction_limit", null],
-      "description": "Why the run's pending confirmation batch cannot be shown to a human now (the run view's confirmation_batch.prompt_error): nobody to ask, already shown (asked again only if something changes), or the run's human interactions are spent. Null when a host will ask, and when nothing waits."
+      "description": "Why the run's pending confirmation batch cannot be shown to a human now (the run view's confirmation_batch.prompt_error): nobody to ask, already shown (only an explicit report asks again), or the run's human interactions are spent. Null when a host will ask, and when nothing waits."
     },
     "waiting": {
       "type": "array",
@@ -73,7 +73,7 @@
         "required": ["claim", "route", "records", "decision"],
         "properties": {
           "claim": {"type": "string", "minLength": 1},
-          "route": {"enum": ["human", "unavailable", "shown", "limit"], "description": "human: the host will ask; unavailable: the host has nobody to ask, so the requirement stays open; shown: already shown, asked again only if something changes; limit: the run's human interactions are spent."},
+          "route": {"enum": ["human", "unavailable", "shown", "limit"], "description": "human: the host will ask; unavailable: the host has nobody to ask, so the requirement stays open; shown: already shown, only an explicit report asks again; limit: the run's human interactions are spent."},
           "records": {"type": "integer", "minimum": 0},
           "decision": {"type": "boolean"}
         }

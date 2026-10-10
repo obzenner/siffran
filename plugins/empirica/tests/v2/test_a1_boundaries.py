@@ -297,14 +297,14 @@ class TheAuthorReadsWhatTheHumanSees(MediatorFixture):
         self.assertNotIn("sha256:", text.split("Waiting on a human")[1].split("\n\n")[0])
         self.assertIn("a human is asked when you report, if this host can show a dialog", text)  # Claude has not looked yet
 
-    def test_D_a_fresh_get_run_after_later_says_it_will_not_ask_again(self):
+    def test_D_a_fresh_get_run_after_later_says_an_explicit_report_asks_again(self):
         drv, run_id = self.start()
         self.research(drv, run_id, "web", URL)
         self.mediate(drv, run_id, Human(accept(d1="later")))
         text = self.text(self.tools(drv), "empirica_read", {"operation": "GetRun", "run_id": run_id})
         self.assertIn("Waiting on a human", text)
         self.assertIn("already shown", text)
-        self.assertIn("only a changed derivation asks again", text)
+        self.assertIn("an explicit report_convergence asks again", text)
 
     def test_D_a_rejection_and_its_note_are_in_the_argument_text_fenced(self):
         drv, run_id = self.start()

@@ -267,14 +267,27 @@ class EvidenceConfirmationTests(EvidenceFixture):
         self.assertEqual(self.answer(drv, run_id, "p1", confirm(record))["type"], "Fault")
         self.assertEqual(self.verification(drv, run_id)["status"], "pending")
 
-    def test_a_presentation_is_recorded_once_per_derivation(self):
+    def test_a_presentation_is_recorded_per_receipt_and_the_same_batch_may_be_shown_again(self):
+        """G14: Later grants nothing, so the next explicit report may show the batch again; each showing spends one
+        interaction and the ceiling (next test) is what ends it."""
         drv, run_id = self.start()
         self.research(drv, run_id, "web", URL)
         left = self.interactions(drv, run_id)["total"]  # the configuration approval spent one
         self.assertEqual(self.present(drv, run_id, "p1")["type"], "Allow")
         self.assertEqual(self.present(drv, run_id, "p1")["type"], "Inert")     # the same presentation
-        self.assertEqual(self.present(drv, run_id, "p2")["type"], "Fault")     # the same batch, again
-        self.assertEqual(self.interactions(drv, run_id)["total"], left - 1)    # one unit, once
+        self.assertEqual(self.present(drv, run_id, "p2")["type"], "Allow")     # the same batch, again
+        self.assertEqual(self.interactions(drv, run_id)["total"], left - 2)    # one unit per showing
+
+    def test_the_interaction_ceiling_ends_asking_again(self):
+        with mock.patch.object(core_governance, "MAX_INTERACTIONS", 3):
+            drv, run_id = self.start()
+            self.research(drv, run_id, "web", URL)
+            shown = 0
+            while self.present(drv, run_id, f"p{shown}")["type"] == "Allow":
+                shown += 1
+                self.assertLess(shown, 10, "unbounded")
+            self.assertEqual(self.interactions(drv, run_id)["total"], 0)
+            self.assertEqual(self.run_view(drv, run_id)["confirmation_batch"]["prompt_error"], "interaction_limit")
 
     def test_nothing_waiting_is_nothing_to_present(self):
         drv, run_id = self.start()
@@ -293,7 +306,7 @@ class EvidenceConfirmationTests(EvidenceFixture):
         self.assertEqual(self.present(drv, run_id, "p2")["type"], "Allow")
         self.assertEqual(self.answer(drv, run_id, "p2", confirm(first))["type"], "Allow")
 
-    def test_an_item_left_out_stays_pending_and_is_shown_again_only_once(self):
+    def test_an_item_left_out_stays_pending_and_is_shown_again_by_the_next_report(self):
         drv, run_id = self.start()
         self.research(drv, run_id, "web", URL)
         self.research(drv, run_id, "web", URL + "/later")
@@ -304,8 +317,8 @@ class EvidenceConfirmationTests(EvidenceFixture):
         self.assertEqual(self.verification(drv, run_id)["status"], "pending")  # "Later"
         self.assertEqual(self.report(drv, run_id)["reasons"][0]["parameters"]["record_ids"], [later])
         self.assertEqual(self.present(drv, run_id, "p2")["type"], "Allow")      # a smaller batch
-        self.assertEqual(self.present(drv, run_id, "p3")["type"], "Fault")      # but not again
-        self.assertEqual(self.interactions(drv, run_id)["total"], left - 2)
+        self.assertEqual(self.present(drv, run_id, "p3")["type"], "Allow")      # and again, while interactions remain
+        self.assertEqual(self.interactions(drv, run_id)["total"], left - 3)
 
     def test_a_decision_about_something_the_presentation_did_not_show_is_refused(self):
         drv, run_id = self.start()

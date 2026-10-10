@@ -49,7 +49,7 @@
           "const": "empirica/public"
         },
         "version": {
-          "const": "3.0.0"
+          "const": "4.0.0"
         },
         "digest": {
           "type": "string",
@@ -156,6 +156,21 @@
             "unavailable",
             "interaction_limit",
             "host_failed"
+          ]
+        }
+      }
+    },
+    "autoCeilingParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bound"
+      ],
+      "properties": {
+        "bound": {
+          "enum": [
+            "approved",
+            "envelope"
           ]
         }
       }
@@ -877,7 +892,7 @@
               "const": "governance.auto_ceiling"
             },
             "parameters": {
-              "$ref": "#/$defs/emptyParams"
+              "$ref": "#/$defs/autoCeilingParams"
             }
           }
         },
@@ -2169,7 +2184,7 @@
           "const": "empirica/public"
         },
         "version": {
-          "const": "3.0.0"
+          "const": "4.0.0"
         },
         "sections": {
           "type": "array",

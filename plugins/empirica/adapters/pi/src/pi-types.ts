@@ -33,6 +33,8 @@ export interface ExtensionContext {
     getEntries(): Array<{ type?: string; customType?: string; data?: unknown }>;
   };
   isIdle?(): boolean;
+  /** Command context only (Pi `agent-session.js` `commandContextActions.waitForIdle`): resolves when no run is active. */
+  waitForIdle?(): Promise<void>;
 }
 
 export interface CommandDefinition {

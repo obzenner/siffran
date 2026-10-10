@@ -8,7 +8,7 @@
       "status": "stopped_frozen",
       "contract": {
         "id": "empirica/public",
-        "version": "3.0.0",
+        "version": "4.0.0",
         "relevant_sections": [
           "freeze",
           "terminal"

@@ -133,7 +133,7 @@
   },
   "settlement_notices": {
     "human_wait": "Empirica is paused for human governance input, not converged. Investigation remains blocked; no approval was granted by this pause.",
-    "evidence_wait": "Empirica is paused: research evidence is waiting for your confirmation, and the run is not converged. No confirmation was granted by this pause. The agent presents it to you at the end of its next pass; if you leave it on Later or close the dialog it is not shown again for the same work, and the run must change or be accepted as a residual.",
+    "evidence_wait": "Empirica is paused: research evidence is waiting for your confirmation, and the run is not converged. No confirmation was granted by this pause. The agent presents it to you at the end of its next pass; if you leave it on Later or close the dialog it is shown again only when you tell the agent to report once more (each showing spends one of the run's human interactions), and otherwise the run must change or be accepted as a residual.",
     "budget_exhausted": "Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this pause. Stop honestly (report_convergence intent=stop), or in deliberative mode propose a raise for human approval; in auto mode start a fresh run.",
     "evidence_report": "Research evidence is waiting for your confirmation, and the run is not converged. Call report_convergence now: the human is asked inside that call, if this host can show a dialog. No confirmation was granted by this block.",
     "paused_for_human": "Empirica is paused for you, not converged: {reason} Nothing was approved or confirmed by this pause, and nobody was asked. The run stays open: tell the agent to carry out that step, or end the run.",
@@ -190,7 +190,7 @@
       "waiting_none_error": "a human can be asked at the end of your next pass",
       "waiting_unavailable": "no human can be asked in this session",
       "waiting_unobserved": "a human is asked when you report, if this host can show a dialog",
-      "waiting_already_presented": "already shown; only a changed derivation asks again",
+      "waiting_already_presented": "already shown; an explicit report_convergence asks again, within the interaction limit",
       "waiting_interaction_limit": "the human interaction limit is reached",
       "waiting_surface_unrecorded": "the host could not tell whether a human can be asked, so nobody was asked; stop honestly, or report again after a change",
       "waiting_presentation_failed": "the host could not show the confirmation dialog, so nobody was asked; stop honestly, or report again after a change",

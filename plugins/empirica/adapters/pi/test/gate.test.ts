@@ -15,7 +15,8 @@ import {
   BUDGET_EXHAUSTED_NOTICE, budgetExhaustedWait, HUMAN_WAIT_NOTICE, humanApprovalWait,
 } from "../src/governance-ui.ts";
 import {
-  createEmpiricaExtension, DEFAULT_SKILLS_DIR, defaultAuditContractResolver, resolvePiAuditorModel,
+  createEmpiricaExtension, DEFAULT_SKILLS_DIR, defaultAuditContractResolver, enabledAuditorCandidates, piAuditorModelSource,
+  resolvePiAuditorModel,
 } from "../src/index.ts";
 import { AUDIT_LAUNCH_PARAMETERS, loadInventory, type SubagentInventory } from "../src/subagent-inventory.ts";
 import { bound, FIXTURES, fixtureFor } from "./preflight-fixtures.ts";
@@ -46,6 +47,23 @@ test("Pi auditor model follows host settings precedence; identity policy owns eq
   assert.equal(resolvePiAuditorModel({}, { subagents: { defaultModel: "project/default" } }, "main/model"),
     "project/default");
   assert.equal(resolvePiAuditorModel({}, {}, "main/model"), "main/model");
+});
+
+test("the enabled models are Pi's own list: project replaces user, patterns expand over what is available, order is kept", () => {
+  const available = [{ provider: "a", id: "sol-1" }, { provider: "a", id: "sol-2" }, { provider: "b", id: "opus-1" }, { provider: "b", id: "opus-2" }];
+  const user = { enabledModels: ["a/sol-1", "b/opus-*"] };
+  assert.deepEqual(enabledAuditorCandidates(user, {}, available), ["a/sol-1", "b/opus-1", "b/opus-2"]);
+  assert.deepEqual(enabledAuditorCandidates(user, { enabledModels: ["opus-2:high", "a/gone", "sol-2", "a/sol-?"] }, available),
+    ["b/opus-2", "a/sol-2", "a/sol-1"], "project replaces user; a thinking level is dropped; a missing model is skipped; ? matches one character");
+  assert.deepEqual(enabledAuditorCandidates({}, {}, available), [], "no list: no candidates, so no pick");
+});
+
+test("only a per-agent override is explicit; a default or the main model may be replaced", () => {
+  const override = { subagents: { agentOverrides: { "empirica.empirica-auditor": { model: "x/y" } } } };
+  assert.equal(piAuditorModelSource({}, override), "override");
+  assert.equal(piAuditorModelSource(override, {}), "override");
+  assert.equal(piAuditorModelSource({ subagents: { defaultModel: "x/y" } }, {}), "default");
+  assert.equal(piAuditorModelSource({}, {}), "main");
 });
 
 // The production resolver runs the owner's preflight and admits its answer through the seam
@@ -191,7 +209,18 @@ interface Wired {
   auditResolutions: Record<string, unknown>[];
 }
 
+/** What a no-UI `/empirica` writes: the lines for stderr and how many times it asked for a failing exit. */
+interface Diagnostics { lines: string[]; failures: number; write(text: string): void; fail(): void }
+function diagnostics(): Diagnostics {
+  const d: Diagnostics = { lines: [], failures: 0, write(text) { d.lines.push(text); }, fail() { d.failures += 1; } };
+  return d;
+}
+
 interface WireOptions {
+  /** Where a notice goes when there is no UI (default: the process's stderr and exit code). */
+  diagnostics?: Diagnostics;
+  /** How long a no-UI `/empirica` waits for its kickoff to start a run (default: the adapter's bound). */
+  kickoffStartMs?: number;
   /** The private `human_surface` ingress fails (`throw`) or answers a typed Fault (`fault`). */
   surface?: "throw" | "fault";
   /** The private `evidence_presentation` ingress fails (`throw`) or answers a typed Fault (`fault`). */
@@ -200,6 +229,8 @@ interface WireOptions {
   owners?: ToolInfo[];
   /** Environment the owner resolver sees (default: none set). */
   env?: OwnerEnv;
+  /** Replaces the audit-contract resolver (default: a fixture that answers `bedrock/auditor-model`). */
+  resolveAudit?: NonNullable<Parameters<typeof createEmpiricaExtension>[0]["resolveAuditContract"]>;
   /** Replaces the reviewed-inventory lookup (default: the checked-in compat/ files). */
   inventoryFor?: (version: string) => SubagentInventory | undefined;
   /** The adapter's configured subagent tool name (default: `subagent`). */
@@ -273,9 +304,11 @@ async function wire(
         type: "Inert", reason: "unsupported_host_event", run: run() } };
     },
     ownerEnv: options.env ?? {},
+    ...(options.diagnostics ? { diagnostics: options.diagnostics } : {}),
+    ...(options.kickoffStartMs ? { kickoffStartMs: options.kickoffStartMs } : {}),
     ...(options.inventoryFor ? { inventoryFor: options.inventoryFor } : {}),
     ...(options.subagentToolName ? { subagentToolName: options.subagentToolName } : {}),
-    resolveAuditContract: async (input, _ctx, runtime) => {
+    resolveAuditContract: options.resolveAudit ?? (async (input, _ctx, runtime) => {
       // Which package's preflight the adapter handed over: the owner's own sentinel answer.
       const answer = await runtime.preflight.resolveSubagentLaunchContract({}) as { ok: boolean; message?: string };
       auditResolutions.push({ ...input, preflightAnswer: answer.ok ? "ok" : answer.message,
@@ -283,7 +316,7 @@ async function wire(
       return { agentFilePath: resolve(DEFAULT_SKILLS_DIR, "..", "agents", "pi", "empirica-auditor.md"),
         model: "bedrock/auditor-model", agentScope: "project",
         auditRetrieval: options.auditRetrieval ?? ["local", "workspace"] };
-    },
+    }),
   })(pi);
   await pi.sessionStart();
   return { pi, requests, privateRequests, auditResolutions };
@@ -374,17 +407,101 @@ test("/empirica preserves replacement tokens in the literal goal", async () => {
   assert.doesNotMatch(w.pi.userMessages[0], /\$ARGUMENTS/);
 });
 
+// ---- G14 item 1: print and json mode have no UI; every /empirica notice must still be seen (F-Q6P-1) -------------
+
+test("without a UI every /empirica refusal goes to stderr with a failing exit, and no run is created", async () => {
+  const cases: Array<[string, string, RegExp, (w: Wired) => void]> = [
+    ["unknown flags", "--cli-exec goal", /not started — unknown flags: --cli-exec/, () => undefined],
+    ["a busy session", "goal", /requires an idle session/, () => undefined],
+  ];
+  for (const mode of ["print", "json"] as const) {
+    for (const [label, args, expected] of cases) {
+      const d = diagnostics();
+      const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }), true, undefined, { diagnostics: d });
+      const ui = new FakeUi();
+      await w.pi.command("empirica").handler(args, { ui, mode, hasUI: false, ...(label === "a busy session" ? { isIdle: () => false } : {}) });
+      assert.match(d.lines.join("\n"), expected, `${mode}: ${label}`);
+      assert.equal(d.failures, 1, `${mode}: ${label} asks for a failing exit`);
+      assert.deepEqual(ui.notifications, [], "nothing goes to a UI that is not there");
+      assert.equal(w.requests.length, 0);
+      assert.equal(w.pi.entries.length, 0);
+    }
+  }
+});
+
+test("without a UI the core's refusal and a missing subagents tool are seen too", async () => {
+  const d = diagnostics();
+  const refused = await wire(() => envelope({ type: "Block", reasons: [
+    { code: "run.goal_required", message: "A non-empty goal is required" }] }), true, undefined, { diagnostics: d });
+  await refused.pi.command("empirica").handler("", { ui: new FakeUi(), mode: "print", hasUI: false });
+  assert.match(d.lines.join("\n"), /non-empty goal is required/);
+  assert.equal(d.failures, 1);
+  const none = diagnostics();
+  const noTool = await wire(() => envelope({ type: "Allow", converged: false, run: run() }), true, undefined, { diagnostics: none });
+  noTool.pi.activeTools = [];
+  await noTool.pi.command("empirica").handler("goal", { ui: new FakeUi(), mode: "json", hasUI: false });
+  assert.ok(none.lines.length >= 1 && none.failures === 1, "a refusal before any run is seen and fails the exit");
+  assert.equal(noTool.requests.length, 0);
+});
+
+// Pi's print and JSON mode end when the command's promise settles (`print-mode.js`: `await session.prompt(...)`, then
+// `runtimeHost.dispose()`), and `pi.sendUserMessage` does not wait for the run it starts (`agent-session.js`). Without a
+// wait the run is torn down at once: ctx stale, `turn_end could not resolve the persisted assistant entry ID`, no work
+// (F-Q6P-2). So with no UI the command waits until the kickoff's run is idle.
+test("without a UI /empirica does not return until the run it started is idle (delegated print mode)", async () => {
+  const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }), true, undefined, { diagnostics: diagnostics() });
+  let release: () => void = () => undefined;
+  const idle = new Promise<void>((resolve) => { release = resolve; });
+  let waited = 0;
+  const ctx = { ui: new FakeUi(), mode: "print" as const, hasUI: false, waitForIdle: () => { waited += 1; return idle; } };
+  let returned = false;
+  const pending = w.pi.command("empirica").handler("goal", ctx).then(() => { returned = true; });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(w.pi.userMessages.length, 1, "the kickoff was sent");
+  assert.equal(waited, 1);
+  assert.equal(returned, false, "the command waits for the run");
+  release();
+  await pending;
+  assert.equal(returned, true);
+});
+
+test("with a UI /empirica does not wait for the run", async () => {
+  const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+  const ctx = { ui: new FakeUi(), mode: "tui" as const, hasUI: true, waitForIdle: () => new Promise<void>(() => undefined) };
+  await w.pi.command("empirica").handler("goal", ctx);
+  assert.equal(w.pi.userMessages.length, 1);
+});
+
+test("a kickoff that never starts a run does not hold a no-UI command forever", async () => {
+  const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }), true, undefined,
+    { diagnostics: diagnostics(), kickoffStartMs: 30 });
+  w.pi.startsRunOnUserMessage = false;
+  let waited = 0;
+  const ctx = { ui: new FakeUi(), mode: "json" as const, hasUI: false, waitForIdle: async () => { waited += 1; } };
+  await w.pi.command("empirica").handler("goal", ctx);
+  assert.equal(waited, 0, "no run began, so there is nothing to wait for");
+});
+
+test("with a UI a notice goes to the UI and not to stderr or the exit code", async () => {
+  const d = diagnostics();
+  const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }), true, undefined, { diagnostics: d });
+  const ui = new FakeUi();
+  await w.pi.command("empirica").handler("--cli-exec goal", { ui, mode: "tui", hasUI: true });
+  assert.match(ui.notifications[0].message, /unknown flags/);
+  assert.deepEqual([d.lines, d.failures], [[], 0]);
+});
+
 test("/empirica empty goal reports the core refusal without starting", async () => {
   const w = await wire(() => envelope({ type: "Block", reasons: [
     { code: "run.goal_required", message: "A non-empty goal is required" },
   ] }));
   const ui = new FakeUi();
-  await w.pi.command("empirica").handler("", { ui, mode: "json" });
+  await w.pi.command("empirica").handler("", { ui, mode: "tui", hasUI: true });
   assert.equal(w.pi.userMessages.length, 0);
   assert.equal(w.pi.entries.length, 0);
   assert.match(ui.notifications[0].message, /non-empty goal is required/);
   if (w.requests[0].command.type === "StartRun")
-    assert.equal(w.requests[0].command.invocation?.interactive, false);
+    assert.equal(w.requests[0].command.invocation?.interactive, true);
 });
 
 test("/empirica rejects a busy session before creating a run", async () => {
@@ -711,7 +828,7 @@ test("gate: the end of a pass presents the waiting evidence once, then re-evalua
   assert.deepEqual(w.privateRequests.find((r) => r.operation === "human_surface")?.payload, { surface: "human" });
 });
 
-test("gate: Later or a cancelled batch grants nothing and the spent batch blocks with the real reason", async () => {
+test("gate: Later or a cancelled batch grants nothing, blocks with the real reason, and the next explicit report asks again (G14)", async () => {
   for (const selects of [["Later"], []]) {
     // eslint-disable-next-line prefer-const
     let holder: Awaited<ReturnType<typeof wire>>;
@@ -721,10 +838,10 @@ test("gate: Later or a cancelled batch grants nothing and the spent batch blocks
     const decision = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), uiCtx(selects));
     assert.deepEqual(decision, { block: true, reason: `Research waits on a human.\nhandle: ${HANDLE}` });
     assert.ok(!w.privateRequests.some((request) => request.operation === "evidence_confirmation"));
-    // and the next report does not show the dialog again: the key is spent
-    const again = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), uiCtx(["Confirm"]));
+    // and the next explicit report shows the dialog again (the core's ceiling, not the key, ends it)
+    const again = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), uiCtx(["Later"]));
     assert.equal(again?.block, true);
-    assert.equal(w.privateRequests.filter((request) => request.operation === "evidence_presentation").length, 1);
+    assert.equal(w.privateRequests.filter((request) => request.operation === "evidence_presentation").length, 2);
   }
 });
 
@@ -1116,6 +1233,71 @@ test("canonical auditor blocks equal normalized identity classes", async () => {
   assert.match(decision?.reason ?? "", /still active and nothing was spent.*Do not stop the run/);
   assert.deepEqual(w.privateRequests.map((item) => item.operation),
     ["classify_identity", "classify_identity"]);
+});
+
+// ---- G14 item 3: Pi picks a different-class auditor from `enabledModels` (ADR-0060 amendment) ----------------------------
+// Claude does the same: `adapters/claude/lifecycle.py` `_auditor_alias` picks a reviewer family other than the main one.
+
+/** Classes by the part of the model id before the first dash: sol-1 and sol-2 are one class, opus-1 another. */
+const byFamily = (_provider: unknown, model: unknown): string | null => String(model).split("-")[0];
+
+/** A resolver that answers by configuration; `preferredModel` is the adapter asking for a specific candidate. */
+function selecting(options: { model: string; source: "override" | "default" | "main"; candidates: string[]; unavailable?: string[] }) {
+  const asked: Array<string | undefined> = [];
+  const resolveAudit = async (input: Record<string, unknown>) => {
+    const preferred = typeof input.preferredModel === "string" ? input.preferredModel : undefined;
+    asked.push(preferred);
+    if (preferred && options.unavailable?.includes(preferred)) throw new Error(`configured auditor model is unavailable: ${preferred}`);
+    return { agentFilePath: resolve(DEFAULT_SKILLS_DIR, "..", "agents", "pi", "empirica-auditor.md"),
+      model: preferred ?? options.model, agentScope: "user" as const, auditRetrieval: ["local", "workspace"] as const,
+      source: preferred ? "enabledModels" as const : options.source, candidates: options.candidates };
+  };
+  return { asked, resolveAudit };
+}
+
+async function startSelecting(options: Parameters<typeof selecting>[0], author = "p/sol-1") {
+  const selection = selecting(options);
+  const diag = diagnostics();
+  const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }), true, byFamily,
+    { diagnostics: diag, resolveAudit: selection.resolveAudit });
+  const ui = new FakeUi();
+  const [provider, id] = author.split("/");
+  await w.pi.command("empirica").handler("goal", { ...fakeCtx(), ui, mode: "tui", hasUI: true, model: { provider, id } });
+  return { w, selection, ui, diag };
+}
+
+test("an author on Sol with a Sol default is given the first enabled model of another class, and the choice is shown", async () => {
+  const { w, selection, ui } = await startSelecting({ model: "p/sol-2", source: "default",
+    candidates: ["p/sol-2", "p/sol-3", "q/opus-1", "q/opus-2"] });
+  assert.deepEqual(selection.asked, [undefined, "p/sol-3", "q/opus-1"], "sol-3 is the author's class too; the first other class is opus-1");
+  assert.equal(w.requests.length > 0, true, "the run started");
+  const shown = ui.notifications.map((item) => item.message).join("\n");
+  assert.match(shown, /auditor: q\/opus-1 .*picked from enabledModels.*p\/sol-2 is in your model's class/);
+});
+
+test("an unavailable enabled model is skipped", async () => {
+  const { selection, w } = await startSelecting({ model: "p/sol-2", source: "default",
+    candidates: ["q/opus-1", "q/opus-2"], unavailable: ["q/opus-1"] });
+  assert.deepEqual(selection.asked, [undefined, "q/opus-1", "q/opus-2"]);
+  assert.equal(w.requests.length > 0, true);
+});
+
+test("an explicit auditor override is honoured and never replaced, even when it is the author's class", async () => {
+  const same = await startSelecting({ model: "p/sol-2", source: "override", candidates: ["q/opus-1"] });
+  assert.deepEqual(same.selection.asked, [undefined], "no other model was tried");
+  assert.deepEqual(same.w.requests, [], "no run was created");
+  assert.match(same.ui.notifications[0].message, /would run on your own model/);
+  const other = await startSelecting({ model: "q/opus-1", source: "override", candidates: ["q/opus-2"] });
+  assert.deepEqual(other.selection.asked, [undefined]);
+  assert.equal(other.w.requests.length > 0, true);
+  assert.doesNotMatch(other.ui.notifications.map((item) => item.message).join("\n"), /picked from enabledModels/);
+});
+
+test("with no enabled model of another class the start is refused as before", async () => {
+  const { w, ui, selection } = await startSelecting({ model: "p/sol-2", source: "default", candidates: ["p/sol-3", "p/sol-4"] });
+  assert.deepEqual(w.requests, []);
+  assert.deepEqual(selection.asked, [undefined, "p/sol-3", "p/sol-4"]);
+  assert.match(ui.notifications[0].message, /would run on your own model.*no model in enabledModels/);
 });
 
 test("/empirica does not start a run whose auditor would run on the author's own model", async () => {
