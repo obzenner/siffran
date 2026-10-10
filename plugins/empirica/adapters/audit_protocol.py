@@ -19,10 +19,20 @@ TrustedEvent = Callable[[str, str, str, dict], dict]
 TrustedAttribution = Callable[[str, str, dict], dict]
 TrustedVerdict = Callable[[str, str, str, dict], dict]
 TrustedPlan = Callable[[str, str, str], dict | None]
+TrustedExclusions = Callable[[str, str], list | None]
 
 
 class AuditProtocolError(RuntimeError):
     """A typed audit operation could not preserve its lifecycle invariants."""
+
+
+class AuditorExcluded(AuditProtocolError):
+    """The reservation was refused before any spawn: the auditor would run on a model that produced covered evidence or is
+    authoring it (``audit.auditor_excluded``). ``identities`` are the classes it must differ from; the text is the core's."""
+
+    def __init__(self, message: str, identities: list[str]) -> None:
+        super().__init__(message)
+        self.identities = identities
 
 
 @dataclass(frozen=True)
@@ -59,6 +69,7 @@ class AuditProtocol:
         attribution_ingress: TrustedAttribution = application_bridge.trusted_attribution,
         verdict_ingress: TrustedVerdict = application_bridge.trusted_audit_verdict,
         plan_ingress: TrustedPlan = application_bridge.trusted_audit_plan,
+        exclusions_ingress: TrustedExclusions = application_bridge.trusted_audit_exclusions,
         audit_retrieval: list[str] | None = None,
     ) -> None:
         if execution not in {"foreground", "async"}:
@@ -69,6 +80,7 @@ class AuditProtocol:
         self._attribution = attribution_ingress
         self._verdict = verdict_ingress
         self._plan = plan_ingress
+        self._exclusions = exclusions_ingress
         self._audit_retrieval = audit_retrieval
 
     def _request(self, command: dict) -> dict:
@@ -86,8 +98,14 @@ class AuditProtocol:
                 and isinstance(response.get("result"), Mapping)
                 and response["result"].get("type") in {"Allow", "Inert"})
 
-    def prepare(self, run_id: str, *, role_profile: str) -> AuditLaunchPlan:
-        """Atomically reserve one host-owned audit child and bind the current dossier.
+    def exclusions(self, run_id: str) -> list[str]:
+        """The identity classes the auditor must not run on (the core's set: the author and every covered producer)."""
+        value = self._exclusions(self.profile_id, run_id)
+        return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+
+    def prepare(self, run_id: str, *, role_profile: str, auditor_identity: str | None = None) -> AuditLaunchPlan:
+        """Atomically reserve one host-owned audit child and bind the current dossier. Given the identity class the
+        auditor will run on, the core refuses (``AuditorExcluded``) before any spawn when it produced covered evidence.
 
         The launch is refused, and the reservation rejected, when the auditor retrieval the host
         observes now is not the one recorded at ``StartRun``: research was routed by the recorded one."""
@@ -102,12 +120,17 @@ class AuditProtocol:
         reserved = self._request({"type": "ObserveAction", "run_id": run_id, "action": {
             "kind": "child_reserve", "purpose": "audit", "role_profile": role_profile,
             "execution": self.execution, "resource_class": "audit",
+            **({"auditor_identity": auditor_identity} if auditor_identity else {}),
         }})
         result = reserved.get("result", {})
         if not isinstance(result, Mapping) or result.get("type") != "Allow":
             # The core's own words for why (e.g. the confirmation that comes before the audit), never the adapter's.
             reasons = result.get("reasons") if isinstance(result, Mapping) else None
             said = reasons[0].get("message") if isinstance(reasons, list) and reasons and isinstance(reasons[0], Mapping) else None
+            if isinstance(reasons, list) and reasons and isinstance(reasons[0], Mapping) \
+                    and reasons[0].get("code") == "audit.auditor_excluded" and isinstance(said, str):
+                identities = reasons[0].get("parameters", {}).get("identities")
+                raise AuditorExcluded(said, [i for i in identities if isinstance(i, str)] if isinstance(identities, list) else [])
             raise AuditProtocolError("audit reservation denied" + (f": {said}" if isinstance(said, str) and said else ""))
         run = result.get("run", {})
         children = run.get("children", []) if isinstance(run, Mapping) else []

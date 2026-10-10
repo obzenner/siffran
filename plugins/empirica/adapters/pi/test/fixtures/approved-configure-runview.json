@@ -110,7 +110,9 @@
           "missing": {
             "code": "claim.research_missing",
             "target_claim_id": "C0",
-            "parameters": {}
+            "parameters": {
+              "claim_id": "C0"
+            }
           },
           "next": [
             "research.record"

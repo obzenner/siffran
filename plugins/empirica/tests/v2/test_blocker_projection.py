@@ -211,6 +211,33 @@ class BlockerProjectionTests(ConformanceCase):
             with self.subTest(reason=reason):
                 self._stop_and_assert_parity(case_drv, case_run, reason)
 
+    def test_a_claim_reason_names_the_claim_it_is_about(self):
+        """G15 F-P2-2: "Record research for this claim." left the author asking which one. The contract's parameter names
+        it and the text carries it, in the gate's reason and in the obligation row, through a redirect to the claim that
+        must be discharged."""
+        drv = self.bind_driver("blocker-projection", "named", "Named claim")
+        run_id = self.start_run(drv)
+        graph = {"root": "P", "claims": [
+            {"id": "P", "text": "Parent text", "gating": True, "kind": "ordinary"},
+            {"id": "M", "text": "Missing research text", "gating": True, "kind": "ordinary"}],
+            "edges": [{"from": "P", "to": "M", "type": "SupportedBy"}]}
+        self.require_graph_admitted(drv, run_id, graph)
+        self.require_research_recorded(drv, run_id, "P")
+        blocked = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))["result"]
+        reason = blocked["reasons"][0]
+        self.assertEqual((reason["code"], reason["parameters"]), ("claim.research_missing", {"claim_id": "M"}))
+        self.assertEqual(reason["message"], "Record research for claim M.")
+        rows = {row["id"]: row["missing"] for row in blocked["run"]["obligations"]["active"]}
+        self.assertEqual(rows["claim:P"]["parameters"], {"claim_id": "M"})  # the redirect names the target
+
+        drv = self.bind_driver("blocker-projection", "named-refuted", "Named refuted")
+        run_id = self.start_run(drv)
+        root = self.require_graph_admitted(drv, run_id, canonical_graph(n_claims=1, kind="ordinary"))["root"]
+        self.dispatch(drv, observe_action(run_id=run_id, action=action_research(
+            claim_id=root, source_kind="code", result="refutes")))
+        refuted = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))["result"]["reasons"][0]
+        self.assertEqual(refuted["message"], f"Active evidence refutes claim {root}.")
+
     def test_obligations_are_lossless_redirected_and_report_all_blockers(self):
         drv = self.bind_driver("blocker-projection", "obligations", "Lossless obligations")
         run_id = self.start_run(drv)

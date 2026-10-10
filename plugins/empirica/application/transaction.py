@@ -7,7 +7,7 @@ from typing import Any
 
 from core.context_selector import select_sections
 from core import governance
-from core.evaluation import (READ_COMMANDS, SPAWN_BUDGET, Decision, EvaluationSnapshot,
+from core.evaluation import (READ_COMMANDS, SPAWN_BUDGET, Decision, EvaluationSnapshot, audit_exclusions,
                              active_spike_heads as captured_heads, audit_binding,
                              audit_operation_current, digest,
                              evaluate_snapshot, frozen_scope_invalid, plan_evidence_confirmation, plan_evidence_presentation,
@@ -332,6 +332,18 @@ class Coordinator:
             "argument": _plain(child["audit_argument"]),
             "audit_retrieval": _plain(loaded.state.invocation["audit_retrieval"]),
         }
+
+    def trusted_audit_exclusions(self, run_id: str) -> list[str] | None:
+        """The identity classes an auditor must not run on (core.evaluation.audit_exclusions); ``None`` when unreadable."""
+        key = decode_handle(run_id)
+        loaded = self._load(key) if key is not None else None
+        if not isinstance(loaded, Loaded):
+            return None
+        try:
+            snapshot = self._assemble(key, loaded.state, {"type": "GetArgument", "run_id": run_id}, require_graph=True)
+        except Exception:  # noqa: BLE001 - an unreadable run has no exclusion; the reservation and the verdict still refuse
+            return None
+        return audit_exclusions(snapshot)
 
     def trusted_attribution(self, run_id: str, payload: dict[str, Any],
                             request_id: str = "trusted-ingress") -> dict[str, Any]:

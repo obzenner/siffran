@@ -183,6 +183,10 @@ class _Service:
         result = self._coordinator.trusted_audit_plan(run_id, child_id)
         return result
 
+    def trusted_audit_exclusions(self, *, run_id) -> list | None:
+        """The identity classes an auditor must not run on, never projected publicly."""
+        return self._coordinator.trusted_audit_exclusions(run_id)
+
     def trusted_child_event(self, *, run_id, child_id, event) -> dict:
         terminal = self._trusted_terminal(run_id)
         if terminal:

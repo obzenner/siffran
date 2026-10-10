@@ -528,6 +528,10 @@ def _spike_requirement(snapshot: EvaluationSnapshot, claim: Mapping[str, Any], d
     return "claim.spike_missing", {}, not (spikes and spikes[-1].get("outcome") == "pass")
 
 
+#: The claim reasons whose parameters carry the claim they are about (``claim_id``) and whose contract text names it.
+CLAIM_NAMED_REASONS = frozenset({"claim.research_missing", "claim.research_unbound", "claim.spike_missing", "claim.refuted"})
+
+
 def claim_blockers(snapshot: EvaluationSnapshot,
                    derivation: ClaimDerivation | None = None) -> tuple[dict[str, Any], ...]:
     """Derive every scoped claim blocker in stable graph order.
@@ -576,6 +580,8 @@ def claim_blockers(snapshot: EvaluationSnapshot,
                 for item in snapshot.history)
             reason = ("claim.research_unbound" if historical_research
                       else "claim.research_missing")
+        if reason in CLAIM_NAMED_REASONS:  # the reason's text names the claim to discharge, not "this claim" (G15)
+            parameters = {**parameters, "claim_id": target_id}
         blockers.append({"claim_id": claim_id, "target_claim_id": target_id,
                          "reason": reason, "parameters": parameters})
     return tuple(blockers)
@@ -920,6 +926,16 @@ def audit_attributions(
     return auditor, producers
 
 
+def audit_exclusions(snapshot: EvaluationSnapshot) -> list[str]:
+    """The opaque identity classes an auditor must not run on: the current author's and every producer of the evidence an
+    audit would cover (sorted). The verdict check refuses an auditor equal to one of them (``independence``), so a launch
+    on one of them would spend a spawn on a verdict that cannot count; the reservation refuses it first (G15)."""
+    by_id = {item.get("artifact_id"): item for item in snapshot.history}
+    producers = [by_id.get(artifact_id, {}).get("producer") for artifact_id in covered_artifact_ids(snapshot)]
+    classes = {identity_pair(producer) for producer in [_producer(snapshot.state), *producers]}
+    return sorted(value for value in classes if value is not None)
+
+
 def audit_binding(snapshot: EvaluationSnapshot) -> dict[str, Any]:
     """Derive the exact audit dossier binding from the current immutable snapshot."""
     if snapshot.graph is None or frozen_scope_invalid(snapshot.state, snapshot.graph):
@@ -1191,7 +1207,14 @@ def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent:
                 if batch is not None and confirmation.prompt_error(snapshot, batch["key"]) in confirmation.ASKABLE:
                     return _decision(snapshot, state, "Block", reason=CONFIRMATION_REASON,
                                      parameters=confirmation.parameters(
-                                         snapshot, batch["record_ids"], [r["claim_id"] for r in batch["claims"]]))
+                                         snapshot, batch["record_ids"], [r["claim_id"] for r in batch["claims"]],
+                                         batch["key"]))
+            auditor_identity = action.get("auditor_identity") if resource_class == "audit" else None
+            if auditor_identity is not None and snapshot.graph is not None:
+                excluded = audit_exclusions(snapshot)
+                if auditor_identity in excluded:
+                    return _decision(snapshot, state, "Block", reason="audit.auditor_excluded",
+                                     parameters={"identities": excluded, "models": ", ".join(excluded)})
             if (execution == "async" and snapshot.host_tier != "full_async"
                     and not (resource_class == "audit"
                              and snapshot.host_audit_execution == "async")):
@@ -1272,7 +1295,7 @@ def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent:
         if batch is not None:
             return decide(state, "Block", reason=CONFIRMATION_REASON,
                           parameters=confirmation.parameters(
-                              snapshot, batch["record_ids"], [r["claim_id"] for r in batch["claims"]]))
+                              snapshot, batch["record_ids"], [r["claim_id"] for r in batch["claims"]], batch["key"]))
         blocker = blocker or (blockers[0] if blockers else None)  # fail closed: never converge past one
         if blocker is not None:
             return decide(state, "Block", reason=blocker["reason"], parameters=blocker["parameters"],

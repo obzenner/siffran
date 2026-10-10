@@ -66,7 +66,9 @@
               "missing": {
                 "code": "claim.research_missing",
                 "target_claim_id": "G0",
-                "parameters": {}
+                "parameters": {
+                  "claim_id": "G0"
+                }
               },
               "next": [
                 "research.record"
@@ -104,7 +106,9 @@
       "reasons": [
         {
           "code": "claim.research_missing",
-          "parameters": {},
+          "parameters": {
+            "claim_id": "G0"
+          },
           "affected": {
             "obligation_id": "claim:G0"
           },
@@ -114,7 +118,7 @@
           "sections": [
             "evidence/research"
           ],
-          "message": "Record research for this claim."
+          "message": "Record research for claim G0."
         }
       ]
     }

@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 
@@ -23,7 +23,7 @@ from application import protocol as _protocol
 from adapters.audit import child_prompt, verdict_from_final_output
 from adapters.audit_protocol import (AuditLaunchPlan, AuditProtocol, AuditProtocolError,
                                      IdentityObservation)
-from adapters.identity import REVIEWER_FAMILIES, claude_observation, family
+from adapters.identity import REVIEWER_FAMILIES, claude_observation, family, observe
 from adapters.public_tools import EVIDENCE_ACTIONS, OBSERVE_TOOL
 from .completion import dispatch_stop, stop_result
 from .restore import dispatch_restore, restore_context
@@ -249,8 +249,29 @@ def _main_model(payload: Mapping[str, object]) -> str | None:
     return _parse_current_assistant_model(payload.get("transcript_path"))
 
 
-def _auditor_alias(payload: Mapping[str, object], environ: Mapping[str, str]) -> str | None:
-    """Choose only a host-resolvable alias different from the observed main family."""
+def _excluded_families(excluded: Sequence[str]) -> set[str]:
+    """The reviewer families of the identity classes the core excludes (``vendor/model``); a class with no known family adds none."""
+    return {name for identity in excluded if (name := family(identity.partition("/")[2])) is not None}
+
+
+def _configured_exclusion(environ: Mapping[str, str], excluded: Sequence[str]) -> str | None:
+    """The excluded identity class an explicit ``CLAUDE_CODE_SUBAGENT_MODEL`` would run on, else ``None``: the same class when it
+    names a concrete model, or any excluded class of the same family when it is an alias (``opus``). The core refuses on it."""
+    configured = environ.get("CLAUDE_CODE_SUBAGENT_MODEL")
+    if not configured or configured == "inherit":
+        return None
+    raw = _model_observation(configured, source="claude-subagent-model")
+    classed = observe(raw["provider_id"], raw["model_id"], source=raw["source"]) if raw else None
+    if classed is not None and classed["identity"] in excluded:
+        return classed["identity"]
+    named = family(configured)
+    return next((item for item in excluded if named is not None and family(item.partition("/")[2]) == named), None)
+
+
+def _auditor_alias(payload: Mapping[str, object], environ: Mapping[str, str],
+                   excluded: Sequence[str] = ()) -> str | None:
+    """Choose only a host-resolvable alias different from the observed main family and from every family the core excludes
+    (the earlier producers of the covered evidence)."""
     configured = environ.get("CLAUDE_CODE_SUBAGENT_MODEL")
     if configured and configured != "inherit":
         return None
@@ -262,8 +283,9 @@ def _auditor_alias(payload: Mapping[str, object], environ: Mapping[str, str]) ->
             "ANTHROPIC_DEFAULT_<FAMILY>_MODEL")
     third_party = any(environ.get(key) for key in (
         "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"))
+    barred = _excluded_families(excluded) | {main}
     for reviewer_family in REVIEWER_FAMILIES:
-        if reviewer_family != main and (not third_party or environ.get(f"ANTHROPIC_DEFAULT_{reviewer_family.upper()}_MODEL")):
+        if reviewer_family not in barred and (not third_party or environ.get(f"ANTHROPIC_DEFAULT_{reviewer_family.upper()}_MODEL")):
             return reviewer_family
     raise AuditProtocolError(
         "no distinct reviewer alias is resolvable; set CLAUDE_CODE_SUBAGENT_MODEL or pin "
@@ -365,9 +387,11 @@ def spawn_main() -> int:
                     if decision.exit_code else 0)
         if "model" in tool_input:
             return _deny("empirica auditor launch forbids model overrides")
-        alias = _auditor_alias(payload, os.environ)
         audit_protocol = AuditProtocol(CLAUDE_PROFILE_ID, execution="async")
-        plan = audit_protocol.prepare(handle, role_profile="empirica:empirica-auditor")
+        excluded = audit_protocol.exclusions(handle)  # the core's set: the author and every covered producer
+        alias = _auditor_alias(payload, os.environ, excluded)
+        plan = audit_protocol.prepare(handle, role_profile="empirica:empirica-auditor",
+                                      auditor_identity=_configured_exclusion(os.environ, excluded))
         updated = {
             "subagent_type": "empirica:empirica-auditor",
             "description": "Bound Empirica audit",

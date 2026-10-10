@@ -126,6 +126,30 @@ class MediatorTests(MediatorFixture):
         self.assertEqual(self.verification(drv, run_id)["status"], "confirmed_by_human")
         self.assertEqual(self.left(drv, run_id), before - 2)
 
+    def test_after_a_later_the_reason_directs_a_re_ask_while_the_ceiling_allows_one(self):
+        """G15 F-P2-3: the text a continuation reads (the reason's message) says an explicit report asks the human again, and the
+        first `next:` is that report. Once the interactions are spent it is the plain waiting text. The core chooses the case."""
+        waiting = "Waiting for a human to confirm research or answer a decision."
+        with mock.patch.object(core_governance, "MAX_INTERACTIONS", 4):
+            drv, run_id = self.start()
+            self.research(drv, run_id, "web", URL)
+            fresh = self.report(drv, run_id)
+            self.assertEqual(fresh["reasons"][0]["message"], waiting)  # nothing was shown yet
+            self.assertNotIn("asking", fresh["reasons"][0]["parameters"])
+            human = Human(accept(d1="later"))
+            projected = self.mediate(drv, run_id, human)  # what the same call returns after the Later
+            again = self.evaluated(drv, run_id)           # what the next Stop / continuation reads
+            for view in (projected, again):
+                reason = view["reasons"][0]
+                self.assertEqual(reason["parameters"]["asking"], "again")
+                self.assertIn("An explicit report_convergence asks the human again", reason["message"])
+                self.assertEqual(reason["next_actions"][0], "convergence.report")
+            while self.left(drv, run_id) > 0:
+                self.mediate(drv, run_id, human)
+            spent = self.evaluated(drv, run_id)["reasons"][0]
+            self.assertEqual(spent["message"], waiting)
+            self.assertNotEqual(spent["next_actions"][0], "convergence.report")
+
     def test_a_pause_or_a_continuation_never_asks_again_by_itself(self):
         """G14: only the mediator inside an explicit report presents. A Stop reads the same view (no mediator) and asks
         nobody, and the view it reads does not lead the author to report again."""
@@ -137,7 +161,7 @@ class MediatorTests(MediatorFixture):
         for _ in range(3):
             stopped = self.evaluated(drv, run_id)  # what a Stop hook / a settle reads
             self.assertEqual(stopped["run"]["confirmation_batch"]["prompt_error"], "already_presented")
-            self.assertNotEqual(stopped["reasons"][0]["next_actions"][0], "convergence.report")
+            self.assertEqual(stopped["reasons"][0]["parameters"]["asking"], "again")  # it directs; it does not ask
         self.assertEqual((len(human.shown), self.left(drv, run_id)), (1, spent))
 
     def test_asking_again_stops_at_the_interaction_ceiling(self):

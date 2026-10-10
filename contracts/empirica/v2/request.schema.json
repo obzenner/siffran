@@ -864,6 +864,11 @@
             "string",
             "null"
           ]
+        },
+        "auditor_identity": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
         }
       }
     },

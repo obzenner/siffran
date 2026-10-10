@@ -136,7 +136,7 @@ test("REPORT_CONVERGENCE_TOOL and INTENT constants are correct", () => {
   assert.equal(REPORT_CONVERGENCE_INTENT, "report_convergence");
 });
 
-// --- startRunNotice (table-driven, truthful D6 UX) ---------------------------
+// --- startRunNotice (table-driven; plain words, no internal labels: G15 F-P2-4) ----------
 
 const START_NOTICE_CASES: Array<{
   label: string;
@@ -144,11 +144,11 @@ const START_NOTICE_CASES: Array<{
   type: "info" | "warning" | "error";
   patterns: RegExp[];
 }> = [
-  { label: "Allow active is info with D6 attempt and id", result: { type: "Allow", converged: false, run: { id: "r1", status: "active" } }, type: "info", patterns: [/D6 StartRun attempt/, /r1/, /active/] },
-  { label: "Allow converged notes already converged", result: { type: "Allow", converged: true, run: { id: "r2", status: "converged" } }, type: "info", patterns: [/already converged/] },
-  { label: "Fault is error with D6 attempt, could-not-start, and actual code", result: { type: "Fault", code: "unsupported", fail_direction: "closed" }, type: "error", patterns: [/D6 StartRun attempt could not start/, /unsupported/] },
-  { label: "Block is warning with D6 attempt", result: { type: "Block", run: RUN, reasons: [{ code: "x", message: "denied" }] }, type: "warning", patterns: [/D6 StartRun attempt blocked/] },
-  { label: "Inert is warning with D6 attempt", result: { type: "Inert", reason: "no_run" }, type: "warning", patterns: [/D6 StartRun attempt/] },
+  { label: "Allow active is info: started, with the id", result: { type: "Allow", converged: false, run: { id: "r1", status: "active" } }, type: "info", patterns: [/^\/empirica started: run r1$/] },
+  { label: "Allow converged notes already converged", result: { type: "Allow", converged: true, run: { id: "r2", status: "converged" } }, type: "info", patterns: [/^\/empirica started: run r2 \(already converged\)$/] },
+  { label: "Fault is error: not started, with the actual code", result: { type: "Fault", code: "unsupported", fail_direction: "closed" }, type: "error", patterns: [/^\/empirica not started: unsupported: /] },
+  { label: "Block is warning: not started, with the reason", result: { type: "Block", run: RUN, reasons: [{ code: "x", message: "denied" }] }, type: "warning", patterns: [/^\/empirica not started: denied/] },
+  { label: "Inert is warning: not started", result: { type: "Inert", reason: "no_run" }, type: "warning", patterns: [/^\/empirica not started: no run was created$/] },
 ];
 
 for (const c of START_NOTICE_CASES) {
@@ -156,6 +156,7 @@ for (const c of START_NOTICE_CASES) {
     const n = startRunNotice(c.result);
     assert.equal(n.type, c.type);
     for (const p of c.patterns) assert.match(n.text, p);
+    assert.doesNotMatch(n.text, /\bD\d\b|StartRun/, "no internal label reaches the user");
   });
 }
 

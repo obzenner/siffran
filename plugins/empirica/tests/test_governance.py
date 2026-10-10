@@ -811,7 +811,40 @@ class GovernanceServiceTests(unittest.TestCase):
                 r, {**v, **observe(v.get("provider_id"), v.get("model_id"), source=v["source"]),
                     "observed_by": "host"}),
             verdict_ingress=lambda _p, r, ch, v: c.trusted_audit_verdict(r, ch, v),
-            plan_ingress=lambda _p, r, ch: c.trusted_audit_plan(r, ch))
+            plan_ingress=lambda _p, r, ch: c.trusted_audit_plan(r, ch),
+            exclusions_ingress=lambda _p, r: c.trusted_audit_exclusions(r))
+
+    def test_the_auditor_must_differ_from_every_producer_of_covered_evidence_not_only_the_author(self):
+        """G15 F-P2-1 (pi-2): research by one model, then the author switched to another. An auditor equal to the earlier
+        producer was admitted at launch (only the author was compared) and the verdict was refused afterwards, after a spawn
+        was spent. The core owns the set (the author and every covered producer); a reservation whose auditor is in it is
+        refused before any spawn, with the contract's text naming the models."""
+        from adapters.audit_protocol import AuditorExcluded, AuditProtocolError
+        from governance_setup import approve_current
+        self.prepare()                                              # the author is CONTEXT's (AUTHOR: sonnet)
+        approve_current(self.service._coordinator, self.run_id)
+        self.assertEqual(self.action("investigate")["type"], "Allow")
+        self.assertEqual(self.action("research", claim_id="C0", source_kind="code", result="supports",
+                                    payload={"source_ref": "supplied", "citation": "observed"})["type"], "Allow")
+        self.assertIn(self.service.trusted_governance_context(          # /model: the author is now opus
+            run_id=self.run_id, payload={"author": AUDITOR, "ingress": "pi_ui"})["result"]["type"], {"Allow", "Inert"})
+        protocol = self.audit_protocol()
+        producer, author = AUTHOR["identity"], AUDITOR["identity"]
+        self.assertEqual(sorted(protocol.exclusions(self.run_id)), sorted([producer, author]))
+        spawns = lambda: self.view()["governance"]["budgets"]["audit_spawns_used"]  # noqa: E731
+        for excluded in (producer, author):                            # the earlier producer, and the author
+            with self.assertRaises(AuditorExcluded) as refused:
+                protocol.prepare(self.run_id, role_profile="empirica:empirica-auditor", auditor_identity=excluded)
+            self.assertEqual(refused.exception.identities, sorted([producer, author]))
+            self.assertIn(producer, str(refused.exception))
+            self.assertIn(author, str(refused.exception))
+            self.assertIn("enabledModels", str(refused.exception))
+            self.assertEqual((len(self.view()["children"]), spawns()), (0, 0), "no spawn is consumed")
+        plan = protocol.prepare(self.run_id, role_profile="empirica:empirica-auditor", auditor_identity="openai/gpt-5.6")
+        self.assertEqual(spawns(), 1)
+        self.assertEqual(plan.run_id, self.run_id)
+        self.assertEqual(self.view()["children"][0]["state"], "reserved")
+        self.assertTrue(issubclass(AuditorExcluded, AuditProtocolError))
 
     def audit_ready(self):
         from governance_setup import approve_current

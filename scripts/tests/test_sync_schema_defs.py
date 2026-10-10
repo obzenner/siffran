@@ -144,6 +144,7 @@ EXPECTED_CLAIM_ID_POSITIONS = {
     ),
     "response.schema.json": (
         "/$defs/auditStaleParams/properties/claim_id",
+        "/$defs/claimNamedParams/properties/claim_id",
         "/$defs/confirmationRequiredParams/properties/claim_ids",
         "/$defs/runView/properties/confirmation_batch/anyOf/1/properties/claim_ids",
         "/$defs/runView/properties/confirmation_batch/anyOf/1/properties/records/items/properties/claim_id",
@@ -168,6 +169,8 @@ EXPECTED_CLAIM_ID_POSITIONS = {
         "/next_actions/spike.run/params/properties/claim_id",
         "/next_actions/spike.regate/params/properties/claim_id",
         "/reasons/audit.stale/params/properties/claim_id",
+        *(f"/reasons/{code}/params/properties/claim_id" for code in (
+            "claim.research_missing", "claim.research_unbound", "claim.spike_missing", "claim.refuted")),
         "/reasons/evidence.confirmation_required/params/properties/claim_ids",
         "/reasons/freeze.deferred/params/properties/claim_ids",
     ),

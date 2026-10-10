@@ -217,7 +217,7 @@ The outcomes below are tested one row at a time in `tests/v2/test_evidence_scena
 | H | New research after an earlier look (route `human`, nothing shown for this derivation) | Same reason; next `convergence.report` | At the next report | Reading `next:` alone reaches the dialog |
 | H | A URL record only | `evidence.confirmation_required` | Once, at the end of the pass | Confirm releases the record |
 | H | A URL record while another claim is open | The open claim's reason | Yes, at the end of the pass | The open claim still leads |
-| H | Later, cancel or timeout | Same reason, `prompt_error: already_presented` | Not by itself; an explicit report asks again, within the interaction limit | Stop blocks; `report_convergence` asks again, otherwise `residual.accept` |
+| H | Later, cancel or timeout | Same reason with `asking: again`, `prompt_error: already_presented`; the text directs an explicit `report_convergence` (G15) while the limit allows one, else the plain waiting text | Not by itself; an explicit report asks again, within the interaction limit | Stop blocks; `report_convergence` asks again, otherwise `residual.accept` |
 | H | Reject with a note on the last supporting record | `claim.research_missing` | Not again | The note shows on the obligation row |
 | H | Interactions exhausted | Same reason, `prompt_error: interaction_limit` | No | Stop blocks with the real reason |
 | H | Only a `needs-decision` claim | `evidence.confirmation_required` with `claim_ids` | Once | Approve converges after an audit as `human_owned` |

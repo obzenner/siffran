@@ -245,8 +245,7 @@ class LiteralAgentOnClaude(HostFaithful):
         self.assertEqual(outcome, "presented", calls)
         self.assertEqual(len(self.human.shown), 1, "the agent that follows `next:` asked once and stopped")
         view = self.say(("report_convergence", {"run_id": run_id}))  # the human asked for it: an explicit report (G14)
-        self.assertIn("already shown", view)
-        self.assertNotIn("report_convergence intent=report_convergence", next_actions(view))
+        self.assertIn("An explicit report_convergence asks the human again", view)  # G15: the view directs the re-ask
         self.assertEqual(len(self.human.shown), 2)
 
     def test_new_research_after_an_observation_is_asked_again(self):  # a human surface observed earlier
@@ -297,7 +296,7 @@ class StopHookLoopOnClaude(HostFaithful):
         self.assertEqual(stops[0].exit_code, 0)
         self.assertRegex(message, r"paused.*not converged|not converged.*paused")
         self.assertIn("nobody was asked", message)
-        self.assertIn("Record research for this claim", message)  # the real reason, not a stock sentence
+        self.assertIn("Record research for claim C0", message)  # the real reason, not a stock sentence
         self.assertEqual(self.run_view(drv, run_id)["status"], "active")  # nothing was terminalized or approved by it
 
     def test_EHB_STOP_16_a_deliberative_evidence_wait_pauses_and_nobody_is_shown_a_dialog_by_the_stop(self):
@@ -334,9 +333,9 @@ class StopHookLoopOnClaude(HostFaithful):
             with self.subTest(label):
                 drv, run_id, stops, calls = self.unattended(**session)
                 self.assertEqual([s.exit_code for s in stops], [2, 2, 0], [s.stderr or s.stdout for s in stops])
-                self.assertEqual(stops[0].stderr.strip(), "Record research for this claim.")  # an auto first turn end gives the core's reason
+                self.assertEqual(stops[0].stderr.strip(), "Record research for claim C0.")  # an auto first turn end gives the core's reason
                 self.assertIn("intent=stop", stops[1].stderr)  # the continuation names the way out
-                self.assertIn("Record research for this claim.", stops[1].stderr)
+                self.assertIn("Record research for claim C0.", stops[1].stderr)
                 self.assertEqual(calls, ["report_convergence intent=stop"])
                 self.assertTrue(self.run_view(drv, run_id)["status"].startswith("stopped_"), self.run_view(drv, run_id)["status"])
                 self.assertEqual(self.human.shown, [])
@@ -391,8 +390,10 @@ class LiteralAgentOnPi(HostFaithful):
         drv, run_id = self.pi(reply=accept(d1="later"))
         outcome, _ = self.literal_agent(run_id, self.after_research(run_id))
         self.assertEqual(outcome, "presented")
-        self.assertNotIn("report_convergence intent=report_convergence",
-                         next_actions(self.say(("report_convergence", {"run_id": run_id}))))
+        self.assertEqual(len(self.human.shown), 1, "the agent that follows `next:` asked once")
+        view = self.say(("report_convergence", {"run_id": run_id}))  # an explicit report asks again (G14)
+        self.assertEqual(len(self.human.shown), 2)
+        self.assertIn("An explicit report_convergence asks the human again", view)  # G15: the continuation directs it
 
 
 FAULT = {"result": {"type": "Fault", "code": "conflict", "fail_direction": "closed"}}
@@ -620,7 +621,7 @@ class HostFailure(HostFaithful):
         self.assertEqual(self.evaluated(drv, run_id, "presentation_failed"), spent)
         self.assertEqual(project_host_failure(spent, "presentation_failed"), spent)
 
-    def test_a_shown_batch_whose_reevaluation_fails_is_not_offered_again(self):
+    def test_a_shown_batch_whose_reevaluation_fails_directs_an_explicit_re_ask_not_a_silent_one(self):
         for how in ("raise", "fault"):
             with self.subTest(how=how):
                 drv, run_id = self.claude(reply=accept(d1="later"))
@@ -635,8 +636,8 @@ class HostFailure(HostFaithful):
                 self.inject(self.tools, "_dispatch", how, when=after_the_dialog)
                 view = self.say(("report_convergence", {"run_id": run_id}))
                 self.assertEqual(len(self.human.shown), 1)
-                self.assertNotEqual(first_actionable(view), "report_convergence intent=report_convergence")
-                self.assertIn("already shown", view)
+                self.assertEqual(len(self.human.shown), 1, "nothing asked again by itself")
+                self.assertIn("left open", view)  # G15: the text says it was shown and an explicit report asks again
 
     # ---- the precedence of what the core already knows ------------------------------------
 

@@ -117,7 +117,7 @@
     "outcome": null
    }
   ],
-  "version": "sha256:e58f5e99d78fc14ac260ba06229c8dbd94746ab458bcb79196b18724e5e49af8",
+  "version": "sha256:2be65d7831810476ad3bd7efef0b1ed5de124ce697404d1c597525432ad7ab86",
   "waiting": []
  },
  "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/2": {
@@ -275,7 +275,7 @@
     "outcome": "fail"
    }
   ],
-  "version": "sha256:8ebc40d8dbad85c0e3acf4e613bc526e3eb7eb08da1c7d82f3fbb51143da6be2",
+  "version": "sha256:201b69c914655de01b29f59287b6e7b503da62a5f061c871fb64ec77995a7afb",
   "waiting": []
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-39abe9247f103fe638ce5e01424e311f5a2751de1eb1f57f4e2ce6da4bc72b70/1": {
@@ -301,7 +301,7 @@
   },
   "claims": [
    {
-    "blocker_message": "Record research for this claim.",
+    "blocker_message": "Record research for claim C0.",
     "commands": [],
     "decision": null,
     "id": "C0",
@@ -395,7 +395,7 @@
     "outcome": null
    }
   ],
-  "version": "sha256:c7b72bb15db2ec98e34f15c250b7a9b044f8945341c6d5bade51e861abe9bc4a",
+  "version": "sha256:9e150ec27d92f8c782b5819502d5770551b0bb205e9df56daf4b5dfbfc76a550",
   "waiting": []
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e/1": {
@@ -421,7 +421,7 @@
   },
   "claims": [
    {
-    "blocker_message": "Record research for this claim.",
+    "blocker_message": "Record research for claim C0.",
     "commands": [],
     "decision": null,
     "id": "C0",
@@ -431,7 +431,7 @@
     "spikes_ever": 0
    },
    {
-    "blocker_message": "Active evidence refutes this claim.",
+    "blocker_message": "Active evidence refutes claim C1.",
     "commands": [],
     "decision": null,
     "id": "C1",
@@ -454,7 +454,7 @@
     "spikes_ever": 0
    },
    {
-    "blocker_message": "Record research for this claim.",
+    "blocker_message": "Record research for claim C2.",
     "commands": [],
     "decision": null,
     "id": "C2",
@@ -476,17 +476,17 @@
    {
     "claim": "C0",
     "code": "claim.research_missing",
-    "message": "Record research for this claim."
+    "message": "Record research for claim C0."
    },
    {
     "claim": "C1",
     "code": "claim.refuted",
-    "message": "Active evidence refutes this claim."
+    "message": "Active evidence refutes claim C1."
    },
    {
     "claim": "C2",
     "code": "claim.research_missing",
-    "message": "Record research for this claim."
+    "message": "Record research for claim C2."
    }
   ],
   "stale": [],
@@ -527,7 +527,7 @@
     "outcome": null
    }
   ],
-  "version": "sha256:480fcc7044c0a4a7605de3ab95818a1af305ffa635657e5c4694b3cca6e90dca",
+  "version": "sha256:301fda26dd723e88f7ef6e35e61a4780ce53b7884426d85b6686a575a8871648",
   "waiting": []
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9/1": {
@@ -713,7 +713,7 @@
     "outcome": "pass"
    }
   ],
-  "version": "sha256:27816a383fc48b74d7766fbfd65b705d07534b8334a18478c576ab6ed5e66e70",
+  "version": "sha256:4ebb7525295a934f7db6bc982f71f78b599eccad238b9fcfec8f4deb26602d8d",
   "waiting": []
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-cb83d909b5dd5e1ef98360c4289ab9c465b1af5cab2e48d54cc3796a4d09e6c5/1": {
@@ -756,7 +756,7 @@
   },
   "claims": [
    {
-    "blocker_message": "Record research for this claim.",
+    "blocker_message": "Record research for claim C0.",
     "commands": [],
     "decision": null,
     "id": "C0",
@@ -835,7 +835,7 @@
     "spikes_ever": 0
    },
    {
-    "blocker_message": "Record research for this claim.",
+    "blocker_message": "Record research for claim C4.",
     "commands": [],
     "decision": null,
     "id": "C4",
@@ -1007,7 +1007,7 @@
     "outcome": null
    }
   ],
-  "version": "sha256:114a86bca659ac144c01ee7dd3a8ce8b53f2e34a31b4a3f0c3ff95d0896e46be",
+  "version": "sha256:7c1db4bc50d6694b3ceea0dcb87a396507fff6865546b317b44f764b298dbadc",
   "waiting": [
    {
     "claim": "C5",
@@ -1231,7 +1231,7 @@
     "outcome": "supporting"
    }
   ],
-  "version": "sha256:db3510bb27a5058c0272c169a8b0e270c2bc0f8e48bb3252fc60db8d7de066a1",
+  "version": "sha256:f3d8e02972294867d459d1afb594a4bf01a5d763b1e6fdc526f0db48468334bd",
   "waiting": []
  },
  "s256-b5e0eee6e28efca6d6ad05d7b8a94631576037ec9e5ff6d305fe89faa0e1032e/s256-6ec97bb08344a844badedb2426721d756e040e9e77f4f26c70f203bdcb9730bd/1": {
@@ -1264,7 +1264,7 @@
   "residuals": [],
   "stale": [],
   "steps": [],
-  "version": "sha256:0055189ae84b5b752606c3abdaa5b76927446457bbd4d4becd7d216330a2e8ce",
+  "version": "sha256:bb17d3ff34140fcaa789e7f4016ea085a8bce8bbaa81bd255700d16adbba895b",
   "waiting": []
  },
  "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470/1": {
@@ -1383,7 +1383,7 @@
     "outcome": null
    }
   ],
-  "version": "sha256:868cb1343fd249de0094333bbaa46484879480be307fc470ff76a495c2206554",
+  "version": "sha256:74c4bdf2fd9bd012a9992aeca1bfbacc26b614144a37a93e27491764d97e810b",
   "waiting": []
  },
  "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148/1": {
@@ -1532,7 +1532,7 @@
     "outcome": null
    }
   ],
-  "version": "sha256:23b5ebed75eee13319974caea91e1954c90bde7cfe3cd78c44d957dd3291c5df",
+  "version": "sha256:35b37f569d756b1803187ef933904ed760c0e3b7b1757b7a9864adfc001fb235",
   "waiting": []
  }
 }

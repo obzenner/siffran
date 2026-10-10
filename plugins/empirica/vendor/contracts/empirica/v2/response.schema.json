@@ -175,6 +175,43 @@
         }
       }
     },
+    "claimNamedParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim_id"
+      ],
+      "properties": {
+        "claim_id": {
+          "$ref": "#/$defs/claimId"
+        }
+      }
+    },
+    "auditorExcludedParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identities",
+        "models"
+      ],
+      "properties": {
+        "identities": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "models": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      }
+    },
     "auditStaleParams": {
       "type": "object",
       "additionalProperties": false,
@@ -397,7 +434,7 @@
               "const": "claim.research_missing"
             },
             "parameters": {
-              "$ref": "#/$defs/emptyParams"
+              "$ref": "#/$defs/claimNamedParams"
             }
           }
         },
@@ -412,7 +449,7 @@
               "const": "claim.research_unbound"
             },
             "parameters": {
-              "$ref": "#/$defs/emptyParams"
+              "$ref": "#/$defs/claimNamedParams"
             }
           }
         },
@@ -457,7 +494,7 @@
               "const": "claim.spike_missing"
             },
             "parameters": {
-              "$ref": "#/$defs/emptyParams"
+              "$ref": "#/$defs/claimNamedParams"
             }
           }
         },
@@ -502,7 +539,7 @@
               "const": "claim.refuted"
             },
             "parameters": {
-              "$ref": "#/$defs/emptyParams"
+              "$ref": "#/$defs/claimNamedParams"
             }
           }
         },
@@ -623,6 +660,21 @@
             },
             "parameters": {
               "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "audit.auditor_excluded"
+            },
+            "parameters": {
+              "$ref": "#/$defs/auditorExcludedParams"
             }
           }
         },
@@ -3733,6 +3785,11 @@
           "items": {
             "$ref": "#/$defs/claimId"
           }
+        },
+        "asking": {
+          "enum": [
+            "again"
+          ]
         }
       }
     }

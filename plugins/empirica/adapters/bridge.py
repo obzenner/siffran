@@ -196,6 +196,11 @@ def trusted_audit_plan(profile_id: str, run_id: str, child_id: str) -> dict | No
     return build_service(profile_id).trusted_audit_plan(run_id=run_id, child_id=child_id)
 
 
+def trusted_audit_exclusions(profile_id: str, run_id: str) -> list | None:
+    """The identity classes an auditor must not run on: the author and every producer of covered evidence."""
+    return build_service(profile_id).trusted_audit_exclusions(run_id=run_id)
+
+
 def trusted_host_runtime(profile_id: str, run_id: str) -> dict | None:
     """The runtime provenance recorded at StartRun (``{"host_runtime": ...}``), or None if unreadable."""
     return build_service(profile_id).trusted_host_runtime(run_id=run_id)

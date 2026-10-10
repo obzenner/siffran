@@ -32,6 +32,7 @@ confirmation row's guidance says which.
 | `audit.failed` | `empirica_read GetRun`; `host: child_reserve` | Address every finding listed under `Audit:`, then retry within the audit ceiling (normally once); stop if it fails again. |
 | `audit.stale` | `host: child_reserve` | The graph or evidence changed after the audit: launch a fresh audit of the current scope. |
 | `audit.same_model` | `host: child_reserve`; `report_convergence intent=stop` | The auditor matched a covered producer's model: launch an auditor from a different model, or accept the residual. |
+| `audit.auditor_excluded` | `host: child_reserve`; `report_convergence intent=stop` | The reservation was refused before any spawn: the auditor would run on a model that produced covered evidence or is authoring it. Choose an auditor of another model (an override, or `enabledModels` on Pi) and launch again. |
 | `audit.independence_unverified` | `host: child_reserve`; `report_convergence intent=stop` | The host could not verify auditor independence: relaunch under a distinct observed model, or accept the residual. |
 | `child.terminal` | `host: child_reserve`; `report_convergence intent=stop` | A child ended in a terminal state: retry within the ceiling (normally once), or accept the residual and stop. |
 | `host.async_unsupported` | `report_convergence intent=stop` | This host cannot run the audit asynchronously: run it in the foreground, or accept the residual and stop. |

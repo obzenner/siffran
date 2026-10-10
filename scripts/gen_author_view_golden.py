@@ -112,7 +112,7 @@ def _synthetic_results() -> list[tuple[str, object]]:
     for row in redirected["run"]["obligations"]["active"]:
         if row["id"].startswith("claim:"):
             row.update(missing={"code": "claim.spike_missing", "target_claim_id": "S1",
-                                "parameters": {}}, next=["spike.run"])
+                                "parameters": {"claim_id": "S1"}}, next=["spike.run"])
 
     deferred = copy.deepcopy(stored(json.loads((FIXTURES / "getargument-active.json").read_text()))
                              ["expected"]["result"])

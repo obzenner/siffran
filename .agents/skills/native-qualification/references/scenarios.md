@@ -40,6 +40,9 @@ Record every row as `PASS`, `FAIL`, `BLOCKED` or `NOT_REACHED` with an evidence 
 | `ev_missing_or_stale_spike` | URL evidence plus a missing or stale spike on one claim; report. | `claim.spike_missing` or `claim.spike_stale` leads; no pause; transcript and RunView. |
 | `ev_long_quote` | A URL citation with a long verbatim quote; present and read the whole text. | The dialog shows the whole quote, untruncated. |
 | `ev_later_then_fresh_get_run` | After Later, call `get_run`. | The author's view says it was shown and an explicit report asks again. |
+| `audit_after_model_switch` | Pi, `enabledModels` with three classes: research by model X, `/model` to Y, then the audit (G15). | The auditor runs on neither X nor Y (the adapter picked another enabled model, or refused with `audit.auditor_excluded` naming both and spending no audit spawn). Claude: the same with `CLAUDE_CODE_SUBAGENT_MODEL` unset, then set to X's family: refused before launch. |
+| `reason_names_claim` | A graph with two open claims; read the Stop / gate reason. | The reason says `claim <id>`, not "this claim". |
+| `later_continuation_directs_report` | Auto run: choose Later; read the next continuation. | It says an explicit `report_convergence` asks the human again (while interactions remain), and the run does not ask by itself. |
 
 ## C. Injected and unreachable rows: covered by deterministic tests, never claimed live
 

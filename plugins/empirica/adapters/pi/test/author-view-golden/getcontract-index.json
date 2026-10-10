@@ -247,6 +247,12 @@
             ]
           },
           {
+            "code": "audit.auditor_excluded",
+            "sections": [
+              "audit/independence"
+            ]
+          },
+          {
             "code": "audit.independence_unverified",
             "sections": [
               "audit/independence"

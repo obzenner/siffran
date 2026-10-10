@@ -96,7 +96,9 @@
           ],
           "append": {
             "code": "claim.research_missing",
-            "parameters": {},
+            "parameters": {
+              "claim_id": "C0"
+            },
             "next_actions": [
               "research.record"
             ],

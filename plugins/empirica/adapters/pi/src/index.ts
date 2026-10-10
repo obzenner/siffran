@@ -155,6 +155,8 @@ export interface ResolvedAuditContract {
   candidates?: readonly string[];
   /** Set when the model was picked from `enabledModels`: the configured model it replaced. */
   replaced?: string;
+  /** The identity class the auditor will run on (set by the adapter after classification; sent with the reservation). */
+  identity?: string;
 }
 /** Resolves the audit launch contract through the bound owner's preflight, exact version, and inventory. */
 export type AuditContractResolver = (
@@ -512,7 +514,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
      * checks this before starting one, and the audit launch checks it again (settings may change).
      */
     const independentAuditor = async (input: Record<string, unknown>, ctx: ExtensionContext,
-                                      runtime: AuditRuntime): Promise<ResolvedAuditContract> => {
+                                      runtime: AuditRuntime, excluded: ReadonlySet<string> = new Set()): Promise<ResolvedAuditContract> => {
       const expectedAgent = path.resolve(skillsDir, "..", "agents", "pi", "empirica-auditor.md");
       const resolved = await resolveAuditContract({ ...input, expectedAgent }, ctx, runtime);
       const author = piGovernanceContext(ctx).author as Record<string, unknown> | null;
@@ -528,9 +530,12 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         throw new Error("main author identity unobservable; select a concrete model");
       if (reviewerIdentity === null)
         throw new Error(`reviewer identity unobservable; ${AUDITOR_MODEL_FIX}`);
-      if (authorIdentity.identity !== reviewerIdentity.identity) return resolved;
-      // Same class as the author. An explicit override is the user's word and is never replaced. Otherwise the first model
-      // the user enabled that is available and of another class becomes the auditor (the same pick Claude's
+      // The classes the auditor must differ from: the author's, and (at audit launch) every producer of covered evidence, which
+      // only the core knows (`excluded`, from its `audit.auditor_excluded` refusal).
+      const barred = (identity: string): boolean => identity === authorIdentity.identity || excluded.has(identity);
+      if (!barred(reviewerIdentity.identity)) return { ...resolved, identity: reviewerIdentity.identity };
+      // Same class as the author or a producer. An explicit override is the user's word and is never replaced. Otherwise the
+      // first model the user enabled that is available and of another class becomes the auditor (the same pick Claude's
       // `_auditor_alias` makes); identity is still proven only by the child session the launch observes.
       if (resolved.source !== "override") {
         for (const candidate of resolved.candidates ?? []) {
@@ -540,11 +545,11 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             picked = await resolveAuditContract({ ...input, expectedAgent, preferredModel: candidate }, ctx, runtime);
           } catch { continue; }
           const identity = await identityOf(picked.model);
-          if (identity !== null && identity.identity !== authorIdentity.identity)
-            return { ...picked, source: "enabledModels", replaced: resolved.model };
+          if (identity !== null && !barred(identity.identity))
+            return { ...picked, identity: identity.identity, source: "enabledModels", replaced: resolved.model };
         }
       }
-      throw new Error(`the auditor would run on your own model (${resolved.model}), so its audit could not `
+      throw new Error(`the auditor would run on ${excluded.size > 0 ? "a model that produced the evidence or is authoring it" : "your own model"} (${resolved.model}), so its audit could not `
         + `count as independent; ${resolved.source === "override" ? "" : "no model in enabledModels is available in another class either; "}`
         + AUDITOR_MODEL_FIX);
     };
@@ -1058,16 +1063,25 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           if (current.result.type !== "Allow") throw new Error("approved configuration unavailable");
           const governed = current.result.run.governance as { state?: string } | undefined;
           if (governed?.state !== "approved") throw new Error("approved configuration unavailable");
-          const resolvedAudit = await independentAuditor(event.input, ctx, auditRuntime);
+          let resolvedAudit = await independentAuditor(event.input, ctx, auditRuntime);
           const roleProfile = "empirica.empirica-auditor";
           const nativeId = event.toolCallId;
           // The runtime is recorded once, at StartRun. The private bridge admits the audit only when the
           // runtime observed now is that record, so a receipt derived from the record cannot name a
           // package other than the one that runs this audit (a reload or resume may have swapped it).
-          const prepared = await trusted({ operation: "audit_prepare", run_id: runHandle,
+          const auditRun = runHandle;
+          const prepare = (audit: ResolvedAuditContract) => trusted({ operation: "audit_prepare", run_id: auditRun,
             role_profile: roleProfile,
             payload: { host_runtime: buildHostRuntime(SUBAGENTS_COMPATIBILITY, launch.binding.provenance),
-              audit_retrieval: resolvedAudit.auditRetrieval } });
+              audit_retrieval: audit.auditRetrieval, ...(audit.identity ? { auditor_identity: audit.identity } : {}) } });
+          let prepared = await prepare(resolvedAudit);
+          if (prepared.type === "audit_excluded" && resolvedAudit.source !== "override") {
+            // The core refused this auditor's class before any spawn: it produced covered evidence. Pick again outside the
+            // core's set (it also holds the author's class); an explicit override is never replaced.
+            resolvedAudit = await independentAuditor(event.input, ctx, auditRuntime, new Set(prepared.identities));
+            prepared = await prepare(resolvedAudit);
+          }
+          if (prepared.type === "audit_excluded") throw new Error(prepared.message);
           if (prepared.type === "audit_refused") {
             const refusal: OwnerRefusal = { ok: false, code: "owner-changed",
               message: `this run was started under a different pi-subagents runtime than the ${SUBAGENT_TOOL} owner `

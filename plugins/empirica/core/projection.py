@@ -73,6 +73,10 @@ def confirmation_actions(code: str, parameters: Mapping[str, Any] | None, action
         # The human has just answered no: the agent is not sent to ask again by itself. The human's own word ("stop")
         # does, and the batch stays askable for that request (``prompt_error`` is not changed).
         prompt_error = "already_presented"
+    elif code == CONFIRMATION_REASON and prompt_error == "already_presented":
+        # Shown and left open, with interactions left (the ceiling outranks "already shown"): an explicit report asks
+        # again, so the recovery leads with it, like the reason's text (G15 F-P2-3).
+        prompt_error = None
     return confirmation_next(actions, (parameters or {}).get("route"), prompt_error)
 
 
@@ -112,6 +116,10 @@ def project_prompt_error(result: Mapping[str, Any], prompt_error: str | None,
 def _recased(row: Mapping[str, Any], prompt_error: str | None, reasons: Mapping[str, Any] | None) -> Mapping[str, Any]:
     """The terminal-step reason with the case (and, given the contract's reasons, the text) that is true for this
     ``prompt_error``; every other row as it is."""
+    if row["code"] == CONFIRMATION_REASON:
+        parameters = {**{k: v for k, v in row["parameters"].items() if k != "asking"}, **confirmation.asking(prompt_error)}
+        text = confirmation.reason_text(reasons[row["code"]], parameters) if reasons else row.get("message")
+        return {**row, "parameters": parameters, **({"message": text} if text is not None else {})}
     if row["code"] != TERMINAL_STOP_REASON:
         return row
     parameters = {**row["parameters"], "case": confirmation.terminal_case(

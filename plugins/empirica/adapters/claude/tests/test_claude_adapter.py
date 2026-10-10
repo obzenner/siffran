@@ -563,8 +563,9 @@ class ResponseMappingTests(unittest.TestCase):
             self.assertEqual((blocked.exit_code, blocked.stderr), (2, "Research waits on a human.\n"), error)
         # Another claim blocker leads: the open claim's own reason is what the Stop reports.
         other = result(code="claim.research_missing")
-        other["reasons"][0]["message"] = "Record research for this claim."
-        self.assertEqual(_stop(other).stderr, "Record research for this claim.\n")
+        other["reasons"][0]["parameters"] = {"claim_id": "G0"}
+        other["reasons"][0]["message"] = "Record research for claim G0."
+        self.assertEqual(_stop(other).stderr, "Record research for claim G0.\n")
         mixed = result()
         mixed["reasons"].append({"code": "run.corrupt", "parameters": {}, "next_actions": [],
                                  "sections": [], "message": "corrupt"})
@@ -664,7 +665,7 @@ class StopModeTests(unittest.TestCase):
     approval. The mode is read only from the run view the core returned."""
 
     MODES = ("deliberative", "auto-interactive-pre", "auto-interactive-post", "auto-delegated")
-    REASON = "Record research for this claim."
+    REASON = "Record research for claim G0."
     RECORD = "sha256:" + "a" * 64
 
     @classmethod
@@ -688,7 +689,7 @@ class StopModeTests(unittest.TestCase):
     @classmethod
     def block(cls, mode: str, kind: str) -> dict:
         run = cls.mode(mode, json.loads(json.dumps(_valid_active_allow()["run"])))
-        reason = {"code": "claim.research_missing", "parameters": {}, "affected": {"obligation_id": "claim:G0"},
+        reason = {"code": "claim.research_missing", "parameters": {"claim_id": "G0"}, "affected": {"obligation_id": "claim:G0"},
                   "next_actions": ["research.record"], "sections": ["evidence/research"], "message": cls.REASON}
         if kind == "evidence":
             run["confirmation_batch"] = {"key": "sha256:" + "b" * 64, "record_ids": [cls.RECORD], "claim_ids": [],
@@ -1157,6 +1158,54 @@ class SpawnLifecycleTests(unittest.TestCase):
              patch("sys.stdin", new=payload):
             self.assertEqual(spawn_main(), 2)
         reject.assert_called_once_with(plan)
+
+    # ---- G15 F-P2-1: the auditor differs from every producer of covered evidence, not only the main model --------------
+
+    SONNET, OPUS, FABLE = "anthropic/claude-sonnet-4-6", "anthropic/claude-opus-4-6", "anthropic/claude-fable-1"
+
+    def _alias_after_switch(self, excluded, env=None):
+        with patch.object(lifecycle, "_parse_current_assistant_model", return_value="claude-sonnet-4-6"):
+            return lifecycle._auditor_alias({"transcript_path": "main.jsonl"}, env or {}, excluded)
+
+    def test_the_default_alias_skips_every_class_the_core_excludes(self) -> None:
+        """Main is sonnet; fable (the first other family) produced the evidence earlier. The alias is the next family."""
+        self.assertEqual(self._alias_after_switch([]), "fable")
+        self.assertEqual(self._alias_after_switch([self.SONNET, self.FABLE]), "opus")
+        self.assertEqual(self._alias_after_switch([self.SONNET, self.FABLE, self.OPUS]), "haiku")
+        from adapters.audit_protocol import AuditProtocolError
+        with self.assertRaises(AuditProtocolError):
+            self._alias_after_switch([self.SONNET, self.FABLE, self.OPUS, "anthropic/claude-haiku-4-5"])
+
+    def _launch(self, env: dict, excluded: list[str], refusal: str | None = None):
+        from adapters.audit_protocol import AuditorExcluded, AuditLaunchPlan
+        plan = AuditLaunchPlan(CLAUDE_PROFILE, "active-run", "ch-audit", "empirica:empirica-auditor", {"claims": []})
+        refuse = AuditorExcluded(refusal, excluded) if refusal else None
+        out, err = StringIO(), StringIO()
+        with patch("adapters.claude.lifecycle._resolve", return_value=("active-run", {})), \
+             patch("adapters.claude.lifecycle.dispatch_investigation", return_value=_typed(_active_result(), "investigate")), \
+             patch("adapters.claude.lifecycle._governance_context"), \
+             patch("adapters.claude.lifecycle._main_model", return_value="claude-sonnet-4-6"), \
+             patch("adapters.claude.lifecycle.AuditProtocol.exclusions", return_value=excluded), \
+             patch("adapters.claude.lifecycle.AuditProtocol.prepare", return_value=plan, side_effect=refuse) as prepare, \
+             patch.dict("os.environ", env, clear=False), \
+             patch("sys.stdin", new=self._stdin({"subagent_type": "empirica:empirica-auditor", "prompt": "audit"})), \
+             patch("sys.stdout", new=out), patch("sys.stderr", new=err):
+            code = lifecycle.spawn_main()
+        return code, prepare, out.getvalue(), err.getvalue()
+
+    def test_an_explicit_subagent_model_in_the_excluded_set_is_refused_before_launch(self) -> None:
+        text = "The auditor would run on a model that produced or is authoring the covered evidence (x)."
+        for configured, expected in (("claude-opus-4-6", self.OPUS), ("opus", self.OPUS)):  # a concrete model, and an alias
+            with self.subTest(configured=configured):
+                code, prepare, out, err = self._launch({"CLAUDE_CODE_SUBAGENT_MODEL": configured},
+                                                       [self.SONNET, self.OPUS], refusal=text)
+                self.assertEqual(code, 2)
+                self.assertEqual(prepare.call_args.kwargs["auditor_identity"], expected)  # the core judges it, not the adapter
+                self.assertIn(text, err + out)
+        code, prepare, out, _ = self._launch({"CLAUDE_CODE_SUBAGENT_MODEL": "claude-haiku-4-5"}, [self.SONNET, self.OPUS])
+        self.assertEqual(code, 0)
+        self.assertEqual(prepare.call_args.kwargs.get("auditor_identity"), None)  # outside the set: nothing to refuse
+        self.assertNotIn('"model"', out)
 
     def test_durable_plan_rejects_missing_operation_or_wrong_role(self) -> None:
         from adapters.claude.lifecycle import _parse_durable_plan

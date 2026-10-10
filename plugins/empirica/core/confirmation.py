@@ -19,6 +19,7 @@ history and run state only (duck-typed), so they stay pure.
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -151,12 +152,21 @@ def retrieve(snapshot: Any, record: Any) -> bool:
     return citations.retrieval_kind(record["source_ref"]) in audit_retrieval(snapshot)
 
 
-def parameters(snapshot: Any, record_ids: list[str], claim_ids: list[str]) -> dict[str, Any]:
+def asking(prompt_error: str | None) -> dict[str, str]:
+    """``{"asking": "again"}`` when the batch was shown and left open while the interaction ceiling still allows another
+    asking (the contract's text then directs an explicit report), else nothing: the plain waiting text stands.
+    ``prompt_error`` ranks the ceiling above "already shown", so the ceiling needs no test here."""
+    return {"asking": "again"} if prompt_error == "already_presented" else {}
+
+
+def parameters(snapshot: Any, record_ids: list[str], claim_ids: list[str], key: str | None = None) -> dict[str, Any]:
     """The ``evidence.confirmation_required`` parameters: the records waiting on a human (every one of
     them takes the same route) and the ``needs-decision`` claims the same batch asks about, decisions
-    and records together being one batch for one human."""
+    and records together being one batch for one human. Given the batch's ``key`` the reason says when it is being asked
+    again (``asking``); a row that has no batch to ask about omits it."""
     return {"route": human_route(snapshot), "record_ids": record_ids,
-            **({"claim_ids": claim_ids} if claim_ids else {})}
+            **({"claim_ids": claim_ids} if claim_ids else {}),
+            **(asking(prompt_error(snapshot, key)) if key is not None else {})}
 
 
 def presentation(snapshot: Any, receipt_id: str) -> dict[str, Any] | None:
@@ -199,9 +209,9 @@ def reason_text(spec: Mapping[str, Any], parameters: Mapping[str, Any]) -> str:
     ``case`` (or the parameter the reason's ``case_parameter`` names), that case's text with the parameters filled in. The one place the text is chosen; nothing in an adapter words it."""
     templates = spec.get("case_messages")
     case = parameters.get(spec.get("case_parameter", "case"))
-    if not templates or case not in templates:
-        return spec["message"]
-    return templates[case].format_map({k: v for k, v in parameters.items() if isinstance(v, str)})
+    text = templates[case] if templates and case in templates else spec["message"]
+    # Only ``{name}`` of a string parameter is filled; any other brace stays as written.
+    return re.sub(r"\{(\w+)\}", lambda m: parameters[m.group(1)] if isinstance(parameters.get(m.group(1)), str) else m.group(0), text)
 
 
 def prompt_error(snapshot: Any, key: str, *, terminal: bool = False) -> str | None:

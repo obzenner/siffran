@@ -217,6 +217,8 @@ function diagnostics(): Diagnostics {
 }
 
 interface WireOptions {
+  /** The identity classes the core refuses an auditor on (`audit.auditor_excluded`); the fake core answers like the real one. */
+  excluded?: readonly string[];
   /** Where a notice goes when there is no UI (default: the process's stderr and exit code). */
   diagnostics?: Diagnostics;
   /** How long a no-UI `/empirica` waits for its kickoff to start a run (default: the adapter's bound). */
@@ -277,6 +279,9 @@ async function wire(
         const identity = classify(payload?.provider_id, payload?.model_id);
         return identity === null ? null as unknown as Record<string, unknown> : { identity };
       }
+      if (request.operation === "audit_prepare" && options.excluded?.includes(String(request.payload?.auditor_identity)))
+        return { type: "audit_excluded", identities: [...options.excluded].sort(),
+          message: `The auditor would run on a model that produced or is authoring the covered evidence (${[...options.excluded].sort().join(", ")}); nothing was launched.` } as never;
       if (request.operation === "audit_prepare") return recordedRuntime !== undefined
         && !isDeepStrictEqual(recordedRuntime, request.payload?.host_runtime)
         ? { type: "audit_refused", reason: "runtime_changed" } : {
@@ -1300,6 +1305,46 @@ test("with no enabled model of another class the start is refused as before", as
   assert.match(ui.notifications[0].message, /would run on your own model.*no model in enabledModels/);
 });
 
+// ---- G15 F-P2-1: the auditor differs from every producer of the covered evidence, not only the current author ----------
+
+/** pi-2: research by Sol, `/model` to Opus, a Sol default auditor. The core's set is {opus, sol}; the adapter compared only the author. */
+async function auditAfterModelSwitch(options: Parameters<typeof selecting>[0], excluded: string[]) {
+  const selection = selecting(options);
+  const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }), true, byFamily,
+    { resolveAudit: selection.resolveAudit, excluded });
+  await w.pi.command("empirica").handler("goal", { ...fakeCtx(), ui: new FakeUi(), mode: "tui", hasUI: true, model: { provider: "p", id: "opus-1" } });
+  const decision = await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "tc-excl",
+    input: { agent: "empirica.empirica-auditor", task: "audit" } }, { ...fakeCtx(), model: { provider: "p", id: "opus-1" } });
+  const prepares = w.privateRequests.filter((request) => request.operation === "audit_prepare");
+  return { w, decision, prepares, selection };
+}
+
+test("an earlier producer's class is skipped at audit launch: the adapter picks another enabled model, spending no spawn", async () => {
+  const { decision, prepares, w } = await auditAfterModelSwitch({ model: "p/sol-2", source: "default",
+    candidates: ["p/sol-2", "p/sol-3", "p/gpt-1", "q/haiku-1"] }, ["opus", "sol"]);
+  assert.equal(decision, undefined, "the audit launches");
+  assert.deepEqual(prepares.map((request) => request.payload?.auditor_identity), ["sol", "gpt"],
+    "the core refused sol before any spawn; gpt is the first enabled model outside {opus, sol}");
+  assert.equal(w.pi.entries.some((entry) => entry.customType === "empirica.audit"), true);
+});
+
+test("an explicit auditor override in the excluded set is refused with the core's reason, never replaced", async () => {
+  const { decision, prepares, w } = await auditAfterModelSwitch({ model: "p/sol-2", source: "override",
+    candidates: ["p/gpt-1"] }, ["opus", "sol"]);
+  assert.equal(decision?.block, true);
+  assert.match(decision?.reason ?? "", /produced or is authoring the covered evidence \(opus, sol\)/);
+  assert.equal(prepares.length, 1, "no other model was tried");
+  assert.equal(w.privateRequests.some((request) => request.operation === "audit_reject"), false, "nothing was reserved");
+});
+
+test("with no enabled model outside the excluded set the launch is refused and says what to do", async () => {
+  const { decision, prepares } = await auditAfterModelSwitch({ model: "p/sol-2", source: "default",
+    candidates: ["p/sol-2", "p/sol-3", "q/opus-2"] }, ["opus", "sol"]);
+  assert.equal(decision?.block, true);
+  assert.match(decision?.reason ?? "", /no model in enabledModels is available in another class either/);
+  assert.equal(prepares.length, 1);
+});
+
 test("/empirica does not start a run whose auditor would run on the author's own model", async () => {
   const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }), true, () => "same-class");
   const ui = new FakeUi();
@@ -1355,7 +1400,7 @@ test("an audit under the runtime recorded at StartRun carries that exact runtime
   assert.equal(decision, undefined);
   const prepare = w.privateRequests.find((request) => request.operation === "audit_prepare");
   assert.deepEqual(prepare?.payload,
-    { host_runtime: ownerHostRuntime(), audit_retrieval: ["local", "workspace"] });
+    { host_runtime: ownerHostRuntime(), audit_retrieval: ["local", "workspace"], auditor_identity: "bedrock/auditor-model" });
 });
 
 test("an audit is refused, sticky, when the pi-subagents runtime is not the one recorded at StartRun", async () => {

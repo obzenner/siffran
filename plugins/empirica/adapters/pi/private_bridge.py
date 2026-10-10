@@ -14,7 +14,7 @@ if str(PLUGIN) not in sys.path:
 from adapters import bridge, confirmation  # noqa: E402
 from application import host_runtime  # noqa: E402
 from adapters.audit_protocol import (  # noqa: E402
-    AuditLaunchPlan, AuditProtocol, IdentityObservation,
+    AuditLaunchPlan, AuditorExcluded, AuditProtocol, IdentityObservation,
 )
 from adapters.identity import observe  # noqa: E402
 
@@ -58,8 +58,11 @@ def _audit_prepare(profile: str, raw: dict, payload: dict):
     if recorded is None or not host_runtime.same_runtime(
             recorded.get("host_runtime"), payload.get("host_runtime")):
         return {"type": "audit_refused", "reason": "runtime_changed"}
-    plan = AuditProtocol(profile, audit_retrieval=payload["audit_retrieval"]).prepare(
-        raw["run_id"], role_profile=raw["role_profile"])
+    try:
+        plan = AuditProtocol(profile, audit_retrieval=payload["audit_retrieval"]).prepare(
+            raw["run_id"], role_profile=raw["role_profile"], auditor_identity=payload.get("auditor_identity"))
+    except AuditorExcluded as excluded:  # before any spawn: the adapter picks another class, or shows the core's text
+        return {"type": "audit_excluded", "message": str(excluded), "identities": excluded.identities}
     return {"type": "audit_plan", "plan": _plan_json(plan)}
 
 

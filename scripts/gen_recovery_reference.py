@@ -50,6 +50,7 @@ AUTHOR_GUIDANCE = {
     "audit.failed": "Address every finding listed under `Audit:`, then retry within the audit ceiling (normally once); stop if it fails again.",
     "audit.stale": "The graph or evidence changed after the audit: launch a fresh audit of the current scope.",
     "audit.same_model": "The auditor matched a covered producer's model: launch an auditor from a different model, or accept the residual.",
+    "audit.auditor_excluded": "The reservation was refused before any spawn: the auditor would run on a model that produced covered evidence or is authoring it. Choose an auditor of another model (an override, or `enabledModels` on Pi) and launch again.",
     "audit.independence_unverified": "The host could not verify auditor independence: relaunch under a distinct observed model, or accept the residual.",
     "child.terminal": "A child ended in a terminal state: retry within the ceiling (normally once), or accept the residual and stop.",
     "host.async_unsupported": "This host cannot run the audit asynchronously: run it in the foreground, or accept the residual and stop.",
