@@ -97,10 +97,13 @@ class Freshness:
 
 @dataclass(frozen=True)
 class AuditSummary:
-    """Contract-owned audit state and host-observed independence classification."""
+    """The audit's latest verdict, its currency, whether a re-audit is pending, and (once settled) the host-observed
+    independence classification: the core's four facts, worded by ``audit_text``."""
 
-    state: Trusted
-    independence: Trusted
+    verdict: Trusted
+    current: bool | None
+    pending: bool
+    independence: Trusted | None
     findings: tuple[Untrusted, ...]
 
 
@@ -347,9 +350,7 @@ def _parse(result: dict[str, Any]) -> AuthorView:
         Freshness(safety.untrusted(row["path"]), Trusted(row["state"]))
         for row in run["freshness"]["changes"])
     return AuthorView(
-        header, AuditSummary(Trusted(run["audit"]["state"]),
-                             Trusted(run["audit"]["independence"]),
-                             tuple(safety.untrusted(item) for item in run["audit"]["findings"])),
+        header, _audit_summary(run["audit"], safety),
         # Only Block carries reasons; a run-bearing Allow has none.
         (tuple(_reason(row, safety) for row in result["reasons"])
          if result["type"] == "Block" else ()),
@@ -400,10 +401,33 @@ def _freshness_lines(rows: tuple[Freshness, ...]) -> tuple[str, ...]:
     return tuple(f"  {row.path}: {row.state}" for row in rows)
 
 
+def _audit_summary(audit: dict[str, Any], safety: TextSafety) -> AuditSummary:
+    return AuditSummary(Trusted(audit["verdict"]), audit["current"], audit["pending"],
+                        None if audit["independence"] is None else Trusted(audit["independence"]),
+                        tuple(safety.untrusted(item) for item in audit["findings"]))
+
+
+def audit_text(audit: AuditSummary | dict[str, Any]) -> str:
+    """The audit in words, from the core's four facts: the verdict (or that one is owed or pending), no longer current
+    when the verdict does not cover the argument, a pending re-audit, and the independence of a settled verdict. Only
+    contract labels are used."""
+    get = (lambda key: getattr(audit, key)) if isinstance(audit, AuditSummary) else audit.__getitem__
+    verdict, current, pending, independence = get("verdict"), get("current"), get("pending"), get("independence")
+    if verdict == "none":
+        parts = [_LABELS["audit_pending" if pending else "audit_verdict_none"]]
+    else:
+        parts = [_LABELS[f"audit_verdict_{verdict}"]]
+        if current is False:
+            parts.append(_LABELS["audit_not_current"])
+        if pending:
+            parts.append(_LABELS["audit_reaudit_pending"])
+    suffix = f" ({independence})" if independence is not None else ""
+    return ", ".join(parts) + suffix
+
+
 def _audit_lines(audit: AuditSummary) -> tuple[str, ...]:
-    """Render independence once a verdict exists, then the findings a failed audit reported."""
-    suffix = f" ({audit.independence})" if audit.state in {"passed", "failed"} else ""
-    return (f"{_LABELS['audit']} {audit.state}{suffix}",
+    """Render the audit in words, then the findings a failed audit reported."""
+    return (f"{_LABELS['audit']} {audit_text(audit)}",
             *(f"  {_LABELS['finding']} {item}" for item in audit.findings))
 
 
@@ -478,7 +502,7 @@ def _argument_lines(argument: dict[str, Any], safety: TextSafety) -> tuple[str, 
         _LABELS["claims"], *claims,
         *((_LABELS["edges"], *edges) if edges else ()),
         *((_LABELS["citations"], *citations) if citations else ()),
-        f"{_LABELS['audit_status']} {audit['state']} ({audit['independence']})",
+        f"{_LABELS['audit_status']} {audit_text(audit)}",
         *(f"  {_LABELS['finding']} {safety.untrusted(item)}" for item in audit["findings"]),
     )
 

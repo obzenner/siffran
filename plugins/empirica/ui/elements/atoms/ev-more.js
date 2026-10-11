@@ -4,7 +4,7 @@ import { EvElement, define, esc, t } from "../core/element.js";
  * Prose that may be long: at most two lines, and "Show all" appears only when the text does not fit in them
  * (measured, and measured again when the box changes width). "Show all" opens it in place; "Show less" folds it. An
  * open or folded state survives a redraw. Used for a goal, a decision's answer, a research quote and a note
- * (CONVENTIONS D: long text is disclosed, short text never shows a control).
+ * (long text is disclosed, short text never shows a control).
  * @element ev-more
  * @attr {string} text - the prose as written
  * @attr {string} [label] - a copy key for a small caption above it (e.g. the goal's)

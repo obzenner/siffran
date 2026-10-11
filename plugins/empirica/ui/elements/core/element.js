@@ -1,4 +1,4 @@
-// Shared element machinery (CONVENTIONS E1-E7). Pure helpers only: no fetch, no timers, no trust logic.
+// Shared element machinery (UI.md, Elements and layers). Pure helpers only: no fetch, no timers, no trust logic.
 import copy from "../../copy/en.json" with { type: "json" };
 import icons from "../../icons.json" with { type: "json" };
 import states from "../../states.json" with { type: "json" };
@@ -28,33 +28,23 @@ export function plain(key, vars = {}) {
 export function stateOf(domain, value) {
   return states[domain]?.[value] ?? states.unknown;
 }
-/** Presentation for a history step (contract `steps[]`): its kind's icon and word, with its outcome's word and, when
- * it has one, its outcome's tone (a failed spike reads as a failure). `quiet`/`minor` are the kind's. */
-export function stepOf(kind, outcome) {
-  const k = stateOf("step", kind), o = outcome ? stateOf("outcome", outcome) : null;
-  const word = t(`${k.copy}.label`);
-  return { icon: k.icon, tone: o ? o.tone : k.tone, quiet: !!k.quiet, minor: !!k.minor, copy: k.copy,
-    label: o ? t("step.with", { kind: word, outcome: t(`${o.copy}.label`) }) : word };
-}
+/** The word for a value of a state vocabulary. */
+export function word(domain, value) { return t(`${stateOf(domain, value).copy}.label`); }
 
 /** A counted phrase: `${key}.one` for exactly one thing, else `key`. `{n}` is that count unless `vars` says more. */
 export function count(key, n, vars = {}) { return t(n === 1 ? `${key}.one` : key, { n, ...vars }); }
+/** A moment as a clock time, in the reader's locale (`ms` since the epoch). */
+export function clock(ms) { return new Intl.DateTimeFormat(undefined, { timeStyle: "medium" }).format(new Date(ms)); }
+/** Whether the copy catalogue has `key`. */
+export const has = (key) => copy[key] !== undefined;
+/** A host's name as the people who use it say it: the catalogue's, else the id the host recorded. */
+export const hostName = (id) => (has(`host.${id}`) ? t(`host.${id}`) : esc(id));
 /** Parts of one line, the blank ones left out, joined with the catalogue's separator (never one typed in code). */
 export function joined(...parts) { return parts.filter(Boolean).join(copy["list.join"]); }
 /** A moment the observer recorded (seconds since the epoch), in the reader's locale: a date and a time. */
 export function when(seconds) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(seconds * 1000));
 }
-/** The word for one value a filter offers: a state's word, else its `copy` prefix + value. */
-export function optionLabel(f, value) {
-  return f.domain ? t(`${stateOf(f.domain, value).copy}.label`) : t(`${f.copy}.${value}`);
-}
-
-/** The values of a domain, in states.json order. */
-export function statesOf(domain) { return Object.keys(states[domain]); }
-/** A domain's one quiet value (`quiet: true` in states.json), or `undefined`. */
-export function quietOf(domain) { return statesOf(domain).find((v) => states[domain][v].quiet); }
-
 /** Literal class sets per tone (E7: no string-built classes; Tailwind scans these literals). */
 export const TONE = {
   positive: { fg: "text-tone-positive", tint: "bg-tone-positive-tint" },
@@ -66,8 +56,8 @@ export const TONE = {
   neutral: { fg: "text-tone-neutral", tint: "bg-tone-neutral-tint" },
 };
 
-/** Shorten prose for a level-1 hint (D: ≤ 60 characters). Presentation only. */
-export function clip(text, n = 60) {
+/** Shorten prose to `n` characters. Presentation only: the full text is always one click away. */
+export function clip(text, n = 90) {
   const s = String(text ?? "").replace(/\s+/g, " ").trim();
   return s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
 }
@@ -80,15 +70,8 @@ export function icon(meaning, size = "s") {
   return `<svg class="${ICON_SIZE[size]} shrink-0" aria-hidden="true" focusable="false"><use href="${SPRITE}#${id}"></use></svg>`;
 }
 
-/** Icon by meaning (V5) placed inside an SVG picture, at (x, y) with the given size in the picture's units. */
-export function iconAt(meaning, x, y, size, cls = "") {
-  const id = icons[meaning];
-  if (!id) throw new Error(`unknown icon meaning: ${meaning}`);
-  return `<svg x="${x}" y="${y}" width="${size}" height="${size}" viewBox="0 0 24 24" class="${cls}" aria-hidden="true" focusable="false"><use href="${SPRITE}#${id}"></use></svg>`;
-}
-
 const FOCUSABLE = "button, a[href], input, select, textarea, summary, [tabindex]";
-const PRESENTATION = new Set(["data-hint", "data-variant", "data-size", "data-selected"]);
+const PRESENTATION = new Set(["data-variant", "data-size", "data-selected"]);
 /** `tag[data-x="v"]…` from a node's identifying data-* attributes, or "" when it has none. */
 function ident(n) {
   const ids = [...n.attributes].filter((x) => x.name.startsWith("data-") && !PRESENTATION.has(x.name));

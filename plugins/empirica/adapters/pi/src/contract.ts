@@ -36,6 +36,8 @@ export interface InvocationProvenance {
   audit_retrieval: readonly RetrievalKind[];
   /** Whether the host can show a dialog to a human now (Pi: `canPresent(ctx)`, a UI with `select` and `input`); sent again at every report_convergence. */
   human_surface: "human" | "unavailable" | "unobserved";
+  /** Where the session can be found again, as the session manager reported it (Pi: the session id, and its file when it has one); absent when it reported nothing. */
+  session?: { label: string; locator: string };
   /** Host-recorded audit-runtime provenance (host-runtime.ts); persisted with the run, shown only when not reviewed. */
   host_runtime?: {
     policy_id: string;

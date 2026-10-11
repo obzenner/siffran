@@ -9,7 +9,9 @@ from core.canonical import canonical_json
 from core.evaluation import (EvaluationSnapshot, active_spike_heads, digest,
                              frozen_scope_invalid, graph_refusal)
 from core import citations
-from core.freshness import FileObservation, FreshnessContractError, ObservationState, observations_digest
+from core.freshness import (FileObservation, FreshnessContractError, ObservationState, observations_digest,
+                            required_paths)
+from .ports import ObservationSnapshot
 from core.records import Artifact
 from core.run import OperationalState
 from core.governance import proposal_digest
@@ -258,6 +260,24 @@ def validate_investigation_history(state: OperationalState,
                 or route_stamp != state.route_stamp
                 or investigation_stamp != state.investigation_stamp):
             raise HistoryCorrupt("investigation evidence conflicts with route-order witnesses")
+
+
+def recorded_observations(history: tuple[dict[str, Any], ...], state: OperationalState,
+                          heads: Any) -> ObservationSnapshot | None:
+    """What the workspace held over ``heads`` when the run's last transaction ran: the workspace source of the run's latest
+    recorded observation basis (the one its state names), or ``None`` when that record does not hold every path the heads
+    bind. Nothing is read from the workspace; the record is what the run was judged against then."""
+    basis = next((item for item in history if item["artifact_id"] == state.observation_basis_digest
+                  and item.get("kind") == OBSERVATION_BASIS_KIND), None)
+    source = next((s for s in (basis or {}).get("sources", ()) if s.get("name") == "workspace"), None)
+    if source is None:
+        return None
+    rows = {row["path"]: row for row in source["observations"]}
+    paths = required_paths(heads)
+    if any(path not in rows for path in paths):
+        return None
+    observations = tuple(FileObservation(p, ObservationState(rows[p]["state"]), rows[p]["sha256"]) for p in paths)
+    return ObservationSnapshot(observations, source["basis_id"], observations_digest(observations))
 
 
 def assemble(state: OperationalState, stored: Any, workspace: Any, *, run_id: str,

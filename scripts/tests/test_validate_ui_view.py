@@ -41,6 +41,56 @@ class ValidateUiViewTests(unittest.TestCase):
         problems = v.mirror_problems(view_schema, run_schema, reg, state)
         self.assertTrue(any("view claim.state" in p for p in problems), problems)
 
+    def test_assured_under_an_audit_that_is_not_independent_is_rejected(self):
+        view = copy.deepcopy(VIEW)
+        run = _run(view, "converged")
+        self.assertTrue(all(c["gating"] for c in run["claims"]) and run["audit"]["independence"] not in ("same_model", "unverified", "mixed"))
+        run["audit"]["independence"] = "same_model"
+        self.assertRejected(view, RUNS, "not independent")
+
+    def test_a_run_that_cannot_be_read_back_to_its_stop_but_has_residuals_is_rejected(self):
+        runs = copy.deepcopy(RUNS)
+        key = next(k for k, d in runs.items() if d["stop"] is not None)
+        runs[key]["stop"]["basis"] = "unavailable"
+        self.assertRejected(VIEW, runs, "residuals must be present exactly when")
+
+    def test_today_s_evaluation_beside_an_active_run_is_rejected(self):
+        runs = copy.deepcopy(RUNS)
+        key = next(k for k, d in runs.items() if d["stop"] is None and d["residuals"] is not None)
+        runs[key]["now"] = []
+        self.assertRejected(VIEW, runs, "today's evaluation is published only beside a recorded stop")
+
+    def test_a_row_that_needs_a_human_but_names_the_agent_s_work_is_rejected(self):
+        view = copy.deepcopy(VIEW)
+        run = _run(view, "parallel-human")
+        detail = _detail(RUNS, "parallel-human")
+        self.assertEqual((run["attention"], detail["outstanding"][0]["who"]), ("needs_you", "agent"))
+        run["next"] = {k: detail["outstanding"][0][k] for k in ("who", "where", "message")}
+        self.assertRejected(view, RUNS, "next is not the human's question")
+
+    def test_a_human_question_the_host_will_show_but_listed_as_later_is_rejected(self):
+        runs = copy.deepcopy(RUNS)
+        view = copy.deepcopy(VIEW)
+        _run(view, "parallel-human")["attention"] = "not_ended"
+        self.assertRejected(view, runs, "attention 'not_ended' is not what its outstanding items say")
+
+    def test_a_row_whose_next_is_not_its_first_obligation_is_rejected(self):
+        view = copy.deepcopy(VIEW)
+        _run(view, "verification")["next"] = None
+        self.assertRejected(view, RUNS, "next is not the human's question")
+        view = copy.deepcopy(VIEW)
+        _run(view, "unreadable")["next"] = {"who": "agent", "where": "next_turn", "message": "x"}
+        self.assertRejected(view, RUNS, "carries derived facts")
+
+    def test_proposed_ceilings_exactly_while_a_proposal_waits_are_required(self):
+        details = copy.deepcopy(RUNS)
+        gov = _detail(details, "converged")["governance"]
+        gov["proposed"] = {"passes": 1, "spawns": 1, "audit_spawns": 1}
+        self.assertRejected(VIEW, details, "ceilings are proposed exactly while a proposal waits")
+        details = copy.deepcopy(RUNS)
+        _detail(details, "pending-amendment")["governance"]["proposed"] = None
+        self.assertRejected(VIEW, details, "ceilings are proposed exactly while a proposal waits")
+
     def test_a_blocker_that_is_not_a_reason_is_rejected(self):
         view = copy.deepcopy(VIEW)
         _run(view, "refuted")["claims"][1]["blocker"] = "claim.contested"
@@ -66,7 +116,7 @@ class ValidateUiViewTests(unittest.TestCase):
     def test_an_unreadable_row_with_a_state_is_rejected(self):
         view = copy.deepcopy(VIEW)
         _run(view, "unreadable")["state"] = "active"
-        self.assertRejected(view, None, "an unreadable row reports a state")
+        self.assertRejected(view, None, "an unreadable row reports facts of its state")
 
     def test_a_detail_with_an_audit_its_row_has_none_of_is_rejected(self):
         details = copy.deepcopy(RUNS)
@@ -80,26 +130,26 @@ class ValidateUiViewTests(unittest.TestCase):
 
     def test_a_message_that_keeps_its_placeholder_is_rejected(self):
         details = copy.deepcopy(RUNS)
-        _detail(details, "budget")["residuals"][0]["message"] = "{resource} budget exhausted."
+        _detail(details, "budget")["residuals"][0]["message"] = "{resource} budget was exhausted when the run stopped."
         self.assertRejected(VIEW, details, "still holds a placeholder")
 
     def test_a_message_that_is_not_the_registry_s_filled_in_is_rejected(self):
         details = copy.deepcopy(RUNS)
         _detail(details, "budget")["residuals"][0]["message"] = "The budget is gone."
-        self.assertRejected(VIEW, details, "is not a registry reason with its message")
+        self.assertRejected(VIEW, details, "is not a registry reason with its wording")
         self.assertTrue(v.fits("{resource} budget exhausted.", "pass budget exhausted."))
         self.assertFalse(v.fits("{resource} budget exhausted.", "budget exhausted."))
 
-    def test_a_waiting_claim_the_run_does_not_have_is_rejected(self):
+    def test_an_outstanding_claim_the_run_does_not_have_is_rejected(self):
         details = copy.deepcopy(RUNS)
-        _detail(details, "verification")["waiting"][0]["claim"] = "C99"
+        _detail(details, "verification")["outstanding"][0]["claims"] = ["C99"]
         self.assertRejected(VIEW, details, "which the run does not have")
 
-    def test_a_decision_with_or_without_a_route_against_its_answer_is_rejected(self):
+    def test_a_decision_that_says_where_it_is_asked_when_it_is_not_waiting_is_rejected(self):
         details = copy.deepcopy(RUNS)
         decision = next(c for c in _detail(details, "verification")["claims"] if c["decision"])["decision"]
-        decision["route"] = None
-        self.assertRejected(VIEW, details, "a decision has a route exactly while it waits")
+        decision["where"] = None
+        self.assertRejected(VIEW, details, "a decision says where it is asked exactly while it waits")
 
     def test_a_record_enum_that_drifts_from_the_core_is_rejected(self):
         view_schema, run_schema = v.schemas()
@@ -115,8 +165,8 @@ class ValidateUiViewTests(unittest.TestCase):
 
     def test_budgets_on_an_undecoded_run_are_rejected(self):
         details = copy.deepcopy(RUNS)
-        details[SCENARIOS["unreadable"]]["budgets"] = details[SCENARIOS["converged"]]["budgets"]
-        self.assertRejected(VIEW, details, "budgets and control must be null exactly")
+        details[SCENARIOS["unreadable"]]["governance"] = details[SCENARIOS["converged"]]["governance"]
+        self.assertRejected(VIEW, details, "governance must be null exactly")
 
     def test_a_previous_that_is_not_the_prior_generation_is_rejected(self):
         view = copy.deepcopy(VIEW)
@@ -138,7 +188,7 @@ class ValidateUiViewTests(unittest.TestCase):
 
     def test_a_partial_row_carrying_derived_facts_is_rejected(self):
         view = copy.deepcopy(VIEW)
-        _run(view, "unreadable")["audit"] = "passed"
+        _run(view, "unreadable")["audit"] = {"verdict": "passed", "current": True, "pending": False, "independence": "distinct"}
         self.assertRejected(view, None, "row carries derived facts")
 
     def test_an_edge_outside_the_run_is_rejected(self):
@@ -149,12 +199,12 @@ class ValidateUiViewTests(unittest.TestCase):
     def test_a_residual_message_that_is_not_the_registry_s_is_rejected(self):
         details = copy.deepcopy(RUNS)
         details[SCENARIOS["refuted"]]["residuals"][0]["message"] = "Something else."
-        self.assertRejected(VIEW, details, "is not a registry reason with its message")
+        self.assertRejected(VIEW, details, "is not a registry reason with its wording")
 
     def test_a_blocker_message_that_is_not_its_blocker_s_is_rejected(self):
         details = copy.deepcopy(RUNS)
         details[SCENARIOS["refuted"]]["claims"][0]["blocker_message"] = "Something else."
-        self.assertRejected(VIEW, details, "blocker_message is not the registry message")
+        self.assertRejected(VIEW, details, "blocker_message is not the registry wording")
 
     def test_a_detail_whose_version_differs_from_its_row_is_rejected(self):
         details = copy.deepcopy(RUNS)
@@ -163,8 +213,8 @@ class ValidateUiViewTests(unittest.TestCase):
 
     def test_a_schema_violation_is_rejected(self):
         view = copy.deepcopy(VIEW)
-        _run(view, "converged")["claims"][0]["state"] = "supported"
-        self.assertRejected(view, None, "'supported' is not one of")
+        _run(view, "converged")["state"] = "settled"
+        self.assertRejected(view, None, "'settled' is not one of")
 
 
 if __name__ == "__main__":

@@ -5,8 +5,8 @@ import { test } from "node:test";
 import { Client, validDetail, validView } from "../app/client.js";
 
 const run = (key, version = "v1") => ({ key, version, edges: [], claims: [] });
-const view = (token, ...keys) => ({ contract: "empirica-ui-view/v1", token, projects: keys.length ? [{ id: "p", label: "p", runs: keys.map((k) => run(k)) }] : [] });
-const doc = (key, version = "v1") => ({ contract: "empirica-ui-view/v1", key, version, residuals: [], waiting: [], stale: [], steps: [], claims: [] });
+const view = (token, ...keys) => ({ contract: "empirica-ui-view/v1", token, coverage: { runs: keys.length, read: keys.length, unreadable: 0, partial: 0 }, projects: keys.length ? [{ id: "p", label: "p", families: [], runs: keys.map((k) => run(k)) }] : [] });
+const doc = (key, version = "v1") => ({ contract: "empirica-ui-view/v1", key, version, residuals: [], outstanding: [], stale: [], steps: [], claims: [] });
 
 function server() {
   const s = { calls: [], view: view("t1"), details: {}, down: false, status: {} };
@@ -136,4 +136,33 @@ test("the cache keeps only the runs of the current view", async () => {
   s.view = view("t3", "a");
   await c.view();
   assert.ok(c.cached(run("a")) && !c.cached(run("b")), "b left the store, so its detail left the cache");
+});
+
+test("the last good check moves on a good answer or an unchanged one, never on a failure", async () => {
+  const s = server(); let clock = 1000;
+  const c = new Client("demo", s.fetch, () => clock);
+  assert.equal(c.checked, null);
+  await c.view();
+  assert.equal(c.checked, 1000);
+  clock = 2000; await c.view();  // 304
+  assert.equal(c.checked, 2000);
+  clock = 3000; s.down = true;
+  assert.equal((await c.view()).status, "offline");
+  s.down = false; s.status["/api/view"] = 500;
+  assert.equal((await c.view()).status, "error");
+  assert.equal(c.checked, 2000, "what the page shows is as old as the last good answer");
+});
+
+test("a detail that failed is asked again, not remembered as failed (the Retry button and the backoff rely on it)", async () => {
+  const s = server(), c = new Client("demo", s.fetch);
+  const r = run("a"); s.details.a = doc("a");
+  s.status["/api/run"] = 500;
+  assert.equal((await c.detail(r)).status, "error");
+  delete s.status["/api/run"];
+  assert.equal((await c.detail(r)).status, "ok");
+  assert.equal(s.calls.filter(([u]) => u.startsWith("/api/run")).length, 2);
+});
+
+test("a view whose project lacks its families is not the contract", async () => {
+  assert.equal(validView({ ...view("t", "a"), projects: [{ id: "p", label: "p", runs: [run("a")] }] }), false);
 });

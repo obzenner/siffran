@@ -27,16 +27,16 @@ def _audit_summary(result: dict, run: dict) -> dict[str, object]:
     # A settled verdict is not derivable from children, so a Block fixture (which has no argument)
     # authors it on the run view; required/pending stay derived from the children below.
     argument_audit = result.get("argument", {}).get("audit") or run.get("audit", {})
-    state = argument_audit.get("state")
+    verdict = argument_audit.get("verdict", "none")
     if run.get("status") == "converged":
-        return {"state": "passed", "independence": "distinct", "findings": []}
-    if state not in {"passed", "failed"}:
-        state = ("pending" if any(child.get("resource_class") == "audit"
-                                  and child.get("state") in {"reserved", "launching", "pending"}
-                                  for child in run.get("children", ())) else "required")
-    return {"state": state,
-            "independence": argument_audit.get("independence", "unverified"),
-            "findings": list(argument_audit.get("findings", [])) if state == "failed" else []}
+        return {"verdict": "passed", "current": True, "pending": False, "independence": "distinct", "findings": []}
+    pending = any(child.get("resource_class") == "audit" and child.get("state") in {"reserved", "launching", "pending"}
+                  for child in run.get("children", ()))
+    settled = verdict != "none" and not pending
+    return {"verdict": verdict, "current": None if verdict == "none" else argument_audit.get("current", True),
+            "pending": pending,
+            "independence": argument_audit.get("independence") if settled else None,
+            "findings": list(argument_audit.get("findings", [])) if settled and verdict == "failed" else []}
 
 
 def generated(path: Path) -> str:

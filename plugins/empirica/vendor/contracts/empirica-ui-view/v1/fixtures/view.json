@@ -1,39 +1,264 @@
 {
  "contract": "empirica-ui-view/v1",
+ "coverage": {
+  "partial": 1,
+  "read": 26,
+  "runs": 29,
+  "unreadable": 2
+ },
  "projects": [
   {
-   "id": "s256-b5e0eee6e28efca6d6ad05d7b8a94631576037ec9e5ff6d305fe89faa0e1032e",
-   "label": "Unnamed project · since 28 Sep",
-   "name": null,
-   "repo": null,
-   "runs": [
+   "families": [
     {
-     "audit": null,
-     "claims": [],
-     "diagnostic": "history-unavailable",
-     "edges": [],
-     "generation": 1,
-     "key": "s256-b5e0eee6e28efca6d6ad05d7b8a94631576037ec9e5ff6d305fe89faa0e1032e/s256-6ec97bb08344a844badedb2426721d756e040e9e77f4f26c70f203bdcb9730bd/1",
-     "previous": null,
-     "project": "s256-b5e0eee6e28efca6d6ad05d7b8a94631576037ec9e5ff6d305fe89faa0e1032e",
-     "root": null,
-     "state": "active",
-     "updated": 1790611380.0,
-     "version": "sha256:ded895d76162bd390b6983f69f414997afcd19fcffb7d0d2d55c84747e58cade"
+     "attempts": [
+      "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-872cbcde548158577ddf9be95a9e50f601699ad6d7e4a00bb769d6068ef77efc/1",
+      "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-872cbcde548158577ddf9be95a9e50f601699ad6d7e4a00bb769d6068ef77efc/2"
+     ],
+     "run": "s256-872cbcde548158577ddf9be95a9e50f601699ad6d7e4a00bb769d6068ef77efc"
+    },
+    {
+     "attempts": [
+      "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-b2188b54870c7880a98e9236eced566deb60026daa52a36bfff3f08759c7beb5/1",
+      "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-b2188b54870c7880a98e9236eced566deb60026daa52a36bfff3f08759c7beb5/2",
+      "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-b2188b54870c7880a98e9236eced566deb60026daa52a36bfff3f08759c7beb5/3"
+     ],
+     "run": "s256-b2188b54870c7880a98e9236eced566deb60026daa52a36bfff3f08759c7beb5"
+    },
+    {
+     "attempts": [
+      "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-169f5325af27f0105c8dfb510772d8c31f18d234cfc59011101a3fef4dc905f3/1"
+     ],
+     "run": "s256-169f5325af27f0105c8dfb510772d8c31f18d234cfc59011101a3fef4dc905f3"
     }
    ],
-   "since": 1790611380.0
-  },
-  {
-   "id": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
-   "label": "atlas",
-   "name": "atlas",
-   "repo": "/work/atlas",
+   "id": "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b",
+   "label": "prism",
+   "name": "prism",
+   "repo": "/work/prism",
    "runs": [
     {
-     "audit": "required",
+     "attention": null,
+     "audit": null,
+     "claims": null,
+     "diagnostic": "unreadable",
+     "edges": null,
+     "generation": 2,
+     "goal": null,
+     "key": "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-872cbcde548158577ddf9be95a9e50f601699ad6d7e4a00bb769d6068ef77efc/2",
+     "next": null,
+     "previous": "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-872cbcde548158577ddf9be95a9e50f601699ad6d7e4a00bb769d6068ef77efc/1",
+     "progress": null,
+     "project": "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b",
+     "root": null,
+     "run": "s256-872cbcde548158577ddf9be95a9e50f601699ad6d7e4a00bb769d6068ef77efc",
+     "session": null,
+     "state": null,
+     "updated": 1790662140.0,
+     "version": "sha256:a0d9b09d89165d4d3e00fc6e28e5649c3329e634c27f17cf4a46a08f9dedecd2"
+    },
+    {
+     "attention": "ended",
+     "audit": {
+      "current": null,
+      "independence": null,
+      "pending": false,
+      "verdict": "none"
+     },
      "claims": [
       {
+       "assurance": "awaiting_audit",
+       "blocker": null,
+       "blocker_claim": null,
+       "evidence": "research",
+       "gating": true,
+       "id": "C0",
+       "kind": "ordinary",
+       "review": "none",
+       "state": "approved",
+       "text": "Avatars are served at one size."
+      }
+     ],
+     "diagnostic": null,
+     "edges": [],
+     "generation": 1,
+     "goal": "Resize the avatar thumbnails.",
+     "key": "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-872cbcde548158577ddf9be95a9e50f601699ad6d7e4a00bb769d6068ef77efc/1",
+     "next": null,
+     "previous": null,
+     "progress": {
+      "approved": 1,
+      "required": 1
+     },
+     "project": "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b",
+     "root": "C0",
+     "run": "s256-872cbcde548158577ddf9be95a9e50f601699ad6d7e4a00bb769d6068ef77efc",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
+     "state": "stopped_residual",
+     "updated": 1790659320.0,
+     "version": "sha256:99864717e8546a5a477d828860b9f39e54e2b15007645114545ac6c397fdf820"
+    },
+    {
+     "attention": "ended",
+     "audit": {
+      "current": null,
+      "independence": null,
+      "pending": false,
+      "verdict": "none"
+     },
+     "claims": [
+      {
+       "assurance": "awaiting_audit",
+       "blocker": null,
+       "blocker_claim": null,
+       "evidence": "research",
+       "gating": true,
+       "id": "C0",
+       "kind": "ordinary",
+       "review": "none",
+       "state": "approved",
+       "text": "The thumbnails are served at the new size."
+      }
+     ],
+     "diagnostic": null,
+     "edges": [],
+     "generation": 1,
+     "goal": "Shrink the thumbnails to 64 pixels.",
+     "key": "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-b2188b54870c7880a98e9236eced566deb60026daa52a36bfff3f08759c7beb5/1",
+     "next": null,
+     "previous": null,
+     "progress": {
+      "approved": 1,
+      "required": 1
+     },
+     "project": "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b",
+     "root": "C0",
+     "run": "s256-b2188b54870c7880a98e9236eced566deb60026daa52a36bfff3f08759c7beb5",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
+     "state": "stopped_residual",
+     "updated": 1790650860.0,
+     "version": "sha256:805c1edff6a087019e76e8ede93b7e3c2a2a352f52bc7ce78e1617ab257021c9"
+    },
+    {
+     "attention": "not_ended",
+     "audit": {
+      "current": null,
+      "independence": null,
+      "pending": false,
+      "verdict": "none"
+     },
+     "claims": [
+      {
+       "assurance": "awaiting_audit",
+       "blocker": null,
+       "blocker_claim": null,
+       "evidence": "research",
+       "gating": true,
+       "id": "C0",
+       "kind": "ordinary",
+       "review": "none",
+       "state": "approved",
+       "text": "The thumbnails are served at the new size."
+      }
+     ],
+     "diagnostic": null,
+     "edges": [],
+     "generation": 3,
+     "goal": "Serve thumbnails from the CDN instead.",
+     "key": "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-b2188b54870c7880a98e9236eced566deb60026daa52a36bfff3f08759c7beb5/3",
+     "next": {
+      "message": "Audit is owed; spawn an independent auditor.",
+      "where": "next_turn",
+      "who": "agent"
+     },
+     "previous": "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-b2188b54870c7880a98e9236eced566deb60026daa52a36bfff3f08759c7beb5/2",
+     "progress": {
+      "approved": 1,
+      "required": 1
+     },
+     "project": "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b",
+     "root": "C0",
+     "run": "s256-b2188b54870c7880a98e9236eced566deb60026daa52a36bfff3f08759c7beb5",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
+     "state": "active",
+     "updated": 1790648040.0,
+     "version": "sha256:40ee877df87d5281bdf71a6b3fb5a64cecc98b2a4b1c4b0b5825740ef7bfa3bc"
+    },
+    {
+     "attention": "ended",
+     "audit": {
+      "current": null,
+      "independence": null,
+      "pending": false,
+      "verdict": "none"
+     },
+     "claims": [
+      {
+       "assurance": "awaiting_audit",
+       "blocker": null,
+       "blocker_claim": null,
+       "evidence": "research",
+       "gating": true,
+       "id": "C0",
+       "kind": "ordinary",
+       "review": "none",
+       "state": "approved",
+       "text": "The thumbnails are served at the new size."
+      }
+     ],
+     "diagnostic": null,
+     "edges": [],
+     "generation": 2,
+     "goal": "Shrink the thumbnails to 128 pixels.",
+     "key": "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-b2188b54870c7880a98e9236eced566deb60026daa52a36bfff3f08759c7beb5/2",
+     "next": null,
+     "previous": "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-b2188b54870c7880a98e9236eced566deb60026daa52a36bfff3f08759c7beb5/1",
+     "progress": {
+      "approved": 1,
+      "required": 1
+     },
+     "project": "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b",
+     "root": "C0",
+     "run": "s256-b2188b54870c7880a98e9236eced566deb60026daa52a36bfff3f08759c7beb5",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
+     "state": "stopped_residual",
+     "updated": 1790645220.0,
+     "version": "sha256:4b2e55a3fbbb1332cd7bc92147a8e55fbfe6035fcc09eb669e624aa7922568a4"
+    },
+    {
+     "attention": "not_ended",
+     "audit": {
+      "current": null,
+      "independence": null,
+      "pending": false,
+      "verdict": "none"
+     },
+     "claims": [
+      {
+       "assurance": "not_approved",
        "blocker": "claim.research_missing",
        "blocker_claim": "C0",
        "evidence": "none",
@@ -42,9 +267,727 @@
        "kind": "ordinary",
        "review": "none",
        "state": "open",
+       "text": "The nightly job regenerates every thumbnail."
+      }
+     ],
+     "diagnostic": null,
+     "edges": [],
+     "generation": 1,
+     "goal": "Regenerate the thumbnails every night.",
+     "key": "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-169f5325af27f0105c8dfb510772d8c31f18d234cfc59011101a3fef4dc905f3/1",
+     "next": {
+      "message": "Record research for claim C0.",
+      "where": "next_turn",
+      "who": "agent"
+     },
+     "previous": null,
+     "progress": {
+      "approved": 0,
+      "required": 1
+     },
+     "project": "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b",
+     "root": "C0",
+     "run": "s256-169f5325af27f0105c8dfb510772d8c31f18d234cfc59011101a3fef4dc905f3",
+     "session": {
+      "delegated": true,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
+     "state": "active",
+     "updated": 1790622660.0,
+     "version": "sha256:fb4a0ff7b18c71e197e3df7bb2a358ddda57704dac9500ae5e2eb2f24fe58971"
+    }
+   ],
+   "since": 1790622660.0
+  },
+  {
+   "families": [
+    {
+     "attempts": [
+      "s256-b5e0eee6e28efca6d6ad05d7b8a94631576037ec9e5ff6d305fe89faa0e1032e/s256-6ec97bb08344a844badedb2426721d756e040e9e77f4f26c70f203bdcb9730bd/1"
+     ],
+     "run": "s256-6ec97bb08344a844badedb2426721d756e040e9e77f4f26c70f203bdcb9730bd"
+    }
+   ],
+   "id": "s256-b5e0eee6e28efca6d6ad05d7b8a94631576037ec9e5ff6d305fe89faa0e1032e",
+   "label": "Unnamed project",
+   "name": null,
+   "repo": null,
+   "runs": [
+    {
+     "attention": null,
+     "audit": null,
+     "claims": null,
+     "diagnostic": "history-unavailable",
+     "edges": null,
+     "generation": 1,
+     "goal": "Tidy the release checklist.",
+     "key": "s256-b5e0eee6e28efca6d6ad05d7b8a94631576037ec9e5ff6d305fe89faa0e1032e/s256-6ec97bb08344a844badedb2426721d756e040e9e77f4f26c70f203bdcb9730bd/1",
+     "next": null,
+     "previous": null,
+     "progress": null,
+     "project": "s256-b5e0eee6e28efca6d6ad05d7b8a94631576037ec9e5ff6d305fe89faa0e1032e",
+     "root": null,
+     "run": "s256-6ec97bb08344a844badedb2426721d756e040e9e77f4f26c70f203bdcb9730bd",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
+     "state": "active",
+     "updated": 1790656500.0,
+     "version": "sha256:4fbe8534b1d53935de2c452ba5688e3501edc9cab8e6edd1f24d3e7cc86c7286"
+    }
+   ],
+   "since": 1790656500.0
+  },
+  {
+   "families": [
+    {
+     "attempts": [
+      "s256-1c1b61d2f3e2199fa3ec3ceb48e9231a183b9bff723c2dc5c04ebeec8d1e6736/s256-50556f10455c3b044a0f2f20e8c9ed2371e751c670ee355ec246bf1e14672d04/1"
+     ],
+     "run": "s256-50556f10455c3b044a0f2f20e8c9ed2371e751c670ee355ec246bf1e14672d04"
+    }
+   ],
+   "id": "s256-1c1b61d2f3e2199fa3ec3ceb48e9231a183b9bff723c2dc5c04ebeec8d1e6736",
+   "label": "south/tiles",
+   "name": "tiles",
+   "repo": "/work/south/tiles",
+   "runs": [
+    {
+     "attention": "not_ended",
+     "audit": {
+      "current": null,
+      "independence": null,
+      "pending": false,
+      "verdict": "none"
+     },
+     "claims": [
+      {
+       "assurance": "awaiting_audit",
+       "blocker": null,
+       "blocker_claim": null,
+       "evidence": "research",
+       "gating": true,
+       "id": "C0",
+       "kind": "ordinary",
+       "review": "none",
+       "state": "approved",
+       "text": "Every tile has a checksum."
+      }
+     ],
+     "diagnostic": null,
+     "edges": [],
+     "generation": 1,
+     "goal": "Check the tile checksum.",
+     "key": "s256-1c1b61d2f3e2199fa3ec3ceb48e9231a183b9bff723c2dc5c04ebeec8d1e6736/s256-50556f10455c3b044a0f2f20e8c9ed2371e751c670ee355ec246bf1e14672d04/1",
+     "next": {
+      "message": "Audit is owed; spawn an independent auditor.",
+      "where": "next_turn",
+      "who": "agent"
+     },
+     "previous": null,
+     "progress": {
+      "approved": 1,
+      "required": 1
+     },
+     "project": "s256-1c1b61d2f3e2199fa3ec3ceb48e9231a183b9bff723c2dc5c04ebeec8d1e6736",
+     "root": "C0",
+     "run": "s256-50556f10455c3b044a0f2f20e8c9ed2371e751c670ee355ec246bf1e14672d04",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
+     "state": "active",
+     "updated": 1790653680.0,
+     "version": "sha256:4f785a80e8fec491d5745ff5dddfeeacd49a198627661de9b5221d17c5726ad8"
+    }
+   ],
+   "since": 1790653680.0
+  },
+  {
+   "families": [
+    {
+     "attempts": [
+      "s256-cf9e9cc0972aac63d68892422dfd106229df45bd1bdef828433e3d4450dffb87/s256-50556f10455c3b044a0f2f20e8c9ed2371e751c670ee355ec246bf1e14672d04/1"
+     ],
+     "run": "s256-50556f10455c3b044a0f2f20e8c9ed2371e751c670ee355ec246bf1e14672d04"
+    }
+   ],
+   "id": "s256-cf9e9cc0972aac63d68892422dfd106229df45bd1bdef828433e3d4450dffb87",
+   "label": "north/tiles",
+   "name": "tiles",
+   "repo": "/work/north/tiles",
+   "runs": [
+    {
+     "attention": "not_ended",
+     "audit": {
+      "current": null,
+      "independence": null,
+      "pending": false,
+      "verdict": "none"
+     },
+     "claims": [
+      {
+       "assurance": "awaiting_audit",
+       "blocker": null,
+       "blocker_claim": null,
+       "evidence": "research",
+       "gating": true,
+       "id": "C0",
+       "kind": "ordinary",
+       "review": "none",
+       "state": "approved",
+       "text": "Every tile has a checksum."
+      }
+     ],
+     "diagnostic": null,
+     "edges": [],
+     "generation": 1,
+     "goal": "Check the tile checksum.",
+     "key": "s256-cf9e9cc0972aac63d68892422dfd106229df45bd1bdef828433e3d4450dffb87/s256-50556f10455c3b044a0f2f20e8c9ed2371e751c670ee355ec246bf1e14672d04/1",
+     "next": {
+      "message": "Audit is owed; spawn an independent auditor.",
+      "where": "next_turn",
+      "who": "agent"
+     },
+     "previous": null,
+     "progress": {
+      "approved": 1,
+      "required": 1
+     },
+     "project": "s256-cf9e9cc0972aac63d68892422dfd106229df45bd1bdef828433e3d4450dffb87",
+     "root": "C0",
+     "run": "s256-50556f10455c3b044a0f2f20e8c9ed2371e751c670ee355ec246bf1e14672d04",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
+     "state": "active",
+     "updated": 1790650860.0,
+     "version": "sha256:c28731e77f710aba4d8faf0dc62e00fb3f19d8191a2e0d26f59b1f2b29c889f4"
+    }
+   ],
+   "since": 1790650860.0
+  },
+  {
+   "families": [
+    {
+     "attempts": [
+      "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-05d85cdc4353863d3fba91e365c2f544a36e22c780dfbe5a13d669c1eaa2812d/1"
+     ],
+     "run": "s256-05d85cdc4353863d3fba91e365c2f544a36e22c780dfbe5a13d669c1eaa2812d"
+    },
+    {
+     "attempts": [
+      "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-fc04a04c0af0c8b9845dfa5ed1ba49af255d5f53532c8dd2b9fa0090998e8695/1"
+     ],
+     "run": "s256-fc04a04c0af0c8b9845dfa5ed1ba49af255d5f53532c8dd2b9fa0090998e8695"
+    },
+    {
+     "attempts": [
+      "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-7097329796037c4fc706f8eadf843ca05f94723747e2f2149c6ef785d38306b2/1"
+     ],
+     "run": "s256-7097329796037c4fc706f8eadf843ca05f94723747e2f2149c6ef785d38306b2"
+    },
+    {
+     "attempts": [
+      "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-2fac41cee6a25f7f4d80295af5875e8d79f37d9ebe255735397d5e6cb48971ab/1"
+     ],
+     "run": "s256-2fac41cee6a25f7f4d80295af5875e8d79f37d9ebe255735397d5e6cb48971ab"
+    },
+    {
+     "attempts": [
+      "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-d9498142c9b380ab5f858c29b74b9261cc19064d9833130ab9a265c12987982a/1"
+     ],
+     "run": "s256-d9498142c9b380ab5f858c29b74b9261cc19064d9833130ab9a265c12987982a"
+    },
+    {
+     "attempts": [
+      "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-802ad3ea4309643736391d57a4ffcdce716720dca33a82a21540cfae7e164c32/1"
+     ],
+     "run": "s256-802ad3ea4309643736391d57a4ffcdce716720dca33a82a21540cfae7e164c32"
+    },
+    {
+     "attempts": [
+      "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-a3ef3cd93353dc90ddc8b6c621c9599f34b705b4b0df356f4c4104f3573e212f/1"
+     ],
+     "run": "s256-a3ef3cd93353dc90ddc8b6c621c9599f34b705b4b0df356f4c4104f3573e212f"
+    },
+    {
+     "attempts": [
+      "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211/1"
+     ],
+     "run": "s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211"
+    },
+    {
+     "attempts": [
+      "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-e5bc37664845dccec9f662b44804806b99e73cb885080ec8fbd053aa74fcc494/1"
+     ],
+     "run": "s256-e5bc37664845dccec9f662b44804806b99e73cb885080ec8fbd053aa74fcc494"
+    },
+    {
+     "attempts": [
+      "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-39abe9247f103fe638ce5e01424e311f5a2751de1eb1f57f4e2ce6da4bc72b70/1"
+     ],
+     "run": "s256-39abe9247f103fe638ce5e01424e311f5a2751de1eb1f57f4e2ce6da4bc72b70"
+    },
+    {
+     "attempts": [
+      "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e/1"
+     ],
+     "run": "s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e"
+    },
+    {
+     "attempts": [
+      "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9/1"
+     ],
+     "run": "s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9"
+    }
+   ],
+   "id": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
+   "label": "atlas",
+   "name": "atlas",
+   "repo": "/work/atlas",
+   "runs": [
+    {
+     "attention": "ended",
+     "audit": {
+      "current": null,
+      "independence": null,
+      "pending": false,
+      "verdict": "none"
+     },
+     "claims": [
+      {
+       "assurance": "not_approved",
+       "blocker": "claim.spike_stale",
+       "blocker_claim": "C1",
+       "evidence": "research",
+       "gating": true,
+       "id": "C0",
+       "kind": "ordinary",
+       "review": "none",
+       "state": "open",
+       "text": "Eviction is least-recently-used."
+      },
+      {
+       "assurance": "not_approved",
+       "blocker": "claim.spike_stale",
+       "blocker_claim": "C1",
+       "evidence": "spike",
+       "gating": true,
+       "id": "C1",
+       "kind": "needs-experiment",
+       "review": "none",
+       "state": "open",
+       "text": "The eviction test passes."
+      }
+     ],
+     "diagnostic": null,
+     "edges": [
+      {
+       "from": "C0",
+       "to": "C1"
+      }
+     ],
+     "generation": 1,
+     "goal": "Check the cache eviction order.",
+     "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-05d85cdc4353863d3fba91e365c2f544a36e22c780dfbe5a13d669c1eaa2812d/1",
+     "next": null,
+     "previous": null,
+     "progress": {
+      "approved": 0,
+      "required": 2
+     },
+     "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
+     "root": "C0",
+     "run": "s256-05d85cdc4353863d3fba91e365c2f544a36e22c780dfbe5a13d669c1eaa2812d",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
+     "state": "stopped_residual",
+     "updated": 1790639580.0,
+     "version": "sha256:ded84342cae11b56e078c2d2f4af23af5acadad509909151ca60c071e2003bd3"
+    },
+    {
+     "attention": "not_ended",
+     "audit": {
+      "current": null,
+      "independence": null,
+      "pending": false,
+      "verdict": "none"
+     },
+     "claims": [
+      {
+       "assurance": "awaiting_audit",
+       "blocker": null,
+       "blocker_claim": null,
+       "evidence": "research",
+       "gating": true,
+       "id": "C0",
+       "kind": "ordinary",
+       "review": "none",
+       "state": "approved",
+       "text": "The hit rate is above 90 percent."
+      }
+     ],
+     "diagnostic": null,
+     "edges": [],
+     "generation": 1,
+     "goal": "Measure the cache hit rate.",
+     "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-fc04a04c0af0c8b9845dfa5ed1ba49af255d5f53532c8dd2b9fa0090998e8695/1",
+     "next": {
+      "message": "pass budget exhausted.",
+      "where": "next_turn",
+      "who": "agent"
+     },
+     "previous": null,
+     "progress": {
+      "approved": 1,
+      "required": 1
+     },
+     "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
+     "root": "C0",
+     "run": "s256-fc04a04c0af0c8b9845dfa5ed1ba49af255d5f53532c8dd2b9fa0090998e8695",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
+     "state": "active",
+     "updated": 1790636760.0,
+     "version": "sha256:ec60daa7d3b6be311d75f77b37de81fbabbe2d6269dd04e09a09acf642150ce3"
+    },
+    {
+     "attention": "not_ended",
+     "audit": {
+      "current": null,
+      "independence": null,
+      "pending": false,
+      "verdict": "none"
+     },
+     "claims": [
+      {
+       "assurance": "not_approved",
+       "blocker": "evidence.confirmation_required",
+       "blocker_claim": "C0",
+       "evidence": "none",
+       "gating": true,
+       "id": "C0",
+       "kind": "needs-decision",
+       "review": "none",
+       "state": "blocked",
+       "text": "Evict least recently used first."
+      }
+     ],
+     "diagnostic": null,
+     "edges": [],
+     "generation": 1,
+     "goal": "Decide the cache eviction policy.",
+     "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-7097329796037c4fc706f8eadf843ca05f94723747e2f2149c6ef785d38306b2/1",
+     "next": {
+      "message": "Waiting for a human to confirm research or answer a decision.",
+      "where": "if_available",
+      "who": "human"
+     },
+     "previous": null,
+     "progress": {
+      "approved": 0,
+      "required": 1
+     },
+     "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
+     "root": "C0",
+     "run": "s256-7097329796037c4fc706f8eadf843ca05f94723747e2f2149c6ef785d38306b2",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": null,
+      "label": null,
+      "locator": null
+     },
+     "state": "active",
+     "updated": 1790633940.0,
+     "version": "sha256:1a6c242fe4cb4f519f33fb998f4e9a30ffb41a1336022dc72eaba881d0f84c20"
+    },
+    {
+     "attention": "needs_you",
+     "audit": {
+      "current": null,
+      "independence": null,
+      "pending": false,
+      "verdict": "none"
+     },
+     "claims": [
+      {
+       "assurance": "not_approved",
+       "blocker": "claim.research_missing",
+       "blocker_claim": "C0",
+       "evidence": "none",
+       "gating": true,
+       "id": "C0",
+       "kind": "ordinary",
+       "review": "none",
+       "state": "open",
+       "text": "The cache key is stable."
+      },
+      {
+       "assurance": "not_approved",
+       "blocker": "evidence.confirmation_required",
+       "blocker_claim": "C1",
+       "evidence": "research",
+       "gating": true,
+       "id": "C1",
+       "kind": "ordinary",
+       "review": "none",
+       "state": "open",
+       "text": "The provider allows the key size."
+      }
+     ],
+     "diagnostic": null,
+     "edges": [
+      {
+       "from": "C0",
+       "to": "C1"
+      }
+     ],
+     "generation": 1,
+     "goal": "Check the cache key and its provider limits.",
+     "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-2fac41cee6a25f7f4d80295af5875e8d79f37d9ebe255735397d5e6cb48971ab/1",
+     "next": {
+      "message": "Waiting for a human to confirm research or answer a decision.",
+      "where": "next_report",
+      "who": "human"
+     },
+     "previous": null,
+     "progress": {
+      "approved": 0,
+      "required": 2
+     },
+     "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
+     "root": "C0",
+     "run": "s256-2fac41cee6a25f7f4d80295af5875e8d79f37d9ebe255735397d5e6cb48971ab",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
+     "state": "active",
+     "updated": 1790631120.0,
+     "version": "sha256:69ee48da6518cb47224dd7d7d5d94e3a14321e3fe0b1684c0ac91e40878981da"
+    },
+    {
+     "attention": "not_ended",
+     "audit": {
+      "current": true,
+      "independence": "unverified",
+      "pending": false,
+      "verdict": "passed"
+     },
+     "claims": [
+      {
+       "assurance": "awaiting_audit",
+       "blocker": null,
+       "blocker_claim": null,
+       "evidence": "research",
+       "gating": true,
+       "id": "C0",
+       "kind": "ordinary",
+       "review": "passed",
+       "state": "approved",
+       "text": "The audit page names its auditor."
+      }
+     ],
+     "diagnostic": null,
+     "edges": [],
+     "generation": 1,
+     "goal": "Document the unverified audit.",
+     "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-d9498142c9b380ab5f858c29b74b9261cc19064d9833130ab9a265c12987982a/1",
+     "next": {
+      "message": "Audit independence is unverified; spawn a distinct auditor or accept the residual.",
+      "where": "next_turn",
+      "who": "agent"
+     },
+     "previous": null,
+     "progress": {
+      "approved": 1,
+      "required": 1
+     },
+     "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
+     "root": "C0",
+     "run": "s256-d9498142c9b380ab5f858c29b74b9261cc19064d9833130ab9a265c12987982a",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
+     "state": "active",
+     "updated": 1790628300.0,
+     "version": "sha256:3a6c03876d4012882b27e73593dab274df8e4b375ad674bc1e9687461fd7ff6f"
+    },
+    {
+     "attention": "not_ended",
+     "audit": {
+      "current": true,
+      "independence": "same_model",
+      "pending": false,
+      "verdict": "passed"
+     },
+     "claims": [
+      {
+       "assurance": "awaiting_audit",
+       "blocker": null,
+       "blocker_claim": null,
+       "evidence": "research",
+       "gating": true,
+       "id": "C0",
+       "kind": "ordinary",
+       "review": "passed",
+       "state": "approved",
+       "text": "The audit page names its auditor."
+      }
+     ],
+     "diagnostic": null,
+     "edges": [],
+     "generation": 1,
+     "goal": "Document the same model audit.",
+     "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-802ad3ea4309643736391d57a4ffcdce716720dca33a82a21540cfae7e164c32/1",
+     "next": {
+      "message": "Auditor is the same model as covered evidence; spawn a distinct auditor or accept the residual.",
+      "where": "next_turn",
+      "who": "agent"
+     },
+     "previous": null,
+     "progress": {
+      "approved": 1,
+      "required": 1
+     },
+     "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
+     "root": "C0",
+     "run": "s256-802ad3ea4309643736391d57a4ffcdce716720dca33a82a21540cfae7e164c32",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
+     "state": "active",
+     "updated": 1790625480.0,
+     "version": "sha256:ce9701025c515fd70546f4bac491e9f11b5858e42fe315178abe958e8d76340c"
+    },
+    {
+     "attention": "not_ended",
+     "audit": {
+      "current": true,
+      "independence": null,
+      "pending": true,
+      "verdict": "passed"
+     },
+     "claims": [
+      {
+       "assurance": "awaiting_audit",
+       "blocker": null,
+       "blocker_claim": null,
+       "evidence": "research",
+       "gating": true,
+       "id": "C0",
+       "kind": "ordinary",
+       "review": "passed",
+       "state": "approved",
+       "text": "The writer emits one index per zoom level."
+      },
+      {
+       "assurance": "awaiting_audit",
+       "blocker": null,
+       "blocker_claim": null,
+       "evidence": "research",
+       "gating": true,
+       "id": "C1",
+       "kind": "ordinary",
+       "review": "passed",
+       "state": "approved",
+       "text": "The writer already groups tiles by level."
+      }
+     ],
+     "diagnostic": null,
+     "edges": [
+      {
+       "from": "C0",
+       "to": "C1"
+      }
+     ],
+     "generation": 1,
+     "goal": "Index tiles by zoom level on write.",
+     "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-a3ef3cd93353dc90ddc8b6c621c9599f34b705b4b0df356f4c4104f3573e212f/1",
+     "next": {
+      "message": "Audit child is pending; wait.",
+      "where": "in_progress",
+      "who": "auditor"
+     },
+     "previous": null,
+     "progress": {
+      "approved": 2,
+      "required": 2
+     },
+     "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
+     "root": "C0",
+     "run": "s256-a3ef3cd93353dc90ddc8b6c621c9599f34b705b4b0df356f4c4104f3573e212f",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": "index writer",
+      "locator": "/home/dev/.pi/sessions/atlas-writer.jsonl"
+     },
+     "state": "active",
+     "updated": 1790611380.0,
+     "version": "sha256:2fb9bed3124d52c4424226f6e920748443eb13e563a96029d33f141f6943aec2"
+    },
+    {
+     "attention": "needs_you",
+     "audit": {
+      "current": null,
+      "independence": null,
+      "pending": false,
+      "verdict": "none"
+     },
+     "claims": [
+      {
+       "assurance": "not_approved",
+       "blocker": "evidence.confirmation_required",
+       "blocker_claim": "C5",
+       "evidence": "research",
+       "gating": true,
+       "id": "C0",
+       "kind": "ordinary",
+       "review": "none",
+       "state": "open",
        "text": "The export reads every tile through one documented path."
       },
       {
+       "assurance": "awaiting_audit",
        "blocker": null,
        "blocker_claim": null,
        "evidence": "research",
@@ -56,6 +999,7 @@
        "text": "The export guide names that path."
       },
       {
+       "assurance": "awaiting_audit",
        "blocker": null,
        "blocker_claim": null,
        "evidence": "research",
@@ -67,6 +1011,7 @@
        "text": "The vendor specification requires that path."
       },
       {
+       "assurance": "awaiting_audit",
        "blocker": null,
        "blocker_claim": null,
        "evidence": "research",
@@ -78,17 +1023,19 @@
        "text": "The published tile format allows only that path."
       },
       {
-       "blocker": "claim.research_missing",
-       "blocker_claim": "C4",
-       "evidence": "none",
+       "assurance": "awaiting_audit",
+       "blocker": null,
+       "blocker_claim": null,
+       "evidence": "research",
        "gating": true,
        "id": "C4",
        "kind": "ordinary",
        "review": "none",
-       "state": "open",
+       "state": "approved",
        "text": "The nightly export log shows every tile read through it."
       },
       {
+       "assurance": "not_approved",
        "blocker": "evidence.confirmation_required",
        "blocker_claim": "C5",
        "evidence": "research",
@@ -100,6 +1047,7 @@
        "text": "The hosting provider's limits allow that path."
       },
       {
+       "assurance": "not_approved",
        "blocker": "evidence.confirmation_required",
        "blocker_claim": "C6",
        "evidence": "research",
@@ -111,6 +1059,7 @@
        "text": "Last week's run reads no tile any other way."
       },
       {
+       "assurance": "not_approved",
        "blocker": "evidence.confirmation_required",
        "blocker_claim": "C7",
        "evidence": "none",
@@ -154,18 +1103,43 @@
       }
      ],
      "generation": 1,
+     "goal": "Document the tile export path.",
      "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211/1",
+     "next": {
+      "message": "Waiting for a human to confirm research or answer a decision.",
+      "where": "next_report",
+      "who": "human"
+     },
      "previous": null,
+     "progress": {
+      "approved": 4,
+      "required": 8
+     },
      "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
      "root": "C0",
+     "run": "s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": "atlas docs session",
+      "locator": "/home/dev/.claude/projects/atlas/6f2c1a.jsonl"
+     },
      "state": "active",
      "updated": 1790608560.0,
-     "version": "sha256:e4aefb61dcdd1f44e8a2b18d5584270988a68c91f9e0dcd9539199f3f5ad9431"
+     "version": "sha256:4d725d4254e1439bdf6aed6c498359d8978910d825560e9d3d1c5e782adb08ab"
     },
     {
-     "audit": "failed",
+     "attention": "not_ended",
+     "audit": {
+      "current": false,
+      "independence": "distinct",
+      "pending": false,
+      "verdict": "passed"
+     },
      "claims": [
       {
+       "assurance": "awaiting_audit",
        "blocker": null,
        "blocker_claim": null,
        "evidence": "research",
@@ -177,6 +1151,7 @@
        "text": "Each zoom level reads only its own index file."
       },
       {
+       "assurance": "awaiting_audit",
        "blocker": null,
        "blocker_claim": null,
        "evidence": "research",
@@ -188,6 +1163,7 @@
        "text": "The index writer can emit one file per level."
       },
       {
+       "assurance": "awaiting_audit",
        "blocker": null,
        "blocker_claim": null,
        "evidence": "research",
@@ -199,6 +1175,7 @@
        "text": "No caller reads the combined index directly."
       },
       {
+       "assurance": "awaiting_audit",
        "blocker": null,
        "blocker_claim": null,
        "evidence": "research",
@@ -226,18 +1203,43 @@
       }
      ],
      "generation": 1,
+     "goal": "Split the tile index by zoom level.",
      "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-e5bc37664845dccec9f662b44804806b99e73cb885080ec8fbd053aa74fcc494/1",
+     "next": {
+      "message": "Audit failed or its coverage went stale; address any findings listed under Audit, then retry.",
+      "where": "next_turn",
+      "who": "agent"
+     },
      "previous": null,
+     "progress": {
+      "approved": 4,
+      "required": 4
+     },
      "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
      "root": "C0",
+     "run": "s256-e5bc37664845dccec9f662b44804806b99e73cb885080ec8fbd053aa74fcc494",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
      "state": "active",
      "updated": 1790594460.0,
-     "version": "sha256:35b0eae715d8f56ef7755fdfe24f11a2a62e73347187d8dadc975e8adab8d533"
+     "version": "sha256:223fc76890d77cca8e5e4114bf81945b314e9ee9a16b43883f187590c39978c8"
     },
     {
-     "audit": "required",
+     "attention": "not_ended",
+     "audit": {
+      "current": null,
+      "independence": null,
+      "pending": false,
+      "verdict": "none"
+     },
      "claims": [
       {
+       "assurance": "not_approved",
        "blocker": "claim.research_missing",
        "blocker_claim": "C0",
        "evidence": "none",
@@ -249,6 +1251,7 @@
        "text": "Decoding a tile no longer allocates per pixel."
       },
       {
+       "assurance": "not_approved",
        "blocker": "claim.spike_stale",
        "blocker_claim": "C1",
        "evidence": "spike",
@@ -268,18 +1271,43 @@
       }
      ],
      "generation": 1,
+     "goal": "Make tile decoding constant-memory.",
      "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-39abe9247f103fe638ce5e01424e311f5a2751de1eb1f57f4e2ce6da4bc72b70/1",
+     "next": {
+      "message": "Record research for claim C0.",
+      "where": "next_turn",
+      "who": "agent"
+     },
      "previous": null,
+     "progress": {
+      "approved": 0,
+      "required": 2
+     },
      "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
      "root": "C0",
+     "run": "s256-39abe9247f103fe638ce5e01424e311f5a2751de1eb1f57f4e2ce6da4bc72b70",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
      "state": "active",
      "updated": 1790591640.0,
-     "version": "sha256:7a7e44ddccf52e1008e5549698853c97d3d7221e0be12e233ec71ac5f4f221cd"
+     "version": "sha256:290c4d66591b853d8118fb5175f8fef3676724f8a073493ae5df0310731edb57"
     },
     {
-     "audit": "required",
+     "attention": "ended",
+     "audit": {
+      "current": null,
+      "independence": null,
+      "pending": false,
+      "verdict": "none"
+     },
      "claims": [
       {
+       "assurance": "not_approved",
        "blocker": "claim.research_missing",
        "blocker_claim": "C0",
        "evidence": "none",
@@ -291,6 +1319,7 @@
        "text": "No reader depends on the old tile format."
       },
       {
+       "assurance": "not_approved",
        "blocker": "claim.refuted",
        "blocker_claim": "C1",
        "evidence": "research",
@@ -302,6 +1331,7 @@
        "text": "The export job writes only the current format."
       },
       {
+       "assurance": "not_approved",
        "blocker": "claim.research_missing",
        "blocker_claim": "C2",
        "evidence": "none",
@@ -325,18 +1355,39 @@
       }
      ],
      "generation": 1,
+     "goal": "Drop the old tile format.",
      "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e/1",
+     "next": null,
      "previous": null,
+     "progress": {
+      "approved": 0,
+      "required": 3
+     },
      "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
      "root": "C0",
+     "run": "s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
      "state": "stopped_residual",
      "updated": 1790588820.0,
-     "version": "sha256:2b96fed0f3aee6bf43d637c73943b34890ee71b7ef2ba04880fff00779407ee4"
+     "version": "sha256:292160fdd0aa162b15633e1ab2544ab138fa7abdbac0c0377c3f605a71348c59"
     },
     {
-     "audit": "passed",
+     "attention": "ended",
+     "audit": {
+      "current": true,
+      "independence": "distinct",
+      "pending": false,
+      "verdict": "passed"
+     },
      "claims": [
       {
+       "assurance": "assured",
        "blocker": null,
        "blocker_claim": null,
        "evidence": "research",
@@ -348,6 +1399,7 @@
        "text": "A cold start reads the tile index from one cache file."
       },
       {
+       "assurance": "assured",
        "blocker": null,
        "blocker_claim": null,
        "evidence": "spike",
@@ -359,6 +1411,7 @@
        "text": "The cache file round-trips every tile entry."
       },
       {
+       "assurance": "assured",
        "blocker": null,
        "blocker_claim": null,
        "evidence": "research",
@@ -382,27 +1435,188 @@
       }
      ],
      "generation": 1,
+     "goal": "Cache the tile index so a cold start reads one file.",
      "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9/1",
+     "next": null,
      "previous": null,
+     "progress": {
+      "approved": 3,
+      "required": 3
+     },
      "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
      "root": "C0",
+     "run": "s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
      "state": "converged",
      "updated": 1790586000.0,
-     "version": "sha256:de969426bcb499c9f5c8e3bf4caa196219f8a49eb365af5abe90bab004538553"
+     "version": "sha256:78a72a781f95e7ebcc5429f334f77c826bb26796e016785a3247da608731023d"
     }
    ],
    "since": 1790586000.0
   },
   {
+   "families": [
+    {
+     "attempts": [
+      "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-4680449e3494a96443960590a1dc559f5f4a9daafead54c78987428e10ab9332/1"
+     ],
+     "run": "s256-4680449e3494a96443960590a1dc559f5f4a9daafead54c78987428e10ab9332"
+    },
+    {
+     "attempts": [
+      "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-304a7406988d22c5ec496b8a79ecfbb856e45a9e20bb82b43e3e3db7a1023365/1"
+     ],
+     "run": "s256-304a7406988d22c5ec496b8a79ecfbb856e45a9e20bb82b43e3e3db7a1023365"
+    },
+    {
+     "attempts": [
+      "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/1",
+      "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/2"
+     ],
+     "run": "s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5"
+    }
+   ],
    "id": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50",
    "label": "lumen",
    "name": "lumen",
    "repo": "/work/lumen",
    "runs": [
     {
-     "audit": "failed",
+     "attention": "not_ended",
+     "audit": {
+      "current": null,
+      "independence": null,
+      "pending": false,
+      "verdict": "none"
+     },
      "claims": [
       {
+       "assurance": "not_approved",
+       "blocker": "claim.research_missing",
+       "blocker_claim": "C0",
+       "evidence": "none",
+       "gating": true,
+       "id": "C0",
+       "kind": "ordinary",
+       "review": "none",
+       "state": "open",
+       "text": "Preview cache misses are rare."
+      },
+      {
+       "assurance": "not_approved",
+       "blocker": "claim.research_unbound",
+       "blocker_claim": "C1",
+       "evidence": "none",
+       "gating": true,
+       "id": "C1",
+       "kind": "ordinary",
+       "review": "none",
+       "state": "open",
+       "text": "The cache keys include the preview size and the format."
+      }
+     ],
+     "diagnostic": null,
+     "edges": [
+      {
+       "from": "C0",
+       "to": "C1"
+      }
+     ],
+     "generation": 1,
+     "goal": "Cut preview cache misses.",
+     "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-4680449e3494a96443960590a1dc559f5f4a9daafead54c78987428e10ab9332/1",
+     "next": {
+      "message": "Record research for claim C0.",
+      "where": "next_turn",
+      "who": "agent"
+     },
+     "previous": null,
+     "progress": {
+      "approved": 0,
+      "required": 2
+     },
+     "project": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50",
+     "root": "C0",
+     "run": "s256-4680449e3494a96443960590a1dc559f5f4a9daafead54c78987428e10ab9332",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
+     "state": "active",
+     "updated": 1790619840.0,
+     "version": "sha256:c37587f5f2fe4721eabf80520d5c778b6185d68aab083e102bb3680ca779eec1"
+    },
+    {
+     "attention": "not_ended",
+     "audit": {
+      "current": null,
+      "independence": null,
+      "pending": false,
+      "verdict": "none"
+     },
+     "claims": [
+      {
+       "assurance": "awaiting_audit",
+       "blocker": null,
+       "blocker_claim": null,
+       "evidence": "research",
+       "gating": true,
+       "id": "C0",
+       "kind": "ordinary",
+       "review": "none",
+       "state": "approved",
+       "text": "Every preview has exactly one thumbnail."
+      }
+     ],
+     "diagnostic": null,
+     "edges": [],
+     "generation": 1,
+     "goal": "Thumbnail every preview once.",
+     "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-304a7406988d22c5ec496b8a79ecfbb856e45a9e20bb82b43e3e3db7a1023365/1",
+     "next": {
+      "message": "Obtain exact host-mediated approval for the current run configuration.",
+      "where": "next_turn",
+      "who": "agent"
+     },
+     "previous": null,
+     "progress": {
+      "approved": 1,
+      "required": 1
+     },
+     "project": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50",
+     "root": "C0",
+     "run": "s256-304a7406988d22c5ec496b8a79ecfbb856e45a9e20bb82b43e3e3db7a1023365",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
+     "state": "active",
+     "updated": 1790617020.0,
+     "version": "sha256:048e113a760e4790a4fcd196aa15e9ed90a3071f7fcc142861d62643ce1cb698"
+    },
+    {
+     "attention": "not_ended",
+     "audit": {
+      "current": true,
+      "independence": "distinct",
+      "pending": false,
+      "verdict": "failed"
+     },
+     "claims": [
+      {
+       "assurance": "audit_failed",
        "blocker": null,
        "blocker_claim": null,
        "evidence": "research",
@@ -414,6 +1628,7 @@
        "text": "Previews look the same in every supported viewer."
       },
       {
+       "assurance": "audit_failed",
        "blocker": null,
        "blocker_claim": null,
        "evidence": "spike",
@@ -433,18 +1648,43 @@
       }
      ],
      "generation": 2,
+     "goal": "Choose the colour space for exported previews.",
      "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/2",
+     "next": {
+      "message": "Audit failed or its coverage went stale; address any findings listed under Audit, then retry.",
+      "where": "next_turn",
+      "who": "agent"
+     },
      "previous": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/1",
+     "progress": {
+      "approved": 2,
+      "required": 2
+     },
      "project": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50",
      "root": "C0",
+     "run": "s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
      "state": "active",
      "updated": 1790605740.0,
-     "version": "sha256:6c3543827ebfa05ac62759f0e5dc92450defa7270f04c3a27e328dfc80327e1d"
+     "version": "sha256:57ebde2337ac22cb9de6ed7aeda4d9056e1064b8b61036d0f531d84e10d009fe"
     },
     {
-     "audit": "required",
+     "attention": "ended",
+     "audit": {
+      "current": null,
+      "independence": null,
+      "pending": false,
+      "verdict": "none"
+     },
      "claims": [
       {
+       "assurance": "not_approved",
        "blocker": "evidence.confirmation_required",
        "blocker_claim": "C1",
        "evidence": "research",
@@ -456,6 +1696,7 @@
        "text": "Previews look the same in every supported viewer."
       },
       {
+       "assurance": "not_approved",
        "blocker": "evidence.confirmation_required",
        "blocker_claim": "C1",
        "evidence": "none",
@@ -475,27 +1716,142 @@
       }
      ],
      "generation": 1,
+     "goal": "Choose the colour space for exported previews.",
      "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/1",
+     "next": null,
      "previous": null,
+     "progress": {
+      "approved": 0,
+      "required": 2
+     },
      "project": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50",
      "root": "C0",
+     "run": "s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
      "state": "stopped_residual",
      "updated": 1790602920.0,
-     "version": "sha256:649d051a05b3a2303141ed12c9c853b628d2504e26dac8aa9e9d149df0b7239a"
+     "version": "sha256:bda98521818536de7a4bb692ac3817900ea32819b2764381ea5ae62065be8d81"
     }
    ],
    "since": 1790602920.0
   },
   {
+   "families": [
+    {
+     "attempts": [
+      "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-682439d331439ac14d50f23fb9165efa6aa381c0e62d2362a4a67d98494c6bb5/1"
+     ],
+     "run": "s256-682439d331439ac14d50f23fb9165efa6aa381c0e62d2362a4a67d98494c6bb5"
+    },
+    {
+     "attempts": [
+      "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470/1"
+     ],
+     "run": "s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470"
+    },
+    {
+     "attempts": [
+      "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-ea2fab75d05920549b4b92798bdf7217fed88df4e0a56de317d1e721524887b2/1"
+     ],
+     "run": "s256-ea2fab75d05920549b4b92798bdf7217fed88df4e0a56de317d1e721524887b2"
+    },
+    {
+     "attempts": [
+      "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148/1"
+     ],
+     "run": "s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148"
+    }
+   ],
    "id": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d",
    "label": "harbor",
    "name": "harbor",
    "repo": "/work/harbor",
    "runs": [
     {
-     "audit": "required",
+     "attention": "not_ended",
+     "audit": {
+      "current": null,
+      "independence": null,
+      "pending": false,
+      "verdict": "none"
+     },
      "claims": [
       {
+       "assurance": "awaiting_audit",
+       "blocker": null,
+       "blocker_claim": null,
+       "evidence": "research",
+       "gating": true,
+       "id": "C0",
+       "kind": "ordinary",
+       "review": "none",
+       "state": "approved",
+       "text": "Retries stop after a bounded wait."
+      },
+      {
+       "assurance": "not_approved",
+       "blocker": null,
+       "blocker_claim": null,
+       "evidence": "none",
+       "gating": false,
+       "id": "C1",
+       "kind": "needs-decision",
+       "review": "none",
+       "state": "blocked",
+       "text": "Cap the wait at five minutes rather than ten."
+      }
+     ],
+     "diagnostic": null,
+     "edges": [
+      {
+       "from": "C0",
+       "to": "C1"
+      }
+     ],
+     "generation": 1,
+     "goal": "Choose the retry backoff ceiling.",
+     "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-682439d331439ac14d50f23fb9165efa6aa381c0e62d2362a4a67d98494c6bb5/1",
+     "next": {
+      "message": "Audit is owed; spawn an independent auditor.",
+      "where": "next_turn",
+      "who": "agent"
+     },
+     "previous": null,
+     "progress": {
+      "approved": 1,
+      "required": 1
+     },
+     "project": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d",
+     "root": "C0",
+     "run": "s256-682439d331439ac14d50f23fb9165efa6aa381c0e62d2362a4a67d98494c6bb5",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
+     "state": "active",
+     "updated": 1790614200.0,
+     "version": "sha256:d0af7967dc1f1f9cf8f591ed2f92c7affdb32d16c43f868c883eaa2a8e6e2d18"
+    },
+    {
+     "attention": "ended",
+     "audit": {
+      "current": null,
+      "independence": null,
+      "pending": false,
+      "verdict": "none"
+     },
+     "claims": [
+      {
+       "assurance": "awaiting_audit",
        "blocker": null,
        "blocker_claim": null,
        "evidence": "research",
@@ -507,6 +1863,7 @@
        "text": "Retries back off exponentially up to five attempts."
       },
       {
+       "assurance": "not_approved",
        "blocker": null,
        "blocker_claim": null,
        "evidence": "none",
@@ -526,18 +1883,39 @@
       }
      ],
      "generation": 1,
+     "goal": "Document the import retry policy.",
      "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470/1",
+     "next": null,
      "previous": null,
+     "progress": {
+      "approved": 1,
+      "required": 1
+     },
      "project": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d",
      "root": "C0",
+     "run": "s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
      "state": "stopped_frozen",
      "updated": 1790600100.0,
-     "version": "sha256:4369c18035cb07c1b2b17cadf2e1957f5b7037246c05d51528bd6ff74de2d5dc"
+     "version": "sha256:7913e5648e3a6879483ab4a06478921dd2b9959072b06eec95a255871ae80720"
     },
     {
-     "audit": "required",
+     "attention": "ended",
+     "audit": {
+      "current": null,
+      "independence": null,
+      "pending": false,
+      "verdict": "none"
+     },
      "claims": [
       {
+       "assurance": "awaiting_audit",
        "blocker": null,
        "blocker_claim": null,
        "evidence": "spike",
@@ -552,24 +1930,44 @@
      "diagnostic": null,
      "edges": [],
      "generation": 1,
+     "goal": "Find why the nightly import is slow.",
      "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-ea2fab75d05920549b4b92798bdf7217fed88df4e0a56de317d1e721524887b2/1",
+     "next": null,
      "previous": null,
+     "progress": {
+      "approved": 1,
+      "required": 1
+     },
      "project": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d",
      "root": "C0",
+     "run": "s256-ea2fab75d05920549b4b92798bdf7217fed88df4e0a56de317d1e721524887b2",
+     "session": {
+      "delegated": false,
+      "host": "test",
+      "interactive": true,
+      "label": null,
+      "locator": null
+     },
      "state": "stopped_budget",
      "updated": 1790597280.0,
-     "version": "sha256:96f45000cc023e13e72662ccf2c59ff4ab944bd37e6e319d0f50913811915b6c"
+     "version": "sha256:66787946ab19fc72664066c281dab4b8fe759f03c2a77c8414e3177dbf41d77d"
     },
     {
+     "attention": null,
      "audit": null,
-     "claims": [],
+     "claims": null,
      "diagnostic": "unreadable",
-     "edges": [],
+     "edges": null,
      "generation": 1,
+     "goal": null,
      "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148/1",
+     "next": null,
      "previous": null,
+     "progress": null,
      "project": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d",
      "root": null,
+     "run": "s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148",
+     "session": null,
      "state": null,
      "updated": 1790583180.0,
      "version": "sha256:a0b61596536fa3e9fcaa7d946ccbd6ee924023183a557157c259af5b0a3a218b"
@@ -578,5 +1976,5 @@
    "since": 1790583180.0
   }
  ],
- "token": "sha256:560f25e55717c079b93980d7d24dead8760436ccd97a18e5b364c663c9a653c8"
+ "token": "sha256:d8f15b3f347967cc3a82a8683fb66271c140bb585b69e13bbcd9cfa9b9d9c236"
 }

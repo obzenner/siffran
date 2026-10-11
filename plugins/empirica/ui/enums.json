@@ -1,0 +1,154 @@
+{
+  "run": [
+    "active",
+    "converged",
+    "stopped_residual",
+    "stopped_frozen",
+    "stopped_budget"
+  ],
+  "diagnostic": [
+    "unreadable",
+    "history-unavailable",
+    "history-missing",
+    "history-corrupt",
+    "workspace-unavailable"
+  ],
+  "attention": [
+    "needs_you",
+    "not_ended",
+    "ended"
+  ],
+  "audit": [
+    "passed",
+    "failed",
+    "none"
+  ],
+  "independence": [
+    "distinct",
+    "mixed",
+    "same_model",
+    "unverified",
+    "human_owned"
+  ],
+  "claim": [
+    "open",
+    "approved",
+    "blocked",
+    "discarded"
+  ],
+  "kind": [
+    "ordinary",
+    "needs-experiment",
+    "needs-decision"
+  ],
+  "evidence": [
+    "spike",
+    "research",
+    "none"
+  ],
+  "review": [
+    "passed",
+    "failed",
+    "stale",
+    "changed",
+    "unreviewed",
+    "none"
+  ],
+  "assurance": [
+    "assured",
+    "awaiting_audit",
+    "audit_failed",
+    "not_approved"
+  ],
+  "who": [
+    "human",
+    "agent",
+    "auditor"
+  ],
+  "where": [
+    "next_report",
+    "explicit_report",
+    "if_available",
+    "unavailable",
+    "limit",
+    "next_turn",
+    "in_progress",
+    "later",
+    "nobody"
+  ],
+  "step": [
+    "graph",
+    "research",
+    "spike_request",
+    "spike",
+    "attribution",
+    "audit_verdict",
+    "evidence_presentation",
+    "evidence_confirmation",
+    "observation_basis"
+  ],
+  "outcome": [
+    "supporting",
+    "refuting",
+    "pass",
+    "fail",
+    "confirm",
+    "reject",
+    "approve"
+  ],
+  "standing": [
+    "current",
+    "replaced",
+    "gone"
+  ],
+  "file": [
+    "present",
+    "missing",
+    "unreadable",
+    "non_regular",
+    "outside_workspace"
+  ],
+  "verification": [
+    "verified_by_service",
+    "confirmed_by_human",
+    "rejected_by_human",
+    "pending"
+  ],
+  "record_class": [
+    "verbatim",
+    "retrievable",
+    "observed"
+  ],
+  "decision": [
+    "approved",
+    "rejected",
+    "waiting",
+    "unanswered",
+    "deferred",
+    "not_asked"
+  ],
+  "spike": [
+    "current",
+    "stale",
+    "superseded"
+  ],
+  "spike_outcome": [
+    "pass",
+    "fail"
+  ],
+  "mode": [
+    "deliberative",
+    "auto"
+  ],
+  "approval": [
+    "pending",
+    "approved",
+    "revision_pending",
+    "rejected"
+  ],
+  "budgets": [
+    "passes",
+    "spawns",
+    "audit_spawns"
+  ]
+}

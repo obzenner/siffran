@@ -173,7 +173,7 @@ class ServerTests(unittest.TestCase):
     def test_the_ui_is_served_with_a_same_origin_policy(self):
         response, body = self.served.get("/app/")
         self.assertEqual(response.status, 200)
-        self.assertIn(b"<ev-split", body)
+        self.assertIn(b"<ev-runs", body)
         self.assertIn("default-src 'self'", response.getheader("Content-Security-Policy"))
         self.assertIn("frame-ancestors 'none'", response.getheader("Content-Security-Policy"))
         self.assertEqual(response.getheader("X-Content-Type-Options"), "nosniff")
@@ -183,7 +183,7 @@ class ServerTests(unittest.TestCase):
 
     def test_nothing_outside_the_allowlist_is_served(self):
         for path in ("/package.json", "/package-lock.json", "/node_modules/tailwindcss/package.json",
-                     "/tests/browser.check.mjs", "/scripts/audit.mjs", "/vendor/VERSIONS",
+                     "/tests/browser.journeys.mjs", "/scripts/audit.mjs", "/vendor/VERSIONS",
                      "/app/../package.json", "/app/%2e%2e/package.json", "/app/..%2fpackage.json",
                      "//etc/passwd", "/app/.hidden.js", "/../../core/observer.py"):
             with self.subTest(path=path):

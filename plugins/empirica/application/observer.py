@@ -15,11 +15,12 @@ The adapter supplies a :class:`Source`: where runs are, when each changed, and w
 """
 from __future__ import annotations
 
-import time
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from core import governance
 from core import observer as _core
 from core.evaluation import digest
 from core.records import Corrupt, Present, RunKey
@@ -28,7 +29,9 @@ from . import protocol as _proto
 from . import run_state
 from .location import encode_handle
 from .observation import ObservationUnavailable, build_observation_snapshot
-from .snapshot import GraphInvalid, HistoryCorrupt, active_spike_heads, assemble
+from dataclasses import replace
+
+from .snapshot import GraphInvalid, HistoryCorrupt, active_spike_heads, assemble, recorded_observations
 
 CONTRACT = "empirica-ui-view/v1"
 #: The label of a project no repository matched: a stable word, never a position in the view.
@@ -92,7 +95,7 @@ class Observer:
         self._source = source
         self._profile_id = profile_id or _proto.profile_ids()[0]
         contract = _proto.public_contract()
-        self._messages = {code: spec["message"] for code, spec in contract["reasons"].items()}
+        self._reasons = contract["reasons"]
         self._cache: dict[RunKey, tuple[str, Observed]] = {}
 
     # --- one run ------------------------------------------------------------
@@ -101,13 +104,14 @@ class Observer:
     def _partial(row: dict[str, Any], version: str, diagnostic: str, *, status: str | None = None,
                  goal: str | None = None, state: Any = None) -> Observed:
         """A run read only in part: the facts it could be read for, and why not the rest."""
-        summary = {**row, "version": version, "state": status, "diagnostic": diagnostic,
-                   "audit": None, "root": None, "edges": [], "claims": []}
+        summary = {**row, "version": version, "state": status, "diagnostic": diagnostic, "goal": goal,
+                   "session": None if state is None else _core.session_fact(governance.plain(state.invocation)),
+                   "attention": None, "next": None, "audit": None, "progress": None, "root": None, "edges": None, "claims": None}
+        # What was not read is unknown (null), never an empty list that reads as zero.
         detail = {"contract": CONTRACT, "key": row["key"], "version": version, "goal": goal,
-                  "budgets": None if state is None else _core.budgets(state),
-                  "control": None if state is None else _core.control(state),
-                  "audit": None, "residuals": [], "prompt_error": None, "waiting": [], "stale": [], "author": None, "auditor": None,
-                  "steps": [], "claims": []}
+                  "governance": None if state is None else _core.governance_view(_core.governance_facts(state, None)),
+                  "audit": None, "stop": None, "residuals": None, "now": None, "outstanding": None, "stale": None, "author": None, "auditor": None,
+                  "steps": None, "claims": None}
         return Observed(summary, detail)
 
     def _observe(self, key: RunKey, row: dict[str, Any], read: Any, history: Any,
@@ -138,14 +142,26 @@ class Observer:
         except _MALFORMED_HISTORY:
             return self._partial(row, base_digest, "history-corrupt", **partial)
         version = _version(base_digest, snapshot.observation_digest)
+        stopped, recorded = None, "recorded"
+        if state.status != "active":
+            # Two time bases. What a run that ended left unresolved is read from what its last transaction recorded (the
+            # workspace as it was then): ``stopped``. Everything current about it (its audit, its claims, its proof, the files
+            # that changed) is read from the snapshot as it is now, exactly as the author view reads it.
+            then = recorded_observations(snapshot.history, state, active_spike_heads(snapshot.history, snapshot.graph))
+            if then is None:
+                recorded = "unavailable"
+            else:
+                stopped = replace(snapshot, observations=then.observations, observation_basis_id=then.basis_id,
+                                  observation_digest=then.digest)
         try:
-            facts, detail = _core.project(snapshot, self._messages)
+            facts, detail = _core.project(snapshot, self._reasons, stopped=stopped, recorded=recorded)
         except ValueError:
             # A reason that cannot be worded is a fact about this one run, never about the whole store.
             return self._partial(row, base_digest, "unreadable", **partial)
         return Observed({**row, "version": version, "state": state.status, "diagnostic": None, **facts},
                         {"contract": CONTRACT, "key": row["key"], "version": version, **detail},
-                        active_spike_heads(snapshot.history, snapshot.graph), snapshot.observation_digest)
+                        active_spike_heads(snapshot.history, snapshot.graph),
+                        snapshot.observation_digest)
 
     def _unchanged(self, key: RunKey, cached: Observed) -> bool:
         """Whether the files a cached run's freshness was judged against still read the same."""
@@ -159,7 +175,7 @@ class Observer:
 
     def _run(self, key: RunKey, keys: frozenset[RunKey]) -> Observed:
         prior = RunKey(key.project_id, key.run_id, key.generation - 1)
-        row = {"key": run_key(key), "project": key.project_id, "generation": key.generation,
+        row = {"key": run_key(key), "project": key.project_id, "run": key.run_id, "generation": key.generation,
                "previous": run_key(prior) if prior in keys else None, "updated": self._source.updated(key)}
         read = self._source.read_state(key)
         base_digest = digest({"state": _revision(read), "history": self._source.history_revision(key),
@@ -193,9 +209,10 @@ class Observer:
             meta = self._source.project(project_id)
             since = [run["updated"] for run in runs if run["updated"] is not None]
             rows.append({"id": project_id, "name": meta.name, "label": meta.name or UNNAMED_PROJECT,
-                         "repo": meta.repo, "since": min(since, default=None), "runs": runs})
+                         "repo": meta.repo, "since": min(since, default=None), "families": _families(runs),
+                         "runs": runs})
         _tell_apart(rows)
-        view = {"contract": CONTRACT,
+        view = {"contract": CONTRACT, "coverage": _coverage(rows),
                 "token": digest([[p["id"], p["name"], p["repo"], [[run["key"], run["version"]] for run in p["runs"]]]
                                  for p in rows]),
                 "projects": rows}
@@ -213,42 +230,59 @@ class Observer:
         return None if found is None else self._run(found, keys).detail
 
 
-_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
-#: How finely a moment is told, coarse to fine; a label gets only as fine as it needs to be unique in its view.
-_GRAINS = ("%d %b", "%d %b %H:%M", "%d %b %H:%M:%S")
-
-
-def _unnamed(first_run: float | None, grain: int = 0) -> str:
-    """A project no repository matched, told apart from the others by a human fact: when it began (UTC)."""
-    if first_run is None:
-        return UNNAMED_PROJECT
-    moment = time.gmtime(first_run)
-    text = f"{moment.tm_mday} {_MONTHS[moment.tm_mon - 1]}"
-    if grain >= 1:
-        text += f" {moment.tm_hour:02d}:{moment.tm_min:02d}"
-    if grain >= 2:
-        text += f":{moment.tm_sec:02d}"
-    if grain >= 3:
-        text += f".{int((first_run % 1) * 1000):03d}"
-    return f"{UNNAMED_PROJECT} · since {text}"
+def _parts(repo: str) -> list[str]:
+    return [p for p in re.split(r"[\\/]+", repo) if p]
 
 
 def _tell_apart(rows: list[dict[str, Any]]) -> None:
-    """Make the labels of the unnamed projects unique within this view by the coarsest of day, minute, second
-    or millisecond (of their first run) that makes each label unique. Never a goal (a goal is
-    never a title), an id or a position."""
-    unnamed = [r for r in rows if r["name"] is None]
-    for grain in range(4):
-        for row in unnamed:
-            row["label"] = _unnamed(row["since"], grain)
-        seen: dict[str, int] = {}
-        for row in unnamed:
-            seen[row["label"]] = seen.get(row["label"], 0) + 1
-        duplicated = {label for label, n in seen.items() if n > 1}
-        if not duplicated:
-            return
-        # only the projects still sharing a label are told finer; the rest keep their coarser, shorter one
-        unnamed = [r for r in unnamed if r["label"] in duplicated]
+    """Make every project's label unique within this view. A project is its repository's folder; two folders of the same
+    name are told apart by the shortest path suffix that differs (``north/tiles``, ``south/tiles``), only for the projects
+    that share one. What still shares a label (the same path under two storage ids, or projects no repository matched) gets a
+    short stable key of its storage id, the shortest that differs. Never a goal, a time or a position."""
+    depth = {row["id"]: 1 for row in rows}
+
+    def label(row: dict[str, Any]) -> str:
+        if row["repo"] is None:
+            return UNNAMED_PROJECT
+        parts = _parts(row["repo"])
+        return "/".join(parts[-min(depth[row["id"]], len(parts)):]) if parts else row["repo"]
+
+    while True:
+        shared: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            shared.setdefault(label(row), []).append(row)
+        deeper = [row for group in shared.values() if len({r["repo"] for r in group}) > 1 for row in group
+                  if row["repo"] is not None and depth[row["id"]] < len(_parts(row["repo"]))]
+        if not deeper:
+            break
+        for row in deeper:
+            depth[row["id"]] += 1
+    for row in rows:
+        row["label"] = label(row)
+    for text, group in shared.items():
+        if len(group) > 1:
+            keys = [row["id"].split("-", 1)[-1] for row in group]
+            size = next((n for n in range(6, 65) if len({k[:n] for k in keys}) == len(keys)), 64)
+            for row, key in zip(group, keys):
+                row["label"] = f"{text} · {key[:size]}"
+
+
+def _families(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The attempts at each run id, chronologically: by generation, never by a file's modification time."""
+    attempts: dict[str, list[dict[str, Any]]] = {}
+    for run in runs:
+        attempts.setdefault(run["run"], []).append(run)
+    return [{"run": run_id, "attempts": [r["key"] for r in sorted(group, key=lambda r: r["generation"])]}
+            for run_id, group in attempts.items()]
+
+
+def _coverage(projects: list[dict[str, Any]]) -> dict[str, int]:
+    """How much of the store was read, so no consumer reads what was not read as zero: runs, those read fully, those whose
+    state is damaged (``unreadable``) and those read only in part (any other diagnostic)."""
+    runs = [run for project in projects for run in project["runs"]]
+    unreadable = sum(run["diagnostic"] == "unreadable" for run in runs)
+    read = sum(run["diagnostic"] is None for run in runs)
+    return {"runs": len(runs), "read": read, "unreadable": unreadable, "partial": len(runs) - read - unreadable}
 
 
 def _version(base_digest: str, observation_digest: str) -> str:

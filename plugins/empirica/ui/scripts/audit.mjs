@@ -1,4 +1,4 @@
-// Mechanical convention checks (CONVENTIONS 0.6, C1, S1, T1, E7, G1). `audit(inputs)` is pure, so
+// Mechanical convention checks (UI.md: copy, icons, tokens, levels). `audit(inputs)` is pure, so
 // tests/audit.test.mjs can prove each check with negative controls; the CLI reads the tree and exits 1 on findings.
 //
 // What it checks, and its limits (keep this list honest):
@@ -10,18 +10,10 @@
 // - 0.6 icons: every icon meaning is used and every used meaning exists.
 // - T1: no Tailwind arbitrary value (`text-[9px]`, `h-[36rem]`) in any string: raw values live in tokens.json.
 // - E7: no inline style attributes; no class value glued to an interpolation (`text-${x}`, `${x}-foo`).
-// - G1: every defined element appears in the gallery as a tag or a created-by-name string (comments ignored), or
-//   inside a template (elements/templates/) that the gallery shows.
-// - Levels (L3): an import graph by atomic level. core imports core; atoms core; molecules core and atoms;
-//   organisms core, atoms and molecules; layout core; templates core and templates; elements/index.js any element;
-//   pages (app/, gallery/) the elements' index, core, templates and their own folder. Nothing imports upward.
 // - T1 raw values: no literal `12px`, `150ms`, hex colour, bare timer delay or unitless SVG number in code; lengths,
-//   durations and colours are tokens, geometry is named (view-layout.js `U`, marks.js `R`/`STROKE`) or catalogue data.
+//   durations and colours are tokens, geometry, if code ever draws any, is named, not written as a number.
 // - T8 unused tokens: every token in tokens.json is used by a class, a var() or a declared reference in code or app.css.
 // - E10 observed attributes: every attribute an element observes is set somewhere other than its own file.
-// - V5 icons: within one vocabulary no two values share a glyph, unless one declares `alias` of the other.
-// - G4 gallery states: every vocabulary in states.json is shown by the gallery (catalogue `gallery_state_domains`, or
-//   `gallery_other_domains` for those it shows another way).
 // - C4 placeholders: the variables a t()/plain()/count() call gives are exactly the {placeholders} of its copy.
 // It does not check levels of detail beyond these patterns, or runtime-built strings.
 import fs from "node:fs";
@@ -33,30 +25,27 @@ import { fileURLToPath } from "node:url";
 const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/<!--[\s\S]*?-->/g, "").replace(/(^|[\s;{}(),])\/\/[^\n]*/g, "$1");
 const entries = (o) => Object.entries(o).filter(([k]) => !k.startsWith("$"));
 
-/** Dynamic copy families: template pattern (each ${…} normalised to *) -> the keys it can produce. */
-function families(states, cat) {
-  const dom = (d) => Object.keys(states[d] ?? {});
-  const F = {
-    "*.label": [], "*.hint": [],  // state copy keys, checked through stateKeys
-    "gallery.*": cat.gallery_sections.map((v) => `gallery.${v}`),
-    "gallery.*.hint": cat.gallery_sections.map((v) => `gallery.${v}.hint`),
-    "gallery.states.*": cat.gallery_state_domains.map((v) => `gallery.states.${v}`),
-    "kind.*": cat.kinds.map((v) => `kind.${v}`),
-    "independence.*": cat.independence.map((v) => `independence.${v}`),
-    "control.mode.*": cat.control_modes.map((v) => `control.mode.${v}`),
-    "control.approval.*": cat.approvals.map((v) => `control.approval.${v}`),
-    "budget.*": cat.budgets.map((v) => `budget.${v}`),
-    "legend.of.*": cat.legend_domains.map((v) => `legend.of.${v}`),
-    "filter.*": cat.filters.map((f) => `filter.${f.id}`),
-    "*.*": cat.filters.filter((f) => f.copy).flatMap((f) => cat[f.values].map((v) => `${f.copy}.${v}`)),
-    "record.class.*": cat.record_classes.map((v) => `record.class.${v}`),
-    "outcome.*": dom("run").map((v) => `outcome.${v}`),
-    "outcome.empty.*": dom("run").map((v) => `outcome.empty.${v}`),
-    "view.empty.*": cat.data_sources.map((v) => `view.empty.${v}`),
-    "app.data.*": cat.data_sources.map((v) => `app.data.${v}`),
-    "tone.*": cat.tones.map((v) => `tone.${v}`),
+/** Dynamic copy families: template pattern (each ${…} normalised to *) -> the keys it can produce. The value lists are
+ * the contract's (enums.json, generated); nothing here is a list kept by hand. */
+function families(states, cat, enums) {
+  const of = (prefix, values) => values.map((v) => `${prefix}.${v}`);
+  return {
+    "*.label": [],  // state copy keys, checked through stateKeys
+    "kind.*": of("kind", enums.kind),
+    "independence.*": of("independence", enums.independence),
+    "who.*": of("who", enums.who),
+    "where.*": of("where", enums.where),
+    "spike.outcome.*": of("spike.outcome", enums.spike_outcome),
+    "spike.*": of("spike", enums.spike),
+    "mode.*": of("mode", enums.mode),
+    "approval.*": of("approval", enums.approval),
+    "budget.*": of("budget", enums.budgets),
+    "now.*": of("now", enums.attention),
+    "record.class.*": of("record.class", enums.record_class),
+    "list.empty.*": of("list.empty", cat.data_sources),
+    "app.data.*": of("app.data", cat.data_sources),
+    "host.*": of("host", cat.hosts),
   };
-  return F;
 }
 
 /** Template literals passed to t(`…`), plain(`…`) or count(`…`) (`name` picks the function), with each ${…}
@@ -93,16 +82,6 @@ function classValues(src) {
   return out;
 }
 
-const LEVELS = {
-  core: ["core"], atoms: ["core"], molecules: ["core", "atoms"], organisms: ["core", "atoms", "molecules"], layout: ["core"],
-  templates: ["core", "templates"], index: ["core", "atoms", "molecules", "organisms", "layout", "templates", "molecule", "index"],
-};
-/** The level of a file: elements/<level>/…, elements/index.js, or a page folder. */
-function levelOf(f) {
-  const parts = f.split(path.sep);
-  if (parts[0] === "elements") return parts.length === 2 ? "index" : parts[1];
-  return parts[0];
-}
 /** The calls `name("key", { a, b: 1 })` with a literal object: [key, [variable names]]. */
 function callVars(src, name) {
   const out = [];
@@ -119,7 +98,7 @@ function callVars(src, name) {
   return out;
 }
 
-export function audit({ code, copy, states, icons, catalogue, tokens = null, css = {} }) {
+export function audit({ code, copy, states, icons, catalogue, enums, tokens = null, css = {} }) {
   const findings = [];
   const report = (rule, msg) => findings.push(`${rule}: ${msg}`);
   const clean = Object.fromEntries(Object.entries(code).map(([f, s]) => [f, stripComments(s)]));
@@ -133,10 +112,10 @@ export function audit({ code, copy, states, icons, catalogue, tokens = null, css
   for (const k of counted) { calls.add(k); calls.add(`${k}.one`); }
   const labelAttr = new Set([...all.matchAll(/\blabel="([a-z_.-]+)"/g)].map((m) => m[1]));
   const stateList = entries(states).flatMap(([, d]) => (d.copy ? [d] : entries(d).map(([, s]) => s)));
-  const stateKeys = new Set(stateList.flatMap((s) => [`${s.copy}.label`, `${s.copy}.hint`]));
-  const F = families(states, catalogue);
+  const stateKeys = new Set(stateList.map((s) => `${s.copy}.label`));
+  const F = families(states, catalogue, enums);
   const expanded = new Set();
-  // copy-key-shaped template literals passed elsewhere (e.g. group(`gallery.states.${d}`)) expand their family too
+  // copy-key-shaped template literals passed elsewhere (e.g. a copy key built in a helper) expand their family too
   for (const m of all.matchAll(/`([a-z][\w-]*(?:\.(?:[\w-]+|\$\{[^}`]*\}))+)`/g)) {
     const norm = m[1].replace(/\$\{[^}`]*\}/g, "*");
     if (norm in F) for (const k of F[norm]) expanded.add(k);
@@ -167,7 +146,6 @@ export function audit({ code, copy, states, icons, catalogue, tokens = null, css
   const iconUse = new Set([
     ...[...all.matchAll(/\bicon\(\s*"([^"]+)"/g)].map((m) => m[1]),
     ...stateList.map((s) => s.icon),
-    ...[...all.matchAll(/"needs-[a-z]+":\s*"([a-z-]+)"/g)].map((m) => m[1]),
   ]);
   for (const [k] of entries(icons)) if (!iconUse.has(k)) report("0.6 unused icon meaning", k);
   for (const k of iconUse) if (!(k in icons)) report("S1 missing icon meaning", k);
@@ -179,42 +157,6 @@ export function audit({ code, copy, states, icons, catalogue, tokens = null, css
     for (const v of classValues(s)) if (/[\w:!-]\$\{|\}[\w-]/.test(v)) report("E7 class built by concatenation", `${f}: class="${v.slice(0, 60)}"`);
   }
 
-  // G1 gallery coverage
-  const defined = [...all.matchAll(/define\("(ev-[a-z-]+)"/g)].map((m) => m[1]);
-  const gallery = Object.entries(clean).filter(([f]) => f.startsWith(`gallery${path.sep}`)).map(([, s]) => s).join("\n");
-  // An element is covered when the gallery shows it, or when a TEMPLATE (elements/templates/) the gallery shows
-  // renders it: the gallery then shows it inside the template, with real data.
-  const shown = (src, tag) => src.includes(`<${tag}`) || src.includes(`"${tag}"`);
-  const templateFiles = Object.entries(clean).filter(([f]) => f.startsWith(path.join("elements", "templates") + path.sep));
-  const covered = new Set(defined.filter((tag) => shown(gallery, tag)));
-  for (let grew = true; grew;) {
-    grew = false;
-    for (const [, src] of templateFiles) {
-      const own = [...src.matchAll(/define\("(ev-[a-z-]+)"/g)].map((m) => m[1]);
-      if (!own.some((tag) => covered.has(tag))) continue;
-      for (const tag of defined) if (!covered.has(tag) && shown(src, tag)) { covered.add(tag); grew = true; }
-    }
-  }
-  for (const tag of defined) if (!covered.has(tag)) report("G1 element missing from gallery", tag);
-
-  // L3 levels
-  for (const [f, src] of Object.entries(clean)) {
-    const mine = levelOf(f);
-    // static `import x from "./y.js"` and dynamic `import("./y.js")` alike
-    for (const m of src.matchAll(/\bimport\s*\(\s*["'](\.[^"']+)["']\s*\)|\bimport\s+(?:[^"';]*?\s+from\s+)?["'](\.[^"']+)["']/g)) {
-      m[1] = m[1] ?? m[2];
-      if (m[1].endsWith(".json")) continue;
-      const target = path.relative(".", path.join(path.dirname(f), m[1]));
-      const theirs = levelOf(target);
-      if (mine === theirs && mine !== "index") continue;
-      if (mine === "app" || mine === "gallery") {
-        if (!["app", "index", "core", "templates"].includes(theirs) && !(theirs === "gallery")) report("L3 page imports below the elements' index", `${f} -> ${target}`);
-        continue;
-      }
-      if (theirs === "app" || theirs === "gallery" || !(LEVELS[mine] ?? []).includes(theirs)) report("L3 import against the levels", `${f} (${mine}) -> ${target} (${theirs})`);
-    }
-  }
-
   // T1 raw units in code, a bare delay, and unitless SVG geometry written as a literal
   for (const [f, src] of Object.entries(clean)) {
     for (const m of src.matchAll(/(?<![\w.#-])\d+(?:\.\d+)?(px|ms)\b/g)) report("T1 raw unit", `${f}: ${m[0]}`);
@@ -223,7 +165,7 @@ export function audit({ code, copy, states, icons, catalogue, tokens = null, css
     // a delay is a duration token (`--duration-*`) or catalogue data, not a number in a timer call (0 defers a tick)
     for (const m of src.matchAll(/\b(?:setTimeout|setInterval)\((?:[^()]|\([^()]*\))*?,\s*(\d+(?:\.\d+)?)\s*\)/g)) if (Number(m[1]) !== 0) report("T1 bare duration", `${f}: ${m[0].slice(0, 50)}`);
     // SVG geometry: no number written into an attribute (rx="6") or into an expression in one (${x + 4}); the numbers
-    // are named (view-layout.js `U`, catalogue `picture`). 0, 1 and 2 (an origin, a unit, a half) are not geometry.
+    // are named. 0, 1 and 2 (an origin, a unit, a half) are not geometry.
     const SVG_ATTR = /\b(?:rx|ry|r|x|y|cx|cy|x1|y1|x2|y2|dx|dy|width|height|stroke-width|stroke-dasharray|font-size)=(["'])((?:(?!\1)[\s\S])*)\1/g;
     for (const m of src.matchAll(SVG_ATTR)) {
       const value = m[2];
@@ -253,22 +195,6 @@ export function audit({ code, copy, states, icons, catalogue, tokens = null, css
     }
   }
 
-  // V5 one glyph per value within a vocabulary
-  for (const [domain, d] of entries(states)) {
-    if (domain === "unknown" || d.copy) continue;
-    const byIcon = new Map();
-    for (const [value, st] of entries(d)) {
-      if (!st || typeof st !== "object" || !st.icon) continue;
-      const first = byIcon.get(st.icon);
-      if (first && st.alias !== first && d[first]?.alias !== value) report("V5 two values share a glyph", `${domain}: ${first} and ${value} (${st.icon})`);
-      else if (!first) byIcon.set(st.icon, value);
-    }
-  }
-
-  // G4 gallery shows every vocabulary
-  const shownDomains = new Set([...catalogue.gallery_state_domains, ...(catalogue.gallery_other_domains ?? [])]);
-  for (const [domain, d] of entries(states)) if (domain !== "unknown" && typeof d === "object" && !shownDomains.has(domain)) report("G4 state vocabulary missing from the gallery", domain);
-
   // T8 unused tokens: every group of tokens.json has a rule, and every token in it is used
   if (tokens) {
     const text = [...Object.values(clean), ...Object.values(css)].join("\n");
@@ -293,16 +219,16 @@ export function audit({ code, copy, states, icons, catalogue, tokens = null, css
     }
   }
 
-  return { findings, stats: { files: Object.keys(code).length, keys: entries(copy).length, elements: defined.length } };
+  return { findings, stats: { files: Object.keys(code).length, keys: entries(copy).length, elements: [...all.matchAll(/define\("(ev-[a-z-]+)"/g)].length } };
 }
 
 export function readTree(root) {
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
-  const files = ["elements", "gallery", "app"].flatMap((d) => walk(path.join(root, d))).filter((f) => /\.(js|html)$/.test(f));
+  const files = ["elements", "app"].flatMap((d) => walk(path.join(root, d))).filter((f) => /\.(js|html)$/.test(f));
   const json = (f) => JSON.parse(fs.readFileSync(path.join(root, f), "utf8"));
   return {
     code: Object.fromEntries(files.map((f) => [path.relative(root, f), fs.readFileSync(f, "utf8")])),
-    copy: json("copy/en.json"), states: json("states.json"), icons: json("icons.json"), catalogue: json("catalogue.json"),
+    copy: json("copy/en.json"), states: json("states.json"), icons: json("icons.json"), catalogue: json("catalogue.json"), enums: json("enums.json"),
     tokens: json("tokens/tokens.json"), css: Object.fromEntries(["styles/app.css", "vendor/basecoat/basecoat-nova.css"].map((f) => [f, fs.readFileSync(path.join(root, f), "utf8")])),
   };
 }

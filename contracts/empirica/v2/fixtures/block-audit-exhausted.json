@@ -185,7 +185,9 @@
           "next_action": "run.inspect"
         },
         "audit": {
-          "state": "failed",
+          "verdict": "failed",
+          "current": true,
+          "pending": false,
           "independence": "distinct",
           "findings": [
             "citation names line 895, not 891"

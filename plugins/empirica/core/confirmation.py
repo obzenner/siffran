@@ -46,8 +46,24 @@ REPRESENTABLE = (None, "already_presented")
 #: The ``prompt_error`` values with which a report would still ask a human: none, or only ``unobserved`` (the host looks
 #: for a dialog surface inside the report). The one place a caller learns whether a human is about to be asked.
 ASKABLE = frozenset({None, UNOBSERVED})
-#: The routes a *human* is told (the observer UI).
-TOLD_ROUTES = (HUMAN, UNAVAILABLE)
+#: Where a human is asked, by the ``confirmation_batch.prompt_error`` that says whether a host can ask now (``None``: the
+#: host asks inside the author's next report; ``unobserved``: ``if_available``, the host has not yet looked for a dialog, so
+#: whether anyone can be asked is unknown until it does inside the next report, and a place that promised the ask would be
+#: false when it finds none; ``already_presented``: only an explicit report asks again; ``unavailable``: the host has nobody
+#: to ask; ``interaction_limit``: the run's human interactions are spent). ``ASKABLE`` is the gate's and the turn end's
+#: question (may the host look for a surface); ``REPRESENTABLE`` is explicit mediation's (is there a dialog to re-ask in); the
+#: two stay distinct, and this map is where each prompt error is told as a place.
+ASK_WHERE = {None: "next_report", "unobserved": "if_available", "already_presented": "explicit_report",
+             "unavailable": "unavailable", "interaction_limit": "limit"}
+
+
+def presentable(batch: Any) -> bool:
+    """Whether the next explicit report presents ``batch`` to a human: there is one and its ``prompt_error`` is one an explicit
+    report may show under (``REPRESENTABLE``). The one predicate of presentability: the host mediators (``adapters.confirmation``,
+    and Pi's ``askableBatch``, which holds the same two values), and the observer's attention and the place of the human's
+    requirement, all consume it. It says nothing of what else the report blocks on first: that is the gate's order, a separate
+    fact."""
+    return isinstance(batch, Mapping) and batch.get("prompt_error") in REPRESENTABLE
 
 
 def is_terminal(batch: Any) -> bool:
@@ -56,15 +72,11 @@ def is_terminal(batch: Any) -> bool:
     return isinstance(batch, Mapping) and isinstance(batch.get("terminal"), Mapping)
 
 
-def told_route(route: str) -> str:
-    """The route as a human is told it: an unobserved surface reads as the ordinary pending question (``human``), because
-    the host looks for the surface at the author's next report. The one place ``unobserved`` is told as ``human``."""
-    return HUMAN if route == UNOBSERVED else route
-
-
-def told_prompt_error(prompt_error: str | None) -> str | None:
-    """``prompt_error`` as a human is told it: ``unobserved`` is no error (see ``told_route``)."""
-    return None if prompt_error == UNOBSERVED else prompt_error
+def ask_where(prompt_error: str | None) -> str:
+    """Where a human who is waited on is asked (``ASK_WHERE``): the one place a prompt error is told as a place, for the
+    observer; the host's own rule for whether it asks is ``ASKABLE``."""
+    # A failure of one call (``host_failure``) is no place: nothing is stored, and the next report asks again.
+    return ASK_WHERE.get(prompt_error, ASK_WHERE[None])
 
 
 def audit_retrieval(snapshot: Any) -> frozenset[str]:
@@ -85,6 +97,12 @@ def human_route(snapshot: Any) -> str:
         return UNAVAILABLE
     surface = invocation["human_surface"]
     return surface if surface in (HUMAN, UNOBSERVED) else UNAVAILABLE
+
+
+def route_error(route: str | None) -> str | None:
+    """The ``prompt_error`` a route says by itself, before any batch does: ``unavailable`` or ``unobserved`` (the host has not
+    looked), else ``None``. For the places of items whose batch is not at hand."""
+    return route if route in (UNAVAILABLE, UNOBSERVED) else None
 
 
 def human_available(snapshot: Any) -> bool:
@@ -199,12 +217,16 @@ def terminal_case(prompt_error: str | None, declined: bool) -> str:
     return "declined" if declined else "ask"
 
 
-def reason_text(spec: Mapping[str, Any], parameters: Mapping[str, Any]) -> str:
+def reason_text(spec: Mapping[str, Any], parameters: Mapping[str, Any], *, ended: bool = False) -> str:
     """The text of a reason: the contract's ``message``, or, when the reason has ``case_messages`` and its parameters name a
-    ``case`` (or the parameter the reason's ``case_parameter`` names), that case's text with the parameters filled in. The one place the text is chosen; nothing in an adapter words it."""
+    ``case`` (or the parameter the reason's ``case_parameter`` names), that case's text with the parameters filled in.
+    For a run that has ended (``ended``) a reason that is still unresolved reads in the past, as ``ended_message`` words it:
+    nothing is asked or waited for any more. The one place the text is chosen; nothing in an adapter or the observer
+    words it."""
     templates = spec.get("case_messages")
     case = parameters.get(spec.get("case_parameter", "case"))
-    text = templates[case] if templates and case in templates else spec["message"]
+    text = (spec["ended_message"] if ended and "ended_message" in spec
+            else templates[case] if templates and case in templates else spec["message"])
     # Only ``{name}`` of a string parameter is filled; any other brace stays as written.
     return re.sub(r"\{(\w+)\}", lambda m: parameters[m.group(1)] if isinstance(parameters.get(m.group(1)), str) else m.group(0), text)
 

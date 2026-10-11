@@ -911,7 +911,7 @@ class GovernanceServiceTests(unittest.TestCase):
         budgets = self.view()["governance"]["budgets"]
         self.assertEqual(budgets["audit_spawns_used"], budgets["max_audit_spawns"])
         audit = self.view()["audit"]
-        self.assertEqual(audit["state"], "failed")
+        self.assertEqual(audit["verdict"], "failed")
         self.assertEqual(audit["findings"], ["citation names line 895, not 891"])
 
     def test_required_audit_with_exhausted_budget_names_audit_spawn_exhaustion(self):
@@ -920,7 +920,7 @@ class GovernanceServiceTests(unittest.TestCase):
         protocol.observe_failure(self.relaunch_audit(protocol), "native-test", "timed_out")
         budgets = self.view()["governance"]["budgets"]
         self.assertEqual(budgets["audit_spawns_used"], budgets["max_audit_spawns"])
-        self.assertEqual(self.view()["audit"]["state"], "required")
+        self.assertEqual(self.view()["audit"]["verdict"], "none")
         self.assert_exhausted_audit(self.request({
             "type": "EvaluateRun", "run_id": self.run_id, "intent": "report_convergence"}))
 

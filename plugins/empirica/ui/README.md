@@ -1,7 +1,7 @@
 # The Empirica observer UI
 
-A read-only view of the Empirica run store for people: every project, run and claim, how they relate,
-and the detail of what you click. It reads only the plugin's observer
+A read-only page for people: your runs grouped by what needs you, and one run's workspace (what it owes or how it ended,
+its claims with their proof, its attempts and history). It reads only the plugin's observer
 (`application/observer.py`, contract [`empirica-ui-view/v1`](../../../contracts/empirica-ui-view/v1/README.md)),
 which the plugin serves on 127.0.0.1 (`adapters/observer/server.py`), at `http://empirica.localhost:<port>/app/`. Why it is built this way:
 ADR-0065.
@@ -27,10 +27,9 @@ browser that does not resolve `*.localhost`.
 
 ## What is here
 
-- [`VIEW.md`](VIEW.md) is the specification of the one view. The browser checks hold the page to it.
-- [`CONVENTIONS.md`](CONVENTIONS.md) holds the standing rules: tokens, copy, states, layering, checks.
-- `app/` is the page; `elements/` holds its custom elements (atoms to templates); `gallery/` shows every element in every state.
-- Declarations: `states.json`, `catalogue.json`, `copy/en.json`, `icons.json`, `tokens/tokens.json`.
+- [`UI.md`](UI.md) is the one document: who owns which fact, the screen, the URL, words and states, tokens, layers, freshness, checks.
+- `app/` is the page; `elements/` holds its custom elements (atoms to templates).
+- Declarations: `enums.json` (generated from the contract), `states.json`, `catalogue.json`, `copy/en.json`, `icons.json`, `tokens/tokens.json`.
 - `dist/` and `vendor/` are built and committed, so the UI runs offline without Node. `package.json` is the dev-only toolchain that builds them.
 
 ## Develop
@@ -38,6 +37,7 @@ browser that does not resolve `*.localhost`.
 `make help` lists the targets:
 
 - `check-ui` (part of `make check`): the audit and the node tests.
-- `ui-browser`: headless Chrome against the real server.
+- `ui-enums`: regenerate `enums.json` from the contract.
+- `ui-browser`: the operator's tasks T1–T7 in headless Chrome against the real server.
 - `ui-build`: rebuilds and checks everything.
 - `ui-install`: installs the toolchain.

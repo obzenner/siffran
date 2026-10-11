@@ -130,8 +130,10 @@
       },
       "children": [],
       "audit": {
-        "state": "required",
-        "independence": "unverified",
+        "verdict": "none",
+        "current": null,
+        "pending": false,
+        "independence": null,
         "findings": []
       },
       "next_actions": [

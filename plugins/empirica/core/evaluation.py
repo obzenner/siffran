@@ -56,6 +56,8 @@ class ContractView:
     reason_metadata: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...]
     bootstrap_requirements: tuple[tuple[str, str, str], ...]
     audit_obligation: tuple[str, str]
+    #: ``(obligation id, must)`` of the report's other stages: ``confirmation``, ``passes`` and ``terminal``.
+    stage_obligations: Mapping[str, tuple[str, str]]
     bootstrap_operations: tuple[tuple[str, tuple[tuple[str, str], ...]], ...]
     governance_controls: Mapping[str, Any]
     recovery_exclusions: Mapping[str, tuple[str, ...]]
@@ -66,6 +68,7 @@ class ContractView:
     batch_limit: int
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "stage_obligations", _freeze(self.stage_obligations))
         object.__setattr__(self, "governance_controls", _freeze(self.governance_controls))
         object.__setattr__(self, "recovery_exclusions", _freeze(self.recovery_exclusions))
         object.__setattr__(self, "untrusted_delimiters", _freeze(self.untrusted_delimiters))
@@ -110,6 +113,10 @@ class EvaluationSnapshot:
     @property
     def audit_obligation(self):
         return self.contract.audit_obligation
+
+    @property
+    def stage_obligations(self):
+        return self.contract.stage_obligations
 
     @property
     def reason_metadata(self):
@@ -1008,6 +1015,19 @@ def audit_binding(snapshot: EvaluationSnapshot) -> dict[str, Any]:
             "scope_review": ("pass" if snapshot.state.frozen_claim_ids is not None else None)}
 
 
+def audit_pending(snapshot: EvaluationSnapshot) -> bool:
+    """Whether a re-audit is in flight: an audit child that has not settled and whose launch dossier still binds the run.
+    The one selector of that fact (acceptance, the audit summary and the observer consume it)."""
+    return any(child["resource_class"] == "audit" and child["state"] in {"reserved", "launching", "pending"}
+               and audit_operation_current(snapshot, child) for child in snapshot.state.children)
+
+
+def latest_audit_verdict(snapshot: EvaluationSnapshot) -> Mapping[str, Any] | None:
+    """The run's latest recorded audit verdict, else ``None``. The one selector of that fact."""
+    audits = [item for item in snapshot.history if item.get("kind") == "audit_verdict"]
+    return audits[-1] if audits else None
+
+
 def audit_operation_current(snapshot: EvaluationSnapshot, child: Mapping[str, Any]) -> bool:
     """Compare the immutable launch dossier, including scope and freshness-derived coverage."""
     expected = audit_binding(snapshot)
@@ -1023,11 +1043,17 @@ def audit_operation_current(snapshot: EvaluationSnapshot, child: Mapping[str, An
                 "argument_digest", "goal_digest", "frozen_scope_digest", "deferred_scope_digest")))
 
 
-def audit_passes(snapshot: EvaluationSnapshot, verdict: Mapping[str, Any]) -> bool:
+def audit_covers(snapshot: EvaluationSnapshot, verdict: Mapping[str, Any]) -> bool:
+    """Whether a recorded verdict, whatever it decided, still binds the current argument, goal and scope: the one
+    owner of an audit's *currency* (``audit_passes`` is a covering pass)."""
     expected = audit_binding(snapshot)
     child = next((c for c in snapshot.state.children if c["child_id"] == verdict.get("child_id")), None)
-    return (child is not None and audit_operation_current(snapshot, child) and bool(expected) and verdict.get("verdict") == "pass" and
+    return (child is not None and audit_operation_current(snapshot, child) and bool(expected) and
             all(_plain(verdict.get(key)) == value for key, value in expected.items()))
+
+
+def audit_passes(snapshot: EvaluationSnapshot, verdict: Mapping[str, Any]) -> bool:
+    return verdict.get("verdict") == "pass" and audit_covers(snapshot, verdict)
 
 
 INDEPENDENCE_REASONS = {
@@ -1080,7 +1106,7 @@ def audit_blocker(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> 
 
     A blocker whose recovery needs a new audit spawn is named ``budget.exhausted`` once the audit
     spawn ceiling is reached, so the author is never told to retry what the core would refuse."""
-    blocker = _audit_reason(snapshot, derivation)
+    blocker = audit_acceptance(snapshot, derivation)
     budgets = snapshot.state.budgets
     if (blocker is not None and blocker["reason"] in AUDIT_SPAWN_REASONS
             and budgets["audit_spawns_used"] >= budgets["max_audit_spawns"]):
@@ -1088,16 +1114,15 @@ def audit_blocker(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> 
     return blocker
 
 
-def _audit_reason(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> dict[str, Any] | None:
-    state = snapshot.state
-    if any(child["resource_class"] == "audit"
-           and child["state"] in {"reserved", "launching", "pending"}
-           and audit_operation_current(snapshot, child) for child in state.children):
+def audit_acceptance(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> dict[str, Any] | None:
+    """Why the gate does not accept the run's audit, as ``{"reason", "parameters"}``, else ``None``: the one predicate of
+    audit acceptance (a settled covering pass; independence, unless a claim is out of scope). The report's audit stage
+    blocks on it, and a claim is *assured* exactly when it holds for the claim's run (``core.observer.assurance``)."""
+    if audit_pending(snapshot):
         return {"reason": "audit.pending", "parameters": {}}
-    audits = [item for item in snapshot.history if item.get("kind") == "audit_verdict"]
-    if not audits:
+    audit = latest_audit_verdict(snapshot)
+    if audit is None:
         return {"reason": "audit.required", "parameters": {}}
-    audit = audits[-1]
     if not audit_passes(snapshot, audit):
         return {"reason": "audit.failed", "parameters": {}}
     if any(claim_id not in set(derivation.scope)
@@ -1106,6 +1131,120 @@ def _audit_reason(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> 
     classification = independence(snapshot, audit)
     reason = INDEPENDENCE_REASONS.get(classification)
     return None if reason is None else {"reason": reason, "parameters": {}}
+
+
+#: The stages of a report, in the order the gate meets them: the setup a run lacks, the claims that block, the human's
+#: answers, the pass ceiling, the audit, the human's consent to end the run. A requirement is *admissible* (the gate names it
+#: now) exactly when no earlier stage has an unmet one.
+REPORT_STAGES = ("setup", "claim", "confirmation", "passes", "audit", "terminal")
+#: The reasons that wait on a human; the auditor acts on ``audit.pending``; everything else is the agent's.
+HUMAN_WAITING_REASONS = frozenset({CONFIRMATION_REASON, TERMINAL_STOP_REASON})
+#: Where a requirement waits that is not admissible yet: for the stages before it.
+LATER = "later"
+
+
+@dataclass(frozen=True)
+class Requirement:
+    """One thing the report still requires of a run. ``reason`` and ``parameters`` are the gate's own when it blocks there; a
+    setup requirement has no reason and is worded by its obligation (``required``). ``claims`` are the claims it concerns.
+    ``admissible`` says whether the gate names it now; ``actor`` (``human``, ``auditor`` or ``agent``) and ``place`` (where it
+    happens: ``next_report``, ``explicit_report``, ``unavailable``, ``limit``, ``in_progress``, ``next_turn``, or ``LATER`` while
+    it is not admissible) say who acts. The human's evidence batch has its place whether or not it is admissible: its
+    presentability is the batch's (``prompt_error``), not the gate's order."""
+
+    stage: str
+    obligation: str
+    required: str
+    reason: str | None
+    parameters: Mapping[str, Any]
+    claims: tuple[str, ...]
+    affected: str | None
+    actor: str
+    place: str
+    admissible: bool
+
+
+def terminal_consent_parameters(snapshot: EvaluationSnapshot, derivation: ClaimDerivation, status: str,
+                                *, consent: bool = True) -> dict[str, Any] | None:
+    """The parameters of ``governance.terminal_stop_pending`` when a deliberative run needs the human's consent to end as
+    ``status`` and has not got it, else ``None``, with ``prompt_error`` as the host would meet it. The one predicate of the
+    gate's ``end`` and of the terminal requirement."""
+    if not (consent and snapshot.state.governance["control_mode"] == "deliberative" and terminal_askable(snapshot)
+            and not terminal_consented(snapshot, derivation, status)):
+        return None
+    key = terminal_key(status, terminal_digest(snapshot, derivation, status))
+    return {"status": status, "route": confirmation.human_route(snapshot),
+            "case": confirmation.terminal_case(confirmation.prompt_error(snapshot, key, terminal=True),
+                                               confirmation.presented(snapshot, key))}
+
+
+def report_requirements(snapshot: EvaluationSnapshot, derivation: ClaimDerivation | None,
+                        blockers: Sequence[Mapping[str, Any]] | None = None, *,
+                        setup: bool = True) -> tuple[Requirement, ...]:
+    """Everything an active run still owes before the report converges it, in the gate's order, each with who acts and where.
+
+    This is the one projection of the report's ordering. The gate blocks on the first requirement (``_evaluate``); the author
+    view lists them as its obligations and holds the ones behind an earlier stage (``core.projection``); the observer
+    publishes them as what the run owes and names the first admissible one next (``core.observer``). It is pure: nothing is
+    committed, so what the gate reaches only after charging a pass is listed without charging it.
+
+    A stage is listed when its predicate holds: the setup the run lacks (``setup``; the gate refuses it before this point);
+    every unmet scoped claim; the human's batch whenever anything waits on a human, even behind agent work (held, not
+    dropped); and then the pass ceiling, the audit, and the human's consent to end the run, each held until the stages before
+    it are clear (``admissible`` is false). Asked of a
+    run that has ended, it is what the report would still require of it (the author view's terminal obligations)."""
+    found: list[tuple] = []  # (stage, obligation, required, reason, parameters, claims, affected, prompt_error)
+    if setup:
+        found += [("setup", row["id"], row["must"], None, {}, (), None, None)
+                  for row in bootstrap_status(snapshot)["active"] if row["status"] != "satisfied"]
+    if snapshot.graph is not None and derivation is not None:
+        blockers = claim_blockers(snapshot, derivation) if blockers is None else blockers
+        batch = confirmation_batch(snapshot, derivation)
+        order = [c["id"] for c in snapshot.graph["claims"]]
+        for b in blockers:
+            if b["reason"] == CONFIRMATION_REASON and batch is not None:
+                continue  # the human's batch below is these claims' requirement, once
+            found.append(("confirmation" if b["reason"] == CONFIRMATION_REASON else "claim", "claim:" + b["claim_id"], "",
+                          b["reason"], b["parameters"], (b["target_claim_id"],), "claim:" + b["target_claim_id"],
+                          confirmation.route_error(confirmation.human_route(snapshot))))
+        if batch is not None:
+            waiting = {*pending_decisions(snapshot, derivation), *pending_human(snapshot, derivation.scope)}
+            found.append(("confirmation", snapshot.stage_obligations["confirmation"][0],
+                          snapshot.stage_obligations["confirmation"][1], CONFIRMATION_REASON,
+                          confirmation.parameters(snapshot, batch["record_ids"], [r["claim_id"] for r in batch["claims"]],
+                                                  batch["key"]),
+                          tuple(c for c in order if c in waiting), None, confirmation.prompt_error(snapshot, batch["key"])))
+        # The later stages are always listed (held behind an earlier one when there is one): the gate reaches them only
+        # then, but what the run will owe is no secret.
+        passes = pass_budget_blocker(snapshot, derivation_digest(snapshot, derivation))
+        audit = audit_blocker(snapshot, derivation)
+        if passes is not None:
+            obligation, required = snapshot.stage_obligations["passes"]
+            found.append(("passes", obligation, required, passes["reason"], passes["parameters"], (), None, None))
+        if audit is not None:
+            obligation, required = snapshot.audit_obligation
+            found.append(("audit", obligation, required, audit["reason"], audit["parameters"], (), "obligation.audit", None))
+        elif passes is None and any(claim_id not in set(derivation.scope) for claim_id in order):
+            consent = terminal_consent_parameters(snapshot, derivation, "stopped_frozen")
+            if consent is not None:
+                obligation, required = snapshot.stage_obligations["terminal"]
+                key = terminal_key("stopped_frozen", terminal_digest(snapshot, derivation, "stopped_frozen"))
+                found.append(("terminal", obligation, required, TERMINAL_STOP_REASON, consent, (), None,
+                              confirmation.prompt_error(snapshot, key, terminal=True)))
+    first = min((REPORT_STAGES.index(row[0]) for row in found), default=0)
+    requirements = []
+    for stage, obligation, required, reason, parameters, claims, affected, prompt_error in found:
+        actor = "human" if reason in HUMAN_WAITING_REASONS else "auditor" if reason == "audit.pending" else "agent"
+        admissible = REPORT_STAGES.index(stage) == first
+        place = (confirmation.ask_where(prompt_error) if actor == "human"
+                 else "in_progress" if actor == "auditor" else "next_turn")
+        # Whether the gate names a requirement now (``admissible``) is one fact; whether a human will be shown the question is
+        # another, and the host's: the core projects the batch whatever else blocks, and an explicit report presents it
+        # (``confirmation.presentable``) even while the agent still owes work. So the human's batch is never "later".
+        asked = obligation == snapshot.stage_obligations["confirmation"][0]
+        requirements.append(Requirement(stage, obligation, required, reason, parameters, claims, affected, actor,
+                                        place if admissible or asked else LATER, admissible))
+    return tuple(requirements)
 
 
 def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> Decision:
@@ -1321,14 +1460,9 @@ def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent:
         def end(ended: OperationalState) -> Decision:
             """A step that ends the run without converging: a deliberative run needs the human's consent first
             (ADR-0063 amendment); the auto modes commit as before. A refusal is never a terminal state."""
-            if (consent and state.governance["control_mode"] == "deliberative" and terminal_askable(snapshot)
-                    and not terminal_consented(snapshot, derivation, ended.status)):
-                key = terminal_key(ended.status, terminal_digest(snapshot, derivation, ended.status))
-                case = confirmation.terminal_case(confirmation.prompt_error(snapshot, key, terminal=True),
-                                                  confirmation.presented(snapshot, key))
-                return decide(state, "Block", reason=TERMINAL_STOP_REASON,
-                              parameters={"status": ended.status, "route": confirmation.human_route(snapshot),
-                                          "case": case})
+            asked = terminal_consent_parameters(snapshot, derivation, ended.status, consent=consent)
+            if asked is not None:
+                return decide(state, "Block", reason=TERMINAL_STOP_REASON, parameters=asked)
             return decide(ended)
 
         if intent == "stop":
@@ -1337,31 +1471,19 @@ def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent:
             deferred = [c for c, _ in states if c["id"] not in gating]
             status = "stopped_frozen" if deferred else "stopped_residual"
             return end(replace(state, status=status))
-        blockers = claim_blockers(snapshot, derivation)
-        # Whatever the author can still do alone comes first; the human is asked about the rest.
-        blocker = next((b for b in blockers if b["reason"] != CONFIRMATION_REASON), None)
-        batch = human_batch(snapshot, derivation, blockers)
-        if batch is not None:
-            return decide(state, "Block", reason=CONFIRMATION_REASON,
-                          parameters=confirmation.parameters(
-                              snapshot, batch["record_ids"], [r["claim_id"] for r in batch["claims"]], batch["key"]))
-        blocker = blocker or (blockers[0] if blockers else None)  # fail closed: never converge past one
-        if blocker is not None:
-            return decide(state, "Block", reason=blocker["reason"], parameters=blocker["parameters"],
-                          affected="claim:" + blocker["target_claim_id"])
+        # The first requirement of the report's one ordering (the author alone before the human, the passes before the audit)
+        # is what the gate names; the observer and the author view list the same requirements.
+        owed = report_requirements(snapshot, derivation, setup=False)
+        first = owed[0] if owed else None
+        if first is not None and first.stage in {"claim", "confirmation", "passes"}:
+            return decide(state, "Block", reason=first.reason, parameters=first.parameters, affected=first.affected)
         current_digest = derivation_digest(snapshot, derivation)
-        blocker = pass_budget_blocker(snapshot, current_digest)
-        if blocker:
-            return decide(state, "Block", reason=blocker["reason"],
-                          parameters=blocker["parameters"])
         if current_digest != state.last_derivation_digest:
             budgets = dict(state.budgets)
             budgets["passes_used"] += 1
             state = replace(state, budgets=budgets, last_derivation_digest=current_digest)
-        blocker = audit_blocker(snapshot, derivation)
-        if blocker:
-            return decide(state, "Block", reason=blocker["reason"],
-                          parameters=blocker["parameters"], affected="obligation.audit")
+        if first is not None and first.stage == "audit":
+            return decide(state, "Block", reason=first.reason, parameters=first.parameters, affected=first.affected)
         deferred = [c for c, _ in states if c["id"] not in gating]
         if deferred:
             return end(replace(state, status="stopped_frozen"))

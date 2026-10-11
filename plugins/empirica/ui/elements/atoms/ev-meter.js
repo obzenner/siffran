@@ -14,7 +14,7 @@ class EvMeter extends EvElement {
     const used = Number(this.getAttribute("used") ?? 0), max = Number(this.getAttribute("max") ?? 0);
     const name = t(this.getAttribute("label") ?? "");
     const amount = t("budget.of", { used, max });
-    return `<span class="inline-flex flex-col gap-3xs text-xs text-muted-foreground" data-hint="${name}: ${amount}"><span class="inline-flex justify-between gap-xs">${this.getAttribute("show") === "amount" ? "" : `<span>${name}</span>`}<span class="tabular-nums">${amount}</span></span><meter class="ev-meter" aria-label="${name}: ${amount}" min="0" max="${max}" value="${used}" ${used >= max && max > 0 ? 'data-full=""' : ""}>${amount}</meter></span>`;
+    return `<span class="inline-flex flex-col gap-3xs text-xs text-muted-foreground"><span class="inline-flex justify-between gap-xs">${this.getAttribute("show") === "amount" ? "" : `<span>${name}</span>`}<span class="tabular-nums">${amount}</span></span><meter class="ev-meter" aria-label="${name}: ${amount}" min="0" max="${max}" value="${used}" ${used >= max && max > 0 ? 'data-full=""' : ""}>${amount}</meter></span>`;
   }
 }
 define("ev-meter", EvMeter);

@@ -14,11 +14,19 @@
 </head>
 <body class="flex h-dvh flex-col overflow-hidden bg-background font-sans text-foreground">
   <noscript>Empirica UI renders with JavaScript.</noscript>
-  <header id="bar" class="shrink-0 border-b border-border bg-background px-xl py-s"></header>
-  <ev-split id="split" key="app" class="ev-with-filters min-h-0 flex-1">
-    <main id="main" class="block h-full overflow-hidden px-xl py-l"></main>
-    <aside class="bg-background"><ev-detail></ev-detail></aside>
-  </ev-split>
-  <ev-hint></ev-hint>
+  <header id="bar" class="shrink-0 border-b border-border bg-background px-l py-s"></header>
+  <div class="flex min-h-0 flex-1">
+    <section id="list" class="flex min-h-0 w-full flex-col overflow-y-auto px-l py-m" aria-labelledby="list-title">
+      <div class="flex max-w-page flex-col gap-s">
+        <h2 id="list-title" class="sr-only"></h2>
+        <div class="flex flex-col gap-xs">
+          <input id="search" type="search" class="input" autocomplete="off">
+          <p id="coverage" class="text-xs text-muted-foreground" aria-live="polite"></p>
+        </div>
+        <ev-runs id="runs" class="flex flex-col gap-m"></ev-runs>
+      </div>
+    </section>
+    <main id="workspace" class="min-h-0 min-w-0 flex-1 overflow-y-auto px-l py-m"><ev-run id="run" class="block max-w-page"></ev-run></main>
+  </div>
 </body>
 </html>

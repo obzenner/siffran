@@ -22,7 +22,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { isTerminalBatch, type Dispatch, type EvaluateIntent, type HostFailure, type InvocationProvenance, type Request, type Response, type RunSelector } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
 import type { RetrievalKind } from "./audit-retrieval.ts";
-import { canPresent, confirmEvidence, evidenceConfirmationWait, evidenceHostFailure, observeSurface } from "./evidence-ui.ts";
+import { canPresent, confirmEvidence, sessionLocator, evidenceConfirmationWait, evidenceHostFailure, observeSurface } from "./evidence-ui.ts";
 import { govern, governanceTimeout, piGovernanceContext, refreshGovernance, settlementNotice } from "./governance-ui.ts";
 import type {
   ExtensionAPI,
@@ -863,6 +863,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             delegation: process.env[PUBLIC_TOOLS.host_profiles[HOST_PROFILE_ID].delegation_env] === "1",
             audit_retrieval: startAuditor.auditRetrieval,
             human_surface: canPresent(ctx) ? "human" : "unavailable",
+            ...sessionLocator(ctx),
             // The observed audit runtime, recorded once with the run (receipts are derived from it).
             host_runtime: buildHostRuntime(SUBAGENTS_COMPATIBILITY, owner.binding.provenance),
           };

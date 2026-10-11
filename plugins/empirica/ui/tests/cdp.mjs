@@ -1,4 +1,4 @@
-// Tiny Chrome DevTools driver (Node 24 global WebSocket/fetch; no deps), used by browser.check.mjs (withPage) and
+// Tiny Chrome DevTools driver (Node 24 global WebSocket/fetch; no deps), used by browser.journeys.mjs (withPage) and
 // for screenshots. Unlike --virtual-time-budget it works with open streams. Every Chrome is kill-guarded.
 // From plugins/empirica/ui/:
 //   node tests/cdp.mjs shot URL OUT.png [WxH] [waitMs=600] [js evaluated before the shot]

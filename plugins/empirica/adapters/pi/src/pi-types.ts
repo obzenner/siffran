@@ -31,6 +31,9 @@ export interface ExtensionContext {
   };
   sessionManager?: {
     getEntries(): Array<{ type?: string; customType?: string; data?: unknown }>;
+    /** Pi `ReadonlySessionManager`: the session's id and, for a persisted session, its file. */
+    getSessionId?(): string;
+    getSessionFile?(): string | undefined;
   };
   isIdle?(): boolean;
   /** Command context only (Pi `agent-session.js` `commandContextActions.waitForIdle`): resolves when no run is active. */

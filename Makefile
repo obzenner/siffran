@@ -163,6 +163,7 @@ check-evidence: ## Fast evidence rules: citations, confirmation, scenarios, A1 b
 check-observer: ## Fast observer store, projection and server tests
 	@printf '$(BOLD)==> observer suite$(RESET)\n'
 	@$(PYTHON) $(EMPIRICA_OBSERVER_TESTS)
+	@cd $(PLUGINS_DIR)/empirica/tests/v2 && PYTHONPATH=..:../..:../../../../scripts $(PYTHON) -m unittest -q test_observer_agreement
 	@$(PYTHON) $(EMPIRICA_OBSERVER_SERVER_TESTS)
 
 check-claude: ## Fast Claude payload, lifecycle translation, and fail-closed adapter tests
@@ -654,7 +655,7 @@ empirica-public-tools-sync: vendor-contracts ## Regenerate public tool schemas a
 # --- Empirica observer UI ---------------------------------------------------------------------
 # The UI ships built: plugins/empirica/ui holds its committed dist/ and vendor/. Its Node toolchain
 # (plugins/empirica/ui/package.json) is dev-only and is needed only to rebuild those.
-.PHONY: ui ui-demo ui-install ui-tokens ui-vendor ui-css ui-contrast ui-browser ui-build
+.PHONY: ui ui-demo ui-install ui-tokens ui-vendor ui-css ui-contrast ui-enums ui-browser ui-build
 ui: ## Serve the observer UI for your Empirica store on 127.0.0.1 (REPO=<checkout> adds a repository for runs without a recorded location)
 	@$(PYTHON) $(EMPIRICA_OBSERVE) serve --open $(if $(REPO),--repo "$(REPO)")
 
@@ -676,7 +677,10 @@ ui-css: ui-tokens ## Rebuild the UI's dist/ui.css (Tailwind CLI, only its token 
 ui-contrast: ## WCAG contrast of every semantic colour pair of the UI, in both schemes (culori)
 	cd $(EMPIRICA_UI) && node scripts/contrast.mjs
 
-ui-browser: ## Headless-Chrome checks of the UI against the observer server (needs Chrome; integration)
-	cd $(EMPIRICA_UI) && node tests/browser.check.mjs
+ui-enums: ## Regenerate the UI's value lists (enums.json) from the observer contract
+	cd $(EMPIRICA_UI) && node scripts/enums.mjs
+
+ui-browser: ## Headless-Chrome journeys T1-T7 and the standing rules against the observer server (needs Chrome; integration)
+	cd $(EMPIRICA_UI) && node tests/browser.journeys.mjs
 
 ui-build: ui-vendor ui-css ui-contrast check-ui ui-browser ## Rebuild everything the UI ships, then check it (needs the toolchain and Chrome)

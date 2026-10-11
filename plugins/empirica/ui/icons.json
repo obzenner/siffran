@@ -1,5 +1,5 @@
 {
-  "$description": "Meaning -> Lucide icon id. One icon per meaning (CONVENTIONS V5). The vendor step builds a sprite of exactly these.",
+  "$description": "Meaning -> Lucide icon id. One icon per meaning (UI.md, Words, states and icons). The vendor step builds a sprite of exactly these.",
   "verified": "circle-check",
   "failed": "circle-x",
   "changed": "file-diff",
@@ -14,7 +14,6 @@
   "audit-failed": "shield-x",
   "audit-stale": "shield-alert",
   "audit-pending": "shield",
-  "audit-none": "shield-off",
   "spike": "flask-conical",
   "spike-request": "clipboard-list",
   "research": "book-open",
@@ -27,8 +26,6 @@
   "integrity-broken": "link-2-off",
   "no-history": "unplug",
   "workspace-off": "folder-x",
-  "close": "x",
-  "chosen": "check",
   "budget-out": "gauge",
   "frozen": "snowflake",
   "audit-required": "shield-question",
@@ -39,11 +36,7 @@
   "source-verified": "file-check",
   "confirmed": "badge-check",
   "rejected": "thumbs-down",
-  "auditor-fetch": "scan-search",
   "waiting-human": "hourglass",
-  "cannot-confirm": "lock",
   "asked": "message-circle-question",
-  "shown-to-human": "eye",
-  "asking-spent": "ban",
   "run-ended": "circle-stop"
 }

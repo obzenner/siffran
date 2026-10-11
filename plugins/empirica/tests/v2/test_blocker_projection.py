@@ -240,7 +240,7 @@ class BlockerProjectionTests(ConformanceCase):
         self.dispatch(drv, observe_action(run_id=run_id, action=action_research(
             claim_id=root, source_kind="code", result="refutes")))
         refuted = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))["result"]["reasons"][0]
-        self.assertEqual(refuted["message"], f"Active evidence refutes claim {root}.")
+        self.assertEqual(refuted["message"], f"Refuted by active evidence; claim {root} still blocks this scope.")
 
     def test_obligations_are_lossless_redirected_and_report_all_blockers(self):
         drv = self.bind_driver("blocker-projection", "obligations", "Lossless obligations")

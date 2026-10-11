@@ -17,7 +17,7 @@
     "audit_execution_modes",
     "claim_states",
     "claim_kinds",
-    "audit_states",
+    "audit_outcomes",
     "independence_states",
     "freshness_states",
     "artifact_kinds",
@@ -206,7 +206,7 @@
       "uniqueItems": true,
       "minItems": 1
     },
-    "audit_states": {
+    "audit_outcomes": {
       "type": "array",
       "items": {
         "type": "string",
@@ -394,6 +394,7 @@
       "required": [
         "requirements",
         "audit_obligation",
+        "stage_obligations",
         "operations",
         "actions",
         "tools",
@@ -423,6 +424,26 @@
             "must": {
               "type": "string",
               "minLength": 1
+            }
+          }
+        },
+        "stage_obligations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "confirmation",
+            "passes",
+            "terminal"
+          ],
+          "properties": {
+            "confirmation": {
+              "$ref": "#/$defs/stageObligation"
+            },
+            "passes": {
+              "$ref": "#/$defs/stageObligation"
+            },
+            "terminal": {
+              "$ref": "#/$defs/stageObligation"
             }
           }
         },
@@ -614,6 +635,10 @@
               "minProperties": 1
             },
             "case_parameter": {
+              "type": "string",
+              "minLength": 1
+            },
+            "ended_message": {
               "type": "string",
               "minLength": 1
             }
@@ -906,7 +931,13 @@
             "human_note",
             "decision_approve",
             "decision_reject",
-            "human_answer"
+            "human_answer",
+            "audit_verdict_none",
+            "audit_verdict_passed",
+            "audit_verdict_failed",
+            "audit_pending",
+            "audit_not_current",
+            "audit_reaudit_pending"
           ],
           "properties": {
             "no_governance": {
@@ -1152,6 +1183,30 @@
             "pending_audit": {
               "type": "string",
               "minLength": 1
+            },
+            "audit_verdict_none": {
+              "type": "string",
+              "minLength": 1
+            },
+            "audit_verdict_passed": {
+              "type": "string",
+              "minLength": 1
+            },
+            "audit_verdict_failed": {
+              "type": "string",
+              "minLength": 1
+            },
+            "audit_pending": {
+              "type": "string",
+              "minLength": 1
+            },
+            "audit_not_current": {
+              "type": "string",
+              "minLength": 1
+            },
+            "audit_reaudit_pending": {
+              "type": "string",
+              "minLength": 1
             }
           }
         }
@@ -1159,6 +1214,24 @@
     }
   },
   "$defs": {
+    "stageObligation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "obligation_id",
+        "must"
+      ],
+      "properties": {
+        "obligation_id": {
+          "type": "string",
+          "pattern": "^obligation\\.[a-z]+$"
+        },
+        "must": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
     "nextActionSurface": {
       "type": "object",
       "description": "Exactly one machine-readable execution surface for a directive: a model author action (empirica_observe), a report intent (report_convergence), a read operation (empirica_read), or an explicit host/human owner with the operation it activates.",

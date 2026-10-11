@@ -60,7 +60,9 @@
       },
       "governance": null,
       "audit": {
-        "state": "passed",
+        "verdict": "passed",
+        "current": true,
+        "pending": false,
         "independence": "mixed",
         "findings": []
       },

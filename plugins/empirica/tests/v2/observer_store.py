@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import governance_setup
+from governance_setup import TEST_INVOCATION, invocation_for, sized_configure_run
 from application.location import storage_id
 from application.observer import Project
 from assertions import (ConformanceCase, action_graph, get_argument, get_run, action_investigate, action_research,
@@ -37,6 +38,7 @@ class Store:
 
     driver: Any
     names: dict[str, str] = field(default_factory=dict)        # storage project id -> name
+    paths: dict[str, str] = field(default_factory=dict)        # storage project id -> repository path (default /work/<name>)
     unmatched: set[str] = field(default_factory=set)           # projects with no repository
     times: dict[RunKey, float] = field(default_factory=dict)
     expect: dict[str, Any] = field(default_factory=dict)       # scenario -> run key
@@ -72,7 +74,7 @@ class DriverSource:
         if project_id in self._store.unmatched:
             return Project(None, None)
         name = self._store.names.get(project_id)
-        return Project(name, f"/work/{name}" if name else None)
+        return Project(name, self._store.paths.get(project_id, f"/work/{name}") if name else None)
 
     def refresh(self):
         pass
@@ -118,10 +120,21 @@ class _Builder:
 
     # --- author and host acts ----------------------------------------------
 
-    def begin(self, project: str, session: str, goal: str, graph: dict, **start) -> str:
+    def begin(self, project: str, session: str, goal: str, graph: dict, *, repo: str | None = None,
+              surface: str | None = "human", where: tuple[str, str] | None = None, **start) -> str:
+        """Start a run, declare its graph and have its configuration approved. ``repo`` is the path of the repository
+        the project is told to live in (its folder name is the project's name); ``surface`` is what the host observes
+        it can show a human (an unattended session shows nobody); ``where`` is the (label, locator) its host recorded for
+        the session, none when the host recorded nothing."""
         a, drv = self.a, self.drv
+        if where is not None:
+            start["invocation"] = {**TEST_INVOCATION, "signal": "v2 harness", "session": {"label": where[0], "locator": where[1]}}
         run_id = a.start_run(drv, goal=goal, project=project, session=session, **start)
-        drv.trusted_human_surface(run_id, "human")  # an attended session: evidence waits on its human
+        if surface is not None:  # none: the host has not looked for a dialog (the run's recorded surface stays ``unobserved``)
+            drv.trusted_human_surface(run_id, surface)  # an attended session: evidence waits on its human
+        if repo is not None:
+            self.store.names[storage_id(project)] = repo.rsplit("/", 1)[-1]
+            self.store.paths[storage_id(project)] = repo
         self.store.names.setdefault(storage_id(project), project)
         a.require_route_admitted(drv, run_id)
         a.dispatch(drv, observe_action(run_id=run_id, action=action_graph(graph)))
@@ -300,7 +313,7 @@ def _build() -> Store:
 
     # atlas: research the service cannot check itself (ADR-0067): one record per way of being verified,
     # and the human's answers to part of what waited for them.
-    run = b.begin("atlas", "s-verify", "Document the tile export path.", _graph(
+    run = b.begin("atlas", "s-verify", "Document the tile export path.", where=("atlas docs session", "/home/dev/.claude/projects/atlas/6f2c1a.jsonl"), graph=_graph(
         "C0", [("C0", "ordinary", "The export reads every tile through one documented path."),
                ("C1", "ordinary", "The export guide names that path."),
                ("C2", "ordinary", "The vendor specification requires that path."),
@@ -310,6 +323,7 @@ def _build() -> Store:
                ("C6", "ordinary", "Last week's run reads no tile any other way."),
                ("C7", "needs-decision", "Keep the old reader for one more release.")],
         [("C0", f"C{n}") for n in range(1, 8)]))
+    b.research(run, "C0", ref="docs/index.md")
     b.research(run, "C1", ref="docs/export.md")
     b.cite(run, "C2", "docs", "/opt/vendor/tiles/SPEC.md", "every tile is read through the index")
     b.cite(run, "C3", "web", "https://tiles.example.org/format#export", "readers must use the index")
@@ -325,13 +339,133 @@ def _build() -> Store:
          "note": "Checked the format page myself."},
         {"subject": "research", "artifact_id": ids["C4"], "outcome": "reject",
          "note": "That log is from a different job."}])
+    # The agent's work comes first (the report asks the human only when it has none left): it replaces the rejected log
+    # with research the workspace holds, and the human's remaining questions are what the run waits on.
+    b.research(run, "C4", ref="docs/export-log.md")
     b.stamp("verification", "atlas", "s-verify")
+
+    # The human is waiting (a deliberative run in an attended session) and the terminal consent is a stopped run's
+    # history: both are runs already built above, named for what they show.
+    b.store.expect["waiting-human"] = b.store.expect["verification"]
+    b.store.expect["terminal-consent"] = b.store.expect["refuted"]
+
+    # atlas: a pass that still covers the argument, and a second audit already pending.
+    run = b.begin("atlas", "s-pending-reaudit", "Index tiles by zoom level on write.", where=("index writer", "/home/dev/.pi/sessions/atlas-writer.jsonl"), graph=_graph(
+        "C0", [("C0", "ordinary", "The writer emits one index per zoom level."),
+               ("C1", "ordinary", "The writer already groups tiles by level.")], [("C0", "C1")]))
+    b.research(run, "C1", ref="src/group.py")
+    b.research(run, "C0", ref="src/writer2.py")
+    b.audit(run, "pass", ["Every approved claim is cited."])
+    b.a.require_pending_audit_child(b.drv, run)
+    b.stamp("pending-reaudit", "atlas", "s-pending-reaudit")
+
+    # harbor: a claim that needs a human decision was added after the scope was frozen: out of scope, unanswered.
+    run = b.begin("harbor", "s-deferred", "Choose the retry backoff ceiling.", _graph(
+        "C0", [("C0", "ordinary", "Retries stop after a bounded wait.")], []))
+    b.research(run, "C0", ref="import/backoff.py")
+    b.freeze(run)
+    b.a.dispatch(b.drv, observe_action(run_id=run, action=action_graph(_graph(
+        "C0", [("C0", "ordinary", "Retries stop after a bounded wait."),
+               ("C1", "needs-decision", "Cap the wait at five minutes rather than ten.")], [("C0", "C1")]))))
+    b.stamp("deferred-decision", "harbor", "s-deferred")
+
+    # lumen: the author proposed other ceilings after the first were approved; the human has not answered.
+    run = b.begin("lumen", "s-amend", "Thumbnail every preview once.", _graph(
+        "C0", [("C0", "ordinary", "Every preview has exactly one thumbnail.")], []))
+    b.research(run, "C0", ref="src/thumbs.py")
+    b.a.dispatch(b.drv, observe_action(run_id=run, action=sized_configure_run(
+        budgets={"max_passes": 3, "max_spawns": 0, "max_audit_spawns": 1}, rationale="One claim, no spikes.")))
+    b.stamp("pending-amendment", "lumen", "s-amend")
+
+    # lumen: research recorded on claims, then the argument was rewritten: one claim reworded, one dropped.
+    run = b.begin("lumen", "s-reworded", "Cut preview cache misses.", _graph(
+        "C0", [("C0", "ordinary", "Preview cache misses are rare."),
+               ("C1", "ordinary", "The cache keys include the preview size."),
+               ("C2", "ordinary", "The cache is warmed on deploy.")], [("C0", "C1"), ("C0", "C2")]))
+    b.research(run, "C1", ref="src/cache_keys.py")
+    b.research(run, "C2", ref="deploy/warm.py")
+    b.a.dispatch(b.drv, observe_action(run_id=run, action=action_graph(_graph(
+        "C0", [("C0", "ordinary", "Preview cache misses are rare."),
+               ("C1", "ordinary", "The cache keys include the preview size and the format.")], [("C0", "C1")]))))
+    b.stamp("reworded", "lumen", "s-reworded")
+
+    # prism: an unattended run started by a delegating host: nobody can be asked.
+    run = b.begin("prism", "s-auto", "Regenerate the thumbnails every night.", _graph(
+        "C0", [("C0", "ordinary", "The nightly job regenerates every thumbnail.")], []),
+        control_mode="auto", surface="unavailable",
+        invocation=invocation_for(PROFILE, delegation=True, human_surface="unavailable", signal="v2 harness"))
+    b.stamp("auto-delegated", "prism", "s-auto")
+
+    # One audited run per way the gate refuses an audit, and the runs the gate meets in its other stages: the observer
+    # says of each what the gate says (tests/v2/test_observer_agreement.py runs the same through every predicate).
+    for variant in ("same_model", "unverified"):
+        run = b.begin("atlas", f"s-{variant}", f"Document the {variant.replace('_', ' ')} audit.", _graph(
+            "C0", [("C0", "ordinary", "The audit page names its auditor.")], []))
+        b.research(run, "C0", ref="docs/audit.md")
+        b.audit(run, "pass", variant=variant)
+        b.stamp(f"audit-{variant.replace('_', '-')}", "atlas", f"s-{variant}")
+    run = b.begin("atlas", "s-parallel", "Check the cache key and its provider limits.", _graph(
+        "C0", [("C0", "ordinary", "The cache key is stable."), ("C1", "ordinary", "The provider allows the key size.")],
+        [("C0", "C1")]))
+    b.cite(run, "C1", "web", "https://provider.example.net/keys", "keys up to 512 bytes are allowed")
+    b.stamp("parallel-human", "atlas", "s-parallel")
+    # A host that has not yet looked for a dialog (whether anyone can be asked is unknown), and one that did not say whether
+    # its session is interactive (that stays unknown too).
+    b.begin("atlas", "s-unobserved", "Decide the cache eviction policy.", _graph(
+        "C0", [("C0", "needs-decision", "Evict least recently used first.")], []), surface=None,
+        invocation=invocation_for(PROFILE, human_surface="unobserved", interactive=None, signal="host startup"))
+    b.stamp("unobserved-surface", "atlas", "s-unobserved")
+    run = b.begin("atlas", "s-passes", "Measure the cache hit rate.", _graph(
+        "C0", [("C0", "ordinary", "The hit rate is above 90 percent.")], []), budgets={"max_passes": 1, "max_spawns": 1, "max_audit_spawns": 2})
+    b.research(run, "C0", ref="docs/hit-rate.md")
+    b.evaluate(run, "report_convergence")
+    b.research(run, "C0", ref="docs/hit-rate-2.md")
+    b.stamp("passes-exhausted", "atlas", "s-passes")
+    run = b.begin("atlas", "s-drift", "Check the cache eviction order.", _graph(
+        "C0", [("C0", "ordinary", "Eviction is least-recently-used."), ("C1", "needs-experiment", "The eviction test passes.")],
+        [("C0", "C1")]))
+    b.research(run, "C0", ref="docs/eviction.md")
+    b.research(run, "C1", ref="docs/eviction-test.md")
+    b.spike(run, "C1", "python src/drift.py", {"src/drift.py": b"lru\n"})
+    b.evaluate(run, "stop")
+    b.write("src/drift.py", b"fifo\n")
+    b.stamp("stopped-drift", "atlas", "s-drift")
+
+    # prism: three attempts at one session, each with another goal.
+    for goal, last in (("Shrink the thumbnails to 64 pixels.", False), ("Shrink the thumbnails to 128 pixels.", False),
+                       ("Serve thumbnails from the CDN instead.", True)):
+        run = b.begin("prism", "s-attempts", goal, _graph(
+            "C0", [("C0", "ordinary", "The thumbnails are served at the new size.")], []))
+        b.research(run, "C0", ref="src/thumb_size.py")
+        if not last:
+            b.evaluate(run, "stop")
+        b.stamp("attempts", "prism", "s-attempts")
+    # the first attempt's file was touched last: its modification time says nothing about the order of the attempts
+    first = RunKey(storage_id("prism"), storage_id("s-attempts"), 1)
+    b.store.times[first] = max(b.store.times.values()) + STEP
+
+    # Two projects with the same folder name in different places.
+    for project, repo in (("tiles-north", "/work/north/tiles"), ("tiles-south", "/work/south/tiles")):
+        run = b.begin(project, "s-same-name", "Check the tile checksum.", _graph(
+            "C0", [("C0", "ordinary", "Every tile has a checksum.")], []), repo=repo)
+        b.research(run, "C0", ref="src/checksum.py")
+        b.stamp(f"same-name-{project.split('-')[1]}", project, "s-same-name")
 
     # loose: a run whose repository was not given, so only its state can be read.
     run = b.begin("loose", "s-nohistory", "Tidy the release checklist.", _graph(
         "C0", [("C0", "ordinary", "The checklist names every release step once.")], []))
     b.stamp("history-unavailable", "loose", "s-nohistory")
     b.store.unmatched.add(storage_id("loose"))
+
+    # A readable attempt followed by one that is not exactly the current state document: a family with an unread member.
+    run = b.begin("prism", "s-unread-member", "Resize the avatar thumbnails.", _graph(
+        "C0", [("C0", "ordinary", "Avatars are served at one size.")], []))
+    b.research(run, "C0", ref="src/avatar_size.py")
+    b.evaluate(run, "stop")
+    b.stamp("attempt-unread-sibling", "prism", "s-unread-member")
+    unread = RunKey(storage_id("prism"), storage_id("s-unread-member"), 2)
+    b.drv.inject_run_state(unread, {"not": "a run"})
+    b.store.times[unread] = b.store.times[RunKey(storage_id("prism"), storage_id("s-unread-member"), 1)] + STEP
 
     # A state that is not exactly the current state document.
     broken = RunKey(storage_id("harbor"), storage_id("s-broken"), 1)

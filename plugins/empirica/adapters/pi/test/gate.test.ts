@@ -374,6 +374,26 @@ test("/empirica dispatches StartRun and persists the opaque handle", async () =>
   assert.doesNotMatch(w.pi.userMessages[0], /\$ARGUMENTS/);
 });
 
+test("/empirica records where the session can be found, from the session manager, and nothing it did not give", async () => {
+  const seen: Array<{ session?: unknown } | undefined> = [];
+  for (const manager of [
+    { getEntries: () => [], getSessionId: () => "019e-abc", getSessionFile: () => "/home/u/.pi/sessions/019e-abc.jsonl" },
+    { getEntries: () => [], getSessionId: () => "019e-abc", getSessionFile: () => undefined },
+    { getEntries: () => [], getSessionId: () => { throw new Error("no id"); }, getSessionFile: () => "" },
+    { getEntries: () => [] },
+    undefined,
+  ]) {
+    const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+    await w.pi.command("empirica").handler("goal", { ui: new FakeUi(), mode: "tui", sessionManager: manager });
+    const command = w.requests[0].command;
+    seen.push(command.type === "StartRun" ? command.invocation : undefined);
+  }
+  assert.deepEqual(seen.map((i) => i?.session), [
+    { label: "019e-abc", locator: "/home/u/.pi/sessions/019e-abc.jsonl" },
+    { label: "019e-abc", locator: "019e-abc" },
+    undefined, undefined, undefined]);
+});
+
 test("/empirica records every Pi mode and operator delegation", async () => {
   const prior = process.env.EMPIRICA_AUTO_DELEGATION;
   try {

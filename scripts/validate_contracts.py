@@ -1528,14 +1528,17 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
     # Audit cross-field conditions (D2A §4).
     audit = argument.get("audit")
     if isinstance(audit, dict):
-        if audit.get("state") not in set(contract.get("audit_states", [])):
-            errors.append(f"{where}: argument.audit.state {audit.get('state')!r} not canonical")
-        if audit.get("independence") not in set(contract.get("independence_states", [])):
+        if audit.get("verdict") not in set(contract.get("audit_outcomes", [])):
+            errors.append(f"{where}: argument.audit.verdict {audit.get('verdict')!r} not canonical")
+        if audit.get("independence") is not None and audit.get("independence") not in set(contract.get("independence_states", [])):
             errors.append(f"{where}: argument.audit.independence {audit.get('independence')!r} not canonical")
-        covered = audit.get("state") in {"passed", "failed", "stale"}
+        # Coverage is reported once a verdict is settled (not while a re-audit is pending).
+        covered = audit.get("verdict") in {"passed", "failed"} and audit.get("pending") is False
+        if (audit.get("verdict") == "none") != (audit.get("current") is None):
+            errors.append(f"{where}: argument.audit.current must be null exactly when there is no verdict")
         for field in ("reviewed_argument_digest", "reviewed_goal_digest", "reviewed_deferred_scope_digest"):
             if covered and audit.get(field) is None:
-                errors.append(f"{where}: argument.audit.{field} must be non-null when state={audit.get('state')!r}")
+                errors.append(f"{where}: argument.audit.{field} must be non-null when verdict={audit.get('verdict')!r}")
             if audit.get(field) is not None and not _is_digest(audit.get(field)):
                 errors.append(f"{where}: argument.audit.{field} must be null or sha256:<64hex>")
         # frozen digest equals null only when current frozen scope digest is null.
@@ -1547,7 +1550,7 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
                 errors.append(f"{where}: argument.audit.reviewed_frozen_scope_digest must be null or sha256:<64hex>")
         elif argument.get("frozen_scope_digest") is not None and covered:
             errors.append(f"{where}: argument.audit.reviewed_frozen_scope_digest must be non-null "
-                          f"when frozen_scope_digest is set and state={audit.get('state')!r}")
+                          f"when frozen_scope_digest is set and verdict={audit.get('verdict')!r}")
         # Reviewed claims resolve and are unique.
         reviewed_claims = audit.get("reviewed_claims", []) or []
         rc_keys: set[str] = set()
@@ -1562,11 +1565,11 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
             if rc.get("claim_id") in rc_keys:
                 errors.append(f"{where}: argument.audit.reviewed_claims[{i}] duplicate claim_id {rc.get('claim_id')!r}")
             rc_keys.add(rc.get("claim_id"))
-        # MAJOR-1: for passed/failed, reviewed_claims must equal exactly all current claims
-        # where gating=true and state=approved, with each reviewed evidence_digest equal to
-        # that claim's current evidence_digest. for not_required/required/pending they must be
-        # empty (the raw schema enforces this); stale retains prior coverage.
-        if audit.get("state") in {"passed", "failed"}:
+        # MAJOR-1: for a settled verdict that still covers the argument (current), reviewed_claims must equal exactly
+        # all current claims where gating=true and state=approved, with each reviewed evidence_digest equal to that
+        # claim's current evidence_digest. With no verdict or a pending re-audit they must be empty (the raw schema
+        # enforces this); a verdict that is no longer current retains its prior coverage.
+        if covered and audit.get("current") is True:
             expected_coverage = {c.get("claim_id"): c.get("evidence_digest")
                                  for c in claims if isinstance(c, dict)
                                  and c.get("gating") is True and c.get("state") == "approved"}
@@ -1577,15 +1580,15 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
                 extra_cov = sorted(set(reviewed_map) - set(expected_coverage))
                 if missing_cov:
                     errors.append(f"{where}: argument.audit.reviewed_claims missing gating-claim "
-                                  f"coverage {missing_cov} for state={audit.get('state')!r}")
+                                  f"coverage {missing_cov} for verdict={audit.get('verdict')!r}")
                 if extra_cov:
                     errors.append(f"{where}: argument.audit.reviewed_claims extra non-gating "
-                                  f"coverage {extra_cov} for state={audit.get('state')!r}")
+                                  f"coverage {extra_cov} for verdict={audit.get('verdict')!r}")
             for cid, exp_digest in expected_coverage.items():
                 if cid in reviewed_map and reviewed_map[cid] != exp_digest:
                     errors.append(f"{where}: argument.audit.reviewed_claims[{cid}] "
                                   f"evidence_digest {reviewed_map[cid]!r} != current "
-                                  f"{exp_digest!r} for state={audit.get('state')!r}")
+                                  f"{exp_digest!r} for verdict={audit.get('verdict')!r}")
 
 
 def check_getargument_exclusivity(request: dict, result: dict, errors: list[str], where: str) -> None:
@@ -2316,10 +2319,11 @@ def check_schema_mirror(request_schema: dict, response_schema: dict, contract: d
     if cki != set(contract.get("claim_kinds", [])):
         errors.append(f"{where}: response claimItem.kind enum {sorted(cki)} != registry "
                       f"claim_kinds {sorted(contract.get('claim_kinds', []))}")
-    avs = set(defs.get("auditView", {}).get("properties", {}).get("state", {}).get("enum", []))
-    if avs != set(contract.get("audit_states", [])):
-        errors.append(f"{where}: response auditView.state enum {sorted(avs)} != registry {sorted(contract.get('audit_states', []))}")
-    avi = set(defs.get("auditView", {}).get("properties", {}).get("independence", {}).get("enum", []))
+    for view_name in ("auditView", "auditSummary"):
+        avs = set(defs.get(view_name, {}).get("properties", {}).get("verdict", {}).get("enum", []))
+        if avs != set(contract.get("audit_outcomes", [])):
+            errors.append(f"{where}: response {view_name}.verdict enum {sorted(avs)} != registry {sorted(contract.get('audit_outcomes', []))}")
+    avi = set(defs.get("auditView", {}).get("properties", {}).get("independence", {}).get("enum", [])) - {None}
     if avi != set(contract.get("independence_states", [])):
         errors.append(f"{where}: response auditView.independence enum {sorted(avi)} != registry {sorted(contract.get('independence_states', []))}")
     ud = defs.get("untrustedDelimiters", {}).get("properties", {})
@@ -3296,7 +3300,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     # D2A §8/§9 negatives: one mutation each with its own expected diagnostic substring.
     full_rv = {"governance": None, "confirmation_batch": None, "id": "r", "goal": "g", "status": "active",
                "basis": "sha256:" + "5" * 64,
-               "audit": {"state": "required", "independence": "unverified", "findings": []},
+               "audit": {"verdict": "none", "current": None, "pending": False, "independence": None, "findings": []},
                "contract": {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
                "obligations": {"active": [], "deferred": []}, "residuals": [],
                "freshness": {"changes": []}, "children": [], "next_actions": [],
@@ -3394,7 +3398,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                         "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
                             "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
                         "claims": [], "edges": [], "artifacts": [],
-                        "audit": {"state": "not_required", "independence": "unverified",
+                        "audit": {"verdict": "none", "current": None, "pending": False, "independence": None,
                             "reviewed_argument_digest": None, "reviewed_goal_digest": None,
                             "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": None,
                             "reviewed_claims": [], "findings": []}}}
@@ -3430,7 +3434,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_audit_bad = copy.deepcopy(arg_bad_root)
     arg_audit_bad["argument"]["claims"] = [{"claim_id": "G0", "text": "t", "wording_digest": d64,
         "kind": "ordinary", "state": "approved", "gating": True, "evidence_digest": d64, "active_evidence_ids": []}]
-    arg_audit_bad["argument"]["audit"] = {"state": "passed", "independence": "distinct",
+    arg_audit_bad["argument"]["audit"] = {"verdict": "passed", "current": True, "pending": False, "independence": "distinct",
         "reviewed_argument_digest": None, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
         "reviewed_claims": [], "findings": []}
@@ -3440,7 +3444,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_audit_frozen = copy.deepcopy(arg_bad_root)
     arg_audit_frozen["argument"]["claims"] = [{"claim_id": "G0", "text": "t", "wording_digest": d64,
         "kind": "ordinary", "state": "approved", "gating": True, "evidence_digest": d64, "active_evidence_ids": []}]
-    arg_audit_frozen["argument"]["audit"] = {"state": "passed", "independence": "distinct",
+    arg_audit_frozen["argument"]["audit"] = {"verdict": "passed", "current": True, "pending": False, "independence": "distinct",
         "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": d64, "reviewed_deferred_scope_digest": d64,
         "reviewed_claims": [{"claim_id": "G0", "evidence_digest": d64}], "findings": []}
@@ -3484,7 +3488,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_audit_empty = copy.deepcopy(arg_bad_root)
     arg_audit_empty["argument"]["claims"] = [{"claim_id": "G0", "text": "t", "wording_digest": d64,
         "kind": "ordinary", "state": "approved", "gating": True, "evidence_digest": d64, "active_evidence_ids": []}]
-    arg_audit_empty["argument"]["audit"] = {"state": "passed", "independence": "distinct",
+    arg_audit_empty["argument"]["audit"] = {"verdict": "passed", "current": True, "pending": False, "independence": "distinct",
         "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
         "reviewed_claims": [], "findings": []}
@@ -3494,7 +3498,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_audit_stale = copy.deepcopy(arg_bad_root)
     arg_audit_stale["argument"]["claims"] = [{"claim_id": "G0", "text": "t", "wording_digest": d64,
         "kind": "ordinary", "state": "approved", "gating": True, "evidence_digest": d64, "active_evidence_ids": []}]
-    arg_audit_stale["argument"]["audit"] = {"state": "passed", "independence": "distinct",
+    arg_audit_stale["argument"]["audit"] = {"verdict": "passed", "current": True, "pending": False, "independence": "distinct",
         "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
         "reviewed_claims": [{"claim_id": "G0", "evidence_digest": "sha256:" + "e" * 64}], "findings": []}
@@ -3507,25 +3511,25 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
          "kind": "ordinary", "state": "approved", "gating": True, "evidence_digest": d64, "active_evidence_ids": []},
         {"claim_id": "G1", "text": "t", "wording_digest": d64,
          "kind": "ordinary", "state": "open", "gating": False, "evidence_digest": d64, "active_evidence_ids": []}]
-    arg_audit_extra["argument"]["audit"] = {"state": "passed", "independence": "distinct",
+    arg_audit_extra["argument"]["audit"] = {"verdict": "passed", "current": True, "pending": False, "independence": "distinct",
         "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
         "reviewed_claims": [{"claim_id": "G0", "evidence_digest": d64},
                             {"claim_id": "G1", "evidence_digest": d64}], "findings": []}
     expect(lambda e: check_argument_view(arg_audit_extra, registry, e, "neg"),
            "extra non-gating coverage", "audit passed extra non-gating reviewed claim")
-    # passed audit with non-null reviewed digest where schema requires null (not_required state).
+    # an audit with no verdict (none) that nevertheless carries a reviewed digest: the schema requires null there.
     arg_audit_nonnull = copy.deepcopy(arg_bad_root)
     arg_audit_nonnull["argument"]["claims"] = [{"claim_id": "G0", "text": "t", "wording_digest": d64,
         "kind": "ordinary", "state": "open", "gating": True, "evidence_digest": d64, "active_evidence_ids": []}]
-    arg_audit_nonnull["argument"]["audit"] = {"state": "not_required", "independence": "unverified",
+    arg_audit_nonnull["argument"]["audit"] = {"verdict": "none", "current": None, "pending": False, "independence": None,
         "reviewed_argument_digest": d64, "reviewed_goal_digest": None,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": None,
         "reviewed_claims": [], "findings": []}
     if not schema_rejects({"protocol": "empirica/v2", "request_id": "x",
             "result": {"type": "Allow", "converged": False, "run": full_rv,
                         "argument": arg_audit_nonnull["argument"]}}, "response"):
-        errors.append("NEG schema not_required+non-null reviewed digest: expected schema rejection")
+        errors.append("NEG schema no-verdict audit with a non-null reviewed digest: expected schema rejection")
 
     # (q) unique artifact IDs: duplicate artifact_id in distinct artifact objects.
     arg_dup_art = copy.deepcopy(arg_bad_root)
@@ -3586,7 +3590,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                                    {"path": "tests/a_test.py", "sha256": d64}],
                  "exit_code": 0, "spike_gate": "pass", "supersedes": None}],
             "route_stamp": 1, "investigation_stamp": 2,
-            "audit": {"state": "passed", "independence": "distinct",
+            "audit": {"verdict": "passed", "current": True, "pending": False, "independence": "distinct",
                 "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
                 "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
                 "reviewed_claims": [{"claim_id": "G0", "evidence_digest": _ed}],
@@ -3793,7 +3797,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                                    {"path": "tests/a_test.py", "sha256": d64}],
                  "exit_code": 0, "spike_gate": "pass", "supersedes": P0}],
             "route_stamp": 1, "investigation_stamp": 2,
-            "audit": {"state": "passed", "independence": "distinct",
+            "audit": {"verdict": "passed", "current": True, "pending": False, "independence": "distinct",
                 "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
                 "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
                 "reviewed_claims": [{"claim_id": "G0", "evidence_digest": _ed}],
@@ -3907,7 +3911,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
              "kind": "research", "statement_digest": d64, "active": True,
              "outcome": "supporting", "source_kind": "web",
              "source_ref": "https://example.test/s", "citation": "Observed test source.", "verification": VERIFICATION}],
-        "audit": {"state": "not_required", "independence": "unverified",
+        "audit": {"verdict": "none", "current": None, "pending": False, "independence": None,
             "reviewed_argument_digest": None, "reviewed_goal_digest": None,
             "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": None,
             "reviewed_claims": [], "findings": []}}
@@ -3973,7 +3977,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
              "kind": "research", "statement_digest": d64, "active": True,
              "outcome": "supporting", "source_kind": "code",
              "source_ref": "src/b.py", "citation": "Observed test source.", "verification": VERIFICATION}],
-        "audit": {"state": "not_required", "independence": "unverified",
+        "audit": {"verdict": "none", "current": None, "pending": False, "independence": None,
             "reviewed_argument_digest": None, "reviewed_goal_digest": None,
             "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": None,
             "reviewed_claims": [], "findings": []}}
@@ -4277,7 +4281,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
              "exit_code": 0, "spike_gate": "pass", "supersedes": None}]
 
     def _arg_view(frozen=None, audit_state="passed") -> dict:
-        covered = audit_state in ("passed", "failed", "stale")
+        covered = audit_state in ("passed", "failed")
         return {"root_claim_id": "G0", "argument_digest": ARG, "goal_digest": GOAL,
                 "frozen_scope_digest": frozen, "deferred_scope_digest": ARG,
                 "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
@@ -4286,7 +4290,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                     "state": "approved", "gating": True, "evidence_digest": EV,
                     "active_evidence_ids": [R1, P1], "kind": "needs-experiment"}],
                 "edges": [], "artifacts": _artifacts(),
-                "audit": {"state": audit_state, "independence": "distinct",
+                "audit": {"verdict": audit_state if covered else "none", "current": True if covered else None,
+                    "pending": False, "independence": "distinct" if covered else None,
                     "reviewed_argument_digest": ARG if covered else None,
                     "reviewed_goal_digest": GOAL if covered else None,
                     "reviewed_frozen_scope_digest": (frozen if (covered and frozen) else None),

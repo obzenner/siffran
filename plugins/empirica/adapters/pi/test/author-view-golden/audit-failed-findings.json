@@ -61,7 +61,9 @@
       },
       "governance": null,
       "audit": {
-        "state": "failed",
+        "verdict": "failed",
+        "current": true,
+        "pending": false,
         "independence": "distinct",
         "findings": [
           "C4's research does not support that the checker fails on a dangling reference.",

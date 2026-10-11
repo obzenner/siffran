@@ -1330,16 +1330,16 @@ class ConformanceCase(unittest.TestCase):
                 })
         return payload
 
-    def assert_audit_view(self, arg: dict, *, state: str | None = None,
-                           independence: str | None = None) -> dict:
-        """Assert the typed ArgumentView carries an audit view with the expected state and
-        independence. Returns the audit dict for further exact assertions."""
+    def assert_audit_view(self, arg: dict, *, verdict: str | None = None, current: bool | None = None,
+                           pending: bool | None = None, independence: str | None = None) -> dict:
+        """Assert the typed ArgumentView carries an audit view with the expected verdict, currency, pending flag and
+        independence (the core's four facts). Returns the audit dict for further exact assertions."""
         audit = arg.get("audit")
         if not isinstance(audit, dict):
             raise self.failureException("ArgumentView must carry a typed audit view (D2C)")
-        if state is not None:
-            self.assertEqual(audit.get("state"), state,
-                             f"audit.state must be {state!r}; got {audit.get('state')!r}")
+        for name, want in (("verdict", verdict), ("current", current), ("pending", pending)):
+            if want is not None:
+                self.assertEqual(audit.get(name), want, f"audit.{name} must be {want!r}; got {audit.get(name)!r}")
         if independence is not None:
             self.assertEqual(audit.get("independence"), independence,
                              f"audit.independence must be {independence!r}; "

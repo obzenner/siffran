@@ -71,7 +71,7 @@ def _synthetic_results() -> list[tuple[str, object]]:
                            "public-contract.json").read_text())
     mixed_metadata = contract["reasons"]["audit.producers_mixed"]
     audit_mixed = copy.deepcopy(pending)
-    audit_mixed["run"]["audit"] = {"state": "passed", "independence": "mixed", "findings": []}
+    audit_mixed["run"]["audit"] = {"verdict": "passed", "current": True, "pending": False, "independence": "mixed", "findings": []}
     audit_mixed["run"]["children"][0] = {
         key: value for key, value in audit_mixed["run"]["children"][0].items()
         if key != "deadline"
@@ -128,7 +128,7 @@ def _synthetic_results() -> list[tuple[str, object]]:
     # A failed audit shows its findings, fenced, under the Audit line (P1c: the Pi author never saw them).
     failed_metadata = contract["reasons"]["audit.failed"]
     audit_failed = copy.deepcopy(audit_mixed)
-    audit_failed["run"]["audit"] = {"state": "failed", "independence": "distinct", "findings": [
+    audit_failed["run"]["audit"] = {"verdict": "failed", "current": True, "pending": False, "independence": "distinct", "findings": [
         "C4's research does not support that the checker fails on a dangling reference.",
         hostile_text]}
     audit_failed["reasons"] = [{"code": "audit.failed", "parameters": {},
@@ -141,6 +141,12 @@ def _synthetic_results() -> list[tuple[str, object]]:
             row.update(status="violated", missing={"code": "audit.failed", "target_claim_id": None,
                                                   "parameters": {}},
                        next=list(failed_metadata["next_actions"]))
+
+    # A pass that no longer covers the argument, with a re-audit on its way: the audit is "passed, no longer current,
+    # re-audit pending" and never "failed" or "required" (U1: four facts, not one overloaded word).
+    audit_not_current = copy.deepcopy(audit_mixed)
+    audit_not_current["run"]["audit"] = {"verdict": "passed", "current": False, "pending": True, "independence": None,
+                                         "findings": []}
 
     # What waits on a human (the batch), in each state a human can be in, with a hostile source.
     waiting = {}
@@ -234,6 +240,7 @@ def _synthetic_results() -> list[tuple[str, object]]:
         ("getargument-human-answers", answered),
         ("audit-stale-scope", audit_stale),
         ("audit-mixed", audit_mixed),
+        ("audit-passed-not-current-reaudit-pending", audit_not_current),
         ("audit-failed-findings", audit_failed),
         ("hostile-author-strings", hostile),
         ("block-open-claim-redirected", redirected),

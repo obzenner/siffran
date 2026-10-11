@@ -129,9 +129,9 @@ class AuditTests(ConformanceCase):
         # D2C artifacts/active digest.
         for claim in dossier["claims"]:
             self.assert_evidence_digest(claim)
-        # audit state is exactly 'required' before child admission (no pending child yet).
-        self.assertEqual(dossier["audit"]["state"], "required",
-                         "audit state must be exactly 'required' before child admission")
+        # No verdict and nothing pending before child admission.
+        self.assertEqual((dossier["audit"]["verdict"], dossier["audit"]["pending"]), ("none", False),
+                         "no verdict, nothing pending, before child admission")
         # no full/private dump.
         self.assert_no_private_capability(dossier)
         self.assert_no_full_contract_dump(run)
@@ -241,9 +241,9 @@ class AuditTests(ConformanceCase):
         # The summary follows the gate: a pass bound to superseded evidence no longer reads passed,
         # and its pass findings are not presented as something to address.
         self.assertEqual(self.dispatch(drv2, get_run(run_id=run2))["result"]["run"]["audit"],
-                         {"state": "failed", "independence": "distinct", "findings": []})
+                         {"verdict": "passed", "current": False, "pending": False, "independence": "distinct", "findings": []})
         stale_audit = self.dispatch(drv2, get_argument(run_id=run2))["result"]["argument"]["audit"]
-        self.assertEqual((stale_audit["state"], stale_audit["findings"]), ("failed", []))
+        self.assertEqual((stale_audit["verdict"], stale_audit["current"], stale_audit["findings"]), ("passed", False, []))
 
     def test_deferred_support_change_preserves_scope_and_stales_old_audit(self):
         drv = self.bind_driver("D7", "seam-4b",
@@ -314,8 +314,7 @@ class AuditTests(ConformanceCase):
                 expected_independence = "same_model" if variant == "same_model" else "unverified"
                 arg = self.assert_argument_view(
                     self.dispatch(drv, get_argument(run_id=run_id))["result"])
-                self.assert_audit_view(arg, independence=expected_independence)
-                self.assertEqual(arg["audit"]["state"], "passed")
+                self.assert_audit_view(arg, verdict="passed", current=True, pending=False, independence=expected_independence)
                 ev = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
                 result = self.assert_block_only(ev, [expected_reason])
                 self.assert_status(result["run"], "active")
@@ -374,8 +373,7 @@ class AuditTests(ConformanceCase):
                                  "ArgumentView must be unchanged after author attempt")
                 # Exact subsequent audit projection: independence remains the original value,
                 # never upgraded to distinct.
-                self.assert_audit_view(arg_after, independence=expected_independence)
-                self.assertEqual(arg_after["audit"]["state"], "passed")
+                self.assert_audit_view(arg_after, verdict="passed", current=True, pending=False, independence=expected_independence)
                 # The exact independence failure persists after the forgery attempt.
                 ev = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
                 self.assert_block_only(ev, [expected_reason])
@@ -401,7 +399,7 @@ class AuditTests(ConformanceCase):
             drv.trusted_audit_verdict(run_id, child_a, verdict_a)["result"]["type"], "Allow")
         # The author reads a failed audit's findings in both views (P1c: Pi redacts the child result).
         self.assertEqual(self.dispatch(drv, get_run(run_id=run_id))["result"]["run"]["audit"],
-                         {"state": "failed", "independence": "distinct",
+                         {"verdict": "failed", "current": True, "pending": False, "independence": "distinct",
                           "findings": ["C0's research does not support the failure path."]})
         self.assertEqual(
             self.dispatch(drv, get_argument(run_id=run_id))["result"]["argument"]["audit"]["findings"],
@@ -416,11 +414,11 @@ class AuditTests(ConformanceCase):
         blocked = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
         self.assert_block_only(blocked, ["audit.pending"])
         # The pending re-audit supersedes child A's verdict in both views: nothing is reported reviewed.
-        self.assertEqual(self.dispatch(drv, get_run(run_id=run_id))["result"]["run"]["audit"]["state"],
-                         "pending")
+        pending_run = self.dispatch(drv, get_run(run_id=run_id))["result"]["run"]["audit"]
+        self.assertTrue(pending_run["pending"] and pending_run["independence"] is None)
         pending_audit = self.dispatch(drv, get_argument(run_id=run_id))["result"]["argument"]["audit"]
-        self.assertEqual((pending_audit["state"], pending_audit["reviewed_argument_digest"],
-                          pending_audit["reviewed_claims"]), ("pending", None, []))
+        self.assertEqual((pending_audit["pending"], pending_audit["independence"], pending_audit["reviewed_argument_digest"],
+                          pending_audit["reviewed_claims"]), (True, None, None, []))
 
         # Once child B supplies its own exact verdict, its bound identity may satisfy the audit.
         verdict_b = self.build_audit_verdict_payload(
@@ -469,7 +467,7 @@ class AuditTests(ConformanceCase):
         # coverage/digests, no stale/extra claim.
         arg = self.assert_argument_view(
             self.dispatch(drv, get_argument(run_id=run_id))["result"])
-        audit = self.assert_audit_view(arg, state="passed", independence="distinct")
+        audit = self.assert_audit_view(arg, verdict="passed", current=True, pending=False, independence="distinct")
         self.assertEqual(audit["reviewed_argument_digest"], arg["argument_digest"],
                          "reviewed argument digest must match current argument")
         self.assertEqual(audit["reviewed_goal_digest"], arg["goal_digest"],
@@ -521,7 +519,7 @@ class AuditTests(ConformanceCase):
         payload = self.build_audit_verdict_payload(drv, run_id, verdict="pass", scope_review="pass")
         self.assert_valid_response(drv.trusted_audit_verdict(run_id, child_id, payload))
         before = self.assert_argument_view(self.dispatch(drv, get_argument(run_id=run_id))["result"])
-        self.assert_audit_view(before, state="passed", independence="distinct")
+        self.assert_audit_view(before, verdict="passed", current=True, independence="distinct")
         asked = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))["result"]
         self.assertEqual([r["code"] for r in asked["reasons"]], ["governance.terminal_stop_pending"])
         drv.trusted_human_surface(run_id, "human")
@@ -533,7 +531,7 @@ class AuditTests(ConformanceCase):
         answered = drv.trusted_evidence_confirmation(run_id, {"run_id": run_id, "receipt_id": "t1", "decisions": [decision]})["result"]
         self.assertEqual(answered["type"], "Allow")
         after = self.assert_argument_view(self.dispatch(drv, get_argument(run_id=run_id))["result"])
-        self.assertEqual(self.assert_audit_view(after, state="passed", independence="distinct")["reviewed_argument_digest"],
+        self.assertEqual(self.assert_audit_view(after, verdict="passed", current=True, independence="distinct")["reviewed_argument_digest"],
                          after["argument_digest"], "the audit still reviews the current argument")
         self.assertEqual(after["argument_digest"], before["argument_digest"])
         ended = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))

@@ -4,7 +4,7 @@
     GET /api/run?key=KEY&source=store|demo   one run's detail
     GET /api/about                           which store this server observes (a digest), so a second
                                              ``serve`` of the same store on the same port reuses it
-    GET /app/, /gallery/, ...                the UI's files (an allowlist under plugins/empirica/ui)
+    GET /app/, /elements/, ...               the UI's files (an allowlist under plugins/empirica/ui)
 
 Security: bound to 127.0.0.1 only. Only GET and HEAD are served. A request whose ``Host`` is not one of this
 server's three names with its own port (``127.0.0.1``, ``localhost``, ``empirica.localhost``) is refused, which
@@ -39,8 +39,8 @@ HOST = "127.0.0.1"
 #: The name the CLI prints and opens; the host check (`_host_ok`) also accepts the two loopback names, with the server's own port.
 NAME = "empirica.localhost"
 #: What the UI may load: top-level folders and files under ``UI``, by extension.
-SERVED_DIRS = ("app", "gallery", "elements", "dist", "vendor", "copy")
-SERVED_FILES = ("states.json", "catalogue.json", "icons.json")
+SERVED_DIRS = ("app", "elements", "dist", "vendor", "copy")
+SERVED_FILES = ("states.json", "catalogue.json", "icons.json", "enums.json")
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
          ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8",
          ".svg": "image/svg+xml", ".woff2": "font/woff2"}

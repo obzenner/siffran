@@ -109,6 +109,29 @@
             }
           }
         },
+        "session": {
+          "description": "Optional host-observed fact: where this run's session can be found again, recorded once at StartRun by the host from what it observed (Claude: the hook payload's session_id and transcript_path; Pi: the session manager's id and session file). The author has no StartRun and cannot supply or change it. Absent when the host observed nothing: it reads as unknown, never as a guess.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "label",
+            "locator"
+          ],
+          "properties": {
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "description": "A short human name for the session (its id)."
+            },
+            "locator": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "description": "A copyable path or id that finds the session again: its transcript or session file when the host has one, otherwise its id."
+            }
+          }
+        },
         "audit_retrieval": {
           "description": "The retrieval kinds this host's auditor is observed to cover, recorded once at StartRun and re-observed at audit launch (a divergence refuses the launch). workspace: files inside the workspace; local: absolute or home paths; web: http(s) URLs. A research record of any other kind is confirmed by a human (ADR-0067).",
           "type": "array",

@@ -2,73 +2,576 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://siffran.dev/contracts/empirica-ui-view/v1/view.schema.json",
   "title": "Empirica observer: the store summary (GET /api/view, observe)",
-  "description": "Every project, run and claim the observer can read, with the facts the view draws and filters. Produced only by the plugin's observer; the UI joins, counts and filters and derives nothing. Enumerations mirror their owners and are held equal by scripts/validate_ui_view.py: run state = public-contract statuses; audit = audit_states; claim kind = claim_kinds; claim state = claim_states; blocker = reasons. A null is unknown, never a default.",
+  "description": "Every project, run and claim the observer can read, with the facts the view draws and filters. Produced only by the plugin's observer; the UI joins, counts and filters and derives nothing. Enumerations mirror their owners and are held equal by scripts/validate_ui_view.py: run state = public-contract statuses; audit verdict = audit_outcomes; claim kind = claim_kinds; claim state = claim_states; blocker = reasons. A null is unknown, never a default or a zero: a run that was not read has null claims, not none.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["contract", "token", "projects"],
+  "required": [
+    "contract",
+    "token",
+    "coverage",
+    "projects"
+  ],
   "properties": {
-    "contract": {"const": "empirica-ui-view/v1"},
-    "token": {"$ref": "#/$defs/digest", "description": "Digest of each project's id, name and repo and its ordered run keys and versions: equal tokens mean the same view (the server's ETag)."},
-    "projects": {"type": "array", "items": {"$ref": "#/$defs/project"}, "description": "Ordered by each project's most recently updated run, newest first."}
+    "contract": {
+      "const": "empirica-ui-view/v1"
+    },
+    "token": {
+      "$ref": "#/$defs/digest",
+      "description": "Digest of each project's id, name and repo and its ordered run keys and versions: equal tokens mean the same view (the server's ETag)."
+    },
+    "coverage": {
+      "$ref": "#/$defs/coverage"
+    },
+    "projects": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/project"
+      },
+      "description": "Ordered by each project's most recently updated run, newest first."
+    }
   },
   "$defs": {
-    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
-    "key": {"type": "string", "minLength": 1, "description": "One run generation: <project>/<run>/<generation>."},
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "key": {
+      "type": "string",
+      "minLength": 1,
+      "description": "One run generation: <project>/<run>/<generation>."
+    },
     "project": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "name", "label", "repo", "since", "runs"],
+      "required": [
+        "id",
+        "name",
+        "label",
+        "repo",
+        "since",
+        "families",
+        "runs"
+      ],
       "properties": {
-        "id": {"type": "string", "minLength": 1, "description": "The plugin's storage id (a one-way digest; never shown as a label)."},
-        "name": {"type": ["string", "null"], "minLength": 1, "description": "Display name: the matched repository's folder name; null when no repository matched."},
-        "label": {"type": "string", "minLength": 1, "description": "What the project is called wherever it is listed: name when known, otherwise the stable word for an unnamed project. Never a position, never an id."},
-        "repo": {"type": ["string", "null"], "minLength": 1, "description": "The matched repository's top-level path on this machine; null when none matched."},
-        "since": {"type": ["number", "null"], "description": "When the project's oldest run last changed (seconds since the epoch): the human fact that tells two unnamed projects apart in detail. Null when no run has a time."},
-        "runs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/run"}, "description": "Newest first by updated."}
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The plugin's storage id (a one-way digest; never shown as a label)."
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "description": "Display name: the matched repository's folder name; null when no repository matched."
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What the project is called wherever it is listed, unique within this view: the matched repository's folder name, told apart from another of the same name by the shortest differing path suffix, and, when that still ties, by a short stable key of its storage id; the stable word for a project no repository matched (with that key when there are several). Never a position, a time or a goal."
+        },
+        "repo": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "description": "The matched repository's top-level path on this machine; null when none matched."
+        },
+        "since": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "When the project's oldest run last changed (seconds since the epoch): the human fact that tells two unnamed projects apart in detail. Null when no run has a time."
+        },
+        "families": {
+          "type": "array",
+          "description": "The attempts at each run id, chronologically: by generation (generation 1 is the first), never by a file's modification time. Keys refer to runs.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "run",
+              "attempts"
+            ],
+            "properties": {
+              "run": {
+                "type": "string",
+                "minLength": 1
+              },
+              "attempts": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/$defs/key"
+                },
+                "description": "Run keys, ascending generation."
+              }
+            }
+          }
+        },
+        "runs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/run"
+          },
+          "description": "Newest first by updated."
+        }
       }
     },
     "run": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["key", "project", "generation", "previous", "updated", "version", "state", "diagnostic", "audit", "root", "edges", "claims"],
+      "required": [
+        "key",
+        "project",
+        "run",
+        "generation",
+        "previous",
+        "updated",
+        "version",
+        "state",
+        "diagnostic",
+        "goal",
+        "session",
+        "attention",
+        "next",
+        "audit",
+        "progress",
+        "root",
+        "edges",
+        "claims"
+      ],
       "properties": {
-        "key": {"$ref": "#/$defs/key"},
-        "project": {"type": "string", "minLength": 1},
-        "generation": {"type": "integer", "minimum": 1},
-        "previous": {"oneOf": [{"$ref": "#/$defs/key"}, {"type": "null"}], "description": "The same run's previous generation, when the store has it."},
-        "updated": {"type": ["number", "null"], "description": "When the run's state file last changed (file modification time, seconds since the epoch)."},
-        "version": {"$ref": "#/$defs/digest", "description": "Changes whenever anything the row was projected from changes: the state and history revisions, whether the prior generation is present, the state file's modification time, and, for a run with active spikes, the observation of the files they depend on (a workspace edit alone can change it)."},
-        "state": {"enum": ["active", "converged", "stopped_residual", "stopped_frozen", "stopped_budget", null], "description": "The plugin's run status; null when the state could not be read."},
-        "diagnostic": {"enum": ["unreadable", "history-unavailable", "history-missing", "history-corrupt", "workspace-unavailable", null], "description": "Why the observer could not read everything. unreadable: the state is not exactly the current state document (not decodable, another shape, or breaking the plugin's invariants); nothing is read from it. history-unavailable: no repository given maps to the run's project. history-missing: the repository given holds no history for this run. history-corrupt: the recorded history fails the plugin's checks. workspace-unavailable: the files its spikes depend on could not be observed (looked at again on every read). Null when fully read."},
-        "audit": {"enum": ["not_required", "required", "pending", "passed", "failed", "stale", null], "description": "The plugin's audit state (a pass counts only while bound to the current argument); null when the history was not read."},
-        "root": {"type": ["string", "null"], "description": "The root claim's id; null exactly when there are no claims."},
-        "edges": {"type": "array", "items": {"$ref": "#/$defs/edge"}},
-        "claims": {"type": "array", "items": {"$ref": "#/$defs/claim"}}
+        "key": {
+          "$ref": "#/$defs/key"
+        },
+        "project": {
+          "type": "string",
+          "minLength": 1
+        },
+        "run": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The run id (the middle part of the key): runs that share it are attempts at the same session."
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "previous": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/key"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The same run's previous generation, when the store has it."
+        },
+        "updated": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "When the run's state file last changed (file modification time, seconds since the epoch)."
+        },
+        "version": {
+          "$ref": "#/$defs/digest",
+          "description": "Changes whenever anything the row was projected from changes: the state and history revisions, whether the prior generation is present, the state file's modification time, and, for a run with active spikes, the observation of the files they depend on (a workspace edit alone can change it)."
+        },
+        "state": {
+          "enum": [
+            "active",
+            "converged",
+            "stopped_residual",
+            "stopped_frozen",
+            "stopped_budget",
+            null
+          ],
+          "description": "The plugin's run status; null when the state could not be read."
+        },
+        "diagnostic": {
+          "enum": [
+            "unreadable",
+            "history-unavailable",
+            "history-missing",
+            "history-corrupt",
+            "workspace-unavailable",
+            null
+          ],
+          "description": "Why the observer could not read everything. unreadable: the state is not exactly the current state document (not decodable, another shape, or breaking the plugin's invariants); nothing is read from it. history-unavailable: no repository given maps to the run's project. history-missing: the repository given holds no history for this run. history-corrupt: the recorded history fails the plugin's checks. workspace-unavailable: the files its spikes depend on could not be observed (looked at again on every read). Null when fully read."
+        },
+        "goal": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The run's goal; null when the state could not be read. Search needs no detail fetch."
+        },
+        "session": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/session"
+            }
+          ],
+          "description": "Where the session can be found again, as its host recorded it at StartRun; null when the state could not be read."
+        },
+        "attention": {
+          "enum": [
+            "needs_you",
+            "not_ended",
+            "ended",
+            null
+          ],
+          "description": "needs_you: an active run for which the host will show a human a question at its next report (or an explicit one), whatever else the agent still owes first: whether a human is shown a form is the batch's own fact (core.confirmation.presentable), not the order of the gate. not_ended: anything else about a run that has not ended (the core knows nothing more: liveness is never inferred). ended: the run is terminal. Null when the run was not read."
+        },
+        "next": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "who",
+                "where",
+                "message"
+              ],
+              "properties": {
+                "who": {
+                  "enum": [
+                    "human",
+                    "agent",
+                    "auditor"
+                  ]
+                },
+                "where": {
+                  "enum": [
+                    "next_report",
+                    "explicit_report",
+                    "if_available",
+                    "unavailable",
+                    "limit",
+                    "next_turn",
+                    "in_progress"
+                  ]
+                },
+                "message": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          ],
+          "description": "What the run owes next, from detail.outstanding: the human's first reachable item when attention is needs_you, else the first item. Null when nothing is owed (the run ended, or its obligations are met) and when the run was not read fully."
+        },
+        "audit": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/auditSummary"
+            }
+          ],
+          "description": "The core's audit summary; null when the history was not read."
+        },
+        "root": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The root claim's id; null when there are no claims, and when the claims were not read."
+        },
+        "edges": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/edge"
+              }
+            }
+          ],
+          "description": "Null when the history was not read: unknown, not none."
+        },
+        "claims": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/claim"
+              }
+            }
+          ],
+          "description": "Null when the history was not read: unknown, not none. An empty list is a run read in full that has no graph yet."
+        },
+        "progress": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "required",
+                "approved"
+              ],
+              "properties": {
+                "required": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Claims in the run's scope."
+                },
+                "approved": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Of those, the approved ones."
+                }
+              }
+            }
+          ],
+          "description": "How far the run's scoped claims are; null when the history was not read."
+        }
       }
     },
     "edge": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["from", "to"],
+      "required": [
+        "from",
+        "to"
+      ],
       "properties": {
-        "from": {"type": "string", "minLength": 1, "description": "The supported claim."},
-        "to": {"type": "string", "minLength": 1, "description": "The claim that supports it."}
+        "from": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The supported claim."
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The claim that supports it."
+        }
       }
     },
     "claim": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "text", "kind", "gating", "state", "blocker", "blocker_claim", "evidence", "review"],
+      "required": [
+        "id",
+        "text",
+        "kind",
+        "gating",
+        "state",
+        "blocker",
+        "blocker_claim",
+        "evidence",
+        "review",
+        "assurance"
+      ],
       "properties": {
-        "id": {"type": "string", "minLength": 1},
-        "text": {"type": "string"},
-        "kind": {"enum": ["ordinary", "needs-experiment", "needs-decision"]},
-        "gating": {"type": "boolean", "description": "In the run's effective scope (its approval gates convergence)."},
-        "state": {"enum": ["open", "approved", "blocked", "discarded"], "description": "The plugin's derived claim state."},
-        "blocker": {"type": ["string", "null"], "description": "The plugin's blocker reason code for a scoped claim that is not approved (a public-contract reason); null otherwise."},
-        "blocker_claim": {"type": ["string", "null"], "description": "The claim whose resolution the blocker waits on: this claim, or the supporting claim the plugin redirected it to (a claim blocked by an unresolved supporter carries that supporter's reason). Null exactly when blocker is null."},
-        "evidence": {"enum": ["spike", "research", "none"], "description": "The strongest kind among the claim's active evidence: a spike, else research, else none."},
-        "review": {"enum": ["passed", "failed", "stale", "changed", "unreviewed", "none"], "description": "The claim against the latest audit verdict: passed = reviewed with today's evidence by the current passing audit; failed = reviewed by a failing verdict; stale = reviewed with today's evidence by a pass that no longer binds the argument; changed = its evidence changed since it was reviewed; unreviewed = the verdict did not review it; none = no verdict yet."}
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "text": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "ordinary",
+            "needs-experiment",
+            "needs-decision"
+          ]
+        },
+        "gating": {
+          "type": "boolean",
+          "description": "In the run's effective scope (its approval gates convergence)."
+        },
+        "state": {
+          "enum": [
+            "open",
+            "approved",
+            "blocked",
+            "discarded"
+          ],
+          "description": "The plugin's derived claim state."
+        },
+        "blocker": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The plugin's blocker reason code for a scoped claim that is not approved (a public-contract reason); null otherwise."
+        },
+        "blocker_claim": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The claim whose resolution the blocker waits on: this claim, or the supporting claim the plugin redirected it to (a claim blocked by an unresolved supporter carries that supporter's reason). Null exactly when blocker is null."
+        },
+        "evidence": {
+          "enum": [
+            "spike",
+            "research",
+            "none"
+          ],
+          "description": "The strongest kind among the claim's active evidence: a spike, else research, else none."
+        },
+        "review": {
+          "enum": [
+            "passed",
+            "failed",
+            "stale",
+            "changed",
+            "unreviewed",
+            "none"
+          ],
+          "description": "The claim against the latest audit verdict: passed = reviewed with today's evidence by the current passing audit; failed = reviewed by a failing verdict; stale = reviewed with today's evidence by a pass that no longer binds the argument; changed = its evidence changed since it was reviewed; unreviewed = the verdict did not review it; none = no verdict yet."
+        },
+        "assurance": {
+          "enum": [
+            "assured",
+            "awaiting_audit",
+            "audit_failed",
+            "not_approved"
+          ],
+          "description": "Whether the claim is settled (core.observer.assurance): assured = approved, covered by a current passing audit, no re-audit pending; awaiting_audit = approved but not yet covered (no audit, a pass no longer current, its evidence changed since, or a re-audit pending); audit_failed = approved but a failing verdict reviewed it; not_approved = anything else."
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runs",
+        "read",
+        "unreadable",
+        "partial"
+      ],
+      "description": "How much of the store was read: every run, those read fully, those whose state is damaged (diagnostic unreadable) and those read only in part (any other diagnostic). runs = read + unreadable + partial. A consumer that shows a count of claims, decisions or attention states must say how many runs it could not read.",
+      "properties": {
+        "runs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "read": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unreadable": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "partial": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host",
+        "label",
+        "locator",
+        "interactive",
+        "delegated"
+      ],
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The host that started the run."
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "description": "A short human name for the session; null (unknown) when the host recorded none."
+        },
+        "locator": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "description": "A copyable path or id that finds the session again; null (unknown) when the host recorded none."
+        },
+        "interactive": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether the host recorded the session as interactive (a person is at it); null (unknown) when it did not say. Not liveness."
+        },
+        "delegated": {
+          "type": "boolean",
+          "description": "Whether the host recorded the run as delegated (an unattended agent runs it). Not liveness."
+        }
+      }
+    },
+    "auditSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verdict",
+        "current",
+        "pending",
+        "independence"
+      ],
+      "description": "The core's audit summary (core.projection._audit): four facts, never one overloaded word.",
+      "properties": {
+        "verdict": {
+          "enum": [
+            "passed",
+            "failed",
+            "none"
+          ],
+          "description": "The latest recorded verdict, or none yet."
+        },
+        "current": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether that verdict still covers the current argument, goal and scope (false: a pass that no longer binds it); null with no verdict."
+        },
+        "pending": {
+          "type": "boolean",
+          "description": "A re-audit has been launched and has not settled."
+        },
+        "independence": {
+          "enum": [
+            "distinct",
+            "mixed",
+            "same_model",
+            "unverified",
+            "human_owned",
+            null
+          ],
+          "description": "Independence of a settled verdict; null with no verdict or while a re-audit is pending."
+        }
       }
     }
   }

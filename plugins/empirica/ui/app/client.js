@@ -7,26 +7,32 @@
 
 const CONTRACT = "empirica-ui-view/v1";
 const isObject = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
-const ARRAYS = { run: ["edges", "claims"], detail: ["residuals", "waiting", "stale", "steps", "claims"] };
+const ARRAYS = { run: ["edges", "claims"], detail: ["residuals", "outstanding", "stale", "steps", "claims"] };
+// A list is a list, or null: a run that was not read has no list, which is not an empty one.
+const listOrNull = (x) => x === null || Array.isArray(x);
 
-/** Whether `v` has the view's required shape: its discriminator, token, and every project with its runs and their
- * claims as lists. The schema (view.schema.json) is checked in the build; this is the cheap check at the boundary. */
+/** Whether `v` has the view's required shape: its discriminator, token, coverage, and every project with its runs and their
+ * claims as lists (or null where a run was not read). The schema (view.schema.json) is checked in the build; this is the cheap check at the boundary. */
 export function validView(v) {
-  return isObject(v) && v.contract === CONTRACT && typeof v.token === "string" && Array.isArray(v.projects)
-    && v.projects.every((p) => isObject(p) && typeof p.id === "string" && typeof p.label === "string" && Array.isArray(p.runs)
+  return isObject(v) && v.contract === CONTRACT && typeof v.token === "string" && isObject(v.coverage) && Array.isArray(v.projects)
+    && v.projects.every((p) => isObject(p) && typeof p.id === "string" && typeof p.label === "string" && Array.isArray(p.runs) && Array.isArray(p.families)
       && p.runs.every((r) => isObject(r) && typeof r.key === "string" && typeof r.version === "string"
-        && ARRAYS.run.every((k) => Array.isArray(r[k]))));
+        && ARRAYS.run.every((k) => listOrNull(r[k]))));
 }
 /** Whether `d` has a run document's required shape. */
 export function validDetail(d) {
   return isObject(d) && d.contract === CONTRACT && typeof d.key === "string" && typeof d.version === "string"
-    && ARRAYS.detail.every((k) => Array.isArray(d[k]));
+    && ARRAYS.detail.every((k) => listOrNull(d[k]));
 }
 
 export class Client {
-  #fetch; #source; #etag = null; #details = new Map(); #flying = new Map();
+  #fetch; #source; #etag = null; #details = new Map(); #flying = new Map(); #checked = null; #now;
   /** @param {string} source - one of catalogue.data_sources; @param {typeof fetch} fetcher */
-  constructor(source, fetcher = (...a) => fetch(...a)) { this.#source = source; this.#fetch = fetcher; }
+  constructor(source, fetcher = (...a) => fetch(...a), now = () => Date.now()) { this.#source = source; this.#fetch = fetcher; this.#now = now; }
+
+  /** When the observer last gave a good answer about the store (an unchanged one counts), in ms since the epoch;
+   * null before the first. A failed answer does not move it, so the page can say how old what it shows is. */
+  get checked() { return this.#checked; }
 
   /** `missing`: the server does not serve this source; `offline`: no answer at all; `error`: the server answered
    * with a failure (a 5xx); `invalid`: an answer that is not the view contract.
@@ -34,12 +40,13 @@ export class Client {
   async view() {
     const r = await this.#get(`/api/view?${new URLSearchParams({ source: this.#source })}`, this.#etag ? { "If-None-Match": this.#etag } : {});
     if (!r) return { status: "offline" };
-    if (r.status === 304) return { status: "same" };
+    if (r.status === 304) { this.#checked = this.#now(); return { status: "same" }; }
     if (r.status === 404) return { status: "missing" };
     if (!r.ok) return { status: "error" };
     const view = await r.json().catch(() => undefined);
     if (!validView(view)) return { status: "invalid" };
     this.#etag = r.headers.get("ETag");
+    this.#checked = this.#now();
     this.prune(view.projects.flatMap((p) => p.runs.map((x) => x.key)));
     return { status: "changed", view };
   }

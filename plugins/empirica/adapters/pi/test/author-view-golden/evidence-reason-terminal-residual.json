@@ -60,8 +60,10 @@
       },
       "governance": null,
       "audit": {
-        "state": "required",
-        "independence": "unverified",
+        "verdict": "none",
+        "current": null,
+        "pending": false,
+        "independence": null,
         "findings": []
       },
       "confirmation_batch": null

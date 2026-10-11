@@ -1,4 +1,4 @@
-// Copies the pinned runtime libraries declared in vendor.json into vendor/ (CONVENTIONS §9): Basecoat CSS/JS,
+// Copies the pinned runtime libraries declared in vendor.json into vendor/ (UI.md, Tokens, styles, vendor): Basecoat CSS/JS,
 // latin font files with a generated @font-face sheet, and a Lucide sprite of exactly the icons in icons.json.
 // Records versions + sha256 in vendor/VERSIONS. Vendored files are never edited by hand.
 import { createHash } from "node:crypto";

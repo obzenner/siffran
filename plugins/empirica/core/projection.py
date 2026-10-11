@@ -8,11 +8,11 @@ from typing import Any
 from . import citations, confirmation, governance
 
 from .evaluation import (CONFIRMATION_REASON, EvaluationSnapshot, HOST_TIER_UNSUPPORTED, TERMINAL_STOP_REASON,
-                         active_evidence, audit_blocker, audit_operation_current, audit_passes, bootstrap_status,
+                         active_evidence, audit_blocker, audit_covers, audit_pending, bootstrap_status, latest_audit_verdict,
                          claim_blockers, claim_digest, confirmation_batch, derive_claims,
                          derive_claims_for_projection, digest, dossier_artifact_ids, effective_scope_ids,
                          evidence_digest, independence, pending_decisions, pending_human, pending_terminal,
-                         progress_basis, terminal_batch)
+                         progress_basis, report_requirements, terminal_batch, REPORT_STAGES, Requirement)
 
 
 def _scope(snapshot: EvaluationSnapshot) -> tuple[list[str], list[str]]:
@@ -204,6 +204,10 @@ def _obligations(snapshot: EvaluationSnapshot, derivation: Any, states: Mapping[
             metadata, "violated", terminal_next))
     blockers_by_claim = {row["claim_id"]: row for row in blockers}
     _, deferred = _scope(snapshot)
+    # What the report requires, in the gate's order (``core.evaluation.report_requirements``): the claim rows below are its
+    # claim stage, the rows after them its human, pass, audit and consent stages, and a row behind an earlier stage is held.
+    owed = report_requirements(snapshot, derivation, blockers)
+    early = min((REPORT_STAGES.index(r.stage) for r in owed), default=None)
     if snapshot.graph:
         for claim in snapshot.graph["claims"]:
             blocker = blockers_by_claim.get(claim["id"])
@@ -217,22 +221,33 @@ def _obligations(snapshot: EvaluationSnapshot, derivation: Any, states: Mapping[
                 "satisfied" if states[claim["id"]] == "approved" else "residual", terminal_next)
             if claim["id"] in deferred:
                 row["hold"] = "deferred"
+            elif terminal_next is None and blocker is not None and early is not None and REPORT_STAGES.index(
+                    "confirmation" if blocker["reason"] == CONFIRMATION_REASON else "claim") > early:
+                row["hold"] = "blocked"
             active.append(row)
-        if not blockers:
-            # What is owed at the audit position is what the gate answers there: a batch that waits on a human comes
-            # before the audit gate (``core/evaluation.py``, ADR-0067), so the view never offers the audit first.
-            batch = confirmation_batch(snapshot, derivation)
-            blocker = (None if batch is not None else audit_blocker(snapshot, derivation))
-            obligation_id, required = snapshot.audit_obligation
-            owed = (None if batch is None and blocker is None else
-                    (CONFIRMATION_REASON, confirmation.parameters(
-                        snapshot, batch["record_ids"], [r["claim_id"] for r in batch["claims"]]))
-                    if batch is not None else (blocker["reason"], blocker["parameters"]))
-            missing = None if owed is None else {"code": owed[0], "target_claim_id": None, "parameters": owed[1]}
-            active.append(_obligation(
-                obligation_id, required, [], missing, metadata,
-                "satisfied" if missing is None else "residual", terminal_next))
+        rows = {r.obligation: r for r in owed if r.stage in {"confirmation", "passes", "audit", "terminal"}
+                and not r.obligation.startswith("claim:")}
+        for obligation_id, required in (snapshot.stage_obligations[s] for s in ("confirmation", "passes")):
+            if obligation_id in rows:
+                active.append(_requirement_row(rows[obligation_id], metadata, terminal_next))
+        # The audit position: satisfied when the gate has nothing to say there, else what the gate says (held while an
+        # earlier stage is unmet).
+        obligation_id, required = snapshot.audit_obligation
+        active.append(_requirement_row(rows[obligation_id], metadata, terminal_next) if obligation_id in rows else
+                      _obligation(obligation_id, required, [], None, metadata, "satisfied", terminal_next))
+        consent = rows.get(snapshot.stage_obligations["terminal"][0])
+        if consent is not None:
+            active.append(_requirement_row(consent, metadata, terminal_next))
     return {"active": active, "deferred": []}
+
+
+def _requirement_row(requirement: Requirement, metadata, terminal_next: list[str] | None) -> dict[str, Any]:
+    """The obligation a stage of the report is listed as: what the gate would answer there (its reason, parameters), held
+    while an earlier stage is unmet."""
+    row = _obligation(requirement.obligation, requirement.required, [],
+                      {"code": requirement.reason, "target_claim_id": None, "parameters": dict(requirement.parameters)},
+                      metadata, "residual", terminal_next)
+    return row if requirement.admissible or terminal_next is not None else {**row, "hold": "blocked"}
 
 
 def _residuals(snapshot: EvaluationSnapshot, derivation: Any,
@@ -241,31 +256,32 @@ def _residuals(snapshot: EvaluationSnapshot, derivation: Any,
                terminal_next: list[str] | None = None) -> list[dict[str, Any]]:
     status = snapshot.state.status
     _, deferred = _scope(snapshot)
+    residuals: list[dict[str, Any]] = []
     if snapshot.state.frozen_claim_ids is not None and deferred:
-        return [_residual(metadata, "freeze.deferred", {
-            "claim_ids": deferred, "deferred_scope_digest": digest(deferred)}, terminal_next)]
+        # What the freeze left out, and then what the required claims it kept still lack (a stop does not resolve them).
+        # The scope is an annotation: it never stands in for a stage of the report (the budget, the audit) left unmet.
+        residuals.append(_residual(metadata, "freeze.deferred", {
+            "claim_ids": deferred, "deferred_scope_digest": digest(deferred)}, terminal_next))
     if status == "stopped_budget":
-        return [_residual(metadata, "budget.exhausted", {"resource": "pass"}, terminal_next)]
-    if status == "stopped_frozen":
-        return []
-    if status == "stopped_residual" and snapshot.graph:
-        residuals = []
+        return [*residuals, _residual(metadata, "budget.exhausted", {"resource": "pass"}, terminal_next)]
+    if status in {"stopped_residual", "stopped_frozen"} and snapshot.graph:
+        owed: list[dict[str, Any]] = []
         for claim_id, records in pending_human(snapshot, _scope(snapshot)[0]).items():
-            residuals.append(_residual(
+            owed.append(_residual(
                 metadata, "evidence.confirmation_required",
                 confirmation.parameters(snapshot, records, pending_decisions(snapshot, derivation)),
                 terminal_next,
                 claim_id=claim_id, target_claim_id=claim_id))
         for blocker in blockers:
-            residuals.append(_residual(
+            owed.append(_residual(
                 metadata, blocker["reason"], blocker["parameters"], terminal_next,
                 claim_id=blocker["claim_id"], target_claim_id=blocker["target_claim_id"]))
-        if residuals:
-            return residuals
-        blocker = audit_blocker(snapshot, derivation)
-        if blocker:
-            return [_residual(metadata, blocker["reason"], blocker["parameters"], terminal_next)]
-    return []
+        residuals += owed
+        if not owed:
+            blocker = audit_blocker(snapshot, derivation)
+            if blocker:
+                residuals.append(_residual(metadata, blocker["reason"], blocker["parameters"], terminal_next))
+    return residuals
 
 
 _HIDDEN = re.compile(r"[\\\x00-\x1f\x7f-\x9f\u00ad\u061c\u200b-\u200f\u2028-\u202e\u2060\u2066-\u2069\ufeff]")
@@ -320,19 +336,28 @@ def governance_dialog(goal: str, value: Mapping, controls: Mapping,
             "budgets": budgets}
 
 
-def project_governance(snapshot: EvaluationSnapshot) -> dict:
-    value = governance.plain(snapshot.state.governance)
-    bootstrap = bootstrap_status(snapshot)
-    actions = bootstrap["next_actions"]  # empty for a terminal run or when bootstrap is complete
-    spent = confirmation.interactions(snapshot)
-    value.update(interactions_remaining=governance.interactions_remaining(snapshot.state.governance, spent),
-                 prompt_error=governance.interaction_error(snapshot.state.governance, spent))
+def governance_facts(state: Any, spent: int | None) -> dict:
+    """What a run's governance is, from its state alone: the configuration, the ceilings and what is left of them, and the
+    human interactions left (``spent`` is the evidence presentations counted from the history; ``None`` when that history
+    was not read, so the interactions are unknown, never a full allowance). The one source of these facts: the run view
+    adds to it (``project_governance``) and the observer shapes it."""
+    value = governance.plain(state.governance)
+    known = spent is not None
+    value.update(interactions_remaining=governance.interactions_remaining(state.governance, spent) if known else None,
+                 prompt_error=governance.interaction_error(state.governance, spent) if known else None)
     value.pop("receipts")
     value.pop("delegation_envelope")
-    value.update(budgets=dict(snapshot.state.budgets),
-                 remaining={ceiling: snapshot.state.budgets[ceiling] - snapshot.state.budgets[used]
-                            for ceiling, used in governance.CEILINGS.items()},
-                 request_ready=bootstrap["request_ready"], display_ready=bootstrap["display_ready"],
+    value.update(budgets=dict(state.budgets),
+                 remaining={ceiling: state.budgets[ceiling] - state.budgets[used]
+                            for ceiling, used in governance.CEILINGS.items()})
+    return value
+
+
+def project_governance(snapshot: EvaluationSnapshot) -> dict:
+    value = governance_facts(snapshot.state, confirmation.interactions(snapshot))
+    bootstrap = bootstrap_status(snapshot)
+    actions = bootstrap["next_actions"]  # empty for a terminal run or when bootstrap is complete
+    value.update(request_ready=bootstrap["request_ready"], display_ready=bootstrap["display_ready"],
                  next_action=actions[-1] if actions else snapshot.default_next_action)
     return value
 
@@ -386,8 +411,9 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
             residual["code"], residual["parameters"], residual["next_actions"], batch))
     for obligation in obligations["active"]:
         missing = obligation["missing"] or {}
-        obligation["next"] = recovery_actions(exclusions, confirmation_actions(
-            missing.get("code", ""), missing.get("parameters"), obligation["next"], batch))
+        # Nothing is asked of the author for a requirement that waits on an earlier one (the report would not name it).
+        obligation["next"] = ([] if obligation.get("hold") == "blocked" else recovery_actions(
+            exclusions, confirmation_actions(missing.get("code", ""), missing.get("parameters"), obligation["next"], batch)))
     recovery_action = terminal_next[0] if terminal else "child.retry"
     children = [_child_summary(child, recovery_action) for child in snapshot.state.children]
     audit = _audit(snapshot)
@@ -397,8 +423,8 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
         "status": snapshot.state.status,
         "basis": progress_basis(snapshot, blockers),
         # A failed verdict's findings are what the author must act on; pass findings stay in GetArgument.
-        "audit": {"state": audit["state"], "independence": audit["independence"],
-                  "findings": audit["findings"] if audit["state"] == "failed" else []},
+        "audit": {key: audit[key] for key in ("verdict", "current", "pending", "independence")}
+                 | {"findings": audit["findings"] if audit["verdict"] == "failed" else []},
         "governance": project_governance(snapshot),
         "confirmation_batch": batch,
         "contract": {"id": snapshot.contract_id, "version": snapshot.contract_version,
@@ -456,30 +482,28 @@ def _batch(snapshot: EvaluationSnapshot, derivation: Any) -> dict[str, Any] | No
 
 
 def _audit(snapshot: EvaluationSnapshot) -> dict[str, Any]:
-    """Summarize the audit with the predicates ``audit_blocker`` uses, so the summary line and the
-    audit obligation row cannot disagree: a current pending child wins, and a pass counts only while
-    it is bound to the current argument (a stale pass reads ``failed``, like ``audit.failed``). Only a
-    settled audit reports what it reviewed; a pending re-audit supersedes the previous verdict."""
-    audits = [a for a in snapshot.history if a.get("kind") == "audit_verdict"]
-    pending = any(child["resource_class"] == "audit"
-                  and child["state"] in {"reserved", "launching", "pending"}
-                  and audit_operation_current(snapshot, child)
-                  for child in snapshot.state.children)
-    state = ("pending" if pending else "required" if not audits else
-             "passed" if audit_passes(snapshot, audits[-1]) else "failed")
-    verdict = audits[-1] if state in {"passed", "failed"} else {}
-    classification = independence(snapshot, verdict)
-    return {"state": state, "independence": classification,
-            "reviewed_argument_digest": verdict.get("argument_digest"),
-            "reviewed_goal_digest": verdict.get("goal_digest"),
-            "reviewed_frozen_scope_digest": verdict.get("frozen_scope_digest"),
-            "reviewed_deferred_scope_digest": verdict.get("deferred_scope_digest"),
-            "reviewed_claims": governance.plain(verdict.get("reviewed_claims", [])),
-            # Findings belong to the verdict that produced them: a stale pass reads ``failed`` but has
-            # nothing to address, so it reports none.
-            "findings": governance.plain(verdict["findings"]
-                                         if (state == "failed") == (verdict.get("verdict") == "fail")
-                                         and verdict else [])}
+    """The one summary of the audit, from the predicates ``audit_blocker`` uses, so it and the audit obligation row cannot
+    disagree. Four facts, never one overloaded word: the latest recorded ``verdict`` (``passed``, ``failed`` or ``none``),
+    its ``current``cy (it still binds the current argument, goal and scope; ``None`` with no verdict), whether a
+    re-audit is ``pending`` (a current child that has not settled), and the ``independence`` of a settled verdict
+    (``None`` otherwise). Only a settled audit reports what it reviewed and what it found: a pending re-audit supersedes
+    the previous verdict's coverage."""
+    latest = latest_audit_verdict(snapshot)
+    pending = audit_pending(snapshot)
+    settled = latest is not None and not pending
+    verdict = "none" if latest is None else "passed" if latest.get("verdict") == "pass" else "failed"
+    current = None if latest is None else audit_covers(snapshot, latest)
+    seen = latest if settled else {}
+    return {"verdict": verdict, "current": current, "pending": pending,
+            "independence": independence(snapshot, latest) if settled else None,
+            "reviewed_argument_digest": seen.get("argument_digest"),
+            "reviewed_goal_digest": seen.get("goal_digest"),
+            "reviewed_frozen_scope_digest": seen.get("frozen_scope_digest"),
+            "reviewed_deferred_scope_digest": seen.get("deferred_scope_digest"),
+            "reviewed_claims": governance.plain(seen.get("reviewed_claims", [])),
+            # Findings belong to the verdict that produced them: a pass that no longer covers the argument has nothing
+            # to address, so it reports none.
+            "findings": governance.plain(seen["findings"] if seen and (verdict == "failed" or current) else [])}
 
 
 def _verification(snapshot: EvaluationSnapshot, record: Mapping[str, Any]) -> dict[str, Any]:
@@ -500,6 +524,15 @@ def _human_decision(snapshot: EvaluationSnapshot, claim: Mapping[str, Any]) -> d
     if answer is None:
         return {}
     return {"human_decision": {"outcome": answer["outcome"], "answer": answer.get("answer")}}
+
+
+def spike_result(art: Mapping[str, Any], active: bool) -> dict[str, Any]:
+    """The dossier's statement of one executed spike: what ran, how it ended, and the files it was bound to. The one place
+    these facts are read from the artifact (``project_argument`` and the observer both); the command's output is not retained."""
+    return {"active": active, "outcome": art["outcome"], "harness_request_id": art["harness_request_id"],
+            "command": art["command"], "command_digest": art["command_digest"],
+            "prerequisite_research_ids": art["prerequisite_research_ids"], "file_bindings": art["file_bindings"],
+            "exit_code": art["exit_code"], "spike_gate": art["spike_gate"], "supersedes": art.get("supersedes")}
 
 
 def project_argument(snapshot: EvaluationSnapshot) -> dict[str, Any]:
@@ -541,12 +574,7 @@ def project_argument(snapshot: EvaluationSnapshot) -> dict[str, Any]:
                           command_digest=art["command_digest"], dependent_files=art["dependent_files"],
                           prerequisite_research_ids=art["prerequisite_research_ids"])
         else:
-            common.update(active=art["artifact_id"] in active_ids, outcome=art["outcome"],
-                          harness_request_id=art["harness_request_id"], command=art["command"],
-                          command_digest=art["command_digest"],
-                          prerequisite_research_ids=art["prerequisite_research_ids"],
-                          file_bindings=art["file_bindings"], exit_code=art["exit_code"],
-                          spike_gate=art["spike_gate"], supersedes=art.get("supersedes"))
+            common.update(spike_result(art, art["artifact_id"] in active_ids))
         artifacts.append(common)
     frozen_digest = None if snapshot.state.frozen_claim_ids is None else digest(gating)
     argument_digest = digest({"graph": snapshot.graph,

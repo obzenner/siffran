@@ -1,26 +1,21 @@
 import { EvElement, TONE, define, icon, stateOf, t } from "../core/element.js";
 
 /**
- * One state as glyph (+ word). Level 0 = icon only, level 1 = hover/focus hint (D, S1).
+ * One value of a contract vocabulary as its word, with its icon beside it (an icon only ever repeats the word).
  * @element ev-state
- * @attr {"run"|"diagnostic"|"audit"|"claim"|"evidence"|"review"|"step"|"outcome"|"file"|"verification"|"route"|"decision"} domain - which vocabulary
- * @attr {string} value - a value of that vocabulary (states.json); unknown values render as "Unknown"
- * @attr {"icon"|"label"} show - icon only, or icon + word (default label)
+ * @attr {string} domain - a vocabulary of states.json
+ * @attr {string} value - a value of that vocabulary; an unknown value renders as "Unknown"
  * @attr {"plain"|"chip"} variant - bare, or a Basecoat badge on a pale tint (default plain)
  */
-// chip = Basecoat's badge (shape follows the style pack); tone classes set its colours.
-const VARIANT = { plain: "inline-flex items-center gap-2xs", chip: "badge" };
 class EvState extends EvElement {
-  static observedAttributes = ["domain", "value", "show", "variant"];
+  static observedAttributes = ["domain", "value", "variant"];
   render() {
     const s = stateOf(this.getAttribute("domain"), this.getAttribute("value"));
     const tone = TONE[s.tone];
-    const chip = this.getAttribute("variant") === "chip";
     const label = t(`${s.copy}.label`);
-    const word = this.getAttribute("show") === "icon"
-      ? `<span class="sr-only">${label}</span>`
-      : chip ? `<span>${label}</span>` : `<span class="text-s font-medium">${label}</span>`;
-    return `<span class="${VARIANT[chip ? "chip" : "plain"]} ${tone.fg} ${chip ? tone.tint : ""}" data-hint="${t(`${s.copy}.hint`)}" tabindex="0">${icon(s.icon)}${word}</span>`;
+    return this.getAttribute("variant") === "chip"
+      ? `<span class="badge ${tone.fg} ${tone.tint}">${icon(s.icon)}<span>${label}</span></span>`
+      : `<span class="inline-flex items-center gap-2xs ${tone.fg}">${icon(s.icon)}<span class="text-s font-medium">${label}</span></span>`;
   }
 }
 define("ev-state", EvState);

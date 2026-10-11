@@ -312,8 +312,13 @@ class ContentCompletenessTests(unittest.TestCase):
         self.assertIn("block-pending-audit", views)
         for name, result in views.items():
             audit = result["run"]["audit"]
-            suffix = f" ({audit['independence']})" if audit["state"] in {"passed", "failed"} else ""
-            self.assertIn(f"\nAudit: {audit['state']}{suffix}\n", render_author_view(result), name)
+            word = {"none": "required", "passed": "passed", "failed": "failed"}[audit["verdict"]]
+            if audit["verdict"] == "none" and audit["pending"]:
+                word = "pending"
+            if audit["verdict"] != "none":
+                word += ("" if audit["current"] is not False else ", no longer current") + (", re-audit pending" if audit["pending"] else "")
+            suffix = f" ({audit['independence']})" if audit["independence"] else ""
+            self.assertIn(f"\nAudit: {word}{suffix}\n", render_author_view(result), name)
 
     def test_every_reason_code_and_message_appears(self):
         for name in RUNVIEW_FIXTURES:

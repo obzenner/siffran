@@ -163,7 +163,7 @@ Each batch item shows the claim, the source, the complete verbatim quote (no tru
   * Both hosts report whether they can show a dialog (`human_surface`) through a private ingress at every `report_convergence`; the latest observation counts. Claude cannot know at the start hook whether the client will elicit, so it starts `unobserved` (F7: it previously started `unavailable`, which told the author that no human could be asked before the host had looked, and the agent stopped with nobody asked). Pi sends `ctx.hasUI` at start and at every report, so a Pi run is never `unobserved`. Codex has no human ingress and starts `unavailable`.
 * **Observer UI.**
   * The contract gains per-record `verification` (class, status, route) and pending confirmations in the run detail.
-  * The UI words them; it never derives them (CONVENTIONS X1).
+  * The UI words them; it never derives them (ui/UI.md, Who owns what).
 
 ### Consequences
 

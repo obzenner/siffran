@@ -1,5 +1,5 @@
 {
-  "$description": "State vocabulary -> presentation (CONVENTIONS S1). Every domain is keyed by exactly one enum of the observer contract (contracts/empirica-ui-view/v1), held equal by tests/contract.test.mjs. Each entry: tone (semantic colour), icon (meaning key in icons.json), copy key prefix in copy/en.json (label + hint). `quiet: true` marks the usual or bookkeeping values: an overview mark carries no glyph for them and a history folds them, so everything else stands out (V3). A claim is quiet only when its state and its review both are: an approved claim no passing audit has reviewed carries its review's glyph. `minor: true` (steps) draws a small dot. A step takes its outcome's tone when it has one. `verdict: true` (audit) marks the states that follow a verdict, the only ones whose independence is told. `alias: <value>` declares that a value shares its icon with another value of the same domain on purpose (two words for one meaning); without it the audit refuses a repeated icon inside a domain (V5).",
+  "$description": "Presentation of each contract value: tone (semantic colour), icon (a meaning in icons.json, only ever beside the word) and copy (a prefix in copy/en.json: `.label`). Keyed by the values of enums.json, which is generated from the observer contract; tests/contract.test.mjs holds the two equal. It decides nothing about the value.",
   "run": {
     "active": {
       "tone": "info",
@@ -54,47 +54,45 @@
       "copy": "diagnostic.workspace-unavailable"
     }
   },
+  "attention": {
+    "needs_you": {
+      "tone": "human",
+      "icon": "waiting-human",
+      "copy": "attention.needs_you"
+    },
+    "not_ended": {
+      "tone": "neutral",
+      "icon": "running",
+      "copy": "attention.not_ended"
+    },
+    "ended": {
+      "tone": "neutral",
+      "icon": "run-ended",
+      "copy": "attention.ended"
+    }
+  },
   "audit": {
     "passed": {
       "tone": "audit",
       "icon": "audit",
-      "copy": "audit.passed",
-      "verdict": true
+      "copy": "audit.passed"
     },
     "failed": {
       "tone": "negative",
       "icon": "audit-failed",
-      "copy": "audit.failed",
-      "verdict": true
+      "copy": "audit.failed"
     },
-    "stale": {
-      "tone": "caution",
-      "icon": "audit-stale",
-      "copy": "audit.stale",
-      "verdict": true
-    },
-    "pending": {
-      "tone": "neutral",
-      "icon": "audit-pending",
-      "copy": "audit.pending"
-    },
-    "required": {
+    "none": {
       "tone": "neutral",
       "icon": "audit-required",
-      "copy": "audit.required"
-    },
-    "not_required": {
-      "tone": "neutral",
-      "icon": "audit-none",
-      "copy": "audit.not_required"
+      "copy": "audit.none"
     }
   },
   "claim": {
     "approved": {
       "tone": "positive",
       "icon": "verified",
-      "copy": "claim.approved",
-      "quiet": true
+      "copy": "claim.approved"
     },
     "open": {
       "tone": "info",
@@ -133,8 +131,7 @@
     "passed": {
       "tone": "audit",
       "icon": "audit",
-      "copy": "review.passed",
-      "quiet": true
+      "copy": "review.passed"
     },
     "failed": {
       "tone": "negative",
@@ -171,14 +168,12 @@
     "research": {
       "tone": "neutral",
       "icon": "research",
-      "copy": "step.research",
-      "minor": true
+      "copy": "step.research"
     },
     "spike_request": {
       "tone": "neutral",
       "icon": "spike-request",
-      "copy": "step.spike_request",
-      "minor": true
+      "copy": "step.spike_request"
     },
     "spike": {
       "tone": "neutral",
@@ -193,29 +188,22 @@
     "attribution": {
       "tone": "neutral",
       "icon": "attribution",
-      "copy": "step.attribution",
-      "quiet": true,
-      "minor": true
+      "copy": "step.attribution"
     },
     "observation_basis": {
       "tone": "neutral",
       "icon": "observation",
-      "copy": "step.observation_basis",
-      "quiet": true,
-      "minor": true
+      "copy": "step.observation_basis"
     },
     "evidence_presentation": {
       "tone": "human",
       "icon": "asked",
-      "copy": "step.evidence_presentation",
-      "quiet": true,
-      "minor": true
+      "copy": "step.evidence_presentation"
     },
     "evidence_confirmation": {
       "tone": "human",
       "icon": "confirmed",
-      "copy": "step.evidence_confirmation",
-      "minor": true
+      "copy": "step.evidence_confirmation"
     }
   },
   "outcome": {
@@ -232,14 +220,27 @@
     "pass": {
       "tone": "positive",
       "icon": "verified",
-      "copy": "outcome.pass",
-      "alias": "supporting"
+      "copy": "outcome.pass"
     },
     "fail": {
       "tone": "negative",
       "icon": "failed",
-      "copy": "outcome.fail",
-      "alias": "refuting"
+      "copy": "outcome.fail"
+    },
+    "confirm": {
+      "tone": "human",
+      "icon": "confirmed",
+      "copy": "outcome.confirm"
+    },
+    "reject": {
+      "tone": "negative",
+      "icon": "rejected",
+      "copy": "outcome.reject"
+    },
+    "approve": {
+      "tone": "human",
+      "icon": "confirmed",
+      "copy": "outcome.approve"
     }
   },
   "file": {
@@ -291,73 +292,58 @@
       "copy": "verification.pending"
     }
   },
-  "route": {
-    "audit": {
-      "tone": "audit",
-      "icon": "auditor-fetch",
-      "copy": "route.audit"
-    },
-    "human": {
-      "tone": "human",
-      "icon": "waiting-human",
-      "copy": "route.human"
-    },
-    "unavailable": {
-      "tone": "caution",
-      "icon": "cannot-confirm",
-      "copy": "route.unavailable"
-    },
-    "shown": {
-      "tone": "neutral",
-      "icon": "shown-to-human",
-      "copy": "route.shown"
-    },
-    "limit": {
-      "tone": "caution",
-      "icon": "asking-spent",
-      "copy": "route.limit"
-    },
-    "ended": {
-      "tone": "neutral",
-      "icon": "run-ended",
-      "copy": "route.ended"
-    }
-  },
   "decision": {
-    "approve": {
+    "approved": {
       "tone": "human",
       "icon": "confirmed",
-      "copy": "decision.approve"
+      "copy": "decision.approved"
     },
-    "reject": {
+    "rejected": {
       "tone": "negative",
       "icon": "rejected",
-      "copy": "decision.reject"
+      "copy": "decision.rejected"
     },
-    "human": {
+    "waiting": {
       "tone": "human",
       "icon": "waiting-human",
-      "copy": "decision.human"
+      "copy": "decision.waiting"
     },
-    "unavailable": {
-      "tone": "caution",
-      "icon": "cannot-confirm",
-      "copy": "decision.unavailable"
-    },
-    "shown": {
-      "tone": "neutral",
-      "icon": "shown-to-human",
-      "copy": "decision.shown"
-    },
-    "limit": {
-      "tone": "caution",
-      "icon": "asking-spent",
-      "copy": "decision.limit"
-    },
-    "ended": {
+    "unanswered": {
       "tone": "neutral",
       "icon": "run-ended",
-      "copy": "decision.ended"
+      "copy": "decision.unanswered"
+    },
+    "deferred": {
+      "tone": "neutral",
+      "icon": "frozen",
+      "copy": "decision.deferred"
+    },
+    "not_asked": {
+      "tone": "neutral",
+      "icon": "open",
+      "copy": "decision.not_asked"
+    }
+  },
+  "assurance": {
+    "assured": {
+      "tone": "audit",
+      "icon": "audit",
+      "copy": "assurance.assured"
+    },
+    "awaiting_audit": {
+      "tone": "caution",
+      "icon": "audit-pending",
+      "copy": "assurance.awaiting_audit"
+    },
+    "audit_failed": {
+      "tone": "negative",
+      "icon": "audit-failed",
+      "copy": "assurance.audit_failed"
+    },
+    "not_approved": {
+      "tone": "neutral",
+      "icon": "open",
+      "copy": "assurance.not_approved"
     }
   },
   "unknown": {

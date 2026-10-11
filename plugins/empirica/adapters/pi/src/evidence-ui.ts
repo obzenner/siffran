@@ -28,6 +28,21 @@ export function canPresent(ctx: ExtensionContext): boolean {
   return Boolean(ctx.hasUI && ctx.ui?.select && ctx.ui?.input);
 }
 
+/**
+ * Where the session can be found again, exactly as Pi's session manager reports it: its id (the label), and its file when it
+ * has one (otherwise the id is the locator). Nothing is invented: a manager that reports no id, throws or is absent gives
+ * none, and the run's session then reads as unknown.
+ */
+export function sessionLocator(ctx: ExtensionContext): { session?: { label: string; locator: string } } {
+  const read = <T>(get: (() => T) | undefined): T | undefined => {
+    try { return get?.call(ctx.sessionManager); } catch { return undefined; }
+  };
+  const id = read(ctx.sessionManager?.getSessionId);
+  if (typeof id !== "string" || id === "") return {};
+  const file = read(ctx.sessionManager?.getSessionFile);
+  return { session: { label: id, locator: typeof file === "string" && file !== "" ? file : id } };
+}
+
 /** The batch a human can be shown now: the core projects it whatever else blocks the run, and says in
  * `prompt_error` why it cannot be shown. The host presents exactly when there is one and no error. */
 export function presentableBatch(result: Response["result"]): ConfirmationBatch | null {

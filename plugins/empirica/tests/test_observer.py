@@ -19,7 +19,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -35,6 +34,7 @@ import validate_ui_view  # noqa: E402
 from application import observer as observer_module  # noqa: E402
 from application import protocol as _proto  # noqa: E402
 from application.observer import Observer  # noqa: E402
+from core.records import RunKey  # noqa: E402
 from assertions import (action_graph, action_investigate, action_research, action_route,  # noqa: E402
                         get_argument, get_run, observe_action, start_run)
 from observer_store import DriverSource, _Builder, _graph, build_store  # noqa: E402
@@ -75,57 +75,76 @@ class ContractTests(unittest.TestCase):
         the plugin's own service actually writes, across every scenario, in both directions."""
         from application.history_records import HISTORY_KINDS
         _, details = _observe()
-        recorded = {step["kind"] for detail in details.values() for step in detail["steps"]}
+        recorded = {step["kind"] for detail in details.values() for step in detail["steps"] or []}
         self.assertEqual(recorded, set(HISTORY_KINDS))
 
 
 class ReasonMessageTests(unittest.TestCase):
-    """Q3a-1: a reason's message is filled in once, by the observer, from the reason's own parameters."""
+    """A reason's wording is chosen and filled once, by ``confirmation.reason_text``; the observer adds only the refusal of
+    a half-filled message and the plainness rules for what reaches a human."""
 
-    def test_the_placeholders_are_the_reason_s_parameters(self):
+    def test_the_placeholders_are_the_reason_s_parameters_and_a_stopped_run_reads_in_the_past(self):
         from core.observer import reason_message
-        self.assertEqual(reason_message("{resource} budget exhausted.", {"resource": "pass"}),
-                         "pass budget exhausted.")
-        self.assertEqual(reason_message("Stale: {scope}.", {"scope": ["C1", "C2"], "claim_id": "C1"}),
-                         "Stale: C1, C2.")
-        self.assertEqual(reason_message("Nothing to fill.", {}), "Nothing to fill.")
+        spec = {"message": "{resource} budget exhausted.", "ended_message": "{resource} budget was spent when the run stopped."}
+        self.assertEqual(reason_message(spec, {"resource": "pass"}), "pass budget exhausted.")
+        self.assertEqual(reason_message(spec, {"resource": "pass"}, ended=True), "pass budget was spent when the run stopped.")
+        # a reason with no ended wording reads the same on a stopped run
+        self.assertEqual(reason_message({"message": "Nothing to fill."}, {}, ended=True), "Nothing to fill.")
+
+    def test_the_observer_words_a_reason_exactly_as_the_author_view_does(self):
+        # one renderer (core.confirmation.reason_text): the observer's text is the core's, for every reason and both tenses
+        from core import confirmation
+        from core.observer import reason_message
+        contract = json.loads((_ROOT / "contracts" / "empirica" / "v2" / "public-contract.json").read_text())
+        for code, spec in contract["reasons"].items():
+            params = {name: "X" for name in spec["params"].get("properties", {})}
+            for ended in (False, True):
+                with self.subTest(code=code, ended=ended):
+                    if "{" in confirmation.reason_text(spec, params, ended=ended):
+                        continue
+                    self.assertEqual(reason_message(spec, params, ended=ended),
+                                     confirmation.reason_text(spec, params, ended=ended))
 
     def test_an_unfillable_or_unsuitable_parameter_is_a_contract_bug_not_half_a_message(self):
         from core.observer import reason_message
-        for template, parameters in (("{resource} spent.", {}), ("{resource} spent.", {"resource": None}),
-                                     ("{resource} spent.", {"resource": {"a": 1}}),
-                                     ("{resource} spent.", {"resource": True})):
+        for parameters in ({}, {"resource": None}, {"resource": {"a": 1}}, {"resource": True}, {"resource": ["a", "b"]}):
             with self.subTest(parameters=parameters), self.assertRaises(ValueError):
-                reason_message(template, parameters)
+                reason_message({"message": "{resource} spent."}, parameters)
 
     def test_no_message_the_observer_emits_keeps_a_placeholder(self):
         _, details = _observe()
-        texts = [r["message"] for d in details.values() for r in d["residuals"]]
-        texts += [c["blocker_message"] for d in details.values() for c in d["claims"] if c["blocker_message"]]
-        self.assertIn("pass budget exhausted.", texts)
+        texts = [r["message"] for d in details.values() for r in d["residuals"] or []]
+        texts += [i["message"] for d in details.values() for i in d["outstanding"] or []]
+        texts += [c["blocker_message"] for d in details.values() for c in d["claims"] or [] if c["blocker_message"]]
+        self.assertIn("pass budget was exhausted when the run stopped.", texts)
         self.assertEqual([t for t in texts if "{" in t or "}" in t], [])
-
 
     def test_every_reason_the_core_can_emit_has_its_placeholders_among_its_required_params(self):
         import re
         contract = json.loads((_ROOT / "contracts" / "empirica" / "v2" / "public-contract.json").read_text())
         for code, reason in contract["reasons"].items():
-            placeholders = set(re.findall(r"\{(\w+)\}", reason["message"]))
-            self.assertLessEqual(placeholders, set(reason["params"].get("required", ())), code)
+            for text in (reason["message"], reason.get("ended_message", "")):
+                placeholders = set(re.findall(r"\{(\w+)\}", text))
+                self.assertLessEqual(placeholders, set(reason["params"].get("required", ())), code)
 
     def test_every_registry_message_that_reaches_the_ui_is_one_plain_sentence(self):
         from core.observer import message_problems
         contract = json.loads((_ROOT / "contracts" / "empirica" / "v2" / "public-contract.json").read_text())
-        problems = [p for code, reason in contract["reasons"].items() for p in message_problems(code, reason["message"])]
+        problems = [p for code, reason in contract["reasons"].items() for p in message_problems(code, reason)]
         self.assertEqual(problems, [])
+        # every reason a run can show as unresolved on a stopped run has its own ended wording
+        from core.observer import UI_REASON_FAMILIES
+        self.assertEqual([c for c in contract["reasons"] if c.startswith(UI_REASON_FAMILIES)
+                          and "ended_message" not in contract["reasons"][c]], [])
 
     def test_negative_control_the_old_paragraph_and_a_jargon_word_are_caught(self):
         from core.observer import message_problems
         old = ("Research or a decision waits on a human, and nothing else blocks the run. The host shows the pending set "
                "once per derivation, at most one batch of the items below, and the human answers in one receipt.")
-        self.assertEqual(len(message_problems("evidence.confirmation_required", old)), 3)  # too long, derivation, receipt
-        self.assertEqual(len(message_problems("claim.refuted", "Fold-1 research refutes it.")), 1)
-        self.assertEqual(message_problems("governance.auto_ceiling", "x" * 300), [])  # not shown to a human
+        self.assertEqual(len(message_problems("evidence.confirmation_required", {"message": old})), 3)  # too long, derivation, receipt
+        self.assertEqual(len(message_problems("claim.refuted", {"message": "Fold-1 research refutes it."})), 1)
+        self.assertEqual(len(message_problems("claim.refuted", {"message": "Fine.", "ended_message": "A receipt."})), 1)
+        self.assertEqual(message_problems("governance.auto_ceiling", {"message": "x" * 300}), [])  # not shown to a human
 
     def test_one_reason_that_cannot_be_worded_makes_one_run_unreadable_not_the_store(self):
         from unittest.mock import patch
@@ -133,11 +152,11 @@ class ReasonMessageTests(unittest.TestCase):
         real = core_observer.project
         calls = []
 
-        def project(snapshot, messages):
+        def project(snapshot, reasons, **kwargs):
             calls.append(1)
             if len(calls) == 1:
                 raise ValueError("unfillable placeholder")
-            return real(snapshot, messages)
+            return real(snapshot, reasons, **kwargs)
         def unreadable(view):
             return sum(1 for p in view["projects"] for run in p["runs"] if run["diagnostic"] == "unreadable")
         baseline = unreadable(Observer(DriverSource(build_store())).view())
@@ -148,40 +167,40 @@ class ReasonMessageTests(unittest.TestCase):
 
 
 class ProjectLabelTests(unittest.TestCase):
-    """Q3b-8: the observer names each project; the label never depends on its place in the view."""
+    """U1-9: the observer names each project, unique across the store, never by its place in the view."""
 
     def test_a_project_is_its_folder_name_or_the_word_for_an_unnamed_one(self):
         view, _ = _observe()
-        labels = {p["name"]: p["label"] for p in view["projects"]}
-        unnamed = next(p for p in view["projects"] if p["name"] is None)
-        self.assertEqual(labels, {"atlas": "atlas", "harbor": "harbor", "lumen": "lumen", None: labels[None]})
-        # Told apart by a human fact, when the project began (UTC), never by an id.
-        moment = time.gmtime(unnamed["since"])
-        self.assertEqual(labels[None], f"Unnamed project · since {moment.tm_mday} "
-                                       f"{('Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec').split()[moment.tm_mon - 1]}")
+        labels = {p["id"]: p["label"] for p in view["projects"]}
+        names = {p["name"]: p["label"] for p in view["projects"] if p["name"] not in {"tiles"}}
+        self.assertEqual(names, {"atlas": "atlas", "harbor": "harbor", "lumen": "lumen", "prism": "prism",
+                                 None: "Unnamed project"})
+        self.assertEqual(len(set(labels.values())), len(labels))
 
-    def test_two_unnamed_projects_read_differently(self):
-        from application.observer import _unnamed
-        self.assertNotEqual(_unnamed(1_700_000_000.0), _unnamed(1_700_000_000.0 + 40 * 86400))
-        self.assertEqual(_unnamed(None), "Unnamed project")
+    def test_two_folders_of_one_name_are_told_apart_by_the_shortest_differing_path_suffix(self):
+        view, _ = _observe()
+        tiles = sorted(p["label"] for p in view["projects"] if p["name"] == "tiles")
+        self.assertEqual(tiles, ["north/tiles", "south/tiles"])
 
-    def test_unnamed_projects_of_a_real_store_read_differently_by_a_finer_time(self):
-        from application.observer import _tell_apart, _unnamed
-        day = 1_758_000_000.0  # one day, as on the owner's store: eleven unnamed projects began on 23 Sep
-        shapes = [day + 60 * i for i in range(11)] + [day + 3600, day + 86400 * 2, day + 86400 * 2 + 5, day + 86400 * 2 + 5.25]
-        rows = [{"name": None, "label": "Unnamed project", "since": t} for t in shapes]
-        rows.append({"name": "atlas", "label": "atlas", "since": day})
-        rows.append({"name": None, "label": "Unnamed project", "since": None})
-        self.assertGreater(len(shapes), len({_unnamed(t) for t in shapes}), "the day alone told them apart: not a real-store shape")  # control
-        _tell_apart(rows)
-        labels = [r["label"] for r in rows]
-        self.assertEqual(len(labels), len(set(labels)), labels)
-        self.assertEqual(rows[-2]["label"], "atlas")
-        self.assertTrue(all(not any(ch.isdigit() for ch in r["label"].split("since")[0]) and "sha256" not in r["label"] for r in rows))
-        # a lone unnamed project keeps the short form; the finer form is used only where it is needed
-        lone = [{"name": None, "label": "Unnamed project", "since": day}, {"name": None, "label": "Unnamed project", "since": day + 90000}]
-        _tell_apart(lone)
-        self.assertTrue(all(len(r["label"].split("since ")[1].split()) == 2 for r in lone), lone)
+    def test_the_label_is_the_shortest_that_is_unique_and_a_tie_gets_a_short_stable_key(self):
+        from application.observer import _tell_apart
+        def rows(*repos):
+            return [{"id": f"s256-{i:02x}" + "ab" * 31, "name": r.rsplit("/", 1)[-1] if r else None, "repo": r, "label": ""}
+                    for i, r in enumerate(repos)]
+        deep = rows("/a/x/tiles", "/b/x/tiles", "/c/y/tiles", "/work/atlas")
+        _tell_apart(deep)
+        self.assertEqual([r["label"] for r in deep], ["a/x/tiles", "b/x/tiles", "y/tiles", "atlas"])
+        # the same path under two storage ids, and projects no repository matched: the key of the id is the last resort
+        tie = rows("/w/atlas", "/w/atlas", None, None)
+        _tell_apart(tie)
+        labels = [r["label"] for r in tie]
+        self.assertEqual(len(set(labels)), 4, labels)
+        self.assertTrue(all(name.startswith(("atlas · ", "Unnamed project · ")) for name in labels), labels)
+        self.assertTrue(all("sha256" not in name and len(name.split(" · ")[1]) == 6 for name in labels), labels)
+        # nothing to tell apart: the short forms stay
+        alone = rows("/w/atlas", None)
+        _tell_apart(alone)
+        self.assertEqual([r["label"] for r in alone], ["atlas", "Unnamed project"])
 
     def test_a_project_knows_when_its_oldest_run_last_changed(self):
         view, _ = _observe()
@@ -194,8 +213,105 @@ class ProjectLabelTests(unittest.TestCase):
         store.times = {k: -t for k, t in store.times.items()}  # the opposite recency
         after = Observer(DriverSource(store)).view()["projects"]
         self.assertNotEqual([p["id"] for p in after], list(before))
-        named = {p["id"]: p["label"] for p in after if p["name"] is not None}
-        self.assertEqual(named, {k: v for k, v in before.items() if k in named})
+        self.assertEqual({p["id"]: p["label"] for p in after}, before)
+
+
+class HistoryStepTests(unittest.TestCase):
+    """U1-7: every history step says what it is about, the human's outcome, and whether the claim it names still stands."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.view, cls.details = _observe()
+        cls.rows = _rows(cls.view)
+
+    def test_INVARIANT_a_step_stands_exactly_as_the_public_argument_says_of_its_claim(self):
+        # Oracle: GetArgument's current claims (wording digest) and its artifacts (the claim and wording each was recorded for).
+        seen = {"current": 0, "replaced": 0, "gone": 0}
+        for key, row in self.rows.items():
+            if row["claims"] is None or not row["claims"]:
+                continue
+            argument = _STORE.driver.request(get_argument(run_id=_handle(key)))["result"]["argument"]
+            wording = {c["claim_id"]: c["wording_digest"] for c in argument["claims"]}
+            recorded = [a for a in argument["artifacts"] if a["kind"] in {"research", "spike_request", "spike"}]
+            steps = [s for s in self.details[key]["steps"] if s["kind"] in {"research", "spike_request", "spike"}]
+            self.assertEqual([(s["kind"], s["claim"]) for s in steps], [(a["kind"], a["claim_id"]) for a in recorded], key)
+            for step, artifact in zip(steps, recorded):
+                want = ("gone" if artifact["claim_id"] not in wording
+                        else "replaced" if artifact["claim_digest"] != wording[artifact["claim_id"]] else "current")
+                self.assertEqual(step["standing"], want, (key, step))
+                seen[want] += 1
+        self.assertTrue(all(seen.values()), seen)  # the oracle must see all three, or "always current" would pass
+
+    def test_a_human_answer_and_the_end_of_a_run_are_steps_with_their_subject_and_outcome(self):
+        steps = [s for d in self.details.values() for s in d["steps"] or []]
+        answers = [s for s in steps if s["kind"] == "evidence_confirmation" and not s["terminal"]]
+        self.assertEqual({s["outcome"] for s in answers} & {"confirm", "reject"}, {"confirm", "reject"})
+        self.assertEqual({s["subject"] for s in answers if s["outcome"] in {"confirm", "reject"}}, {"record"})
+        self.assertEqual({s["subject"] for s in steps if s["kind"] in {"graph", "audit_verdict", "attribution"}}, {"run"})
+        ends = [s for s in steps if s["terminal"]]
+        self.assertTrue(ends)
+        self.assertEqual({(s["subject"], s["claim"], s["standing"]) for s in ends}, {("run", None, None)})
+
+
+    def test_the_core_says_which_steps_are_bookkeeping_and_the_human_s_consent_never_is(self):
+        steps = [s for d in self.details.values() for s in d["steps"] or []]
+        self.assertEqual({s["kind"] for s in steps if s["bookkeeping"]}, {"observation_basis", "attribution"})
+        self.assertFalse(any(s["bookkeeping"] for s in steps if s["terminal"] or s["kind"] in {"evidence_confirmation", "audit_verdict"}))
+
+
+class AttemptFamilyTests(unittest.TestCase):
+    """U1-10: attempts at one session are listed chronologically, by generation, whatever a file's modification time says."""
+
+    def test_INVARIANT_a_family_lists_its_attempts_by_generation_whatever_the_times_say(self):
+        import itertools
+        key = _STORE.expect["attempts"]
+        project_id, run_id, _ = key.split("/")
+        n = sum(1 for p in _observe()[0]["projects"] for r in p["runs"] if r["project"] == project_id and r["run"] == run_id)
+        self.assertGreaterEqual(n, 3)
+        for order in itertools.permutations(range(n)):
+            store = build_store()
+            for generation, rank in zip(range(1, n + 1), order):
+                store.times[RunKey(project_id, run_id, generation)] = 1000.0 + 100 * rank
+            view = Observer(DriverSource(store)).view()
+            project = next(p for p in view["projects"] if p["id"] == project_id)
+            family = next(f for f in project["families"] if f["run"] == run_id)
+            self.assertEqual(family["attempts"], [f"{project_id}/{run_id}/{g}" for g in range(1, n + 1)], order)
+        # control: in the store as built the first attempt was touched last, so the runs (newest first by time) are not in
+        # generation order: ordering attempts by time would have been caught
+        built = next(p for p in _observe()[0]["projects"] if p["id"] == project_id)
+        self.assertNotEqual([r["generation"] for r in built["runs"] if r["run"] == run_id], [3, 2, 1])
+        self.assertNotEqual([r["generation"] for r in built["runs"] if r["run"] == run_id], list(range(1, n + 1)))
+
+    def test_every_run_is_in_exactly_one_family_and_a_run_row_carries_its_goal_and_session(self):
+        view, _ = _observe()
+        for project in view["projects"]:
+            listed = sorted(k for f in project["families"] for k in f["attempts"])
+            self.assertEqual(listed, sorted(r["key"] for r in project["runs"]))
+        goals = {r["goal"] for p in view["projects"] for r in p["runs"] if r["key"].split("/")[1] == _STORE.expect["attempts"].split("/")[1]}
+        self.assertGreaterEqual(len(goals), 3)
+
+
+class CoverageTests(unittest.TestCase):
+    """U1-4: what was not read is unknown, never zero, and the view says how much was read."""
+
+    def test_the_view_counts_the_runs_it_read_and_those_it_could_not(self):
+        view, _ = _observe()
+        rows = list(_rows(view).values())
+        self.assertEqual(view["coverage"]["runs"], len(rows))
+        self.assertEqual(view["coverage"]["unreadable"], sum(r["diagnostic"] == "unreadable" for r in rows))
+        self.assertGreater(view["coverage"]["unreadable"], 0)
+        self.assertGreater(view["coverage"]["partial"], 0)
+        self.assertEqual(view["coverage"]["read"] + view["coverage"]["unreadable"] + view["coverage"]["partial"], len(rows))
+
+    def test_INVARIANT_a_run_that_was_not_read_has_null_facts_never_empty_or_zero_ones(self):
+        view, details = _observe()
+        for key, row in _rows(view).items():
+            if row["diagnostic"] is None:
+                continue
+            for field in ("audit", "attention", "progress", "root", "claims", "edges"):
+                self.assertIsNone(row[field], (key, field))
+            for field in ("residuals", "outstanding", "stale", "steps", "claims"):
+                self.assertIsNone(details[key][field], (key, field))
 
 
 class VerificationFactsTests(unittest.TestCase):
@@ -208,19 +324,22 @@ class VerificationFactsTests(unittest.TestCase):
         cls.claims = {c["id"]: c for c in cls.detail["claims"]}
 
     def record(self, claim):
-        (record,) = self.claims[claim]["records"]
+        # C4's rejected log is the one that matters here; the agent's replacement for it is a second record.
+        record, *replacements = self.claims[claim]["records"]
+        self.assertEqual(len(replacements), claim == "C4")
         return record
 
-    def test_each_record_states_its_class_status_and_route(self):
-        rows = {claim: {k: self.record(claim)[k] for k in ("class", "status", "route", "retrieve")}
+    def test_each_record_states_its_class_status_and_who_it_waits_on(self):
+        rows = {claim: {k: self.record(claim)[k] for k in ("class", "status", "wait", "retrieve")}
                 for claim in ("C1", "C2", "C3", "C4", "C5", "C6")}
+        human = {"who": "human", "where": "next_report"}
         self.assertEqual(rows, {
-            "C1": {"class": "verbatim", "status": "verified_by_service", "route": None, "retrieve": True},
-            "C2": {"class": "retrievable", "status": "pending", "route": "audit", "retrieve": True},
-            "C3": {"class": "retrievable", "status": "confirmed_by_human", "route": None, "retrieve": False},
-            "C4": {"class": "observed", "status": "rejected_by_human", "route": None, "retrieve": False},
-            "C5": {"class": "retrievable", "status": "pending", "route": "human", "retrieve": False},
-            "C6": {"class": "observed", "status": "pending", "route": "human", "retrieve": False}})
+            "C1": {"class": "verbatim", "status": "verified_by_service", "wait": None, "retrieve": True},
+            "C2": {"class": "retrievable", "status": "pending", "wait": {"who": "auditor", "where": "next_turn"}, "retrieve": True},
+            "C3": {"class": "retrievable", "status": "confirmed_by_human", "wait": None, "retrieve": False},
+            "C4": {"class": "observed", "status": "rejected_by_human", "wait": None, "retrieve": False},
+            "C5": {"class": "retrievable", "status": "pending", "wait": human, "retrieve": False},
+            "C6": {"class": "observed", "status": "pending", "wait": human, "retrieve": False}})
 
     def test_an_observed_record_carries_why_no_spike_could_establish_it_and_the_human_s_note(self):
         self.assertEqual(self.record("C4")["spike_unavailable"], "The job only runs on the nightly cluster.")
@@ -228,20 +347,20 @@ class VerificationFactsTests(unittest.TestCase):
         self.assertEqual(self.record("C3")["note"], "Checked the format page myself.")
         self.assertEqual((self.record("C1")["spike_unavailable"], self.record("C1")["note"]), (None, None))
 
-    def test_what_waits_on_a_human_is_listed_per_claim_and_audit_routed_research_is_not(self):
-        self.assertEqual(self.detail["waiting"], [
-            {"claim": "C5", "route": "human", "records": 1, "decision": False},
-            {"claim": "C6", "route": "human", "records": 1, "decision": False},
-            {"claim": "C7", "route": "human", "records": 0, "decision": True}])
+    def test_what_waits_on_a_human_is_outstanding_per_claim_grouped_and_audit_routed_research_is_not(self):
+        human = [i for i in self.detail["outstanding"] if i["who"] == "human"]
+        self.assertEqual([(i["need"], i["claims"], i["where"]) for i in human],
+                         [("evidence.confirmation_required", ["C5", "C6", "C7"], "next_report")])
 
     def test_a_needs_decision_claim_says_whether_it_is_answered(self):
-        self.assertEqual(self.claims["C7"]["decision"], {"outcome": None, "answer": None, "route": "human"})
+        self.assertEqual(self.claims["C7"]["decision"],
+                         {"status": "waiting", "outcome": None, "answer": None, "where": "next_report"})
         self.assertIsNone(self.claims["C1"]["decision"])
 
 
 class WaitingOwnerTests(unittest.TestCase):
-    """R3 M2: what waits on a human is the run view's ``confirmation_batch``, nothing else. It is empty when the run is
-    not active, and it says when the batch was already shown or the run's interactions are spent."""
+    """R3 M2: what waits on a human is the run view's ``confirmation_batch``, nothing else (the owner of ``where``). It is empty
+    when the run is not active, and it says when the batch was already shown or the run's interactions are spent."""
 
     @staticmethod
     def _run(answer: bool = False, present: bool = False, limit: bool = False):
@@ -273,35 +392,267 @@ class WaitingOwnerTests(unittest.TestCase):
     def _detail(details):
         return next(iter(details.values()))
 
-    def test_a_run_a_host_will_ask_lists_its_batch(self):
-        _, details = self._run()
-        d = self._detail(details)
-        self.assertEqual(d["prompt_error"], None)
-        self.assertEqual([(w["claim"], w["route"], w["records"]) for w in d["waiting"]], [("C1", "human", 1), ("C2", "human", 1)])
+    def _human(self, details):
+        return [i for i in self._detail(details)["outstanding"] if i["who"] == "human"]
 
-    def test_a_batch_already_shown_reads_shown_everywhere_and_is_not_promised_again(self):
-        _, details = self._run(present=True)
-        d = self._detail(details)
-        self.assertEqual(d["prompt_error"], "already_presented")
-        self.assertEqual({w["route"] for w in d["waiting"]}, {"shown"})
-        self.assertEqual({r["route"] for c in d["claims"] for r in c["records"] if r["status"] == "pending"}, {"shown"})
+    def test_a_run_a_host_will_ask_needs_you_and_lists_its_batch(self):
+        rows, details = self._run()
+        self.assertEqual(next(iter(rows.values()))["attention"], "needs_you")
+        self.assertEqual([(i["claims"], i["where"]) for i in self._human(details)], [(["C1", "C2"], "next_report")])
 
-    def test_when_the_runs_interactions_are_spent_it_says_so(self):
-        _, details = self._run(answer=True, limit=True)
-        d = self._detail(details)
-        self.assertEqual(d["prompt_error"], "interaction_limit")
-        self.assertEqual({w["route"] for w in d["waiting"]}, {"limit"})
+    def test_a_batch_already_shown_is_only_asked_again_by_an_explicit_report(self):
+        rows, details = self._run(present=True)
+        self.assertEqual(next(iter(rows.values()))["attention"], "needs_you")  # still the human's to answer, and reachable
+        self.assertEqual({i["where"] for i in self._human(details)}, {"explicit_report"})
+        self.assertEqual({r["wait"]["where"] for c in self._detail(details)["claims"] for r in c["records"]
+                          if r["status"] == "pending"}, {"explicit_report"})
 
-    def test_a_stopped_run_waits_on_nobody(self):
-        _, details = _observe()
+    def test_when_the_runs_interactions_are_spent_it_says_so_and_nobody_is_promised_a_question(self):
+        rows, details = self._run(answer=True, limit=True)
+        self.assertEqual({i["where"] for i in self._human(details)}, {"limit"})
+        self.assertEqual(next(iter(rows.values()))["attention"], "not_ended")
+
+    def test_INVARIANT_a_row_names_the_obligation_its_detail_lists_first_the_human_s_when_they_are_asked(self):
+        view, details = _observe()
+        seen = set()
+        for key, row in _rows(view).items():
+            if row["diagnostic"] is not None:
+                self.assertIsNone(row["next"], key)
+                continue
+            items = details[key]["outstanding"]
+            reachable = [i for i in items if i["who"] == "human" and i["where"] in ("next_report", "explicit_report")]
+            first = (reachable or items)[:1]
+            self.assertEqual(row["next"], {k: first[0][k] for k in ("who", "where", "message")} if first else None, key)
+            seen.add((row["attention"], row["next"] and row["next"]["who"]))
+        # control: the store holds a human's turn, someone else's, and a run owing nothing, so none of this is vacuous
+        self.assertGreaterEqual(seen, {("needs_you", "human"), ("ended", None)})
+        self.assertTrue({who for _, who in seen} - {None, "human"})
+
+    def test_a_stopped_run_waits_on_nobody_and_owes_nothing(self):
+        rows, details = _observe()
+        view = _rows(rows)
         stopped = details[_STORE.expect["decision"]]
-        self.assertEqual((stopped["waiting"], stopped["prompt_error"]), ([], None))
+        self.assertEqual(stopped["outstanding"], [])
+        self.assertEqual(view[_STORE.expect["decision"]]["attention"], "ended")
         pending = [c["decision"] for c in stopped["claims"] if c["decision"] and c["decision"]["outcome"] is None]
         self.assertTrue(pending)
-        self.assertEqual({d["route"] for d in pending}, {"ended"})
+        self.assertEqual({d["status"] for d in pending}, {"unanswered"})
+        self.assertEqual({d["where"] for d in pending}, {None})
         # control: the active run in the same store does list what waits, so "always empty" would be caught
-        self.assertTrue(details[_STORE.expect["verification"]]["waiting"])
-        self.assertNotIn("ended", {d["decision"]["route"] for d in details[_STORE.expect["verification"]]["claims"] if d["decision"]})
+        self.assertTrue(details[_STORE.expect["verification"]]["outstanding"])
+        self.assertNotIn("unanswered", {d["decision"]["status"] for d in details[_STORE.expect["verification"]]["claims"] if d["decision"]})
+
+
+class ProposedCeilingsTests(unittest.TestCase):
+    def test_INVARIANT_ceilings_are_proposed_exactly_while_a_proposal_waits_on_the_human(self):
+        _, details = _observe()
+        pending = [d["governance"] for d in details.values() if d["governance"] and d["governance"]["proposal_pending"]]
+        settled = [d["governance"] for d in details.values() if d["governance"] and not d["governance"]["proposal_pending"]]
+        self.assertTrue(pending and settled)  # control: both kinds are in the store
+        self.assertTrue(all(g["proposed"] is not None for g in pending))
+        self.assertTrue(all(g["proposed"] is None for g in settled))
+
+
+class DecisionApplicabilityTests(unittest.TestCase):
+    """A human decision says whether it applies (U1-6): answered, waiting, deferred out of scope, or not asked."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.view, cls.details = _observe()
+        cls.rows = _rows(cls.view)
+
+    def test_ST_08_a_decision_claim_added_after_the_freeze_is_a_valid_view_and_reads_deferred(self):
+        # The reproduction through the real service: out of scope and unanswered used to have no outcome and no route,
+        # which the contract's own validator rejected as malformed.
+        self.assertEqual(validate_ui_view.check(self.view, self.details), [])
+        key = _STORE.expect["deferred-decision"]
+        decision = next(c["decision"] for c in self.details[key]["claims"] if c["decision"])
+        self.assertEqual((decision["status"], decision["outcome"], decision["where"]), ("deferred", None, None))
+        self.assertFalse(next(c for c in self.rows[key]["claims"] if c["kind"] == "needs-decision")["gating"])
+
+    def test_INVARIANT_every_decision_in_every_run_reads_what_the_core_says_of_it(self):
+        # Oracle: the public GetArgument projection of the same run (answer present, scope, state), never the observer.
+        checked = {"approved": 0, "rejected": 0, "waiting": 0, "unanswered": 0, "deferred": 0, "not_asked": 0}
+        for key, row in self.rows.items():
+            if row["claims"] is None or not row["claims"]:
+                continue
+            argument = _STORE.driver.request(get_argument(run_id=_handle(key)))["result"]["argument"]
+            for claim in argument["claims"]:
+                if claim["kind"] != "needs-decision":
+                    continue
+                decision = next(c for c in self.details[key]["claims"] if c["id"] == claim["claim_id"])["decision"]
+                answered = claim.get("human_decision")
+                if answered is not None:
+                    want = {"approve": "approved", "reject": "rejected"}[answered["outcome"]]
+                elif claim["gating"]:
+                    want = (("waiting" if row["state"] == "active" else "unanswered")
+                            if claim["state"] == "blocked" else "not_asked")
+                else:
+                    want = "deferred"
+                self.assertEqual(decision["status"], want, f"{key} {claim['claim_id']}")
+                self.assertEqual(decision["outcome"] is not None, answered is not None, key)
+                self.assertEqual(decision["where"] is not None, want == "waiting", key)
+                checked[want] += 1
+        # the oracle must see more than one standing, or an always-"waiting" observer would pass
+        self.assertGreaterEqual(sum(1 for n in checked.values() if n), 3, checked)
+
+
+class AuditSelectorTests(unittest.TestCase):
+    """U5 V2: the current pending audit child and the latest audit verdict are each selected once, at the evaluation owner;
+    acceptance, the audit summary and the observer consume the same two functions."""
+
+    def test_acceptance_the_summary_and_the_observer_select_through_the_same_two_functions(self):
+        from core import evaluation, observer as core_observer, projection
+        self.assertTrue(callable(evaluation.audit_pending) and callable(evaluation.latest_audit_verdict))
+        self.assertIs(projection.audit_pending, evaluation.audit_pending)
+        self.assertIs(projection.latest_audit_verdict, evaluation.latest_audit_verdict)
+        self.assertIs(core_observer.latest_audit_verdict, evaluation.latest_audit_verdict)
+
+
+class PresentabilityTests(unittest.TestCase):
+    """U4 H2: whether a human is shown the batch has one owner (``core.confirmation``): the observer's reachable places, the
+    host mediator's predicate and the places of the prompt errors cannot drift apart."""
+
+    def test_the_places_a_human_is_reached_are_exactly_those_of_the_errors_a_report_presents_or_looks_under(self):
+        from adapters.confirmation import presentable
+        from core import confirmation
+        from core.observer import HUMAN_REACHABLE
+        errors = (None, *confirmation.PROMPT_ERRORS)
+        self.assertEqual({e for e in errors if confirmation.ask_where(e) in HUMAN_REACHABLE}, set(confirmation.REPRESENTABLE))
+        # An unknown availability is its own place, not a promise: ASKABLE (the gate's "may look") stays distinct.
+        self.assertEqual(confirmation.ask_where(confirmation.UNOBSERVED), "if_available")
+        self.assertNotIn("if_available", HUMAN_REACHABLE)
+        self.assertTrue(set(confirmation.ASKABLE) - set(confirmation.REPRESENTABLE) == {confirmation.UNOBSERVED})
+        for error in errors:
+            result = {"run": {"confirmation_batch": {"prompt_error": error}}}
+            self.assertEqual(presentable(result) is not None, error in confirmation.REPRESENTABLE, error)
+            self.assertEqual(confirmation.presentable({"prompt_error": error}), error in confirmation.REPRESENTABLE, error)
+
+
+class HistoricalFactsTests(unittest.TestCase):
+    """U3 F3: what a stopped run says it left unresolved is read from what was recorded when it stopped (its observation
+    basis), never from today's files; today's evaluation is its own section, published only when it differs."""
+
+    @staticmethod
+    def _read(b):
+        view, details = Observer(DriverSource(b.store)).observe()
+        row = view["projects"][0]["runs"][0]
+        return row, details[row["key"]]
+
+    @staticmethod
+    def _stopped_with_spike():
+        b = _Builder()
+        run = b.begin("probe", "drift", "Stop with a passing experiment", _graph(
+            "C0", [("C0", "ordinary", "Goal"), ("C1", "needs-experiment", "Experiment")], [("C0", "C1")]))
+        b.research(run, "C0")
+        b.research(run, "C1")
+        b.spike(run, "C1", "python check.py", {"check.py": b"old\n"})
+        b.evaluate(run, "stop")
+        return b
+
+    def test_the_workspace_changing_after_a_stop_does_not_rewrite_what_the_stop_left(self):
+        b = self._stopped_with_spike()
+        before_row, before = self._read(b)
+        self.assertIsNone(before["now"], "nothing changed since it stopped")
+        b.write("check.py", b"new\n")
+        row, after = self._read(b)
+        self.assertEqual(after["residuals"], before["residuals"], "what the stop left is read from the stop")
+        self.assertEqual([c["state"] for c in before_row["claims"]], ["approved", "approved"])
+        self.assertEqual([(c["state"], c["blocker"]) for c in row["claims"]],
+                         [("open", "claim.spike_stale")] * 2, "what is true now is read from now (the root rests on it)")
+        self.assertEqual(row["progress"]["approved"], 0)
+        self.assertNotEqual(row["version"], before_row["version"])
+        self.assertEqual([r["code"] for r in after["now"]], ["claim.spike_stale", "audit.required"],
+                         "today's requirements: the stale proof, then the audit the report would still ask")
+        self.assertTrue(after["stale"], "the files that changed are still listed")
+
+    def test_a_stop_publishes_its_basis_scope_and_status(self):
+        b = self._stopped_with_spike()
+        _, detail = self._read(b)
+        self.assertEqual(detail["stop"], {"basis": "recorded", "status": "stopped_residual", "frozen": False,
+                                          "required": ["C0", "C1"], "deferred": []})
+
+    def test_a_basis_that_does_not_hold_the_stop_is_unavailable_not_inferred(self):
+        b = self._stopped_with_spike()
+        with mock.patch.object(observer_module, "recorded_observations", return_value=None):
+            row, detail = self._read(b)
+        self.assertEqual(detail["stop"]["basis"], "unavailable")
+        self.assertIsNone(detail["residuals"])
+        self.assertEqual(validate_ui_view.check(*Observer(DriverSource(b.store)).observe()), [])
+
+    def test_a_record_that_lacks_a_path_the_spikes_bind_holds_nothing(self):
+        from application import snapshot as snapshot_module
+        b = self._stopped_with_spike()
+        real = snapshot_module.required_paths
+        seen = []
+        original = snapshot_module.recorded_observations
+
+        def recording(history, state, heads):
+            seen.append(original(history, state, heads))
+            with mock.patch.object(snapshot_module, "required_paths", lambda h: (*real(h), "never/recorded.py")):
+                seen.append(original(history, state, heads))
+            return seen[0]
+        with mock.patch.object(observer_module, "recorded_observations", recording):
+            self._read(b)
+        self.assertEqual([x is None for x in seen], [False, True])
+
+    def test_a_frozen_stop_lists_the_required_claims_it_left_unresolved_with_what_it_deferred(self):
+        b = _Builder()
+        run = b.begin("probe", "frozen", "Frozen stop", _graph(
+            "C0", [("C0", "needs-experiment", "Spike-backed")], []))
+        b.research(run, "C0")
+        b.spike(run, "C0", "python check.py", {"check.py": b"old\n"})
+        b.freeze(run)
+        b.write("check.py", b"new\n")
+        b.a.dispatch(b.drv, observe_action(run_id=run, action=action_graph(_graph(
+            "C0", [("C0", "needs-experiment", "Spike-backed"), ("C1", "ordinary", "Added after")], [("C0", "C1")]))))
+        b.evaluate(run, "stop")
+        row, detail = self._read(b)
+        self.assertEqual(row["state"], "stopped_frozen")
+        self.assertEqual({r["code"] for r in detail["residuals"]}, {"freeze.deferred", "claim.spike_stale"})
+        self.assertEqual(detail["stop"]["required"], ["C0"])
+        self.assertEqual(detail["stop"]["deferred"], ["C1"])
+
+
+class SpikeProofTests(unittest.TestCase):
+    """U3 F4: a claim's proof is each retained spike (what ran, how it ended, which bytes it bound, whether it still holds),
+    read from the same dossier the plugin publishes, never a count."""
+
+    @staticmethod
+    def _built():
+        b = _Builder()
+        run = b.begin("probe", "spiked", "Spiked claim", _graph("C0", [("C0", "needs-experiment", "Experiment")], []))
+        b.research(run, "C0")
+        b.spike(run, "C0", "python check.py", {"check.py": b"old\n"})
+        b.spike(run, "C0", "python check.py --strict", {"check.py": b"old\n"}, exit_code=1)
+        return b, run
+
+    @staticmethod
+    def _proof(b):
+        _, details = Observer(DriverSource(b.store)).observe()
+        (detail,) = details.values()
+        return detail["claims"][0]["proof"]
+
+    def test_each_retained_spike_carries_its_command_result_files_and_standing(self):
+        b, run = self._built()
+        dossier = [a for a in b.a.dispatch(b.drv, get_argument(run_id=run))["result"]["argument"]["artifacts"]
+                   if a["kind"] == "spike"]
+        proof = self._proof(b)
+        self.assertEqual([(p["command"], p["outcome"], p["exit_code"], p["gate"]) for p in proof],
+                         [(a["command"], a["outcome"], a["exit_code"], a["spike_gate"]) for a in dossier])
+        self.assertEqual([p["files"] for p in proof], [a["file_bindings"] for a in dossier])
+        self.assertEqual([p["state"] for p in proof], ["superseded", "current"])
+        self.assertEqual({p["output"] for p in proof}, {"not_retained"})
+
+    def test_a_spike_whose_files_changed_is_stale_and_keeps_its_command(self):
+        b, _ = self._built()
+        b.write("check.py", b"new\n")
+        self.assertEqual([p["state"] for p in self._proof(b)], ["superseded", "stale"])
+
+    def test_a_claim_without_a_spike_has_an_empty_proof(self):
+        view, details = Observer(DriverSource(_STORE)).observe()
+        proofs = [c["proof"] for d in details.values() for c in d["claims"] or []]
+        self.assertTrue(all(isinstance(p, list) for p in proofs) and any(p == [] for p in proofs) and any(proofs))
 
 
 class AgreementTests(unittest.TestCase):
@@ -330,23 +681,57 @@ class AgreementTests(unittest.TestCase):
             argument = self._public(key, get_argument)
             runview = self._public(key, get_run)["run"]
             states = {c["claim_id"]: (c["state"], c["kind"], c["gating"]) for c in argument["argument"]["claims"]}
-            self.assertEqual({c["id"]: (c["state"], c["kind"], c["gating"]) for c in row["claims"]},
-                             states, key)
-            self.assertEqual(row["audit"], runview["audit"]["state"], key)
-            self.assertEqual(row["state"], runview["status"], key)
             detail = self.details[key]
-            self.assertEqual([r["code"] for r in detail["residuals"]],
-                             [r["code"] for r in runview["residuals"]], key)
+            # Claims are the argument's as of now, always; an ended run whose files changed has today's requirements beside
+            # its stop's residuals (every unmet obligation of the author view but the consent to end it).
+            self.assertEqual({c["id"]: (c["state"], c["kind"], c["gating"]) for c in row["claims"]}, states, key)
+            if detail["now"] is not None:
+                unmet = {o["missing"]["code"] for o in runview["obligations"]["active"]
+                         if o["status"] != "satisfied" and o["missing"] and o.get("hold") != "deferred"}
+                self.assertEqual(sorted({r["code"] for r in detail["now"]}),
+                                 sorted(unmet - {"governance.terminal_stop_pending"}), key)
+            else:
+                self.assertEqual(sorted({r["code"] for r in detail["residuals"]}),
+                                 sorted({r["code"] for r in runview["residuals"]}), key)
+            self.assertEqual(row["audit"], {k: runview["audit"][k] for k in ("verdict", "current", "pending", "independence")}, key)
+            self.assertEqual(row["state"], runview["status"], key)
             self.assertEqual(detail["stale"], runview["freshness"]["changes"], key)
             self.assertEqual(detail["audit"]["findings"], runview["audit"]["findings"], key)
             checked += 1
         self.assertGreaterEqual(checked, 6)
 
+    def test_governance_is_the_plugin_s_own_projection_shaped(self):
+        """U3 F5: the ceilings, their use, the configuration and the interactions left are ``project_governance``'s."""
+        checked = 0
+        for key, row in self.rows.items():
+            gov = self.details[key]["governance"]
+            if row["diagnostic"] is not None or gov is None:
+                continue
+            public = self._public(key, get_run)["run"]["governance"]
+            self.assertEqual((gov["mode"], gov["approval"]), (public["control_mode"], public["state"]), key)
+            self.assertEqual({n: (c["used"], c["max"]) for n, c in gov["ceilings"].items()},
+                             {"passes": (public["budgets"]["passes_used"], public["budgets"]["max_passes"]),
+                              "spawns": (public["budgets"]["spawns_used"], public["budgets"]["max_spawns"]),
+                              "audit_spawns": (public["budgets"]["audit_spawns_used"], public["budgets"]["max_audit_spawns"])}, key)
+            self.assertEqual(gov["interactions"]["left"], public["interactions_remaining"]["total"], key)
+            checked += 1
+        self.assertGreaterEqual(checked, 10)
+
+    def test_governance_of_a_run_whose_history_was_not_read_leaves_the_interactions_unknown(self):
+        view, details = _observe()
+        partial = [k for k, r in _rows(view).items() if r["diagnostic"] == "history-unavailable"]
+        self.assertTrue(partial)
+        for key in partial:
+            gov = details[key]["governance"]
+            self.assertIsNone(gov["interactions"])
+            self.assertIsNotNone(gov["mode"])
+
     def test_scenarios_read_as_the_plugin_left_them(self):
         r = {name: self.rows[key] for name, key in _STORE.expect.items()}
         d = {name: self.details[key] for name, key in _STORE.expect.items()}
-        claims = {name: {c["id"]: c for c in row["claims"]} for name, row in r.items()}
-        self.assertEqual((r["converged"]["state"], r["converged"]["audit"]), ("converged", "passed"))
+        claims = {name: {c["id"]: c for c in row["claims"] or []} for name, row in r.items()}
+        self.assertEqual((r["converged"]["state"], r["converged"]["audit"]["verdict"], r["converged"]["audit"]["current"]),
+                         ("converged", "passed", True))
         self.assertEqual({c["review"] for c in claims["converged"].values()}, {"passed"})
         self.assertEqual(d["converged"]["auditor"] is not None, True)
         self.assertEqual(claims["refuted"]["C1"]["state"], "discarded")
@@ -361,13 +746,61 @@ class AgreementTests(unittest.TestCase):
         self.assertTrue(d["audit-failed"]["audit"]["findings"])
         self.assertEqual(r["history-unavailable"]["diagnostic"], "history-unavailable")
         self.assertEqual(r["history-unavailable"]["state"], "active")
-        self.assertIsNotNone(d["history-unavailable"]["budgets"])
+        self.assertIsNotNone(d["history-unavailable"]["governance"])
+        self.assertIsNone(d["history-unavailable"]["steps"])
         self.assertEqual((r["unreadable"]["diagnostic"], r["unreadable"]["state"]), ("unreadable", None))
         self.assertEqual({cid: c["review"] for cid, c in claims["reaudit"].items()},
                          {"C0": "unreviewed", "C1": "stale", "C2": "unreviewed", "C3": "changed"})
-        self.assertEqual(r["reaudit"]["audit"], "failed")
+        # a pass that no longer covers the argument is a pass that is not current, never a failure (U1-2)
+        self.assertEqual((r["reaudit"]["audit"]["verdict"], r["reaudit"]["audit"]["current"], r["reaudit"]["audit"]["pending"]),
+                         ("passed", False, False))
+        self.assertEqual({c["assurance"] for c in claims["reaudit"].values() if c["state"] == "approved"}, {"awaiting_audit"})
+        self.assertEqual(d["reaudit"]["audit"]["findings"], [])
+        self.assertEqual((r["audit-failed"]["audit"]["verdict"], r["audit-failed"]["audit"]["current"]), ("failed", True))
+        self.assertEqual({c["assurance"] for c in claims["converged"].values()}, {"assured"})
+        # a second audit already running: the earlier pass stays the verdict, nothing is settled, nothing is yet assured
+        self.assertEqual((r["pending-reaudit"]["audit"]["verdict"], r["pending-reaudit"]["audit"]["pending"],
+                          r["pending-reaudit"]["audit"]["independence"]), ("passed", True, None))
+        self.assertEqual({c["assurance"] for c in claims["pending-reaudit"].values()}, {"awaiting_audit"})
+        pending_audit = [i for i in d["pending-reaudit"]["outstanding"] if i["need"] == "audit.pending"]
+        self.assertEqual([(i["who"], i["where"]) for i in pending_audit], [("auditor", "in_progress")])
+        # a proposal the human has not answered is not the ceilings in force
+        amended = d["pending-amendment"]["governance"]
+        self.assertTrue(amended["proposal_pending"])
+        self.assertEqual(amended["proposed"]["passes"], 3)
+        self.assertNotEqual(amended["proposed"], {k: v["max"] for k, v in amended["ceilings"].items()})
+        # a delegated unattended run asks nobody: not ended, and never "needs you"
+        self.assertEqual(r["auto-delegated"]["attention"], "not_ended")
+        self.assertEqual({i["who"] for i in d["auto-delegated"]["outstanding"]} & {"human"}, set())
+        self.assertEqual(r["waiting-human"]["attention"], "needs_you")
+        # the end of a run the human approved is a run event, not a claim named after a status
+        ending = [s for s in d["terminal-consent"]["steps"] if s["terminal"]]
+        self.assertEqual([(s["subject"], s["claim"], s["outcome"]) for s in ending], [("run", None, "approve")])
         self.assertEqual((claims["decision"]["C0"]["blocker"], claims["decision"]["C0"]["blocker_claim"]),
                          ("evidence.confirmation_required", "C1"))
+
+    def test_the_gate_s_other_stages_read_as_the_gate_leaves_them(self):
+        r = {name: self.rows[key] for name, key in _STORE.expect.items()}
+        d = {name: self.details[key] for name, key in _STORE.expect.items()}
+        for name in ("audit-same-model", "audit-unverified"):  # a passing audit the gate refuses: nothing is assured
+            self.assertEqual({c["assurance"] for c in r[name]["claims"]}, {"awaiting_audit"}, name)
+        self.assertEqual((r["audit-same-model"]["audit"]["verdict"], r["audit-same-model"]["audit"]["independence"]),
+                         ("passed", "same_model"))
+        # a human batch beside work the agent owes: the host shows it at the next report, so a human is needed; the gate's first
+        # reason is still the agent's work (the first outstanding item), which is a separate fact
+        self.assertEqual(r["parallel-human"]["attention"], "needs_you")
+        self.assertEqual([(i["who"], i["where"]) for i in d["parallel-human"]["outstanding"] if i["who"] == "human"],
+                         [("human", "next_report")])
+        self.assertEqual(d["parallel-human"]["outstanding"][0]["who"], "agent")
+        self.assertEqual(r["parallel-human"]["next"]["who"], "human")
+        # the pass ceiling is what the report names when it is spent
+        self.assertEqual([i["need"] for i in d["passes-exhausted"]["outstanding"]][:1], ["budget.exhausted"])
+        # a stop, then the files change: the stop's residuals stay, today's are beside them
+        self.assertEqual([x["code"] for x in d["stopped-drift"]["now"]], ["claim.spike_stale", "audit.required"])
+        self.assertNotIn("claim.spike_stale", [x["code"] for x in d["stopped-drift"]["residuals"]])
+        # an attempt that cannot be read beside one that can: the family has both
+        family = [x for x in self.rows.values() if x["run"] == r["attempt-unread-sibling"]["run"]]
+        self.assertEqual(sorted((x["generation"], x["diagnostic"]) for x in family), [(1, None), (2, "unreadable")])
 
     def test_the_output_does_not_depend_on_the_host_profile(self):
         reference = _observe()
@@ -424,13 +857,18 @@ class CacheTests(unittest.TestCase):
         first, _ = obs.observe()
         store.driver.workspace_write("src/cache.py", b"cache v2\n")
         with _counting_assemble() as calls:
-            changed, _ = obs.observe()
+            changed, details = obs.observe()
         self.assertEqual(len(calls), 1)
         before, after = _rows(first), _rows(changed)
         key = store.expect["converged"]
         self.assertEqual([k for k in before if before[k]["version"] != after[k]["version"]], [key])
+        # The run ended, and its outcome stays; but what it says of its claims and audit is true now, as the author view says it:
+        # the file its proof is bound to changed, so the claim is open again and the audit no longer covers it.
         claim = {c["id"]: c for c in after[key]["claims"]}["C1"]
-        self.assertEqual((claim["state"], claim["blocker"]), ("open", "claim.spike_stale"))
+        self.assertEqual((claim["state"], claim["blocker"], claim["assurance"]), ("open", "claim.spike_stale", "not_approved"))
+        self.assertEqual((after[key]["state"], before[key]["claims"] != after[key]["claims"]), ("converged", True))
+        self.assertEqual((before[key]["audit"]["current"], after[key]["audit"]["current"]), (True, False))
+        self.assertEqual([c["path"] for c in details[key]["stale"]], ["src/cache.py"])
         self.assertEqual(Observer(DriverSource(store)).observe()[0], changed)
 
 
@@ -446,7 +884,7 @@ class UnobservableWorkspaceTests(unittest.TestCase):
         source.workspace = lambda key: Refusing()
         view, details = Observer(source).observe()
         stale = _rows(view)[_STORE.expect["stale"]]
-        self.assertEqual((stale["diagnostic"], stale["claims"]), ("workspace-unavailable", []))
+        self.assertEqual((stale["diagnostic"], stale["claims"]), ("workspace-unavailable", None))
         self.assertEqual(validate_ui_view.check(view, details), [])
 
 
@@ -509,7 +947,7 @@ class ClassificationTests(unittest.TestCase):
                 view, details = _observe(store)
                 self.assertEqual((row["diagnostic"], row["state"]), ("unreadable", None))
                 detail = details[key]
-                self.assertEqual((detail["goal"], detail["budgets"], detail["control"]), (None, None, None))
+                self.assertEqual((detail["goal"], detail["governance"], row["goal"], row["session"]), (None, None, None, None))
                 self.assertNotIn(canary, json.dumps([row, detail]))
 
     def test_a_run_whose_history_cannot_be_assembled_marks_only_that_run(self):
@@ -666,7 +1104,7 @@ class FilesystemStoreTests(unittest.TestCase):
         view, details = Observer(StoreSource(self._home_where(None), [])).observe()
         (run,) = view["projects"][0]["runs"]
         self.assertEqual((run["diagnostic"], run["state"], run["claims"]),
-                         ("history-unavailable", "active", []))
+                         ("history-unavailable", "active", None))
         self.assertIsNone(view["projects"][0]["name"])
         self.assertEqual(validate_ui_view.check(view, details), [])
 

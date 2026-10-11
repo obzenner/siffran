@@ -50,8 +50,10 @@
         },
         "governance": null,
         "audit": {
-          "state": "required",
-          "independence": "unverified",
+          "verdict": "none",
+          "current": null,
+          "pending": false,
+          "independence": null,
           "findings": []
         },
         "confirmation_batch": null
@@ -200,8 +202,10 @@
         "route_stamp": 1,
         "investigation_stamp": 2,
         "audit": {
-          "state": "required",
-          "independence": "unverified",
+          "verdict": "none",
+          "current": null,
+          "pending": false,
+          "independence": null,
           "reviewed_argument_digest": null,
           "reviewed_goal_digest": null,
           "reviewed_frozen_scope_digest": null,

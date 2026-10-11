@@ -130,8 +130,8 @@ test("print and JSON (no UI), or a UI without select/input: nothing is presented
   }
 });
 
-test("G14: a batch left on Later is shown again by an explicit report, until the core's ceiling says otherwise", async () => {
-  for (const [promptError, asks] of [[null, 1], ["already_presented", 1], ["interaction_limit", 0], ["unavailable", 0]] as const) {
+test("G14, U4: a batch left on Later is shown again by an explicit report, under the same prompt errors as the Python mediator (core.confirmation.REPRESENTABLE), until the core's ceiling says otherwise", async () => {
+  for (const [promptError, asks] of [[null, 1], ["already_presented", 1], ["interaction_limit", 0], ["unavailable", 0], ["unobserved", 0]] as const) {
     const { ctx } = ctxFor({ selects: ["Confirm"], inputs: [""] });
     const { trusted, calls } = bridge([RECORD]);
     const result = await run(ctx, trusted, blocked("human", promptError));

@@ -60,6 +60,8 @@ _BOOTSTRAP_REQUIREMENTS = tuple((row["predicate"], row["obligation_id"], row["mu
                                 for row in _bootstrap["requirements"])
 _AUDIT_OBLIGATION = (_bootstrap["audit_obligation"]["obligation_id"],
                      _bootstrap["audit_obligation"]["must"])
+_STAGE_OBLIGATIONS = {stage: (row["obligation_id"], row["must"])
+                      for stage, row in _bootstrap["stage_obligations"].items()}
 _BOOTSTRAP_OPERATIONS = tuple((name, tuple((step["predicate"], step["reason"])
                                            for step in operation["preconditions"]))
                               for name, operation in _bootstrap["operations"].items())
@@ -118,6 +120,7 @@ CONTRACT_VIEW = ContractView(
     reason_metadata=_REASON_METADATA,
     bootstrap_requirements=_BOOTSTRAP_REQUIREMENTS,
     audit_obligation=_AUDIT_OBLIGATION,
+    stage_obligations=_STAGE_OBLIGATIONS,
     bootstrap_operations=_BOOTSTRAP_OPERATIONS,
     governance_controls=_PROJECTION_CONTROLS,
     recovery_exclusions=_RECOVERY_EXCLUSIONS,

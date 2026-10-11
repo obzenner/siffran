@@ -49,13 +49,16 @@ def provenance(
     *,
     profile_id: str,
     human_surface: str = "unobserved",
+    session: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     """Build the canonical attested invocation provenance shape.
 
     ``human_surface`` is what the host observes it can show a human at start; a host that cannot yet tell
     (Claude's hook runs before the MCP client has declared form elicitation) starts ``unobserved`` and records
     ``human`` or ``unavailable`` through the private ingress inside ``report_convergence``. A host that knows at
-    start (Pi's ``ctx.hasUI``) or has no human ingress at all (Codex) passes its answer."""
+    start (Pi's ``ctx.hasUI``) or has no human ingress at all (Codex) passes its answer. ``session`` is where the host
+    observed the session to live (``{"label", "locator"}``); a host that observed nothing passes none and the member is
+    absent: the value is then unknown, never invented."""
     delegation_env = _proto.host_profile(profile_id)["delegation_env"]
     return {
         "host": host,
@@ -64,6 +67,7 @@ def provenance(
         "delegation": environ.get(delegation_env) == "1",
         "audit_retrieval": audit_retrieval(profile_id),
         "human_surface": human_surface,
+        **({} if session is None else {"session": dict(session)}),
     }
 
 

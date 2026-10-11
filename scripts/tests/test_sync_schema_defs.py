@@ -60,6 +60,8 @@ class SyncSchemaDefsTests(unittest.TestCase):
         invocation = shared["invocationProvenance"]
         self.assertIn("host_runtime", invocation["properties"])
         self.assertNotIn("host_runtime", invocation["required"], "optional: Claude and Codex record none")
+        self.assertIn("session", invocation["properties"])
+        self.assertNotIn("session", invocation["required"], "optional: a host that cannot say where its session is records none")
         # Carrying the member is the shared shape; it collapses to the reference.
         self.assertEqual(sync_schema_defs._replace_shared(copy.deepcopy(invocation), shared),
                          {"$ref": "#/$defs/invocationProvenance"})

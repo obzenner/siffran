@@ -22,7 +22,7 @@ from uuid import uuid4
 
 from adapters import bridge
 from application import protocol
-from core.confirmation import REPRESENTABLE, is_terminal
+from core.confirmation import is_terminal, presentable as batch_presentable
 from core.evaluation import TERMINAL_STATUSES, terminal_key
 from core.projection import project_host_failure, project_prompt_error
 
@@ -105,7 +105,7 @@ def presentable(result: object) -> dict[str, Any] | None:
     again, and the core's interaction ceiling (``interaction_limit``) bounds it. It decides nothing."""
     run = result.get("run") if isinstance(result, dict) else None
     batch = run.get("confirmation_batch") if isinstance(run, dict) else None
-    return batch if isinstance(batch, dict) and batch.get("prompt_error") in REPRESENTABLE else None
+    return batch if batch_presentable(batch) else None
 
 
 def _call(profile: str, run_id: str, command: dict, dispatch: Callable[..., dict]) -> dict[str, Any]:

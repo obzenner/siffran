@@ -127,6 +127,22 @@ class HostRuntimeBridgeTests(unittest.TestCase):
         stored = json.loads(runs[0].read_text(encoding="utf-8"))
         self.assertEqual(stored["invocation"]["host_runtime"], invocation["host_runtime"])
 
+    def test_the_session_locator_is_stored_once_with_the_run_and_only_in_the_shape_the_contract_names(self):
+        # U1-11: the host records where the session lives; it is persisted opaquely, never shown in a run view, and a
+        # malformed one is refused by the request schema (the author has no StartRun to put one in).
+        session = {"label": "019e-abc", "locator": "/home/u/.pi/sessions/019e-abc.jsonl"}
+        response = bridge.handle(start(CLAUDE, {**TEST_INVOCATION, "session": session}), CLAUDE["profile_id"])
+        self.assertEqual(response["result"]["type"], "Allow", response)
+        self.assertNotIn("019e-abc", json.dumps(response["result"]))
+        runs = list(Path(os.environ["EMPIRICA_HOME"]).glob("projects/*/runs/*/gen-*/run.json"))
+        self.assertEqual(json.loads(runs[0].read_text(encoding="utf-8"))["invocation"]["session"], session)
+        for label, bad in (("empty label", {**session, "label": ""}), ("no locator", {"label": "x"}),
+                           ("empty locator", {**session, "locator": ""}), ("an extra member", {**session, "id": 1}),
+                           ("a path longer than the bound", {**session, "locator": "x" * 4097}), ("a string", "x")):
+            with self.subTest(label):
+                refused = bridge.handle(start(CLAUDE, {**TEST_INVOCATION, "session": bad}), CLAUDE["profile_id"])
+                self.assertEqual(refused["result"]["code"], "invalid_request")
+
     def test_a_version_in_range_without_a_compat_record_starts_and_the_run_view_says_so(self):
         runtime = host_runtime_for(PI["profile_id"])
         runtime["subagents"].update(version="0.99.0", reviewed=False)

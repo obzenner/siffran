@@ -2868,18 +2868,31 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "state",
+        "verdict",
+        "current",
+        "pending",
         "independence",
         "findings"
       ],
       "properties": {
-        "state": {
+        "verdict": {
           "enum": [
-            "required",
-            "pending",
             "passed",
-            "failed"
-          ]
+            "failed",
+            "none"
+          ],
+          "description": "The latest recorded verdict: passed, failed, or none yet."
+        },
+        "current": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether the latest verdict still binds the current argument, goal and scope (a pass that no longer does reads passed and not current); null with no verdict."
+        },
+        "pending": {
+          "type": "boolean",
+          "description": "A current audit child has been launched and has not settled; it supersedes the previous verdict's coverage."
         },
         "independence": {
           "enum": [
@@ -2887,8 +2900,10 @@
             "mixed",
             "same_model",
             "unverified",
-            "human_owned"
-          ]
+            "human_owned",
+            null
+          ],
+          "description": "Independence of a settled verdict from the evidence it reviewed; null with no verdict or while a re-audit is pending."
         },
         "findings": {
           "type": "array",
@@ -2896,27 +2911,92 @@
             "type": "string",
             "minLength": 1
           },
-          "description": "Findings of a failed verdict; empty otherwise, including a stale pass."
+          "description": "Findings of a failed verdict; empty otherwise, including a pass that no longer covers the argument."
         }
       },
       "allOf": [
         {
           "if": {
             "properties": {
-              "state": {
-                "enum": [
-                  "required",
-                  "pending",
-                  "passed"
-                ]
+              "verdict": {
+                "const": "none"
               }
             },
             "required": [
-              "state"
+              "verdict"
             ]
           },
           "then": {
             "properties": {
+              "current": {
+                "type": "null"
+              },
+              "findings": {
+                "maxItems": 0
+              },
+              "independence": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "enum": [
+                  "passed",
+                  "failed"
+                ]
+              }
+            },
+            "required": [
+              "verdict"
+            ]
+          },
+          "then": {
+            "properties": {
+              "current": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "const": "passed"
+              }
+            },
+            "required": [
+              "verdict"
+            ]
+          },
+          "then": {
+            "properties": {
+              "findings": {
+                "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "pending": {
+                "const": true
+              }
+            },
+            "required": [
+              "pending"
+            ]
+          },
+          "then": {
+            "properties": {
+              "independence": {
+                "type": "null"
+              },
               "findings": {
                 "maxItems": 0
               }
@@ -2929,7 +3009,9 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "state",
+        "verdict",
+        "current",
+        "pending",
         "independence",
         "reviewed_argument_digest",
         "reviewed_goal_digest",
@@ -2939,15 +3021,24 @@
         "findings"
       ],
       "properties": {
-        "state": {
+        "verdict": {
           "enum": [
-            "not_required",
-            "required",
-            "pending",
             "passed",
             "failed",
-            "stale"
-          ]
+            "none"
+          ],
+          "description": "The latest recorded verdict: passed, failed, or none yet."
+        },
+        "current": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether the latest verdict still binds the current argument, goal and scope (a pass that no longer does reads passed and not current); null with no verdict."
+        },
+        "pending": {
+          "type": "boolean",
+          "description": "A current audit child has been launched and has not settled; it supersedes the previous verdict's coverage."
         },
         "independence": {
           "enum": [
@@ -2955,8 +3046,10 @@
             "mixed",
             "same_model",
             "unverified",
-            "human_owned"
-          ]
+            "human_owned",
+            null
+          ],
+          "description": "Independence of a settled verdict from the evidence it reviewed; null with no verdict or while a re-audit is pending."
         },
         "reviewed_argument_digest": {
           "$ref": "#/$defs/nullableDigest256"
@@ -2983,27 +3076,40 @@
             "type": "string",
             "minLength": 1
           },
-          "description": "Findings of the latest settled verdict, while it still matches the audit state; empty for a stale pass or while a re-audit is pending."
+          "description": "Findings of the latest settled verdict, while it is a failure or still covers the argument; empty with no verdict, while a re-audit is pending, and for a pass that no longer covers the argument."
         }
       },
       "allOf": [
         {
           "if": {
-            "properties": {
-              "state": {
-                "enum": [
-                  "not_required",
-                  "required",
+            "anyOf": [
+              {
+                "properties": {
+                  "verdict": {
+                    "const": "none"
+                  }
+                },
+                "required": [
+                  "verdict"
+                ]
+              },
+              {
+                "properties": {
+                  "pending": {
+                    "const": true
+                  }
+                },
+                "required": [
                   "pending"
                 ]
               }
-            },
-            "required": [
-              "state"
             ]
           },
           "then": {
             "properties": {
+              "independence": {
+                "type": "null"
+              },
               "reviewed_argument_digest": {
                 "type": "null"
               },
@@ -3022,30 +3128,66 @@
               "findings": {
                 "maxItems": 0
               }
-            },
-            "required": [
-              "reviewed_argument_digest",
-              "reviewed_goal_digest",
-              "reviewed_frozen_scope_digest",
-              "reviewed_deferred_scope_digest",
-              "reviewed_claims",
-              "findings"
-            ]
+            }
           }
         },
         {
           "if": {
             "properties": {
-              "state": {
+              "verdict": {
+                "const": "none"
+              }
+            },
+            "required": [
+              "verdict"
+            ]
+          },
+          "then": {
+            "properties": {
+              "current": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "verdict": {
                 "enum": [
                   "passed",
-                  "failed",
-                  "stale"
+                  "failed"
                 ]
               }
             },
             "required": [
-              "state"
+              "verdict"
+            ]
+          },
+          "then": {
+            "properties": {
+              "current": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "enum": [
+                  "passed",
+                  "failed"
+                ]
+              },
+              "pending": {
+                "const": false
+              }
+            },
+            "required": [
+              "verdict",
+              "pending"
             ]
           },
           "then": {
@@ -3437,6 +3579,29 @@
                   "description": "Whether this exact version has a checked-in compat record. false is admitted when the live preflight and the tool's parameter schema passed; it is never a refusal by itself. An absent value reads as false (not reviewed); a present value that is not a boolean is malformed."
                 }
               }
+            }
+          }
+        },
+        "session": {
+          "description": "Optional host-observed fact: where this run's session can be found again, recorded once at StartRun by the host from what it observed (Claude: the hook payload's session_id and transcript_path; Pi: the session manager's id and session file). The author has no StartRun and cannot supply or change it. Absent when the host observed nothing: it reads as unknown, never as a guess.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "label",
+            "locator"
+          ],
+          "properties": {
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "description": "A short human name for the session (its id)."
+            },
+            "locator": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "description": "A copyable path or id that finds the session again: its transcript or session file when the host has one, otherwise its id."
             }
           }
         },

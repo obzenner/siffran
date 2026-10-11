@@ -1,31 +1,380 @@
 {
- "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/1": {
+ "s256-1c1b61d2f3e2199fa3ec3ceb48e9231a183b9bff723c2dc5c04ebeec8d1e6736/s256-50556f10455c3b044a0f2f20e8c9ed2371e751c670ee355ec246bf1e14672d04/1": {
   "audit": {
-   "findings": [],
-   "independence": "unverified"
+   "findings": []
   },
   "auditor": null,
   "author": "anthropic/claude-sonnet-4-6",
-  "budgets": {
-   "audit_spawns": {
-    "max": 2,
-    "used": 0
-   },
-   "passes": {
-    "max": 8,
-    "used": 0
-   },
-   "spawns": {
-    "max": 1,
-    "used": 0
-   }
-  },
   "claims": [
    {
-    "blocker_message": "Waiting for a human to confirm research or answer a decision.",
-    "commands": [],
+    "blocker_message": null,
     "decision": null,
     "id": "C0",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/checksum.py states this directly.",
+      "retrieve": true,
+      "source": "src/checksum.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "goal": "Check the tile checksum.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-1c1b61d2f3e2199fa3ec3ceb48e9231a183b9bff723c2dc5c04ebeec8d1e6736/s256-50556f10455c3b044a0f2f20e8c9ed2371e751c670ee355ec246bf1e14672d04/1",
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [],
+    "message": "Audit is owed; spawn an independent auditor.",
+    "need": "audit.required",
+    "where": "next_turn",
+    "who": "agent"
+   }
+  ],
+  "residuals": [],
+  "stale": [],
+  "steps": [
+   {
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   }
+  ],
+  "stop": null,
+  "version": "sha256:4f785a80e8fec491d5745ff5dddfeeacd49a198627661de9b5221d17c5726ad8"
+ },
+ "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-304a7406988d22c5ec496b8a79ecfbb856e45a9e20bb82b43e3e3db7a1023365/1": {
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/thumbs.py states this directly.",
+      "retrieve": true,
+      "source": "src/thumbs.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "goal": "Thumbnail every preview once.",
+  "governance": {
+   "approval": "revision_pending",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": true,
+   "proposed": {
+    "audit_spawns": 1,
+    "passes": 3,
+    "spawns": 0
+   }
+  },
+  "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-304a7406988d22c5ec496b8a79ecfbb856e45a9e20bb82b43e3e3db7a1023365/1",
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [],
+    "message": "Obtain exact host-mediated approval for the current run configuration.",
+    "need": "obligation.approval",
+    "where": "next_turn",
+    "who": "agent"
+   },
+   {
+    "claims": [],
+    "message": "Audit is owed; spawn an independent auditor.",
+    "need": "audit.required",
+    "where": "later",
+    "who": "agent"
+   }
+  ],
+  "residuals": [],
+  "stale": [],
+  "steps": [
+   {
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   }
+  ],
+  "stop": null,
+  "version": "sha256:048e113a760e4790a4fcd196aa15e9ed90a3071f7fcc142861d62643ce1cb698"
+ },
+ "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-4680449e3494a96443960590a1dc559f5f4a9daafead54c78987428e10ab9332/1": {
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": "Record research for claim C0.",
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [],
+    "research": 0
+   },
+   {
+    "blocker_message": "Research for claim C1 is not bound to the current claim digest.",
+    "decision": null,
+    "id": "C1",
+    "proof": [],
+    "records": [],
+    "research": 0
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "goal": "Cut preview cache misses.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-4680449e3494a96443960590a1dc559f5f4a9daafead54c78987428e10ab9332/1",
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [
+     "C0"
+    ],
+    "message": "Record research for claim C0.",
+    "need": "claim.research_missing",
+    "where": "next_turn",
+    "who": "agent"
+   },
+   {
+    "claims": [
+     "C1"
+    ],
+    "message": "Research for claim C1 is not bound to the current claim digest.",
+    "need": "claim.research_unbound",
+    "where": "next_turn",
+    "who": "agent"
+   },
+   {
+    "claims": [],
+    "message": "Audit is owed; spawn an independent auditor.",
+    "need": "audit.required",
+    "where": "later",
+    "who": "agent"
+   }
+  ],
+  "residuals": [],
+  "stale": [],
+  "steps": [
+   {
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": "C1",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "replaced",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": "C2",
+    "command": null,
+    "kind": "research",
+    "n": 4,
+    "outcome": "supporting",
+    "standing": "gone",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 5,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   }
+  ],
+  "stop": null,
+  "version": "sha256:c37587f5f2fe4721eabf80520d5c778b6185d68aab083e102bb3680ca779eec1"
+ },
+ "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/1": {
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": "Unanswered when this run stopped: research or a decision needed a human.",
+    "decision": null,
+    "id": "C0",
+    "proof": [],
     "records": [
      {
       "class": "verbatim",
@@ -33,122 +382,152 @@
       "outcome": "supporting",
       "quote": "docs/viewers.md states this directly.",
       "retrieve": true,
-      "route": null,
       "source": "docs/viewers.md",
       "source_kind": "code",
       "spike_unavailable": null,
-      "status": "verified_by_service"
+      "status": "verified_by_service",
+      "wait": null
      }
     ],
-    "research": 1,
-    "spikes": 0,
-    "spikes_ever": 0
+    "research": 1
    },
    {
-    "blocker_message": "Waiting for a human to confirm research or answer a decision.",
-    "commands": [],
+    "blocker_message": "Unanswered when this run stopped: research or a decision needed a human.",
     "decision": {
      "answer": null,
      "outcome": null,
-     "route": "ended"
+     "status": "unanswered",
+     "where": null
     },
     "id": "C1",
+    "proof": [],
     "records": [],
-    "research": 0,
-    "spikes": 0,
-    "spikes_ever": 0
+    "research": 0
    }
   ],
   "contract": "empirica-ui-view/v1",
-  "control": {
-   "approval": "approved",
-   "mode": "deliberative"
-  },
   "goal": "Choose the colour space for exported previews.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 126,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
   "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/1",
-  "prompt_error": null,
+  "now": null,
+  "outstanding": [],
   "residuals": [
    {
-    "claim": "C0",
+    "claims": [
+     "C0",
+     "C1"
+    ],
     "code": "evidence.confirmation_required",
-    "message": "Waiting for a human to confirm research or answer a decision."
-   },
-   {
-    "claim": "C1",
-    "code": "evidence.confirmation_required",
-    "message": "Waiting for a human to confirm research or answer a decision."
+    "message": "Unanswered when this run stopped: research or a decision needed a human."
    }
   ],
   "stale": [],
   "steps": [
    {
+    "bookkeeping": true,
     "claim": null,
     "command": null,
     "kind": "observation_basis",
     "n": 1,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": null,
     "command": null,
     "kind": "graph",
     "n": 2,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C0",
     "command": null,
     "kind": "research",
     "n": 3,
-    "outcome": "supporting"
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": null,
     "command": null,
     "kind": "evidence_presentation",
     "n": 4,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
-    "claim": "stopped_residual",
+    "bookkeeping": false,
+    "claim": null,
     "command": null,
     "kind": "evidence_confirmation",
     "n": 5,
-    "outcome": null
+    "outcome": "approve",
+    "standing": null,
+    "subject": "run",
+    "terminal": true
    }
   ],
-  "version": "sha256:649d051a05b3a2303141ed12c9c853b628d2504e26dac8aa9e9d149df0b7239a",
-  "waiting": []
+  "stop": {
+   "basis": "recorded",
+   "deferred": [],
+   "frozen": false,
+   "required": [
+    "C0",
+    "C1"
+   ],
+   "status": "stopped_residual"
+  },
+  "version": "sha256:bda98521818536de7a4bb692ac3817900ea32819b2764381ea5ae62065be8d81"
  },
  "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/2": {
   "audit": {
    "findings": [
     "The tolerance test never checks the wide-gamut swatches."
-   ],
-   "independence": "distinct"
+   ]
   },
   "auditor": "anthropic/claude-opus-4-6",
   "author": "anthropic/claude-sonnet-4-6",
-  "budgets": {
-   "audit_spawns": {
-    "max": 2,
-    "used": 1
-   },
-   "passes": {
-    "max": 8,
-    "used": 0
-   },
-   "spawns": {
-    "max": 1,
-    "used": 0
-   }
-  },
   "claims": [
    {
     "blocker_message": null,
-    "commands": [],
     "decision": null,
     "id": "C0",
+    "proof": [],
     "records": [
      {
       "class": "verbatim",
@@ -156,24 +535,35 @@
       "outcome": "supporting",
       "quote": "docs/viewers.md states this directly.",
       "retrieve": true,
-      "route": null,
       "source": "docs/viewers.md",
       "source_kind": "code",
       "spike_unavailable": null,
-      "status": "verified_by_service"
+      "status": "verified_by_service",
+      "wait": null
      }
     ],
-    "research": 1,
-    "spikes": 0,
-    "spikes_ever": 0
+    "research": 1
    },
    {
     "blocker_message": null,
-    "commands": [
-     "python -m pytest tests/test_colour.py"
-    ],
     "decision": null,
     "id": "C1",
+    "proof": [
+     {
+      "command": "python -m pytest tests/test_colour.py",
+      "exit_code": 0,
+      "files": [
+       {
+        "path": "src/colour.py",
+        "sha256": "sha256:39e3f5bc086a21615f8f05427a6b051008b35723cfea8bba663cb141fc25de3b"
+       }
+      ],
+      "gate": "pass",
+      "outcome": "pass",
+      "output": "not_retained",
+      "state": "current"
+     }
+    ],
     "records": [
      {
       "class": "verbatim",
@@ -181,142 +571,584 @@
       "outcome": "supporting",
       "quote": "src/colour.py states this directly.",
       "retrieve": true,
-      "route": null,
       "source": "src/colour.py",
       "source_kind": "code",
       "spike_unavailable": null,
-      "status": "verified_by_service"
+      "status": "verified_by_service",
+      "wait": null
      }
     ],
-    "research": 1,
-    "spikes": 1,
-    "spikes_ever": 1
+    "research": 1
    }
   ],
   "contract": "empirica-ui-view/v1",
-  "control": {
-   "approval": "approved",
-   "mode": "deliberative"
-  },
   "goal": "Choose the colour space for exported previews.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 1
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
   "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/2",
-  "prompt_error": null,
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [],
+    "message": "Audit failed or its coverage went stale; address any findings listed under Audit, then retry.",
+    "need": "audit.failed",
+    "where": "next_turn",
+    "who": "agent"
+   }
+  ],
   "residuals": [],
   "stale": [],
   "steps": [
    {
+    "bookkeeping": true,
     "claim": null,
     "command": null,
     "kind": "observation_basis",
     "n": 1,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": null,
     "command": null,
     "kind": "graph",
     "n": 2,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C0",
     "command": null,
     "kind": "research",
     "n": 3,
-    "outcome": "supporting"
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C1",
     "command": null,
     "kind": "research",
     "n": 4,
-    "outcome": "supporting"
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C1",
     "command": "python -m pytest tests/test_colour.py",
     "kind": "spike_request",
     "n": 5,
-    "outcome": null
+    "outcome": null,
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C1",
     "command": "python -m pytest tests/test_colour.py",
     "kind": "spike",
     "n": 6,
-    "outcome": "pass"
+    "outcome": "pass",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
+    "bookkeeping": true,
     "claim": null,
     "command": null,
     "kind": "observation_basis",
     "n": 7,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": true,
     "claim": null,
     "command": null,
     "kind": "observation_basis",
     "n": 8,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": true,
     "claim": null,
     "command": null,
     "kind": "attribution",
     "n": 9,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": null,
     "command": null,
     "kind": "audit_verdict",
     "n": 10,
-    "outcome": "fail"
+    "outcome": "fail",
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    }
   ],
-  "version": "sha256:6c3543827ebfa05ac62759f0e5dc92450defa7270f04c3a27e328dfc80327e1d",
-  "waiting": []
+  "stop": null,
+  "version": "sha256:57ebde2337ac22cb9de6ed7aeda4d9056e1064b8b61036d0f531d84e10d009fe"
  },
- "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-39abe9247f103fe638ce5e01424e311f5a2751de1eb1f57f4e2ce6da4bc72b70/1": {
+ "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-05d85cdc4353863d3fba91e365c2f544a36e22c780dfbe5a13d669c1eaa2812d/1": {
   "audit": {
-   "findings": [],
-   "independence": "unverified"
+   "findings": []
   },
   "auditor": null,
   "author": "anthropic/claude-sonnet-4-6",
-  "budgets": {
-   "audit_spawns": {
-    "max": 2,
-    "used": 0
+  "claims": [
+   {
+    "blocker_message": "The spike's files changed after it ran, and it was not run again.",
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "docs/eviction.md states this directly.",
+      "retrieve": true,
+      "source": "docs/eviction.md",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
    },
-   "passes": {
-    "max": 8,
-    "used": 0
-   },
-   "spawns": {
-    "max": 1,
-    "used": 0
+   {
+    "blocker_message": "The spike's files changed after it ran, and it was not run again.",
+    "decision": null,
+    "id": "C1",
+    "proof": [
+     {
+      "command": "python src/drift.py",
+      "exit_code": 0,
+      "files": [
+       {
+        "path": "src/drift.py",
+        "sha256": "sha256:3883d28fbd0c753f4c73b65e3e8492ede7a37b9e50bbed38ce0a69f96b3be6ce"
+       }
+      ],
+      "gate": "pass",
+      "outcome": "pass",
+      "output": "not_retained",
+      "state": "stale"
+     }
+    ],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "docs/eviction-test.md states this directly.",
+      "retrieve": true,
+      "source": "docs/eviction-test.md",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
    }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "goal": "Check the cache eviction order.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 126,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
   },
+  "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-05d85cdc4353863d3fba91e365c2f544a36e22c780dfbe5a13d669c1eaa2812d/1",
+  "now": [
+   {
+    "claims": [
+     "C1"
+    ],
+    "code": "claim.spike_stale",
+    "message": "Spike prerequisites changed; re-gate."
+   },
+   {
+    "claims": [],
+    "code": "audit.required",
+    "message": "Audit is owed; spawn an independent auditor."
+   }
+  ],
+  "outstanding": [],
+  "residuals": [
+   {
+    "claims": [],
+    "code": "audit.required",
+    "message": "No audit had been done when the run stopped."
+   }
+  ],
+  "stale": [
+   {
+    "path": "src/drift.py",
+    "state": "present"
+   }
+  ],
+  "steps": [
+   {
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": "C1",
+    "command": null,
+    "kind": "research",
+    "n": 4,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": "C1",
+    "command": "python src/drift.py",
+    "kind": "spike_request",
+    "n": 5,
+    "outcome": null,
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": "C1",
+    "command": "python src/drift.py",
+    "kind": "spike",
+    "n": 6,
+    "outcome": "pass",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 7,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 8,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "evidence_presentation",
+    "n": 9,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "evidence_confirmation",
+    "n": 10,
+    "outcome": "approve",
+    "standing": null,
+    "subject": "run",
+    "terminal": true
+   }
+  ],
+  "stop": {
+   "basis": "recorded",
+   "deferred": [],
+   "frozen": false,
+   "required": [
+    "C0",
+    "C1"
+   ],
+   "status": "stopped_residual"
+  },
+  "version": "sha256:ded84342cae11b56e078c2d2f4af23af5acadad509909151ca60c071e2003bd3"
+ },
+ "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-2fac41cee6a25f7f4d80295af5875e8d79f37d9ebe255735397d5e6cb48971ab/1": {
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "author": "anthropic/claude-sonnet-4-6",
   "claims": [
    {
     "blocker_message": "Record research for claim C0.",
-    "commands": [],
     "decision": null,
     "id": "C0",
+    "proof": [],
     "records": [],
-    "research": 0,
-    "spikes": 0,
-    "spikes_ever": 0
+    "research": 0
+   },
+   {
+    "blocker_message": "Waiting for a human to confirm research or answer a decision.",
+    "decision": null,
+    "id": "C1",
+    "proof": [],
+    "records": [
+     {
+      "class": "retrievable",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "keys up to 512 bytes are allowed",
+      "retrieve": false,
+      "source": "https://provider.example.net/keys",
+      "source_kind": "web",
+      "spike_unavailable": null,
+      "status": "pending",
+      "wait": {
+       "where": "next_report",
+       "who": "human"
+      }
+     }
+    ],
+    "research": 1
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "goal": "Check the cache key and its provider limits.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-2fac41cee6a25f7f4d80295af5875e8d79f37d9ebe255735397d5e6cb48971ab/1",
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [
+     "C0"
+    ],
+    "message": "Record research for claim C0.",
+    "need": "claim.research_missing",
+    "where": "next_turn",
+    "who": "agent"
+   },
+   {
+    "claims": [
+     "C1"
+    ],
+    "message": "Waiting for a human to confirm research or answer a decision.",
+    "need": "evidence.confirmation_required",
+    "where": "next_report",
+    "who": "human"
+   },
+   {
+    "claims": [],
+    "message": "Audit is owed; spawn an independent auditor.",
+    "need": "audit.required",
+    "where": "later",
+    "who": "agent"
+   }
+  ],
+  "residuals": [],
+  "stale": [],
+  "steps": [
+   {
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": "C1",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   }
+  ],
+  "stop": null,
+  "version": "sha256:69ee48da6518cb47224dd7d7d5d94e3a14321e3fe0b1684c0ac91e40878981da"
+ },
+ "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-39abe9247f103fe638ce5e01424e311f5a2751de1eb1f57f4e2ce6da4bc72b70/1": {
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": "Record research for claim C0.",
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [],
+    "research": 0
    },
    {
     "blocker_message": "Spike prerequisites changed; re-gate.",
-    "commands": [
-     "python -m pytest tests/test_decode.py"
-    ],
     "decision": null,
     "id": "C1",
+    "proof": [
+     {
+      "command": "python -m pytest tests/test_decode.py",
+      "exit_code": 0,
+      "files": [
+       {
+        "path": "src/decode.py",
+        "sha256": "sha256:feac304450554ee9fa4c9769c7e8c104bb616e2c30ce4a7f081f385b7aaf5105"
+       }
+      ],
+      "gate": "pass",
+      "outcome": "pass",
+      "output": "not_retained",
+      "state": "stale"
+     }
+    ],
     "records": [
      {
       "class": "verbatim",
@@ -324,26 +1156,71 @@
       "outcome": "supporting",
       "quote": "src/decode.py states this directly.",
       "retrieve": true,
-      "route": null,
       "source": "src/decode.py",
       "source_kind": "code",
       "spike_unavailable": null,
-      "status": "verified_by_service"
+      "status": "verified_by_service",
+      "wait": null
      }
     ],
-    "research": 1,
-    "spikes": 1,
-    "spikes_ever": 1
+    "research": 1
    }
   ],
   "contract": "empirica-ui-view/v1",
-  "control": {
-   "approval": "approved",
-   "mode": "deliberative"
-  },
   "goal": "Make tile decoding constant-memory.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
   "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-39abe9247f103fe638ce5e01424e311f5a2751de1eb1f57f4e2ce6da4bc72b70/1",
-  "prompt_error": null,
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [
+     "C0"
+    ],
+    "message": "Record research for claim C0.",
+    "need": "claim.research_missing",
+    "where": "next_turn",
+    "who": "agent"
+   },
+   {
+    "claims": [
+     "C1"
+    ],
+    "message": "Spike prerequisites changed; re-gate.",
+    "need": "claim.spike_stale",
+    "where": "next_turn",
+    "who": "agent"
+   },
+   {
+    "claims": [],
+    "message": "Audit is owed; spawn an independent auditor.",
+    "need": "audit.required",
+    "where": "later",
+    "who": "agent"
+   }
+  ],
   "residuals": [],
   "stale": [
    {
@@ -353,88 +1230,95 @@
   ],
   "steps": [
    {
+    "bookkeeping": true,
     "claim": null,
     "command": null,
     "kind": "observation_basis",
     "n": 1,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": null,
     "command": null,
     "kind": "graph",
     "n": 2,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C1",
     "command": null,
     "kind": "research",
     "n": 3,
-    "outcome": "supporting"
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C1",
     "command": "python -m pytest tests/test_decode.py",
     "kind": "spike_request",
     "n": 4,
-    "outcome": null
+    "outcome": null,
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C1",
     "command": "python -m pytest tests/test_decode.py",
     "kind": "spike",
     "n": 5,
-    "outcome": "pass"
+    "outcome": "pass",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
+    "bookkeeping": true,
     "claim": null,
     "command": null,
     "kind": "observation_basis",
     "n": 6,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    }
   ],
-  "version": "sha256:7a7e44ddccf52e1008e5549698853c97d3d7221e0be12e233ec71ac5f4f221cd",
-  "waiting": []
+  "stop": null,
+  "version": "sha256:290c4d66591b853d8118fb5175f8fef3676724f8a073493ae5df0310731edb57"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e/1": {
   "audit": {
-   "findings": [],
-   "independence": "unverified"
+   "findings": []
   },
   "auditor": null,
   "author": "anthropic/claude-sonnet-4-6",
-  "budgets": {
-   "audit_spawns": {
-    "max": 2,
-    "used": 0
-   },
-   "passes": {
-    "max": 8,
-    "used": 0
-   },
-   "spawns": {
-    "max": 1,
-    "used": 0
-   }
-  },
   "claims": [
    {
-    "blocker_message": "Record research for claim C0.",
-    "commands": [],
+    "blocker_message": "No research was recorded for claim C0 before the run stopped.",
     "decision": null,
     "id": "C0",
+    "proof": [],
     "records": [],
-    "research": 0,
-    "spikes": 0,
-    "spikes_ever": 0
+    "research": 0
    },
    {
-    "blocker_message": "Active evidence refutes claim C1.",
-    "commands": [],
+    "blocker_message": "Active evidence refuted claim C1; it still blocked this scope when the run stopped.",
     "decision": null,
     "id": "C1",
+    "proof": [],
     "records": [
      {
       "class": "verbatim",
@@ -442,121 +1326,159 @@
       "outcome": "refuting",
       "quote": "jobs/export.py states this directly.",
       "retrieve": true,
-      "route": null,
       "source": "jobs/export.py",
       "source_kind": "code",
       "spike_unavailable": null,
-      "status": "verified_by_service"
+      "status": "verified_by_service",
+      "wait": null
      }
     ],
-    "research": 0,
-    "spikes": 0,
-    "spikes_ever": 0
+    "research": 0
    },
    {
-    "blocker_message": "Record research for claim C2.",
-    "commands": [],
+    "blocker_message": "No research was recorded for claim C2 before the run stopped.",
     "decision": null,
     "id": "C2",
+    "proof": [],
     "records": [],
-    "research": 0,
-    "spikes": 0,
-    "spikes_ever": 0
+    "research": 0
    }
   ],
   "contract": "empirica-ui-view/v1",
-  "control": {
-   "approval": "approved",
-   "mode": "deliberative"
-  },
   "goal": "Drop the old tile format.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 126,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
   "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e/1",
-  "prompt_error": null,
+  "now": null,
+  "outstanding": [],
   "residuals": [
    {
-    "claim": "C0",
+    "claims": [
+     "C0"
+    ],
     "code": "claim.research_missing",
-    "message": "Record research for claim C0."
+    "message": "No research was recorded for claim C0 before the run stopped."
    },
    {
-    "claim": "C1",
+    "claims": [
+     "C1"
+    ],
     "code": "claim.refuted",
-    "message": "Active evidence refutes claim C1."
+    "message": "Active evidence refuted claim C1; it still blocked this scope when the run stopped."
    },
    {
-    "claim": "C2",
+    "claims": [
+     "C2"
+    ],
     "code": "claim.research_missing",
-    "message": "Record research for claim C2."
+    "message": "No research was recorded for claim C2 before the run stopped."
    }
   ],
   "stale": [],
   "steps": [
    {
+    "bookkeeping": true,
     "claim": null,
     "command": null,
     "kind": "observation_basis",
     "n": 1,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": null,
     "command": null,
     "kind": "graph",
     "n": 2,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C1",
     "command": null,
     "kind": "research",
     "n": 3,
-    "outcome": "refuting"
+    "outcome": "refuting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": null,
     "command": null,
     "kind": "evidence_presentation",
     "n": 4,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
-    "claim": "stopped_residual",
+    "bookkeeping": false,
+    "claim": null,
     "command": null,
     "kind": "evidence_confirmation",
     "n": 5,
-    "outcome": null
+    "outcome": "approve",
+    "standing": null,
+    "subject": "run",
+    "terminal": true
    }
   ],
-  "version": "sha256:2b96fed0f3aee6bf43d637c73943b34890ee71b7ef2ba04880fff00779407ee4",
-  "waiting": []
+  "stop": {
+   "basis": "recorded",
+   "deferred": [],
+   "frozen": false,
+   "required": [
+    "C0",
+    "C1",
+    "C2"
+   ],
+   "status": "stopped_residual"
+  },
+  "version": "sha256:292160fdd0aa162b15633e1ab2544ab138fa7abdbac0c0377c3f605a71348c59"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9/1": {
   "audit": {
-   "findings": [],
-   "independence": "distinct"
+   "findings": []
   },
   "auditor": "anthropic/claude-opus-4-6",
   "author": "anthropic/claude-sonnet-4-6",
-  "budgets": {
-   "audit_spawns": {
-    "max": 2,
-    "used": 1
-   },
-   "passes": {
-    "max": 8,
-    "used": 1
-   },
-   "spawns": {
-    "max": 1,
-    "used": 0
-   }
-  },
   "claims": [
    {
     "blocker_message": null,
-    "commands": [],
     "decision": null,
     "id": "C0",
+    "proof": [],
     "records": [
      {
       "class": "verbatim",
@@ -564,24 +1486,35 @@
       "outcome": "supporting",
       "quote": "src/loader.py states this directly.",
       "retrieve": true,
-      "route": null,
       "source": "src/loader.py",
       "source_kind": "code",
       "spike_unavailable": null,
-      "status": "verified_by_service"
+      "status": "verified_by_service",
+      "wait": null
      }
     ],
-    "research": 1,
-    "spikes": 0,
-    "spikes_ever": 0
+    "research": 1
    },
    {
     "blocker_message": null,
-    "commands": [
-     "python -m pytest tests/test_cache.py"
-    ],
     "decision": null,
     "id": "C1",
+    "proof": [
+     {
+      "command": "python -m pytest tests/test_cache.py",
+      "exit_code": 0,
+      "files": [
+       {
+        "path": "src/cache.py",
+        "sha256": "sha256:dd0d562a7494b2d8456203ed7fbd11d2d6181377197cd7d0858617eb7412e644"
+       }
+      ],
+      "gate": "pass",
+      "outcome": "pass",
+      "output": "not_retained",
+      "state": "current"
+     }
+    ],
     "records": [
      {
       "class": "verbatim",
@@ -589,22 +1522,20 @@
       "outcome": "supporting",
       "quote": "src/cache.py states this directly.",
       "retrieve": true,
-      "route": null,
       "source": "src/cache.py",
       "source_kind": "code",
       "spike_unavailable": null,
-      "status": "verified_by_service"
+      "status": "verified_by_service",
+      "wait": null
      }
     ],
-    "research": 1,
-    "spikes": 1,
-    "spikes_ever": 1
+    "research": 1
    },
    {
     "blocker_message": null,
-    "commands": [],
     "decision": null,
     "id": "C2",
+    "proof": [],
     "records": [
      {
       "class": "verbatim",
@@ -612,147 +1543,728 @@
       "outcome": "supporting",
       "quote": "src/loader.py states this directly.",
       "retrieve": true,
-      "route": null,
       "source": "src/loader.py",
       "source_kind": "code",
       "spike_unavailable": null,
-      "status": "verified_by_service"
+      "status": "verified_by_service",
+      "wait": null
      }
     ],
-    "research": 1,
-    "spikes": 0,
-    "spikes_ever": 0
+    "research": 1
    }
   ],
   "contract": "empirica-ui-view/v1",
-  "control": {
-   "approval": "approved",
-   "mode": "deliberative"
-  },
   "goal": "Cache the tile index so a cold start reads one file.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 1
+    },
+    "passes": {
+     "max": 8,
+     "used": 1
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
   "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9/1",
-  "prompt_error": null,
+  "now": null,
+  "outstanding": [],
   "residuals": [],
   "stale": [],
   "steps": [
    {
+    "bookkeeping": true,
     "claim": null,
     "command": null,
     "kind": "observation_basis",
     "n": 1,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": null,
     "command": null,
     "kind": "graph",
     "n": 2,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C2",
     "command": null,
     "kind": "research",
     "n": 3,
-    "outcome": "supporting"
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C1",
     "command": null,
     "kind": "research",
     "n": 4,
-    "outcome": "supporting"
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C1",
     "command": "python -m pytest tests/test_cache.py",
     "kind": "spike_request",
     "n": 5,
-    "outcome": null
+    "outcome": null,
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C1",
     "command": "python -m pytest tests/test_cache.py",
     "kind": "spike",
     "n": 6,
-    "outcome": "pass"
+    "outcome": "pass",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
+    "bookkeeping": true,
     "claim": null,
     "command": null,
     "kind": "observation_basis",
     "n": 7,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C0",
     "command": null,
     "kind": "research",
     "n": 8,
-    "outcome": "supporting"
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
+    "bookkeeping": true,
     "claim": null,
     "command": null,
     "kind": "observation_basis",
     "n": 9,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": true,
     "claim": null,
     "command": null,
     "kind": "attribution",
     "n": 10,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": null,
     "command": null,
     "kind": "audit_verdict",
     "n": 11,
-    "outcome": "pass"
+    "outcome": "pass",
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    }
   ],
-  "version": "sha256:de969426bcb499c9f5c8e3bf4caa196219f8a49eb365af5abe90bab004538553",
-  "waiting": []
+  "stop": {
+   "basis": "recorded",
+   "deferred": [],
+   "frozen": true,
+   "required": [
+    "C0",
+    "C1",
+    "C2"
+   ],
+   "status": "converged"
+  },
+  "version": "sha256:78a72a781f95e7ebcc5429f334f77c826bb26796e016785a3247da608731023d"
  },
- "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211/1": {
+ "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-7097329796037c4fc706f8eadf843ca05f94723747e2f2149c6ef785d38306b2/1": {
   "audit": {
-   "findings": [],
-   "independence": "unverified"
+   "findings": []
   },
   "auditor": null,
   "author": "anthropic/claude-sonnet-4-6",
-  "budgets": {
-   "audit_spawns": {
-    "max": 2,
-    "used": 0
-   },
-   "passes": {
-    "max": 8,
-    "used": 0
-   },
-   "spawns": {
-    "max": 1,
-    "used": 0
-   }
-  },
   "claims": [
    {
-    "blocker_message": "Record research for claim C0.",
-    "commands": [],
+    "blocker_message": "Waiting for a human to confirm research or answer a decision.",
+    "decision": {
+     "answer": null,
+     "outcome": null,
+     "status": "waiting",
+     "where": "if_available"
+    },
+    "id": "C0",
+    "proof": [],
+    "records": [],
+    "research": 0
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "goal": "Decide the cache eviction policy.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-7097329796037c4fc706f8eadf843ca05f94723747e2f2149c6ef785d38306b2/1",
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [
+     "C0"
+    ],
+    "message": "Waiting for a human to confirm research or answer a decision.",
+    "need": "evidence.confirmation_required",
+    "where": "if_available",
+    "who": "human"
+   },
+   {
+    "claims": [],
+    "message": "Audit is owed; spawn an independent auditor.",
+    "need": "audit.required",
+    "where": "later",
+    "who": "agent"
+   }
+  ],
+  "residuals": [],
+  "stale": [],
+  "steps": [
+   {
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   }
+  ],
+  "stop": null,
+  "version": "sha256:1a6c242fe4cb4f519f33fb998f4e9a30ffb41a1336022dc72eaba881d0f84c20"
+ },
+ "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-802ad3ea4309643736391d57a4ffcdce716720dca33a82a21540cfae7e164c32/1": {
+  "audit": {
+   "findings": []
+  },
+  "auditor": "anthropic/claude-sonnet-4-6",
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": null,
     "decision": null,
     "id": "C0",
-    "records": [],
-    "research": 0,
-    "spikes": 0,
-    "spikes_ever": 0
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "docs/audit.md states this directly.",
+      "retrieve": true,
+      "source": "docs/audit.md",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "goal": "Document the same model audit.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 1
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-802ad3ea4309643736391d57a4ffcdce716720dca33a82a21540cfae7e164c32/1",
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [],
+    "message": "Auditor is the same model as covered evidence; spawn a distinct auditor or accept the residual.",
+    "need": "audit.same_model",
+    "where": "next_turn",
+    "who": "agent"
+   }
+  ],
+  "residuals": [],
+  "stale": [],
+  "steps": [
+   {
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "attribution",
+    "n": 4,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "audit_verdict",
+    "n": 5,
+    "outcome": "pass",
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   }
+  ],
+  "stop": null,
+  "version": "sha256:ce9701025c515fd70546f4bac491e9f11b5858e42fe315178abe958e8d76340c"
+ },
+ "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-a3ef3cd93353dc90ddc8b6c621c9599f34b705b4b0df356f4c4104f3573e212f/1": {
+  "audit": {
+   "findings": []
+  },
+  "auditor": "anthropic/claude-opus-4-6",
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/writer2.py states this directly.",
+      "retrieve": true,
+      "source": "src/writer2.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
    },
    {
     "blocker_message": null,
-    "commands": [],
     "decision": null,
     "id": "C1",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/group.py states this directly.",
+      "retrieve": true,
+      "source": "src/group.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "goal": "Index tiles by zoom level on write.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 2
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-a3ef3cd93353dc90ddc8b6c621c9599f34b705b4b0df356f4c4104f3573e212f/1",
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [],
+    "message": "Audit child is pending; wait.",
+    "need": "audit.pending",
+    "where": "in_progress",
+    "who": "auditor"
+   }
+  ],
+  "residuals": [],
+  "stale": [],
+  "steps": [
+   {
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": "C1",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 4,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "attribution",
+    "n": 5,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "audit_verdict",
+    "n": 6,
+    "outcome": "pass",
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   }
+  ],
+  "stop": null,
+  "version": "sha256:2fb9bed3124d52c4424226f6e920748443eb13e563a96029d33f141f6943aec2"
+ },
+ "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-d9498142c9b380ab5f858c29b74b9261cc19064d9833130ab9a265c12987982a/1": {
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "docs/audit.md states this directly.",
+      "retrieve": true,
+      "source": "docs/audit.md",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "goal": "Document the unverified audit.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 1
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-d9498142c9b380ab5f858c29b74b9261cc19064d9833130ab9a265c12987982a/1",
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [],
+    "message": "Audit independence is unverified; spawn a distinct auditor or accept the residual.",
+    "need": "audit.independence_unverified",
+    "where": "next_turn",
+    "who": "agent"
+   }
+  ],
+  "residuals": [],
+  "stale": [],
+  "steps": [
+   {
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "attribution",
+    "n": 4,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "audit_verdict",
+    "n": 5,
+    "outcome": "pass",
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   }
+  ],
+  "stop": null,
+  "version": "sha256:3a6c03876d4012882b27e73593dab274df8e4b375ad674bc1e9687461fd7ff6f"
+ },
+ "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211/1": {
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": "Waiting for a human to confirm research or answer a decision.",
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "docs/index.md states this directly.",
+      "retrieve": true,
+      "source": "docs/index.md",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   },
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C1",
+    "proof": [],
     "records": [
      {
       "class": "verbatim",
@@ -760,22 +2272,20 @@
       "outcome": "supporting",
       "quote": "docs/export.md states this directly.",
       "retrieve": true,
-      "route": null,
       "source": "docs/export.md",
       "source_kind": "code",
       "spike_unavailable": null,
-      "status": "verified_by_service"
+      "status": "verified_by_service",
+      "wait": null
      }
     ],
-    "research": 1,
-    "spikes": 0,
-    "spikes_ever": 0
+    "research": 1
    },
    {
     "blocker_message": null,
-    "commands": [],
     "decision": null,
     "id": "C2",
+    "proof": [],
     "records": [
      {
       "class": "retrievable",
@@ -783,22 +2293,23 @@
       "outcome": "supporting",
       "quote": "every tile is read through the index",
       "retrieve": true,
-      "route": "audit",
       "source": "/opt/vendor/tiles/SPEC.md",
       "source_kind": "docs",
       "spike_unavailable": null,
-      "status": "pending"
+      "status": "pending",
+      "wait": {
+       "where": "next_turn",
+       "who": "auditor"
+      }
      }
     ],
-    "research": 1,
-    "spikes": 0,
-    "spikes_ever": 0
+    "research": 1
    },
    {
     "blocker_message": null,
-    "commands": [],
     "decision": null,
     "id": "C3",
+    "proof": [],
     "records": [
      {
       "class": "retrievable",
@@ -806,22 +2317,20 @@
       "outcome": "supporting",
       "quote": "readers must use the index",
       "retrieve": false,
-      "route": null,
       "source": "https://tiles.example.org/format#export",
       "source_kind": "web",
       "spike_unavailable": null,
-      "status": "confirmed_by_human"
+      "status": "confirmed_by_human",
+      "wait": null
      }
     ],
-    "research": 1,
-    "spikes": 0,
-    "spikes_ever": 0
+    "research": 1
    },
    {
-    "blocker_message": "Record research for claim C4.",
-    "commands": [],
+    "blocker_message": null,
     "decision": null,
     "id": "C4",
+    "proof": [],
     "records": [
      {
       "class": "observed",
@@ -829,22 +2338,32 @@
       "outcome": "supporting",
       "quote": "tile reads: 0 outside the index",
       "retrieve": false,
-      "route": null,
       "source": "nightly export log, 2026-09-27",
       "source_kind": "runtime",
       "spike_unavailable": "The job only runs on the nightly cluster.",
-      "status": "rejected_by_human"
+      "status": "rejected_by_human",
+      "wait": null
+     },
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "docs/export-log.md states this directly.",
+      "retrieve": true,
+      "source": "docs/export-log.md",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
      }
     ],
-    "research": 0,
-    "spikes": 0,
-    "spikes_ever": 0
+    "research": 1
    },
    {
     "blocker_message": "Waiting for a human to confirm research or answer a decision.",
-    "commands": [],
     "decision": null,
     "id": "C5",
+    "proof": [],
     "records": [
      {
       "class": "retrievable",
@@ -852,22 +2371,23 @@
       "outcome": "supporting",
       "quote": "direct tile reads are not available",
       "retrieve": false,
-      "route": "human",
       "source": "https://provider.example.net/limits",
       "source_kind": "web",
       "spike_unavailable": null,
-      "status": "pending"
+      "status": "pending",
+      "wait": {
+       "where": "next_report",
+       "who": "human"
+      }
      }
     ],
-    "research": 1,
-    "spikes": 0,
-    "spikes_ever": 0
+    "research": 1
    },
    {
     "blocker_message": "Waiting for a human to confirm research or answer a decision.",
-    "commands": [],
     "decision": null,
     "id": "C6",
+    "proof": [],
     "records": [
      {
       "class": "observed",
@@ -875,170 +2395,242 @@
       "outcome": "supporting",
       "quote": "no reads outside the index",
       "retrieve": false,
-      "route": "human",
       "source": "export log, 2026-09-21",
       "source_kind": "runtime",
       "spike_unavailable": "The run is over and its inputs are gone.",
-      "status": "pending"
+      "status": "pending",
+      "wait": {
+       "where": "next_report",
+       "who": "human"
+      }
      }
     ],
-    "research": 1,
-    "spikes": 0,
-    "spikes_ever": 0
+    "research": 1
    },
    {
     "blocker_message": "Waiting for a human to confirm research or answer a decision.",
-    "commands": [],
     "decision": {
      "answer": null,
      "outcome": null,
-     "route": "human"
+     "status": "waiting",
+     "where": "next_report"
     },
     "id": "C7",
+    "proof": [],
     "records": [],
-    "research": 0,
-    "spikes": 0,
-    "spikes_ever": 0
+    "research": 0
    }
   ],
   "contract": "empirica-ui-view/v1",
-  "control": {
-   "approval": "approved",
-   "mode": "deliberative"
-  },
   "goal": "Document the tile export path.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 126,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
   "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211/1",
-  "prompt_error": null,
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [
+     "C5",
+     "C6",
+     "C7"
+    ],
+    "message": "Waiting for a human to confirm research or answer a decision.",
+    "need": "evidence.confirmation_required",
+    "where": "next_report",
+    "who": "human"
+   },
+   {
+    "claims": [],
+    "message": "Audit is owed; spawn an independent auditor.",
+    "need": "audit.required",
+    "where": "later",
+    "who": "agent"
+   }
+  ],
   "residuals": [],
   "stale": [],
   "steps": [
    {
+    "bookkeeping": true,
     "claim": null,
     "command": null,
     "kind": "observation_basis",
     "n": 1,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": null,
     "command": null,
     "kind": "graph",
     "n": 2,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
-    "claim": "C1",
+    "bookkeeping": false,
+    "claim": "C0",
     "command": null,
     "kind": "research",
     "n": 3,
-    "outcome": "supporting"
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
-    "claim": "C2",
+    "bookkeeping": false,
+    "claim": "C1",
     "command": null,
     "kind": "research",
     "n": 4,
-    "outcome": "supporting"
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
-    "claim": "C3",
+    "bookkeeping": false,
+    "claim": "C2",
     "command": null,
     "kind": "research",
     "n": 5,
-    "outcome": "supporting"
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
-    "claim": "C4",
+    "bookkeeping": false,
+    "claim": "C3",
     "command": null,
     "kind": "research",
     "n": 6,
-    "outcome": "supporting"
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
-    "claim": "C5",
+    "bookkeeping": false,
+    "claim": "C4",
     "command": null,
     "kind": "research",
     "n": 7,
-    "outcome": "supporting"
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
-    "claim": "C6",
+    "bookkeeping": false,
+    "claim": "C5",
     "command": null,
     "kind": "research",
     "n": 8,
-    "outcome": "supporting"
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
+    "claim": "C6",
+    "command": null,
+    "kind": "research",
+    "n": 9,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
     "claim": null,
     "command": null,
     "kind": "evidence_presentation",
-    "n": 9,
-    "outcome": null
+    "n": 10,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C3",
     "command": null,
     "kind": "evidence_confirmation",
-    "n": 10,
-    "outcome": null
+    "n": 11,
+    "outcome": "confirm",
+    "standing": "current",
+    "subject": "record",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C4",
     "command": null,
     "kind": "evidence_confirmation",
-    "n": 11,
-    "outcome": null
+    "n": 12,
+    "outcome": "reject",
+    "standing": "current",
+    "subject": "record",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": "C4",
+    "command": null,
+    "kind": "research",
+    "n": 13,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    }
   ],
-  "version": "sha256:e4aefb61dcdd1f44e8a2b18d5584270988a68c91f9e0dcd9539199f3f5ad9431",
-  "waiting": [
-   {
-    "claim": "C5",
-    "decision": false,
-    "records": 1,
-    "route": "human"
-   },
-   {
-    "claim": "C6",
-    "decision": false,
-    "records": 1,
-    "route": "human"
-   },
-   {
-    "claim": "C7",
-    "decision": true,
-    "records": 0,
-    "route": "human"
-   }
-  ]
+  "stop": null,
+  "version": "sha256:4d725d4254e1439bdf6aed6c498359d8978910d825560e9d3d1c5e782adb08ab"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-e5bc37664845dccec9f662b44804806b99e73cb885080ec8fbd053aa74fcc494/1": {
   "audit": {
-   "findings": [],
-   "independence": "distinct"
+   "findings": []
   },
   "auditor": "anthropic/claude-opus-4-6",
   "author": "anthropic/claude-sonnet-4-6",
-  "budgets": {
-   "audit_spawns": {
-    "max": 2,
-    "used": 1
-   },
-   "passes": {
-    "max": 8,
-    "used": 0
-   },
-   "spawns": {
-    "max": 1,
-    "used": 0
-   }
-  },
   "claims": [
    {
     "blocker_message": null,
-    "commands": [],
     "decision": null,
     "id": "C0",
+    "proof": [],
     "records": [
      {
       "class": "verbatim",
@@ -1046,22 +2638,20 @@
       "outcome": "supporting",
       "quote": "src/index.py states this directly.",
       "retrieve": true,
-      "route": null,
       "source": "src/index.py",
       "source_kind": "code",
       "spike_unavailable": null,
-      "status": "verified_by_service"
+      "status": "verified_by_service",
+      "wait": null
      }
     ],
-    "research": 1,
-    "spikes": 0,
-    "spikes_ever": 0
+    "research": 1
    },
    {
     "blocker_message": null,
-    "commands": [],
     "decision": null,
     "id": "C1",
+    "proof": [],
     "records": [
      {
       "class": "verbatim",
@@ -1069,22 +2659,20 @@
       "outcome": "supporting",
       "quote": "src/writer.py states this directly.",
       "retrieve": true,
-      "route": null,
       "source": "src/writer.py",
       "source_kind": "code",
       "spike_unavailable": null,
-      "status": "verified_by_service"
+      "status": "verified_by_service",
+      "wait": null
      }
     ],
-    "research": 1,
-    "spikes": 0,
-    "spikes_ever": 0
+    "research": 1
    },
    {
     "blocker_message": null,
-    "commands": [],
     "decision": null,
     "id": "C2",
+    "proof": [],
     "records": [
      {
       "class": "verbatim",
@@ -1092,22 +2680,20 @@
       "outcome": "supporting",
       "quote": "src/callers.py states this directly.",
       "retrieve": true,
-      "route": null,
       "source": "src/callers.py",
       "source_kind": "code",
       "spike_unavailable": null,
-      "status": "verified_by_service"
+      "status": "verified_by_service",
+      "wait": null
      }
     ],
-    "research": 1,
-    "spikes": 0,
-    "spikes_ever": 0
+    "research": 1
    },
    {
     "blocker_message": null,
-    "commands": [],
     "decision": null,
     "id": "C3",
+    "proof": [],
     "records": [
      {
       "class": "verbatim",
@@ -1115,11 +2701,11 @@
       "outcome": "supporting",
       "quote": "src/server.py states this directly.",
       "retrieve": true,
-      "route": null,
       "source": "src/server.py",
       "source_kind": "code",
       "spike_unavailable": null,
-      "status": "verified_by_service"
+      "status": "verified_by_service",
+      "wait": null
      },
      {
       "class": "verbatim",
@@ -1127,196 +2713,1030 @@
       "outcome": "supporting",
       "quote": "docs/server.md states this directly.",
       "retrieve": true,
-      "route": null,
       "source": "docs/server.md",
       "source_kind": "code",
       "spike_unavailable": null,
-      "status": "verified_by_service"
+      "status": "verified_by_service",
+      "wait": null
      }
     ],
-    "research": 2,
-    "spikes": 0,
-    "spikes_ever": 0
+    "research": 2
    }
   ],
   "contract": "empirica-ui-view/v1",
-  "control": {
-   "approval": "approved",
-   "mode": "deliberative"
-  },
   "goal": "Split the tile index by zoom level.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 1
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
   "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-e5bc37664845dccec9f662b44804806b99e73cb885080ec8fbd053aa74fcc494/1",
-  "prompt_error": null,
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [],
+    "message": "Audit failed or its coverage went stale; address any findings listed under Audit, then retry.",
+    "need": "audit.failed",
+    "where": "next_turn",
+    "who": "agent"
+   }
+  ],
   "residuals": [],
   "stale": [],
   "steps": [
    {
+    "bookkeeping": true,
     "claim": null,
     "command": null,
     "kind": "observation_basis",
     "n": 1,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": null,
     "command": null,
     "kind": "graph",
     "n": 2,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C1",
     "command": null,
     "kind": "research",
     "n": 3,
-    "outcome": "supporting"
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C3",
     "command": null,
     "kind": "research",
     "n": 4,
-    "outcome": "supporting"
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
+    "bookkeeping": true,
     "claim": null,
     "command": null,
     "kind": "attribution",
     "n": 5,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": null,
     "command": null,
     "kind": "audit_verdict",
     "n": 6,
-    "outcome": "pass"
+    "outcome": "pass",
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C2",
     "command": null,
     "kind": "research",
     "n": 7,
-    "outcome": "supporting"
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C0",
     "command": null,
     "kind": "research",
     "n": 8,
-    "outcome": "supporting"
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C3",
     "command": null,
     "kind": "research",
     "n": 9,
-    "outcome": "supporting"
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    }
   ],
-  "version": "sha256:35b0eae715d8f56ef7755fdfe24f11a2a62e73347187d8dadc975e8adab8d533",
-  "waiting": []
+  "stop": null,
+  "version": "sha256:223fc76890d77cca8e5e4114bf81945b314e9ee9a16b43883f187590c39978c8"
  },
- "s256-b5e0eee6e28efca6d6ad05d7b8a94631576037ec9e5ff6d305fe89faa0e1032e/s256-6ec97bb08344a844badedb2426721d756e040e9e77f4f26c70f203bdcb9730bd/1": {
-  "audit": null,
-  "auditor": null,
-  "author": null,
-  "budgets": {
-   "audit_spawns": {
-    "max": 2,
-    "used": 0
-   },
-   "passes": {
-    "max": 8,
-    "used": 0
-   },
-   "spawns": {
-    "max": 1,
-    "used": 0
-   }
-  },
-  "claims": [],
-  "contract": "empirica-ui-view/v1",
-  "control": {
-   "approval": "approved",
-   "mode": "deliberative"
-  },
-  "goal": "Tidy the release checklist.",
-  "key": "s256-b5e0eee6e28efca6d6ad05d7b8a94631576037ec9e5ff6d305fe89faa0e1032e/s256-6ec97bb08344a844badedb2426721d756e040e9e77f4f26c70f203bdcb9730bd/1",
-  "prompt_error": null,
-  "residuals": [],
-  "stale": [],
-  "steps": [],
-  "version": "sha256:ded895d76162bd390b6983f69f414997afcd19fcffb7d0d2d55c84747e58cade",
-  "waiting": []
- },
- "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470/1": {
+ "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-fc04a04c0af0c8b9845dfa5ed1ba49af255d5f53532c8dd2b9fa0090998e8695/1": {
   "audit": {
-   "findings": [],
-   "independence": "unverified"
+   "findings": []
   },
   "auditor": null,
   "author": "anthropic/claude-sonnet-4-6",
-  "budgets": {
-   "audit_spawns": {
-    "max": 2,
-    "used": 0
-   },
-   "passes": {
-    "max": 8,
-    "used": 0
-   },
-   "spawns": {
-    "max": 1,
-    "used": 0
-   }
-  },
   "claims": [
    {
     "blocker_message": null,
-    "commands": [],
     "decision": null,
     "id": "C0",
+    "proof": [],
     "records": [
      {
       "class": "verbatim",
       "note": null,
       "outcome": "supporting",
-      "quote": "import/retry.py states this directly.",
+      "quote": "docs/hit-rate.md states this directly.",
       "retrieve": true,
-      "route": null,
-      "source": "import/retry.py",
+      "source": "docs/hit-rate.md",
       "source_kind": "code",
       "spike_unavailable": null,
-      "status": "verified_by_service"
+      "status": "verified_by_service",
+      "wait": null
+     },
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "docs/hit-rate-2.md states this directly.",
+      "retrieve": true,
+      "source": "docs/hit-rate-2.md",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
      }
     ],
-    "research": 1,
-    "spikes": 0,
-    "spikes_ever": 0
-   },
-   {
-    "blocker_message": null,
-    "commands": [],
-    "decision": null,
-    "id": "C1",
-    "records": [],
-    "research": 0,
-    "spikes": 0,
-    "spikes_ever": 0
+    "research": 2
    }
   ],
   "contract": "empirica-ui-view/v1",
-  "control": {
+  "goal": "Measure the cache hit rate.",
+  "governance": {
    "approval": "approved",
-   "mode": "deliberative"
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 1,
+     "used": 1
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
   },
-  "goal": "Document the import retry policy.",
-  "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470/1",
-  "prompt_error": null,
+  "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-fc04a04c0af0c8b9845dfa5ed1ba49af255d5f53532c8dd2b9fa0090998e8695/1",
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [],
+    "message": "pass budget exhausted.",
+    "need": "budget.exhausted",
+    "where": "next_turn",
+    "who": "agent"
+   },
+   {
+    "claims": [],
+    "message": "Audit is owed; spawn an independent auditor.",
+    "need": "audit.required",
+    "where": "later",
+    "who": "agent"
+   }
+  ],
+  "residuals": [],
+  "stale": [],
+  "steps": [
+   {
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 4,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   }
+  ],
+  "stop": null,
+  "version": "sha256:ec60daa7d3b6be311d75f77b37de81fbabbe2d6269dd04e09a09acf642150ce3"
+ },
+ "s256-b5e0eee6e28efca6d6ad05d7b8a94631576037ec9e5ff6d305fe89faa0e1032e/s256-6ec97bb08344a844badedb2426721d756e040e9e77f4f26c70f203bdcb9730bd/1": {
+  "audit": null,
+  "auditor": null,
+  "author": null,
+  "claims": null,
+  "contract": "empirica-ui-view/v1",
+  "goal": "Tidy the release checklist.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": null,
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-b5e0eee6e28efca6d6ad05d7b8a94631576037ec9e5ff6d305fe89faa0e1032e/s256-6ec97bb08344a844badedb2426721d756e040e9e77f4f26c70f203bdcb9730bd/1",
+  "now": null,
+  "outstanding": null,
+  "residuals": null,
+  "stale": null,
+  "steps": null,
+  "stop": null,
+  "version": "sha256:4fbe8534b1d53935de2c452ba5688e3501edc9cab8e6edd1f24d3e7cc86c7286"
+ },
+ "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-169f5325af27f0105c8dfb510772d8c31f18d234cfc59011101a3fef4dc905f3/1": {
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": "Record research for claim C0.",
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [],
+    "research": 0
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "goal": "Regenerate the thumbnails every night.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "auto",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-169f5325af27f0105c8dfb510772d8c31f18d234cfc59011101a3fef4dc905f3/1",
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [
+     "C0"
+    ],
+    "message": "Record research for claim C0.",
+    "need": "claim.research_missing",
+    "where": "next_turn",
+    "who": "agent"
+   },
+   {
+    "claims": [],
+    "message": "Audit is owed; spawn an independent auditor.",
+    "need": "audit.required",
+    "where": "later",
+    "who": "agent"
+   }
+  ],
+  "residuals": [],
+  "stale": [],
+  "steps": [
+   {
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   }
+  ],
+  "stop": null,
+  "version": "sha256:fb4a0ff7b18c71e197e3df7bb2a358ddda57704dac9500ae5e2eb2f24fe58971"
+ },
+ "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-872cbcde548158577ddf9be95a9e50f601699ad6d7e4a00bb769d6068ef77efc/1": {
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/avatar_size.py states this directly.",
+      "retrieve": true,
+      "source": "src/avatar_size.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "goal": "Resize the avatar thumbnails.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 126,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-872cbcde548158577ddf9be95a9e50f601699ad6d7e4a00bb769d6068ef77efc/1",
+  "now": null,
+  "outstanding": [],
   "residuals": [
    {
+    "claims": [],
+    "code": "audit.required",
+    "message": "No audit had been done when the run stopped."
+   }
+  ],
+  "stale": [],
+  "steps": [
+   {
+    "bookkeeping": true,
     "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "evidence_presentation",
+    "n": 4,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "evidence_confirmation",
+    "n": 5,
+    "outcome": "approve",
+    "standing": null,
+    "subject": "run",
+    "terminal": true
+   }
+  ],
+  "stop": {
+   "basis": "recorded",
+   "deferred": [],
+   "frozen": false,
+   "required": [
+    "C0"
+   ],
+   "status": "stopped_residual"
+  },
+  "version": "sha256:99864717e8546a5a477d828860b9f39e54e2b15007645114545ac6c397fdf820"
+ },
+ "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-872cbcde548158577ddf9be95a9e50f601699ad6d7e4a00bb769d6068ef77efc/2": {
+  "audit": null,
+  "auditor": null,
+  "author": null,
+  "claims": null,
+  "contract": "empirica-ui-view/v1",
+  "goal": null,
+  "governance": null,
+  "key": "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-872cbcde548158577ddf9be95a9e50f601699ad6d7e4a00bb769d6068ef77efc/2",
+  "now": null,
+  "outstanding": null,
+  "residuals": null,
+  "stale": null,
+  "steps": null,
+  "stop": null,
+  "version": "sha256:a0d9b09d89165d4d3e00fc6e28e5649c3329e634c27f17cf4a46a08f9dedecd2"
+ },
+ "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-b2188b54870c7880a98e9236eced566deb60026daa52a36bfff3f08759c7beb5/1": {
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/thumb_size.py states this directly.",
+      "retrieve": true,
+      "source": "src/thumb_size.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "goal": "Shrink the thumbnails to 64 pixels.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 126,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-b2188b54870c7880a98e9236eced566deb60026daa52a36bfff3f08759c7beb5/1",
+  "now": null,
+  "outstanding": [],
+  "residuals": [
+   {
+    "claims": [],
+    "code": "audit.required",
+    "message": "No audit had been done when the run stopped."
+   }
+  ],
+  "stale": [],
+  "steps": [
+   {
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "evidence_presentation",
+    "n": 4,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "evidence_confirmation",
+    "n": 5,
+    "outcome": "approve",
+    "standing": null,
+    "subject": "run",
+    "terminal": true
+   }
+  ],
+  "stop": {
+   "basis": "recorded",
+   "deferred": [],
+   "frozen": false,
+   "required": [
+    "C0"
+   ],
+   "status": "stopped_residual"
+  },
+  "version": "sha256:805c1edff6a087019e76e8ede93b7e3c2a2a352f52bc7ce78e1617ab257021c9"
+ },
+ "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-b2188b54870c7880a98e9236eced566deb60026daa52a36bfff3f08759c7beb5/2": {
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/thumb_size.py states this directly.",
+      "retrieve": true,
+      "source": "src/thumb_size.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "goal": "Shrink the thumbnails to 128 pixels.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 126,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-b2188b54870c7880a98e9236eced566deb60026daa52a36bfff3f08759c7beb5/2",
+  "now": null,
+  "outstanding": [],
+  "residuals": [
+   {
+    "claims": [],
+    "code": "audit.required",
+    "message": "No audit had been done when the run stopped."
+   }
+  ],
+  "stale": [],
+  "steps": [
+   {
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "evidence_presentation",
+    "n": 4,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "evidence_confirmation",
+    "n": 5,
+    "outcome": "approve",
+    "standing": null,
+    "subject": "run",
+    "terminal": true
+   }
+  ],
+  "stop": {
+   "basis": "recorded",
+   "deferred": [],
+   "frozen": false,
+   "required": [
+    "C0"
+   ],
+   "status": "stopped_residual"
+  },
+  "version": "sha256:4b2e55a3fbbb1332cd7bc92147a8e55fbfe6035fcc09eb669e624aa7922568a4"
+ },
+ "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-b2188b54870c7880a98e9236eced566deb60026daa52a36bfff3f08759c7beb5/3": {
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/thumb_size.py states this directly.",
+      "retrieve": true,
+      "source": "src/thumb_size.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "goal": "Serve thumbnails from the CDN instead.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-bb4c8eb92b6ec7b9055c94a397581544693c61da0f8f6cbb808681ccd0d9ce9b/s256-b2188b54870c7880a98e9236eced566deb60026daa52a36bfff3f08759c7beb5/3",
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [],
+    "message": "Audit is owed; spawn an independent auditor.",
+    "need": "audit.required",
+    "where": "next_turn",
+    "who": "agent"
+   }
+  ],
+  "residuals": [],
+  "stale": [],
+  "steps": [
+   {
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   }
+  ],
+  "stop": null,
+  "version": "sha256:40ee877df87d5281bdf71a6b3fb5a64cecc98b2a4b1c4b0b5825740ef7bfa3bc"
+ },
+ "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-682439d331439ac14d50f23fb9165efa6aa381c0e62d2362a4a67d98494c6bb5/1": {
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "import/backoff.py states this directly.",
+      "retrieve": true,
+      "source": "import/backoff.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   },
+   {
+    "blocker_message": null,
+    "decision": {
+     "answer": null,
+     "outcome": null,
+     "status": "deferred",
+     "where": null
+    },
+    "id": "C1",
+    "proof": [],
+    "records": [],
+    "research": 0
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "goal": "Choose the retry backoff ceiling.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-682439d331439ac14d50f23fb9165efa6aa381c0e62d2362a4a67d98494c6bb5/1",
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [],
+    "message": "Audit is owed; spawn an independent auditor.",
+    "need": "audit.required",
+    "where": "next_turn",
+    "who": "agent"
+   }
+  ],
+  "residuals": [
+   {
+    "claims": [],
     "code": "freeze.deferred",
     "message": "Deferred claims are residual; accept."
    }
@@ -1324,97 +3744,257 @@
   "stale": [],
   "steps": [
    {
+    "bookkeeping": true,
     "claim": null,
     "command": null,
     "kind": "observation_basis",
     "n": 1,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": null,
     "command": null,
     "kind": "graph",
     "n": 2,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C0",
     "command": null,
     "kind": "research",
     "n": 3,
-    "outcome": "supporting"
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": null,
     "command": null,
     "kind": "graph",
     "n": 4,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   }
+  ],
+  "stop": null,
+  "version": "sha256:d0af7967dc1f1f9cf8f591ed2f92c7affdb32d16c43f868c883eaa2a8e6e2d18"
+ },
+ "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470/1": {
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "import/retry.py states this directly.",
+      "retrieve": true,
+      "source": "import/retry.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
    },
    {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C1",
+    "proof": [],
+    "records": [],
+    "research": 0
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "goal": "Document the import retry policy.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 126,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470/1",
+  "now": null,
+  "outstanding": [],
+  "residuals": [
+   {
+    "claims": [],
+    "code": "freeze.deferred",
+    "message": "Claims deferred by the frozen scope were left unresolved."
+   },
+   {
+    "claims": [],
+    "code": "audit.required",
+    "message": "No audit had been done when the run stopped."
+   }
+  ],
+  "stale": [],
+  "steps": [
+   {
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 4,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
     "claim": null,
     "command": null,
     "kind": "evidence_presentation",
     "n": 5,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
-    "claim": "stopped_frozen",
+    "bookkeeping": false,
+    "claim": null,
     "command": null,
     "kind": "evidence_confirmation",
     "n": 6,
-    "outcome": null
+    "outcome": "approve",
+    "standing": null,
+    "subject": "run",
+    "terminal": true
    }
   ],
-  "version": "sha256:4369c18035cb07c1b2b17cadf2e1957f5b7037246c05d51528bd6ff74de2d5dc",
-  "waiting": []
+  "stop": {
+   "basis": "recorded",
+   "deferred": [
+    "C1"
+   ],
+   "frozen": true,
+   "required": [
+    "C0"
+   ],
+   "status": "stopped_frozen"
+  },
+  "version": "sha256:7913e5648e3a6879483ab4a06478921dd2b9959072b06eec95a255871ae80720"
  },
  "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148/1": {
   "audit": null,
   "auditor": null,
   "author": null,
-  "budgets": null,
-  "claims": [],
+  "claims": null,
   "contract": "empirica-ui-view/v1",
-  "control": null,
   "goal": null,
+  "governance": null,
   "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148/1",
-  "prompt_error": null,
-  "residuals": [],
-  "stale": [],
-  "steps": [],
-  "version": "sha256:a0b61596536fa3e9fcaa7d946ccbd6ee924023183a557157c259af5b0a3a218b",
-  "waiting": []
+  "now": null,
+  "outstanding": null,
+  "residuals": null,
+  "stale": null,
+  "steps": null,
+  "stop": null,
+  "version": "sha256:a0b61596536fa3e9fcaa7d946ccbd6ee924023183a557157c259af5b0a3a218b"
  },
  "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-ea2fab75d05920549b4b92798bdf7217fed88df4e0a56de317d1e721524887b2/1": {
   "audit": {
-   "findings": [],
-   "independence": "unverified"
+   "findings": []
   },
   "auditor": null,
   "author": "anthropic/claude-sonnet-4-6",
-  "budgets": {
-   "audit_spawns": {
-    "max": 2,
-    "used": 0
-   },
-   "passes": {
-    "max": 1,
-    "used": 1
-   },
-   "spawns": {
-    "max": 1,
-    "used": 0
-   }
-  },
   "claims": [
    {
     "blocker_message": null,
-    "commands": [
-     "python bench/import.py"
-    ],
     "decision": null,
     "id": "C0",
+    "proof": [
+     {
+      "command": "python bench/import.py",
+      "exit_code": 0,
+      "files": [
+       {
+        "path": "import/query.sql",
+        "sha256": "sha256:8903abffd68710879da59014708c6187f8e839fadc2bdf94ae73a036aa591623"
+       }
+      ],
+      "gate": "pass",
+      "outcome": "pass",
+      "output": "not_retained",
+      "state": "current"
+     }
+    ],
     "records": [
      {
       "class": "verbatim",
@@ -1422,100 +4002,269 @@
       "outcome": "supporting",
       "quote": "import/query.sql states this directly.",
       "retrieve": true,
-      "route": null,
       "source": "import/query.sql",
       "source_kind": "code",
       "spike_unavailable": null,
-      "status": "verified_by_service"
+      "status": "verified_by_service",
+      "wait": null
      }
     ],
-    "research": 1,
-    "spikes": 1,
-    "spikes_ever": 1
+    "research": 1
    }
   ],
   "contract": "empirica-ui-view/v1",
-  "control": {
-   "approval": "approved",
-   "mode": "deliberative"
-  },
   "goal": "Find why the nightly import is slow.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 1,
+     "used": 1
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 126,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
   "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-ea2fab75d05920549b4b92798bdf7217fed88df4e0a56de317d1e721524887b2/1",
-  "prompt_error": null,
+  "now": null,
+  "outstanding": [],
   "residuals": [
    {
-    "claim": null,
+    "claims": [],
     "code": "budget.exhausted",
-    "message": "pass budget exhausted."
+    "message": "pass budget was exhausted when the run stopped."
    }
   ],
   "stale": [],
   "steps": [
    {
+    "bookkeeping": true,
     "claim": null,
     "command": null,
     "kind": "observation_basis",
     "n": 1,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": null,
     "command": null,
     "kind": "graph",
     "n": 2,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C0",
     "command": null,
     "kind": "research",
     "n": 3,
-    "outcome": "supporting"
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C0",
     "command": "python bench/import.py",
     "kind": "spike_request",
     "n": 4,
-    "outcome": null
+    "outcome": null,
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": "C0",
     "command": "python bench/import.py",
     "kind": "spike",
     "n": 5,
-    "outcome": "pass"
+    "outcome": "pass",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
    },
    {
+    "bookkeeping": true,
     "claim": null,
     "command": null,
     "kind": "observation_basis",
     "n": 6,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": true,
     "claim": null,
     "command": null,
     "kind": "observation_basis",
     "n": 7,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
+    "bookkeeping": false,
     "claim": null,
     "command": null,
     "kind": "evidence_presentation",
     "n": 8,
-    "outcome": null
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
    },
    {
-    "claim": "stopped_budget",
+    "bookkeeping": false,
+    "claim": null,
     "command": null,
     "kind": "evidence_confirmation",
     "n": 9,
-    "outcome": null
+    "outcome": "approve",
+    "standing": null,
+    "subject": "run",
+    "terminal": true
    }
   ],
-  "version": "sha256:96f45000cc023e13e72662ccf2c59ff4ab944bd37e6e319d0f50913811915b6c",
-  "waiting": []
+  "stop": {
+   "basis": "recorded",
+   "deferred": [],
+   "frozen": false,
+   "required": [
+    "C0"
+   ],
+   "status": "stopped_budget"
+  },
+  "version": "sha256:66787946ab19fc72664066c281dab4b8fe759f03c2a77c8414e3177dbf41d77d"
+ },
+ "s256-cf9e9cc0972aac63d68892422dfd106229df45bd1bdef828433e3d4450dffb87/s256-50556f10455c3b044a0f2f20e8c9ed2371e751c670ee355ec246bf1e14672d04/1": {
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/checksum.py states this directly.",
+      "retrieve": true,
+      "source": "src/checksum.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "goal": "Check the tile checksum.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-cf9e9cc0972aac63d68892422dfd106229df45bd1bdef828433e3d4450dffb87/s256-50556f10455c3b044a0f2f20e8c9ed2371e751c670ee355ec246bf1e14672d04/1",
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [],
+    "message": "Audit is owed; spawn an independent auditor.",
+    "need": "audit.required",
+    "where": "next_turn",
+    "who": "agent"
+   }
+  ],
+  "residuals": [],
+  "stale": [],
+  "steps": [
+   {
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   }
+  ],
+  "stop": null,
+  "version": "sha256:c28731e77f710aba4d8faf0dc62e00fb3f19d8191a2e0d26f59b1f2b29c889f4"
  }
 }

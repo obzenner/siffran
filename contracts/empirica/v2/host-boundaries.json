@@ -2279,7 +2279,7 @@
       "action": "open the observer at each checkpoint",
       "expected": "agrees with RunView",
       "covered_by": [
-        "plugins/empirica/ui/tests/contract.test.mjs::every states.json domain is held to a contract enum"
+        "plugins/empirica/ui/tests/contract.test.mjs::every state vocabulary is keyed by exactly the values of one contract list (only the fallback is not)"
       ],
       "ledger_rows": [
         "observer_ui_live"

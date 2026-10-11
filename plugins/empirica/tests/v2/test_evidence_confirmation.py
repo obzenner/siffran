@@ -473,9 +473,11 @@ class EvidenceConfirmationTests(EvidenceFixture):
         self.dispatch(drv, observe_action(run_id=run_id, action=action_freeze()))
         self.present(drv, run_id, "p1")
         self.audit(drv, run_id)
-        self.assertEqual(self.run_view(drv, run_id)["audit"]["state"], "passed")
+        self.assertEqual(self.run_view(drv, run_id)["audit"]["verdict"], "passed")
         self.assertEqual(self.answer(drv, run_id, "p1", confirm(record))["type"], "Allow")
-        self.assertEqual(self.run_view(drv, run_id)["audit"]["state"], "failed")
+        # The pass is still the latest verdict, but it no longer covers the argument.
+        audit = self.run_view(drv, run_id)["audit"]
+        self.assertEqual((audit["verdict"], audit["current"]), ("passed", False))
         self.assertEqual(self.report(drv, run_id)["reasons"][0]["code"], "audit.failed")
 
     def test_a_receipt_changes_what_an_audit_reviewed_and_what_the_dossier_covers(self):
@@ -588,12 +590,15 @@ class ViewIsOrderedLikeTheGateTests(EvidenceFixture):
         self.assertEqual([r["code"] for r in gate["reasons"]], ["evidence.confirmation_required"])
         self.assertEqual([c["state"] for c in self.argument(drv, run_id)["claims"]], ["approved"])
         view = self.dispatch(drv, get_run(run_id=run_id))["result"]["run"]
-        audit = next(row for row in view["obligations"]["active"] if row["id"] == "obligation.audit")
-        self.assertEqual(audit["status"], "residual")
-        self.assertEqual(audit["missing"]["code"], "evidence.confirmation_required")
-        self.assertNotIn("child.spawn_auditor", audit["next"])
-        self.assertIn("human.confirm_evidence", audit["next"])
-        self.assertEqual(audit["missing"]["parameters"], gate["reasons"][0]["parameters"])
+        rows = {row["id"]: row for row in view["obligations"]["active"]}
+        asked = rows["obligation.confirmation"]  # the gate's own answer, led with
+        self.assertEqual((asked["status"], asked["missing"]["code"]), ("residual", "evidence.confirmation_required"))
+        self.assertIn("human.confirm_evidence", asked["next"])
+        self.assertNotIn("hold", asked)
+        self.assertEqual(asked["missing"]["parameters"], gate["reasons"][0]["parameters"])
+        audit = rows["obligation.audit"]  # listed, and held until the human has answered
+        self.assertEqual((audit["status"], audit["missing"]["code"], audit["hold"]), ("residual", "audit.required", "blocked"))
+        self.assertEqual(audit["next"], [])
 
     def test_once_the_human_has_decided_the_view_offers_the_audit(self):
         """The ordering is the gate's, not a ban: with nothing waiting on a human the audit is what is owed."""

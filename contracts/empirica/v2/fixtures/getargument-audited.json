@@ -60,7 +60,9 @@
         },
         "governance": null,
         "audit": {
-          "state": "passed",
+          "verdict": "passed",
+          "current": true,
+          "pending": false,
           "independence": "distinct",
           "findings": []
         },
@@ -163,7 +165,9 @@
         "route_stamp": 1,
         "investigation_stamp": 2,
         "audit": {
-          "state": "passed",
+          "verdict": "passed",
+          "current": true,
+          "pending": false,
           "independence": "distinct",
           "reviewed_argument_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
           "reviewed_goal_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",

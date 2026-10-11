@@ -160,13 +160,10 @@
     "needs-experiment",
     "needs-decision"
   ],
-  "audit_states": [
-    "not_required",
-    "required",
-    "pending",
+  "audit_outcomes": [
     "passed",
     "failed",
-    "stale"
+    "none"
   ],
   "independence_states": [
     "distinct",
@@ -297,6 +294,20 @@
     "audit_obligation": {
       "obligation_id": "obligation.audit",
       "must": "Obtain a current independent audit of every approved gating claim."
+    },
+    "stage_obligations": {
+      "confirmation": {
+        "obligation_id": "obligation.confirmation",
+        "must": "Get the human's answers to the research and decisions that wait on them."
+      },
+      "passes": {
+        "obligation_id": "obligation.passes",
+        "must": "Make progress within the run's pass ceiling, or stop honestly."
+      },
+      "terminal": {
+        "obligation_id": "obligation.terminal",
+        "must": "Get the human's consent to end the run."
+      }
     },
     "actions": {
       "route": {
@@ -1058,7 +1069,8 @@
       "sections": [
         "evidence/research"
       ],
-      "message": "Record research for claim {claim_id}."
+      "message": "Record research for claim {claim_id}.",
+      "ended_message": "No research was recorded for claim {claim_id} before the run stopped."
     },
     "claim.research_unbound": {
       "params": {
@@ -1080,7 +1092,8 @@
       "sections": [
         "evidence/research"
       ],
-      "message": "Research for claim {claim_id} is not bound to the current claim digest."
+      "message": "Research for claim {claim_id} is not bound to the current claim digest.",
+      "ended_message": "Research for claim {claim_id} did not match the claim as it was finally worded."
     },
     "claim.spike_missing": {
       "params": {
@@ -1102,7 +1115,8 @@
       "sections": [
         "evidence/spike"
       ],
-      "message": "Run a deterministic spike for claim {claim_id}."
+      "message": "Run a deterministic spike for claim {claim_id}.",
+      "ended_message": "No spike was run for claim {claim_id} before the run stopped."
     },
     "claim.spike_prerequisite_missing": {
       "params": {
@@ -1117,7 +1131,8 @@
       "sections": [
         "evidence/order"
       ],
-      "message": "Spike has no active supporting research prerequisite."
+      "message": "Spike has no active supporting research prerequisite.",
+      "ended_message": "The spike had no supporting research behind it when the run stopped."
     },
     "claim.spike_stale": {
       "params": {
@@ -1164,7 +1179,8 @@
       "sections": [
         "evidence/freshness"
       ],
-      "message": "Spike prerequisites changed; re-gate."
+      "message": "Spike prerequisites changed; re-gate.",
+      "ended_message": "The spike's files changed after it ran, and it was not run again."
     },
     "claim.refuted": {
       "params": {
@@ -1186,7 +1202,8 @@
       "sections": [
         "claims/refutation"
       ],
-      "message": "Active evidence refutes claim {claim_id}."
+      "message": "Refuted by active evidence; claim {claim_id} still blocks this scope.",
+      "ended_message": "Active evidence refuted claim {claim_id}; it still blocked this scope when the run stopped."
     },
     "evidence.conflict": {
       "params": {
@@ -1201,7 +1218,8 @@
       "sections": [
         "claims/refutation"
       ],
-      "message": "Simultaneous supporting and refuting research fails closed; resolve or stop with residual."
+      "message": "Simultaneous supporting and refuting research fails closed; resolve or stop with residual.",
+      "ended_message": "Supporting and refuting research conflicted when the run stopped."
     },
     "budget.exhausted": {
       "params": {
@@ -1228,7 +1246,8 @@
       "sections": [
         "budget"
       ],
-      "message": "{resource} budget exhausted."
+      "message": "{resource} budget exhausted.",
+      "ended_message": "{resource} budget was exhausted when the run stopped."
     },
     "audit.required": {
       "params": {
@@ -1242,7 +1261,8 @@
       "sections": [
         "audit"
       ],
-      "message": "Audit is owed; spawn an independent auditor."
+      "message": "Audit is owed; spawn an independent auditor.",
+      "ended_message": "No audit had been done when the run stopped."
     },
     "audit.pending": {
       "params": {
@@ -1256,7 +1276,8 @@
       "sections": [
         "audit"
       ],
-      "message": "Audit child is pending; wait."
+      "message": "Audit child is pending; wait.",
+      "ended_message": "An audit was still pending when the run stopped."
     },
     "audit.unreadable": {
       "params": {
@@ -1270,7 +1291,8 @@
       "sections": [
         "audit"
       ],
-      "message": "Audit output is unreadable; retry."
+      "message": "Audit output is unreadable; retry.",
+      "ended_message": "The audit output was unreadable when the run stopped."
     },
     "audit.failed": {
       "params": {
@@ -1285,7 +1307,8 @@
       "sections": [
         "audit"
       ],
-      "message": "Audit failed or its coverage went stale; address any findings listed under Audit, then retry."
+      "message": "Audit failed or its coverage went stale; address any findings listed under Audit, then retry.",
+      "ended_message": "The latest audit failed, or no longer covered the argument, when the run stopped."
     },
     "audit.stale": {
       "params": {
@@ -1314,7 +1337,8 @@
       "sections": [
         "audit"
       ],
-      "message": "Audit coverage is stale for {scope}; re-audit."
+      "message": "Audit coverage is stale for {scope}; re-audit.",
+      "ended_message": "The audit no longer covered {scope} when the run stopped."
     },
     "audit.same_model": {
       "params": {
@@ -1329,7 +1353,8 @@
       "sections": [
         "audit/independence"
       ],
-      "message": "Auditor is the same model as covered evidence; spawn a distinct auditor or accept the residual."
+      "message": "Auditor is the same model as covered evidence; spawn a distinct auditor or accept the residual.",
+      "ended_message": "The auditor was the same model as the covered evidence when the run stopped."
     },
     "audit.auditor_excluded": {
       "params": {
@@ -1364,7 +1389,8 @@
       "sections": [
         "audit/independence"
       ],
-      "message": "The auditor would run on a model that made this evidence ({models}). Set another: an override, or enabledModels on Pi."
+      "message": "The auditor would run on a model that made this evidence ({models}). Set another: an override, or enabledModels on Pi.",
+      "ended_message": "No auditor on another model could be set when the run stopped."
     },
     "audit.independence_unverified": {
       "params": {
@@ -1379,7 +1405,8 @@
       "sections": [
         "audit/independence"
       ],
-      "message": "Audit independence is unverified; spawn a distinct auditor or accept the residual."
+      "message": "Audit independence is unverified; spawn a distinct auditor or accept the residual.",
+      "ended_message": "The audit's independence was unverified when the run stopped."
     },
     "child.terminal": {
       "params": {
@@ -1407,7 +1434,8 @@
       "sections": [
         "children"
       ],
-      "message": "Child terminated in state {state}."
+      "message": "Child terminated in state {state}.",
+      "ended_message": "A child ended in state {state} and was not retried before the run stopped."
     },
     "host.async_unsupported": {
       "params": {
@@ -1602,7 +1630,8 @@
       "sections": [
         "freeze"
       ],
-      "message": "Deferred claims are residual; accept."
+      "message": "Deferred claims are residual; accept.",
+      "ended_message": "Claims deferred by the frozen scope were left unresolved."
     },
     "governance.auto_invocation_required": {
       "params": {
@@ -1868,7 +1897,8 @@
       "sections": [
         "audit/independence"
       ],
-      "message": "Covered evidence has mixed producers; re-run the latest spike under the research producer or accept the residual."
+      "message": "Covered evidence has mixed producers; re-run the latest spike under the research producer or accept the residual.",
+      "ended_message": "The covered evidence had mixed producers when the run stopped."
     },
     "research.citation_unverified": {
       "params": {
@@ -1949,7 +1979,8 @@
       "case_parameter": "asking",
       "case_messages": {
         "again": "Research or a decision was shown to the human and left open (Later, cancel or timeout). An explicit report_convergence asks the human again; each asking spends one of the run's human interactions."
-      }
+      },
+      "ended_message": "Unanswered when this run stopped: research or a decision needed a human."
     }
   },
   "sections": {
@@ -2573,6 +2604,12 @@
       "edges": "Edges:",
       "citations": "Citations:",
       "audit_status": "Audit status:",
+      "audit_verdict_none": "required",
+      "audit_verdict_passed": "passed",
+      "audit_verdict_failed": "failed",
+      "audit_pending": "pending",
+      "audit_not_current": "no longer current",
+      "audit_reaudit_pending": "re-audit pending",
       "claim_kind": "kind=",
       "claim_gating": "gating=",
       "claim_state": "state=",

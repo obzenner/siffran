@@ -43,8 +43,10 @@ interface Freshness {
   readonly state: Trusted;
 }
 interface AuditSummary {
-  readonly state: Trusted;
-  readonly independence: Trusted;
+  readonly verdict: Trusted;
+  readonly current: boolean | null;
+  readonly pending: boolean;
+  readonly independence: Trusted | null;
   readonly findings: readonly Untrusted[];
 }
 interface AuthorView {
@@ -440,7 +442,8 @@ function parse(result: Json): AuthorView {
   return {
     header,
     audit: {
-      state: trusted(run.audit.state), independence: trusted(run.audit.independence),
+      verdict: trusted(run.audit.verdict), current: run.audit.current, pending: run.audit.pending,
+      independence: run.audit.independence === null ? null : trusted(run.audit.independence),
       findings: (run.audit.findings as unknown[]).map((item) => untrusted(item, safety)),
     },
     // Only Block carries reasons; a run-bearing Allow has none.
@@ -481,10 +484,23 @@ function freshnessLines(rows: readonly Freshness[]): readonly string[] {
   return rows.map((row) => `  ${row.path}: ${row.state}`);
 }
 
-/** Render independence only once an audit verdict exists. */
+/**
+ * The audit in words, from the core's four facts: the verdict (or that one is owed or pending), no longer current when the
+ * verdict does not cover the argument, a pending re-audit, and the independence of a settled verdict. Only contract labels.
+ */
+function auditText(audit: { verdict: unknown; current: boolean | null; pending: boolean; independence: unknown }): string {
+  const labels = LABELS as Record<string, string>;
+  const parts = audit.verdict === "none"
+    ? [labels[audit.pending ? "audit_pending" : "audit_verdict_none"]]
+    : [labels[`audit_verdict_${audit.verdict}`],
+      ...(audit.current === false ? [labels.audit_not_current] : []),
+      ...(audit.pending ? [labels.audit_reaudit_pending] : [])];
+  return `${parts.join(", ")}${audit.independence === null ? "" : ` (${audit.independence})`}`;
+}
+
+/** Render the audit in words, then the findings a failed audit reported. */
 function auditLines(audit: AuditSummary): string[] {
-  const suffix = ["passed", "failed"].includes(audit.state) ? ` (${audit.independence})` : "";
-  return [`${LABELS.audit} ${audit.state}${suffix}`,
+  return [`${LABELS.audit} ${auditText(audit)}`,
     ...audit.findings.map((item) => `  ${LABELS.finding} ${item}`)];
 }
 
@@ -555,7 +571,7 @@ function argumentLines(argument: Json, safety: TextSafety): readonly string[] {
     LABELS.claims, ...claims,
     ...(edges.length ? [LABELS.edges, ...edges] : []),
     ...(citations.length ? [LABELS.citations, ...citations] : []),
-    `${LABELS.audit_status} ${argument.audit.state} (${argument.audit.independence})`,
+    `${LABELS.audit_status} ${auditText(argument.audit)}`,
     ...(argument.audit.findings as unknown[]).map(
       (item) => `  ${LABELS.finding} ${untrusted(item, safety)}`),
   ];

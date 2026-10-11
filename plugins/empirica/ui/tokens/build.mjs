@@ -1,5 +1,5 @@
 // Tokens -> dist/tokens.css (runtime CSS variables) and dist/theme.css (Tailwind @theme, build input only).
-// Style Dictionary does the resolution; this file only declares the two output shapes. CONVENTIONS T1-T6.
+// Style Dictionary does the resolution; this file only declares the two output shapes. UI.md, Tokens, styles, vendor.
 import StyleDictionary from "style-dictionary";
 
 const SCHEMES = ["light", "dark"];

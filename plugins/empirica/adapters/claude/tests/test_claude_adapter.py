@@ -151,6 +151,20 @@ class CorrelationTests(unittest.TestCase):
 
 
 class StartRunTests(unittest.TestCase):
+    def test_the_host_records_where_the_session_can_be_found_and_never_invents_it(self) -> None:
+        # U1-11: the payload's session_id and transcript_path are the locator; with neither path the id alone; a payload
+        # with no id cannot start a run at all (context_from_payload), so there is no fabricated value.
+        with_path = build_start_run_request(
+            _payload(transcript_path="/home/u/.claude/projects/p/s.jsonl"), correlation_id="s-1", environ={})
+        _assert_valid(with_path)
+        self.assertEqual(with_path["command"]["invocation"]["session"],
+                         {"label": "claude-session", "locator": "/home/u/.claude/projects/p/s.jsonl"})
+        id_only = build_start_run_request(_payload(), correlation_id="s-2", environ={})
+        self.assertEqual(id_only["command"]["invocation"]["session"],
+                         {"label": "claude-session", "locator": "claude-session"})
+        blank = build_start_run_request(_payload(transcript_path=""), correlation_id="s-3", environ={})
+        self.assertEqual(blank["command"]["invocation"]["session"]["locator"], "claude-session")
+
     def test_minimal_start_run_is_schema_valid_with_no_actor_or_budgets(self) -> None:
         request = build_start_run_request(
             _payload(command_name="empirica:empirica"),
@@ -203,7 +217,8 @@ class StartRunTests(unittest.TestCase):
                 self.assertEqual(command["goal"], "  exact goal  ")
                 self.assertEqual(command["invocation"], {
                     "host": "claude", "interactive": interactive,
-                    "signal": "transcript.entrypoint", "delegation": False, "audit_retrieval": ["local", "workspace"], "human_surface": "unobserved"})
+                    "signal": "transcript.entrypoint", "delegation": False, "audit_retrieval": ["local", "workspace"], "human_surface": "unobserved",
+                    "session": {"label": "claude-session", "locator": str(transcript)}})
             unknown = build_start_run_request(_payload(command_args="goal"), environ={})["command"]
             self.assertIsNone(unknown["invocation"]["interactive"])
             self.assertEqual(unknown["invocation"]["signal"], "transcript.entrypoint unavailable")
