@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The shared JSON bridge between any host adapter and the Empirica v2 core (ADR-30/31/32, D6-C).
+"""The shared JSON bridge between any host adapter and the Empirica v2 core (ADR-30/31/32).
 
 A host adapter — the Pi extension over stdio, or the Claude/Codex hooks in-process — speaks the
 ``empirica/v2`` contract but owns no domain rules. This module is the single transport target that
@@ -10,9 +10,9 @@ core to storage:
       -> application.v2 service (composed with an explicit exact registry profile)
       -> response envelope (dict)
 
-D7 composition boundary: the bridge composes ``application.v2`` with the hardened located run
+Composition boundary: the bridge composes ``application.v2`` with the hardened located run
 facade and Git artifact repository. Public handles are decoded only by the strict ``er2`` codec;
-raw selectors are hashed into safe storage IDs and no selector index or legacy decoder exists.
+raw selectors are hashed into safe storage IDs and there is no selector index.
 
 Each host supplies an exact registry ``profile_id`` at bridge construction, never in a public
 request. The generic bridge has no host default. Missing, malformed, or unknown profile returns

@@ -25,7 +25,6 @@
   "stopped": "octagon-pause",
   "running": "loader",
   "integrity-broken": "link-2-off",
-  "older": "archive",
   "no-history": "unplug",
   "workspace-off": "folder-x",
   "close": "x",

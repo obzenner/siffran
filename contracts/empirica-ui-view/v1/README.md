@@ -25,9 +25,8 @@ observer (`core.observer.reason_message`); a consumer never sees a `{name}`.
 
 A `null` is unknown, never a default. A run the observer cannot fully read still appears with a
 `diagnostic` that says why (the schema's `run.diagnostic` lists them). Only the facts it could
-read are shown. `older-format` versus `unreadable` is decided with the plugin's own identifiers
-and state validator: a different shape is age, and a current shape that breaks invariants is
-damage.
+read are shown. A state that is not exactly the current state document (by the plugin's own
+identifiers and state validator) is `unreadable`: nothing is read from it.
 
 ## Fixtures
 

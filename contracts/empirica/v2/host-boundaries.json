@@ -323,14 +323,14 @@
     {
       "id": "HX-ADM-01",
       "boundary": "HB-ADM",
-      "title": "the host version is inside the interval and a receipt is from the qualified version or later",
+      "title": "the Pi version is checked against its range at start; the Claude range is documented; the pi-subagents range is enforced at runtime",
       "control_mode_dependent": false,
-      "outcomes": "- Claude: interval `>=2.1.278,<2.2.0`; qualified version `2.1.294`; profile id `claude-code`, which never carries a version (ADR-0069). Compatibility is enforced **at receipt capture and verification** (`scripts/empirica_live_receipts.py:require_compatible_version`), not at run start.\n- Pi: `>=1.0.0,<2.0.0` (user ruling 2026-10-08; nothing older is supported, ADR-0069); qualified version `1.1.0`; profile id `pi+pi-subagents-foreground-audit-v1` (the policy, never a version, ADR-0069). Enforced at receipt time.\n- Both: a receipt is refused unless its host version is inside the interval and at or above the profile's qualified `version` (\"a native receipt from <host> >= <qualified version> is required\"); raising the qualified version in the profile therefore asks for exactly one new receipt.\n- Codex: exact `0.146.0`.",
+      "outcomes": "- Pi: `>=1.0.0,<2.0.0` (user ruling 2026-10-08; nothing older is supported, ADR-0069); qualified version `1.1.0`; profile id `pi+pi-subagents-foreground-audit-v1` (the policy, never a version, ADR-0069). `/empirica` reads Pi's own version (`VERSION` of `@earendil-works/pi-coding-agent`) and refuses to start outside the range, or when the version cannot be read, with `host.version_unsupported` naming the observed version and the range; in print and JSON mode the refusal goes to stderr and exits 1. The one check is `checkHostVersion` in `host-profile.ts`, which reads the range from the contract.\n- Claude: interval `>=2.1.278,<2.2.0`; qualified version `2.1.294` (the version the long-running scenarios run on); profile id `claude-code`, which never carries a version (ADR-0069). The interval is the documented supported range and is **not checked**: hook payloads carry no host version. Claude is admitted by observed capability.\n- pi-subagents: its range is enforced at runtime (`HX-ADM-02`).\n- Codex: exact `0.146.0`.",
       "scenarios": [
         "EHB-ADM-01",
         "EHB-ADM-02"
       ],
-      "sources": "ADR-52 (decision and its amendments), ADR-0069 (G6 amendment: the receipt floor), `contracts/empirica/v2/host-profiles.json` (`version` and `compatibility` of the claude-code and pi profiles), `scripts/empirica_live_receipts.py` (`require_compatible_version`), PROGRESS \"User ruling 2026-10-08\". Tests: `scripts/tests/test_empirica_live_receipts.py::test_compatible_harness_patch_versions_pass_and_are_recorded_exactly`, `::test_a_receipt_below_the_qualified_version_is_refused`, `::test_raising_the_qualified_version_in_the_profile_asks_for_exactly_a_new_receipt`, `::test_incompatible_or_misreported_harness_versions_fail`."
+      "sources": "ADR-52 (decision and its amendments), ADR-0069 (G5-R2 and G9-R1), `contracts/empirica/v2/host-profiles.json` (`version` and `compatibility`), `plugins/empirica/adapters/pi/src/host-profile.ts` (`checkHostVersion`), PROGRESS \"User ruling 2026-10-08\" and \"G19b round\". Tests: `plugins/empirica/adapters/pi/test/gate.test.ts::INVARIANT (G19b)…`, `scripts/tests/test_validate_empirica_activation.py::test_the_committed_skill_is_accepted`."
     },
     {
       "id": "HX-ADM-02",
@@ -790,12 +790,11 @@
       "control_modes": [
         "any"
       ],
-      "setup": "Claude at 2.1.277 and 2.2.0",
-      "action": "capture a receipt",
-      "expected": "outside `>=2.1.278,<2.2.0` is refused **by the receipt verifier**; no run-start refusal (`report-limitation`)",
+      "setup": "the claude-code profile",
+      "action": "read the documented support interval",
+      "expected": "the interval and the qualified version are declared and stated in the skill; nothing checks the Claude version at run time (hook payloads carry none); admission is by observed capability",
       "covered_by": [
-        "scripts/tests/test_empirica_live_receipts.py::test_incompatible_or_misreported_harness_versions_fail",
-        "scripts/tests/test_empirica_live_receipts.py::test_compatible_harness_patch_versions_pass_and_are_recorded_exactly"
+        "scripts/tests/test_validate_empirica_activation.py::test_the_committed_skill_is_accepted"
       ],
       "ledger_rows": []
     },
@@ -805,15 +804,11 @@
       "control_modes": [
         "any"
       ],
-      "setup": "Pi at 0.99.9, 1.0.0, 1.0.x, 1.1.0 (the profile's qualified version), 1.9.9, 2.0.0 (`>=1.0.0,<2.0.0`); Claude below its qualified version",
-      "action": "capture a receipt",
-      "expected": "a receipt from the qualified version or later inside the interval (1.1.0, 1.9.9) is accepted; 0.99.9 is outside the interval and is refused; 1.0.0…1.0.x are inside the interval but below the qualified version and are refused (\"a native receipt from pi >= 1.1.0 is required\"); 2.0.0 is refused as outside the interval; Claude below its qualified version is refused the same way (\"a native receipt from claude >= <qualified> is required\"); the qualified receipt is Pi 1.1.0 (profile id `pi+pi-subagents-foreground-audit-v1`)",
+      "setup": "Pi at the minimum, inside, the last version of the range, just below, far below, at the exclusive maximum, above it, an unreadable version",
+      "action": "`/empirica` in tui, print and json mode",
+      "expected": "inside the range a run starts; outside it, or unreadable, nothing is dispatched or recorded, the notice names the observed version and the range, and print and JSON mode exit 1 (`host.version_unsupported`)",
       "covered_by": [
-        "scripts/tests/test_empirica_live_receipts.py::test_compatible_harness_patch_versions_pass_and_are_recorded_exactly",
-        "scripts/tests/test_empirica_live_receipts.py::test_a_receipt_below_the_qualified_version_is_refused",
-        "scripts/tests/test_empirica_live_receipts.py::test_raising_the_qualified_version_in_the_profile_asks_for_exactly_a_new_receipt",
-        "scripts/tests/test_empirica_live_receipts.py::test_incompatible_or_misreported_harness_versions_fail",
-        "scripts/tests/test_validate_empirica_activation.py::test_the_committed_skill_is_accepted"
+        "plugins/empirica/adapters/pi/test/gate.test.ts::INVARIANT (G19b): /empirica starts exactly when Pi's version is an exact version inside the profile's range, in every mode"
       ],
       "ledger_rows": []
     },

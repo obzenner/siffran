@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""G14 D5: the 5.0 public contract is incompatible with the shipped 3.0.0, so its label is 4.0.0 everywhere it is
-checked or stated. One test names every place, so a label that moves in one place and not another fails here."""
+"""The public contract's label (4.0.0) is the same everywhere it is checked or stated. One test names every place,
+so a label that moves in one place and not another fails here."""
 import json
 import re
 import sys
@@ -29,17 +29,16 @@ class ContractLabelTests(unittest.TestCase):
         for schema in ("public-contract.schema.json", "response.schema.json"):
             consts = re.findall(r'"const": "(\d+\.\d+\.\d+)"', text(CONTRACTS / schema))
             self.assertIn(LABEL, consts, schema)
-            self.assertNotIn("3.0.0", consts, schema)
             self.assertEqual(text(CONTRACTS / schema), text(PLUGIN / "vendor" / "contracts" / "empirica" / "v2" / schema), schema)
         governance = text(PLUGIN / "skills" / "empirica" / "references" / "governance.md")
         self.assertIn(f"(public contract {LABEL})", governance.splitlines()[0])
-        self.assertNotIn("3.0.0", governance)
 
-    def test_no_current_document_states_the_old_label(self):
-        stale = [str(p.relative_to(ROOT)) for folder in (CONTRACTS / "fixtures",
+    def test_every_stored_run_view_names_the_label(self):
+        wrong = [str(p.relative_to(ROOT)) for folder in (CONTRACTS / "fixtures",
                                                          PLUGIN / "adapters" / "pi" / "test" / "author-view-golden")
-                 for p in sorted(folder.glob("*.json")) if '"version": "3.0.0"' in text(p)]
-        self.assertEqual(stale, [])
+                 for p in sorted(folder.glob("*.json"))
+                 if set(re.findall(r'"contract": \{[^{}]*?"version": "([^"]+)"', text(p))) - {LABEL}]
+        self.assertEqual(wrong, [])
 
 
 if __name__ == "__main__":

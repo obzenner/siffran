@@ -63,7 +63,7 @@ class SyncSchemaDefsTests(unittest.TestCase):
         # Carrying the member is the shared shape; it collapses to the reference.
         self.assertEqual(sync_schema_defs._replace_shared(copy.deepcopy(invocation), shared),
                          {"$ref": "#/$defs/invocationProvenance"})
-        # An embedding that still has the four 4.0 members is a near match, not silently collapsed.
+        # An embedding that lacks the shared member is a near match, not silently collapsed.
         stale = copy.deepcopy(invocation)
         del stale["properties"]["host_runtime"]
         with self.assertRaisesRegex(sync_schema_defs.SchemaGenerationError, r"#/\$defs/old"):

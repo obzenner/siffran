@@ -7,13 +7,13 @@ functions. No runtime contract engine is created here.
 
 Validated:
   * every ``*.schema.json`` under ``contracts/<protocol>/<version>/``;
-  * v1 substrate-neutral fixtures under ``contracts/fixtures/``;
+  * substrate-neutral fixture envelopes under ``contracts/fixtures/``;
   * the v2 public contract registry, host profiles, and generated wire exemplars
     under ``contracts/empirica/v2/fixtures`` (checked by ``regen_contract_fixtures.py``):
     referential integrity, closed values, exact key sets, child transitions,
     host profile facts, response reason/residual parameters and exact ordered
     next-action/section lists, child recovery actions, schema↔registry mirror,
-    banned v1 fields, Allow.converged==status==converged, required digest,
+    retired response fields, Allow.converged==status==converged, required digest,
     GetContract target correlation and materialization;
   * in-memory negative cases: one mutation each asserting an expected
     diagnostic substring so a case cannot pass for the wrong rejection reason.
@@ -525,7 +525,7 @@ def _semver_tuple(version: str) -> tuple[int, ...]:
 
 def check_subagents_compatibility(profile: dict, pwhere: str, inventory_versions: frozenset[str] | None,
                                   errors: list[str]) -> None:
-    """The external-runtime policy of a foreground-audit profile (Empirica 4.1 D5/D6; ADR-0069).
+    """The external-runtime policy of a foreground-audit profile (ADR-0069).
 
     Exactly the foreground hosts declare it; the profile id is ``<host>+<policy_id>``, so an id can
     never encode a range or a version. The policy is a half-open version range
@@ -2459,7 +2459,7 @@ def main() -> int:
             return {}
         return value
 
-    # --- schema discovery (auto-discovers v1 + v2) ---
+    # --- schema discovery (every protocol/version folder) ---
     schemas: dict[tuple[str, str], dict] = {}
     for path in sorted(CONTRACTS.glob("*/*/*.schema.json")):
         data = load(path)
@@ -2492,16 +2492,9 @@ def main() -> int:
         for error in validator.iter_errors(instance):
             errors.append(f"{where}: {error.message}")
 
-    # --- v1 substrate-neutral fixtures (D6-C: v1 schemas removed; structural checks only) ---
-    # D6-C deletes contracts/empirica/v1, so v1 fixture envelopes can no longer be schema-validated.
-    # The negative v1 wire examples remain allowed (spec §7) for host-suite strict refusal; only
-    # structural identity (request_id presence, request/expected protocol + id correlation) is
-    # enforced here. Schema validation below is best-effort: it runs only when a schema exists.
-    REQUIRED_EMPIRICA_FIXTURES = frozenset({"empirica-get-argument.json", "empirica-void-spawn.json"})
+    # --- substrate-neutral fixture envelopes (Methodologist): structural identity (request_id presence,
+    # request/expected protocol + id correlation), then the schema when one exists for that protocol.
     fixture_paths = sorted((CONTRACTS / "fixtures").glob("*.json"))
-    missing = REQUIRED_EMPIRICA_FIXTURES - {p.name for p in fixture_paths}
-    for name in sorted(missing):
-        errors.append(f"contracts/fixtures/{name}: required Empirica audit fixture is missing")
     for path in fixture_paths:
         fixture = load(path)
         for field, kind in (("request", "request"), ("expected", "response")):
@@ -2660,7 +2653,7 @@ def main() -> int:
         "invalid-missing-goal", "invalid-missing-invocation", "invalid-extra-field", "invalid-status",
         "invalid-child-duplicate-id", "invalid-counter", "invalid-stamp",
         "invalid-child-branch", "invalid-deadline-nan", "invalid-refund-mismatch",
-        "invalid-budget-reconciliation", "invalid-governance-legacy-shape",
+        "invalid-budget-reconciliation", "invalid-governance-unknown-field",
         "invalid-receipt-kind", "invalid-approved-placeholder",
     }
     state_names = {p.name.removesuffix(".json") for p in state_fixture_paths}
@@ -2681,8 +2674,8 @@ def main() -> int:
         "invalid-deadline-nan": (False, "finite number"),
         "invalid-refund-mismatch": (False, "launch_rejected"),
         "invalid-budget-reconciliation": (False, "reconcile"),
-        "invalid-governance-legacy-shape": (False, "first_approval"),
-        "invalid-receipt-kind": (False, "legacy"),
+        "invalid-governance-unknown-field": (False, "first_approval"),
+        "invalid-receipt-kind": (False, "unknown_kind"),
         "invalid-approved-placeholder": (False, "approved placeholder"),
     }
     for path in state_fixture_paths:
@@ -3118,13 +3111,13 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
          "digest": d64, "relevant_sections": []}}},
         e, "neg"), "RunView must not duplicate converged", "RunView converged duplication")
 
-    # Banned v1 fields.
+    # Retired response fields.
     expect(lambda e: check_banned_fields(
         {"protocol": "empirica/v2", "request_id": "x", "result": {"type": "Allow", "converged": False,
          "run": {"id": "r", "goal": "g", "status": "active", "contract": {"id": "empirica/public",
          "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
          "nonce": "abc", "phase": "investigate"}}},
-        e, "neg"), "banned field", "banned v1 fields in response")
+        e, "neg"), "banned field", "retired fields in response")
 
     # Protocol identity.
     expect(lambda e: check_protocol_identity(

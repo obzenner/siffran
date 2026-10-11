@@ -3,8 +3,8 @@
 Read this file only after the `investigate` witness is admitted and a capability failure needs
 diagnosis. Capability claims come from the registered profile, its qualified compatibility range,
 and the live adapter surface—not generic host documentation or exact equality with one
-qualification build. The registry owns compatibility numbers; exact observed versions remain
-receipt provenance.
+qualification build. The registry owns compatibility numbers; exact observed versions are recorded
+in the run.
 
 The inline bootstrap matrix in [the skill](../SKILL.md) defines the required surfaces. Dated-snapshot
 simulated tests do not establish installed support. Hosted WebSearch may be invisible to

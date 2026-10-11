@@ -8,4 +8,5 @@ declare module "@earendil-works/pi-coding-agent" {
     getProjectSettings(): HostSettings;
   }
   export function getAgentDir(): string;
+  export const VERSION: string;
 }

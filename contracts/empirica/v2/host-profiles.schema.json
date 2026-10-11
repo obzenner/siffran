@@ -28,9 +28,10 @@
         ],
         "properties": {
           "host_id": {"type": "string", "minLength": 1},
-          "profile_id": {"description": "The host family, plus `+<policy_id>` for a foreground-audit host. Never a version: the qualified version is `version`, the interval is `compatibility`, and the observed version is on `host_runtime` and on every receipt.", "type": "string", "minLength": 1},
+          "profile_id": {"description": "The host family, plus `+<policy_id>` for a foreground-audit host. Never a version: the qualified version is `version`, the interval is `compatibility`, and the observed audit runtime is on `host_runtime`.", "type": "string", "minLength": 1},
           "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
           "compatibility": {
+            "description": "The host versions Empirica supports, `[minimum, maximum_exclusive)`. Pi: enforced at `/empirica` start. Claude Code: documented, not checked (hook payloads carry no version); admitted by observed capability.",
             "type": "object",
             "additionalProperties": false,
             "required": ["minimum", "maximum_exclusive"],

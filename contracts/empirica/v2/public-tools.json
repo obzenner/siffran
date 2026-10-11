@@ -294,8 +294,8 @@
         "residual.accept"
       ]
     },
-    "host.subagents_provenance_missing": {
-      "message": "The retained run or receipt lacks the exact pi-subagents version and owner path. Recapture a provenance-complete run; this one is not evidence.",
+    "host.version_unsupported": {
+      "message": "The active Pi is {version}, outside the range Empirica supports ({range}), or its version could not be read, so no run starts. Install a Pi inside the range and restart the host, or accept the residual.",
       "sections": [
         "hosts/capabilities"
       ],

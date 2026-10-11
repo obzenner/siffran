@@ -62,7 +62,7 @@ AUTHOR_GUIDANCE = {
     "host.subagents_version_unsupported": "The active pi-subagents is outside the supported range, or its schema or launch preflight cannot carry the audit launch: install a version inside the range and restart, or accept the residual.",
     "host.subagents_tools_not_read_only": "The preflight would give the auditor a tool Empirica does not allow it (the refusal names it): remove it from the auditor's configuration or update pi-subagents, restart, and start fresh, or accept the residual.",
     "host.subagents_launch_unsupported": "During a run `subagent` accepts exactly one launch form or a read-only action the reviewed versions know (`list`, `status`, ...); control, mutation, unknown-action and ambiguous calls are refused: retry with a supported call, or accept the residual.",
-    "host.subagents_provenance_missing": "The run or receipt lacks the exact pi-subagents version and owner path: recapture a provenance-complete run; this one is not evidence.",
+    "host.version_unsupported": "The active Pi is outside the range Empirica supports (the reason names the version read and the range), or its version could not be read: install a Pi inside the range, restart the host and start again; nothing was started.",
     "freeze.deferred": "Deferred claims stay residual: accept them when you stop, or investigate them before freezing.",
     "governance.auto_invocation_required": "Auto needs an interactive invocation or operator-set `EMPIRICA_AUTO_DELEGATION=1`: run interactively or have the operator set it, then start fresh.",
     "governance.approval_required": "Submit a task-sized `configure_run` (all three ceilings plus a 1-600 character rationale) and wait for host approval; nothing is authorized before it.",

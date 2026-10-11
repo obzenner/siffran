@@ -1,4 +1,4 @@
-"""Boundary check of the host-recorded runtime provenance of a ``StartRun`` (Empirica 4.1, D7).
+"""Boundary check of the host-recorded runtime provenance of a ``StartRun`` (ADR-0069).
 
 A host whose profile declares ``subagents_compatibility`` executes its foreground audit in an external
 runtime. Its adapter observes which package and exact version that is and records it once, as
@@ -7,7 +7,7 @@ the profile; the request schema has already fixed their shape. The shared bridge
 where the exact profile is bound (``adapters/bridge.py``, before any run exists), so every host entry
 point — Pi over stdio, the Claude and Codex hooks in-process — refuses the same requests. The core reads only
 ``subagents.package``, ``version`` and ``reviewed``, for the run view (``projection._unreviewed_runtime``); it decides no
-admission and no receipt. The object is persisted beside the invocation and verified by the receipt tool.
+admission. The object is persisted beside the invocation.
 
 ``rejection`` is pure and total over JSON values. The TypeScript adapter applies the same rules to
 the same shared fixtures (``tests/fixtures/host-runtime-cases.json``) before it sends the request.
@@ -15,7 +15,7 @@ the same shared fixtures (``tests/fixtures/host-runtime-cases.json``) before it 
 The runtime is recorded once, at ``StartRun``; a session that reloads or resumes may now be served by a
 different package of the same range. ``same_runtime`` is the single comparison the audit admission makes
 between the recorded runtime and the one the adapter observes *now* (``adapters/pi/private_bridge.py``),
-so a receipt derived from the recorded value can never name a runtime other than the one that ran the audit.
+so the audit is never bound to a runtime other than the one recorded.
 """
 from __future__ import annotations
 

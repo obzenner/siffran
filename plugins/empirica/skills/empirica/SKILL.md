@@ -2,7 +2,7 @@
 name: empirica
 description: "Empirical-convergence workflow for non-trivial work whose plan is uncertain. Route before investigating, represent unknowns as claims, require cited research before deterministic spikes, discard refuted claims, and request an independently audited convergence decision. Use for design-and-implement work, architectural uncertainty, competing approaches, and risky assumptions. Host capabilities differ; run the capability preflight before promising convergence. Invoke as /empirica <goal>."
 allowed-tools: Read Glob Grep Bash Edit Write Agent TaskCreate TaskUpdate WebFetch
-compatibility: Designed for Claude Code >=2.1.278,<2.2.0 and Pi >=1.0.0,<2.0.0 with the external pi-subagents runtime (not bundled); requires python3 for hook-backed hosts. Exact observed versions remain receipt provenance; live capabilities still gate execution.
+compatibility: Designed for Claude Code >=2.1.278,<2.2.0 and Pi >=1.0.0,<2.0.0 with the external pi-subagents runtime (not bundled); requires python3 for hook-backed hosts. The exact observed versions are recorded in the run; live capabilities still gate execution.
 argument-hint: "[--auto] <goal>"
 ---
 
@@ -16,9 +16,6 @@ The host-neutral `empirica/v2` service owns policy and state. Host adapters only
 translate host events and expose capabilities. Never edit operational state under
 `~/.empirica-plugin/` or knowledge under `refs/empirica/*` directly. Never create Empirica state under `.claude/`, `.codex/`, or `.pi/`.
 
-> **Upgrading from 4.x to 5.0.** Old runs, artifacts and receipts are not migrated and fail closed; start
-> a fresh session. See "Upgrading from 4.x to 5.0" in the repository README.
-
 ## 0. Adopt the stance and preflight the host
 
 Treat training-weight knowledge as hypothesis: discharge load-bearing claims against evidence or surface them as unverified.
@@ -28,14 +25,14 @@ Identify the exact active host surface from the tools and lifecycle already pres
 (route → graph → approved configuration).** Use this inline bootstrap matrix:
 
 - **Claude Code capability profile (qualified on `2.1.294`, compatible
-  `>=2.1.278,<2.2.0`):** continue when the Empirica hooks and
+  `>=2.1.278,<2.2.0`, documented and not checked: hook payloads carry no version):** continue when the Empirica hooks and
   public MCP tools are active and trusted; record route first. Canonical audits
   are host-owned async children; a current pending audit settles the parent turn
   until Claude's native completion notification resumes it.
 - **Pi capability profile (qualified on `1.1.0`, compatible
   `>=1.0.0,<2.0.0`, with external `pi-subagents` installed by the user):** continue when `/empirica`
   injected an opaque handle, `empirica_observe`, `empirica_read`, and `report_convergence` are present,
-  and the adapter accepted exactly one active `subagent` owner (its canonical package root, exact
+  and `/empirica` accepted the host (a Pi outside its range is refused at start) and exactly one active `subagent` owner (its canonical package root, exact
   version, and that package's own launch preflight). A `pi-subagents` version outside the supported range fails closed
   (the range and the reviewed versions are listed in the README); one inside it with no compat record is admitted
   and shown as not reviewed. Any other state is a `host.subagents_*`
@@ -74,7 +71,7 @@ The user invocation is `$ARGUMENTS`. Leading `--` values are invocation flags, n
 of the goal. The host adapter owns parsing. Surface unknown flags and read the
 resolved goal only from the public run view when that view is available.
 
-External actor CLIs are not metered or attributed in 4.0 (ADR 0061).
+External actor CLIs are not metered or attributed (ADR 0061).
 
 ## 1. Route before investigating
 

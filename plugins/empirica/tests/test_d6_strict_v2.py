@@ -872,7 +872,7 @@ class D6StrictRunStateTests(unittest.TestCase):
     def test_classify_does_not_mutate_input(self):
         """classify_and_decode must not mutate the input raw state."""
         mod = _import_run_state()
-        old = {"protocol": "empirica/v1", "status": "active", "goal": "legacy"}
+        old = {"protocol": "empirica/v1", "status": "active", "goal": "another goal"}
         snapshot = json.loads(json.dumps(old))
         mod.classify_and_decode(old)
         self.assertEqual(old, snapshot, "classify_and_decode must not mutate rejected state")
@@ -937,7 +937,7 @@ class D6MinimalServiceTests(unittest.TestCase):
         """Noncurrent GetRun returns run.corrupt with fixed safe fields, no canary, zero writes."""
         runs = RecordingRunRepository()
         canary = "CANARY_OLD_GET_001"
-        old_state = {"protocol": "empirica/v1", "status": "converged", "goal": "A legacy goal.",
+        old_state = {"protocol": "empirica/v1", "status": "converged", "goal": "Another goal.",
                      canary: "hostile-payload", "children": [{"x": 1}]}
         runs.inject("r-old", old_state)
         service, runs = self._compose(runs)
@@ -958,7 +958,7 @@ class D6MinimalServiceTests(unittest.TestCase):
         """Noncurrent RestoreRun returns run.corrupt with no semantic reuse or writes."""
         runs = RecordingRunRepository()
         canary = "CANARY_OLD_RESTORE_002"
-        old_state = {"protocol": "empirica/v1", "status": "converged", "goal": "A legacy goal.",
+        old_state = {"protocol": "empirica/v1", "status": "converged", "goal": "Another goal.",
                      canary: "hostile", "budgets": {"max_passes": 99}}
         runs.inject("r-old", old_state)
         service, runs = self._compose(runs)
@@ -975,7 +975,7 @@ class D6MinimalServiceTests(unittest.TestCase):
         """Noncurrent EvaluateRun returns run.corrupt with no semantic reuse or writes."""
         runs = RecordingRunRepository()
         canary = "CANARY_OLD_EVAL_003"
-        old_state = {"protocol": "empirica/v1", "status": "active", "goal": "Legacy.",
+        old_state = {"protocol": "empirica/v1", "status": "active", "goal": "Another goal.",
                      canary: "hostile"}
         runs.inject("r-old", old_state)
         service, runs = self._compose(runs)
@@ -1085,7 +1085,7 @@ class D6MinimalServiceTests(unittest.TestCase):
         """reload returns a distinct shell with equivalent behavior over the same recording
         ports."""
         runs = RecordingRunRepository()
-        runs.inject("r-old", {"protocol": "empirica/v1", "status": "active", "goal": "legacy"})
+        runs.inject("r-old", {"protocol": "empirica/v1", "status": "active", "goal": "another goal"})
         service, runs = self._compose(runs)
         reloaded = service.reload()
         self.assertIsNot(reloaded, service, "reload must return a DISTINCT shell")

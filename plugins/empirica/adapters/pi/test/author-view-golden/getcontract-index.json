@@ -319,7 +319,7 @@
             ]
           },
           {
-            "code": "host.subagents_provenance_missing",
+            "code": "host.version_unsupported",
             "sections": [
               "hosts/capabilities"
             ]

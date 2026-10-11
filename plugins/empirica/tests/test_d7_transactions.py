@@ -1372,7 +1372,7 @@ class D7TransactionTests(unittest.TestCase):
         research = artifact("research", {"claim_id": "C0", "claim_digest": "sha256:" + "1" * 64,
             "statement_digest": "sha256:" + "2" * 64, "outcome": "supporting",
             "source_kind": "code", "source_ref": "CANARY_ROUTE_EVIDENCE",
-            "citation": "legacy bypass"})
+            "citation": "unreviewed bypass"})
         base = replace(initial(), goal="CANARY_ROUTE_GOAL",
                        selected_graph_artifact_id=graph["artifact_id"])
         state, values = chain(base, (graph, research))

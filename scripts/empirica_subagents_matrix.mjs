@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // The reviewed pi-subagents matrix: prove, for every version that has a checked-in compat record, that the
-// checked-in evidence still describes the package the registry serves (Empirica 4.1, D3/D7; ADR-0069).
+// checked-in evidence still describes the package the registry serves (ADR-0069).
 //
 // Per reviewed version (the versions with a `compat/pi-subagents-<version>.json`, each of which must lie in the
 // range of `subagents_compatibility` in contracts/empirica/v2/host-profiles.json; the version the repository's

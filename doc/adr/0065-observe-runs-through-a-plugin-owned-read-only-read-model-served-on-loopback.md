@@ -74,11 +74,11 @@ When the bridge creates a run (StartRun, on every host), it records where that r
 - **What reads it:** the observer reads these files on every poll, so it finds every project's history and each run's workspace whatever selector the host used.
 - **What it amends in ADR-31:** a project id stays a one-way hash. These files sit beside the strict run state, not inside it, and no run decision reads them. The run document and its schema are unchanged.
 - **Failure:** a failed write never fails the run.
-- **Older runs:** runs created before this decision have no record. For them, `--repo` (or the current directory's repository) is matched through the plugin's identity, which works for Claude and Codex.
+- **Runs without a record:** a run whose record could not be written has none. For it, `--repo` (or the current directory's repository) is matched through the plugin's identity, which works for Claude and Codex.
 
 ### Consequences
 
 * **Good:** the UI shows exactly the plugin's judgement, and a change to a derivation reaches the UI without a UI change.
 * **Good:** one observer per store on the default port, launched from any host (`/empirica:ui` in Claude, `/empirica-ui` in Pi, `make ui` and the CLI everywhere). When something else holds the port, each launch gets its own.
 * **Bad:** a project's record names its latest repository. Linked worktrees share one artifact namespace (ADR-31), so the history is unaffected, and each run's workspace is recorded per run.
-* **Bad:** runs written by plugin versions before 4.0's current state schema are shown as `older-format`, with goal and status only.
+* **Bad:** a state that is not exactly the current state document is shown as `unreadable`, with nothing read from it (one category: no age, no partial decoding).

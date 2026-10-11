@@ -391,7 +391,7 @@ test("a refusal block carries the reason, and the run only when one exists", () 
 test("the contract defines every host.subagents_* reason once, each offering residual.accept", () => {
   const codes = Object.keys(PUBLIC_TOOLS.recovery).filter((code) => code.startsWith("host.subagents_")).sort();
   assert.deepEqual(codes, ["host.subagents_duplicate_owner", "host.subagents_launch_unsupported",
-    "host.subagents_missing", "host.subagents_owner_unverified", "host.subagents_provenance_missing",
+    "host.subagents_missing", "host.subagents_owner_unverified",
     "host.subagents_tool_inactive", "host.subagents_tools_not_read_only", "host.subagents_version_unsupported"]);
   for (const code of codes) assert.deepEqual(PUBLIC_TOOLS.recovery[code].next_actions, ["residual.accept"], code);
 });

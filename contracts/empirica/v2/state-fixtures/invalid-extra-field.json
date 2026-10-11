@@ -30,7 +30,7 @@
   "stamp_seq": 0,
   "last_derivation_digest": null,
   "children": [],
-  "legacy_marker": true,
+  "extra_marker": true,
   "committed_artifact_head_id": null,
   "governance": {
     "state": "pending",

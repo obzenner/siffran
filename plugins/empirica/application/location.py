@@ -1,4 +1,4 @@
-"""D7 identity/location codec (spec §8).
+"""Identity/location codec.
 
 Pure codec for storage IDs and ``er2`` self-locating run handles. No I/O, no
 environment access, no repository or adapter — just deterministic functions that

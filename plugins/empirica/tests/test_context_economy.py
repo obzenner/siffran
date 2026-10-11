@@ -412,7 +412,7 @@ class SizeBudgetTests(_ServiceHarness):
         configure dismiss result       1059
         configure edit->confirm result  872
     Largest measured state = 1059 (configure dismiss); CEILING = 1200 leaves 141 chars headroom.
-    Re-attaching the legacy presentation (dialog + scope) to the pending RunView pushes the
+    Re-attaching the full presentation (dialog + scope) to the pending RunView pushes the
     JSON to 3577 chars, well past the ceiling, so the reduction is guarded rather than asserted
     only to be > 0.
     """
@@ -545,20 +545,20 @@ class SizeBudgetTests(_ServiceHarness):
         self.assertEqual([c["state"] for c in run["children"]], ["pending"])
         self.assertLess(self._text_size(blocked), self.CEILING, "audit-pending Block")
 
-    def test_reattaching_legacy_presentation_exceeds_the_budget(self):
+    def test_reattaching_the_full_presentation_exceeds_the_budget(self):
         self.to_pending()
         pending = self._read_text()
         self.assertLess(self._text_size(pending), self.CEILING)
         result = pending["structuredContent"]
         self.assertFalse(contains_private(result))
         pres = project_presentation(self.service._coordinator.last_snapshot)
-        # Legacy shape: dialog + scope re-attached onto the author RunView governance block.
+        # Full shape: dialog + scope re-attached onto the author RunView governance block.
         result = copy.deepcopy(result)
         result["run"]["governance"]["dialog"] = pres["dialog"]
         result["run"]["governance"]["scope"] = pres["scope"]
-        legacy_json = json.dumps(result, sort_keys=True, separators=(",", ":"))
-        self.assertGreaterEqual(len(legacy_json), self.CEILING,
-                                "re-attaching the legacy presentation must exceed the ceiling")
+        full_json = json.dumps(result, sort_keys=True, separators=(",", ":"))
+        self.assertGreaterEqual(len(full_json), self.CEILING,
+                                "re-attaching the full presentation must exceed the ceiling")
 
 
 #: What a human can be asked: the one batch of evidence and decisions (ADR-0067).

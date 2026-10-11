@@ -218,7 +218,7 @@ def detail_problems(details: dict, view: dict, run_schema: dict, reg: dict) -> l
             out.append(f"{at}: key or version differs from its view row")
         if (detail["audit"] is None) != (row["audit"] is None):
             out.append(f"{at}: audit detail must be present exactly when its view row has an audit state")
-        undecoded = row["diagnostic"] in {"unreadable", "older-format"}
+        undecoded = row["diagnostic"] in {"unreadable"}
         if undecoded != (detail["budgets"] is None) or undecoded != (detail["control"] is None):
             out.append(f"{at}: budgets and control must be null exactly when the state was not decoded")
         if [c["id"] for c in detail["claims"]] != [c["id"] for c in row["claims"]]:

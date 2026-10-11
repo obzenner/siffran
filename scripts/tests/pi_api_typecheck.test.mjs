@@ -1,7 +1,7 @@
 // The adapter's mirrored Pi API (src/pi-types.ts) against Pi's own declarations. `make
 // empirica-pi-api-typecheck` fetches each reviewed Pi version and runs the same check; here the
 // package roots can be supplied as PI_API_ROOTS='{"1.0.0":"<pi package dir>",...}' (unsupplied
-// versions are reported, not skipped silently). The looser mirror of 4.0 is kept as a negative
+// versions are reported, not skipped silently). A loosened mirror is kept as a negative
 // control: it must fail against every supplied Pi version.
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -13,7 +13,7 @@ import { MIRROR, MIRRORS, PI_API_VERSIONS, PI_PACKAGE, projectFiles, typecheckAg
 
 const roots = process.env.PI_API_ROOTS ? JSON.parse(process.env.PI_API_ROOTS) : {};
 
-/** The 4.0 Empirica mirror: optional label/parameters/display and a handler that may return nothing. */
+/** A loosened mirror of the Empirica declarations: optional label/parameters/display and a handler that may return nothing. */
 const LOOSENED_EDITS = {
   empirica: [
     ["  label: string;", "  label?: string;"],

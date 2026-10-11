@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Bounded exact-v2 tests for the Claude adapter slice (D6-C C2a).
+"""Bounded exact-v2 tests for the Claude adapter slice.
 
 These tests assert the retained request builders produce ``contracts/empirica/v2/request.schema.json``-
 valid envelopes with the exact v2 shapes, that the transport reaches the shared bridge with the
 fixed exact Claude profile (no ``cwd``), that correlation is exact v2, and that response mapping is
-honest native unsupported/fail-closed.  Compatibility/migration/audit-ticket/trusted-submission
-assertions are intentionally absent: those surfaces are deleted and must not be reintroduced.
+honest native unsupported/fail-closed.
 """
 from __future__ import annotations
 

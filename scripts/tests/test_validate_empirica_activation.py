@@ -42,9 +42,9 @@ class ReadmeRuntimeTests(unittest.TestCase):
     def requires(self, version):
         return activation.pi_requirement(self.peers()[version], activation.PI_PROFILE["compatibility"]["minimum"])
 
-    def table(self, versions, requires=None, receipt="pending A9"):
+    def table(self, versions, requires=None):
         rows = "\n".join(f"| `{v}` | `{(requires or {}).get(v, self.requires(v) if v in self.peers() else '>=1.0.0')}` "
-                         f"| {receipt} | reviewed |" for v in versions)
+                         f"| reviewed |" for v in versions)
         policy = activation.PI_PROFILE["subagents_compatibility"]
         return (f"{activation.pi_interval(activation.PI_PROFILE)} >={policy['minimum']},<{policy['maximum_exclusive']} {policy['policy_id']} "
                 f"{activation.SUPPORT_RANGE_DISCLOSURE}\n{rows}\n")
@@ -93,17 +93,12 @@ class ReadmeRuntimeTests(unittest.TestCase):
                 self.assertIn(f"pi-subagents {version} requires Pi '>=0.99.0'", problems[0])
                 self.assertIn("'>=1.0.0'", problems[0])
 
-    def test_a_table_in_the_old_shape_without_the_new_columns_is_rejected(self):
+    def test_a_row_without_the_requirement_column_is_rejected(self):
         old = "\n".join(f"| `{v}` | reviewed |" for v in self.versions())
         text = self.table([]) + old + "\n"
         problems = activation.readme_runtime_problems(text, activation.PI_PROFILE)
         self.assertEqual(len(problems), len(self.versions()))
-        self.assertTrue(all("lacks the 'Requires Pi' and native-receipt columns" in p for p in problems))
-
-    def test_a_row_that_does_not_say_whether_a_native_receipt_exists_is_named(self):
-        problems = activation.readme_runtime_problems(self.table(self.versions(), receipt=""), activation.PI_PROFILE)
-        self.assertEqual(len(problems), len(self.versions()))
-        self.assertTrue(all("native receipt exists" in p for p in problems))
+        self.assertTrue(all("lacks the 'Requires Pi' column" in p for p in problems))
 
     def test_a_peer_form_the_check_cannot_read_is_an_error_not_a_pass(self):
         with self.assertRaisesRegex(ValueError, "not a plain"):

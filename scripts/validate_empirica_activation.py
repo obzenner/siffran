@@ -101,18 +101,16 @@ def readme_runtime_problems(readme_text: str, profile: dict, peers: dict[str, st
     if pi_interval(profile) not in readme_text:
         problems.append(f"README omits the Pi interval {pi_interval(profile)}")
     rows = {match[1]: match for match in re.finditer(
-        r"^\|\s*`(\d+\.\d+\.\d+)`\s*\|\s*`([^`|]*)`\s*\|\s*([^|]*?)\s*\|", readme_text, re.MULTILINE)}
+        r"^\|\s*`(\d+\.\d+\.\d+)`\s*\|\s*`([^`|]*)`\s*\|", readme_text, re.MULTILINE)}
     for version in reviewed_versions():
         if not re.search(rf"^\|\s*`?{re.escape(version)}`?\s*\|", readme_text, re.MULTILINE):
             problems.append(f"README supported-versions table has no row for pi-subagents {version}")
         elif version not in rows:
-            problems.append(f"README row for pi-subagents {version} lacks the 'Requires Pi' and native-receipt columns")
+            problems.append(f"README row for pi-subagents {version} lacks the 'Requires Pi' column")
         else:
             if rows[version][2] != requirements[version]:
                 problems.append(f"README says pi-subagents {version} requires Pi {rows[version][2]!r}; "
                                 f"its declared pi-ai peer {peers[version]} makes it {requirements[version]!r}")
-            if not rows[version][3]:
-                problems.append(f"README row for pi-subagents {version} does not say whether a native receipt exists")
     table = set(re.findall(r"^\|\s*`?(\d+\.\d+\.\d+)`?\s*\|", readme_text, re.MULTILINE))
     for version in sorted(table - set(reviewed_versions())):
         problems.append(f"README lists pi-subagents {version}, which has no compat record")

@@ -1,4 +1,4 @@
-"""Assemble immutable snapshots from reachable committed history and D5 capture."""
+"""Assemble immutable snapshots from reachable committed history and the workspace capture."""
 from __future__ import annotations
 
 import json

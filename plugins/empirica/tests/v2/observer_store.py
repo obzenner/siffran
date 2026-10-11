@@ -222,10 +222,10 @@ def _build() -> Store:
     b.stamp("converged", "atlas", "s-converged")
 
     # atlas: stopped with a refuted claim and an unsupported one.
-    run = b.begin("atlas", "s-refuted", "Drop the legacy tile format.", _graph(
-        "C0", [("C0", "ordinary", "No reader depends on the legacy tile format."),
+    run = b.begin("atlas", "s-refuted", "Drop the old tile format.", _graph(
+        "C0", [("C0", "ordinary", "No reader depends on the old tile format."),
                ("C1", "ordinary", "The export job writes only the current format."),
-               ("C2", "ordinary", "Users were told the legacy format is going away.")],
+               ("C2", "ordinary", "Users were told the old format is going away.")],
         [("C0", "C1"), ("C0", "C2")]))
     b.research(run, "C1", result="refutes", ref="jobs/export.py")
     b.evaluate(run, "stop")
@@ -308,7 +308,7 @@ def _build() -> Store:
                ("C4", "ordinary", "The nightly export log shows every tile read through it."),
                ("C5", "ordinary", "The hosting provider's limits allow that path."),
                ("C6", "ordinary", "Last week's run reads no tile any other way."),
-               ("C7", "needs-decision", "Keep the legacy reader for one more release.")],
+               ("C7", "needs-decision", "Keep the old reader for one more release.")],
         [("C0", f"C{n}") for n in range(1, 8)]))
     b.research(run, "C1", ref="docs/export.md")
     b.cite(run, "C2", "docs", "/opt/vendor/tiles/SPEC.md", "every tile is read through the index")
@@ -333,16 +333,10 @@ def _build() -> Store:
     b.stamp("history-unavailable", "loose", "s-nohistory")
     b.store.unmatched.add(storage_id("loose"))
 
-    # Older and unreadable states, as earlier plugin versions or damage leave them.
-    older = RunKey(storage_id("atlas"), storage_id("s-older"), 1)
-    b.drv.inject_run_state(older, {"protocol": "empirica/v2", "state_schema": "empirica.run/2",
-                                   "goal": "Render the legend from one table.",
-                                   "status": "converged", "modes": {}})
-    b.store.times[older] = T0 - STEP
-    b.store.expect["older-format"] = f"{older.project_id}/{older.run_id}/1"
+    # A state that is not exactly the current state document.
     broken = RunKey(storage_id("harbor"), storage_id("s-broken"), 1)
     b.drv.inject_run_state(broken, {"not": "a run"})
-    b.store.times[broken] = T0 - 2 * STEP
+    b.store.times[broken] = T0 - STEP
     b.store.expect["unreadable"] = f"{broken.project_id}/{broken.run_id}/1"
     return b.store
 

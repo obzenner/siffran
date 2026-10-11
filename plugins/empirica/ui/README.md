@@ -14,7 +14,7 @@ ADR-0065.
 - **Demo:** `make ui-demo` shows the plugin's demo runs and reads no store
 
 Each project's history is found in the repository recorded when its runs were created. For runs
-without a recorded location (created by an earlier plugin version), pass `--repo <checkout>`
+without a recorded location, pass `--repo <checkout>`
 (`make ui REPO=<checkout>`). Without it, the current directory's repository is used.
 
 A second start for the same store opens the observer already listening on the default port (8765)

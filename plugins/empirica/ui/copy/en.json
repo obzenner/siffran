@@ -152,8 +152,6 @@
   "audit.not_required.hint": "Nothing in the argument needs an audit yet",
   "claim.approved.label": "Approved",
   "claim.approved.hint": "Meets the plugin's rules; a passing audit makes it final",
-  "diagnostic.older-format.label": "Older format",
-  "diagnostic.older-format.hint": "Recorded by an earlier plugin: goal and status only",
   "diagnostic.unreadable.label": "Unreadable",
   "diagnostic.unreadable.hint": "The run's record could not be read",
   "diagnostic.history-unavailable.label": "History not found",

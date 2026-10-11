@@ -117,7 +117,7 @@
         "outcome": "approve",
         "plan_revision": 1,
         "proposal_digest": "sha256:b8ac41179cdf99e474e4ddbfad1f888738a03669b67c588ffd556ecb9879c226",
-        "approval_kind": "legacy"
+        "approval_kind": "unknown_kind"
       }
     ],
     "proposal": {

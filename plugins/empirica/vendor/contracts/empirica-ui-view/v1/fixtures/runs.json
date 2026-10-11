@@ -117,7 +117,7 @@
     "outcome": null
    }
   ],
-  "version": "sha256:4668776478d745c4c8b1eadda6df603f642ff4a28d48e150fedd2dd92ccd7f94",
+  "version": "sha256:649d051a05b3a2303141ed12c9c853b628d2504e26dac8aa9e9d149df0b7239a",
   "waiting": []
  },
  "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/2": {
@@ -275,7 +275,7 @@
     "outcome": "fail"
    }
   ],
-  "version": "sha256:9ece28a094a89bf998869110043d13f257bf9727d998f33327659366e344ebe8",
+  "version": "sha256:6c3543827ebfa05ac62759f0e5dc92450defa7270f04c3a27e328dfc80327e1d",
   "waiting": []
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-39abe9247f103fe638ce5e01424e311f5a2751de1eb1f57f4e2ce6da4bc72b70/1": {
@@ -395,7 +395,7 @@
     "outcome": null
    }
   ],
-  "version": "sha256:1742de21c329b29beff48a9db5f3d632d26faaf7137c70eddf50f129dcc812fd",
+  "version": "sha256:7a7e44ddccf52e1008e5549698853c97d3d7221e0be12e233ec71ac5f4f221cd",
   "waiting": []
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e/1": {
@@ -469,7 +469,7 @@
    "approval": "approved",
    "mode": "deliberative"
   },
-  "goal": "Drop the legacy tile format.",
+  "goal": "Drop the old tile format.",
   "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e/1",
   "prompt_error": null,
   "residuals": [
@@ -527,7 +527,7 @@
     "outcome": null
    }
   ],
-  "version": "sha256:b49faac94630a7829e02dc5cae2b74526bbd9573fb2c64df4d8d5c58661a7cd7",
+  "version": "sha256:2b96fed0f3aee6bf43d637c73943b34890ee71b7ef2ba04880fff00779407ee4",
   "waiting": []
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9/1": {
@@ -713,24 +713,7 @@
     "outcome": "pass"
    }
   ],
-  "version": "sha256:b1a79413913e659bf84e1be7ee51fd3fa578eac96656c44ccaf95567487aea1d",
-  "waiting": []
- },
- "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-cb83d909b5dd5e1ef98360c4289ab9c465b1af5cab2e48d54cc3796a4d09e6c5/1": {
-  "audit": null,
-  "auditor": null,
-  "author": null,
-  "budgets": null,
-  "claims": [],
-  "contract": "empirica-ui-view/v1",
-  "control": null,
-  "goal": "Render the legend from one table.",
-  "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-cb83d909b5dd5e1ef98360c4289ab9c465b1af5cab2e48d54cc3796a4d09e6c5/1",
-  "prompt_error": null,
-  "residuals": [],
-  "stale": [],
-  "steps": [],
-  "version": "sha256:6ff3c5c604161515d0a37efb0e4a216b1bace505c7b48afe83618c7c5f6f213e",
+  "version": "sha256:de969426bcb499c9f5c8e3bf4caa196219f8a49eb365af5abe90bab004538553",
   "waiting": []
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211/1": {
@@ -1007,7 +990,7 @@
     "outcome": null
    }
   ],
-  "version": "sha256:65d379721e14f1a02a0427e36684206d506b65d125de70844807576304bc4c54",
+  "version": "sha256:e4aefb61dcdd1f44e8a2b18d5584270988a68c91f9e0dcd9539199f3f5ad9431",
   "waiting": [
    {
     "claim": "C5",
@@ -1231,7 +1214,7 @@
     "outcome": "supporting"
    }
   ],
-  "version": "sha256:cf317899316459231281c5e309ed8cc45461a79094b49a1edde7b4fe04b80b9d",
+  "version": "sha256:35b0eae715d8f56ef7755fdfe24f11a2a62e73347187d8dadc975e8adab8d533",
   "waiting": []
  },
  "s256-b5e0eee6e28efca6d6ad05d7b8a94631576037ec9e5ff6d305fe89faa0e1032e/s256-6ec97bb08344a844badedb2426721d756e040e9e77f4f26c70f203bdcb9730bd/1": {
@@ -1264,7 +1247,7 @@
   "residuals": [],
   "stale": [],
   "steps": [],
-  "version": "sha256:e18b537d199d4716e8968038439fc959a17b6396ce42d30794ca06a5000d14b8",
+  "version": "sha256:ded895d76162bd390b6983f69f414997afcd19fcffb7d0d2d55c84747e58cade",
   "waiting": []
  },
  "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470/1": {
@@ -1383,7 +1366,7 @@
     "outcome": null
    }
   ],
-  "version": "sha256:db1d9f3b3397843a03a26db7f93bc5e49894e66308096c1d5897ece778ff2fff",
+  "version": "sha256:4369c18035cb07c1b2b17cadf2e1957f5b7037246c05d51528bd6ff74de2d5dc",
   "waiting": []
  },
  "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148/1": {
@@ -1400,7 +1383,7 @@
   "residuals": [],
   "stale": [],
   "steps": [],
-  "version": "sha256:cb3cc03811279664860c3795a785cf5c86b24db9ae83381649efa8ca17adcd4e",
+  "version": "sha256:a0b61596536fa3e9fcaa7d946ccbd6ee924023183a557157c259af5b0a3a218b",
   "waiting": []
  },
  "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-ea2fab75d05920549b4b92798bdf7217fed88df4e0a56de317d1e721524887b2/1": {
@@ -1532,7 +1515,7 @@
     "outcome": null
    }
   ],
-  "version": "sha256:b1a5605222ca69fe6bf606785774d42bc81026fa34e51ba06f72bec4ad049b5a",
+  "version": "sha256:96f45000cc023e13e72662ccf2c59ff4ab944bd37e6e319d0f50913811915b6c",
   "waiting": []
  }
 }

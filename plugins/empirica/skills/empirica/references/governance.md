@@ -38,15 +38,10 @@ binds the presentation it answers and each item's record or claim wording, so it
 configuration approval, and an identical replay is inert while a conflicting one blocks. With no approval
 ingress (route `unavailable`) nothing is asked and the requirement stays open.
 
-## Timeout, compatibility, and recovery
+## Timeout and recovery
 
 The host decision timeout defaults to 900 seconds. `EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS` accepts host-owned overrides written as whole seconds in plain decimal digits from 1 to 1500 (no fractions, signs, exponents, or hex); a set but malformed or out-of-range value fails extension or server start with an error naming the variable instead of defaulting. It appears in the dialog header and is never approvable. Pi shares one timeout across review and locked confirmation.
 
-Public contract 4.0.0 keeps wire `empirica/v2` and state family `empirica.run/2`. Persisted documents with removed governance fields are intentionally incompatible with the strict current schema and fail closed as `run.corrupt`. A later `StartRun` creates a fresh generation. The runtime never mutates, repairs, converts, or carries approval from an obsolete document.
+A persisted document that is not exactly the current wire `empirica/v2` and state family `empirica.run/2`, or that the strict current schema rejects, fails closed as `run.corrupt`. A later `StartRun` creates a fresh generation. The runtime never mutates, repairs or carries approval from such a document.
 
-Deterministic unit/integration tests are not native human-approval or installed-host qualification receipts.
-
-## Upgrading from 4.x to 5.0
-
-Old runs, artifacts and receipts are not migrated and fail closed; start a fresh session. The full upgrade
-note is in the repository README ("Upgrading from 4.x to 5.0").
+Deterministic unit/integration tests are not native human-approval or installed-host qualification evidence.

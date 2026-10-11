@@ -15,7 +15,7 @@ lands only if the file on disk still hashes to the revision the caller read. Abs
 are kept distinct as ADR-31 requires: a missing file is ``ABSENT`` (safe to create), an
 undecodable one is ``Corrupt`` (must fail closed, never silently overwritten).
 
-No host-specific runtime directory is read and there is no legacy fallback (ADR-31).
+No host-specific runtime directory is read (ADR-31).
 """
 from __future__ import annotations
 

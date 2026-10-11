@@ -43,7 +43,7 @@ import {
 import {
   identityFromSessionJsonl, sessionFileFromDetails,
 } from "./audit-identity.ts";
-import { HOST_PROFILE_ID } from "./host-profile.ts";
+import { HOST_COMPATIBILITY, HOST_PROFILE_ID, checkHostVersion } from "./host-profile.ts";
 import { createStdioBridgeDispatch, defaultBridgeConfig } from "./stdio-transport.ts";
 import { renderAuthorView } from "./author-view.ts";
 import {
@@ -52,7 +52,7 @@ import {
   type AuditRuntime, type BoundPreflight, type OwnerEnv, type OwnerIo, type OwnerRefusal,
   type PreflightImporter, type SubagentOwner, type SubagentsProvenance,
 } from "./runtime-owner.ts";
-import { launchUnsupportedReason, ownerRefusalBlock, ownerRefusalReason, seamRefusalMessage } from "./owner-refusal.ts";
+import { hostVersionReason, launchUnsupportedReason, ownerRefusalBlock, ownerRefusalReason, seamRefusalMessage } from "./owner-refusal.ts";
 import { AUDIT_LAUNCH_POLICY, SUBAGENTS_COMPATIBILITY } from "./host-profile.ts";
 import { buildHostRuntime } from "./host-runtime.ts";
 import { auditLaunchInput, preflightLaunch } from "./audit-launch.ts";
@@ -291,6 +291,8 @@ export interface EmpiricaPiDeps {
   resolveAuditContract?: AuditContractResolver;
   /** File-system reads for owner resolution (default: the real file system). */
   ownerIo?: OwnerIo;
+  /** Pi's own version as the host reports it (default: ``VERSION`` exported by ``@earendil-works/pi-coding-agent``); anything unreadable is refused. */
+  hostVersion?: () => unknown | Promise<unknown>;
   /** Environment consulted for the pi-subagents child-process flag (default: ``process.env``). */
   ownerEnv?: OwnerEnv;
   /** Owner-anchored module resolution and loading (default: ``require.resolve`` from the owner + ``import``). */
@@ -301,6 +303,13 @@ export interface EmpiricaPiDeps {
   kickoffStartMs?: number;
   /** The checked-in inventory of an exact pi-subagents version, if any (default: the ``compat/`` files; ADR-0069). */
   inventoryFor?: (version: string) => SubagentInventory | undefined;
+}
+
+/** Pi's version from the host (the injected reader, else the package's exported ``VERSION``); ``undefined`` when it cannot be read. */
+async function observeHostVersion(reader: EmpiricaPiDeps["hostVersion"]): Promise<unknown> {
+  try {
+    return reader !== undefined ? await reader() : ((await import("@earendil-works/pi-coding-agent")) as { VERSION?: unknown }).VERSION;
+  } catch { return undefined; }
 }
 
 function defaultSelectorProvider(): SelectorProvider {
@@ -819,6 +828,13 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         const goal = parsed.goal;
         if (parsed.unknownFlags.length) {
           say(ctx, diagnostics, `empirica: not started — unknown flags: ${parsed.unknownFlags.join(" ")}`, "error");
+          return;
+        }
+        // Pi's own version is the first admission: outside the profile's range, or unreadable, nothing starts.
+        const hostVersion = await observeHostVersion(deps.hostVersion);
+        const hostVerdict = checkHostVersion(HOST_COMPATIBILITY, hostVersion);
+        if (!hostVerdict.ok) {
+          say(ctx, diagnostics, `/empirica not started: ${hostVersionReason(hostVerdict).message}`, "error");
           return;
         }
         // Convergence needs the independent audit, which Pi can only launch through the external

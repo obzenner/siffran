@@ -75,7 +75,7 @@ test("registers the shared public driving tools", () => {
     ["empirica_observe", "empirica_read", "report_convergence"]);
 });
 
-test("does NOT register legacy empirica_knowledge tool", () => {
+test("does NOT register an empirica_knowledge tool", () => {
   const pi = register();
   assert.equal(pi.tools.get("empirica_knowledge"), undefined);
 });

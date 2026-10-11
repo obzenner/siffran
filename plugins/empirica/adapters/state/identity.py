@@ -16,9 +16,8 @@ Project identity, per ADR-31:
 * **Non-git project** — keyed on the resolved anchor: the resolved input path itself. A project
   with no Git repository still gets one stable identity per directory.
 
-Deliberately NOT consulted: any host-specific run store. ADR-31 removes the legacy anchor
-that let a stray run directory define "this project"; identity now derives only from the repository
-boundary or the resolved path, never from plugin debris.
+Deliberately NOT consulted: any host-specific run store. A stray run directory never defines
+"this project"; identity derives only from the repository boundary or the resolved path.
 """
 from __future__ import annotations
 

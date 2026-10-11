@@ -1,10 +1,9 @@
 ---
 name: native-qualification
 description: Qualify Empirica end to end in an operator-present Claude Code or Pi session, keeping host evidence and refusing to fabricate consent, races, failures or convergence. Use for native acceptance after adapter, UI or contract changes, not for routine unit checks.
-compatibility: Needs a supported Claude Code or Pi executable, this checkout, Python 3, Git, make, and an operator who answers the native prompts. Receipt validation uses the repository Make targets.
+compatibility: Needs a supported Claude Code or Pi executable, this checkout, Python 3, Git, make, and an operator who answers the native prompts.
 metadata:
   workflow: empirica-native-qualification
-  receipt: empirica-live-receipt/v3
 ---
 
 # Native qualification
@@ -41,7 +40,7 @@ Before launch:
 
 - Record HEAD, the exact host, plugin and subagent versions, the expected load paths and the reviewer configuration
   (`python3 scripts/census.py` prints the checkout facts). A release qualification needs a clean committed candidate
-  because receipts bind HEAD and version.
+  because the result names HEAD and the versions.
 - For an exploratory dirty candidate, retain `git status --porcelain=v1 --untracked-files=all`, both binary diffs, and a
   SHA-256 manifest of tracked and untracked candidate bytes (`python3 scripts/manifest.py`). Never stage to obtain a
   fingerprint. Mark the result non-release if source identity is incomplete.
@@ -71,10 +70,11 @@ plus human checkpoints, not a script for fabricating results. Record each row as
 `NOT_REACHED` with its evidence pointer. Read state only through public tools and never edit operational state. A row
 marked *deterministic* is covered by a named test and is never claimed live. In particular the 128-interaction ceiling is a fixed contract constant, not an operator setting: native qualification never exercises it.
 
-## 3. Receipt
+## 3. Context economy
 
-After one complete converged trace, build and validate the v3 receipt as in [the receipt reference](references/receipt.md).
-A receipt does not prove every UI checkpoint and cannot qualify dirty source.
+Extract the ordered Empirica tool results of the run to a newline-delimited JSON slice and run
+`make empirica-context-economy-report FILE=<slice>`. Retain the dialogs and logs too: the result is the retained
+evidence, not a receipt.
 
 ## 4. Retain one compact result
 
@@ -88,4 +88,4 @@ facts; session, child and operation IDs; the command; and the host decision time
 Add `methodologist` in the same shape, then the overall result and limitations. PASS is valid only when every required
 row passed. Stop on a required blocker, mark later rows NOT_REACHED, and preserve failed artifacts. One host pass does
 not qualify another host. `make check` is local regression evidence; release qualification also needs the integration
-and installed-host gates in `make release-check`.
+gates in `make release-check`.

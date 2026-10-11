@@ -272,10 +272,10 @@ class TestLocationCodec(unittest.TestCase):
             with self.subTest(label):
                 self.assertIsNone(location.decode_handle(token))
 
-    def test_decode_handle_legacy_unknown_prefix(self):
+    def test_decode_handle_unknown_prefix(self):
         for label, token in [
             ("unknown_prefix", "v1:" + ":".join(CANON_TOKEN.split(":")[1:])),
-            ("legacy_v1", "v1:oldformat:somedata"),
+            ("unknown_version", "v1:oldformat:somedata"),
             ("extra_part", CANON_TOKEN + ":extra"),
         ]:
             with self.subTest(label):

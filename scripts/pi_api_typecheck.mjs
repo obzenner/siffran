@@ -27,7 +27,7 @@ export const PI_API_VERSIONS = ["1.0.0", "1.1.0"];
 export const MIRROR = path.join(repo, "plugins", "empirica", "adapters", "pi", "src", "pi-types.ts");
 /**
  * Every Pi adapter's hand-kept mirror, proven against Pi's own declarations at the versions in `PI_API_VERSIONS` only:
- * the supported range is declared, and each later release needs its own typecheck and receipt (ADR-0052).
+ * the supported range is declared, and each later release needs its own typecheck (ADR-0052).
  */
 export const MIRRORS = {
   empirica: MIRROR,

@@ -178,7 +178,6 @@ Each batch item shows the claim, the source, the complete verbatim quote (no tru
   * the `invocation` field `audit_retrieval`;
   * the observer fields.
   Each of these changes regenerates the fixtures (the contract digest in them is a placeholder, filled in when they are loaded), the goldens, the recovery reference, the vendor copies and the public tools (L5b §1).
-* Bad, because the live receipts are replaced by a v3 format carrying confirmation receipts and `audit_retrieval`, and fresh Claude and Pi receipts must be captured.
 * Bad, because humans see more prompts on hosts whose auditor cannot retrieve the web: Claude for now, and Pi without a web extension. Each derivation is shown once, which bounds the prompts; a Pi batch is up to two dialogs per item, a select and a note.
 
 ### Confirmation
@@ -195,7 +194,6 @@ Each batch item shows the claim, the source, the complete verbatim quote (no tru
   * A divergence test at audit launch.
   * The Claude `audit_retrieval` omits `web`, and a test pins that `WebFetch` is never credited.
 * **Hosts.** Pi dialog unit tests (TUI, RPC, print); Claude elicitation tests (with and without form support); Claude Stop and the Pi gate tests that an open claim, an already presented key and exhausted interactions block with the real reason.
-* **Receipts.** `empirica-live-receipt/v3` carries `audit_retrieval` and any confirmation receipts, and the verifier rejects receipts without them. Capture and inspect bind the artifact store to the repository the run recorded (`projects/<project>/project.json`), comparing canonical Git common-directory identity (a worktree is legitimate); a mismatched, absent or unreadable record is refused (A1-6).
 * **What the author reads.** Both renderers (Python and Pi) show a "Waiting on a human" section from `confirmation_batch` (each record's source and claim, each decision claim, and in plain words whether a human is asked when you report, and whether this host can show a dialog), each citation's verification (checked by the service, for the audit to retrieve, waiting for a human, confirmed or rejected by a human) with the human's note, and each decision's outcome and answer. All human text is fenced as untrusted; no receipt id or digest appears (A1-4).
 * **The response after a presentation is fresh** (m2). Once a presentation was admitted, the mediator re-evaluates whatever the human did (Later, cancel, timeout, a failing dialog) and returns the refreshed result.
 * **Spelling is refused, not interpreted** (m1). A `source_ref` that is an absolute or `~` path with `.` or `..` segments, a leading `//` or `//` inside, or a trailing slash is refused with `source_ref_form`; the check is lexical and reads no filesystem. The runtime-policy path check applies the same rule. Whether a symlink points elsewhere is the audit's to see.

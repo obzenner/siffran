@@ -28,11 +28,6 @@
     }
   },
   "diagnostic": {
-    "older-format": {
-      "tone": "neutral",
-      "icon": "older",
-      "copy": "diagnostic.older-format"
-    },
     "unreadable": {
       "tone": "negative",
       "icon": "unreadable",

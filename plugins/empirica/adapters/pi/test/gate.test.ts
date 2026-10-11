@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { PROTOCOL, type InvocationProvenance, type Request, type Response, type Result } from "../src/contract.ts";
-import { AUDIT_LAUNCH_POLICY, SUBAGENTS_COMPATIBILITY } from "../src/host-profile.ts";
+import { AUDIT_LAUNCH_POLICY, HOST_COMPATIBILITY, SUBAGENTS_COMPATIBILITY, spellRange } from "../src/host-profile.ts";
 import { auditLaunchInput } from "../src/audit-launch.ts";
 import { REPORT_CONVERGENCE_TOOL, SUBAGENT_TOOL } from "../src/translate.ts";
 import { EVIDENCE_WAIT_NOTICE } from "../src/evidence-ui.ts";
@@ -237,6 +237,8 @@ interface WireOptions {
   inventoryFor?: (version: string) => SubagentInventory | undefined;
   /** The adapter's configured subagent tool name (default: `subagent`). */
   subagentToolName?: string;
+  /** Pi's own version as the host reports it (default: a version inside the Pi profile's range). */
+  hostVersion?: () => unknown;
   /** What the fake preflight reports the auditor can retrieve (default: workspace and local files). */
   auditRetrieval?: readonly ("local" | "web" | "workspace")[];
 }
@@ -309,6 +311,7 @@ async function wire(
         type: "Inert", reason: "unsupported_host_event", run: run() } };
     },
     ownerEnv: options.env ?? {},
+    hostVersion: options.hostVersion ?? (() => "1.1.0"),
     ...(options.diagnostics ? { diagnostics: options.diagnostics } : {}),
     ...(options.kickoffStartMs ? { kickoffStartMs: options.kickoffStartMs } : {}),
     ...(options.inventoryFor ? { inventoryFor: options.inventoryFor } : {}),
@@ -445,6 +448,67 @@ test("without a UI every /empirica refusal goes to stderr with a failing exit, a
       assert.equal(w.pi.entries.length, 0);
     }
   }
+});
+
+// ---- G19b: Pi's own version is checked against the Pi profile's range at /empirica start -----------------------
+
+/** Versions around the contract's Pi range, derived from it (the test holds no second copy of the range). */
+function hostVersionCases(): Array<[string, unknown, boolean]> {
+  const [lowMajor, lowMinor] = HOST_COMPATIBILITY.minimum.split(".").map(Number);
+  const [highMajor] = HOST_COMPATIBILITY.maximum_exclusive.split(".").map(Number);
+  return [
+    ["the minimum", HOST_COMPATIBILITY.minimum, true],
+    ["a version inside", `${lowMajor}.${lowMinor + 1}.0`, true],
+    ["the last of the range", `${highMajor - 1}.99.99`, true],
+    ["just below the minimum", `${lowMajor - 1}.99.9`, false],
+    ["far below", "0.84.2", false],
+    ["the exclusive maximum", HOST_COMPATIBILITY.maximum_exclusive, false],
+    ["above the maximum", `${highMajor}.0.1`, false],
+    ["a much later major", `${highMajor + 8}.0.0`, false],
+    ["undefined", undefined, false],
+    ["an empty string", "", false],
+    ["a number", 1.1, false],
+    ["a two-part version", "1.1", false],
+    ["a prerelease", `${lowMajor}.${lowMinor + 1}.0-beta.1`, false],
+  ];
+}
+
+test("INVARIANT (G19b): /empirica starts exactly when Pi's version is an exact version inside the profile's range, in every mode", async () => {
+  const range = spellRange(HOST_COMPATIBILITY);
+  for (const [label, version, inside] of hostVersionCases()) {
+    for (const mode of ["tui", "print", "json"] as const) {
+      const d = diagnostics();
+      const ui = new FakeUi();
+      const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }), true, undefined,
+        { diagnostics: d, hostVersion: () => version });
+      const hasUI = mode === "tui";
+      await w.pi.command("empirica").handler("goal", { ui, mode, hasUI, waitForIdle: async () => undefined });
+      const where = `${label} (${String(version)}), ${mode}`;
+      if (inside) {
+        assert.ok(w.requests.some((r) => r.command.type === "StartRun"), `${where}: a run starts`);
+      } else {
+        const shown = (hasUI ? ui.notifications.map((n) => n.message) : d.lines).join("\n");
+        assert.equal(w.requests.length, 0, `${where}: nothing is dispatched`);
+        assert.equal(w.pi.entries.length, 0, `${where}: no run is recorded`);
+        assert.equal(w.pi.userMessages.length, 0, `${where}: no kickoff is sent`);
+        assert.ok(shown.includes(range), `${where}: the notice names the range ${range}: ${shown}`);
+        assert.ok(shown.includes(typeof version === "string" && version !== "" ? version : "unreadable"),
+          `${where}: the notice names the observed version: ${shown}`);
+        if (!hasUI) assert.equal(d.failures, 1, `${where}: a failing exit`);
+        else assert.deepEqual(ui.notifications.map((n) => n.type), ["error"], where);
+      }
+    }
+  }
+});
+
+test("a Pi whose version reader throws is refused as unreadable", async () => {
+  const d = diagnostics();
+  const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }), true, undefined,
+    { diagnostics: d, hostVersion: () => { throw new Error("no package"); } });
+  await w.pi.command("empirica").handler("goal", { ui: new FakeUi(), mode: "print", hasUI: false });
+  assert.match(d.lines.join("\n"), /unreadable/);
+  assert.equal(d.failures, 1);
+  assert.equal(w.requests.length, 0);
 });
 
 test("without a UI the core's refusal and a missing subagents tool are seen too", async () => {
@@ -663,7 +727,7 @@ test("an unavailable tool inventory is an unobservable owner, not a crash", asyn
   const pi = new FakePi();
   pi.inventoryError = new Error("inventory down");
   const ui = new FakeUi();
-  createEmpiricaExtension({ ownerEnv: {}, dispatch: () => { throw new Error("no dispatch expected"); } })(pi);
+  createEmpiricaExtension({ ownerEnv: {}, hostVersion: () => "1.1.0", dispatch: () => { throw new Error("no dispatch expected"); } })(pi);
   await pi.sessionStart();
   await pi.command("empirica").handler("goal", { ui });
   assert.ok(ui.notifications[0].message.includes(reasonMessage("host.subagents_owner_unverified")));
@@ -674,7 +738,7 @@ test("an unavailable command inventory is an unobservable owner, not a crash", a
   const pi = new FakePi();
   pi.commandsError = new Error("commands down");
   const ui = new FakeUi();
-  createEmpiricaExtension({ ownerEnv: {}, dispatch: () => { throw new Error("no dispatch expected"); } })(pi);
+  createEmpiricaExtension({ ownerEnv: {}, hostVersion: () => "1.1.0", dispatch: () => { throw new Error("no dispatch expected"); } })(pi);
   await pi.sessionStart();
   await pi.command("empirica").handler("goal", { ui });
   assert.ok(ui.notifications[0].message.includes(reasonMessage("host.subagents_owner_unverified")));
@@ -698,7 +762,7 @@ test("a malformed inventory cannot escape session_start: the run is restored and
 test("a /empirica issued before session_start observed an owner is refused, not assumed", async () => {
   const pi = new FakePi();
   const ui = new FakeUi();
-  createEmpiricaExtension({ ownerEnv: {}, dispatch: () => { throw new Error("no dispatch expected"); } })(pi);
+  createEmpiricaExtension({ ownerEnv: {}, hostVersion: () => "1.1.0", dispatch: () => { throw new Error("no dispatch expected"); } })(pi);
   await pi.command("empirica").handler("goal", { ui });
   assert.ok(ui.notifications[0].message.includes(reasonMessage("host.subagents_owner_unverified")));
   assert.match(ui.notifications[0].message, /not observed at session_start/);

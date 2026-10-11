@@ -27,7 +27,6 @@ EMPIRICA_FRESHNESS_TESTS := $(PLUGINS_DIR)/empirica/tests/test_freshness.py
 EMPIRICA_OBSERVATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_observation.py
 EMPIRICA_EXECUTION_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/tests/test_execution_adapter.py
 EMPIRICA_PROTOCOL_ISOLATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_protocol_isolation.py
-EMPIRICA_LIVE_RECEIPT_TESTS := $(SCRIPTS)/tests/test_empirica_live_receipts.py
 EMPIRICA_CLAUDE_MCP_LOG_TESTS := $(SCRIPTS)/tests/test_check_claude_mcp_log.py
 EMPIRICA_RUN_CENSUS_TESTS := $(SCRIPTS)/tests/test_empirica_run_census.py
 EMPIRICA_CONTEXT_ECONOMY_TESTS := $(SCRIPTS)/tests/test_empirica_context_economy.py
@@ -113,7 +112,7 @@ check-ci: ## Fast contributor gate except Pi and UI (PI_CHECKS=1 includes them),
 	@$(call RUN_SUITES,$(CI_SUITES))
 	@printf '\n$(BOLD)CI checks passed.$(RESET)\n'
 
-check-static: lint validate docs-check adr-check empirica-architecture-check empirica-architecture-unit-check contract-check obligations-check vendor-check activation-check empirica-host-receipt-unit-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check empirica-context-economy-unit-check claude-subagent-models-unit-check pi-canary-unit-check pi-validator-unit-check skills-check suites-check ## Lint, manifests, skills, suite ownership, docs, ADRs, architecture validator and its tests, contracts, vendor copies, activation, receipts, canary config
+check-static: lint validate docs-check adr-check empirica-architecture-check empirica-architecture-unit-check contract-check obligations-check vendor-check activation-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check empirica-context-economy-unit-check claude-subagent-models-unit-check pi-canary-unit-check pi-validator-unit-check skills-check suites-check ## Lint, manifests, skills, suite ownership, docs, ADRs, architecture validator and its tests, contracts, vendor copies, activation, canary config
 	@printf '$(BOLD)==> static suite ok$(RESET)\n'
 
 check-core: empirica-author-view-golden empirica-governance-dialog-golden ## Fast host-neutral contracts, malformed input, state, bridge, and governance boundaries
@@ -425,13 +424,13 @@ empirica-codex-check: ## Validate the Empirica Codex manifest, hooks, and packag
 	@printf '$(BOLD)==> empirica Codex adapter$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_codex_adapter.py
 
-# Empirica 4.0 target-state architecture validator (D3). Structural-only: ownership/dependency
+# Empirica target-state architecture validator. Structural-only: ownership/dependency
 # direction, subtraction (forbidden files/symbols/fields/actions/protocols), thin hooks,
 # public-contract/profile alignment, and Make lifecycle. ADR 0060 composes this target into
 # check-static/check/check-ci. Line count is not a rule.
 # Pass ARGS=--self-test to run the committed synthetic suite (GREEN) instead of validating the repo.
 .PHONY: empirica-architecture-check
-empirica-architecture-check: ## validate Empirica 4.0 target ownership, dependencies, and subtraction
+empirica-architecture-check: ## validate Empirica target ownership, dependencies, and subtraction
 	@printf '$(BOLD)==> empirica architecture$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_empirica_architecture.py $(ARGS)
 
@@ -470,26 +469,10 @@ empirica-claude-mcp-log-check: ## Verify one native Claude MCP log: LOG=... [ARG
 	@test -n "$(LOG)" || { printf 'LOG is required\n' >&2; exit 2; }
 	@$(PYTHON) $(SCRIPTS)/check_claude_mcp_log.py "$(LOG)" $(ARGS)
 
-.PHONY: empirica-host-receipt-unit-check
-empirica-host-receipt-unit-check: ## test structural installed-host receipt verification
-	@printf '$(BOLD)==> empirica receipt verifier$(RESET)\n'
-	@$(PYTHON) $(EMPIRICA_LIVE_RECEIPT_TESTS)
-
 .PHONY: pi-canary-unit-check
 pi-canary-unit-check: ## Test that the dogfood settings and canary recipes never provision or suppress a pi-subagents runtime
 	@printf '$(BOLD)==> Pi dogfood runtime boundary$(RESET)\n'
 	@$(PYTHON) $(PI_CANARY_TESTS)
-
-.PHONY: empirica-host-receipt
-empirica-host-receipt: ## capture one operator-attested receipt: HOST=... TRANSCRIPT=... STATE=... CHILD_SESSION=... VERSION_OUTPUT=... COMMAND=... OUTPUT=... ARTIFACTS_REPO=...
-	@if [ -z "$(HOST)" ] || [ -z "$(TRANSCRIPT)" ] || [ -z "$(STATE)" ] || [ -z "$(CHILD_SESSION)" ] || [ -z "$(VERSION_OUTPUT)" ] || [ -z "$(COMMAND)" ] || [ -z "$(OUTPUT)" ] || [ -z "$(ARTIFACTS_REPO)" ]; then \
-		printf 'usage: make empirica-host-receipt HOST=claude|pi TRANSCRIPT=... STATE=... CHILD_SESSION=... VERSION_OUTPUT=... COMMAND=... OUTPUT=... ARTIFACTS_REPO=...\n' >&2; exit 2; fi
-	@$(PYTHON) $(SCRIPTS)/capture_empirica_live_receipt.py "$(HOST)" --transcript "$(TRANSCRIPT)" --state "$(STATE)" --child-session "$(CHILD_SESSION)" --version-output "$(VERSION_OUTPUT)" --command "$(COMMAND)" --output "$(OUTPUT)" --artifacts-repo "$(ARTIFACTS_REPO)" --operator-attested
-
-.PHONY: empirica-host-live-check
-empirica-host-live-check: ## require retained installed-host Allow(converged=true) receipts
-	@printf '$(BOLD)==> empirica installed-host receipts$(RESET)\n'
-	@$(PYTHON) $(SCRIPTS)/verify_empirica_live_receipts.py
 
 ## --- Qualify
 
@@ -627,7 +610,7 @@ empirica-recovery-reference: ## Regenerate the skill's reason-code recovery refe
 	@$(PYTHON) $(SCRIPTS)/gen_recovery_reference.py
 
 .PHONY: release-check
-release-check: check empirica-core-integration empirica-governance-check empirica-host-integration empirica-subagents-matrix empirica-pi-api-typecheck empirica-host-live-check ## Deliberate pre-release gate: fast checks, integration diagnostics, the reviewed pi-subagents and Pi API matrices, installed-host receipts
+release-check: check empirica-core-integration empirica-governance-check empirica-host-integration empirica-subagents-matrix empirica-pi-api-typecheck ## Deliberate pre-release gate: fast checks, integration diagnostics, the reviewed pi-subagents and Pi API matrices
 	@printf '\n$(BOLD)Ready to release.$(RESET) Remaining steps are yours:\n'
 	@printf '  1. confirm the version bump is in plugin.json (make status)\n'
 	@printf '  2. commit and push\n'

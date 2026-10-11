@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Bounded exact-v2 activation lifecycle tests for the Claude hooks (D6-C C2a).
+"""Bounded exact-v2 activation lifecycle tests for the Claude hooks.
 
 The seven thin hooks remain importable and return honest native unsupported/fail-closed behavior
 through the strict v2 shell. At D6 the no-location run port returns unsupported/closed. Executable
 Agent and investigative-tool admission must distinguish exact ``Inert/no_run`` from that
-unavailability and therefore deny; observational hooks remain non-wedging. Removed/trusted actions
-are never dispatched. Compatibility/migration assertions are intentionally absent.
+unavailability and therefore deny; observational hooks remain non-wedging. Trusted actions
+are never dispatched.
 """
 from __future__ import annotations
 

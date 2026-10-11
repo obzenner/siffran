@@ -70,7 +70,7 @@ class ValidateUiViewTests(unittest.TestCase):
 
     def test_a_detail_with_an_audit_its_row_has_none_of_is_rejected(self):
         details = copy.deepcopy(RUNS)
-        details[SCENARIOS["older-format"]]["audit"] = details[SCENARIOS["converged"]]["audit"]
+        details[SCENARIOS["unreadable"]]["audit"] = details[SCENARIOS["converged"]]["audit"]
         self.assertRejected(VIEW, details, "audit detail must be present exactly")
 
     def test_a_detail_that_repeats_a_row_fact_is_rejected(self):
@@ -115,7 +115,7 @@ class ValidateUiViewTests(unittest.TestCase):
 
     def test_budgets_on_an_undecoded_run_are_rejected(self):
         details = copy.deepcopy(RUNS)
-        details[SCENARIOS["older-format"]]["budgets"] = details[SCENARIOS["converged"]]["budgets"]
+        details[SCENARIOS["unreadable"]]["budgets"] = details[SCENARIOS["converged"]]["budgets"]
         self.assertRejected(VIEW, details, "budgets and control must be null exactly")
 
     def test_a_previous_that_is_not_the_prior_generation_is_rejected(self):
@@ -138,7 +138,7 @@ class ValidateUiViewTests(unittest.TestCase):
 
     def test_a_partial_row_carrying_derived_facts_is_rejected(self):
         view = copy.deepcopy(VIEW)
-        _run(view, "older-format")["audit"] = "passed"
+        _run(view, "unreadable")["audit"] = "passed"
         self.assertRejected(view, None, "row carries derived facts")
 
     def test_an_edge_outside_the_run_is_rejected(self):

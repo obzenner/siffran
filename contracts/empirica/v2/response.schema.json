@@ -866,10 +866,10 @@
           ],
           "properties": {
             "code": {
-              "const": "host.subagents_provenance_missing"
+              "const": "host.version_unsupported"
             },
             "parameters": {
-              "$ref": "#/$defs/emptyParams"
+              "$ref": "#/$defs/hostVersionParams"
             }
           }
         },
@@ -3795,6 +3795,26 @@
           "enum": [
             "again"
           ]
+        }
+      }
+    },
+    "hostVersionParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "range",
+        "version"
+      ],
+      "properties": {
+        "range": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
         }
       }
     }

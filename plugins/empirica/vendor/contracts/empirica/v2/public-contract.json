@@ -1542,11 +1542,26 @@
       "message": "During an Empirica run, `subagent` accepts exactly one launch form (for example `agent` or `workflow`) or a read-only action that the runtime's reviewed versions know (`list`, `status`, `models`, ...); control, mutation, unknown-action, and ambiguous calls are refused. Retry with a supported call, or accept the residual.",
       "disposition": "host_recovery"
     },
-    "host.subagents_provenance_missing": {
+    "host.version_unsupported": {
       "params": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "required": [
+          "range",
+          "version"
+        ],
+        "properties": {
+          "range": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
       },
       "next_actions": [
         "residual.accept"
@@ -1554,7 +1569,7 @@
       "sections": [
         "hosts/capabilities"
       ],
-      "message": "The retained run or receipt lacks the exact pi-subagents version and owner path. Recapture a provenance-complete run; this one is not evidence.",
+      "message": "The active Pi is {version}, outside the range Empirica supports ({range}), or its version could not be read, so no run starts. Install a Pi inside the range and restart the host, or accept the residual.",
       "disposition": "host_recovery"
     },
     "freeze.deferred": {
@@ -1992,7 +2007,7 @@
         },
         {
           "id": "run/lifecycle/corrupt",
-          "text": "Any persisted aggregate that is not exactly valid empirica/v2 state and history returns run.corrupt with run.start_fresh; rejected data contributes no fields, defaults, terminal inference, migration, or repair."
+          "text": "Any persisted aggregate that is not exactly valid empirica/v2 state and history returns run.corrupt with run.start_fresh; rejected data contributes no fields, defaults, terminal inference, or repair."
         }
       ]
     },
@@ -2387,8 +2402,8 @@
           "text": "The only accepted wire and persisted-state protocol identifier is exactly empirica/v2; every other wire identity is invalid_request and every other persisted identity is run.corrupt."
         },
         {
-          "id": "protocol/no_migration",
-          "text": "Rejected persisted data is never decoded, migrated, adjudicated, or repaired and contributes no public fields. Transaction manifest version 2 and its observation-basis link are required; pre-M5 version 1 manifests are not accepted because current state has no migration path and no current writer emits them."
+          "id": "protocol/rejected_state",
+          "text": "Rejected persisted data is never decoded, adjudicated, or repaired and contributes no public fields. Transaction manifest version 2 and its observation-basis link are required."
         },
         {
           "id": "protocol/no_internal_fields",
@@ -2448,7 +2463,7 @@
         },
         {
           "id": "governance/hosts",
-          "text": "Claude uses negotiated MCP form elicitation; Pi uses hasUI/select/input/confirm. Codex deliberative approval is unavailable. Reviewer configuration is host-owned and is not part of approval. Hosts observe the actual reviewer identity; availability, authorization and independence still fail closed. Operator hooks/RPC may answer; physical human identity and same-OS-principal isolation are not claimed. input_private remains unverified until native qualification. Incompatible older governance state requires a fresh generation without migration."
+          "text": "Claude uses negotiated MCP form elicitation; Pi uses hasUI/select/input/confirm. Codex deliberative approval is unavailable. Reviewer configuration is host-owned and is not part of approval. Hosts observe the actual reviewer identity; availability, authorization and independence still fail closed. Operator hooks/RPC may answer; physical human identity and same-OS-principal isolation are not claimed. input_private remains unverified until native qualification."
         },
         {
           "id": "governance/human_decisions",

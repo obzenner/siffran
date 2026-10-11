@@ -8,7 +8,7 @@ and evidence in Git shadow refs, leaving project worktrees clean.
 
 ## Governed Empirica starts
 
-Empirica 4.0.0 defaults to host-mediated approval of run configuration—budget ceilings and
+Empirica defaults to host-mediated approval of run configuration—budget ceilings and
 control mode—**before investigation**. The immutable goal is shown read-only; the claim graph
 defines the work but is not approvable. Prepare from supplied context, record route, propose scope,
 and submit `configure_run` to open approval. Configuration changes need a new exact decision;
@@ -20,16 +20,10 @@ Claude needs MCP form elicitation and Pi uses its UI. Reviewer configuration sta
 and the adapter observes the identity that actually produced the verdict. See the
 [governance guide](plugins/empirica/skills/empirica/references/governance.md) for configuration and
 auto provenance, and the [audit guide](plugins/empirica/skills/empirica/references/audit.md#independence-reporting)
-for identity classification. Inventory-shaped old runs fail closed and require fresh generations;
-they are never silently migrated or approved. New approval flows have deterministic integration
+for identity classification. New approval flows have deterministic integration
 coverage, not operator-present native approval qualification.
 
-## Upgrading from 4.x to 5.0
-
-Empirica 5.0 does not migrate old runs, artifacts or receipts; they fail closed. To move over, start a
-fresh session. A URL source now needs a human on Claude and Pi, and delegated or non-interactive runs
-cannot confirm. v3 live receipts need a fresh operator capture. The wire family `empirica/v2` is distinct
-from the plugin version 5.0.0.
+5.0.0 does not read state from earlier versions; start a fresh session.
 
 ## Install for Claude Code
 
@@ -111,19 +105,16 @@ because nobody has reviewed its actions, a `subagent` action runs during a run o
 name and the classifier calls it read-only (`list`, `status`, `models`, ...); launches are classified as usual. `make empirica-subagents-matrix-update` lists releases newer than the newest
 reviewed one; reviewing one means adding its compat record, preflight fixture and classifier cases.
 
-| `pi-subagents` | Pi floor (supported) | Native receipt (4.1) | Status |
-|---|---|---|---|
-| `0.50.0` | `>=1.0.0` | pending A9 | reviewed; the 4.0 qualification version |
-| `0.64.0` | `>=1.0.0` | Pi 0.87.1 (A9a, `ebf426f`) | reviewed |
-| `0.74.0` | `>=1.0.0` | pending A9 | reviewed |
-| `0.75.0` | `>=1.0.0` | pending A9 | reviewed |
-| `0.76.1` | `>=1.0.0` | pending A9 | reviewed; the repository's development pin |
+| `pi-subagents` | Pi floor (supported) | Status |
+|---|---|---|
+| `0.50.0` | `>=1.0.0` | reviewed |
+| `0.64.0` | `>=1.0.0` | reviewed |
+| `0.74.0` | `>=1.0.0` | reviewed |
+| `0.75.0` | `>=1.0.0` | reviewed |
+| `0.76.1` | `>=1.0.0` | reviewed; the repository's development pin |
 
 "Requires Pi" is each release's own declared `@earendil-works/pi-ai` peer, raised to the floor of the supported Pi interval (1.0.0, which every reviewed release's peer is below). It is
-recorded in `plugins/empirica/adapters/pi/compat/` and checked against this table. "Native receipt" marks
-the pairs for which an installed-host run has been recorded; `pending A9` means none has yet. The
-0.64.0 receipt is native evidence for that pair; the release receipt the live check requires must come
-from the profile's qualified Pi version or later (`host-profiles.json` `version`, today 1.1.0; A9b, pending).
+recorded in `plugins/empirica/adapters/pi/compat/` and checked against this table.
 
 Install the newest reviewed version and pin the exact
 version, as in the commands above; an unpinned install may resolve to a release outside the range, which is
@@ -161,10 +152,11 @@ pi install "$(pwd)"
 ```
 
 The exact Claude Code and Pi foreground profiles were promoted from installed-host observations;
-release certification additionally requires fresh operator-attested, candidate-bound structural
-receipts.
+release evidence is the long-running scenarios (`.agents/skills/native-qualification/references/scenarios.md`).
 
 ### Supported surfaces
+
+Host versions: Pi's range is enforced at `/empirica` start (a Pi outside it, or one whose version cannot be read, is refused with `host.version_unsupported` and nothing starts); Claude Code's range is the documented supported range and is not checked (hook payloads carry no version), so Claude is admitted by observed capability; the pi-subagents range is enforced at runtime.
 
 | Surface | Deliberative | Auto, human present | Auto, delegated (`EMPIRICA_AUTO_DELEGATION=1`) |
 |---|---|---|---|
@@ -178,8 +170,7 @@ A refusal in print mode is written to stderr and exits 1. Rows qualified only by
 the Pi auditor calling `contact_supervisor`, Pi compaction failure) are listed in
 `.agents/skills/native-qualification/references/scenarios.md`, section C.
 
-`make empirica-host-live-check` requires exact receipts for Claude and Pi only; Pi and Claude async
-promotion remains separate and unsupported.
+Pi and Claude async promotion remains separate and unsupported.
 
 ## Watching the store
 

@@ -20,8 +20,6 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-import jsonschema
-
 from core import observer as _core
 from core.evaluation import digest
 from core.records import Corrupt, Present, RunKey
@@ -35,8 +33,6 @@ from .snapshot import GraphInvalid, HistoryCorrupt, active_spike_heads, assemble
 CONTRACT = "empirica-ui-view/v1"
 #: The label of a project no repository matched: a stable word, never a position in the view.
 UNNAMED_PROJECT = "Unnamed project"
-#: The marker the plugin's pre-v2 state documents carry instead of ``protocol``/``state_schema``.
-_PRE_V2_MARKER = "schema"
 #: A malformed recorded artifact that ``traverse_history`` admits (it checks only that each is an
 #: object) surfaces as one of these while the snapshot is assembled: corrupt history, per run.
 _MALFORMED_HISTORY = (HistoryCorrupt, GraphInvalid, KeyError, TypeError, ValueError)
@@ -74,27 +70,6 @@ def _revision(read: Any) -> str | None:
     return read.revision.token if isinstance(read, Present) else None
 
 
-def state_format(raw: Any) -> str:
-    """Why a state the plugin does not decode is not decoded, judged with the plugin's own
-    identifiers and validator: ``older-format`` when its shape is not this plugin's (another
-    protocol or schema, or the current identifiers on a document the current state schema rejects,
-    as the plugin's earlier versions wrote), ``unreadable`` otherwise (not a state document, or one
-    of the current shape that breaks the plugin's invariants: damage, not age)."""
-    if not isinstance(raw, dict):
-        return "unreadable"
-    current = (raw.get("protocol") == _proto.protocol_id()
-               and raw.get("state_schema") == _proto.state_schema_id())
-    if not current:
-        marked = any(isinstance(raw.get(field), str) and raw[field].startswith("empirica")
-                     for field in ("protocol", "state_schema", _PRE_V2_MARKER))
-        return "older-format" if marked else "unreadable"
-    try:
-        _proto.schema_validator("state").validate(raw)
-    except jsonschema.ValidationError:
-        return "older-format"
-    return "unreadable"
-
-
 @dataclass(frozen=True)
 class Observed:
     """One run: its summary row and its detail document, both contract-shaped, plus what its
@@ -118,7 +93,6 @@ class Observer:
         self._profile_id = profile_id or _proto.profile_ids()[0]
         contract = _proto.public_contract()
         self._messages = {code: spec["message"] for code, spec in contract["reasons"].items()}
-        self._statuses = frozenset(contract["statuses"])
         self._cache: dict[RunKey, tuple[str, Observed]] = {}
 
     # --- one run ------------------------------------------------------------
@@ -142,12 +116,8 @@ class Observer:
             return self._partial(row, base_digest, "unreadable")
         classified = run_state.classify_and_decode(read.value)
         if classified.kind != "valid":
-            raw = read.value
-            if state_format(raw) != "older-format":
-                return self._partial(row, base_digest, "unreadable")
-            status = raw.get("status") if raw.get("status") in self._statuses else None
-            goal = raw.get("goal") if isinstance(raw.get("goal"), str) else None
-            return self._partial(row, base_digest, "older-format", status=status, goal=goal)
+            # A document that is not exactly the current state is damage, whatever wrote it: nothing is read from it.
+            return self._partial(row, base_digest, "unreadable")
         state = classified.state
         partial = {"status": state.status, "goal": state.goal, "state": state}
         if history is None:

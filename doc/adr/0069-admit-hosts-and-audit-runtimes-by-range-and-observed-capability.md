@@ -32,11 +32,11 @@ Every Pi, Claude or pi-subagents release forced an edit of several files and a n
 
 ## Decision Outcome
 
-The decisions below (G5-R1 to G5-R4, the host range G9-R1, and G10-R1), with the G6 amendment. G5-R3 is recorded as not built (below).
+The decisions below (G5-R1 to G5-R4, the host range G9-R1, G10-R1 and who enforces which range G19b-R1), with the G6 amendment. G5-R3 is recorded as not built (below).
 
 ### G5-R1 Profile ids never carry a version
 
-A profile id is the host id (`claude-code`, `codex-cli`) or, for a host with an external audit runtime, `<host_id>+<policy_id>` (`pi+pi-subagents-foreground-audit-v1`). The qualification version stays in the profile's `version` field and receipts keep recording the exact observed host version. `application.protocol.host_profile_id(host_id)` resolves the id of a host (exactly one profile per host); no code splits an id on `@`. Stored runs, receipts and fixtures changed in place (ADR-0067: 5.0.0 is unreleased and carries no compatibility).
+A profile id is the host id (`claude-code`, `codex-cli`) or, for a host with an external audit runtime, `<host_id>+<policy_id>` (`pi+pi-subagents-foreground-audit-v1`). The qualified version stays in the profile's `version` field: it is the version the long-running scenarios run on. `application.protocol.host_profile_id(host_id)` resolves the id of a host (exactly one profile per host); no code splits an id on `@`. Stored runs, receipts and fixtures changed in place (ADR-0067: 5.0.0 is unreleased and carries no compatibility).
 
 ### G5-R2 pi-subagents is admitted in a range, by observed capability
 
@@ -46,7 +46,7 @@ A profile id is the host id (`claude-code`, `codex-cli`) or, for a host with an 
 * *reviewed*: a version with a checked-in `compat/pi-subagents-<v>.json` uses that inventory (launch forms, actions, contract version), exactly as before;
 * *not reviewed*: any other version in the range is admitted only if the owner's own `parameters.properties` declare every field the audit launch sends (`AUDIT_LAUNCH_PARAMETERS`: `agent task model agentScope async context acceptance timeoutMs toolBudget`) and its live launch preflight passes every existing check (packaged canonical auditor, configured model, `context: "fresh"`, contract version in `[2, 3]`, package version equal to the owner's). Its action list is empty here, so every `subagent` action is refused while a run is active (the G6 amendment below widens this to the names some reviewed version has; the classifier still decides). Launches are still classified by the launch forms its schema declares.
 
-`invocation.host_runtime.subagents` records `reviewed: boolean`. It is the only member of `host_runtime` the run view reads (`StartRun` checks the rest): `reviewed: false` adds `host.unreviewed_runtime {package, version}` to the run view and the author view shows one line under the header, `host: pi-subagents <v> (not reviewed; preflight passed)` on every run view while the runtime stays unreviewed. The live receipt records `reviewed` too. `make empirica-subagents-matrix` still proves every version that has a record; a record outside the range fails `make contract-check`. Reviewing a release is adding its record, fixture and classifier cases, not editing the contract.
+`invocation.host_runtime.subagents` records `reviewed: boolean`. It is the only member of `host_runtime` the run view reads (`StartRun` checks the rest): `reviewed: false` adds `host.unreviewed_runtime {package, version}` to the run view and the author view shows one line under the header, `host: pi-subagents <v> (not reviewed; preflight passed)` on every run view while the runtime stays unreviewed. `make empirica-subagents-matrix` still proves every version that has a record; a record outside the range fails `make contract-check`. Reviewing a release is adding its record, fixture and classifier cases, not editing the contract.
 
 **Trade-off.** A release inside the range that changes what its preflight does not report, or what an action means, is admitted without review. This is bounded: the audit still needs a distinct independent auditor with a verdict bound to the canonical agent, the run view says the runtime is not reviewed, and no action runs beyond the reviewed read-only ones (G6 amendment). The range's upper end is the reviewing mechanism: a major release is refused until a human widens it.
 
@@ -56,7 +56,11 @@ The decision was to let a `web` record be confirmed by the audit when the audito
 
 ### G9-R1 Pi is supported from 1.0.0, and nothing older is kept
 
-The Pi interval is `>=1.0.0,<2.0.0` and the qualified version stays `1.1.0`. Empirica acts at `agent_before_settle` (ADR-0068), whose `BoundaryResult` is not in every older Pi, and a single floor lets the adapter use it without a fallback. 5.0.0 carries no compatibility with earlier state (ADR-0067), so every artifact that served a Pi below 1.0.0 goes: the profile's `compatibility.minimum`, the versions of `make empirica-pi-api-typecheck` (it keeps 1.0.0 and 1.1.0), shims and version branches in the Pi adapters, and the fixtures and prose that named 0.84.1, 0.86 or 0.87. A Pi below 1.0.0 is outside the interval; there is no run-start refusal for it (ADR-0052: compatibility is enforced at receipt capture and verification), but no code or test supports it. Methodologist declares the same Pi interval and follows the same rule. pi-subagents is a different package with its own range and is not affected. ADR-0052's two 2026-10-08 amendments carry the same floor.
+The Pi interval is `>=1.0.0,<2.0.0` and the qualified version stays `1.1.0`. Empirica acts at `agent_before_settle` (ADR-0068), whose `BoundaryResult` is not in every older Pi, and a single floor lets the adapter use it without a fallback. 5.0.0 carries no compatibility with earlier state (ADR-0067), so every artifact that served a Pi below 1.0.0 goes: the profile's `compatibility.minimum`, the versions of `make empirica-pi-api-typecheck` (it keeps 1.0.0 and 1.1.0), shims and version branches in the Pi adapters, and the fixtures and prose that named 0.84.1, 0.86 or 0.87. A Pi below 1.0.0 is outside the interval and `/empirica` refuses to start on it (below). Methodologist declares the same Pi interval and follows the same rule. pi-subagents is a different package with its own range and is not affected. ADR-0052's two 2026-10-08 amendments carry the same floor.
+
+### G19b-R1 Who enforces which range
+
+Pi's range is enforced at `/empirica` start (a Pi outside it, or one whose version cannot be read, is refused with `host.version_unsupported` and nothing starts); Claude Code's range is the documented supported range and is not checked (hook payloads carry no version), so Claude is admitted by observed capability; the pi-subagents range is enforced at runtime. Pi's own version is read once at `/empirica` start from `VERSION` of `@earendil-works/pi-coding-agent` (injectable as `hostVersion`); `checkHostVersion` in `host-profile.ts` is the one function that judges it, against the `compatibility` of the Pi profile read from `host-profiles.json` (no second copy of the range). An unreadable or non-exact version is outside the range. The refusal is the closed contract reason `host.version_unsupported` with the observed version and the range as parameters; it goes through the same notice path as the other start refusals (stderr and exit 1 in print and JSON mode). Claude Code's hook payloads carry no host version, so the range stays the documented supported range and no check is added.
 
 ### G10-R1 Empirica has no Codex host in 5.0.0
 
@@ -76,13 +80,9 @@ The `codex-cli` profile was never completed: Codex cannot observe the resolved a
 
 ## Confirmation
 
-`make contract-check` (host-profiles schema and digest, range rule, record-in-range rule, registry references, generated regions and their negatives), `plugins/empirica/adapters/pi/test/{host-profile,runtime-owner,host-runtime,gate}.test.ts` (range, observed admission, refusal by missing field, `reviewed:false` recorded and every action refused), `plugins/empirica/tests/test_host_runtime.py`, `scripts/tests/test_empirica_live_receipts.py`, and the author-view golden `host-unreviewed-runtime`.
+`make contract-check` (host-profiles schema and digest, range rule, record-in-range rule, registry references, generated regions and their negatives), `plugins/empirica/adapters/pi/test/{host-profile,runtime-owner,host-runtime,gate}.test.ts` (range, observed admission, refusal by missing field, `reviewed:false` recorded and every action refused), `plugins/empirica/tests/test_host_runtime.py`, and the author-view golden `host-unreviewed-runtime`.
 
-## Amendment (2026-10-08, round G6): receipt floor, read-only auditor, unreviewed actions, trade-offs
-
-### G6-R1 A receipt must be from the qualified version or later
-
-`scripts/empirica_live_receipts.py:require_compatible_version` requires a receipt's host version to be inside the profile's interval **and** at or above the profile's `version` (the qualified version). The hard-coded `_WIDENED_END_RELEASE = {"pi": "1.1.0"}` and its function are removed: the profile's `version` now carries that floor, so raising it in `host-profiles.json` asks for exactly one new receipt, from that release or a later one in the interval. This is the check G5-R1 removed implicitly when the version left the profile id. A qualified-version bump still costs three files (the contract, its vendored copy, the pinned digest in `scripts/validate_contracts.py`); the repin is the human review of the edit. Statements above and in ADR-0052 that name the Pi 1.1.0 floor as a constant are superseded by this one.
+## Amendment (2026-10-08, round G6): read-only auditor, unreviewed actions, trade-offs
 
 ### G6-R2 The auditor holds no writing tool at run time, for every version
 

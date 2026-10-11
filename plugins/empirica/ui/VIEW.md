@@ -41,7 +41,7 @@ panel, on click.
 |---|---|---|---|
 | state (the contract's statuses; none when its record cannot be read) | colour + glyph | ✓ | |
 | audit (the contract's audit states) | a separate audit symbol on the run | ✓ | |
-| diagnostic: why it was not read in full (older format, unreadable, history not found, missing or damaged, files unavailable) | its symbol, in the audit symbol's place | | ✓ |
+| diagnostic: why it was not read in full (unreadable, history not found, missing or damaged, files unavailable) | its symbol, in the audit symbol's place | | ✓ |
 | claims approved of total ("5/6") | number | | |
 | goal | | | ✓ |
 | author, auditor and its independence, governance | | | ✓ |

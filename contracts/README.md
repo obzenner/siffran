@@ -20,7 +20,7 @@ dispatch and treats an unknown command or decision as `unsupported`, never as su
   `GetArgument` response projects the one canonical typed `artifacts` union
   (research | `spike_request` | spike) as the public bounded provenance view. v2 is the sole
   Empirica runtime protocol: its registry is inert structured data consumed by the core and
-  adapters, with no v1 dispatch, migration, or fallback. v2 fixtures live under
+  adapters. v2 fixtures live under
   `contracts/empirica/v2/fixtures/`.
 - `empirica-ui-view/v1` — the read-only observer's view of the run store, for human-facing
   views. Its enums are held equal to the `empirica/v2` registry. See

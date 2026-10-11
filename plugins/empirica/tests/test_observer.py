@@ -362,9 +362,6 @@ class AgreementTests(unittest.TestCase):
         self.assertEqual(r["history-unavailable"]["diagnostic"], "history-unavailable")
         self.assertEqual(r["history-unavailable"]["state"], "active")
         self.assertIsNotNone(d["history-unavailable"]["budgets"])
-        self.assertEqual((r["older-format"]["diagnostic"], r["older-format"]["state"]),
-                         ("older-format", "converged"))
-        self.assertEqual(d["older-format"]["goal"], "Render the legend from one table.")
         self.assertEqual((r["unreadable"]["diagnostic"], r["unreadable"]["state"]), ("unreadable", None))
         self.assertEqual({cid: c["review"] for cid, c in claims["reaudit"].items()},
                          {"C0": "unreviewed", "C1": "stale", "C2": "unreviewed", "C3": "changed"})
@@ -490,19 +487,30 @@ class ClassificationTests(unittest.TestCase):
         from core.records import RunKey
         return json.loads(json.dumps(store.driver._runs.read(RunKey(project, run, int(generation))).value))
 
-    def test_a_current_format_state_that_breaks_an_invariant_is_unreadable_not_older(self):
-        state = self._current_state()
-        state["budgets"]["passes_used"] = state["budgets"]["max_passes"] + 5
-        row, _ = self._inject(state)
-        self.assertEqual((row["diagnostic"], row["state"]), ("unreadable", None))
-
-    def test_states_from_earlier_versions_read_goal_and_status(self):
-        for older in ({**self._current_state(), "modes": {}},
-                      {"schema": "empirica.run/1", "goal": "Old.", "status": "active"}):
-            with self.subTest(keys=sorted(older)[:3]):
-                row, _ = self._inject(older)
-                self.assertEqual(row["diagnostic"], "older-format")
-                self.assertIn(row["state"], {"converged", "active"})
+    def test_INVARIANT_a_document_that_is_not_the_current_state_is_unreadable_and_nothing_is_decoded_from_it(self):
+        """Whatever wrote it (another protocol, another schema, an old marker, the current identifiers on a body the
+        schema rejects), such a document is one category: ``unreadable``, with no state, goal,
+        budgets or control read from it. The core reads the same documents as ``run.corrupt`` (``test_d6_strict_v2``)."""
+        canary = "CANARY goal that must not be read"
+        base = self._current_state()
+        over_budget = json.loads(json.dumps(base))
+        over_budget["budgets"]["passes_used"] = over_budget["budgets"]["max_passes"] + 5
+        documents = {
+            "another protocol": {"protocol": "empirica/v1", "goal": canary, "status": "active"},
+            "another schema": {**base, "state_schema": "empirica.run/1", "goal": canary},
+            "an old marker": {"schema": "empirica.run/1", "goal": canary, "status": "active"},
+            "an extra field": {**base, "modes": {}, "goal": canary},
+            "an invariant broken": {**over_budget, "goal": canary},
+        }
+        for label, document in documents.items():
+            with self.subTest(label):
+                row, store = self._inject(document)
+                key = f"{row['key']}"
+                view, details = _observe(store)
+                self.assertEqual((row["diagnostic"], row["state"]), ("unreadable", None))
+                detail = details[key]
+                self.assertEqual((detail["goal"], detail["budgets"], detail["control"]), (None, None, None))
+                self.assertNotIn(canary, json.dumps([row, detail]))
 
     def test_a_run_whose_history_cannot_be_assembled_marks_only_that_run(self):
         """A recorded artifact keeps its content address, so a malformed one is a producer bug

@@ -27,8 +27,15 @@ export interface SubagentsCompatibility {
   readonly maximum_exclusive: string;
 }
 
+/** The half-open interval `[minimum, maximum_exclusive)` of exact host versions a profile supports (ADR-0069). */
+export interface VersionRange {
+  readonly minimum: string;
+  readonly maximum_exclusive: string;
+}
+
 export interface HostProfiles {
   readonly thinking_levels: readonly string[];
+  readonly host_compatibility: ReadonlyMap<string, VersionRange>;
   readonly audit_launch_policies: ReadonlyMap<string, AuditLaunchPolicy>;
   readonly subagents_compatibility: ReadonlyMap<string, SubagentsCompatibility>;
 }
@@ -84,10 +91,41 @@ export function compareVersions(left: string, right: string): number {
   return (a[0] - b[0]) || (a[1] - b[1]) || (a[2] - b[2]);
 }
 
+/** Whether `version` is an exact version in `[minimum, maximum_exclusive)` of the range. */
+export function inRange(range: VersionRange, version: unknown): version is string {
+  return typeof version === "string" && EXACT_VERSION.test(version)
+    && compareVersions(version, range.minimum) >= 0 && compareVersions(version, range.maximum_exclusive) < 0;
+}
+
 /** Whether `version` is an exact version in `[minimum, maximum_exclusive)` of the policy. */
 export function inSubagentsRange(policy: SubagentsCompatibility, version: unknown): version is string {
-  return typeof version === "string" && EXACT_VERSION.test(version)
-    && compareVersions(version, policy.minimum) >= 0 && compareVersions(version, policy.maximum_exclusive) < 0;
+  return inRange(policy, version);
+}
+
+/** The range as the contract and the docs spell it: `>=1.0.0,<2.0.0`. */
+export function spellRange(range: VersionRange): string {
+  return `>=${range.minimum},<${range.maximum_exclusive}`;
+}
+
+/** The host version as the reason shows it: the exact version read, else the word for "could not be read". */
+export type HostVersionVerdict = { ok: true; version: string } | { ok: false; version: string; range: string };
+
+/**
+ * The one check of the host's own version against its profile's range (ADR-0069). A version that is not an exact
+ * MAJOR.MINOR.PATCH, or that was not read at all, is outside the range: the run is refused, never started blind.
+ */
+export function checkHostVersion(range: VersionRange, observed: unknown): HostVersionVerdict {
+  return inRange(range, observed) ? { ok: true, version: observed }
+    : { ok: false, version: typeof observed === "string" && observed !== "" ? observed : "unreadable", range: spellRange(range) };
+}
+
+function versionRange(value: unknown, where: string): VersionRange {
+  const range = record(value, where);
+  const { minimum, maximum_exclusive: maximum } = range;
+  if (typeof minimum !== "string" || typeof maximum !== "string" || !EXACT_VERSION.test(minimum) || !EXACT_VERSION.test(maximum)
+      || compareVersions(minimum, maximum) >= 0)
+    throw new Error(`host-profiles: ${where} needs exact versions with minimum below maximum_exclusive`);
+  return { minimum, maximum_exclusive: maximum };
 }
 
 function subagentsCompatibility(value: unknown, where: string): SubagentsCompatibility {
@@ -115,17 +153,20 @@ export function parseHostProfiles(document: unknown): HostProfiles {
   if (!Array.isArray(doc.profiles)) throw new Error("host-profiles: profiles must be a list");
   const policies = new Map<string, AuditLaunchPolicy>();
   const compatibilities = new Map<string, SubagentsCompatibility>();
+  const hosts = new Map<string, VersionRange>();
   doc.profiles.forEach((row, index) => {
     const profile = record(row, `profiles[${index}]`);
     if (typeof profile.profile_id !== "string" || profile.profile_id === "")
       throw new Error(`host-profiles: profiles[${index}].profile_id must be a nonempty string`);
+    if ("compatibility" in profile)
+      hosts.set(profile.profile_id, versionRange(profile.compatibility, `${profile.profile_id}.compatibility`));
     if ("audit_launch_policy" in profile)
       policies.set(profile.profile_id, auditLaunchPolicy(profile.audit_launch_policy, `${profile.profile_id}.audit_launch_policy`));
     if ("subagents_compatibility" in profile)
       compatibilities.set(profile.profile_id,
         subagentsCompatibility(profile.subagents_compatibility, `${profile.profile_id}.subagents_compatibility`));
   });
-  return { thinking_levels: Object.freeze([...levels] as string[]), audit_launch_policies: policies,
+  return { thinking_levels: Object.freeze([...levels] as string[]), host_compatibility: hosts, audit_launch_policies: policies,
     subagents_compatibility: compatibilities };
 }
 
@@ -134,6 +175,13 @@ export function auditLaunchPolicyFor(profiles: HostProfiles, profileId: string):
   const policy = profiles.audit_launch_policies.get(profileId);
   if (policy === undefined) throw new Error(`host-profiles: ${profileId} declares no audit_launch_policy`);
   return policy;
+}
+
+/** The host version range of `profileId`; throws when the profile declares none (fail closed). */
+export function hostCompatibilityFor(profiles: HostProfiles, profileId: string): VersionRange {
+  const range = profiles.host_compatibility.get(profileId);
+  if (range === undefined) throw new Error(`host-profiles: ${profileId} declares no compatibility`);
+  return range;
 }
 
 /** The external-runtime policy of `profileId`; throws when the profile declares none (fail closed). */
@@ -176,6 +224,9 @@ export const THINKING_LEVELS: ReadonlySet<string> = new Set(PROFILES.thinking_le
 
 /** The audit bound of this adapter's host profile (contract `audit_launch_policy`). */
 export const AUDIT_LAUNCH_POLICY: AuditLaunchPolicy = auditLaunchPolicyFor(PROFILES, HOST_PROFILE_ID);
+
+/** The Pi versions this adapter supports (contract `compatibility` of the Pi profile): enforced at `/empirica` start. */
+export const HOST_COMPATIBILITY: VersionRange = hostCompatibilityFor(PROFILES, HOST_PROFILE_ID);
 
 /** The external audit runtime of this adapter's host profile: its version range and the policy id. */
 export const SUBAGENTS_COMPATIBILITY: SubagentsCompatibility = subagentsCompatibilityFor(PROFILES, HOST_PROFILE_ID);
