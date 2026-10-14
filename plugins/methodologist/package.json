@@ -1,9 +1,9 @@
 {
   "name": "@siffran/methodologist-pi",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Turnkey Pi package (Pi >=1.0.0,<2.0.0) for Methodologist: bare /think presents the complete registry catalog and starts the human-selected methodology; named and --simple expert paths remain available.",
   "type": "module",
-  "license": "MIT",
+  "license": "LicenseRef-PolyForm-Internal-Use-1.0.0",
   "keywords": [
     "pi-package",
     "pi",

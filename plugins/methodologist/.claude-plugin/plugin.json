@@ -1,8 +1,9 @@
 {
   "name": "methodologist",
   "description": "Formal reasoning catalog \u2014 lets users choose and execute evidence-backed CS/math methodologies with traced phases and structured output.",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "author": {
     "name": "obzenner"
-  }
+  },
+  "license": "LicenseRef-PolyForm-Internal-Use-1.0.0"
 }

@@ -17,7 +17,7 @@
 //     declares `action` as a free string). PRIVATE for the same reason.
 //   * validateOffline          — the package documents `validate` as offline (`docs/tool-reference.md`).
 //   * peer_pi_ai               — the package's own `peerDependencies["@earendil-works/pi-ai"]`: the Pi
-//     generation it declares it needs. The README's "Requires Pi" column is derived from it (checked by
+//     generation it declares it needs. doc/hosts.md's "Requires Pi" column is derived from it (checked by
 //     scripts/validate_empirica_activation.py), so the pairing claim is data, not prose.
 // The operator's home directory is never read: the preflight runs in a throwaway project with
 // PI_CODING_AGENT_DIR, HOME and USERPROFILE all pointing into the same scratch directory (the

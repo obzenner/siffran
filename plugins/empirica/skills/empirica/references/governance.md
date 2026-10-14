@@ -12,6 +12,8 @@ Cancel, timeout, invalid content, stale/conflicting replies, and missing UI neve
 
 ## Modes
 
+Auto is opt-in through explicit `/empirica --auto <goal>`. It is bounded automatic acceptance, not human consent: it never increases budgets and needs an interactive invocation or recorded operator delegation. Graph changes keep configuration authority but invalidate stale audit coverage ([audit guide](audit.md)).
+
 - **Deliberative:** every material configuration change returns to the human for review and locked confirmation when amended.
 - **Interactive auto:** the initial complete sized proposal has one human approval episode before investigation. Dismissal, timeout, cancellation, rejection, a declined confirmation, or unavailable UI grants nothing and never falls back to delegation. After the first successful approval, non-raising changes are accepted automatically without another dialog; raises are refused. Exhaustion requires a fresh run rather than a prompt or `budget.raise` loop (ADR-0063). On exhaustion the host settles the turn with a notice instead of blocking; stop honestly with `report_convergence` `intent: "stop"` or, in deliberative mode, propose a raise for human approval.
 - **Delegated auto:** with no human present and operator-recorded `EMPIRICA_AUTO_DELEGATION=1`, proposals may be accepted only inside the fixed 8/1/2 envelope. StartRun budgets and `EMPIRICA_MAX_*` may narrow but never enlarge it. Oversize work must reduce scope or move to an approval-capable host interactively.

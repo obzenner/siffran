@@ -285,13 +285,16 @@ fmt: ## Auto-fix what the linter can fix
 	fi
 
 .PHONY: validate
-validate: ## Validate marketplace + plugin manifests (JSON, semver, cross-references)
+validate: ## Validate marketplace + plugin manifests (JSON, semver, cross-references), the LICENSE, the manifests' licence and the vendored licence texts (with negative controls)
 	@printf '$(BOLD)==> manifests$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_manifests.py
 	@if [ -f $(PLUGINS_DIR)/methodologist/scripts/validate.py ]; then \
 		$(PYTHON) $(PLUGINS_DIR)/methodologist/scripts/validate.py \
 			$(PLUGINS_DIR)/methodologist/skills/think; \
 	fi
+	@printf '$(BOLD)==> licence$(RESET)\n'
+	@$(PYTHON) $(SCRIPTS)/validate_licence.py
+	@$(PYTHON) $(SCRIPTS)/tests/test_validate_licence.py
 
 .PHONY: adr-check
 adr-check: ## Check ADR link health and numbering (adrs doctor)
@@ -717,8 +720,9 @@ ui-tokens: ## Rebuild the UI's tokens.json -> dist/tokens.css + dist/theme.css (
 ui-vendor: ## Re-vendor the UI's pinned Basecoat, fonts, Lucide subset and idiomorph (records vendor/VERSIONS)
 	cd $(EMPIRICA_UI) && node scripts/vendor.mjs
 
-ui-css: ui-tokens ## Rebuild the UI's dist/ui.css (Tailwind CLI, only its token utilities)
+ui-css: ui-tokens ## Rebuild the UI's dist/ui.css (Tailwind CLI, only its token utilities) and copy tailwindcss's LICENSE beside it (dist/VERSIONS records its sha256)
 	cd $(EMPIRICA_UI) && npx --no-install @tailwindcss/cli -i styles/app.css -o dist/ui.css --minify
+	cd $(EMPIRICA_UI) && node scripts/tailwind-licence.mjs
 
 .PHONY: ui-test
 ui-test: ui-deps ## While building: the UI tests related to FILES=app/x.js,… (vitest related, from the imports), or to the UI files changed in the worktree; names the browser journeys that also hold them

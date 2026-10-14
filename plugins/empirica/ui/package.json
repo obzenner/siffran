@@ -1,6 +1,7 @@
 {
   "name": "empirica-ui",
   "private": true,
+  "license": "LicenseRef-PolyForm-Internal-Use-1.0.0",
   "description": "Dev-only toolchain for the Empirica observer UI. Only its committed outputs (dist/, vendor/) are used at run time.",
   "type": "module",
   "engines": {

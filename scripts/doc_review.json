@@ -1,5 +1,6 @@
 {
-  "README.md": ["plugins/*/.claude-plugin/plugin.json", "plugins/*/.codex-plugin/plugin.json", "plugins/empirica/skills/**", "plugins/empirica/ui/**", "plugins/empirica/commands/**", "Makefile", "doc/images/*"],
+  "README.md": ["plugins/*/.claude-plugin/plugin.json", "plugins/empirica/skills/**", "plugins/empirica/ui/**", "plugins/empirica/commands/**", "Makefile", "doc/images/*"],
+  "doc/hosts.md": ["plugins/empirica/adapters/pi/**", "plugins/empirica/adapters/pi/compat/**", "contracts/empirica/v2/host-profiles.json", "contracts/empirica/v2/host-boundaries.json"],
   "plugins/empirica/ui/README.md": ["plugins/empirica/ui/**", "Makefile"],
   "doc/testing.md": ["Makefile", "scripts/verify.py", "scripts/run_suites.py"]
 }
