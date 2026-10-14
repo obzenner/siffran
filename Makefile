@@ -523,6 +523,7 @@ suites-check: ## Test the parallel suite runner, that every test module belongs 
 	@$(PYTHON) $(SCRIPTS)/tests/test_suite_ownership.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_verify.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_mutate.py
+	@$(PYTHON) $(SCRIPTS)/tests/test_doc_review.py
 
 .PHONY: native-qualification
 native-qualification: ## Print the operator-led native qualification skill entrypoint (never launches a host)
@@ -640,9 +641,10 @@ docs-sync: ## Deterministically regenerate the marked plugin tables from manifes
 	@$(PYTHON) $(SCRIPTS)/check_generated_docs.py --write
 
 .PHONY: docs-check
-docs-check: ## Verify the generated plugin tables and the skill recovery reference match their sources, and guard the UI guide (plugins/empirica/ui/CLAUDE.md: only make help targets, at most 150 lines)
+docs-check: ## Verify the generated plugin tables and the skill recovery reference match their sources, and guard the UI guide (plugins/empirica/ui/CLAUDE.md: only make help targets, at most 150 lines), and print review: reminders for presentation docs whose sources changed (never fails)
 	@$(PYTHON) $(SCRIPTS)/check_generated_docs.py
 	@$(PYTHON) $(SCRIPTS)/gen_recovery_reference.py --check
+	@$(PYTHON) $(SCRIPTS)/doc_review.py
 
 .PHONY: empirica-recovery-reference
 empirica-recovery-reference: ## Regenerate the skill's reason-code recovery reference from the public contract
@@ -710,7 +712,7 @@ ui-install: ## Install the pinned dev-only UI toolchain (npm ci in plugins/empir
 ui-tokens: ## Rebuild the UI's tokens.json -> dist/tokens.css + dist/theme.css (Style Dictionary)
 	cd $(EMPIRICA_UI) && node tokens/build.mjs
 
-ui-vendor: ## Re-vendor the UI's pinned Basecoat, fonts and Lucide subset (records vendor/VERSIONS)
+ui-vendor: ## Re-vendor the UI's pinned Basecoat, fonts, Lucide subset and idiomorph (records vendor/VERSIONS)
 	cd $(EMPIRICA_UI) && node scripts/vendor.mjs
 
 ui-css: ui-tokens ## Rebuild the UI's dist/ui.css (Tailwind CLI, only its token utilities)

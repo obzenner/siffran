@@ -35,6 +35,7 @@ Why this is a rule and not a preference: a command that lives only in a chat mes
 
 Rules that follow from this:
 
+- **When `make docs-check` (or `make check`) prints `review:` lines,** read each named doc and either update it, or say in your reply that you checked it and it is current. The lines never fail the build; `scripts/doc_review.json` maps each doc to the paths it describes.
 - **`make check` must be green before you commit.** It runs the eight fast suites in parallel through `scripts/run_suites.py` (about 40 s): `check-static`, `check-core`, `check-evidence`, `check-observer`, `check-claude`, `check-codex`, `check-pi`, `check-ui`. Each test module belongs to exactly one fast suite or a named integration target (`make suites-check` guards it), and each suite also runs alone. `check-ci` omits Pi and UI unless `PI_CHECKS=1`; `make test` includes all fast deterministic tests. Expensive persistence and simulated-host matrices are explicit integration diagnostics documented in `doc/testing.md`; native qualification is operator-led and never automatic.
 - **Add new lifecycle operations as targets**, with a `## description` so they appear in `make help`. If you find yourself explaining a multi-step command in prose, that command belongs in the Makefile.
 - **No target commits, pushes, or rewrites history**, by design. `make release-check` verifies and then tells you what is left; publishing stays a human decision.

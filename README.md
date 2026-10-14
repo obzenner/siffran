@@ -20,8 +20,7 @@ Claude needs MCP form elicitation and Pi uses its UI. Reviewer configuration sta
 and the adapter observes the identity that actually produced the verdict. See the
 [governance guide](plugins/empirica/skills/empirica/references/governance.md) for configuration and
 auto provenance, and the [audit guide](plugins/empirica/skills/empirica/references/audit.md#independence-reporting)
-for identity classification. New approval flows have deterministic integration
-coverage, not operator-present native approval qualification.
+for identity classification.
 
 5.0.0 does not read state from earlier versions; start a fresh session.
 
@@ -174,8 +173,9 @@ Pi and Claude async promotion remains separate and unsupported.
 
 ## Watching the store
 
-The Empirica plugin ships a read-only observer UI: every project, run and claim in your store, with
-how they relate, and the detail of whatever you click. It is served by the plugin itself on
+The Empirica plugin ships a read-only observer UI: the **Universe** (every run a mark, each project an
+island), the **Inbox** (what needs you, the calendar, runs by standing) and a run's **sheet** (its claims, proof,
+audits and history). It is served by the plugin itself on
 127.0.0.1 (at `empirica.localhost:<port>`) and updates while runs progress.
 
 | Host | Start it with |

@@ -1,8 +1,9 @@
 # The Empirica observer UI
 
-A read-only page for people: an inbox of your runs (what needs you first, what the period held, which days were busy), a
-filtered list of runs, and one run's sheet (what it owes or how it ended, its claims with their proof, its audits, its
-attempts and history). It reads only the plugin's observer (`application/observer.py`, contract
+A read-only page for people. The **Universe**: every run a mark, each project an island, zoom from the store to an
+island to a run. The **Inbox**: buckets of what needs you, the calendar, and runs by standing. A run's **sheet**
+(resizable): what it owes or how it ended, its claims with their proof, its audits, attempts and history.
+It reads only the plugin's observer (`application/observer.py`, contract
 [`empirica-ui-view/v1`](../../../contracts/empirica-ui-view/v1/README.md)), which the plugin serves on 127.0.0.1
 (`adapters/observer/server.py`), at `http://empirica.localhost:<port>/app/`. Why it is built this way: ADR-0065.
 
@@ -36,8 +37,14 @@ browser that does not resolve `*.localhost`.
 
 `make help` lists the targets:
 
-- `check-ui` (part of `make check`): the audit and the Vitest unit tests; `ui-test` the tests related to what you changed; `mutate` the changed lines' surviving mutants.
-- `ui-enums`: regenerate `enums.json` from the contract.
-- `ui-browser`: the journeys in headless Chrome against the real server, on stores of 15 (the fixture runs), 1 000 and 10 000 runs.
-- `ui-build`: rebuilds and checks everything.
-- `ui-install`: installs the toolchain.
+- `check-ui` (part of `make check`): every Vitest unit test and the audit; needs `make ui-install`.
+- `ui-test`: the tests related to `FILES=…` or to the changed UI files; names the browser journeys that also hold them.
+- `ui-browser`: headless-Chrome journeys, the standing rules and the layout invariants in both colour schemes (needs Chrome).
+- `ui-smoke`: one headless-Chrome smoke run at 1,000 generated runs (needs Chrome).
+- `ui-dev`: one live demo for this worktree, N=1000 by default, reused while it runs; `STOP=1` stops it.
+- `ui-look`: one PNG of `URL=<page>` (`OUT=`, `SIZE=`), to open with the read tool.
+- `ui-demo`: serve a generated demo store (N=300 by default) in the foreground.
+- `ui-build`: rebuild everything the UI ships, then check it.
+- `ui-vendor`: re-vendor the pinned Basecoat, fonts, Lucide subset and idiomorph into `vendor/`.
+- `ui-install`: install the dev-only toolchain.
+- `mutate`: mutation testing of the changed lines.
