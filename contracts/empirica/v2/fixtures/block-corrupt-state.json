@@ -17,14 +17,15 @@
         "id": "run-corrupt",
         "goal": "Unsupported run state.",
         "status": "active",
+        "basis": "sha256:33efc3ac20f86b6208ed5ea0b4ee64058bf8ca4847a5cdd74045d9df40df20ff",
         "contract": {
           "id": "empirica/public",
-          "version": "3.0.0",
+          "version": "4.0.0",
           "relevant_sections": [
             "run/lifecycle",
             "protocol"
           ],
-          "digest": "sha256:dfc3b1cb235da4d56b7225a8e9a60c2b208ad1c6405be53782666fa4431fb2e3"
+          "digest": "<contract-digest>"
         },
         "obligations": {
           "active": [],
@@ -36,7 +37,7 @@
         },
         "children": [],
         "host": {
-          "profile_id": "claude-code@2.1.278",
+          "profile_id": "claude-code",
           "tier": "foreground_only",
           "missing_capabilities": [
             "host.async_unsupported"
@@ -49,10 +50,13 @@
         },
         "governance": null,
         "audit": {
-          "state": "required",
-          "independence": "unverified",
+          "verdict": "none",
+          "current": null,
+          "pending": false,
+          "independence": null,
           "findings": []
-        }
+        },
+        "confirmation_batch": null
       },
       "reasons": [
         {

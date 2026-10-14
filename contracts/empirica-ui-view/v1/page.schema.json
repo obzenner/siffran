@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://siffran.dev/contracts/empirica-ui-view/v1/page.schema.json",
+  "title": "Empirica observer: a page of runs (GET /api/runs, GET /api/search)",
+  "description": "At most 200 one-line rows in page order (standing precedence; inside each bucket its declared order, the summary's orders: the needs-a-human bucket the oldest question first, as the summary's needs, every other bucket the most recent activity first; an untimed run after every timed one; then key), the total the filter or query admits, and the cursor of the next page (null on the last).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "pending",
+    "rows",
+    "total",
+    "next",
+    "token"
+  ],
+  "properties": {
+    "contract": {
+      "const": "empirica-ui-view/v1"
+    },
+    "pending": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Runs not read yet: not in any page."
+    },
+    "query": {
+      "type": "string"
+    },
+    "unsearched": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Runs whose claims were not read, so a query could not search their claim text."
+    },
+    "rows": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "id",
+          "goal",
+          "standing",
+          "ask",
+          "asked_at",
+          "project",
+          "project_label",
+          "host",
+          "session",
+          "updated",
+          "generation"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{12}$",
+            "description": "A run's compact id: the first hex digits of the sha256 of its key (application.observer_index.short_id)."
+          },
+          "goal": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "standing": {
+            "enum": [
+              "unreadable",
+              "needs_human",
+              "audit_pending",
+              "changed_since_audit",
+              "not_ended",
+              "proven",
+              "stopped_residual",
+              "stopped_budget",
+              "stopped_frozen"
+            ],
+            "description": "The one word a run is filed under (core.observer.standing), in precedence order: unreadable (not read in full), needs_human, audit_pending, changed_since_audit, not_ended, proven, then the stop's status."
+          },
+          "ask": {
+            "enum": [
+              "approve_configuration",
+              "approve_revision",
+              "decide_claim",
+              "confirm_source",
+              "consent_stop",
+              "freeze_scope",
+              null
+            ],
+            "description": "What a human is asked about an active run (core.observer.ask), read from the item the core presents; null when nothing is asked or the run was not read."
+          },
+          "asked_at": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Seconds since the epoch (UTC) of the write that recorded the question, from the run's timeline (ADR-0070): a label (unsigned, may skew), and the needs-a-human bucket's order (the summary's orders: the oldest first); null when unknown."
+          },
+          "project": {
+            "type": "string",
+            "minLength": 1
+          },
+          "project_label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "host": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updated": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Seconds since the epoch (UTC) of the write that recorded the run's current state, from its timeline (ADR-0070): a label (unsigned, may skew), and every other bucket's order (the summary's orders: the most recent activity first); null when unknown."
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "next": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The cursor of the next page in this view (the view's mark, then after the last row), or null on the last page."
+    },
+    "token": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "The published view this page was cut from (the summary's token). A cursor is valid only in it: after any change a request with an older cursor is answered 409 with the current token, and the walk restarts."
+    }
+  }
+}

@@ -2,9 +2,9 @@
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
 
-import { PROTOCOL, type Response } from "./contract.ts";
+import { PROTOCOL, isTerminalBatch, type Response } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
-import { PUBLIC_TOOLS, VENDORED_CONTRACT_DIR } from "./public-tools.ts";
+import { PUBLIC_TOOLS, VENDORED_CONTRACT_DIR, type AuthorViewLabel } from "./public-tools.ts";
 
 type Trusted = string & { readonly __trusted: unique symbol };
 type Untrusted = string & { readonly __untrusted: unique symbol };
@@ -17,6 +17,7 @@ interface Header {
   readonly governance: Trusted;
   readonly runId: Trusted;
   readonly proposalRationale: Untrusted | null;
+  readonly hostNote: Trusted | null;
 }
 interface Reason {
   readonly code: Trusted;
@@ -42,8 +43,10 @@ interface Freshness {
   readonly state: Trusted;
 }
 interface AuditSummary {
-  readonly state: Trusted;
-  readonly independence: Trusted;
+  readonly verdict: Trusted;
+  readonly current: boolean | null;
+  readonly pending: boolean;
+  readonly independence: Trusted | null;
   readonly findings: readonly Untrusted[];
 }
 interface AuthorView {
@@ -56,6 +59,7 @@ interface AuthorView {
   readonly children: readonly Child[];
   readonly freshness: readonly Freshness[];
   readonly nextActions: readonly Trusted[];
+  readonly waiting: readonly string[];
 }
 
 const PUBLIC_CONTRACT = JSON.parse(readFileSync(
@@ -152,7 +156,7 @@ function validContractResult(value: unknown): boolean {
   if (value.target === "index") {
     const index = value.index;
     return objectWithKeys(index, ["id", "version", "sections", "reasons", "next_actions"])
-      && index.id === "empirica/public" && index.version === "3.0.0"
+      && index.id === "empirica/public" && index.version === "4.0.0"
       && rows(index.sections, ["id", "title"], ["id", "title"])
       && Array.isArray(index.reasons) && unique(index.reasons) && index.reasons.every((reason) =>
         objectWithKeys(reason, ["code", "sections"]) && text(reason.code)
@@ -240,7 +244,8 @@ function valueRenderer(schema: Json): ValueRenderer | null {
   if (schema.enum !== undefined || schema.const !== undefined) return (value) => String(value);
   if (schema.type === "string") return (value, safety) => untrusted(value, safety);
   if (schema.type === "array") {
-    const item = valueRenderer(schema.items) as ValueRenderer;
+    const item = valueRenderer(schema.items);
+    if (item === null) return null; // elements are intentionally omitted (digests), so the whole array is omitted
     const separator = isString(schema.items) ? ", " : "; ";
     return (value, safety) => (value as unknown[]).map((row) => item(row, safety)).join(separator);
   }
@@ -357,6 +362,42 @@ function requiredRationale(governance: Json): string | null {
   return governance.proposal.rationale as string | null;
 }
 
+const WAIT_STATE: Readonly<Record<string, AuthorViewLabel>> = {
+  none: "waiting_none_error", unavailable: "waiting_unavailable", unobserved: "waiting_unobserved",
+  already_presented: "waiting_already_presented", interaction_limit: "waiting_interaction_limit",
+  surface_unrecorded: "waiting_surface_unrecorded", presentation_failed: "waiting_presentation_failed",
+};
+
+/** The notice a host-failure Block carries where only a line fits (the Pi gate's refusal): the waiting line the author view
+ * prints for this failure, then the stop it leads with. `null` unless the prompt error is a host failure. */
+export function hostFailureNotice(promptError: unknown): string | null {
+  if (promptError !== "surface_unrecorded" && promptError !== "presentation_failed") return null;
+  return `${(LABELS as Record<string, string>)[WAIT_STATE[promptError]]}\n${LABELS.next_inline} ${surface("residual.accept")}`;
+}
+
+/** What waits on a human, where each record is cited from and for which claim, and whether a human will be asked. */
+function waitingLines(run: Json, safety: TextSafety): readonly string[] {
+  const batch = run.confirmation_batch as Json | null | undefined;
+  if (!batch) return [];
+  const labels = LABELS as Record<string, string>;
+  return [
+    ...(batch.records as Json[]).map((row) =>
+      `  ${LABELS.waiting_record} ${row.source_kind} ${untrusted(row.source_ref, safety)} ` +
+      `${LABELS.waiting_for_claim} ${claimId(row.claim_id, safety)}`),
+    ...(batch.claim_ids as string[]).map((id) => `  ${LABELS.waiting_claim} ${claimId(id, safety)}`),
+    // The terminal step of a deliberative run asks about the run, not about a claim; the status is the core's own word.
+    ...(isTerminalBatch(batch) ? [`  ${labels.waiting_terminal} ${(batch.terminal as Json).status}`] : []),
+    `  ${labels[WAIT_STATE[String(batch.prompt_error ?? "none")]]}`,
+  ];
+}
+
+/** The one host line shown when the audit runtime was admitted by observation and has no compat record. */
+function hostNote(host: Json): Trusted | null {
+  const runtime = host.unreviewed_runtime as Json | undefined;
+  return runtime === undefined ? null
+    : trusted(`${LABELS.host_unreviewed} ${runtime.package} ${runtime.version} ${LABELS.host_unreviewed_note}`);
+}
+
 /** Parse one guarded run-bearing Allow or Block result. */
 function parse(result: Json): AuthorView {
   const run = result.run as Json;
@@ -368,6 +409,7 @@ function parse(result: Json): AuthorView {
   const header: Header = {
     resultType: trusted(resultType), status: trusted(run.status), governance: governance(run),
     runId: trusted(run.id), proposalRationale: rationale === null ? null : untrusted(rationale, safety),
+    hostNote: hostNote(run.host as Json),
   };
   const terminalNext = (run.next_actions as string[]).map(surface);
   const terminal = run.status !== "active";
@@ -400,7 +442,8 @@ function parse(result: Json): AuthorView {
   return {
     header,
     audit: {
-      state: trusted(run.audit.state), independence: trusted(run.audit.independence),
+      verdict: trusted(run.audit.verdict), current: run.audit.current, pending: run.audit.pending,
+      independence: run.audit.independence === null ? null : trusted(run.audit.independence),
       findings: (run.audit.findings as unknown[]).map((item) => untrusted(item, safety)),
     },
     // Only Block carries reasons; a run-bearing Allow has none.
@@ -408,6 +451,7 @@ function parse(result: Json): AuthorView {
       ? (result.reasons as Json[]).map((row) => reason(row, safety)) : [],
     obligations, satisfied, residuals, children, freshness,
     nextActions: terminal ? [] : terminalNext,
+    waiting: waitingLines(run, safety),
   };
 }
 
@@ -440,10 +484,23 @@ function freshnessLines(rows: readonly Freshness[]): readonly string[] {
   return rows.map((row) => `  ${row.path}: ${row.state}`);
 }
 
-/** Render independence only once an audit verdict exists. */
+/**
+ * The audit in words, from the core's four facts: the verdict (or that one is owed or pending), no longer current when the
+ * verdict does not cover the argument, a pending re-audit, and the independence of a settled verdict. Only contract labels.
+ */
+function auditText(audit: { verdict: unknown; current: boolean | null; pending: boolean; independence: unknown }): string {
+  const labels = LABELS as Record<string, string>;
+  const parts = audit.verdict === "none"
+    ? [labels[audit.pending ? "audit_pending" : "audit_verdict_none"]]
+    : [labels[`audit_verdict_${audit.verdict}`],
+      ...(audit.current === false ? [labels.audit_not_current] : []),
+      ...(audit.pending ? [labels.audit_reaudit_pending] : [])];
+  return `${parts.join(", ")}${audit.independence === null ? "" : ` (${audit.independence})`}`;
+}
+
+/** Render the audit in words, then the findings a failed audit reported. */
 function auditLines(audit: AuditSummary): string[] {
-  const suffix = ["passed", "failed"].includes(audit.state) ? ` (${audit.independence})` : "";
-  return [`${LABELS.audit} ${audit.state}${suffix}`,
+  return [`${LABELS.audit} ${auditText(audit)}`,
     ...audit.findings.map((item) => `  ${LABELS.finding} ${item}`)];
 }
 
@@ -454,11 +511,13 @@ function render(view: AuthorView): string {
     `${LABELS.run_id} ${view.header.runId}`,
     ...(view.header.proposalRationale === null
       ? [] : [`${LABELS.proposal_rationale} ${view.header.proposalRationale}`]),
+    ...(view.header.hostNote === null ? [] : [view.header.hostNote]),
     ...auditLines(view.audit),
   ].join("\n");
   const sections: readonly [string, readonly string[]][] = [
     [LABELS.reasons, reasonLines(view.reasons)],
     [LABELS.open_obligations, obligationLines(view.obligations)],
+    [LABELS.waiting, view.waiting],
     [LABELS.satisfied_obligations, view.satisfied.map((item) => `  ${item}`)],
     [LABELS.residuals, reasonLines(view.residuals)],
     [LABELS.children, childLines(view.children)],
@@ -469,25 +528,50 @@ function render(view: AuthorView): string {
     .map(([title, lines]) => [title, ...lines].join("\n"))].join("\n\n");
 }
 
+const VERIFICATION: Readonly<Record<string, string>> = {
+  verified_by_service: "verified_by_service", confirmed_by_human: "confirmed_by_human",
+  rejected_by_human: "rejected_by_human",
+};
+
+/** Plain words for one record's verification: what the service did, what a human did, or who retrieves it. */
+function verificationLabel(verification: Json): string {
+  const labels = LABELS as Record<string, string>;
+  if (verification.status === "pending") return labels[verification.retrieve ? "pending_audit" : "pending_human"];
+  return labels[VERIFICATION[verification.status as string]];
+}
+
 /** Render the graph projection without private identity or artifact fields. */
 function argumentLines(argument: Json, safety: TextSafety): readonly string[] {
-  const claims = (argument.claims as Json[]).map((item) =>
-    `  ${claimId(item.claim_id, safety)} ${LABELS.claim_kind}${item.kind} ` +
-    `${LABELS.claim_gating}${item.gating ? "true" : "false"} ` +
-    `${LABELS.claim_state}${item.state} ${LABELS.claim_evidence}` +
-    `${item.active_evidence_ids.length ? LABELS.evidence_present : LABELS.evidence_none}: ` +
-    `${untrusted(item.text, safety)}`);
+  const labels = LABELS as Record<string, string>;
+  const claims = (argument.claims as Json[]).flatMap((item) => {
+    const decision = item.human_decision as Json | undefined;
+    return [
+      `  ${claimId(item.claim_id, safety)} ${LABELS.claim_kind}${item.kind} ` +
+      `${LABELS.claim_gating}${item.gating ? "true" : "false"} ` +
+      `${LABELS.claim_state}${item.state} ${LABELS.claim_evidence}` +
+      `${item.active_evidence_ids.length ? LABELS.evidence_present : LABELS.evidence_none}: ` +
+      `${untrusted(item.text, safety)}`,
+      ...(decision ? [`    ${labels[`decision_${decision.outcome}`]}` +
+        (decision.answer ? ` — ${LABELS.human_answer} ${untrusted(decision.answer, safety)}` : "")] : []),
+    ];
+  });
   const edges = (argument.edges as Json[]).map((item) =>
     `  ${claimId(item.from, safety)} -${item.type}-> ${claimId(item.to, safety)}`);
-  const citations = (argument.artifacts as Json[]).filter((item) => item.citation !== undefined)
-    .map((item) => `  ${untrusted(item.citation, safety)}`);
+  const citations = (argument.artifacts as Json[]).filter((item) => item.citation).flatMap((item) => {
+    const verification = item.verification as Json | undefined;
+    return [
+      `  ${untrusted(item.citation, safety)}` +
+        (verification ? ` — ${verificationLabel(verification)}` : ""),
+      ...(verification?.note ? [`    ${LABELS.human_note} ${untrusted(verification.note, safety)}`] : []),
+    ];
+  });
   return [
     `${LABELS.goal} ${untrusted(argument.goal, safety)}`,
     `${LABELS.root_claim_id} ${claimId(argument.root_claim_id, safety)}`,
     LABELS.claims, ...claims,
     ...(edges.length ? [LABELS.edges, ...edges] : []),
     ...(citations.length ? [LABELS.citations, ...citations] : []),
-    `${LABELS.audit_status} ${argument.audit.state} (${argument.audit.independence})`,
+    `${LABELS.audit_status} ${auditText(argument.audit)}`,
     ...(argument.audit.findings as unknown[]).map(
       (item) => `  ${LABELS.finding} ${untrusted(item, safety)}`),
   ];

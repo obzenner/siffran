@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-  classifierVerdict, compareVersions, evaluateCell, inspectInChildren, maskMachineDigests, newerThanReviewed,
+  classifierVerdict, compareVersions, evaluateCell, REVIEWED_RETRIEVAL, retrievalVerdict, inspectInChildren, maskMachineDigests, newerThanReviewed,
   parseVersion, planCells, processVerdict, reviewCommands, reviewedFrom, runMatrix,
 } from "../empirica_subagents_matrix.mjs";
 import { loadInventory } from "../../plugins/empirica/adapters/pi/src/subagent-inventory.ts";
@@ -25,11 +25,17 @@ test("versions are exact releases, compared numerically, never as strings", () =
   assert.equal(compareVersions("1.2.3", "1.2.3"), 0);
 });
 
-test("the matrix checks exactly the contract's reviewed versions, which are exactly the checked-in inventories", () => {
+test("the matrix checks exactly the versions with a checked-in compat record, all inside the contract's range", () => {
   const reviewed = reviewedFrom(profiles);
   const inventories = readdirSync(compat).map((file) => /^pi-subagents-(.+)\.json$/.exec(file)?.[1]).filter(Boolean);
   assert.deepEqual(reviewed.versions, inventories.sort(compareVersions));
   assert.equal(reviewed.policy_id, "pi-subagents-foreground-audit-v1");
+});
+
+test("reviewedFrom refuses a compat record outside the profile's range", () => {
+  const withPolicy = profiles.profiles.find((profile) => profile.subagents_compatibility);
+  const narrowed = { profiles: [{ ...withPolicy, subagents_compatibility: { ...withPolicy.subagents_compatibility, maximum_exclusive: "0.76.1" } }] };
+  assert.throws(() => reviewedFrom(narrowed), /compat records outside the supported range \[0\.50\.0, 0\.76\.1\): 0\.76\.1/);
 });
 
 test("reviewedFrom refuses a document with no profile, two profiles, or another package", () => {
@@ -68,6 +74,7 @@ const GOOD = () => ({
   inventory: INVENTORY, liveFixture: { v: 1, cases: { x: { response: { contract: { digest: "a".repeat(64) } } } } },
   checkedFixture: { v: 1, cases: { x: { response: { contract: { digest: "b".repeat(64) } } } } },
   classify: classifySubagentCall, managementActions: MANAGEMENT_ACTIONS,
+  retrieval: { observed: ["local", "workspace"] },
 });
 const failing = (checks) => Object.entries(checks).filter(([, check]) => !check.ok).map(([name]) => name);
 
@@ -93,6 +100,23 @@ test("a changed preflight answer fails the preflight check alone; a different ma
   otherInstall.liveFixture.cases.x.response.contract.launchContractDigest = "d".repeat(64);
   otherInstall.checkedFixture.cases.x.response.contract.launchContractDigest = "e".repeat(64);
   assert.deepEqual(failing(evaluateCell(otherInstall)), [], "the same package in another directory hashes differently");
+});
+
+test("a changed auditor allowlist fails the retrieval check alone, and the fixtures of every reviewed version derive the reviewed set", async () => {
+  for (const observed of [["workspace"], [], ["local", "web", "workspace"], null]) {
+    const checks = evaluateCell({ ...GOOD(), retrieval: { observed } });
+    assert.deepEqual(failing(checks), ["retrieval"], JSON.stringify(observed));
+    assert.match(checks.retrieval.detail, /reviewed \["local","workspace"\]/);
+  }
+  const { auditRetrievalFrom } = await import("../../plugins/empirica/adapters/pi/src/audit-retrieval.ts");
+  const fixtures = readdirSync(path.join(compat, "..", "test", "fixtures")).filter((f) => /^preflight-.*\.json$/.test(f));
+  assert.equal(fixtures.length, reviewedFrom(profiles).versions.length);
+  for (const file of fixtures) {
+    const fixture = JSON.parse(readFileSync(path.join(compat, "..", "test", "fixtures", file), "utf8"));
+    const allowlist = fixture.cases.canonical_auditor.response.contract.tools.effectiveAllowlist;
+    assert.deepEqual(retrievalVerdict(fixture.version, { observed: auditRetrievalFrom(allowlist) }), { ok: true }, file);
+  }
+  assert.deepEqual(REVIEWED_RETRIEVAL, ["local", "workspace"]);
 });
 
 test("maskMachineDigests masks the path-bearing digests only, recursively, without mutating its input", () => {

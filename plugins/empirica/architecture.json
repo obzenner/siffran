@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "description": "Empirica 4.0 target-state architecture policy. Inert internal config consumed by scripts/validate_empirica_architecture.py. Not a public contract. Composed into check-static by ADR 0060; line count is not a rule.",
+  "description": "Empirica target-state architecture policy. Inert internal config consumed by scripts/validate_empirica_architecture.py. Not a public contract. Composed into check-static by ADR 0060; line count is not a rule.",
   "runtime_roots": {
     "package_root": "plugins/empirica",
     "python_extension": ".py",
@@ -10,6 +10,7 @@
   "import_package_prefixes": ["empirica", "plugins.empirica"],
   "excluded_test_patterns": [
     "__pycache__",
+    "node_modules",
     "tests",
     "test",
     "test_*",
@@ -43,6 +44,10 @@
     "adapters.state": {
       "roots": ["adapters/state"],
       "forbidden_imports": ["adapters.claude", "adapters.codex", "adapters.pi", "hooks"]
+    },
+    "adapters.observer": {
+      "roots": ["adapters/observer"],
+      "forbidden_imports": ["adapters.claude", "adapters.codex", "adapters.pi", "adapters.bridge", "hooks"]
     },
     "adapters.bridge": {
       "roots": ["adapters/bridge.py", "adapters/__init__.py"],
@@ -145,16 +150,16 @@
   "required_contract_references": {
     "public_contract": "contracts/empirica/v2/public-contract.json",
     "id": "empirica/public",
-    "version": "3.0.0",
+    "version": "4.0.0",
     "protocol": "empirica/v2"
   },
   "required_profile_references": {
     "host_profiles": "contracts/empirica/v2/host-profiles.json",
     "protocol": "empirica/v2",
     "required_profile_ids": [
-      "claude-code@2.1.278",
-      "pi@0.84.1+pi-subagents-foreground-audit-v1",
-      "codex-cli@0.146.0"
+      "claude-code",
+      "pi+pi-subagents-foreground-audit-v1",
+      "codex-cli"
     ]
   },
   "make_target": "empirica-architecture-check",

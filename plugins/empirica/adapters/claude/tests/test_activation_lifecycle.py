@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Bounded exact-v2 activation lifecycle tests for the Claude hooks (D6-C C2a).
+"""Bounded exact-v2 activation lifecycle tests for the Claude hooks.
 
 The seven thin hooks remain importable and return honest native unsupported/fail-closed behavior
 through the strict v2 shell. At D6 the no-location run port returns unsupported/closed. Executable
 Agent and investigative-tool admission must distinguish exact ``Inert/no_run`` from that
-unavailability and therefore deny; observational hooks remain non-wedging. Removed/trusted actions
-are never dispatched. Compatibility/migration assertions are intentionally absent.
+unavailability and therefore deny; observational hooks remain non-wedging. Trusted actions
+are never dispatched.
 """
 from __future__ import annotations
 
@@ -24,6 +24,9 @@ PLUGIN = Path(__file__).resolve().parents[3]
 HOOKS = PLUGIN / "hooks"
 if str(PLUGIN) not in sys.path:
     sys.path.insert(0, str(PLUGIN))
+
+from application.protocol import host_profile_id, stored  # noqa: E402
+CLAUDE_PROFILE = host_profile_id("claude-code")
 
 _ENTRYPOINTS = {
     "run_start.py": "run_start_main",
@@ -88,22 +91,21 @@ class ClaudeAuditorAliasTests(unittest.TestCase):
         # non-mapping ``message``; a valid verdict next to a corrupt row must not be read
         # as a valid transcript (that let an auditor child complete and the run converge).
         from adapters.claude.lifecycle import (
-            _parse_current_assistant_model, _parse_transcript_contents, _parse_transcript_handbacks)
+            _audit_outcome, _parse_current_assistant_model)
         verdict = json.dumps({"message": {"role": "assistant", "model": "claude-opus-4-6",
                                            "content": [{"type": "tool_use", "name": "SubagentHandback",
-                                                        "input": {"message": "verdict"}}]}})
+                                                        "input": {"message": "```empirica-verdict\n" + json.dumps({"verdict": "pass", "findings": []}) + "\n```"}}]}})
         with tempfile.TemporaryDirectory() as directory:
             transcript = Path(directory) / "auditor.jsonl"
             for malformed in (None, [], "broken"):
                 with self.subTest(message=malformed):
                     transcript.write_text(
                         verdict + "\n" + json.dumps({"message": malformed}) + "\n", encoding="utf-8")
-                    self.assertEqual(_parse_transcript_handbacks(str(transcript)), (False, []))
-                    self.assertEqual(_parse_transcript_contents(str(transcript)), ([], None))
+                    self.assertEqual(_audit_outcome(str(transcript)), (None, None))
                     self.assertIsNone(_parse_current_assistant_model(str(transcript)))
             # Positive control: rows without a message field are not messages and are skipped.
             transcript.write_text(verdict + "\n" + json.dumps({"type": "summary"}) + "\n", encoding="utf-8")
-            self.assertEqual(_parse_transcript_handbacks(str(transcript)), (True, ["verdict"]))
+            self.assertEqual(_audit_outcome(str(transcript)), ({"verdict": "pass", "findings": []}, "claude-opus-4-6"))
 
     def test_anthropic_api_chooses_first_distinct_family(self):
         self.assertEqual(self._alias("claude-fable-5-1", {}), "opus")
@@ -120,6 +122,23 @@ class ClaudeAuditorAliasTests(unittest.TestCase):
         self.assertEqual(self._alias("claude-sonnet-5", env), "opus")
         with self.assertRaisesRegex(RuntimeError, "ANTHROPIC_DEFAULT_FABLE_MODEL"):
             self._alias("claude-opus-4-8", env)
+
+    # The user's core configuration: Bedrock, main Opus 4.8 [1m], Opus/Sonnet/Haiku pinned. The
+    # reviewer family follows the *observed* main model and the pins, in REVIEWER_FAMILIES order.
+    BEDROCK = {"CLAUDE_CODE_USE_BEDROCK": "1",
+               "ANTHROPIC_DEFAULT_OPUS_MODEL": "eu.anthropic.claude-opus-4-8[1m]",
+               "ANTHROPIC_DEFAULT_SONNET_MODEL": "eu.anthropic.claude-sonnet-5-5",
+               "ANTHROPIC_DEFAULT_HAIKU_MODEL": "eu.anthropic.claude-haiku-5-5"}
+
+    def test_EHB_MODEL_04_bedrock_main_opus_with_all_pins_reviews_on_sonnet(self):
+        self.assertEqual(self._alias("eu.anthropic.claude-opus-4-8[1m]", dict(self.BEDROCK)), "sonnet")
+
+    def test_EHB_MODEL_05_bedrock_main_opus_without_the_sonnet_pin_falls_to_haiku(self):
+        env = {key: value for key, value in self.BEDROCK.items() if key != "ANTHROPIC_DEFAULT_SONNET_MODEL"}
+        self.assertEqual(self._alias("eu.anthropic.claude-opus-4-8[1m]", env), "haiku")
+
+    def test_EHB_MODEL_06_bedrock_main_sonnet_with_all_pins_reviews_on_opus(self):
+        self.assertEqual(self._alias("eu.anthropic.claude-sonnet-5-5", dict(self.BEDROCK)), "opus")
 
     def test_unobservable_main_family_fails_closed_with_pin_guidance(self):
         with self.assertRaisesRegex(RuntimeError, "CLAUDE_CODE_SUBAGENT_MODEL"):
@@ -167,7 +186,7 @@ class HookNativeBehaviorTests(unittest.TestCase):
     def test_run_start_injects_handle_and_public_tool_contract(self) -> None:
         from adapters.claude import lifecycle
 
-        result = json.loads((_FIXTURES / "start-bootstrap-allow.json").read_text())["expected"]["result"]
+        result = stored(json.loads((_FIXTURES / "start-bootstrap-allow.json").read_text()))["expected"]["result"]
         result["run"]["id"] = "er2:opaque:checksum"
         response = _typed(result)
         output = io.StringIO()
@@ -472,7 +491,7 @@ class TransportProfileTests(unittest.TestCase):
         with patch_target(bridge, "handle", fake_handle):
             from adapters.claude.run_start import dispatch_start_run
             dispatch_start_run(_payload(command_args="prove X"), environ={})
-        self.assertEqual(captured["profile_id"], "claude-code@2.1.278")
+        self.assertEqual(captured["profile_id"], CLAUDE_PROFILE)
         self.assertEqual(captured["command_type"], "StartRun")
 
 

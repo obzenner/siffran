@@ -46,6 +46,8 @@ if _REPO_ROOT is None:
 _PLUGIN_ROOT = _REPO_ROOT / "plugins" / "empirica"
 sys.path.insert(0, str(_PLUGIN_ROOT))
 from governance_setup import TEST_INVOCATION, SIZED_RATIONALE  # noqa: E402
+from application.protocol import host_profile_id, stored  # noqa: E402
+CLAUDE_PROFILE = host_profile_id("claude-code")
 
 _V2 = _REPO_ROOT / "contracts" / "empirica" / "v2"
 _PUBLIC_CONTRACT = json.loads((_V2 / "public-contract.json").read_text(encoding="utf-8"))
@@ -58,8 +60,8 @@ _VALID_ACTIVE_STATE = json.loads(
     (_V2 / "state-fixtures" / "valid-active.json").read_text(encoding="utf-8"))
 
 # Canonical failure-safe projection for every rejected persisted aggregate.
-_BLOCK_CORRUPT_FIXTURE = json.loads(
-    (_V2 / "fixtures" / "block-corrupt-state.json").read_text(encoding="utf-8"))
+_BLOCK_CORRUPT_FIXTURE = stored(json.loads(
+    (_V2 / "fixtures" / "block-corrupt-state.json").read_text(encoding="utf-8")))
 
 _PROTOCOL = _PUBLIC_CONTRACT["protocol"]
 _COMMANDS = list(_PUBLIC_CONTRACT["commands"])
@@ -69,13 +71,13 @@ _STATUSES = list(_PUBLIC_CONTRACT["statuses"])
 _CHILD_STATES = list(_PUBLIC_CONTRACT["child_lifecycle"]["states"])
 _CHILD_TERMINAL = list(_PUBLIC_CONTRACT["child_lifecycle"]["terminal_states"])
 _PROFILES = {p["profile_id"]: p for p in _HOST_PROFILES["profiles"]}
-_DEFAULT_PROFILE = "claude-code@2.1.278"
+_DEFAULT_PROFILE = CLAUDE_PROFILE
 
 # --- Accepted observe fixture requests for the four trusted actions ---
 _TRUSTED_FIXTURE_REQUESTS: list[dict] = []
 for _fx_name in ("observe-evidence-leaf", "observe-attribution-auditor",
                  "observe-child-event-redacted", "observe-audit-verdict"):
-    _fx = json.loads((_V2 / "fixtures" / f"{_fx_name}.json").read_text(encoding="utf-8"))
+    _fx = stored(json.loads((_V2 / "fixtures" / f"{_fx_name}.json").read_text(encoding="utf-8")))
     _TRUSTED_FIXTURE_REQUESTS.append(_fx["request"])
 
 
@@ -870,7 +872,7 @@ class D6StrictRunStateTests(unittest.TestCase):
     def test_classify_does_not_mutate_input(self):
         """classify_and_decode must not mutate the input raw state."""
         mod = _import_run_state()
-        old = {"protocol": "empirica/v1", "status": "active", "goal": "legacy"}
+        old = {"protocol": "empirica/v1", "status": "active", "goal": "another goal"}
         snapshot = json.loads(json.dumps(old))
         mod.classify_and_decode(old)
         self.assertEqual(old, snapshot, "classify_and_decode must not mutate rejected state")
@@ -935,7 +937,7 @@ class D6MinimalServiceTests(unittest.TestCase):
         """Noncurrent GetRun returns run.corrupt with fixed safe fields, no canary, zero writes."""
         runs = RecordingRunRepository()
         canary = "CANARY_OLD_GET_001"
-        old_state = {"protocol": "empirica/v1", "status": "converged", "goal": "A legacy goal.",
+        old_state = {"protocol": "empirica/v1", "status": "converged", "goal": "Another goal.",
                      canary: "hostile-payload", "children": [{"x": 1}]}
         runs.inject("r-old", old_state)
         service, runs = self._compose(runs)
@@ -956,7 +958,7 @@ class D6MinimalServiceTests(unittest.TestCase):
         """Noncurrent RestoreRun returns run.corrupt with no semantic reuse or writes."""
         runs = RecordingRunRepository()
         canary = "CANARY_OLD_RESTORE_002"
-        old_state = {"protocol": "empirica/v1", "status": "converged", "goal": "A legacy goal.",
+        old_state = {"protocol": "empirica/v1", "status": "converged", "goal": "Another goal.",
                      canary: "hostile", "budgets": {"max_passes": 99}}
         runs.inject("r-old", old_state)
         service, runs = self._compose(runs)
@@ -973,7 +975,7 @@ class D6MinimalServiceTests(unittest.TestCase):
         """Noncurrent EvaluateRun returns run.corrupt with no semantic reuse or writes."""
         runs = RecordingRunRepository()
         canary = "CANARY_OLD_EVAL_003"
-        old_state = {"protocol": "empirica/v1", "status": "active", "goal": "Legacy.",
+        old_state = {"protocol": "empirica/v1", "status": "active", "goal": "Another goal.",
                      canary: "hostile"}
         runs.inject("r-old", old_state)
         service, runs = self._compose(runs)
@@ -1083,7 +1085,7 @@ class D6MinimalServiceTests(unittest.TestCase):
         """reload returns a distinct shell with equivalent behavior over the same recording
         ports."""
         runs = RecordingRunRepository()
-        runs.inject("r-old", {"protocol": "empirica/v1", "status": "active", "goal": "legacy"})
+        runs.inject("r-old", {"protocol": "empirica/v1", "status": "active", "goal": "another goal"})
         service, runs = self._compose(runs)
         reloaded = service.reload()
         self.assertIsNot(reloaded, service, "reload must return a DISTINCT shell")

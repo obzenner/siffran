@@ -49,7 +49,7 @@
           "const": "empirica/public"
         },
         "version": {
-          "const": "3.0.0"
+          "const": "4.0.0"
         },
         "digest": {
           "type": "string",
@@ -122,6 +122,93 @@
             "audit_spawn",
             "pass"
           ]
+        }
+      }
+    },
+    "terminalStopPendingParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "route",
+        "case"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "stopped_frozen",
+            "stopped_residual",
+            "stopped_budget"
+          ]
+        },
+        "route": {
+          "enum": [
+            "human",
+            "unavailable",
+            "unobserved"
+          ]
+        },
+        "case": {
+          "enum": [
+            "ask",
+            "declined",
+            "unobserved",
+            "unavailable",
+            "interaction_limit",
+            "host_failed"
+          ]
+        }
+      }
+    },
+    "autoCeilingParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bound"
+      ],
+      "properties": {
+        "bound": {
+          "enum": [
+            "approved",
+            "envelope"
+          ]
+        }
+      }
+    },
+    "claimNamedParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim_id"
+      ],
+      "properties": {
+        "claim_id": {
+          "$ref": "#/$defs/claimId"
+        }
+      }
+    },
+    "auditorExcludedParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identities",
+        "models"
+      ],
+      "properties": {
+        "identities": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "models": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
         }
       }
     },
@@ -284,6 +371,21 @@
           ],
           "properties": {
             "code": {
+              "const": "graph.root_not_gating"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
               "const": "route.required"
             },
             "parameters": {
@@ -332,7 +434,7 @@
               "const": "claim.research_missing"
             },
             "parameters": {
-              "$ref": "#/$defs/emptyParams"
+              "$ref": "#/$defs/claimNamedParams"
             }
           }
         },
@@ -347,7 +449,37 @@
               "const": "claim.research_unbound"
             },
             "parameters": {
-              "$ref": "#/$defs/emptyParams"
+              "$ref": "#/$defs/claimNamedParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "research.citation_unverified"
+            },
+            "parameters": {
+              "$ref": "#/$defs/citationUnverifiedParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "evidence.confirmation_required"
+            },
+            "parameters": {
+              "$ref": "#/$defs/confirmationRequiredParams"
             }
           }
         },
@@ -362,7 +494,7 @@
               "const": "claim.spike_missing"
             },
             "parameters": {
-              "$ref": "#/$defs/emptyParams"
+              "$ref": "#/$defs/claimNamedParams"
             }
           }
         },
@@ -404,25 +536,10 @@
           ],
           "properties": {
             "code": {
-              "const": "claim.human_decision"
-            },
-            "parameters": {
-              "$ref": "#/$defs/emptyParams"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "code",
-            "parameters"
-          ],
-          "properties": {
-            "code": {
               "const": "claim.refuted"
             },
             "parameters": {
-              "$ref": "#/$defs/emptyParams"
+              "$ref": "#/$defs/claimNamedParams"
             }
           }
         },
@@ -543,6 +660,21 @@
             },
             "parameters": {
               "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "audit.auditor_excluded"
+            },
+            "parameters": {
+              "$ref": "#/$defs/auditorExcludedParams"
             }
           }
         },
@@ -704,6 +836,21 @@
           ],
           "properties": {
             "code": {
+              "const": "host.subagents_tools_not_read_only"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
               "const": "host.subagents_launch_unsupported"
             },
             "parameters": {
@@ -719,10 +866,10 @@
           ],
           "properties": {
             "code": {
-              "const": "host.subagents_provenance_missing"
+              "const": "host.version_unsupported"
             },
             "parameters": {
-              "$ref": "#/$defs/emptyParams"
+              "$ref": "#/$defs/hostVersionParams"
             }
           }
         },
@@ -797,7 +944,7 @@
               "const": "governance.auto_ceiling"
             },
             "parameters": {
-              "$ref": "#/$defs/emptyParams"
+              "$ref": "#/$defs/autoCeilingParams"
             }
           }
         },
@@ -903,6 +1050,21 @@
             },
             "parameters": {
               "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.terminal_stop_pending"
+            },
+            "parameters": {
+              "$ref": "#/$defs/terminalStopPendingParams"
             }
           }
         },
@@ -1068,6 +1230,20 @@
               },
               "stale": {
                 "type": "boolean"
+              },
+              "confirm": {
+                "enum": [
+                  "audit",
+                  "human",
+                  "unavailable",
+                  "unobserved"
+                ]
+              },
+              "note": {
+                "type": "string"
+              },
+              "rejected": {
+                "const": true
               }
             }
           }
@@ -1250,6 +1426,25 @@
             "minLength": 1
           },
           "uniqueItems": true
+        },
+        "unreviewed_runtime": {
+          "description": "Present only when the external audit runtime was admitted by observation and has no checked-in compat record (ADR-0069): the package and exact version.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "package",
+            "version"
+          ],
+          "properties": {
+            "package": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]*$"
+            },
+            "version": {
+              "type": "string",
+              "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+            }
+          }
         }
       }
     },
@@ -1260,6 +1455,7 @@
         "id",
         "goal",
         "status",
+        "basis",
         "audit",
         "contract",
         "obligations",
@@ -1269,7 +1465,8 @@
         "host",
         "next_actions",
         "untrusted_delimiters",
-        "governance"
+        "governance",
+        "confirmation_batch"
       ],
       "description": "Public run view. converged lives only on Allow, never duplicated here.",
       "properties": {
@@ -1291,6 +1488,10 @@
             "stopped_frozen",
             "stopped_budget"
           ]
+        },
+        "basis": {
+          "$ref": "#/$defs/digest256",
+          "description": "The core's progress basis: a digest of the blockers and of the run state an author's or a host's action can change. Reads never change it; a host remembers the value at its last continuation and compares only that."
         },
         "audit": {
           "$ref": "#/$defs/auditSummary"
@@ -1356,7 +1557,8 @@
                 "display_ready",
                 "next_action",
                 "interactions_remaining",
-                "prompt_error"
+                "prompt_error",
+                "human_wait"
               ],
               "properties": {
                 "state": {
@@ -1600,11 +1802,110 @@
                     null,
                     "governance.interaction_limit"
                   ]
+                },
+                "human_wait": {
+                  "description": "Whether the configuration waits on its human (core.governance.human_wait, the one predicate of who acts on it: the agent asked, it is pending, a revision pending or rejected, a human approves this phase, the host that mediated it can show its dialog and a presentation is admissible). A host's turn end reads it and adds only its own approval ingress.",
+                  "type": "boolean"
                 }
               }
             },
             {
               "type": "null"
+            }
+          ]
+        },
+        "confirmation_batch": {
+          "description": "What a human would be shown now, or null when nothing waits on one. The host presents exactly when this is not null and prompt_error is null, whatever else blocks the run. record_ids and claim_ids are exactly the items one presentation shows (at most the receipt's decision limit); prompt_error says why it cannot be shown: unavailable (nobody to ask), unobserved (the host has not looked for a surface; it asks inside the next report), already_presented (an explicit report_convergence asks again, within the interaction limit), interaction_limit, or, when the host reported it for this call, surface_unrecorded or presentation_failed (nobody was asked).",
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "key",
+                "record_ids",
+                "claim_ids",
+                "records",
+                "prompt_error"
+              ],
+              "properties": {
+                "key": {
+                  "$ref": "#/$defs/digest256"
+                },
+                "record_ids": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "$ref": "#/$defs/digest256"
+                  }
+                },
+                "claim_ids": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "$ref": "#/$defs/claimId"
+                  }
+                },
+                "terminal": {
+                  "description": "Present only when the batch is the terminal step of a deliberative run (ADR-0063 amendment): the one item asks whether to end the run as status. claim_ids is then [status] and digest is the wording digest a receipt decision for it carries.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "digest"
+                  ],
+                  "properties": {
+                    "status": {
+                      "enum": [
+                        "stopped_frozen",
+                        "stopped_residual",
+                        "stopped_budget"
+                      ]
+                    },
+                    "digest": {
+                      "$ref": "#/$defs/digest256"
+                    }
+                  }
+                },
+                "prompt_error": {
+                  "enum": [
+                    null,
+                    "unavailable",
+                    "unobserved",
+                    "already_presented",
+                    "interaction_limit",
+                    "surface_unrecorded",
+                    "presentation_failed"
+                  ]
+                },
+                "records": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "claim_id",
+                      "source_kind",
+                      "source_ref"
+                    ],
+                    "properties": {
+                      "claim_id": {
+                        "$ref": "#/$defs/claimId"
+                      },
+                      "source_kind": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "source_ref": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                }
+              }
             }
           ]
         }
@@ -1945,7 +2246,7 @@
           "const": "empirica/public"
         },
         "version": {
-          "const": "3.0.0"
+          "const": "4.0.0"
         },
         "sections": {
           "type": "array",
@@ -2222,6 +2523,32 @@
             "minLength": 1
           },
           "uniqueItems": true
+        },
+        "human_decision": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "outcome",
+            "answer"
+          ],
+          "properties": {
+            "outcome": {
+              "enum": [
+                "approve",
+                "reject"
+              ]
+            },
+            "answer": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
         }
       }
     },
@@ -2275,9 +2602,10 @@
         "outcome",
         "source_kind",
         "source_ref",
-        "citation"
+        "citation",
+        "verification"
       ],
-      "description": "Fold-1 research citation; no spike fields.",
+      "description": "research citation; no spike fields.",
       "properties": {
         "sequence": {
           "type": "integer",
@@ -2325,6 +2653,45 @@
         },
         "observed_content_digest": {
           "$ref": "#/$defs/digest256"
+        },
+        "spike_unavailable": {
+          "type": "string",
+          "minLength": 1
+        },
+        "verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "class",
+            "status",
+            "retrieve"
+          ],
+          "properties": {
+            "class": {
+              "enum": [
+                "verbatim",
+                "retrievable",
+                "observed"
+              ]
+            },
+            "status": {
+              "enum": [
+                "verified_by_service",
+                "confirmed_by_human",
+                "rejected_by_human",
+                "pending"
+              ]
+            },
+            "retrieve": {
+              "type": "boolean"
+            },
+            "receipt": {
+              "$ref": "#/$defs/digest256"
+            },
+            "note": {
+              "type": "string"
+            }
+          }
         }
       }
     },
@@ -2506,26 +2873,42 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "state",
+        "verdict",
+        "current",
+        "pending",
         "independence",
         "findings"
       ],
       "properties": {
-        "state": {
+        "verdict": {
           "enum": [
-            "required",
-            "pending",
             "passed",
-            "failed"
-          ]
+            "failed",
+            "none"
+          ],
+          "description": "The latest recorded verdict: passed, failed, or none yet."
+        },
+        "current": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether the latest verdict still binds the current argument, goal and scope (a pass that no longer does reads passed and not current); null with no verdict."
+        },
+        "pending": {
+          "type": "boolean",
+          "description": "A current audit child has been launched and has not settled; it supersedes the previous verdict's coverage."
         },
         "independence": {
           "enum": [
             "distinct",
             "mixed",
             "same_model",
-            "unverified"
-          ]
+            "unverified",
+            "human_owned",
+            null
+          ],
+          "description": "Independence of a settled verdict from the evidence it reviewed; null with no verdict or while a re-audit is pending."
         },
         "findings": {
           "type": "array",
@@ -2533,27 +2916,92 @@
             "type": "string",
             "minLength": 1
           },
-          "description": "Findings of a failed verdict; empty otherwise, including a stale pass."
+          "description": "Findings of a failed verdict; empty otherwise, including a pass that no longer covers the argument."
         }
       },
       "allOf": [
         {
           "if": {
             "properties": {
-              "state": {
-                "enum": [
-                  "required",
-                  "pending",
-                  "passed"
-                ]
+              "verdict": {
+                "const": "none"
               }
             },
             "required": [
-              "state"
+              "verdict"
             ]
           },
           "then": {
             "properties": {
+              "current": {
+                "type": "null"
+              },
+              "findings": {
+                "maxItems": 0
+              },
+              "independence": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "enum": [
+                  "passed",
+                  "failed"
+                ]
+              }
+            },
+            "required": [
+              "verdict"
+            ]
+          },
+          "then": {
+            "properties": {
+              "current": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "const": "passed"
+              }
+            },
+            "required": [
+              "verdict"
+            ]
+          },
+          "then": {
+            "properties": {
+              "findings": {
+                "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "pending": {
+                "const": true
+              }
+            },
+            "required": [
+              "pending"
+            ]
+          },
+          "then": {
+            "properties": {
+              "independence": {
+                "type": "null"
+              },
               "findings": {
                 "maxItems": 0
               }
@@ -2566,7 +3014,9 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "state",
+        "verdict",
+        "current",
+        "pending",
         "independence",
         "reviewed_argument_digest",
         "reviewed_goal_digest",
@@ -2576,23 +3026,35 @@
         "findings"
       ],
       "properties": {
-        "state": {
+        "verdict": {
           "enum": [
-            "not_required",
-            "required",
-            "pending",
             "passed",
             "failed",
-            "stale"
-          ]
+            "none"
+          ],
+          "description": "The latest recorded verdict: passed, failed, or none yet."
+        },
+        "current": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether the latest verdict still binds the current argument, goal and scope (a pass that no longer does reads passed and not current); null with no verdict."
+        },
+        "pending": {
+          "type": "boolean",
+          "description": "A current audit child has been launched and has not settled; it supersedes the previous verdict's coverage."
         },
         "independence": {
           "enum": [
             "distinct",
             "mixed",
             "same_model",
-            "unverified"
-          ]
+            "unverified",
+            "human_owned",
+            null
+          ],
+          "description": "Independence of a settled verdict from the evidence it reviewed; null with no verdict or while a re-audit is pending."
         },
         "reviewed_argument_digest": {
           "$ref": "#/$defs/nullableDigest256"
@@ -2619,27 +3081,40 @@
             "type": "string",
             "minLength": 1
           },
-          "description": "Findings of the latest settled verdict, while it still matches the audit state; empty for a stale pass or while a re-audit is pending."
+          "description": "Findings of the latest settled verdict, while it is a failure or still covers the argument; empty with no verdict, while a re-audit is pending, and for a pass that no longer covers the argument."
         }
       },
       "allOf": [
         {
           "if": {
-            "properties": {
-              "state": {
-                "enum": [
-                  "not_required",
-                  "required",
+            "anyOf": [
+              {
+                "properties": {
+                  "verdict": {
+                    "const": "none"
+                  }
+                },
+                "required": [
+                  "verdict"
+                ]
+              },
+              {
+                "properties": {
+                  "pending": {
+                    "const": true
+                  }
+                },
+                "required": [
                   "pending"
                 ]
               }
-            },
-            "required": [
-              "state"
             ]
           },
           "then": {
             "properties": {
+              "independence": {
+                "type": "null"
+              },
               "reviewed_argument_digest": {
                 "type": "null"
               },
@@ -2658,30 +3133,66 @@
               "findings": {
                 "maxItems": 0
               }
-            },
-            "required": [
-              "reviewed_argument_digest",
-              "reviewed_goal_digest",
-              "reviewed_frozen_scope_digest",
-              "reviewed_deferred_scope_digest",
-              "reviewed_claims",
-              "findings"
-            ]
+            }
           }
         },
         {
           "if": {
             "properties": {
-              "state": {
+              "verdict": {
+                "const": "none"
+              }
+            },
+            "required": [
+              "verdict"
+            ]
+          },
+          "then": {
+            "properties": {
+              "current": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "verdict": {
                 "enum": [
                   "passed",
-                  "failed",
-                  "stale"
+                  "failed"
                 ]
               }
             },
             "required": [
-              "state"
+              "verdict"
+            ]
+          },
+          "then": {
+            "properties": {
+              "current": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "enum": [
+                  "passed",
+                  "failed"
+                ]
+              },
+              "pending": {
+                "const": false
+              }
+            },
+            "required": [
+              "verdict",
+              "pending"
             ]
           },
           "then": {
@@ -2993,7 +3504,9 @@
         "host",
         "interactive",
         "signal",
-        "delegation"
+        "delegation",
+        "audit_retrieval",
+        "human_surface"
       ],
       "properties": {
         "host": {
@@ -3014,7 +3527,7 @@
           "type": "boolean"
         },
         "host_runtime": {
-          "description": "Optional host-observed facts about the runtime that executes this host's foreground audit, recorded once with the run (Pi: the pi-subagents owner). Validated at the application boundary against the host profile's subagents_compatibility, persisted opaquely, and never interpreted or projected by the core.",
+          "description": "Optional host-observed facts about the runtime that executes this host's foreground audit, recorded once with the run (Pi: the pi-subagents owner). Validated at the application boundary against the host profile's subagents_compatibility range, persisted opaquely, and read by the core only for `reviewed` (a version with no checked-in compat record is recorded `reviewed: false` and shown in the run view; it is admitted by what the adapter observed of it, ADR-0069).",
           "type": "object",
           "additionalProperties": false,
           "required": [
@@ -3065,10 +3578,57 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 4096
+                },
+                "reviewed": {
+                  "type": "boolean",
+                  "description": "Whether this exact version has a checked-in compat record. false is admitted when the live preflight and the tool's parameter schema passed; it is never a refusal by itself. An absent value reads as false (not reviewed); a present value that is not a boolean is malformed."
                 }
               }
             }
           }
+        },
+        "session": {
+          "description": "Optional host-observed fact: where this run's session can be found again, recorded once at StartRun by the host from what it observed (Claude: the hook payload's session_id and transcript_path; Pi: the session manager's id and session file). The author has no StartRun and cannot supply or change it. Absent when the host observed nothing: it reads as unknown, never as a guess.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "label",
+            "locator"
+          ],
+          "properties": {
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "description": "A short human name for the session (its id)."
+            },
+            "locator": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "description": "A copyable path or id that finds the session again: its transcript or session file when the host has one, otherwise its id."
+            }
+          }
+        },
+        "audit_retrieval": {
+          "description": "The retrieval kinds this host's auditor is observed to cover, recorded once at StartRun and re-observed at audit launch (a divergence refuses the launch). workspace: files inside the workspace; local: absolute or home paths; web: http(s) URLs. A research record of any other kind is confirmed by a human (ADR-0067).",
+          "type": "array",
+          "items": {
+            "enum": [
+              "local",
+              "web",
+              "workspace"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "human_surface": {
+          "description": "Whether the host last observed a surface to show a dialog to a human now: Claude form elicitation advertised by the client, Pi `ctx.hasUI` in the TUI or RPC. Recorded at StartRun and updated by the host's private ingress at every report_convergence. `unobserved` means the host has not yet looked (Claude's start hook runs before the MCP client declares form elicitation); a host that can tell at start records `human` or `unavailable` at once. Evidence is presented to a human only when this is `human`, the run is not delegated or non-interactive, and the profile has a human approval ingress (ADR-0067); while it is `unobserved` such a run is told a human is asked when it reports, if the host can show a dialog.",
+          "enum": [
+            "human",
+            "unavailable",
+            "unobserved"
+          ]
         }
       }
     },
@@ -3352,6 +3912,81 @@
     "claimId": {
       "type": "string",
       "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+    },
+    "citationUnverifiedParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "problem"
+      ],
+      "properties": {
+        "problem": {
+          "enum": [
+            "source_ref_form",
+            "file_unavailable",
+            "lines_out_of_range",
+            "text_not_found",
+            "spike_reason_missing"
+          ]
+        }
+      }
+    },
+    "confirmationRequiredParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "route",
+        "record_ids"
+      ],
+      "properties": {
+        "route": {
+          "enum": [
+            "human",
+            "unavailable",
+            "unobserved"
+          ]
+        },
+        "record_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/digest256"
+          }
+        },
+        "claim_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/claimId"
+          }
+        },
+        "asking": {
+          "enum": [
+            "again"
+          ]
+        }
+      }
+    },
+    "hostVersionParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "range",
+        "version"
+      ],
+      "properties": {
+        "range": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      }
     }
   }
 }

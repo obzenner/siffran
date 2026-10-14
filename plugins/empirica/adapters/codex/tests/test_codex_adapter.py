@@ -128,7 +128,7 @@ class ExactV2ProfileTests(unittest.TestCase):
     """The transport reaches the shared bridge with the fixed exact Codex profile and no cwd."""
 
     def test_profile_id_is_the_exact_codex_registry_profile(self) -> None:
-        self.assertEqual(CODEX_PROFILE_ID, "codex-cli@0.146.0")
+        self.assertEqual([CODEX_PROFILE_ID], [p["profile_id"] for p in json.loads((Path(__file__).resolve().parents[3] / "vendor/contracts/empirica/v2/host-profiles.json").read_text())["profiles"] if p["host_id"] == "codex-cli"])
 
     def test_stop_hook_deadline_is_pinned_for_bounded_stop_reconciliation(self) -> None:
         # 960 seconds is the reviewed Codex Stop-hook host deadline, not an audit-runner timeout.
@@ -262,7 +262,7 @@ class StartRunTests(unittest.TestCase):
         self.assertEqual(command["goal"], "  exact goal  ")
         self.assertEqual(command["invocation"], {
             "host": "codex", "interactive": None,
-            "signal": "codex hook has no interactive signal", "delegation": True})
+            "signal": "codex hook has no interactive signal", "delegation": True, "audit_retrieval": [], "human_surface": "unavailable"})
         empty = build_start_run_request(_payload(prompt="$empirica   "), environ={})
         self.assertEqual(empty["command"]["goal"], "  ")
 

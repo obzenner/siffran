@@ -8,6 +8,7 @@ import copy
 import functools
 import json
 import logging
+import re
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
@@ -15,7 +16,7 @@ from typing import Any, Mapping
 import jsonschema
 from referencing import Registry, Resource
 
-from core.canonical import canonical_digest
+from core.canonical import CONTRACT_DIGEST_PLACEHOLDER, canonical_digest, replace_string_values
 from core.evaluation import ContractView
 from .history_records import POLICY_INPUT_KEYS
 
@@ -57,8 +58,12 @@ if (tuple(row["predicate"] for row in _bootstrap["requirements"]) != _BOOTSTRAP_
     raise RuntimeError("unknown or reordered bootstrap contract binding")
 _BOOTSTRAP_REQUIREMENTS = tuple((row["predicate"], row["obligation_id"], row["must"])
                                 for row in _bootstrap["requirements"])
+#: The words of a bootstrap requirement when its human acts on it (``waiting``), by obligation id.
+_BOOTSTRAP_WAITING = {row["obligation_id"]: row["waiting"] for row in _bootstrap["requirements"] if "waiting" in row}
 _AUDIT_OBLIGATION = (_bootstrap["audit_obligation"]["obligation_id"],
                      _bootstrap["audit_obligation"]["must"])
+_STAGE_OBLIGATIONS = {stage: (row["obligation_id"], row["must"])
+                      for stage, row in _bootstrap["stage_obligations"].items()}
 _BOOTSTRAP_OPERATIONS = tuple((name, tuple((step["predicate"], step["reason"])
                                            for step in operation["preconditions"]))
                               for name, operation in _bootstrap["operations"].items())
@@ -76,8 +81,18 @@ _GOVERNANCE_CONTROLS = copy.deepcopy(_decisions)
 _PROJECTION_CONTROLS = _GOVERNANCE_CONTROLS["controls"]
 _NOTICES = _PUBLIC_CONTRACT["settlement_notices"]
 HUMAN_WAIT_NOTICE: str = _NOTICES["human_wait"]
-#: Template with the single ``{resource}`` placeholder, formatted with the reason's resource.
+#: What the Claude Stop says when the confirmation is the sole blocker: report_convergence, where the host can ask.
+EVIDENCE_REPORT_NOTICE: str = _NOTICES["evidence_report"]
+#: Template with the single ``{resource}`` placeholder.
 BUDGET_EXHAUSTED_NOTICE: str = _NOTICES["budget_exhausted"]
+#: A deliberative turn end pauses with this (ADR-0068); one ``{reason}`` placeholder.
+PAUSED_FOR_HUMAN_NOTICE: str = _NOTICES["paused_for_human"]
+#: A deliberative turn end whose sole blocker is an evidence confirmation (ADR-0068); no placeholder.
+PAUSED_FOR_EVIDENCE_NOTICE: str = _NOTICES["paused_for_evidence"]
+#: Block on a later turn end of an ``auto`` run, which never hands the turn back (ADR-0068); one ``{reason}``.
+UNATTENDED_CONTINUE_NOTICE: str = _NOTICES["unattended_continue"]
+
+
 _AUTHOR_VIEW_LABELS = MappingProxyType(dict(_PUBLIC_CONTRACT["author_view"]["labels"]))
 _RECOVERY_EXCLUSIONS = {
     mode: tuple(actions)
@@ -94,6 +109,9 @@ CEILING_BOUNDS = MappingProxyType({
     name: (schema["minimum"], schema["maximum"])
     for name, schema in _configure_ceilings.items()
 })
+#: One owner of the batch size: a receipt carries at most this many decisions, so a presentation shows no more.
+EVIDENCE_BATCH_LIMIT: int = _REQUEST_SCHEMA["$defs"]["evidenceConfirmationPayload"]["properties"][
+    "decisions"]["maxItems"]
 _LATE_ROUTE_MUST = _bootstrap["late_route_must"]
 _DEFAULT_NEXT_ACTION = _bootstrap["default_next_action"]
 if _DEFAULT_NEXT_ACTION not in _PUBLIC_CONTRACT["next_actions"]:
@@ -103,14 +121,29 @@ _DIGEST = canonical_digest(_PUBLIC_CONTRACT)
 CONTRACT_VIEW = ContractView(
     reason_metadata=_REASON_METADATA,
     bootstrap_requirements=_BOOTSTRAP_REQUIREMENTS,
+    bootstrap_waiting=_BOOTSTRAP_WAITING,
     audit_obligation=_AUDIT_OBLIGATION,
+    stage_obligations=_STAGE_OBLIGATIONS,
     bootstrap_operations=_BOOTSTRAP_OPERATIONS,
     governance_controls=_PROJECTION_CONTROLS,
     recovery_exclusions=_RECOVERY_EXCLUSIONS,
     late_route_must=_LATE_ROUTE_MUST,
     default_next_action=_DEFAULT_NEXT_ACTION,
     untrusted_delimiters=_UNTRUSTED_DELIMITERS,
+    batch_limit=EVIDENCE_BATCH_LIMIT,
 )
+
+
+def render_notice(template: str, **values: str) -> str:
+    """Fill a settlement notice's ``{name}`` placeholders by plain replacement (a core reason may carry braces).
+
+    The keys must be exactly the template's placeholders: a wrong keyword raises here, in a test, and never leaves a
+    ``{name}`` in a Stop message."""
+    if set(re.findall(r"\{([A-Za-z_]+)\}", template)) != set(values):
+        raise ValueError("a notice's placeholders and the values given differ")
+    for name, value in values.items():
+        template = template.replace("{" + name + "}", value)
+    return template
 
 
 def protocol_id() -> str:
@@ -152,6 +185,14 @@ def profile_ids() -> tuple[str, ...]:
     return tuple(sorted(_PROFILES))
 
 
+def host_profile_id(host_id: str) -> str:
+    """The id of the single reviewed profile of a host (``host-profiles.json`` is its only owner)."""
+    ids = [profile["profile_id"] for profile in _HOST_PROFILES["profiles"] if profile["host_id"] == host_id]
+    if len(ids) != 1:
+        raise ValueError(f"expected exactly one host profile for {host_id!r}, found {len(ids)}")
+    return ids[0]
+
+
 def host_profile(profile_id: str) -> Mapping[str, Any]:
     return copy.deepcopy(_PROFILES[profile_id])
 
@@ -173,6 +214,17 @@ def untrusted_delimiters() -> Mapping[str, Any]:
 
 def contract_digest() -> str:
     return _DIGEST
+
+
+def stored(value: Any) -> Any:
+    """A stored fixture or golden as it is loaded: the live contract digest where the placeholder stands. Call it before
+    schema validation or comparison, never on a response under test."""
+    return replace_string_values(value, CONTRACT_DIGEST_PLACEHOLDER, _DIGEST)
+
+
+def to_stored(value: Any) -> Any:
+    """The inverse of ``stored``, for the generators: they write the placeholder, never the hash."""
+    return replace_string_values(value, _DIGEST, CONTRACT_DIGEST_PLACEHOLDER)
 
 
 def projection_controls() -> dict:

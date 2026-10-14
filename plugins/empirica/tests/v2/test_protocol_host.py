@@ -31,10 +31,10 @@ class ProtocolHostTests(ConformanceCase):
             "D6", "case-45",
             "Exact empirica/v2 state/protocol identity is checked before semantic decoding")
         # Persisted non-v2 identity with hostile fields → sole run.corrupt before decoding.
-        drv.inject_run_state("r-legacy", {"protocol": "empirica/v1", "status": "active",
+        drv.inject_run_state("r-other", {"protocol": "empirica/v1", "status": "active",
                                            "hostile": "payload", "partial": {"x": 1}})
         restored = self.raw_dispatch(drv, {"protocol": protocol(), "request_id": "r",
-                                            "command": {"type": "RestoreRun", "run_id": "r-legacy"}})
+                                            "command": {"type": "RestoreRun", "run_id": "r-other"}})
         self.assert_block_sole_reason(restored, "run.corrupt")
         # a v1 protocol wire envelope → exact Fault/closed (raw wire, not Block)
         v1 = {"protocol": "empirica/v1", "request_id": "v1-probe",

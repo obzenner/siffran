@@ -1,0 +1,5385 @@
+{
+ "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/s256-405b28cee2b1c2980b78f6044c23fda4ec8f9ae0a86e56da7e2b97090f74333b/1": {
+  "attempts": [
+   {
+    "ask": "freeze_scope",
+    "asked_at": null,
+    "attention": "needs_you",
+    "audit": {
+     "current": true,
+     "independence": "distinct",
+     "pending": false,
+     "verdict": "passed"
+    },
+    "claims": [
+     {
+      "assurance": "assured",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "research",
+      "gating": true,
+      "id": "C0",
+      "kind": "ordinary",
+      "review": "passed",
+      "state": "approved",
+      "text": "Blasts happen only on weekday mornings."
+     },
+     {
+      "assurance": "not_approved",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "none",
+      "gating": false,
+      "id": "C1",
+      "kind": "ordinary",
+      "review": "unreviewed",
+      "state": "open",
+      "text": "Neighbours are told a day ahead."
+     }
+    ],
+    "diagnostic": null,
+    "edges": [
+     {
+      "from": "C0",
+      "to": "C1"
+     }
+    ],
+    "ended": null,
+    "flags": {
+     "changed_since_audit": false,
+     "decided": true,
+     "failed_audit": false,
+     "refuted": false
+    },
+    "generation": 1,
+    "goal": "Write down the blasting schedule.",
+    "id": "847d720ba940",
+    "key": "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/s256-405b28cee2b1c2980b78f6044c23fda4ec8f9ae0a86e56da7e2b97090f74333b/1",
+    "mode": "deliberative",
+    "next": {
+     "message": "Ending the run as stopped_frozen needs a human's agreement, and nobody has been asked yet. Stop again (report_convergence intent=stop) and the human is asked whether to end the run.",
+     "where": "next_report",
+     "who": "human"
+    },
+    "previous": null,
+    "progress": {
+     "approved": 1,
+     "required": 1
+    },
+    "project": "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17",
+    "root": "C0",
+    "run": "s256-405b28cee2b1c2980b78f6044c23fda4ec8f9ae0a86e56da7e2b97090f74333b",
+    "session": {
+     "delegated": false,
+     "host": "pi",
+     "interactive": true,
+     "label": null,
+     "locator": null
+    },
+    "standing": "needs_human",
+    "started": 1790601600.0,
+    "state": "active",
+    "updated": 1790602560.0,
+    "version": "sha256:4f5ffb0f9f99afc5972433f83e49e994b07af3f6e748201ffe02d2ab394a4cfd"
+   }
+  ],
+  "audit": {
+   "findings": []
+  },
+  "auditor": "anthropic/claude-opus-4-6",
+  "audits": [
+   {
+    "at": 1790602560.0,
+    "auditor": "anthropic/claude-opus-4-6",
+    "findings": [
+     "The frozen claim is cited."
+    ],
+    "independence": "distinct",
+    "verdict": "passed"
+   }
+  ],
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "blast/schedule.md states this directly.",
+      "retrieve": true,
+      "source": "blast/schedule.md",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   },
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C1",
+    "proof": [],
+    "records": [],
+    "research": 0
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "decisions": [
+   {
+    "answer": "approve",
+    "asked": "approve_configuration",
+    "at": 1790601960.0,
+    "claim": null,
+    "effect": "configuration_approved",
+    "plan": 1,
+    "source": null
+   }
+  ],
+  "dropped": [],
+  "goal": "Write down the blasting schedule.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 1
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/s256-405b28cee2b1c2980b78f6044c23fda4ec8f9ae0a86e56da7e2b97090f74333b/1",
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [],
+    "message": "Ending the run as stopped_frozen needs a human's agreement, and nobody has been asked yet. Stop again (report_convergence intent=stop) and the human is asked whether to end the run.",
+    "need": "governance.terminal_stop_pending",
+    "where": "next_report",
+    "who": "human"
+   }
+  ],
+  "residuals": [
+   {
+    "claims": [],
+    "code": "freeze.deferred",
+    "message": "Deferred claims are residual; accept."
+   }
+  ],
+  "row": {
+   "ask": "freeze_scope",
+   "asked_at": null,
+   "attention": "needs_you",
+   "audit": {
+    "current": true,
+    "independence": "distinct",
+    "pending": false,
+    "verdict": "passed"
+   },
+   "claims": [
+    {
+     "assurance": "assured",
+     "blocker": null,
+     "blocker_claim": null,
+     "evidence": "research",
+     "gating": true,
+     "id": "C0",
+     "kind": "ordinary",
+     "review": "passed",
+     "state": "approved",
+     "text": "Blasts happen only on weekday mornings."
+    },
+    {
+     "assurance": "not_approved",
+     "blocker": null,
+     "blocker_claim": null,
+     "evidence": "none",
+     "gating": false,
+     "id": "C1",
+     "kind": "ordinary",
+     "review": "unreviewed",
+     "state": "open",
+     "text": "Neighbours are told a day ahead."
+    }
+   ],
+   "diagnostic": null,
+   "edges": [
+    {
+     "from": "C0",
+     "to": "C1"
+    }
+   ],
+   "ended": null,
+   "flags": {
+    "changed_since_audit": false,
+    "decided": true,
+    "failed_audit": false,
+    "refuted": false
+   },
+   "generation": 1,
+   "goal": "Write down the blasting schedule.",
+   "id": "847d720ba940",
+   "key": "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/s256-405b28cee2b1c2980b78f6044c23fda4ec8f9ae0a86e56da7e2b97090f74333b/1",
+   "mode": "deliberative",
+   "next": {
+    "message": "Ending the run as stopped_frozen needs a human's agreement, and nobody has been asked yet. Stop again (report_convergence intent=stop) and the human is asked whether to end the run.",
+    "where": "next_report",
+    "who": "human"
+   },
+   "previous": null,
+   "progress": {
+    "approved": 1,
+    "required": 1
+   },
+   "project": "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17",
+   "root": "C0",
+   "run": "s256-405b28cee2b1c2980b78f6044c23fda4ec8f9ae0a86e56da7e2b97090f74333b",
+   "session": {
+    "delegated": false,
+    "host": "pi",
+    "interactive": true,
+    "label": null,
+    "locator": null
+   },
+   "standing": "needs_human",
+   "started": 1790601600.0,
+   "state": "active",
+   "updated": 1790602560.0,
+   "version": "sha256:4f5ffb0f9f99afc5972433f83e49e994b07af3f6e748201ffe02d2ab394a4cfd"
+  },
+  "stale": [],
+  "steps": [
+   {
+    "at": 1790601600.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790601780.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790602140.0,
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790602260.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 4,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790602500.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "attribution",
+    "n": 5,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790602560.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "audit_verdict",
+    "n": 6,
+    "outcome": "pass",
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   }
+  ],
+  "stop": null,
+  "version": "sha256:4f5ffb0f9f99afc5972433f83e49e994b07af3f6e748201ffe02d2ab394a4cfd"
+ },
+ "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/s256-8a026a1c72cfeb0ecf5d51a17a55e4a1f0d250ca32742fef86cd0c1782d4d003/1": {
+  "attempts": [
+   {
+    "ask": "approve_configuration",
+    "asked_at": 1790601420.0,
+    "attention": "needs_you",
+    "audit": {
+     "current": null,
+     "independence": null,
+     "pending": false,
+     "verdict": "none"
+    },
+    "claims": [
+     {
+      "assurance": "not_approved",
+      "blocker": "claim.research_missing",
+      "blocker_claim": "C0",
+      "evidence": "none",
+      "gating": true,
+      "id": "C0",
+      "kind": "ordinary",
+      "review": "none",
+      "state": "open",
+      "text": "The north pit grading meets the road spec."
+     }
+    ],
+    "diagnostic": null,
+    "edges": [],
+    "ended": null,
+    "flags": {
+     "changed_since_audit": false,
+     "decided": false,
+     "failed_audit": false,
+     "refuted": false
+    },
+    "generation": 1,
+    "goal": "Choose the gravel grading for the north pit.",
+    "id": "05e9cd035aba",
+    "key": "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/s256-8a026a1c72cfeb0ecf5d51a17a55e4a1f0d250ca32742fef86cd0c1782d4d003/1",
+    "mode": "deliberative",
+    "next": {
+     "message": "Waiting for a human to approve the run's configuration in the host's dialog.",
+     "where": "next_report",
+     "who": "human"
+    },
+    "previous": null,
+    "progress": {
+     "approved": 0,
+     "required": 1
+    },
+    "project": "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17",
+    "root": "C0",
+    "run": "s256-8a026a1c72cfeb0ecf5d51a17a55e4a1f0d250ca32742fef86cd0c1782d4d003",
+    "session": {
+     "delegated": false,
+     "host": "claude",
+     "interactive": true,
+     "label": null,
+     "locator": null
+    },
+    "standing": "needs_human",
+    "started": 1790601180.0,
+    "state": "active",
+    "updated": 1790601540.0,
+    "version": "sha256:6b9afeeff2b10934d9fb4c53edbd7ad48930f3383f78295a9dee086478f02692"
+   }
+  ],
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "audits": [],
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": "Record research for claim C0.",
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [],
+    "research": 0
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "decisions": [],
+  "dropped": [],
+  "goal": "Choose the gravel grading for the north pit.",
+  "governance": {
+   "approval": "pending",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": true,
+   "proposed": {
+    "audit_spawns": 2,
+    "passes": 8,
+    "spawns": 1
+   }
+  },
+  "key": "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/s256-8a026a1c72cfeb0ecf5d51a17a55e4a1f0d250ca32742fef86cd0c1782d4d003/1",
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [],
+    "message": "Waiting for a human to approve the run's configuration in the host's dialog.",
+    "need": "obligation.approval",
+    "where": "next_report",
+    "who": "human"
+   },
+   {
+    "claims": [
+     "C0"
+    ],
+    "message": "Record research for claim C0.",
+    "need": "claim.research_missing",
+    "where": "later",
+    "who": "agent"
+   },
+   {
+    "claims": [],
+    "message": "Audit is owed; spawn an independent auditor.",
+    "need": "audit.required",
+    "where": "later",
+    "who": "agent"
+   }
+  ],
+  "residuals": [],
+  "row": {
+   "ask": "approve_configuration",
+   "asked_at": 1790601420.0,
+   "attention": "needs_you",
+   "audit": {
+    "current": null,
+    "independence": null,
+    "pending": false,
+    "verdict": "none"
+   },
+   "claims": [
+    {
+     "assurance": "not_approved",
+     "blocker": "claim.research_missing",
+     "blocker_claim": "C0",
+     "evidence": "none",
+     "gating": true,
+     "id": "C0",
+     "kind": "ordinary",
+     "review": "none",
+     "state": "open",
+     "text": "The north pit grading meets the road spec."
+    }
+   ],
+   "diagnostic": null,
+   "edges": [],
+   "ended": null,
+   "flags": {
+    "changed_since_audit": false,
+    "decided": false,
+    "failed_audit": false,
+    "refuted": false
+   },
+   "generation": 1,
+   "goal": "Choose the gravel grading for the north pit.",
+   "id": "05e9cd035aba",
+   "key": "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/s256-8a026a1c72cfeb0ecf5d51a17a55e4a1f0d250ca32742fef86cd0c1782d4d003/1",
+   "mode": "deliberative",
+   "next": {
+    "message": "Waiting for a human to approve the run's configuration in the host's dialog.",
+    "where": "next_report",
+    "who": "human"
+   },
+   "previous": null,
+   "progress": {
+    "approved": 0,
+    "required": 1
+   },
+   "project": "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17",
+   "root": "C0",
+   "run": "s256-8a026a1c72cfeb0ecf5d51a17a55e4a1f0d250ca32742fef86cd0c1782d4d003",
+   "session": {
+    "delegated": false,
+    "host": "claude",
+    "interactive": true,
+    "label": null,
+    "locator": null
+   },
+   "standing": "needs_human",
+   "started": 1790601180.0,
+   "state": "active",
+   "updated": 1790601540.0,
+   "version": "sha256:6b9afeeff2b10934d9fb4c53edbd7ad48930f3383f78295a9dee086478f02692"
+  },
+  "stale": [],
+  "steps": [
+   {
+    "at": 1790601180.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790601360.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   }
+  ],
+  "stop": null,
+  "version": "sha256:6b9afeeff2b10934d9fb4c53edbd7ad48930f3383f78295a9dee086478f02692"
+ },
+ "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-304a7406988d22c5ec496b8a79ecfbb856e45a9e20bb82b43e3e3db7a1023365/1": {
+  "attempts": [
+   {
+    "ask": "approve_revision",
+    "asked_at": 1790595840.0,
+    "attention": "needs_you",
+    "audit": {
+     "current": null,
+     "independence": null,
+     "pending": false,
+     "verdict": "none"
+    },
+    "claims": [
+     {
+      "assurance": "awaiting_audit",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "research",
+      "gating": true,
+      "id": "C0",
+      "kind": "ordinary",
+      "review": "none",
+      "state": "approved",
+      "text": "Every preview has exactly one thumbnail."
+     }
+    ],
+    "diagnostic": null,
+    "edges": [],
+    "ended": null,
+    "flags": {
+     "changed_since_audit": false,
+     "decided": true,
+     "failed_audit": false,
+     "refuted": false
+    },
+    "generation": 1,
+    "goal": "Thumbnail every preview once.",
+    "id": "4eee61b22b3e",
+    "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-304a7406988d22c5ec496b8a79ecfbb856e45a9e20bb82b43e3e3db7a1023365/1",
+    "mode": "deliberative",
+    "next": {
+     "message": "Waiting for a human to approve the run's configuration in the host's dialog.",
+     "where": "next_report",
+     "who": "human"
+    },
+    "previous": null,
+    "progress": {
+     "approved": 1,
+     "required": 1
+    },
+    "project": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50",
+    "root": "C0",
+    "run": "s256-304a7406988d22c5ec496b8a79ecfbb856e45a9e20bb82b43e3e3db7a1023365",
+    "session": {
+     "delegated": false,
+     "host": "claude",
+     "interactive": true,
+     "label": null,
+     "locator": null
+    },
+    "standing": "needs_human",
+    "started": 1790595240.0,
+    "state": "active",
+    "updated": 1790595840.0,
+    "version": "sha256:7055495441e76d5f838445f64a37de4b17bb384fc9a3d20f478c5d0c1943a942"
+   }
+  ],
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "audits": [],
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/thumbs.py states this directly.",
+      "retrieve": true,
+      "source": "src/thumbs.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "decisions": [
+   {
+    "answer": "approve",
+    "asked": "approve_configuration",
+    "at": 1790595600.0,
+    "claim": null,
+    "effect": "configuration_approved",
+    "plan": 1,
+    "source": null
+   }
+  ],
+  "dropped": [],
+  "goal": "Thumbnail every preview once.",
+  "governance": {
+   "approval": "revision_pending",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": true,
+   "proposed": {
+    "audit_spawns": 1,
+    "passes": 3,
+    "spawns": 0
+   }
+  },
+  "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-304a7406988d22c5ec496b8a79ecfbb856e45a9e20bb82b43e3e3db7a1023365/1",
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [],
+    "message": "Waiting for a human to approve the run's configuration in the host's dialog.",
+    "need": "obligation.approval",
+    "where": "next_report",
+    "who": "human"
+   },
+   {
+    "claims": [],
+    "message": "Audit is owed; spawn an independent auditor.",
+    "need": "audit.required",
+    "where": "later",
+    "who": "agent"
+   }
+  ],
+  "residuals": [],
+  "row": {
+   "ask": "approve_revision",
+   "asked_at": 1790595840.0,
+   "attention": "needs_you",
+   "audit": {
+    "current": null,
+    "independence": null,
+    "pending": false,
+    "verdict": "none"
+   },
+   "claims": [
+    {
+     "assurance": "awaiting_audit",
+     "blocker": null,
+     "blocker_claim": null,
+     "evidence": "research",
+     "gating": true,
+     "id": "C0",
+     "kind": "ordinary",
+     "review": "none",
+     "state": "approved",
+     "text": "Every preview has exactly one thumbnail."
+    }
+   ],
+   "diagnostic": null,
+   "edges": [],
+   "ended": null,
+   "flags": {
+    "changed_since_audit": false,
+    "decided": true,
+    "failed_audit": false,
+    "refuted": false
+   },
+   "generation": 1,
+   "goal": "Thumbnail every preview once.",
+   "id": "4eee61b22b3e",
+   "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-304a7406988d22c5ec496b8a79ecfbb856e45a9e20bb82b43e3e3db7a1023365/1",
+   "mode": "deliberative",
+   "next": {
+    "message": "Waiting for a human to approve the run's configuration in the host's dialog.",
+    "where": "next_report",
+    "who": "human"
+   },
+   "previous": null,
+   "progress": {
+    "approved": 1,
+    "required": 1
+   },
+   "project": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50",
+   "root": "C0",
+   "run": "s256-304a7406988d22c5ec496b8a79ecfbb856e45a9e20bb82b43e3e3db7a1023365",
+   "session": {
+    "delegated": false,
+    "host": "claude",
+    "interactive": true,
+    "label": null,
+    "locator": null
+   },
+   "standing": "needs_human",
+   "started": 1790595240.0,
+   "state": "active",
+   "updated": 1790595840.0,
+   "version": "sha256:7055495441e76d5f838445f64a37de4b17bb384fc9a3d20f478c5d0c1943a942"
+  },
+  "stale": [],
+  "steps": [
+   {
+    "at": 1790595240.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790595420.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790595780.0,
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   }
+  ],
+  "stop": null,
+  "version": "sha256:7055495441e76d5f838445f64a37de4b17bb384fc9a3d20f478c5d0c1943a942"
+ },
+ "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/1": {
+  "attempts": [
+   {
+    "ask": null,
+    "asked_at": null,
+    "attention": "ended",
+    "audit": {
+     "current": null,
+     "independence": null,
+     "pending": false,
+     "verdict": "none"
+    },
+    "claims": [
+     {
+      "assurance": "not_approved",
+      "blocker": "evidence.confirmation_required",
+      "blocker_claim": "C1",
+      "evidence": "research",
+      "gating": true,
+      "id": "C0",
+      "kind": "ordinary",
+      "review": "none",
+      "state": "open",
+      "text": "Previews look the same in every supported viewer."
+     },
+     {
+      "assurance": "not_approved",
+      "blocker": "evidence.confirmation_required",
+      "blocker_claim": "C1",
+      "evidence": "none",
+      "gating": true,
+      "id": "C1",
+      "kind": "needs-decision",
+      "review": "none",
+      "state": "blocked",
+      "text": "Display P3 is the right default for previews."
+     }
+    ],
+    "diagnostic": null,
+    "edges": [
+     {
+      "from": "C0",
+      "to": "C1"
+     }
+    ],
+    "ended": 1790591760.0,
+    "flags": {
+     "changed_since_audit": false,
+     "decided": true,
+     "failed_audit": false,
+     "refuted": false
+    },
+    "generation": 1,
+    "goal": "Choose the colour space for exported previews.",
+    "id": "3311712612ef",
+    "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/1",
+    "mode": "deliberative",
+    "next": null,
+    "previous": null,
+    "progress": {
+     "approved": 0,
+     "required": 2
+    },
+    "project": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50",
+    "root": "C0",
+    "run": "s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5",
+    "session": {
+     "delegated": false,
+     "host": "claude",
+     "interactive": true,
+     "label": null,
+     "locator": null
+    },
+    "standing": "stopped_residual",
+    "started": 1790591040.0,
+    "state": "stopped_residual",
+    "updated": 1790591760.0,
+    "version": "sha256:568e6833ea3daae6cea4a475234ff946f028f20f8f6d4e131c5c9332c461a45c"
+   },
+   {
+    "ask": null,
+    "asked_at": null,
+    "attention": "not_ended",
+    "audit": {
+     "current": true,
+     "independence": "distinct",
+     "pending": false,
+     "verdict": "failed"
+    },
+    "claims": [
+     {
+      "assurance": "audit_failed",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "research",
+      "gating": true,
+      "id": "C0",
+      "kind": "ordinary",
+      "review": "failed",
+      "state": "approved",
+      "text": "Previews look the same in every supported viewer."
+     },
+     {
+      "assurance": "audit_failed",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "spike",
+      "gating": true,
+      "id": "C1",
+      "kind": "needs-experiment",
+      "review": "failed",
+      "state": "approved",
+      "text": "Converting to sRGB keeps every swatch within tolerance."
+     }
+    ],
+    "diagnostic": null,
+    "edges": [
+     {
+      "from": "C0",
+      "to": "C1"
+     }
+    ],
+    "ended": null,
+    "flags": {
+     "changed_since_audit": false,
+     "decided": true,
+     "failed_audit": true,
+     "refuted": false
+    },
+    "generation": 2,
+    "goal": "Choose the colour space for exported previews.",
+    "id": "fbfc17260172",
+    "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/2",
+    "mode": "deliberative",
+    "next": {
+     "message": "Audit failed or its coverage went stale; address any findings listed under Audit, then retry.",
+     "where": "next_turn",
+     "who": "agent"
+    },
+    "previous": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/1",
+    "progress": {
+     "approved": 2,
+     "required": 2
+    },
+    "project": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50",
+    "root": "C0",
+    "run": "s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5",
+    "session": {
+     "delegated": false,
+     "host": "claude",
+     "interactive": true,
+     "label": null,
+     "locator": null
+    },
+    "standing": "not_ended",
+    "started": 1790591820.0,
+    "state": "active",
+    "updated": 1790592900.0,
+    "version": "sha256:8a172772e99dc0e79da6ce65de5260a92d923d8ad61ae09eed59fb14f698c007"
+   }
+  ],
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "audits": [],
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": "Unanswered when this run stopped: research or a decision needed a human.",
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "docs/viewers.md states this directly.",
+      "retrieve": true,
+      "source": "docs/viewers.md",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   },
+   {
+    "blocker_message": "Unanswered when this run stopped: research or a decision needed a human.",
+    "decision": {
+     "answer": null,
+     "outcome": null,
+     "status": "unanswered",
+     "where": null
+    },
+    "id": "C1",
+    "proof": [],
+    "records": [],
+    "research": 0
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "decisions": [
+   {
+    "answer": "approve",
+    "asked": "approve_configuration",
+    "at": 1790591400.0,
+    "claim": null,
+    "effect": "configuration_approved",
+    "plan": 1,
+    "source": null
+   },
+   {
+    "answer": "approve",
+    "asked": "consent_stop",
+    "at": 1790591700.0,
+    "claim": null,
+    "effect": "run_ended",
+    "plan": null,
+    "source": null
+   }
+  ],
+  "dropped": [],
+  "goal": "Choose the colour space for exported previews.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 126,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/1",
+  "now": null,
+  "outstanding": [],
+  "residuals": [
+   {
+    "claims": [
+     "C0",
+     "C1"
+    ],
+    "code": "evidence.confirmation_required",
+    "message": "Unanswered when this run stopped: research or a decision needed a human."
+   }
+  ],
+  "row": {
+   "ask": null,
+   "asked_at": null,
+   "attention": "ended",
+   "audit": {
+    "current": null,
+    "independence": null,
+    "pending": false,
+    "verdict": "none"
+   },
+   "claims": [
+    {
+     "assurance": "not_approved",
+     "blocker": "evidence.confirmation_required",
+     "blocker_claim": "C1",
+     "evidence": "research",
+     "gating": true,
+     "id": "C0",
+     "kind": "ordinary",
+     "review": "none",
+     "state": "open",
+     "text": "Previews look the same in every supported viewer."
+    },
+    {
+     "assurance": "not_approved",
+     "blocker": "evidence.confirmation_required",
+     "blocker_claim": "C1",
+     "evidence": "none",
+     "gating": true,
+     "id": "C1",
+     "kind": "needs-decision",
+     "review": "none",
+     "state": "blocked",
+     "text": "Display P3 is the right default for previews."
+    }
+   ],
+   "diagnostic": null,
+   "edges": [
+    {
+     "from": "C0",
+     "to": "C1"
+    }
+   ],
+   "ended": 1790591760.0,
+   "flags": {
+    "changed_since_audit": false,
+    "decided": true,
+    "failed_audit": false,
+    "refuted": false
+   },
+   "generation": 1,
+   "goal": "Choose the colour space for exported previews.",
+   "id": "3311712612ef",
+   "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/1",
+   "mode": "deliberative",
+   "next": null,
+   "previous": null,
+   "progress": {
+    "approved": 0,
+    "required": 2
+   },
+   "project": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50",
+   "root": "C0",
+   "run": "s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5",
+   "session": {
+    "delegated": false,
+    "host": "claude",
+    "interactive": true,
+    "label": null,
+    "locator": null
+   },
+   "standing": "stopped_residual",
+   "started": 1790591040.0,
+   "state": "stopped_residual",
+   "updated": 1790591760.0,
+   "version": "sha256:568e6833ea3daae6cea4a475234ff946f028f20f8f6d4e131c5c9332c461a45c"
+  },
+  "stale": [],
+  "steps": [
+   {
+    "at": 1790591040.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790591220.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790591580.0,
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790591640.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "evidence_presentation",
+    "n": 4,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790591700.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "evidence_confirmation",
+    "n": 5,
+    "outcome": "approve",
+    "standing": null,
+    "subject": "run",
+    "terminal": true
+   }
+  ],
+  "stop": {
+   "basis": "recorded",
+   "deferred": [],
+   "frozen": false,
+   "required": [
+    "C0",
+    "C1"
+   ],
+   "status": "stopped_residual"
+  },
+  "version": "sha256:568e6833ea3daae6cea4a475234ff946f028f20f8f6d4e131c5c9332c461a45c"
+ },
+ "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/2": {
+  "attempts": [
+   {
+    "ask": null,
+    "asked_at": null,
+    "attention": "ended",
+    "audit": {
+     "current": null,
+     "independence": null,
+     "pending": false,
+     "verdict": "none"
+    },
+    "claims": [
+     {
+      "assurance": "not_approved",
+      "blocker": "evidence.confirmation_required",
+      "blocker_claim": "C1",
+      "evidence": "research",
+      "gating": true,
+      "id": "C0",
+      "kind": "ordinary",
+      "review": "none",
+      "state": "open",
+      "text": "Previews look the same in every supported viewer."
+     },
+     {
+      "assurance": "not_approved",
+      "blocker": "evidence.confirmation_required",
+      "blocker_claim": "C1",
+      "evidence": "none",
+      "gating": true,
+      "id": "C1",
+      "kind": "needs-decision",
+      "review": "none",
+      "state": "blocked",
+      "text": "Display P3 is the right default for previews."
+     }
+    ],
+    "diagnostic": null,
+    "edges": [
+     {
+      "from": "C0",
+      "to": "C1"
+     }
+    ],
+    "ended": 1790591760.0,
+    "flags": {
+     "changed_since_audit": false,
+     "decided": true,
+     "failed_audit": false,
+     "refuted": false
+    },
+    "generation": 1,
+    "goal": "Choose the colour space for exported previews.",
+    "id": "3311712612ef",
+    "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/1",
+    "mode": "deliberative",
+    "next": null,
+    "previous": null,
+    "progress": {
+     "approved": 0,
+     "required": 2
+    },
+    "project": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50",
+    "root": "C0",
+    "run": "s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5",
+    "session": {
+     "delegated": false,
+     "host": "claude",
+     "interactive": true,
+     "label": null,
+     "locator": null
+    },
+    "standing": "stopped_residual",
+    "started": 1790591040.0,
+    "state": "stopped_residual",
+    "updated": 1790591760.0,
+    "version": "sha256:568e6833ea3daae6cea4a475234ff946f028f20f8f6d4e131c5c9332c461a45c"
+   },
+   {
+    "ask": null,
+    "asked_at": null,
+    "attention": "not_ended",
+    "audit": {
+     "current": true,
+     "independence": "distinct",
+     "pending": false,
+     "verdict": "failed"
+    },
+    "claims": [
+     {
+      "assurance": "audit_failed",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "research",
+      "gating": true,
+      "id": "C0",
+      "kind": "ordinary",
+      "review": "failed",
+      "state": "approved",
+      "text": "Previews look the same in every supported viewer."
+     },
+     {
+      "assurance": "audit_failed",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "spike",
+      "gating": true,
+      "id": "C1",
+      "kind": "needs-experiment",
+      "review": "failed",
+      "state": "approved",
+      "text": "Converting to sRGB keeps every swatch within tolerance."
+     }
+    ],
+    "diagnostic": null,
+    "edges": [
+     {
+      "from": "C0",
+      "to": "C1"
+     }
+    ],
+    "ended": null,
+    "flags": {
+     "changed_since_audit": false,
+     "decided": true,
+     "failed_audit": true,
+     "refuted": false
+    },
+    "generation": 2,
+    "goal": "Choose the colour space for exported previews.",
+    "id": "fbfc17260172",
+    "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/2",
+    "mode": "deliberative",
+    "next": {
+     "message": "Audit failed or its coverage went stale; address any findings listed under Audit, then retry.",
+     "where": "next_turn",
+     "who": "agent"
+    },
+    "previous": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/1",
+    "progress": {
+     "approved": 2,
+     "required": 2
+    },
+    "project": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50",
+    "root": "C0",
+    "run": "s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5",
+    "session": {
+     "delegated": false,
+     "host": "claude",
+     "interactive": true,
+     "label": null,
+     "locator": null
+    },
+    "standing": "not_ended",
+    "started": 1790591820.0,
+    "state": "active",
+    "updated": 1790592900.0,
+    "version": "sha256:8a172772e99dc0e79da6ce65de5260a92d923d8ad61ae09eed59fb14f698c007"
+   }
+  ],
+  "audit": {
+   "findings": [
+    "The tolerance test never checks the wide-gamut swatches: research artifact sha256:8db61ff4da9b90192441e9833d4306964aeb94e1bf64248638f124bca4268e21 cites tests/colour/tolerance/wide_gamut_swatches_display_p3_rec2020_regression_cases.py:3,5,16."
+   ]
+  },
+  "auditor": "anthropic/claude-opus-4-6",
+  "audits": [
+   {
+    "at": 1790592900.0,
+    "auditor": "anthropic/claude-opus-4-6",
+    "findings": [
+     "The tolerance test never checks the wide-gamut swatches: research artifact sha256:8db61ff4da9b90192441e9833d4306964aeb94e1bf64248638f124bca4268e21 cites tests/colour/tolerance/wide_gamut_swatches_display_p3_rec2020_regression_cases.py:3,5,16."
+    ],
+    "independence": "distinct",
+    "verdict": "failed"
+   }
+  ],
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "docs/viewers.md states this directly.",
+      "retrieve": true,
+      "source": "docs/viewers.md",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   },
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C1",
+    "proof": [
+     {
+      "command": "python -m pytest tests/test_colour.py",
+      "exit_code": 0,
+      "files": [
+       {
+        "path": "src/colour.py",
+        "sha256": "sha256:39e3f5bc086a21615f8f05427a6b051008b35723cfea8bba663cb141fc25de3b"
+       }
+      ],
+      "gate": "pass",
+      "outcome": "pass",
+      "output": "not_retained",
+      "state": "current"
+     }
+    ],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/colour.py states this directly.",
+      "retrieve": true,
+      "source": "src/colour.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "decisions": [
+   {
+    "answer": "approve",
+    "asked": "approve_configuration",
+    "at": 1790592180.0,
+    "claim": null,
+    "effect": "configuration_approved",
+    "plan": 1,
+    "source": null
+   }
+  ],
+  "dropped": [],
+  "goal": "Choose the colour space for exported previews.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 1
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/2",
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [],
+    "message": "Audit failed or its coverage went stale; address any findings listed under Audit, then retry.",
+    "need": "audit.failed",
+    "where": "next_turn",
+    "who": "agent"
+   }
+  ],
+  "residuals": [],
+  "row": {
+   "ask": null,
+   "asked_at": null,
+   "attention": "not_ended",
+   "audit": {
+    "current": true,
+    "independence": "distinct",
+    "pending": false,
+    "verdict": "failed"
+   },
+   "claims": [
+    {
+     "assurance": "audit_failed",
+     "blocker": null,
+     "blocker_claim": null,
+     "evidence": "research",
+     "gating": true,
+     "id": "C0",
+     "kind": "ordinary",
+     "review": "failed",
+     "state": "approved",
+     "text": "Previews look the same in every supported viewer."
+    },
+    {
+     "assurance": "audit_failed",
+     "blocker": null,
+     "blocker_claim": null,
+     "evidence": "spike",
+     "gating": true,
+     "id": "C1",
+     "kind": "needs-experiment",
+     "review": "failed",
+     "state": "approved",
+     "text": "Converting to sRGB keeps every swatch within tolerance."
+    }
+   ],
+   "diagnostic": null,
+   "edges": [
+    {
+     "from": "C0",
+     "to": "C1"
+    }
+   ],
+   "ended": null,
+   "flags": {
+    "changed_since_audit": false,
+    "decided": true,
+    "failed_audit": true,
+    "refuted": false
+   },
+   "generation": 2,
+   "goal": "Choose the colour space for exported previews.",
+   "id": "fbfc17260172",
+   "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/2",
+   "mode": "deliberative",
+   "next": {
+    "message": "Audit failed or its coverage went stale; address any findings listed under Audit, then retry.",
+    "where": "next_turn",
+    "who": "agent"
+   },
+   "previous": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/1",
+   "progress": {
+    "approved": 2,
+    "required": 2
+   },
+   "project": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50",
+   "root": "C0",
+   "run": "s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5",
+   "session": {
+    "delegated": false,
+    "host": "claude",
+    "interactive": true,
+    "label": null,
+    "locator": null
+   },
+   "standing": "not_ended",
+   "started": 1790591820.0,
+   "state": "active",
+   "updated": 1790592900.0,
+   "version": "sha256:8a172772e99dc0e79da6ce65de5260a92d923d8ad61ae09eed59fb14f698c007"
+  },
+  "stale": [],
+  "steps": [
+   {
+    "at": 1790591820.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790592000.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790592360.0,
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790592420.0,
+    "bookkeeping": false,
+    "claim": "C1",
+    "command": null,
+    "kind": "research",
+    "n": 4,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790592480.0,
+    "bookkeeping": false,
+    "claim": "C1",
+    "command": "python -m pytest tests/test_colour.py",
+    "kind": "spike_request",
+    "n": 5,
+    "outcome": null,
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790592540.0,
+    "bookkeeping": false,
+    "claim": "C1",
+    "command": "python -m pytest tests/test_colour.py",
+    "kind": "spike",
+    "n": 6,
+    "outcome": "pass",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790592540.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 7,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790592600.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 8,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790592840.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "attribution",
+    "n": 9,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790592900.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "audit_verdict",
+    "n": 10,
+    "outcome": "fail",
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   }
+  ],
+  "stop": null,
+  "version": "sha256:8a172772e99dc0e79da6ce65de5260a92d923d8ad61ae09eed59fb14f698c007"
+ },
+ "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-2fac41cee6a25f7f4d80295af5875e8d79f37d9ebe255735397d5e6cb48971ab/1": {
+  "attempts": [
+   {
+    "ask": "confirm_source",
+    "asked_at": 1790596440.0,
+    "attention": "needs_you",
+    "audit": {
+     "current": null,
+     "independence": null,
+     "pending": false,
+     "verdict": "none"
+    },
+    "claims": [
+     {
+      "assurance": "not_approved",
+      "blocker": "claim.research_missing",
+      "blocker_claim": "C0",
+      "evidence": "none",
+      "gating": true,
+      "id": "C0",
+      "kind": "ordinary",
+      "review": "none",
+      "state": "open",
+      "text": "The cache key is stable."
+     },
+     {
+      "assurance": "not_approved",
+      "blocker": "evidence.confirmation_required",
+      "blocker_claim": "C1",
+      "evidence": "research",
+      "gating": true,
+      "id": "C1",
+      "kind": "ordinary",
+      "review": "none",
+      "state": "open",
+      "text": "The provider allows the key size."
+     }
+    ],
+    "diagnostic": null,
+    "edges": [
+     {
+      "from": "C0",
+      "to": "C1"
+     }
+    ],
+    "ended": null,
+    "flags": {
+     "changed_since_audit": false,
+     "decided": true,
+     "failed_audit": false,
+     "refuted": false
+    },
+    "generation": 1,
+    "goal": "Check the cache key and its provider limits.",
+    "id": "6dcdc8c0a41f",
+    "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-2fac41cee6a25f7f4d80295af5875e8d79f37d9ebe255735397d5e6cb48971ab/1",
+    "mode": "deliberative",
+    "next": {
+     "message": "Waiting for a human to confirm research or answer a decision.",
+     "where": "next_report",
+     "who": "human"
+    },
+    "previous": null,
+    "progress": {
+     "approved": 0,
+     "required": 2
+    },
+    "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
+    "root": "C0",
+    "run": "s256-2fac41cee6a25f7f4d80295af5875e8d79f37d9ebe255735397d5e6cb48971ab",
+    "session": {
+     "delegated": false,
+     "host": "pi",
+     "interactive": true,
+     "label": null,
+     "locator": null
+    },
+    "standing": "needs_human",
+    "started": 1790595900.0,
+    "state": "active",
+    "updated": 1790596440.0,
+    "version": "sha256:7ae5fdf67d16e9c0592406656165124947b4d694ebef4473bccd50b290da3164"
+   }
+  ],
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "audits": [],
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": "Record research for claim C0.",
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [],
+    "research": 0
+   },
+   {
+    "blocker_message": "Waiting for a human to confirm research or answer a decision.",
+    "decision": null,
+    "id": "C1",
+    "proof": [],
+    "records": [
+     {
+      "class": "retrievable",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "keys up to 512 bytes are allowed",
+      "retrieve": false,
+      "source": "https://provider.example.net/keys",
+      "source_kind": "web",
+      "spike_unavailable": null,
+      "status": "pending",
+      "wait": {
+       "where": "next_report",
+       "who": "human"
+      }
+     }
+    ],
+    "research": 1
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "decisions": [
+   {
+    "answer": "approve",
+    "asked": "approve_configuration",
+    "at": 1790596260.0,
+    "claim": null,
+    "effect": "configuration_approved",
+    "plan": 1,
+    "source": null
+   }
+  ],
+  "dropped": [],
+  "goal": "Check the cache key and its provider limits.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-2fac41cee6a25f7f4d80295af5875e8d79f37d9ebe255735397d5e6cb48971ab/1",
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [
+     "C0"
+    ],
+    "message": "Record research for claim C0.",
+    "need": "claim.research_missing",
+    "where": "next_turn",
+    "who": "agent"
+   },
+   {
+    "claims": [
+     "C1"
+    ],
+    "message": "Waiting for a human to confirm research or answer a decision.",
+    "need": "evidence.confirmation_required",
+    "where": "next_report",
+    "who": "human"
+   },
+   {
+    "claims": [],
+    "message": "Audit is owed; spawn an independent auditor.",
+    "need": "audit.required",
+    "where": "later",
+    "who": "agent"
+   }
+  ],
+  "residuals": [],
+  "row": {
+   "ask": "confirm_source",
+   "asked_at": 1790596440.0,
+   "attention": "needs_you",
+   "audit": {
+    "current": null,
+    "independence": null,
+    "pending": false,
+    "verdict": "none"
+   },
+   "claims": [
+    {
+     "assurance": "not_approved",
+     "blocker": "claim.research_missing",
+     "blocker_claim": "C0",
+     "evidence": "none",
+     "gating": true,
+     "id": "C0",
+     "kind": "ordinary",
+     "review": "none",
+     "state": "open",
+     "text": "The cache key is stable."
+    },
+    {
+     "assurance": "not_approved",
+     "blocker": "evidence.confirmation_required",
+     "blocker_claim": "C1",
+     "evidence": "research",
+     "gating": true,
+     "id": "C1",
+     "kind": "ordinary",
+     "review": "none",
+     "state": "open",
+     "text": "The provider allows the key size."
+    }
+   ],
+   "diagnostic": null,
+   "edges": [
+    {
+     "from": "C0",
+     "to": "C1"
+    }
+   ],
+   "ended": null,
+   "flags": {
+    "changed_since_audit": false,
+    "decided": true,
+    "failed_audit": false,
+    "refuted": false
+   },
+   "generation": 1,
+   "goal": "Check the cache key and its provider limits.",
+   "id": "6dcdc8c0a41f",
+   "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-2fac41cee6a25f7f4d80295af5875e8d79f37d9ebe255735397d5e6cb48971ab/1",
+   "mode": "deliberative",
+   "next": {
+    "message": "Waiting for a human to confirm research or answer a decision.",
+    "where": "next_report",
+    "who": "human"
+   },
+   "previous": null,
+   "progress": {
+    "approved": 0,
+    "required": 2
+   },
+   "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
+   "root": "C0",
+   "run": "s256-2fac41cee6a25f7f4d80295af5875e8d79f37d9ebe255735397d5e6cb48971ab",
+   "session": {
+    "delegated": false,
+    "host": "pi",
+    "interactive": true,
+    "label": null,
+    "locator": null
+   },
+   "standing": "needs_human",
+   "started": 1790595900.0,
+   "state": "active",
+   "updated": 1790596440.0,
+   "version": "sha256:7ae5fdf67d16e9c0592406656165124947b4d694ebef4473bccd50b290da3164"
+  },
+  "stale": [],
+  "steps": [
+   {
+    "at": 1790595900.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790596080.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790596440.0,
+    "bookkeeping": false,
+    "claim": "C1",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   }
+  ],
+  "stop": null,
+  "version": "sha256:7ae5fdf67d16e9c0592406656165124947b4d694ebef4473bccd50b290da3164"
+ },
+ "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e/1": {
+  "attempts": [
+   {
+    "ask": null,
+    "asked_at": null,
+    "attention": "ended",
+    "audit": {
+     "current": null,
+     "independence": null,
+     "pending": false,
+     "verdict": "none"
+    },
+    "claims": [
+     {
+      "assurance": "not_approved",
+      "blocker": "claim.research_missing",
+      "blocker_claim": "C0",
+      "evidence": "none",
+      "gating": true,
+      "id": "C0",
+      "kind": "ordinary",
+      "review": "none",
+      "state": "open",
+      "text": "No reader depends on the old tile format."
+     },
+     {
+      "assurance": "not_approved",
+      "blocker": "claim.refuted",
+      "blocker_claim": "C1",
+      "evidence": "research",
+      "gating": true,
+      "id": "C1",
+      "kind": "ordinary",
+      "review": "none",
+      "state": "discarded",
+      "text": "The export job writes only the current format."
+     },
+     {
+      "assurance": "not_approved",
+      "blocker": "claim.research_missing",
+      "blocker_claim": "C2",
+      "evidence": "none",
+      "gating": true,
+      "id": "C2",
+      "kind": "ordinary",
+      "review": "none",
+      "state": "open",
+      "text": "Users were told the old format is going away."
+     }
+    ],
+    "diagnostic": null,
+    "edges": [
+     {
+      "from": "C0",
+      "to": "C1"
+     },
+     {
+      "from": "C0",
+      "to": "C2"
+     }
+    ],
+    "ended": 1790587980.0,
+    "flags": {
+     "changed_since_audit": false,
+     "decided": true,
+     "failed_audit": false,
+     "refuted": true
+    },
+    "generation": 1,
+    "goal": "Drop the old tile format.",
+    "id": "cdb0ec84ca85",
+    "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e/1",
+    "mode": "deliberative",
+    "next": null,
+    "previous": null,
+    "progress": {
+     "approved": 0,
+     "required": 3
+    },
+    "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
+    "root": "C0",
+    "run": "s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e",
+    "session": {
+     "delegated": false,
+     "host": "claude",
+     "interactive": true,
+     "label": null,
+     "locator": null
+    },
+    "standing": "stopped_residual",
+    "started": 1790587260.0,
+    "state": "stopped_residual",
+    "updated": 1790587980.0,
+    "version": "sha256:53c262630b8778e71dbe3315272e768f5d9daa3fb643826848025a0fe76a7aec"
+   }
+  ],
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "audits": [],
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": "No research was recorded for claim C0 before the run stopped.",
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [],
+    "research": 0
+   },
+   {
+    "blocker_message": "Active evidence refuted claim C1; it still blocked this scope when the run stopped.",
+    "decision": null,
+    "id": "C1",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "refuting",
+      "quote": "jobs/export.py states this directly.",
+      "retrieve": true,
+      "source": "jobs/export.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 0
+   },
+   {
+    "blocker_message": "No research was recorded for claim C2 before the run stopped.",
+    "decision": null,
+    "id": "C2",
+    "proof": [],
+    "records": [],
+    "research": 0
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "decisions": [
+   {
+    "answer": "approve",
+    "asked": "approve_configuration",
+    "at": 1790587620.0,
+    "claim": null,
+    "effect": "configuration_approved",
+    "plan": 1,
+    "source": null
+   },
+   {
+    "answer": "approve",
+    "asked": "consent_stop",
+    "at": 1790587920.0,
+    "claim": null,
+    "effect": "run_ended",
+    "plan": null,
+    "source": null
+   }
+  ],
+  "dropped": [
+   {
+    "at": 1790587800.0,
+    "citation": "jobs/export.py states this directly.",
+    "claim": "C1",
+    "command": null,
+    "kind": "ordinary",
+    "removed": false,
+    "source": "jobs/export.py",
+    "text": "The export job writes only the current format.",
+    "why": "refuted"
+   }
+  ],
+  "goal": "Drop the old tile format.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 126,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e/1",
+  "now": null,
+  "outstanding": [],
+  "residuals": [
+   {
+    "claims": [
+     "C0"
+    ],
+    "code": "claim.research_missing",
+    "message": "No research was recorded for claim C0 before the run stopped."
+   },
+   {
+    "claims": [
+     "C1"
+    ],
+    "code": "claim.refuted",
+    "message": "Active evidence refuted claim C1; it still blocked this scope when the run stopped."
+   },
+   {
+    "claims": [
+     "C2"
+    ],
+    "code": "claim.research_missing",
+    "message": "No research was recorded for claim C2 before the run stopped."
+   }
+  ],
+  "row": {
+   "ask": null,
+   "asked_at": null,
+   "attention": "ended",
+   "audit": {
+    "current": null,
+    "independence": null,
+    "pending": false,
+    "verdict": "none"
+   },
+   "claims": [
+    {
+     "assurance": "not_approved",
+     "blocker": "claim.research_missing",
+     "blocker_claim": "C0",
+     "evidence": "none",
+     "gating": true,
+     "id": "C0",
+     "kind": "ordinary",
+     "review": "none",
+     "state": "open",
+     "text": "No reader depends on the old tile format."
+    },
+    {
+     "assurance": "not_approved",
+     "blocker": "claim.refuted",
+     "blocker_claim": "C1",
+     "evidence": "research",
+     "gating": true,
+     "id": "C1",
+     "kind": "ordinary",
+     "review": "none",
+     "state": "discarded",
+     "text": "The export job writes only the current format."
+    },
+    {
+     "assurance": "not_approved",
+     "blocker": "claim.research_missing",
+     "blocker_claim": "C2",
+     "evidence": "none",
+     "gating": true,
+     "id": "C2",
+     "kind": "ordinary",
+     "review": "none",
+     "state": "open",
+     "text": "Users were told the old format is going away."
+    }
+   ],
+   "diagnostic": null,
+   "edges": [
+    {
+     "from": "C0",
+     "to": "C1"
+    },
+    {
+     "from": "C0",
+     "to": "C2"
+    }
+   ],
+   "ended": 1790587980.0,
+   "flags": {
+    "changed_since_audit": false,
+    "decided": true,
+    "failed_audit": false,
+    "refuted": true
+   },
+   "generation": 1,
+   "goal": "Drop the old tile format.",
+   "id": "cdb0ec84ca85",
+   "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e/1",
+   "mode": "deliberative",
+   "next": null,
+   "previous": null,
+   "progress": {
+    "approved": 0,
+    "required": 3
+   },
+   "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
+   "root": "C0",
+   "run": "s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e",
+   "session": {
+    "delegated": false,
+    "host": "claude",
+    "interactive": true,
+    "label": null,
+    "locator": null
+   },
+   "standing": "stopped_residual",
+   "started": 1790587260.0,
+   "state": "stopped_residual",
+   "updated": 1790587980.0,
+   "version": "sha256:53c262630b8778e71dbe3315272e768f5d9daa3fb643826848025a0fe76a7aec"
+  },
+  "stale": [],
+  "steps": [
+   {
+    "at": 1790587260.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790587440.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790587800.0,
+    "bookkeeping": false,
+    "claim": "C1",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "refuting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790587860.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "evidence_presentation",
+    "n": 4,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790587920.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "evidence_confirmation",
+    "n": 5,
+    "outcome": "approve",
+    "standing": null,
+    "subject": "run",
+    "terminal": true
+   }
+  ],
+  "stop": {
+   "basis": "recorded",
+   "deferred": [],
+   "frozen": false,
+   "required": [
+    "C0",
+    "C1",
+    "C2"
+   ],
+   "status": "stopped_residual"
+  },
+  "version": "sha256:53c262630b8778e71dbe3315272e768f5d9daa3fb643826848025a0fe76a7aec"
+ },
+ "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9/1": {
+  "attempts": [
+   {
+    "ask": null,
+    "asked_at": null,
+    "attention": "ended",
+    "audit": {
+     "current": true,
+     "independence": "distinct",
+     "pending": false,
+     "verdict": "passed"
+    },
+    "claims": [
+     {
+      "assurance": "assured",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "research",
+      "gating": true,
+      "id": "C0",
+      "kind": "ordinary",
+      "review": "passed",
+      "state": "approved",
+      "text": "A cold start reads the tile index from one cache file."
+     },
+     {
+      "assurance": "assured",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "spike",
+      "gating": true,
+      "id": "C1",
+      "kind": "needs-experiment",
+      "review": "passed",
+      "state": "approved",
+      "text": "The cache file round-trips every tile entry."
+     },
+     {
+      "assurance": "assured",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "research",
+      "gating": true,
+      "id": "C2",
+      "kind": "ordinary",
+      "review": "passed",
+      "state": "approved",
+      "text": "The loader already isolates index parsing in one function."
+     }
+    ],
+    "diagnostic": null,
+    "edges": [
+     {
+      "from": "C0",
+      "to": "C1"
+     },
+     {
+      "from": "C0",
+      "to": "C2"
+     }
+    ],
+    "ended": 1790587200.0,
+    "flags": {
+     "changed_since_audit": false,
+     "decided": true,
+     "failed_audit": false,
+     "refuted": false
+    },
+    "generation": 1,
+    "goal": "Cache the tile index so a cold start reads one file.",
+    "id": "e9d2410d9652",
+    "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9/1",
+    "mode": "deliberative",
+    "next": null,
+    "previous": null,
+    "progress": {
+     "approved": 3,
+     "required": 3
+    },
+    "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
+    "root": "C0",
+    "run": "s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9",
+    "session": {
+     "delegated": false,
+     "host": "pi",
+     "interactive": true,
+     "label": null,
+     "locator": null
+    },
+    "standing": "proven",
+    "started": 1790586000.0,
+    "state": "converged",
+    "updated": 1790587200.0,
+    "version": "sha256:5ca1238eb42aee3999ed18c6f7b56225b5c287c1e3052121180bc6c99c12ecd5"
+   }
+  ],
+  "audit": {
+   "findings": []
+  },
+  "auditor": "anthropic/claude-opus-4-6",
+  "audits": [
+   {
+    "at": 1790587140.0,
+    "auditor": "anthropic/claude-opus-4-6",
+    "findings": [
+     "The round-trip spike covers every entry kind."
+    ],
+    "independence": "distinct",
+    "verdict": "passed"
+   }
+  ],
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/loader.py states this directly.",
+      "retrieve": true,
+      "source": "src/loader.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   },
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C1",
+    "proof": [
+     {
+      "command": "python -m pytest tests/test_cache.py",
+      "exit_code": 0,
+      "files": [
+       {
+        "path": "src/cache.py",
+        "sha256": "sha256:dd0d562a7494b2d8456203ed7fbd11d2d6181377197cd7d0858617eb7412e644"
+       }
+      ],
+      "gate": "pass",
+      "outcome": "pass",
+      "output": "not_retained",
+      "state": "current"
+     }
+    ],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/cache.py states this directly.",
+      "retrieve": true,
+      "source": "src/cache.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   },
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C2",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/loader.py states this directly.",
+      "retrieve": true,
+      "source": "src/loader.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "decisions": [
+   {
+    "answer": "approve",
+    "asked": "approve_configuration",
+    "at": 1790586360.0,
+    "claim": null,
+    "effect": "configuration_approved",
+    "plan": 1,
+    "source": null
+   }
+  ],
+  "dropped": [],
+  "goal": "Cache the tile index so a cold start reads one file.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 1
+    },
+    "passes": {
+     "max": 8,
+     "used": 1
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9/1",
+  "now": null,
+  "outstanding": [],
+  "residuals": [],
+  "row": {
+   "ask": null,
+   "asked_at": null,
+   "attention": "ended",
+   "audit": {
+    "current": true,
+    "independence": "distinct",
+    "pending": false,
+    "verdict": "passed"
+   },
+   "claims": [
+    {
+     "assurance": "assured",
+     "blocker": null,
+     "blocker_claim": null,
+     "evidence": "research",
+     "gating": true,
+     "id": "C0",
+     "kind": "ordinary",
+     "review": "passed",
+     "state": "approved",
+     "text": "A cold start reads the tile index from one cache file."
+    },
+    {
+     "assurance": "assured",
+     "blocker": null,
+     "blocker_claim": null,
+     "evidence": "spike",
+     "gating": true,
+     "id": "C1",
+     "kind": "needs-experiment",
+     "review": "passed",
+     "state": "approved",
+     "text": "The cache file round-trips every tile entry."
+    },
+    {
+     "assurance": "assured",
+     "blocker": null,
+     "blocker_claim": null,
+     "evidence": "research",
+     "gating": true,
+     "id": "C2",
+     "kind": "ordinary",
+     "review": "passed",
+     "state": "approved",
+     "text": "The loader already isolates index parsing in one function."
+    }
+   ],
+   "diagnostic": null,
+   "edges": [
+    {
+     "from": "C0",
+     "to": "C1"
+    },
+    {
+     "from": "C0",
+     "to": "C2"
+    }
+   ],
+   "ended": 1790587200.0,
+   "flags": {
+    "changed_since_audit": false,
+    "decided": true,
+    "failed_audit": false,
+    "refuted": false
+   },
+   "generation": 1,
+   "goal": "Cache the tile index so a cold start reads one file.",
+   "id": "e9d2410d9652",
+   "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9/1",
+   "mode": "deliberative",
+   "next": null,
+   "previous": null,
+   "progress": {
+    "approved": 3,
+    "required": 3
+   },
+   "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
+   "root": "C0",
+   "run": "s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9",
+   "session": {
+    "delegated": false,
+    "host": "pi",
+    "interactive": true,
+    "label": null,
+    "locator": null
+   },
+   "standing": "proven",
+   "started": 1790586000.0,
+   "state": "converged",
+   "updated": 1790587200.0,
+   "version": "sha256:5ca1238eb42aee3999ed18c6f7b56225b5c287c1e3052121180bc6c99c12ecd5"
+  },
+  "stale": [],
+  "steps": [
+   {
+    "at": 1790586000.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790586180.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790586540.0,
+    "bookkeeping": false,
+    "claim": "C2",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790586600.0,
+    "bookkeeping": false,
+    "claim": "C1",
+    "command": null,
+    "kind": "research",
+    "n": 4,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790586660.0,
+    "bookkeeping": false,
+    "claim": "C1",
+    "command": "python -m pytest tests/test_cache.py",
+    "kind": "spike_request",
+    "n": 5,
+    "outcome": null,
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790586720.0,
+    "bookkeeping": false,
+    "claim": "C1",
+    "command": "python -m pytest tests/test_cache.py",
+    "kind": "spike",
+    "n": 6,
+    "outcome": "pass",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790586720.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 7,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790586780.0,
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 8,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790586780.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 9,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790587080.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "attribution",
+    "n": 10,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790587140.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "audit_verdict",
+    "n": 11,
+    "outcome": "pass",
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   }
+  ],
+  "stop": {
+   "basis": "recorded",
+   "deferred": [],
+   "frozen": true,
+   "required": [
+    "C0",
+    "C1",
+    "C2"
+   ],
+   "status": "converged"
+  },
+  "version": "sha256:5ca1238eb42aee3999ed18c6f7b56225b5c287c1e3052121180bc6c99c12ecd5"
+ },
+ "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-a3ef3cd93353dc90ddc8b6c621c9599f34b705b4b0df356f4c4104f3573e212f/1": {
+  "attempts": [
+   {
+    "ask": null,
+    "asked_at": null,
+    "attention": "not_ended",
+    "audit": {
+     "current": true,
+     "independence": null,
+     "pending": true,
+     "verdict": "passed"
+    },
+    "claims": [
+     {
+      "assurance": "awaiting_audit",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "research",
+      "gating": true,
+      "id": "C0",
+      "kind": "ordinary",
+      "review": "passed",
+      "state": "approved",
+      "text": "The writer emits one index per zoom level."
+     },
+     {
+      "assurance": "awaiting_audit",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "research",
+      "gating": true,
+      "id": "C1",
+      "kind": "ordinary",
+      "review": "passed",
+      "state": "approved",
+      "text": "The writer already groups tiles by level."
+     }
+    ],
+    "diagnostic": null,
+    "edges": [
+     {
+      "from": "C0",
+      "to": "C1"
+     }
+    ],
+    "ended": null,
+    "flags": {
+     "changed_since_audit": false,
+     "decided": true,
+     "failed_audit": false,
+     "refuted": false
+    },
+    "generation": 1,
+    "goal": "Index tiles by zoom level on write.",
+    "id": "4bf0bcdffdf1",
+    "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-a3ef3cd93353dc90ddc8b6c621c9599f34b705b4b0df356f4c4104f3573e212f/1",
+    "mode": "deliberative",
+    "next": {
+     "message": "Audit child is pending; wait.",
+     "where": "in_progress",
+     "who": "auditor"
+    },
+    "previous": null,
+    "progress": {
+     "approved": 2,
+     "required": 2
+    },
+    "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
+    "root": "C0",
+    "run": "s256-a3ef3cd93353dc90ddc8b6c621c9599f34b705b4b0df356f4c4104f3573e212f",
+    "session": {
+     "delegated": false,
+     "host": "pi",
+     "interactive": true,
+     "label": "index writer",
+     "locator": "/home/dev/.pi/sessions/atlas-writer.jsonl"
+    },
+    "standing": "audit_pending",
+    "started": 1790594100.0,
+    "state": "active",
+    "updated": 1790595180.0,
+    "version": "sha256:ef77ccf3dd75b165e6427fe6e7c32b6920e645e06b63f45096b09cd7dd4cbf1a"
+   }
+  ],
+  "audit": {
+   "findings": []
+  },
+  "auditor": "anthropic/claude-opus-4-6",
+  "audits": [
+   {
+    "at": 1790595000.0,
+    "auditor": "anthropic/claude-opus-4-6",
+    "findings": [
+     "Every approved claim is cited."
+    ],
+    "independence": "distinct",
+    "verdict": "passed"
+   }
+  ],
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/writer2.py states this directly.",
+      "retrieve": true,
+      "source": "src/writer2.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   },
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C1",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/group.py states this directly.",
+      "retrieve": true,
+      "source": "src/group.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "decisions": [
+   {
+    "answer": "approve",
+    "asked": "approve_configuration",
+    "at": 1790594460.0,
+    "claim": null,
+    "effect": "configuration_approved",
+    "plan": 1,
+    "source": null
+   }
+  ],
+  "dropped": [],
+  "goal": "Index tiles by zoom level on write.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 2
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-a3ef3cd93353dc90ddc8b6c621c9599f34b705b4b0df356f4c4104f3573e212f/1",
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [],
+    "message": "Audit child is pending; wait.",
+    "need": "audit.pending",
+    "where": "in_progress",
+    "who": "auditor"
+   }
+  ],
+  "residuals": [],
+  "row": {
+   "ask": null,
+   "asked_at": null,
+   "attention": "not_ended",
+   "audit": {
+    "current": true,
+    "independence": null,
+    "pending": true,
+    "verdict": "passed"
+   },
+   "claims": [
+    {
+     "assurance": "awaiting_audit",
+     "blocker": null,
+     "blocker_claim": null,
+     "evidence": "research",
+     "gating": true,
+     "id": "C0",
+     "kind": "ordinary",
+     "review": "passed",
+     "state": "approved",
+     "text": "The writer emits one index per zoom level."
+    },
+    {
+     "assurance": "awaiting_audit",
+     "blocker": null,
+     "blocker_claim": null,
+     "evidence": "research",
+     "gating": true,
+     "id": "C1",
+     "kind": "ordinary",
+     "review": "passed",
+     "state": "approved",
+     "text": "The writer already groups tiles by level."
+    }
+   ],
+   "diagnostic": null,
+   "edges": [
+    {
+     "from": "C0",
+     "to": "C1"
+    }
+   ],
+   "ended": null,
+   "flags": {
+    "changed_since_audit": false,
+    "decided": true,
+    "failed_audit": false,
+    "refuted": false
+   },
+   "generation": 1,
+   "goal": "Index tiles by zoom level on write.",
+   "id": "4bf0bcdffdf1",
+   "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-a3ef3cd93353dc90ddc8b6c621c9599f34b705b4b0df356f4c4104f3573e212f/1",
+   "mode": "deliberative",
+   "next": {
+    "message": "Audit child is pending; wait.",
+    "where": "in_progress",
+    "who": "auditor"
+   },
+   "previous": null,
+   "progress": {
+    "approved": 2,
+    "required": 2
+   },
+   "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
+   "root": "C0",
+   "run": "s256-a3ef3cd93353dc90ddc8b6c621c9599f34b705b4b0df356f4c4104f3573e212f",
+   "session": {
+    "delegated": false,
+    "host": "pi",
+    "interactive": true,
+    "label": "index writer",
+    "locator": "/home/dev/.pi/sessions/atlas-writer.jsonl"
+   },
+   "standing": "audit_pending",
+   "started": 1790594100.0,
+   "state": "active",
+   "updated": 1790595180.0,
+   "version": "sha256:ef77ccf3dd75b165e6427fe6e7c32b6920e645e06b63f45096b09cd7dd4cbf1a"
+  },
+  "stale": [],
+  "steps": [
+   {
+    "at": 1790594100.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790594280.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790594640.0,
+    "bookkeeping": false,
+    "claim": "C1",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790594700.0,
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 4,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790594940.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "attribution",
+    "n": 5,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790595000.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "audit_verdict",
+    "n": 6,
+    "outcome": "pass",
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   }
+  ],
+  "stop": null,
+  "version": "sha256:ef77ccf3dd75b165e6427fe6e7c32b6920e645e06b63f45096b09cd7dd4cbf1a"
+ },
+ "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211/1": {
+  "attempts": [
+   {
+    "ask": "decide_claim",
+    "asked_at": 1790593140.0,
+    "attention": "needs_you",
+    "audit": {
+     "current": null,
+     "independence": null,
+     "pending": false,
+     "verdict": "none"
+    },
+    "claims": [
+     {
+      "assurance": "not_approved",
+      "blocker": "evidence.confirmation_required",
+      "blocker_claim": "C5",
+      "evidence": "research",
+      "gating": true,
+      "id": "C0",
+      "kind": "ordinary",
+      "review": "none",
+      "state": "open",
+      "text": "The export reads every tile through one documented path."
+     },
+     {
+      "assurance": "awaiting_audit",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "research",
+      "gating": true,
+      "id": "C1",
+      "kind": "ordinary",
+      "review": "none",
+      "state": "approved",
+      "text": "The export guide names that path."
+     },
+     {
+      "assurance": "awaiting_audit",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "research",
+      "gating": true,
+      "id": "C2",
+      "kind": "ordinary",
+      "review": "none",
+      "state": "approved",
+      "text": "The vendor specification requires that path."
+     },
+     {
+      "assurance": "awaiting_audit",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "research",
+      "gating": true,
+      "id": "C3",
+      "kind": "ordinary",
+      "review": "none",
+      "state": "approved",
+      "text": "The published tile format allows only that path."
+     },
+     {
+      "assurance": "awaiting_audit",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "research",
+      "gating": true,
+      "id": "C4",
+      "kind": "ordinary",
+      "review": "none",
+      "state": "approved",
+      "text": "The nightly export log shows every tile read through it."
+     },
+     {
+      "assurance": "not_approved",
+      "blocker": "evidence.confirmation_required",
+      "blocker_claim": "C5",
+      "evidence": "research",
+      "gating": true,
+      "id": "C5",
+      "kind": "ordinary",
+      "review": "none",
+      "state": "open",
+      "text": "The hosting provider's limits allow that path."
+     },
+     {
+      "assurance": "not_approved",
+      "blocker": "evidence.confirmation_required",
+      "blocker_claim": "C6",
+      "evidence": "research",
+      "gating": true,
+      "id": "C6",
+      "kind": "ordinary",
+      "review": "none",
+      "state": "open",
+      "text": "Last week's run reads no tile any other way."
+     },
+     {
+      "assurance": "not_approved",
+      "blocker": "evidence.confirmation_required",
+      "blocker_claim": "C7",
+      "evidence": "none",
+      "gating": true,
+      "id": "C7",
+      "kind": "needs-decision",
+      "review": "none",
+      "state": "blocked",
+      "text": "Keep the old reader for one more release."
+     }
+    ],
+    "diagnostic": null,
+    "edges": [
+     {
+      "from": "C0",
+      "to": "C1"
+     },
+     {
+      "from": "C0",
+      "to": "C2"
+     },
+     {
+      "from": "C0",
+      "to": "C3"
+     },
+     {
+      "from": "C0",
+      "to": "C4"
+     },
+     {
+      "from": "C0",
+      "to": "C5"
+     },
+     {
+      "from": "C0",
+      "to": "C6"
+     },
+     {
+      "from": "C0",
+      "to": "C7"
+     }
+    ],
+    "ended": null,
+    "flags": {
+     "changed_since_audit": false,
+     "decided": true,
+     "failed_audit": false,
+     "refuted": false
+    },
+    "generation": 1,
+    "goal": "Document the tile export path.",
+    "id": "9c23b865daaa",
+    "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211/1",
+    "mode": "deliberative",
+    "next": {
+     "message": "Waiting for a human to confirm research or answer a decision.",
+     "where": "next_report",
+     "who": "human"
+    },
+    "previous": null,
+    "progress": {
+     "approved": 4,
+     "required": 8
+    },
+    "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
+    "root": "C0",
+    "run": "s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211",
+    "session": {
+     "delegated": false,
+     "host": "claude",
+     "interactive": true,
+     "label": "atlas docs session",
+     "locator": "/home/dev/.claude/projects/atlas/6f2c1a.jsonl"
+    },
+    "standing": "needs_human",
+    "started": 1790592960.0,
+    "state": "active",
+    "updated": 1790594040.0,
+    "version": "sha256:31e3f962923d3679d96c18b90d5a5a7c5612d72427db330f4beabc7fad2a4cf0"
+   }
+  ],
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "audits": [],
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": "Waiting for a human to confirm research or answer a decision.",
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "docs/index.md states this directly.",
+      "retrieve": true,
+      "source": "docs/index.md",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   },
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C1",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "docs/export.md states this directly.",
+      "retrieve": true,
+      "source": "docs/export.md",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   },
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C2",
+    "proof": [],
+    "records": [
+     {
+      "class": "retrievable",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "every tile is read through the index",
+      "retrieve": true,
+      "source": "/opt/vendor/tiles/SPEC.md",
+      "source_kind": "docs",
+      "spike_unavailable": null,
+      "status": "pending",
+      "wait": {
+       "where": "next_turn",
+       "who": "auditor"
+      }
+     }
+    ],
+    "research": 1
+   },
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C3",
+    "proof": [],
+    "records": [
+     {
+      "class": "retrievable",
+      "note": "Checked the format page myself.",
+      "outcome": "supporting",
+      "quote": "readers must use the index",
+      "retrieve": false,
+      "source": "https://tiles.example.org/format#export",
+      "source_kind": "web",
+      "spike_unavailable": null,
+      "status": "confirmed_by_human",
+      "wait": null
+     }
+    ],
+    "research": 1
+   },
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C4",
+    "proof": [],
+    "records": [
+     {
+      "class": "observed",
+      "note": "That log is from a different job.",
+      "outcome": "supporting",
+      "quote": "tile reads: 0 outside the index",
+      "retrieve": false,
+      "source": "nightly export log, 2026-09-27",
+      "source_kind": "runtime",
+      "spike_unavailable": "The job only runs on the nightly cluster.",
+      "status": "rejected_by_human",
+      "wait": null
+     },
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "docs/export-log.md states this directly.",
+      "retrieve": true,
+      "source": "docs/export-log.md",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   },
+   {
+    "blocker_message": "Waiting for a human to confirm research or answer a decision.",
+    "decision": null,
+    "id": "C5",
+    "proof": [],
+    "records": [
+     {
+      "class": "retrievable",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "direct tile reads are not available",
+      "retrieve": false,
+      "source": "https://provider.example.net/limits",
+      "source_kind": "web",
+      "spike_unavailable": null,
+      "status": "pending",
+      "wait": {
+       "where": "next_report",
+       "who": "human"
+      }
+     }
+    ],
+    "research": 1
+   },
+   {
+    "blocker_message": "Waiting for a human to confirm research or answer a decision.",
+    "decision": null,
+    "id": "C6",
+    "proof": [],
+    "records": [
+     {
+      "class": "observed",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "no reads outside the index",
+      "retrieve": false,
+      "source": "export log, 2026-09-21",
+      "source_kind": "runtime",
+      "spike_unavailable": "The run is over and its inputs are gone.",
+      "status": "pending",
+      "wait": {
+       "where": "next_report",
+       "who": "human"
+      }
+     }
+    ],
+    "research": 1
+   },
+   {
+    "blocker_message": "Waiting for a human to confirm research or answer a decision.",
+    "decision": {
+     "answer": null,
+     "outcome": null,
+     "status": "waiting",
+     "where": "next_report"
+    },
+    "id": "C7",
+    "proof": [],
+    "records": [],
+    "research": 0
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "decisions": [
+   {
+    "answer": "approve",
+    "asked": "approve_configuration",
+    "at": 1790593320.0,
+    "claim": null,
+    "effect": "configuration_approved",
+    "plan": 1,
+    "source": null
+   },
+   {
+    "answer": "later",
+    "asked": "decide_claim",
+    "at": 1790593920.0,
+    "claim": "C7",
+    "effect": "none",
+    "plan": null,
+    "source": null
+   },
+   {
+    "answer": "later",
+    "asked": "confirm_source",
+    "at": 1790593920.0,
+    "claim": "C5",
+    "effect": "none",
+    "plan": null,
+    "source": "https://provider.example.net/limits"
+   },
+   {
+    "answer": "later",
+    "asked": "confirm_source",
+    "at": 1790593920.0,
+    "claim": "C6",
+    "effect": "none",
+    "plan": null,
+    "source": "export log, 2026-09-21"
+   },
+   {
+    "answer": "approve",
+    "asked": "confirm_source",
+    "at": 1790593980.0,
+    "claim": "C3",
+    "effect": "record_confirmed",
+    "plan": null,
+    "source": "https://tiles.example.org/format#export"
+   },
+   {
+    "answer": "reject",
+    "asked": "confirm_source",
+    "at": 1790593980.0,
+    "claim": "C4",
+    "effect": "record_rejected",
+    "plan": null,
+    "source": "nightly export log, 2026-09-27"
+   }
+  ],
+  "dropped": [],
+  "goal": "Document the tile export path.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 126,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211/1",
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [
+     "C5",
+     "C6",
+     "C7"
+    ],
+    "message": "Waiting for a human to confirm research or answer a decision.",
+    "need": "evidence.confirmation_required",
+    "where": "next_report",
+    "who": "human"
+   },
+   {
+    "claims": [],
+    "message": "Audit is owed; spawn an independent auditor.",
+    "need": "audit.required",
+    "where": "later",
+    "who": "agent"
+   }
+  ],
+  "residuals": [],
+  "row": {
+   "ask": "decide_claim",
+   "asked_at": 1790593140.0,
+   "attention": "needs_you",
+   "audit": {
+    "current": null,
+    "independence": null,
+    "pending": false,
+    "verdict": "none"
+   },
+   "claims": [
+    {
+     "assurance": "not_approved",
+     "blocker": "evidence.confirmation_required",
+     "blocker_claim": "C5",
+     "evidence": "research",
+     "gating": true,
+     "id": "C0",
+     "kind": "ordinary",
+     "review": "none",
+     "state": "open",
+     "text": "The export reads every tile through one documented path."
+    },
+    {
+     "assurance": "awaiting_audit",
+     "blocker": null,
+     "blocker_claim": null,
+     "evidence": "research",
+     "gating": true,
+     "id": "C1",
+     "kind": "ordinary",
+     "review": "none",
+     "state": "approved",
+     "text": "The export guide names that path."
+    },
+    {
+     "assurance": "awaiting_audit",
+     "blocker": null,
+     "blocker_claim": null,
+     "evidence": "research",
+     "gating": true,
+     "id": "C2",
+     "kind": "ordinary",
+     "review": "none",
+     "state": "approved",
+     "text": "The vendor specification requires that path."
+    },
+    {
+     "assurance": "awaiting_audit",
+     "blocker": null,
+     "blocker_claim": null,
+     "evidence": "research",
+     "gating": true,
+     "id": "C3",
+     "kind": "ordinary",
+     "review": "none",
+     "state": "approved",
+     "text": "The published tile format allows only that path."
+    },
+    {
+     "assurance": "awaiting_audit",
+     "blocker": null,
+     "blocker_claim": null,
+     "evidence": "research",
+     "gating": true,
+     "id": "C4",
+     "kind": "ordinary",
+     "review": "none",
+     "state": "approved",
+     "text": "The nightly export log shows every tile read through it."
+    },
+    {
+     "assurance": "not_approved",
+     "blocker": "evidence.confirmation_required",
+     "blocker_claim": "C5",
+     "evidence": "research",
+     "gating": true,
+     "id": "C5",
+     "kind": "ordinary",
+     "review": "none",
+     "state": "open",
+     "text": "The hosting provider's limits allow that path."
+    },
+    {
+     "assurance": "not_approved",
+     "blocker": "evidence.confirmation_required",
+     "blocker_claim": "C6",
+     "evidence": "research",
+     "gating": true,
+     "id": "C6",
+     "kind": "ordinary",
+     "review": "none",
+     "state": "open",
+     "text": "Last week's run reads no tile any other way."
+    },
+    {
+     "assurance": "not_approved",
+     "blocker": "evidence.confirmation_required",
+     "blocker_claim": "C7",
+     "evidence": "none",
+     "gating": true,
+     "id": "C7",
+     "kind": "needs-decision",
+     "review": "none",
+     "state": "blocked",
+     "text": "Keep the old reader for one more release."
+    }
+   ],
+   "diagnostic": null,
+   "edges": [
+    {
+     "from": "C0",
+     "to": "C1"
+    },
+    {
+     "from": "C0",
+     "to": "C2"
+    },
+    {
+     "from": "C0",
+     "to": "C3"
+    },
+    {
+     "from": "C0",
+     "to": "C4"
+    },
+    {
+     "from": "C0",
+     "to": "C5"
+    },
+    {
+     "from": "C0",
+     "to": "C6"
+    },
+    {
+     "from": "C0",
+     "to": "C7"
+    }
+   ],
+   "ended": null,
+   "flags": {
+    "changed_since_audit": false,
+    "decided": true,
+    "failed_audit": false,
+    "refuted": false
+   },
+   "generation": 1,
+   "goal": "Document the tile export path.",
+   "id": "9c23b865daaa",
+   "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211/1",
+   "mode": "deliberative",
+   "next": {
+    "message": "Waiting for a human to confirm research or answer a decision.",
+    "where": "next_report",
+    "who": "human"
+   },
+   "previous": null,
+   "progress": {
+    "approved": 4,
+    "required": 8
+   },
+   "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
+   "root": "C0",
+   "run": "s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211",
+   "session": {
+    "delegated": false,
+    "host": "claude",
+    "interactive": true,
+    "label": "atlas docs session",
+    "locator": "/home/dev/.claude/projects/atlas/6f2c1a.jsonl"
+   },
+   "standing": "needs_human",
+   "started": 1790592960.0,
+   "state": "active",
+   "updated": 1790594040.0,
+   "version": "sha256:31e3f962923d3679d96c18b90d5a5a7c5612d72427db330f4beabc7fad2a4cf0"
+  },
+  "stale": [],
+  "steps": [
+   {
+    "at": 1790592960.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790593140.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790593500.0,
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790593560.0,
+    "bookkeeping": false,
+    "claim": "C1",
+    "command": null,
+    "kind": "research",
+    "n": 4,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790593620.0,
+    "bookkeeping": false,
+    "claim": "C2",
+    "command": null,
+    "kind": "research",
+    "n": 5,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790593680.0,
+    "bookkeeping": false,
+    "claim": "C3",
+    "command": null,
+    "kind": "research",
+    "n": 6,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790593740.0,
+    "bookkeeping": false,
+    "claim": "C4",
+    "command": null,
+    "kind": "research",
+    "n": 7,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790593800.0,
+    "bookkeeping": false,
+    "claim": "C5",
+    "command": null,
+    "kind": "research",
+    "n": 8,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790593860.0,
+    "bookkeeping": false,
+    "claim": "C6",
+    "command": null,
+    "kind": "research",
+    "n": 9,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790593920.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "evidence_presentation",
+    "n": 10,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790593980.0,
+    "bookkeeping": false,
+    "claim": "C3",
+    "command": null,
+    "kind": "evidence_confirmation",
+    "n": 11,
+    "outcome": "confirm",
+    "standing": "current",
+    "subject": "record",
+    "terminal": false
+   },
+   {
+    "at": 1790593980.0,
+    "bookkeeping": false,
+    "claim": "C4",
+    "command": null,
+    "kind": "evidence_confirmation",
+    "n": 12,
+    "outcome": "reject",
+    "standing": "current",
+    "subject": "record",
+    "terminal": false
+   },
+   {
+    "at": 1790594040.0,
+    "bookkeeping": false,
+    "claim": "C4",
+    "command": null,
+    "kind": "research",
+    "n": 13,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   }
+  ],
+  "stop": null,
+  "version": "sha256:31e3f962923d3679d96c18b90d5a5a7c5612d72427db330f4beabc7fad2a4cf0"
+ },
+ "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-e5bc37664845dccec9f662b44804806b99e73cb885080ec8fbd053aa74fcc494/1": {
+  "attempts": [
+   {
+    "ask": null,
+    "asked_at": null,
+    "attention": "not_ended",
+    "audit": {
+     "current": false,
+     "independence": "distinct",
+     "pending": false,
+     "verdict": "passed"
+    },
+    "claims": [
+     {
+      "assurance": "awaiting_audit",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "research",
+      "gating": true,
+      "id": "C0",
+      "kind": "ordinary",
+      "review": "unreviewed",
+      "state": "approved",
+      "text": "Each zoom level reads only its own index file."
+     },
+     {
+      "assurance": "awaiting_audit",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "research",
+      "gating": true,
+      "id": "C1",
+      "kind": "ordinary",
+      "review": "stale",
+      "state": "approved",
+      "text": "The index writer can emit one file per level."
+     },
+     {
+      "assurance": "awaiting_audit",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "research",
+      "gating": true,
+      "id": "C2",
+      "kind": "ordinary",
+      "review": "unreviewed",
+      "state": "approved",
+      "text": "No caller reads the combined index directly."
+     },
+     {
+      "assurance": "awaiting_audit",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "research",
+      "gating": true,
+      "id": "C3",
+      "kind": "ordinary",
+      "review": "changed",
+      "state": "approved",
+      "text": "The tile server resolves a level before reading."
+     }
+    ],
+    "diagnostic": null,
+    "edges": [
+     {
+      "from": "C0",
+      "to": "C1"
+     },
+     {
+      "from": "C0",
+      "to": "C2"
+     },
+     {
+      "from": "C0",
+      "to": "C3"
+     }
+    ],
+    "ended": null,
+    "flags": {
+     "changed_since_audit": true,
+     "decided": true,
+     "failed_audit": false,
+     "refuted": false
+    },
+    "generation": 1,
+    "goal": "Split the tile index by zoom level.",
+    "id": "5e08e7f95232",
+    "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-e5bc37664845dccec9f662b44804806b99e73cb885080ec8fbd053aa74fcc494/1",
+    "mode": "deliberative",
+    "next": {
+     "message": "Audit failed or its coverage went stale; address any findings listed under Audit, then retry.",
+     "where": "next_turn",
+     "who": "agent"
+    },
+    "previous": null,
+    "progress": {
+     "approved": 4,
+     "required": 4
+    },
+    "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
+    "root": "C0",
+    "run": "s256-e5bc37664845dccec9f662b44804806b99e73cb885080ec8fbd053aa74fcc494",
+    "session": {
+     "delegated": false,
+     "host": "pi",
+     "interactive": true,
+     "label": null,
+     "locator": null
+    },
+    "standing": "changed_since_audit",
+    "started": 1790588040.0,
+    "state": "active",
+    "updated": 1790589120.0,
+    "version": "sha256:c09092b71532354c07977913ee95fd7b428a4ec61609f8c699696532795c0725"
+   }
+  ],
+  "audit": {
+   "findings": []
+  },
+  "auditor": "anthropic/claude-opus-4-6",
+  "audits": [
+   {
+    "at": 1790588940.0,
+    "auditor": "anthropic/claude-opus-4-6",
+    "findings": [
+     "C2 has no support yet."
+    ],
+    "independence": "distinct",
+    "verdict": "passed"
+   }
+  ],
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/index.py states this directly.",
+      "retrieve": true,
+      "source": "src/index.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   },
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C1",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/writer.py states this directly.",
+      "retrieve": true,
+      "source": "src/writer.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   },
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C2",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/callers.py states this directly.",
+      "retrieve": true,
+      "source": "src/callers.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   },
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C3",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "src/server.py states this directly.",
+      "retrieve": true,
+      "source": "src/server.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     },
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "docs/server.md states this directly.",
+      "retrieve": true,
+      "source": "docs/server.md",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 2
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "decisions": [
+   {
+    "answer": "approve",
+    "asked": "approve_configuration",
+    "at": 1790588400.0,
+    "claim": null,
+    "effect": "configuration_approved",
+    "plan": 1,
+    "source": null
+   }
+  ],
+  "dropped": [],
+  "goal": "Split the tile index by zoom level.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 1
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-e5bc37664845dccec9f662b44804806b99e73cb885080ec8fbd053aa74fcc494/1",
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [],
+    "message": "Audit failed or its coverage went stale; address any findings listed under Audit, then retry.",
+    "need": "audit.failed",
+    "where": "next_turn",
+    "who": "agent"
+   }
+  ],
+  "residuals": [],
+  "row": {
+   "ask": null,
+   "asked_at": null,
+   "attention": "not_ended",
+   "audit": {
+    "current": false,
+    "independence": "distinct",
+    "pending": false,
+    "verdict": "passed"
+   },
+   "claims": [
+    {
+     "assurance": "awaiting_audit",
+     "blocker": null,
+     "blocker_claim": null,
+     "evidence": "research",
+     "gating": true,
+     "id": "C0",
+     "kind": "ordinary",
+     "review": "unreviewed",
+     "state": "approved",
+     "text": "Each zoom level reads only its own index file."
+    },
+    {
+     "assurance": "awaiting_audit",
+     "blocker": null,
+     "blocker_claim": null,
+     "evidence": "research",
+     "gating": true,
+     "id": "C1",
+     "kind": "ordinary",
+     "review": "stale",
+     "state": "approved",
+     "text": "The index writer can emit one file per level."
+    },
+    {
+     "assurance": "awaiting_audit",
+     "blocker": null,
+     "blocker_claim": null,
+     "evidence": "research",
+     "gating": true,
+     "id": "C2",
+     "kind": "ordinary",
+     "review": "unreviewed",
+     "state": "approved",
+     "text": "No caller reads the combined index directly."
+    },
+    {
+     "assurance": "awaiting_audit",
+     "blocker": null,
+     "blocker_claim": null,
+     "evidence": "research",
+     "gating": true,
+     "id": "C3",
+     "kind": "ordinary",
+     "review": "changed",
+     "state": "approved",
+     "text": "The tile server resolves a level before reading."
+    }
+   ],
+   "diagnostic": null,
+   "edges": [
+    {
+     "from": "C0",
+     "to": "C1"
+    },
+    {
+     "from": "C0",
+     "to": "C2"
+    },
+    {
+     "from": "C0",
+     "to": "C3"
+    }
+   ],
+   "ended": null,
+   "flags": {
+    "changed_since_audit": true,
+    "decided": true,
+    "failed_audit": false,
+    "refuted": false
+   },
+   "generation": 1,
+   "goal": "Split the tile index by zoom level.",
+   "id": "5e08e7f95232",
+   "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-e5bc37664845dccec9f662b44804806b99e73cb885080ec8fbd053aa74fcc494/1",
+   "mode": "deliberative",
+   "next": {
+    "message": "Audit failed or its coverage went stale; address any findings listed under Audit, then retry.",
+    "where": "next_turn",
+    "who": "agent"
+   },
+   "previous": null,
+   "progress": {
+    "approved": 4,
+    "required": 4
+   },
+   "project": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
+   "root": "C0",
+   "run": "s256-e5bc37664845dccec9f662b44804806b99e73cb885080ec8fbd053aa74fcc494",
+   "session": {
+    "delegated": false,
+    "host": "pi",
+    "interactive": true,
+    "label": null,
+    "locator": null
+   },
+   "standing": "changed_since_audit",
+   "started": 1790588040.0,
+   "state": "active",
+   "updated": 1790589120.0,
+   "version": "sha256:c09092b71532354c07977913ee95fd7b428a4ec61609f8c699696532795c0725"
+  },
+  "stale": [],
+  "steps": [
+   {
+    "at": 1790588040.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790588220.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790588580.0,
+    "bookkeeping": false,
+    "claim": "C1",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790588640.0,
+    "bookkeeping": false,
+    "claim": "C3",
+    "command": null,
+    "kind": "research",
+    "n": 4,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790588880.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "attribution",
+    "n": 5,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790588940.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "audit_verdict",
+    "n": 6,
+    "outcome": "pass",
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790589000.0,
+    "bookkeeping": false,
+    "claim": "C2",
+    "command": null,
+    "kind": "research",
+    "n": 7,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790589060.0,
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 8,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790589120.0,
+    "bookkeeping": false,
+    "claim": "C3",
+    "command": null,
+    "kind": "research",
+    "n": 9,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   }
+  ],
+  "stop": null,
+  "version": "sha256:c09092b71532354c07977913ee95fd7b428a4ec61609f8c699696532795c0725"
+ },
+ "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470/1": {
+  "attempts": [
+   {
+    "ask": null,
+    "asked_at": null,
+    "attention": "ended",
+    "audit": {
+     "current": null,
+     "independence": null,
+     "pending": false,
+     "verdict": "none"
+    },
+    "claims": [
+     {
+      "assurance": "awaiting_audit",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "research",
+      "gating": true,
+      "id": "C0",
+      "kind": "ordinary",
+      "review": "none",
+      "state": "approved",
+      "text": "Retries back off exponentially up to five attempts."
+     },
+     {
+      "assurance": "not_approved",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "none",
+      "gating": false,
+      "id": "C1",
+      "kind": "ordinary",
+      "review": "none",
+      "state": "open",
+      "text": "A failed attempt is logged with its cause."
+     }
+    ],
+    "diagnostic": null,
+    "edges": [
+     {
+      "from": "C0",
+      "to": "C1"
+     }
+    ],
+    "ended": 1790590980.0,
+    "flags": {
+     "changed_since_audit": false,
+     "decided": true,
+     "failed_audit": false,
+     "refuted": false
+    },
+    "generation": 1,
+    "goal": "Document the import retry policy.",
+    "id": "2c109de55a9f",
+    "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470/1",
+    "mode": "deliberative",
+    "next": null,
+    "previous": null,
+    "progress": {
+     "approved": 1,
+     "required": 1
+    },
+    "project": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d",
+    "root": "C0",
+    "run": "s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470",
+    "session": {
+     "delegated": false,
+     "host": "claude",
+     "interactive": true,
+     "label": null,
+     "locator": null
+    },
+    "standing": "stopped_frozen",
+    "started": 1790590140.0,
+    "state": "stopped_frozen",
+    "updated": 1790590980.0,
+    "version": "sha256:1b26658a8af6523ca7c7d61eab67cd3e646e1bac7c96e65eaa5a2939c7b58a33"
+   }
+  ],
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "audits": [],
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "import/retry.py states this directly.",
+      "retrieve": true,
+      "source": "import/retry.py",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   },
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C1",
+    "proof": [],
+    "records": [],
+    "research": 0
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "decisions": [
+   {
+    "answer": "approve",
+    "asked": "approve_configuration",
+    "at": 1790590500.0,
+    "claim": null,
+    "effect": "configuration_approved",
+    "plan": 1,
+    "source": null
+   },
+   {
+    "answer": "approve",
+    "asked": "freeze_scope",
+    "at": 1790590920.0,
+    "claim": null,
+    "effect": "run_ended",
+    "plan": null,
+    "source": null
+   }
+  ],
+  "dropped": [],
+  "goal": "Document the import retry policy.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 126,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470/1",
+  "now": null,
+  "outstanding": [],
+  "residuals": [
+   {
+    "claims": [],
+    "code": "freeze.deferred",
+    "message": "Claims deferred by the frozen scope were left unresolved."
+   },
+   {
+    "claims": [],
+    "code": "audit.required",
+    "message": "No audit had been done when the run stopped."
+   }
+  ],
+  "row": {
+   "ask": null,
+   "asked_at": null,
+   "attention": "ended",
+   "audit": {
+    "current": null,
+    "independence": null,
+    "pending": false,
+    "verdict": "none"
+   },
+   "claims": [
+    {
+     "assurance": "awaiting_audit",
+     "blocker": null,
+     "blocker_claim": null,
+     "evidence": "research",
+     "gating": true,
+     "id": "C0",
+     "kind": "ordinary",
+     "review": "none",
+     "state": "approved",
+     "text": "Retries back off exponentially up to five attempts."
+    },
+    {
+     "assurance": "not_approved",
+     "blocker": null,
+     "blocker_claim": null,
+     "evidence": "none",
+     "gating": false,
+     "id": "C1",
+     "kind": "ordinary",
+     "review": "none",
+     "state": "open",
+     "text": "A failed attempt is logged with its cause."
+    }
+   ],
+   "diagnostic": null,
+   "edges": [
+    {
+     "from": "C0",
+     "to": "C1"
+    }
+   ],
+   "ended": 1790590980.0,
+   "flags": {
+    "changed_since_audit": false,
+    "decided": true,
+    "failed_audit": false,
+    "refuted": false
+   },
+   "generation": 1,
+   "goal": "Document the import retry policy.",
+   "id": "2c109de55a9f",
+   "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470/1",
+   "mode": "deliberative",
+   "next": null,
+   "previous": null,
+   "progress": {
+    "approved": 1,
+    "required": 1
+   },
+   "project": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d",
+   "root": "C0",
+   "run": "s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470",
+   "session": {
+    "delegated": false,
+    "host": "claude",
+    "interactive": true,
+    "label": null,
+    "locator": null
+   },
+   "standing": "stopped_frozen",
+   "started": 1790590140.0,
+   "state": "stopped_frozen",
+   "updated": 1790590980.0,
+   "version": "sha256:1b26658a8af6523ca7c7d61eab67cd3e646e1bac7c96e65eaa5a2939c7b58a33"
+  },
+  "stale": [],
+  "steps": [
+   {
+    "at": 1790590140.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790590320.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790590680.0,
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790590800.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 4,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790590860.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "evidence_presentation",
+    "n": 5,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790590920.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "evidence_confirmation",
+    "n": 6,
+    "outcome": "approve",
+    "standing": null,
+    "subject": "run",
+    "terminal": true
+   }
+  ],
+  "stop": {
+   "basis": "recorded",
+   "deferred": [
+    "C1"
+   ],
+   "frozen": true,
+   "required": [
+    "C0"
+   ],
+   "status": "stopped_frozen"
+  },
+  "version": "sha256:1b26658a8af6523ca7c7d61eab67cd3e646e1bac7c96e65eaa5a2939c7b58a33"
+ },
+ "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148/1": {
+  "attempts": [
+   {
+    "ask": null,
+    "asked_at": null,
+    "attention": null,
+    "audit": null,
+    "claims": null,
+    "diagnostic": "unreadable",
+    "edges": null,
+    "ended": null,
+    "flags": null,
+    "generation": 1,
+    "goal": null,
+    "id": "e35f11147e7c",
+    "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148/1",
+    "mode": null,
+    "next": null,
+    "previous": null,
+    "progress": null,
+    "project": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d",
+    "root": null,
+    "run": "s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148",
+    "session": null,
+    "standing": "unreadable",
+    "started": null,
+    "state": null,
+    "updated": null,
+    "version": "sha256:ad1acbc5695e3e476c12f0ede032abec3828ff3f451fef0b9ccec73a07b49132"
+   }
+  ],
+  "audit": null,
+  "auditor": null,
+  "audits": null,
+  "author": null,
+  "claims": null,
+  "contract": "empirica-ui-view/v1",
+  "decisions": null,
+  "dropped": null,
+  "goal": null,
+  "governance": null,
+  "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148/1",
+  "now": null,
+  "outstanding": null,
+  "residuals": null,
+  "row": {
+   "ask": null,
+   "asked_at": null,
+   "attention": null,
+   "audit": null,
+   "claims": null,
+   "diagnostic": "unreadable",
+   "edges": null,
+   "ended": null,
+   "flags": null,
+   "generation": 1,
+   "goal": null,
+   "id": "e35f11147e7c",
+   "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148/1",
+   "mode": null,
+   "next": null,
+   "previous": null,
+   "progress": null,
+   "project": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d",
+   "root": null,
+   "run": "s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148",
+   "session": null,
+   "standing": "unreadable",
+   "started": null,
+   "state": null,
+   "updated": null,
+   "version": "sha256:ad1acbc5695e3e476c12f0ede032abec3828ff3f451fef0b9ccec73a07b49132"
+  },
+  "stale": null,
+  "steps": null,
+  "stop": null,
+  "version": "sha256:ad1acbc5695e3e476c12f0ede032abec3828ff3f451fef0b9ccec73a07b49132"
+ },
+ "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-ea2fab75d05920549b4b92798bdf7217fed88df4e0a56de317d1e721524887b2/1": {
+  "attempts": [
+   {
+    "ask": null,
+    "asked_at": null,
+    "attention": "ended",
+    "audit": {
+     "current": null,
+     "independence": null,
+     "pending": false,
+     "verdict": "none"
+    },
+    "claims": [
+     {
+      "assurance": "awaiting_audit",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "spike",
+      "gating": true,
+      "id": "C0",
+      "kind": "needs-experiment",
+      "review": "none",
+      "state": "approved",
+      "text": "The import spends most of its time in one query."
+     }
+    ],
+    "diagnostic": null,
+    "edges": [],
+    "ended": 1790590080.0,
+    "flags": {
+     "changed_since_audit": false,
+     "decided": true,
+     "failed_audit": false,
+     "refuted": false
+    },
+    "generation": 1,
+    "goal": "Find why the nightly import is slow.",
+    "id": "50e1645f6e84",
+    "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-ea2fab75d05920549b4b92798bdf7217fed88df4e0a56de317d1e721524887b2/1",
+    "mode": "deliberative",
+    "next": null,
+    "previous": null,
+    "progress": {
+     "approved": 1,
+     "required": 1
+    },
+    "project": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d",
+    "root": "C0",
+    "run": "s256-ea2fab75d05920549b4b92798bdf7217fed88df4e0a56de317d1e721524887b2",
+    "session": {
+     "delegated": false,
+     "host": "claude",
+     "interactive": true,
+     "label": null,
+     "locator": null
+    },
+    "standing": "stopped_budget",
+    "started": 1790589180.0,
+    "state": "stopped_budget",
+    "updated": 1790590080.0,
+    "version": "sha256:11e49a7b56e1ad39abb645369da064c09319eab2c21ee83bc08d21c4956ee691"
+   }
+  ],
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "audits": [],
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C0",
+    "proof": [
+     {
+      "command": "python bench/import.py",
+      "exit_code": 0,
+      "files": [
+       {
+        "path": "import/query.sql",
+        "sha256": "sha256:8903abffd68710879da59014708c6187f8e839fadc2bdf94ae73a036aa591623"
+       }
+      ],
+      "gate": "pass",
+      "outcome": "pass",
+      "output": "not_retained",
+      "state": "current"
+     }
+    ],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "import/query.sql states this directly.",
+      "retrieve": true,
+      "source": "import/query.sql",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "decisions": [
+   {
+    "answer": "approve",
+    "asked": "approve_configuration",
+    "at": 1790589540.0,
+    "claim": null,
+    "effect": "configuration_approved",
+    "plan": 1,
+    "source": null
+   },
+   {
+    "answer": "approve",
+    "asked": "consent_stop",
+    "at": 1790590020.0,
+    "claim": null,
+    "effect": "run_ended",
+    "plan": null,
+    "source": null
+   }
+  ],
+  "dropped": [],
+  "goal": "Find why the nightly import is slow.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 1,
+     "used": 1
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 126,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-ea2fab75d05920549b4b92798bdf7217fed88df4e0a56de317d1e721524887b2/1",
+  "now": null,
+  "outstanding": [],
+  "residuals": [
+   {
+    "claims": [],
+    "code": "budget.exhausted",
+    "message": "pass budget was exhausted when the run stopped."
+   }
+  ],
+  "row": {
+   "ask": null,
+   "asked_at": null,
+   "attention": "ended",
+   "audit": {
+    "current": null,
+    "independence": null,
+    "pending": false,
+    "verdict": "none"
+   },
+   "claims": [
+    {
+     "assurance": "awaiting_audit",
+     "blocker": null,
+     "blocker_claim": null,
+     "evidence": "spike",
+     "gating": true,
+     "id": "C0",
+     "kind": "needs-experiment",
+     "review": "none",
+     "state": "approved",
+     "text": "The import spends most of its time in one query."
+    }
+   ],
+   "diagnostic": null,
+   "edges": [],
+   "ended": 1790590080.0,
+   "flags": {
+    "changed_since_audit": false,
+    "decided": true,
+    "failed_audit": false,
+    "refuted": false
+   },
+   "generation": 1,
+   "goal": "Find why the nightly import is slow.",
+   "id": "50e1645f6e84",
+   "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-ea2fab75d05920549b4b92798bdf7217fed88df4e0a56de317d1e721524887b2/1",
+   "mode": "deliberative",
+   "next": null,
+   "previous": null,
+   "progress": {
+    "approved": 1,
+    "required": 1
+   },
+   "project": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d",
+   "root": "C0",
+   "run": "s256-ea2fab75d05920549b4b92798bdf7217fed88df4e0a56de317d1e721524887b2",
+   "session": {
+    "delegated": false,
+    "host": "claude",
+    "interactive": true,
+    "label": null,
+    "locator": null
+   },
+   "standing": "stopped_budget",
+   "started": 1790589180.0,
+   "state": "stopped_budget",
+   "updated": 1790590080.0,
+   "version": "sha256:11e49a7b56e1ad39abb645369da064c09319eab2c21ee83bc08d21c4956ee691"
+  },
+  "stale": [],
+  "steps": [
+   {
+    "at": 1790589180.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790589360.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790589720.0,
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790589780.0,
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": "python bench/import.py",
+    "kind": "spike_request",
+    "n": 4,
+    "outcome": null,
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790589840.0,
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": "python bench/import.py",
+    "kind": "spike",
+    "n": 5,
+    "outcome": "pass",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790589840.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 6,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790589900.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 7,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790589960.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "evidence_presentation",
+    "n": 8,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790590020.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "evidence_confirmation",
+    "n": 9,
+    "outcome": "approve",
+    "standing": null,
+    "subject": "run",
+    "terminal": true
+   }
+  ],
+  "stop": {
+   "basis": "recorded",
+   "deferred": [],
+   "frozen": false,
+   "required": [
+    "C0"
+   ],
+   "status": "stopped_budget"
+  },
+  "version": "sha256:11e49a7b56e1ad39abb645369da064c09319eab2c21ee83bc08d21c4956ee691"
+ }
+}

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; font-src 'self'">
+  <title></title>
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg">
+  <link rel="stylesheet" href="../vendor/basecoat/basecoat-nova.css">
+  <link rel="stylesheet" href="../vendor/fonts/fonts.css">
+  <link rel="stylesheet" href="../dist/tokens.css">
+  <link rel="stylesheet" href="../dist/ui.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body class="flex h-dvh flex-col overflow-hidden bg-background font-sans text-m font-normal text-foreground">
+  <noscript>Empirica UI renders with JavaScript.</noscript>
+  <header id="bar" class="shrink-0 border-b border-border bg-background px-m py-xs"></header>
+  <div class="flex min-h-0 flex-1">
+    <aside id="rail-pane" class="hidden w-rail shrink-0 overflow-y-auto border-r border-border p-s lg:block"><ev-rail id="rail" class="block"></ev-rail></aside>
+    <main id="main" class="min-h-0 min-w-0 flex-1 overflow-y-auto"><ev-universe id="universe" class="block h-full"></ev-universe><ev-inbox id="inbox" class="block p-m"></ev-inbox><ev-work id="work" class="block h-full"></ev-work></main>
+    <ev-divider id="divider" class="w-xs shrink-0 cursor-col-resize justify-center"></ev-divider>
+    <aside id="sheet-pane" class="min-h-0 shrink-0 overflow-y-auto bg-background p-m"><ev-sheet id="sheet" class="block"></ev-sheet></aside>
+  </div>
+</body>
+</html>

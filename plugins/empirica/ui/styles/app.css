@@ -1,0 +1,106 @@
+/* Tailwind input. Only our utilities are generated: no Tailwind default theme or preflight is imported (Basecoat's
+   vendored bundle brings its own base), so classes outside tokens.json do not exist. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "../dist/theme.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@source "../elements";
+@source "../app";
+
+/* Focus indicator (WCAG 2.4.7/2.4.13): every Basecoat pack draws focus as a 30-50%-alpha ring (1.6-2.4:1 against the
+   surface). One solid 2 px outline in `ring` (>= 7:1) is added everywhere; !important because the vendored components set
+   their ring with higher-specificity variants, and this is the only such override. */
+:focus-visible { outline: 2px solid var(--color-ring) !important; outline-offset: 2px; }
+
+/* Basecoat's components size their words by its own scale (--text-xs 12 px, --text-sm 14 px, --text-base 16 px); V2 (the
+   user: "labels and text much smaller") puts that scale onto ours, so a button, an input or a select is as small as the
+   text beside it. Outside any layer, so it beats the vendored theme. */
+:root { --text-xs: theme(--text-xs); --text-sm: theme(--text-s); --text-base: theme(--text-m); --text-lg: theme(--text-l); }
+
+/* A hidden element is hidden whatever display utility it also carries. */
+[hidden] { display: none !important; }
+
+/* Element display: custom elements are inline by default; these are the ones that are blocks. */
+@layer components {
+  :where(ev-rail, ev-inbox, ev-work, ev-sheet, ev-more, ev-universe) { display: block; }
+  :where(ev-meter, ev-copy) { display: inline-flex; }
+}
+
+/* The three panes. The rail shows from the large breakpoint up. A run opens in the sheet beside the list; below the large
+   breakpoint the sheet takes the whole width and the list waits behind it (Close brings it back). Outside any layer, so it
+   beats the panes' own utilities. */
+body:not([data-sheet]) #sheet-pane { display: none; }
+@media (width < theme(--breakpoint-lg)) {
+  body[data-sheet] #sheet-pane { width: 100%; }
+  body[data-sheet] #main { display: none; }
+}
+/* The divider between the main area and the sheet (elements/atoms/ev-divider.js) reads these lengths in px: registered as
+   lengths, a rem resolves first. It sets the sheet's width (--ev-sheet-w); below sheet-min + main-min, or below the
+   large breakpoint, it is not drawn and the sheet takes the full width as above. */
+@property --ev-sheet { syntax: "<length>"; inherits: true; initial-value: 0px; }
+@property --ev-sheet-min { syntax: "<length>"; inherits: true; initial-value: 0px; }
+@property --ev-main-min { syntax: "<length>"; inherits: true; initial-value: 0px; }
+@property --ev-split-step { syntax: "<length>"; inherits: true; initial-value: 0px; }
+body { --ev-sheet: var(--container-sheet); --ev-sheet-min: var(--container-sheet-min); --ev-main-min: var(--container-main-min); --ev-split-step: var(--container-split-step); }
+#sheet-pane { width: var(--ev-sheet-w, var(--container-sheet)); }
+ev-divider { display: flex; touch-action: none; }
+ev-divider:hover > [data-line], ev-divider:focus-visible > [data-line] { background: var(--ring); }
+body:not([data-sheet]) ev-divider, body[data-narrow] ev-divider { display: none; }
+body[data-sheet][data-narrow] #sheet-pane { width: 100%; }
+body[data-sheet][data-narrow] #main { display: none; }
+@media (width < theme(--breakpoint-lg)) { ev-divider { display: none; } }
+
+/* The Universe is the whole main pane: the rail is the inbox's. */
+body[data-view="universe"] #rail-pane { display: none; }
+
+/* The row of the open run keeps its background (and the pointer's hover is the same). */
+.ev-row[aria-current] { background: var(--muted); }
+
+/* With a run open the list is a narrow column: what is not the run's name or its ask waits for the sheet to close. */
+body[data-sheet] .ev-optional { display: none; }
+
+/* A glyph stands alone (its word in the title and for screen readers) until the person asks for words beside every glyph. */
+.ev-word { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+body[data-words] .ev-word { position: static; inline-size: auto; block-size: auto; overflow: visible; clip-path: none; }
+
+/* Motion is for live state and for re-orienting after a change, never decoration: a run still asking something breathes; a
+   row's background answers the pointer; the sheet settles in. All off under prefers-reduced-motion. */
+@keyframes ev-breathe { 50% { opacity: 0.45; } }
+@keyframes ev-settle { from { opacity: 0; translate: var(--spacing-s) 0; } }
+@media (prefers-reduced-motion: no-preference) {
+  [data-live] { animation: ev-breathe var(--duration-pulse) ease-in-out infinite; }
+  .ev-row { transition: background-color var(--duration-fast); }
+  #sheet > * { animation: ev-settle var(--duration-base) ease-out; }
+}
+
+/* The calendar: a cell with runs is a link whose colour is the most urgent standing among its runs. */
+.ev-cell:hover { outline: 1px solid var(--color-foreground); }
+
+/* Native <meter> in token colours: quiet track, neutral fill; a full budget turns cautionary. */
+@layer components {
+  meter.ev-meter, span.ev-meter { inline-size: 100%; block-size: var(--spacing-2xs); border-radius: var(--radius-full); background: var(--muted); appearance: none; }
+  span.ev-meter { display: block; }  /* a zero ceiling: the empty track alone (ev-meter.js) */
+  meter.ev-meter::-webkit-meter-bar { background: var(--muted); border: 0; border-radius: var(--radius-full); block-size: var(--spacing-2xs); }
+  meter.ev-meter::-webkit-meter-optimum-value, meter.ev-meter::-webkit-meter-suboptimum-value, meter.ev-meter::-webkit-meter-even-less-good-value { background: var(--tone-neutral); border-radius: var(--radius-full); }
+  meter.ev-meter[data-full]::-webkit-meter-optimum-value { background: var(--tone-caution); }
+  meter.ev-meter::-moz-meter-bar { background: var(--tone-neutral); border-radius: var(--radius-full); }
+  meter.ev-meter[data-full]::-moz-meter-bar { background: var(--tone-caution); }
+}
+
+/* A run's facts: a stable grid, so the labels line up whatever the values hold. */
+@layer components {
+  .ev-facts > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 3fr); column-gap: var(--spacing-l); }
+  .ev-facts > div > * { min-inline-size: 0; overflow-wrap: anywhere; }
+}
+
+/* The attempts side by side: Basecoat's table keeps every cell on one line, so a long goal or residual is painted through the
+   next attempt's column. Cells wrap (a long word too) and keep room to be read; the wrapper scrolls sideways when the
+   attempts do not fit. Outside any layer, so it beats the vendored `nowrap`. */
+/* every sheet's and card's prose wraps anywhere: a long unbroken token (a digest, a path, a regex in an audit's reason)
+   breaks inside the width rather than running past the edge (L8); `anywhere` also lets a flex item shrink below it */
+ev-sheet, [data-card] { overflow-wrap: anywhere; }
+/* the attempts share the sheet's width (fixed layout: equal columns), each cell wrapping, so none is cut at its edge */
+.ev-compare { table-layout: fixed; }
+.ev-compare th, .ev-compare td { white-space: normal; overflow-wrap: anywhere; vertical-align: top; }

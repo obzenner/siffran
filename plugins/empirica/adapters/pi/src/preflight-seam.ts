@@ -6,15 +6,17 @@
 // real packages (test/fixtures/preflight-<version>.json), not against hand-written shapes.
 //
 // Consumed fields, and what the captured fixtures show per launch-contract version:
-//   contract.version                 v2 (0.50.0, 0.64.0) | v3 (0.74.0, 0.75.0); must be one the
-//                                    bound inventory records AND one listed in ACCEPTED_LAUNCH_CONTRACT_VERSIONS
+//   contract.version                 v2 (0.50.0, 0.64.0) | v3 (0.74.0, 0.75.0, 0.76.1); must be one the
+//                                    bound inventory records (when it records one) AND one listed in ACCEPTED_LAUNCH_CONTRACT_VERSIONS
 //   contract.protocol.packageVersion must equal the bound owner's exact version
 //   contract.agent.filePath          must be the packaged canonical auditor file (canonicalised)
 //   contract.modelCandidates[0]      v2 only - the resolved launch model, thinking level appended
 //   contract.model                   v3 only (v3 drops modelCandidates) - same spelling
+//   contract.tools.effectiveAllowlist  must be a subset of the profile's audit_child_tools (read-only, ADR-0069)
 // The response does not report async/outputMode/forceTopLevelAsync, so those are checked on the
 // launch request the adapter is about to send (`descriptor.launch`), not read from the response.
 
+import { auditRetrievalFrom, type RetrievalKind } from "./audit-retrieval.ts";
 import { THINKING_LEVELS } from "./host-profile.ts";
 import type { SubagentInventory } from "./subagent-inventory.ts";
 
@@ -37,20 +39,28 @@ export type AdmissionRefusalCode =
   | "model-substituted"
   | "forced-async"
   | "not-foreground"
-  | "output-mode-not-inline";
+  | "output-mode-not-inline"
+  | "context-not-fresh"
+  | "tools-not-read-only";
 
 /** The runtime and the launch the adapter is about to perform, as the adapter observed them. */
 export interface AuditPreflightDescriptor {
   /** Exact version of the bound owner; `undefined` is a refusal, never a default. */
   readonly version: string | undefined;
-  /** The owner's reviewed inventory; `undefined` is a refusal. */
+  /** The owner's inventory (checked-in or observed, ADR-0069); `undefined` is a refusal. */
   readonly inventory: SubagentInventory | undefined;
-  readonly expected: { readonly agent_file_path: string; readonly model: string };
+  readonly expected: {
+    readonly agent_file_path: string; readonly model: string;
+    /** The only tools the auditor child may be given (`audit_launch_policy.audit_child_tools`). */
+    readonly child_tools: readonly string[];
+  };
   /** The launch request's own fields (the preflight response does not echo them). */
   readonly launch: {
     readonly async: unknown;
     readonly output_mode: unknown;
     readonly force_top_level_async: unknown;
+    /** The context the launch request pins (see `audit-launch.ts` for why it is `fresh`). */
+    readonly context: unknown;
   };
   /** Path canonicalisation (production: realpath with resolve fallback), injected. */
   readonly canonical: (file: string) => string;
@@ -60,7 +70,8 @@ export interface AdmittedAuditContract {
   readonly agent_file_path: string;
   /** The resolved launch model with its reasoning level removed. */
   readonly model: string;
-  readonly launch_contract_version: number;
+  /** What the child can retrieve, from its effective tool allowlist (audit-retrieval.ts). */
+  readonly audit_retrieval: readonly RetrievalKind[];
 }
 
 export type AuditAdmission =
@@ -77,7 +88,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function admitAuditPreflight(descriptor: AuditPreflightDescriptor, response: unknown): AuditAdmission {
   const { version, inventory, launch } = descriptor;
   if (version === undefined || version === "") return refuse("owner-unverified", "the pi-subagents owner has no observed version");
-  if (inventory === undefined) return refuse("owner-unverified", `pi-subagents ${version} has no reviewed inventory`);
+  if (inventory === undefined) return refuse("owner-unverified", `pi-subagents ${version} has no inventory`);
   if (inventory.version !== version)
     return refuse("owner-unverified", `the inventory describes ${inventory.version}, not the bound owner ${version}`);
   if (launch.force_top_level_async === true)
@@ -88,6 +99,9 @@ export function admitAuditPreflight(descriptor: AuditPreflightDescriptor, respon
     return refuse("output-mode-not-inline",
       `outputMode ${JSON.stringify(launch.output_mode)} would withhold the inline result the verdict is read from`);
 
+  if (launch.context !== "fresh")
+    return refuse("context-not-fresh", `the audit launch must set context:"fresh" (got ${JSON.stringify(launch.context)})`);
+
   if (!isRecord(response)) return refuse("malformed-response", "the preflight response is not an object");
   if (response.ok === false)
     return refuse("preflight-refused", typeof response.message === "string" ? response.message : "the preflight refused the launch");
@@ -97,10 +111,14 @@ export function admitAuditPreflight(descriptor: AuditPreflightDescriptor, respon
 
   const contractVersion = contract.version;
   if (typeof contractVersion !== "number" || !ACCEPTED_LAUNCH_CONTRACT_VERSIONS.includes(contractVersion)
-      || contractVersion !== inventory.launch_contract_version)
+      || (inventory.launch_contract_version !== null && contractVersion !== inventory.launch_contract_version))
     return refuse("launch-contract-version",
-      `launch contract ${JSON.stringify(contractVersion)} is not the v${inventory.launch_contract_version} that `
-      + `pi-subagents ${version} is reviewed to emit (accepted: ${ACCEPTED_LAUNCH_CONTRACT_VERSIONS.join(", ")})`);
+      `launch contract ${JSON.stringify(contractVersion)} is not ${inventory.launch_contract_version === null
+        ? "one Empirica accepts" : `the v${inventory.launch_contract_version} that pi-subagents ${version} is reviewed to emit`} `
+      + `(accepted: ${ACCEPTED_LAUNCH_CONTRACT_VERSIONS.join(", ")})`);
+  if (contract.context !== "fresh")
+    return refuse("context-not-fresh",
+      `the preflight resolved context ${JSON.stringify(contract.context)}, not "fresh"`);
   const protocol = contract.protocol;
   if (!isRecord(protocol) || protocol.packageVersion !== version)
     return refuse("owner-version-mismatch",
@@ -121,5 +139,16 @@ export function admitAuditPreflight(descriptor: AuditPreflightDescriptor, respon
   const model = withoutThinkingLevel(resolvedModel);
   if (model !== withoutThinkingLevel(descriptor.expected.model))
     return refuse("model-substituted", `preflight resolved ${resolvedModel}, the configured auditor model is ${descriptor.expected.model}`);
-  return { kind: "accept", contract: { agent_file_path: agent.filePath, model, launch_contract_version: contractVersion } };
+  const tools = contract.tools;
+  const allowlist = isRecord(tools) ? tools.effectiveAllowlist : undefined;
+  if (!Array.isArray(allowlist) || !allowlist.every((tool) => typeof tool === "string"))
+    return refuse("malformed-response", "contract.tools.effectiveAllowlist is missing or not a list of tool names");
+  // Every version, reviewed or not, is checked at run time that its auditor holds nothing that writes (ADR-0069).
+  const outside = allowlist.filter((tool) => !descriptor.expected.child_tools.includes(tool));
+  if (outside.length > 0)
+    return refuse("tools-not-read-only",
+      `the auditor would be given ${outside.map((tool) => JSON.stringify(tool)).join(", ")}; `
+      + `only ${descriptor.expected.child_tools.join(", ")} may reach it`);
+  return { kind: "accept", contract: { agent_file_path: agent.filePath, model,
+    audit_retrieval: auditRetrievalFrom(allowlist) } };
 }

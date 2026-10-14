@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Dogfooding never provisions, enables, or suppresses a pi-subagents runtime.
 
-siffran does not bundle pi-subagents (Empirica 4.1): the audit runtime is whichever external
+siffran does not bundle pi-subagents: the audit runtime is whichever external
 extension registered the ``subagent`` tool, resolved by the adapter at ``session_start``. The
 committed ``.pi/settings.json`` and the ``pi-dev``/``pi-canary`` recipes must therefore carry no
 pi-subagents package entry, suppression, or bundled-extension filter, and ``pi-canary`` must run

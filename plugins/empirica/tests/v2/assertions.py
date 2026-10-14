@@ -22,6 +22,8 @@ schema/registry lookups and structural assertions only.
 """
 from __future__ import annotations
 
+import tempfile
+import os
 import hashlib
 import json
 import re
@@ -34,7 +36,10 @@ from governance_setup import TEST_INVOCATION
 
 from adapters.identity import observe
 from core.canonical import canonical_digest
-from driver import V2SeamAbsent, new_driver
+from core.projection import confirmation_actions
+from driver import CITED_SOURCE, V2SeamAbsent, new_driver
+from application.protocol import host_profile_id  # noqa: E402
+CLAUDE_PROFILE = host_profile_id("claude-code")
 
 # ---------------------------------------------------------------------------
 # Locate the accepted D2 contract registry (the SSOT — never copied into tests)
@@ -259,10 +264,12 @@ def observe_action(*, run_id: str, action: dict, observed_at: str | None = None,
 
 
 def evaluate(*, run_id: str, intent: str = "continue", observed_at: str | None = None,
-             request_id: str | None = None) -> dict:
+             request_id: str | None = None, host_failure: str | None = None) -> dict:
     cmd: dict = {"type": "EvaluateRun", "run_id": run_id, "intent": intent}
     if observed_at is not None:
         cmd["observed_at"] = observed_at
+    if host_failure is not None:
+        cmd["host_failure"] = host_failure
     return _envelope(request_id or _rid("eval"), cmd)
 
 
@@ -301,8 +308,7 @@ def action_graph(payload: dict | None = None) -> dict:
 
 def action_research(*, claim_id: str, source_kind: str, result: str,
                     payload: dict | None = None) -> dict:
-    details = {"source_ref": "plugins/empirica/tests/v2/assertions.py",
-               "citation": "The test observed this source directly."}
+    details = {"source_ref": CITED_SOURCE[0], "citation": CITED_SOURCE[1]}
     details.update(payload or {})
     return {"kind": "research", "claim_id": claim_id,
             "source_kind": source_kind, "result": result, "payload": details}
@@ -497,22 +503,56 @@ class ConformanceCase(unittest.TestCase):
     selection is bound through the factory only (no invented StartRun field).
     """
 
+    def setUp(self) -> None:
+        """Every case gets its own ``EMPIRICA_HOME``: nothing a case writes (operational state, the host's surface note)
+        can reach the developer's real home. Restored on teardown. ``tests/test_home_isolation.py`` is the guard."""
+        super().setUp()
+        home = tempfile.TemporaryDirectory(prefix="empirica-home-")
+        self.addCleanup(home.cleanup)
+        prior = os.environ.get("EMPIRICA_HOME")
+        os.environ["EMPIRICA_HOME"] = self.empirica_home = home.name
+        self.addCleanup(lambda: os.environ.__setitem__("EMPIRICA_HOME", prior) if prior is not None
+                        else os.environ.pop("EMPIRICA_HOME", None))
+
     # Default profile used by cases that do not assert a specific host tier.
-    DEFAULT_PROFILE = "claude-code@2.1.278"
+    DEFAULT_PROFILE = CLAUDE_PROFILE
     DEFAULT_GOAL = "Prove the public contract is internally consistent."
 
     # ---- SUT binding -------------------------------------------------------
 
     def bind_driver(self, owner: str, case_id: str, behavior: str,
-                    profile_id: str | None = None, limits: dict | None = None):
+                    profile_id: str | None = None, limits: dict | None = None, **ports):
         pid = profile_id or self.DEFAULT_PROFILE
         try:
-            drv = new_driver(profile_id=pid, limits=limits)
+            drv = new_driver(profile_id=pid, limits=limits, **ports)
         except V2SeamAbsent as exc:
             self.fail(f"[{owner}] {case_id}: {behavior} — v2 SUT seam absent: {exc}")
         return drv
 
     # ---- central dispatch (D4 spec §4) -------------------------------------
+
+    def stop(self, drv, run_id: str, **extra) -> dict:
+        """``stop`` as a whole (see ``end_run``)."""
+        return self.end_run(drv, run_id, "stop", **extra)
+
+    def end_run(self, drv, run_id: str, intent: str = "stop", **extra) -> dict:
+        """``stop`` or ``report_convergence`` that ends the run non-converged: the response that committed it. A deliberative run is first asked of its human
+        (ADR-0063 amendment); the helper answers that dialog with approval, through the trusted ingresses a host uses,
+        and evaluates again. An auto run's first answer is the final one. Tests of the consent itself do not use it."""
+        response = self.dispatch(drv, evaluate(run_id=run_id, intent=intent, **extra))
+        if not any(r["code"] == "governance.terminal_stop_pending" for r in response["result"].get("reasons", [])):
+            return response
+        drv.trusted_human_surface(run_id, "human")
+        batch = self.dispatch(drv, evaluate(run_id=run_id, intent=intent))["result"]["run"]["confirmation_batch"]
+        shown = drv.trusted_evidence_presentation(run_id, {"run_id": run_id, "receipt_id": "terminal-presented",
+                                                           "key": batch["key"]})["result"]
+        assert shown["type"] == "Allow", shown
+        decision = {"subject": "claim", "claim_id": batch["terminal"]["status"],
+                    "claim_digest": batch["terminal"]["digest"], "outcome": "approve"}
+        answered = drv.trusted_evidence_confirmation(run_id, {"run_id": run_id, "receipt_id": "terminal-presented",
+                                                              "decisions": [decision]})["result"]
+        assert answered["type"] == "Allow", answered
+        return self.dispatch(drv, evaluate(run_id=run_id, intent=intent, **extra))
 
     def dispatch(self, drv, envelope: dict) -> dict:
         """Normal dispatch: validate the request against the v2 schema, send it to the SUT,
@@ -584,7 +624,8 @@ class ConformanceCase(unittest.TestCase):
         for r in result["reasons"]:
             self.assertIn(r["code"], REASONS, f"reason code {r['code']!r} must be canonical")
             spec = REASONS[r["code"]]
-            self.assertEqual(r["next_actions"], spec["next_actions"],
+            self.assertEqual(r["next_actions"],
+                             confirmation_actions(r["code"], r.get("parameters"), spec["next_actions"], None),
                              f"reason {r['code']} next_actions must match registry order")
             self.assertEqual(r["sections"], spec["sections"],
                              f"reason {r['code']} sections must match registry order")
@@ -640,7 +681,8 @@ class ConformanceCase(unittest.TestCase):
         else:
             self.assertEqual(r.get("parameters", {}), {},
                              f"reason {code} parameters must be empty")
-        self.assertEqual(r["next_actions"], spec["next_actions"],
+        self.assertEqual(r["next_actions"],
+                         confirmation_actions(code, r.get("parameters"), spec["next_actions"], None),
                          f"reason {code} next_actions must match registry order")
         self.assertEqual(r["sections"], spec["sections"],
                          f"reason {code} sections must match registry order")
@@ -1288,16 +1330,16 @@ class ConformanceCase(unittest.TestCase):
                 })
         return payload
 
-    def assert_audit_view(self, arg: dict, *, state: str | None = None,
-                           independence: str | None = None) -> dict:
-        """Assert the typed ArgumentView carries an audit view with the expected state and
-        independence. Returns the audit dict for further exact assertions."""
+    def assert_audit_view(self, arg: dict, *, verdict: str | None = None, current: bool | None = None,
+                           pending: bool | None = None, independence: str | None = None) -> dict:
+        """Assert the typed ArgumentView carries an audit view with the expected verdict, currency, pending flag and
+        independence (the core's four facts). Returns the audit dict for further exact assertions."""
         audit = arg.get("audit")
         if not isinstance(audit, dict):
             raise self.failureException("ArgumentView must carry a typed audit view (D2C)")
-        if state is not None:
-            self.assertEqual(audit.get("state"), state,
-                             f"audit.state must be {state!r}; got {audit.get('state')!r}")
+        for name, want in (("verdict", verdict), ("current", current), ("pending", pending)):
+            if want is not None:
+                self.assertEqual(audit.get(name), want, f"audit.{name} must be {want!r}; got {audit.get(name)!r}")
         if independence is not None:
             self.assertEqual(audit.get("independence"), independence,
                              f"audit.independence must be {independence!r}; "

@@ -43,7 +43,10 @@ from core.records import (ABSENT, Artifact, Conflict, Corrupt, Present, Revision
 from core.run import OperationalState  # noqa: E402
 from core.governance import initial as initial_governance  # noqa: E402
 from governance_setup import (  # noqa: E402
-    TEST_INVOCATION, AUTHOR, AUDITOR, SIZED_RATIONALE, approve_current)
+    TEST_INVOCATION, AUTHOR, AUDITOR, SIZED_RATIONALE, approve_current, end_with_consent)
+from application.protocol import host_profile_id  # noqa: E402
+CLAUDE_PROFILE = host_profile_id("claude-code")
+PI_PROFILE = host_profile_id("pi")
 
 # The response schema rooted at its RunView definition (same $id, so shared refs resolve).
 RUN_VIEW = jsonschema.validators.validator_for(protocol._RESPONSE_SCHEMA)(
@@ -127,10 +130,29 @@ class Artifacts:
         return ABSENT if values is None else Present(frozenset(values.values()), Revision("a"))
 
 
+#: The files the research in the suites built on this double cites, so every citation is verbatim
+#: from its source (core.citations). Each Workspace starts with them.
+CITED_SOURCES = {
+    "supplied": b"observed\n",
+    "counter-proof": b"admitted evidence\n",
+    "first": b"first observer\n",
+    "second": b"second observer\n",
+    "third": b"first observer again\n",
+    "review": b"active audit fixture\n",
+    "notes.md": b"tested\n",
+    "test_d7_transactions.py": b"Repeated artifact fixture.\nDerivation fixture.\n"
+                               b"Post-plan capture fixture.\nObservation basis fixture.\n",
+    "plugins/empirica/tests/test_d7_transactions.py":
+        b"The projection fixture records real supporting evidence.\n",
+    "plugins/empirica/tests/test_context_economy.py": b"The test observed directly what it cites.\n",
+    **{f"sequence-{index}": b"Current producer observation.\n" for index in range(8)},
+}
+
+
 class Workspace:
     def __init__(self):
         self.calls = []
-        self.files = {}
+        self.files = dict(CITED_SOURCES)
 
     def write(self, path, content):
         self.files[path] = bytes(content)
@@ -190,7 +212,7 @@ def initial() -> OperationalState:
                  "max_audit_spawns": 1, "audit_spawns_used": 0},
         governance=initial_governance("g", {"max_passes": 8, "max_spawns": 1,
             "max_audit_spawns": 1}, "deliberative", {"host": "test", "interactive": True,
-            "signal": "test", "delegation": False}, None),
+            "signal": "test", "delegation": False, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}, None),
         selected_graph_artifact_id=None, frozen_claim_ids=None, frozen_semantic_digest=None,
         route_stamp=None,
         investigation_stamp=None, stamp_seq=0, last_derivation_digest=None, children=(),
@@ -231,7 +253,7 @@ def projection_snapshot(*, frozen: bool = False, deferred: bool = False,
         raise ValueError("deferred scope requires a frozen scope")
     runs, artifacts_repo, workspace, harness = Runs(), Artifacts(), Workspace(), Harness()
     coordinator = ProductionCoordinator(
-        workspace, harness, runs, artifacts_repo, "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+        workspace, harness, runs, artifacts_repo, PI_PROFILE, {})
     started = coordinator.handle(
         {"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "projection", "session": "base"},
          "goal": "g"}, "start")
@@ -389,7 +411,7 @@ class D7TransactionTests(unittest.TestCase):
     def test_cas_retry_reuses_content_addresses_without_duplicates(self):
         runs, artifacts_repo, workspace = Runs(), Artifacts(), Workspace()
         coordinator = ProductionCoordinator(workspace, Harness(), runs, artifacts_repo,
-                                  "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+                                  PI_PROFILE, {})
         start = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                     "goal": "g"}, "start")
         run_id = start["result"]["run"]["id"]
@@ -409,7 +431,7 @@ class D7TransactionTests(unittest.TestCase):
     def test_append_once_delegates_idempotency_without_repository_preread(self):
         artifacts_repo = Artifacts()
         coordinator = ProductionCoordinator(Workspace(), Harness(), Runs(), artifacts_repo,
-                                  "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+                                  PI_PROFILE, {})
         key = RunKey("p", "s", 1)
         value = make_artifact({"kind": "graph", "root": "C0", "claims": [], "edges": []})
         coordinator._append_once(key, value)
@@ -421,7 +443,7 @@ class D7TransactionTests(unittest.TestCase):
     def test_append_once_surfaces_orphan_collision_without_repository_preread(self):
         artifacts_repo = Artifacts()
         coordinator = ProductionCoordinator(Workspace(), Harness(), Runs(), artifacts_repo,
-                                  "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+                                  PI_PROFILE, {})
         key = RunKey("p", "s", 1)
         artifacts_repo.append(key, Artifact("orphan-id", "original"))
         with self.assertRaisesRegex(ValueError, "collision"):
@@ -440,7 +462,7 @@ class D7TransactionTests(unittest.TestCase):
 
         runs, artifacts_repo = Runs(), CollisionArtifacts()
         coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo,
-                                  "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+                                  PI_PROFILE, {})
         started = coordinator.handle({
             "type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"}, "goal": "g",
         }, "start")
@@ -464,7 +486,7 @@ class D7TransactionTests(unittest.TestCase):
 
     def test_repeated_domain_artifacts_are_idempotent_not_corrupting(self):
         runs, artifacts_repo, workspace = Runs(), Artifacts(), Workspace()
-        coordinator = ProductionCoordinator(workspace, Harness(), runs, artifacts_repo, "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+        coordinator = ProductionCoordinator(workspace, Harness(), runs, artifacts_repo, PI_PROFILE, {})
         started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                       "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
@@ -490,7 +512,7 @@ class D7TransactionTests(unittest.TestCase):
 
     def test_deduplicated_noop_retries_if_revision_changed(self):
         runs, artifacts_repo = Runs(), Artifacts()
-        coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo, "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+        coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo, PI_PROFILE, {})
         started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                       "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
@@ -507,7 +529,7 @@ class D7TransactionTests(unittest.TestCase):
 
     def test_identical_derivation_does_not_double_consume_pass(self):
         runs, artifacts_repo, workspace = Runs(), Artifacts(), Workspace()
-        coordinator = ProductionCoordinator(workspace, Harness(), runs, artifacts_repo, "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+        coordinator = ProductionCoordinator(workspace, Harness(), runs, artifacts_repo, PI_PROFILE, {})
         started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                       "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
@@ -530,7 +552,7 @@ class D7TransactionTests(unittest.TestCase):
 
     def test_corrupt_repository_read_blocks_get_and_resolve(self):
         runs, artifacts_repo = Runs(), Artifacts()
-        coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo, "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+        coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo, PI_PROFILE, {})
         key = RunKey(storage_id("p"), storage_id("s"), 1)
         runs.data[key] = Corrupt("bad bytes")
         get_response = coordinator.handle({"type": "GetRun", "run_id": encode_handle(key)}, "get")
@@ -544,7 +566,7 @@ class D7TransactionTests(unittest.TestCase):
     def test_inconsistent_frozen_semantics_uses_fixed_safe_corrupt_projection(self):
         runs, artifacts_repo = Runs(), Artifacts()
         coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo,
-                                  "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+                                  PI_PROFILE, {})
         started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                       "goal": "CANARY_REJECTED_GOAL"}, "start")
         run_id = started["result"]["run"]["id"]
@@ -578,7 +600,7 @@ class D7TransactionTests(unittest.TestCase):
     def test_frozen_identity_without_selected_graph_is_corrupt_on_all_ingress(self):
         runs, artifacts_repo = Runs(), Artifacts()
         coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo,
-                                  "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+                                  PI_PROFILE, {})
         started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION),
             "selector": {"project": "p", "session": "s"},
             "goal": "CANARY_MISSING_SELECTION"}, "start")
@@ -616,7 +638,7 @@ class D7TransactionTests(unittest.TestCase):
 
     def test_read_revision_change_retries_before_projection(self):
         runs, artifacts_repo, workspace = Runs(), Artifacts(), Workspace()
-        coordinator = ProductionCoordinator(workspace, Harness(), runs, artifacts_repo, "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+        coordinator = ProductionCoordinator(workspace, Harness(), runs, artifacts_repo, PI_PROFILE, {})
         started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                       "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
@@ -629,7 +651,7 @@ class D7TransactionTests(unittest.TestCase):
     def test_route_order_rejections_have_zero_writes_or_execution(self):
         runs, artifacts_repo, harness = Runs(), Artifacts(), Harness()
         coordinator = ProductionCoordinator(Workspace(), harness, runs, artifacts_repo,
-                                  "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+                                  PI_PROFILE, {})
         started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION),
             "selector": {"project": "p", "session": "route"}, "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
@@ -706,18 +728,18 @@ class D7TransactionTests(unittest.TestCase):
                                  "audit.pending")
             return reserved
 
-        claude_audit = reserve("claude-code@2.1.278", "claude-audit", "audit")
+        claude_audit = reserve(CLAUDE_PROFILE, "claude-audit", "audit")
         self.assertEqual(claude_audit["type"], "Allow")
-        claude_generic = reserve("claude-code@2.1.278", "claude-generic", "investigation")
+        claude_generic = reserve(CLAUDE_PROFILE, "claude-generic", "investigation")
         self.assertEqual(claude_generic["reasons"][0]["code"], "host.async_unsupported")
-        pi_audit = reserve("pi@0.84.1+pi-subagents-foreground-audit-v1", "pi-audit", "audit")
+        pi_audit = reserve(PI_PROFILE, "pi-audit", "audit")
         self.assertEqual(pi_audit["reasons"][0]["code"], "host.async_unsupported")
 
     def test_split_child_budgets_are_isolated_and_purpose_cannot_select_audit(self):
         def setup(session, audit_limit):
             runs, artifacts_repo = Runs(), Artifacts()
             coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo,
-                                      "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+                                      PI_PROFILE, {})
             started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION),
                 "selector": {"project": "p", "session": session}, "goal": "split",
                 "budgets": {"max_spawns": 1, "max_audit_spawns": audit_limit}}, "start")
@@ -792,7 +814,7 @@ class D7TransactionTests(unittest.TestCase):
             with self.subTest(candidate=candidate):
                 runs, artifacts_repo = Runs(), Artifacts()
                 coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo,
-                                          "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+                                          PI_PROFILE, {})
                 started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION),
                     "selector": {"project": "p", "session": "s"}, "goal": "g"}, "start")
                 key = next(iter(runs.data))
@@ -806,7 +828,7 @@ class D7TransactionTests(unittest.TestCase):
     def test_frozen_semantic_identity_is_atomic_and_rejection_has_zero_writes(self):
         runs, artifacts_repo = Runs(), Artifacts()
         coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo,
-                                  "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+                                  PI_PROFILE, {})
         started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION),
             "selector": {"project": "p", "session": "s"}, "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
@@ -840,7 +862,7 @@ class D7TransactionTests(unittest.TestCase):
 
     def test_post_plan_capture_tracks_disjoint_graph_heads(self):
         runs, artifacts_repo, workspace, harness = Runs(), Artifacts(), Workspace(), Harness()
-        coordinator = ProductionCoordinator(workspace, harness, runs, artifacts_repo, "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+        coordinator = ProductionCoordinator(workspace, harness, runs, artifacts_repo, PI_PROFILE, {})
         started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                       "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
@@ -886,7 +908,7 @@ class D7TransactionTests(unittest.TestCase):
             with self.subTest(replacement=replacement):
                 runs, artifacts_repo = Runs(), Artifacts()
                 coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo,
-                                          "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+                                          PI_PROFILE, {})
                 coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                     "goal": "g"}, "start")
                 key = next(iter(runs.data))
@@ -906,7 +928,7 @@ class D7TransactionTests(unittest.TestCase):
     def test_resolve_valid_terminal_is_inert_but_corrupt_terminal_blocks(self):
         runs, artifacts_repo = Runs(), Artifacts()
         coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo,
-                                  "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+                                  PI_PROFILE, {})
         started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                       "goal": "CANARY_TERMINAL_GOAL"}, "start")
         run_id = started["result"]["run"]["id"]
@@ -915,7 +937,9 @@ class D7TransactionTests(unittest.TestCase):
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "graph", "payload": graph}}, "graph")
         approve_current(coordinator, run_id)
-        coordinator.handle({"type": "EvaluateRun", "run_id": run_id, "intent": "stop"}, "stop")
+        coordinator.handle({"type": "ObserveAction", "run_id": run_id, "action": {"kind": "route", "reason": "r"}}, "route")
+        coordinator.handle({"type": "ObserveAction", "run_id": run_id, "action": {"kind": "investigate"}}, "investigate")
+        end_with_consent(coordinator, run_id)  # a deliberative run ends only with its human's consent (ADR-0063)
         resolve = {"type": "ResolveRun", "selector": {"project": "p", "session": "s"}}
         self.assertEqual(coordinator.handle(resolve, "valid")["result"],
                          {"type": "Inert", "reason": "no_run"})
@@ -933,7 +957,7 @@ class D7TransactionTests(unittest.TestCase):
             with self.subTest(corruption=corruption):
                 runs, artifacts_repo = Runs(), Artifacts()
                 coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo,
-                                          "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+                                          PI_PROFILE, {})
                 started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION),
                                               "selector": {"project": "p", "session": "s"},
                                               "goal": "CANARY_SELECTED_GRAPH_GOAL"}, "start")
@@ -971,6 +995,31 @@ class D7TransactionTests(unittest.TestCase):
                 self.assertEqual(runs.cas_calls, writes_before)
                 self.assertEqual(len(artifacts_repo.values[key]), artifact_count)
 
+    def test_a_stored_graph_with_a_non_gating_root_is_read_back_not_run_corrupt(self):
+        """HQ-G9-04: the gating root is an admission rule (``graph.root_not_gating`` at graph time). History integrity checks
+        structure only, so a stored graph the rule would now refuse is read, never reported as a corrupt run."""
+        runs, artifacts_repo = Runs(), Artifacts()
+        coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo, PI_PROFILE, {})
+        started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION),
+                                      "selector": {"project": "p", "session": "s"}, "goal": "g"}, "start")
+        run_id = started["result"]["run"]["id"]
+        graph = {"root": "C0", "claims": [{"id": "C0", "text": "t", "gating": True, "kind": "ordinary"}], "edges": []}
+        coordinator.handle({"type": "ObserveAction", "run_id": run_id, "action": {"kind": "graph", "payload": graph}}, "g")
+        approve_current(coordinator, run_id)
+        key = next(iter(runs.data))
+        state = decode_state(runs.data[key].value)
+        stored = make_artifact({"kind": "graph", "graph": {
+            "root": "C0", "claims": [{"id": "C0", "text": "t", "gating": False, "kind": "ordinary"}], "edges": []}})
+        artifacts_repo.append(key, stored)
+        next_state = replace(state, selected_graph_artifact_id=stored.artifact_id)
+        manifest = manifest_for(state.committed_artifact_head_id, (stored,), next_state, basis_id="test")
+        artifacts_repo.append(key, manifest)
+        committed = replace(next_state, committed_artifact_head_id=manifest.artifact_id)
+        runs.data[key] = Present(encode_state(committed), Revision("non-gating"))
+        response = coordinator.handle({"type": "GetArgument", "run_id": run_id}, "arg")
+        self.assertNotEqual(response["result"]["type"], "Fault")
+        self.assertNotIn("run.corrupt", [r["code"] for r in response["result"].get("reasons", [])])
+
     def test_trusted_ingress_maps_corrupt_aggregate_to_fixed_safe_block(self):
         operations = (
             ("trusted_attribution", ({},)),
@@ -982,7 +1031,7 @@ class D7TransactionTests(unittest.TestCase):
                 with self.subTest(operation=operation, corruption=corruption):
                     runs, artifacts_repo = Runs(), Artifacts()
                     coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo,
-                                              "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+                                              PI_PROFILE, {})
                     started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION),
                         "selector": {"project": "p", "session": "s"},
                         "goal": "CANARY_TRUSTED_GOAL"}, "start")
@@ -1018,7 +1067,7 @@ class D7TransactionTests(unittest.TestCase):
                                 completion_author=AUDITOR):
         runs, artifacts_repo, workspace, harness = Runs(), Artifacts(), Workspace(), Harness()
         coordinator = ProductionCoordinator(
-            workspace, harness, runs, artifacts_repo, "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+            workspace, harness, runs, artifacts_repo, PI_PROFILE, {})
         started = coordinator.handle(
             {"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
              "goal": "g"}, "start")
@@ -1097,9 +1146,12 @@ class D7TransactionTests(unittest.TestCase):
         coordinator, runs, artifacts_repo, workspace, harness, _, key = \
             self._run_with_passing_spike(conflict=True)
         self.assertEqual(harness.calls, 1)
-        # Immutable execution capture plus one post-plan capture per result attempt;
-        # successful projection performs no additional observation.
-        self.assertEqual(len(workspace.calls), 3)
+        # The research reads only the file it cites (core.citations); then the immutable execution
+        # capture plus one post-plan capture per result attempt; successful projection performs no
+        # additional observation.
+        cited = [call for call in workspace.calls if call == ("test_d7_transactions.py",)]
+        self.assertEqual(len(cited), 1)
+        self.assertEqual(len(workspace.calls) - len(cited), 3)
         history = traverse_history(
             decode_state(runs.data[key].value), artifacts_repo.values[key].values())
         spikes = [item for item in history if item["kind"] == "spike"]
@@ -1204,7 +1256,7 @@ class D7TransactionTests(unittest.TestCase):
         command = {"type": "EvaluateRun", "run_id": run_id, "intent": "report_convergence"}
         snapshot = assemble(
             state, artifacts_repo.values[key].values(), workspace, run_id=run_id,
-            profile_id="pi@0.84.1+pi-subagents-foreground-audit-v1", command=command,
+            profile_id=PI_PROFILE, command=command,
             require_graph=True)
         open_snapshot = replace(
             snapshot, history=tuple(item for item in snapshot.history
@@ -1219,7 +1271,7 @@ class D7TransactionTests(unittest.TestCase):
         state = decode_state(runs.data[key].value)
         snapshot = assemble(
             state, artifacts_repo.values[key].values(), workspace, run_id=run_id,
-            profile_id="pi@0.84.1+pi-subagents-foreground-audit-v1",
+            profile_id=PI_PROFILE,
             command={"type": "EvaluateRun", "run_id": run_id, "intent": "continue"},
             require_graph=True)
         self.assertFalse(evaluate_snapshot(snapshot, snapshot.command).observations_consulted)
@@ -1313,14 +1365,14 @@ class D7TransactionTests(unittest.TestCase):
     def test_persisted_evidence_without_route_witnesses_is_fixed_safe_corrupt(self):
         runs, artifacts_repo = Runs(), Artifacts()
         coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo,
-                                  "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+                                  PI_PROFILE, {})
         graph = artifact("graph", {"graph": {"root": "C0", "claims": [
             {"id": "C0", "text": "CANARY_ROUTE_EVIDENCE", "gating": True,
              "kind": "ordinary"}], "edges": []}})
         research = artifact("research", {"claim_id": "C0", "claim_digest": "sha256:" + "1" * 64,
             "statement_digest": "sha256:" + "2" * 64, "outcome": "supporting",
             "source_kind": "code", "source_ref": "CANARY_ROUTE_EVIDENCE",
-            "citation": "legacy bypass"})
+            "citation": "unreviewed bypass"})
         base = replace(initial(), goal="CANARY_ROUTE_GOAL",
                        selected_graph_artifact_id=graph["artifact_id"])
         state, values = chain(base, (graph, research))
@@ -1350,7 +1402,7 @@ class D7TransactionTests(unittest.TestCase):
             with self.subTest(kind=kind):
                 runs, artifacts_repo = Runs(), Artifacts()
                 coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo,
-                                          "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+                                          PI_PROFILE, {})
                 graph = artifact("graph", {"graph": {"root": "C0", "claims": [
                     {"id": "C0", "text": "typed witness", "gating": True,
                      "kind": "ordinary"}], "edges": []}})
@@ -1368,7 +1420,7 @@ class D7TransactionTests(unittest.TestCase):
     def test_trusted_audit_plan_rejects_inconsistent_investigation_history(self):
         runs, artifacts_repo = Runs(), Artifacts()
         coordinator = ProductionCoordinator(Workspace(), Harness(), runs, artifacts_repo,
-                                  "pi@0.84.1+pi-subagents-foreground-audit-v1", {})
+                                  PI_PROFILE, {})
         graph = artifact("graph", {"graph": {"root": "C0", "claims": [
             {"id": "C0", "text": "audit history", "gating": True,
              "kind": "ordinary"}], "edges": []}})
@@ -1396,7 +1448,7 @@ class D7TransactionTests(unittest.TestCase):
             state=state, history=(), graph=None, contract=protocol.CONTRACT_VIEW,
             run_id="er2:test:test",
             contract_id=protocol._PUBLIC_CONTRACT["id"], contract_version=protocol._PUBLIC_CONTRACT["version"],
-            contract_digest=protocol._DIGEST, profile_id="pi@0.84.1+pi-subagents-foreground-audit-v1",
+            contract_digest=protocol._DIGEST, profile_id=PI_PROFILE,
             host_tier="foreground_only", command={"type": "GetRun"})
         left, right = project_runview(snapshot), project_runview(snapshot)
         self.assertEqual(left, right)

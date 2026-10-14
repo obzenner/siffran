@@ -37,13 +37,23 @@ def _parse_transcript_entrypoint(path: object) -> str | None:
     return None
 
 
+def _session(payload: Mapping[str, object]) -> dict[str, str] | None:
+    """Where the session can be found again, from what the hook payload carries: its id, and its transcript when the
+    payload names one (otherwise the id is the locator). Nothing is invented: a payload without an id gives none."""
+    session_id = payload.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        return None
+    transcript = payload.get("transcript_path")
+    return {"label": session_id, "locator": transcript if isinstance(transcript, str) and transcript else session_id}
+
+
 def invocation_provenance(payload: Mapping[str, object], environ: Mapping[str, str]) -> dict[str, object]:
     entrypoint = environ.get("CLAUDE_CODE_ENTRYPOINT")
     signal = "CLAUDE_CODE_ENTRYPOINT" if entrypoint is not None else "transcript.entrypoint unavailable"
     if entrypoint is None and (observed := _parse_transcript_entrypoint(payload.get("transcript_path"))) is not None:
         entrypoint, signal = observed, "transcript.entrypoint"
     return provenance("claude", _ENTRYPOINT_INTERACTIVE.get(entrypoint), signal, environ,
-                      profile_id=CLAUDE_PROFILE_ID)
+                      profile_id=CLAUDE_PROFILE_ID, session=_session(payload))
 
 
 def _budget(environ: Mapping[str, str], name: str, minimum: int) -> int | None:

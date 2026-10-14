@@ -1,0 +1,473 @@
+{
+ "aggregates": {
+  "by": {
+   "ask": {
+    "approve_configuration": 1,
+    "approve_revision": 1,
+    "confirm_source": 1,
+    "decide_claim": 1,
+    "freeze_scope": 1
+   },
+   "audit": {
+    "failed": 1,
+    "none": 8,
+    "passed": 4
+   },
+   "host": {
+    "claude": 8,
+    "pi": 5
+   },
+   "mode": {
+    "deliberative": 13
+   },
+   "project": {
+    "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17": 2,
+    "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50": 3,
+    "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9": 6,
+    "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d": 2
+   },
+   "standing": {
+    "audit_pending": 1,
+    "changed_since_audit": 1,
+    "needs_human": 5,
+    "not_ended": 1,
+    "proven": 1,
+    "stopped_budget": 1,
+    "stopped_frozen": 1,
+    "stopped_residual": 2
+   }
+  },
+  "decisions_by": {
+   "approve_configuration": {
+    "facts": 12,
+    "runs": 12,
+    "untimed": 0
+   },
+   "approve_revision": {
+    "facts": 0,
+    "runs": 0,
+    "untimed": 0
+   },
+   "confirm_source": {
+    "facts": 2,
+    "runs": 1,
+    "untimed": 0
+   },
+   "consent_stop": {
+    "facts": 3,
+    "runs": 3,
+    "untimed": 0
+   },
+   "decide_claim": {
+    "facts": 0,
+    "runs": 0,
+    "untimed": 0
+   },
+   "freeze_scope": {
+    "facts": 1,
+    "runs": 1,
+    "untimed": 0
+   }
+  },
+  "facts": {
+   "decisions": 18,
+   "failed_audits": 1,
+   "refutations": 1
+  },
+  "not_read": 1,
+  "runs": {
+   "decisions": 12,
+   "failed_audits": 1,
+   "refutations": 1
+  },
+  "since": null,
+  "total": 13,
+  "untimed": {
+   "decisions": 0,
+   "failed_audits": 0,
+   "refutations": 0
+  },
+  "untimed_runs": 0
+ },
+ "calendar": {
+  "day": [
+   "2026-09-28",
+   "2026-09-28",
+   "2026-09-28",
+   "2026-09-28"
+  ],
+  "project": [
+   0,
+   1,
+   2,
+   3
+  ],
+  "runs": [
+   6,
+   2,
+   3,
+   2
+  ],
+  "standing": [
+   1,
+   7,
+   1,
+   1
+  ],
+  "start": [
+   1790553600.0,
+   1790553600.0,
+   1790553600.0,
+   1790553600.0
+  ],
+  "tz": "UTC"
+ },
+ "contract": "empirica-ui-view/v1",
+ "coverage": {
+  "partial": 0,
+  "pending": 0,
+  "read": 13,
+  "reindexing": 0,
+  "runs": 14,
+  "unreadable": 1
+ },
+ "facets": {
+  "ask": {
+   "approve_configuration": 1,
+   "approve_revision": 1,
+   "confirm_source": 1,
+   "decide_claim": 1,
+   "freeze_scope": 1
+  },
+  "audit": {
+   "failed": 1,
+   "none": 8,
+   "passed": 4
+  },
+  "host": {
+   "claude": 8,
+   "pi": 5
+  },
+  "mode": {
+   "deliberative": 13
+  },
+  "project": {
+   "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17": 2,
+   "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50": 3,
+   "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9": 6,
+   "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d": 2
+  },
+  "standing": {
+   "audit_pending": 1,
+   "changed_since_audit": 1,
+   "needs_human": 5,
+   "not_ended": 1,
+   "proven": 1,
+   "stopped_budget": 1,
+   "stopped_frozen": 1,
+   "stopped_residual": 2
+  }
+ },
+ "marks": {
+  "attempt": [
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   2,
+   1,
+   1,
+   1,
+   1,
+   1
+  ],
+  "flag_bits": [
+   "failed_audit",
+   "refuted",
+   "decided",
+   "changed_since_audit"
+  ],
+  "flags": [
+   0,
+   4,
+   4,
+   4,
+   0,
+   4,
+   4,
+   12,
+   5,
+   4,
+   4,
+   6,
+   4,
+   4
+  ],
+  "id": [
+   "e35f11147e7c",
+   "9c23b865daaa",
+   "4eee61b22b3e",
+   "6dcdc8c0a41f",
+   "05e9cd035aba",
+   "847d720ba940",
+   "4bf0bcdffdf1",
+   "5e08e7f95232",
+   "fbfc17260172",
+   "e9d2410d9652",
+   "3311712612ef",
+   "cdb0ec84ca85",
+   "50e1645f6e84",
+   "2c109de55a9f"
+  ],
+  "place": [
+   96,
+   3,
+   2,
+   5,
+   0,
+   1,
+   4,
+   2,
+   1,
+   0,
+   0,
+   1,
+   0,
+   1
+  ],
+  "project": [
+   1,
+   0,
+   2,
+   0,
+   3,
+   3,
+   0,
+   0,
+   2,
+   0,
+   2,
+   0,
+   1,
+   1
+  ],
+  "standing": [
+   0,
+   1,
+   1,
+   1,
+   1,
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   6,
+   7,
+   8
+  ],
+  "standings": [
+   "unreadable",
+   "needs_human",
+   "audit_pending",
+   "changed_since_audit",
+   "not_ended",
+   "proven",
+   "stopped_residual",
+   "stopped_budget",
+   "stopped_frozen"
+  ],
+  "started": [
+   null,
+   1790592960.0,
+   1790595240.0,
+   1790595900.0,
+   1790601180.0,
+   1790601600.0,
+   1790594100.0,
+   1790588040.0,
+   1790591820.0,
+   1790586000.0,
+   1790591040.0,
+   1790587260.0,
+   1790589180.0,
+   1790590140.0
+  ],
+  "updated": [
+   null,
+   1790594040.0,
+   1790595840.0,
+   1790596440.0,
+   1790601540.0,
+   1790602560.0,
+   1790595180.0,
+   1790589120.0,
+   1790592900.0,
+   1790587200.0,
+   1790591760.0,
+   1790587980.0,
+   1790590080.0,
+   1790590980.0
+  ],
+  "window_flags": [
+   0,
+   4,
+   4,
+   4,
+   0,
+   4,
+   4,
+   12,
+   5,
+   4,
+   4,
+   6,
+   4,
+   4
+  ]
+ },
+ "needs": [
+  {
+   "ask": "decide_claim",
+   "asked_at": 1790593140.0,
+   "host": "claude",
+   "id": "9c23b865daaa",
+   "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211/1",
+   "session": "atlas docs session"
+  },
+  {
+   "ask": "approve_revision",
+   "asked_at": 1790595840.0,
+   "host": "claude",
+   "id": "4eee61b22b3e",
+   "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-304a7406988d22c5ec496b8a79ecfbb856e45a9e20bb82b43e3e3db7a1023365/1",
+   "session": null
+  },
+  {
+   "ask": "confirm_source",
+   "asked_at": 1790596440.0,
+   "host": "pi",
+   "id": "6dcdc8c0a41f",
+   "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-2fac41cee6a25f7f4d80295af5875e8d79f37d9ebe255735397d5e6cb48971ab/1",
+   "session": null
+  },
+  {
+   "ask": "approve_configuration",
+   "asked_at": 1790601420.0,
+   "host": "claude",
+   "id": "05e9cd035aba",
+   "key": "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/s256-8a026a1c72cfeb0ecf5d51a17a55e4a1f0d250ca32742fef86cd0c1782d4d003/1",
+   "session": null
+  },
+  {
+   "ask": "freeze_scope",
+   "asked_at": null,
+   "host": "pi",
+   "id": "847d720ba940",
+   "key": "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/s256-405b28cee2b1c2980b78f6044c23fda4ec8f9ae0a86e56da7e2b97090f74333b/1",
+   "session": null
+  }
+ ],
+ "orders": {
+  "audit_pending": {
+   "by": "updated",
+   "first": "newest"
+  },
+  "changed_since_audit": {
+   "by": "updated",
+   "first": "newest"
+  },
+  "needs_human": {
+   "by": "asked_at",
+   "first": "oldest"
+  },
+  "not_ended": {
+   "by": "updated",
+   "first": "newest"
+  },
+  "proven": {
+   "by": "updated",
+   "first": "newest"
+  },
+  "stopped_budget": {
+   "by": "updated",
+   "first": "newest"
+  },
+  "stopped_frozen": {
+   "by": "updated",
+   "first": "newest"
+  },
+  "stopped_residual": {
+   "by": "updated",
+   "first": "newest"
+  },
+  "unreadable": {
+   "by": "updated",
+   "first": "newest"
+  }
+ },
+ "projects": [
+  {
+   "id": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9",
+   "label": "atlas",
+   "name": "atlas",
+   "needs": 2,
+   "repo": "/work/atlas",
+   "runs": 6,
+   "since": 1790586000.0,
+   "standings": {
+    "audit_pending": 1,
+    "changed_since_audit": 1,
+    "needs_human": 2,
+    "proven": 1,
+    "stopped_residual": 1
+   }
+  },
+  {
+   "id": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d",
+   "label": "harbor",
+   "name": "harbor",
+   "needs": 0,
+   "repo": "/work/harbor",
+   "runs": 3,
+   "since": 1790589180.0,
+   "standings": {
+    "stopped_budget": 1,
+    "stopped_frozen": 1,
+    "unreadable": 1
+   }
+  },
+  {
+   "id": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50",
+   "label": "lumen",
+   "name": "lumen",
+   "needs": 1,
+   "repo": "/work/lumen",
+   "runs": 3,
+   "since": 1790591040.0,
+   "standings": {
+    "needs_human": 1,
+    "not_ended": 1,
+    "stopped_residual": 1
+   }
+  },
+  {
+   "id": "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17",
+   "label": "quarry",
+   "name": "quarry",
+   "needs": 2,
+   "repo": "/work/quarry",
+   "runs": 2,
+   "since": 1790601180.0,
+   "standings": {
+    "needs_human": 2
+   }
+  }
+ ],
+ "token": "sha256:d3cb1f1dc3e47851168cff83b93b41b83db21c418144e4b8d79587a86212d2b1"
+}

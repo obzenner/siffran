@@ -2,16 +2,16 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import partial
 from types import MappingProxyType
 from typing import Any
 
 from .canonical import canonical_digest
-from .freshness import ActiveSpikeHead, FileBinding, evaluate_freshness, valid_claim_id
+from .freshness import ActiveSpikeHead, FileBinding, ObservationState, evaluate_freshness, valid_claim_id
 from .run import OperationalState
-from . import governance
+from . import citations, confirmation, governance
 
 SPAWN_BUDGET = {"investigation": ("max_spawns", *governance.BUDGETS["max_spawns"]),
                 "audit": ("max_audit_spawns", *governance.BUDGETS["max_audit_spawns"])}
@@ -55,15 +55,23 @@ def _producer(state: OperationalState) -> dict[str, Any] | None:
 class ContractView:
     reason_metadata: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...]
     bootstrap_requirements: tuple[tuple[str, str, str], ...]
+    #: A bootstrap requirement's words when its human acts on it, by obligation id (the contract's ``waiting``).
+    bootstrap_waiting: Mapping[str, str]
     audit_obligation: tuple[str, str]
+    #: ``(obligation id, must)`` of the report's other stages: ``confirmation``, ``passes`` and ``terminal``.
+    stage_obligations: Mapping[str, tuple[str, str]]
     bootstrap_operations: tuple[tuple[str, tuple[tuple[str, str], ...]], ...]
     governance_controls: Mapping[str, Any]
     recovery_exclusions: Mapping[str, tuple[str, ...]]
     late_route_must: str
     default_next_action: str
     untrusted_delimiters: Mapping[str, str]
+    #: The most items one human batch carries: the request schema's ``maxItems`` for a receipt's decisions.
+    batch_limit: int
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "stage_obligations", _freeze(self.stage_obligations))
+        object.__setattr__(self, "bootstrap_waiting", _freeze(self.bootstrap_waiting))
         object.__setattr__(self, "governance_controls", _freeze(self.governance_controls))
         object.__setattr__(self, "recovery_exclusions", _freeze(self.recovery_exclusions))
         object.__setattr__(self, "untrusted_delimiters", _freeze(self.untrusted_delimiters))
@@ -86,6 +94,11 @@ class EvaluationSnapshot:
     profile_id: str = ""
     host_tier: str = "observational"
     host_audit_execution: str = "unavailable"
+    #: The workspace's capture of the file a submitted research record cites (``core.citations``), when
+    #: the command is such a record: an object with ``observation`` (state, sha256) and ``content``.
+    cited: Any = None
+    #: Where the run's workspace lives, when the workspace says (an absolute citation inside it is refused).
+    workspace_root: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "history", _freeze(self.history))
@@ -103,6 +116,10 @@ class EvaluationSnapshot:
     @property
     def audit_obligation(self):
         return self.contract.audit_obligation
+
+    @property
+    def stage_obligations(self):
+        return self.contract.stage_obligations
 
     @property
     def reason_metadata(self):
@@ -123,6 +140,10 @@ class EvaluationSnapshot:
     @property
     def untrusted_delimiters(self):
         return self.contract.untrusted_delimiters
+
+    @property
+    def batch_limit(self):
+        return self.contract.batch_limit
 
 
 @dataclass(frozen=True)
@@ -150,8 +171,30 @@ class Decision:
     observations_consulted: bool = False
 
 
+GRAPH_INVALID = "graph.invalid"
+GRAPH_ROOT_NOT_GATING = "graph.root_not_gating"
+
+
+def graph_refusal(value: Any, *, admission: bool = True) -> str | None:
+    """Why ``value`` is not a claim graph, else ``None``: ``graph.invalid`` for a structure the core cannot read, and (when
+    ``admission``) ``graph.root_not_gating`` for a well-formed graph whose root is outside the effective scope.
+
+    The root is the goal-level assurance claim, and a claim's state comes from its own evidence plus its scoped children
+    (ADR-0045), so a root outside the effective scope could never converge: that is an admission rule, applied when a
+    graph is recorded. A graph read back from history is held to the structure only (``admission=False``)."""
+    if not _well_formed_graph(value):
+        return GRAPH_INVALID
+    root = next(claim for claim in value["claims"] if claim["id"] == value["root"])
+    return GRAPH_ROOT_NOT_GATING if admission and not root["gating"] else None
+
+
 def valid_graph(value: Any) -> bool:
-    """Whether ``value`` is a well-formed claim graph (closed shape, bounded claims, edges)."""
+    """Whether ``value`` may be recorded as the claim graph (``graph_refusal`` finds nothing to refuse)."""
+    return graph_refusal(value) is None
+
+
+def _well_formed_graph(value: Any) -> bool:
+    """Whether ``value`` has the closed shape of a claim graph: bounded claims and edges, a root connected to every claim."""
     if not isinstance(value, Mapping) or set(value) != {"root", "claims", "edges"}:
         return False
     claims = value.get("claims")
@@ -236,12 +279,72 @@ def claim_digest(claim: dict[str, Any]) -> str:
 
 
 def active_evidence(snapshot: EvaluationSnapshot, claim: dict[str, Any]) -> list[dict[str, Any]]:
-    """Research and spike artifacts bound to the claim's current digest; only the latest spike is active."""
+    """Research and spike artifacts bound to the claim's current digest; only the latest spike is
+    active, and research a human rejected is not."""
     cd = claim_digest(claim)
-    evidence = [a for a in snapshot.history if a.get("kind") in {"research", "spike"} and a.get("claim_id") == claim["id"] and a.get("claim_digest") == cd]
+    evidence = [a for a in snapshot.history if a.get("kind") in {"research", "spike"} and a.get("claim_id") == claim["id"] and a.get("claim_digest") == cd
+                and not (a["kind"] == "research" and confirmation.rejected(snapshot, a))]
     spikes = [a for a in evidence if a["kind"] == "spike"]
     active_spike = spikes[-1:] if spikes else []
     return [a for a in evidence if a["kind"] == "research"] + active_spike
+
+
+def claim_confirmations(snapshot: EvaluationSnapshot, claim: dict[str, Any]) -> list[dict[str, Any]]:
+    """The human receipts that bear on the claim's active evidence, and its own decision if any."""
+    receipts = [r for a in active_evidence(snapshot, claim) if a["kind"] == "research"
+                if (r := confirmation.receipt(snapshot, a)) is not None]
+    answer = confirmation.decision(snapshot, claim["id"], claim_digest(claim))
+    return receipts + ([answer] if answer is not None else [])
+
+
+def evidence_digest(snapshot: EvaluationSnapshot, claim: dict[str, Any]) -> str:
+    """The digest an audit verdict binds per reviewed claim: its ordered active evidence ids and the
+    human receipts on them, so an audit that predates a confirmation is stale."""
+    return digest([a["artifact_id"] for a in active_evidence(snapshot, claim)]
+                  + [r["artifact_id"] for r in claim_confirmations(snapshot, claim)])
+
+
+#: The artifact kinds the audit dossier covers; ``argument_digest`` binds every one of them.
+#: It binds the confirmation artifacts, not the projected ``verification`` rows: a row's ``retrieve``
+#: comes from ``invocation.audit_retrieval``, which is fixed when the run starts and re-checked when an
+#: audit launches. A capability that could change mid-run would have to enter the digest.
+DOSSIER_KINDS = frozenset({"research", "spike_request", "spike", confirmation.KIND})
+
+
+#: The artifacts that are the work of the run: what an author or a human records. A presentation (a host showing a batch) and
+#: the observation basis are not work, so they never move ``progress_basis``.
+PROGRESS_KINDS = frozenset({"graph", "research", "spike_request", "spike", "attribution", "audit_verdict", confirmation.KIND})
+
+
+def progress_basis(snapshot: EvaluationSnapshot, blockers: Sequence[Mapping[str, Any]]) -> str:
+    """The one owner of "did the run move" (ADR-0068): a digest of the blockers (code and parameters) and of the run state that
+    an author's or a host's action can change: status, the bootstrap facts, the governance revision, the graph, the frozen scope, every recorded
+    artifact of the work, the audit children's states. A read (``GetRun``, ``GetArgument``), a presentation and the budget
+    counters, which move on every evaluation, never change it. Hosts remember the value at their last continuation and compare
+    only that."""
+    state = snapshot.state
+    return digest({
+        "status": state.status, "facts": _bootstrap_facts(snapshot),
+        "governance": [state.governance.get("plan_revision"), state.governance.get("proposal_digest")],
+        "blockers": [[b["reason"], b["parameters"]] for b in blockers],
+        "graph": snapshot.graph,
+        "frozen": None if state.frozen_claim_ids is None else sorted(state.frozen_claim_ids),
+        "work": [a["artifact_id"] for a in snapshot.history if a.get("kind") in PROGRESS_KINDS],
+        "children": [[c["child_id"], c["state"]] for c in state.children],
+    })
+
+
+def _terminal_consent_record(item: Mapping[str, Any]) -> bool:
+    """A human's answer to the terminal step, not evidence about a claim. It is marked by the core when it records the
+    answer to the presentation of a terminal batch (``_confirmation_artifact``); the name of an id says nothing, because
+    a claim may be called ``stopped_budget``."""
+    return item.get("kind") == confirmation.KIND and item.get("terminal") is True
+
+
+def dossier_artifact_ids(history: tuple[dict[str, Any], ...]) -> list[str]:
+    """Ids of the artifacts the dossier covers, in history order. The consent to end the run is not among them: it is
+    given after the audit that the end depends on, and must not make that audit stale."""
+    return [a["artifact_id"] for a in history if a.get("kind") in DOSSIER_KINDS and not _terminal_consent_record(a)]
 
 
 def active_spike_heads(
@@ -303,23 +406,194 @@ def effective_scope_ids(snapshot: EvaluationSnapshot) -> tuple[str, ...]:
 
 def local_claim_state(snapshot: EvaluationSnapshot, claim: dict[str, Any],
                       stale: set[str]) -> str:
+    return claim_state_cause(snapshot, claim, stale)[0]
+
+
+def claim_state_cause(snapshot: EvaluationSnapshot, claim: dict[str, Any],
+                      stale: set[str]) -> tuple[str, Mapping[str, Any] | None]:
+    """A claim's own state, before its supporters are considered, and for a ``discarded`` one the recorded artifact that
+    discarded it: the failed spike, else the first refuting research, else the human's answer that rejected a
+    ``needs-decision`` claim (``None`` for every other state). The one rule of a claim's own state: the gate's
+    ``local_claim_state`` is its first element, and the observer's dropped claims read their cause from it."""
     evidence = active_evidence(snapshot, claim)
     research = [a for a in evidence if a["kind"] == "research"]
-    supporting = any(a["outcome"] == "supporting" for a in research)
+    supporting = any(a["outcome"] == "supporting" and confirmation.counts(snapshot, a)
+                     for a in research)
     refuting = any(a["outcome"] == "refuting" for a in research)
     spikes = [a for a in evidence if a["kind"] == "spike"]
     spike_failed = bool(spikes and spikes[-1]["outcome"] == "fail")
     sensitive = _freshness_sensitive(snapshot, claim)
     spike_ok = bool(sensitive and spikes[-1]["artifact_id"] not in stale)
     if supporting and refuting and not spike_failed:
-        return "open"
-    if spike_failed or refuting:
-        return "discarded"
+        return "open", None
+    if spike_failed:
+        return "discarded", spikes[-1]
+    if refuting:
+        return "discarded", next(a for a in research if a["outcome"] == "refuting")
     if claim["kind"] == "needs-decision":
-        return "blocked"
+        answer = confirmation.decision(snapshot, claim["id"], claim_digest(claim))
+        if answer is None:
+            return "blocked", None
+        return ("approved", None) if answer["outcome"] == confirmation.APPROVE else ("discarded", answer)
     approved = supporting and (claim["kind"] == "ordinary" or
                                (claim["kind"] == "needs-experiment" and spike_ok))
-    return "approved" if approved else "open"
+    return ("approved" if approved else "open"), None
+
+
+def _awaiting_human(snapshot: EvaluationSnapshot, research: list[dict[str, Any]]) -> list[str]:
+    """Ids of the supporting records a claim waits on, when none of them can approve it yet."""
+    supporting = [a for a in research if a["outcome"] == "supporting"]
+    if not supporting or any(confirmation.counts(snapshot, a) for a in supporting):
+        return []
+    return [a["artifact_id"] for a in supporting]
+
+
+CONFIRMATION_REASON = "evidence.confirmation_required"
+#: The reason a deliberative run's terminal step is blocked on the human's consent (ADR-0063 amendment, ADR-0068).
+TERMINAL_STOP_REASON = "governance.terminal_stop_pending"
+#: What a deliberative run may end as without converging; also the id of the terminal item of a confirmation batch.
+TERMINAL_STATUSES = ("stopped_frozen", "stopped_residual", "stopped_budget")
+
+
+def pending_human(snapshot: EvaluationSnapshot, scope: tuple[str, ...]) -> dict[str, list[str]]:
+    """Ids of the research records in scope that still wait on a human, by claim."""
+    pending = {}
+    for claim in snapshot.graph["claims"]:
+        if claim["id"] in scope and (records := [
+                a["artifact_id"] for a in active_evidence(snapshot, claim)
+                if a["kind"] == "research"
+                and confirmation.pending_route(snapshot, a) in confirmation.HUMAN_ROUTES]):
+            pending[claim["id"]] = records
+    return pending
+
+
+def pending_decisions(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> list[str]:
+    """Ids of the gating ``needs-decision`` claims still waiting for the human's answer."""
+    return [c["id"] for c in snapshot.graph["claims"]
+            if c["id"] in derivation.scope and c["kind"] == "needs-decision"
+            and derivation.states[c["id"]] == "blocked"]
+
+
+def terminal_digest(snapshot: EvaluationSnapshot, derivation: ClaimDerivation, status: str) -> str:
+    """What a human's consent to end the run as ``status`` is bound to: the status, the run's derivation and the dossier (the
+    graph and every artifact of it, a human's confirmation receipts included but never the terminal consents themselves), so
+    a changed argument, evidence, receipt or frozen scope needs a new answer (the terminal item's wording digest)."""
+    return digest({"terminal": status, "derivation": derivation_digest(snapshot, derivation),
+                   "dossier": digest({"graph": snapshot.graph, "evidence": dossier_artifact_ids(snapshot.history)})})
+
+
+def terminal_key(status: str, wording: str) -> str:
+    """The key of the terminal batch for ``status`` and its wording digest. A host that holds a terminal batch checks it
+    against this before it shows it; the core admits a presentation only while the key is one of its own candidates."""
+    return digest({"terminal": status, "digest": wording})
+
+
+def terminal_consented(snapshot: EvaluationSnapshot, derivation: ClaimDerivation, status: str) -> bool:
+    """Whether a human approved ending the run as ``status`` for this derivation (an accepted receipt of the batch)."""
+    wording = terminal_digest(snapshot, derivation, status)
+    return any(_terminal_consent_record(a) and a.get("claim_id") == status and a.get("claim_digest") == wording
+               and a.get("outcome") == confirmation.APPROVE for a in snapshot.history)
+
+
+def terminal_batch(snapshot: EvaluationSnapshot, derivation: ClaimDerivation, status: str) -> dict[str, Any]:
+    """The batch of a terminal step: the one item asking whether to end the run as ``status``. It holds nothing else
+    (ADR-0063): pending evidence either comes first at a report or is moot at a stop."""
+    wording = terminal_digest(snapshot, derivation, status)
+    return {"key": terminal_key(status, wording), "record_ids": [],
+            "claims": [{"claim_id": status, "claim_digest": wording}], "terminal": {"status": status, "digest": wording}}
+
+
+def terminal_askable(snapshot: EvaluationSnapshot) -> bool:
+    """Whether the consent to end the run can be asked at all: a route is recorded and a graph is selected (nothing is
+    started before a route, so a stop then ends the run without a question). The one predicate of the projection of the
+    terminal batch, of the gate that asks it and of the admission of its presentation (``_human_batch_block``)."""
+    return terminal_unaskable(snapshot) is None
+
+
+def terminal_unaskable(snapshot: EvaluationSnapshot) -> tuple[str, str | None] | None:
+    """Why the consent to end the run cannot be asked yet, as ``(reason, affected)``, else ``None``: the one place that reads the
+    route and the graph for it."""
+    facts = _bootstrap_facts(snapshot)
+    if not facts["route.recorded"]:
+        return "route.required", "obligation.route"
+    if not facts["graph.selected"]:
+        return "graph.missing", None
+    return None
+
+
+def pending_terminal(snapshot: EvaluationSnapshot, intent: str) -> str | None:
+    """The ``stopped_*`` status ``intent`` would commit but for the human's consent, when this deliberative run needs it;
+    else ``None``. It is the gate itself run without the consent check, so the batch and the gate cannot disagree."""
+    if (snapshot.graph is None or snapshot.state.status != "active"
+            or snapshot.state.governance["control_mode"] != "deliberative" or not terminal_askable(snapshot)):
+        return None
+    hypothetical = replace(snapshot, command={"type": "EvaluateRun", "run_id": snapshot.run_id, "intent": intent})
+    decision = _evaluate(hypothetical, hypothetical.command, consent=False)
+    status = decision.intent.state.status
+    return status if decision.result_type == "Allow" and status in TERMINAL_STATUSES else None
+
+
+def batch_candidates(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> list[dict[str, Any]]:
+    """Every batch a presentation may name now: the pending evidence batch, and the terminal batch each intent (a
+    report, a stop) would ask. The presentation names its key, so the host never has to say which step asked."""
+    found = [] if (batch := confirmation_batch(snapshot, derivation)) is None else [batch]
+    for intent in ("report_convergence", "stop"):
+        if (status := pending_terminal(snapshot, intent)) is not None:
+            candidate = terminal_batch(snapshot, derivation, status)
+            if all(candidate["key"] != other["key"] for other in found):
+                found.append(candidate)
+    return found
+
+
+def confirmation_batch(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> dict[str, Any] | None:
+    """What a human would be shown now, or ``None`` when nothing waits on one.
+
+    One batch for one human: the gating ``needs-decision`` claims first, in graph order, then the research
+    records, in their claim's graph order and then by submission. At most ``batch_limit`` items are shown;
+    the rest wait, and are shown after a decision changes the derivation. The ``key`` identifies the
+    derivation and exactly the shown items, so a batch is never presented twice and a changed derivation
+    is a new one."""
+    claims = {c["id"]: c for c in snapshot.graph["claims"]}
+    waiting = pending_decisions(snapshot, derivation)
+    records = [i for ids in pending_human(snapshot, derivation.scope).values() for i in ids]
+    if not waiting and not records:
+        return None
+    limit = snapshot.batch_limit
+    shown_claims = waiting[:limit]
+    shown_records = records[:limit - len(shown_claims)]
+    rows = [{"claim_id": cid, "claim_digest": claim_digest(claims[cid])} for cid in shown_claims]
+    key = digest({"derivation": derivation_digest(snapshot, derivation),
+                  "records": sorted(shown_records), "claims": [(r["claim_id"], r["claim_digest"]) for r in rows]})
+    return {"key": key, "record_ids": shown_records, "claims": rows}
+
+
+def human_batch(snapshot: EvaluationSnapshot, derivation: ClaimDerivation,
+                blockers: tuple[dict[str, Any], ...] | None = None) -> dict[str, Any] | None:
+    """The batch the gate asks a human about now: the pending batch, once nothing the author can do alone is left. The
+    one predicate the report, the audit reservation and (as ``confirmation_batch``) the view's audit row order by."""
+    blockers = claim_blockers(snapshot, derivation) if blockers is None else blockers
+    if any(b["reason"] != CONFIRMATION_REASON for b in blockers):
+        return None
+    return confirmation_batch(snapshot, derivation)
+
+
+def _spike_requirement(snapshot: EvaluationSnapshot, claim: Mapping[str, Any], derivation: ClaimDerivation,
+                       research: list[dict[str, Any]],
+                       spikes: list[dict[str, Any]]) -> tuple[str, dict[str, Any], bool] | None:
+    """The spike reason of a ``needs-experiment`` claim whose research supports it, its parameters and whether
+    the author can act on it now (no passing, fresh spike yet); ``None`` for any other claim."""
+    if claim["kind"] != "needs-experiment" or not any(item["outcome"] == "supporting" for item in research):
+        return None
+    stale_head = (derivation.stale_heads.get(spikes[-1]["artifact_id"])
+                  if spikes and _freshness_sensitive(snapshot, claim) else None)
+    if stale_head is not None:
+        return "claim.spike_stale", {"changes": [{"path": change.path, "state": change.state.value}
+                                                   for change in stale_head.changes]}, True
+    return "claim.spike_missing", {}, not (spikes and spikes[-1].get("outcome") == "pass")
+
+
+#: The claim reasons whose parameters carry the claim they are about (``claim_id``) and whose contract text names it.
+CLAIM_NAMED_REASONS = frozenset({"claim.research_missing", "claim.research_unbound", "claim.spike_missing", "claim.refuted"})
 
 
 def claim_blockers(snapshot: EvaluationSnapshot,
@@ -351,24 +625,27 @@ def claim_blockers(snapshot: EvaluationSnapshot,
         if state == "discarded":
             reason = "claim.refuted"
         elif state == "blocked":
-            reason = "claim.human_decision"
+            reason, parameters = "evidence.confirmation_required", confirmation.parameters(
+                snapshot, [], pending_decisions(snapshot, derivation))
         elif claim_conflicted(snapshot, claim):
             reason = "evidence.conflict"
-        elif (any(item["outcome"] == "supporting" for item in research)
-              and claim["kind"] == "needs-experiment"):
-            sensitive = _freshness_sensitive(snapshot, claim)
-            stale_head = (derivation.stale_heads.get(spikes[-1]["artifact_id"])
-                          if sensitive else None)
-            if stale_head is not None:
-                parameters = {"changes": [{"path": change.path, "state": change.state.value}
-                                           for change in stale_head.changes]}
-            reason = "claim.spike_stale" if stale_head is not None else "claim.spike_missing"
+        elif (spike := _spike_requirement(snapshot, claim, derivation, research, spikes)) and spike[2]:
+            # What the author can do now comes before waiting on a human; the batch is still projected.
+            reason, parameters = spike[0], spike[1]
+        elif awaiting := _awaiting_human(snapshot, research):
+            reason, parameters = "evidence.confirmation_required", confirmation.parameters(
+                snapshot, awaiting, pending_decisions(snapshot, derivation))
+        elif spike:
+            reason, parameters = spike[0], spike[1]
         else:
             historical_research = any(
                 item.get("kind") == "research" and item.get("claim_id") == target_id
+                and item.get("claim_digest") != claim_digest(claim)
                 for item in snapshot.history)
             reason = ("claim.research_unbound" if historical_research
                       else "claim.research_missing")
+        if reason in CLAIM_NAMED_REASONS:  # the reason's text names the claim to discharge, not "this claim"
+            parameters = {**parameters, "claim_id": target_id}
         blockers.append({"claim_id": claim_id, "target_claim_id": target_id,
                          "reason": reason, "parameters": parameters})
     return tuple(blockers)
@@ -476,7 +753,7 @@ def bootstrap_status(snapshot: EvaluationSnapshot) -> dict[str, Any]:
         if not facts["graph.selected"]:
             actions.append("graph.record")
         elif not facts["governance.approved"]:
-            if governance.interaction_error(governed):
+            if governance.interaction_error(governed, confirmation.interactions(snapshot)):
                 actions.append("residual.accept")
             else:
                 actions.append("governance.propose")
@@ -484,7 +761,7 @@ def bootstrap_status(snapshot: EvaluationSnapshot) -> dict[str, Any]:
             actions.append("investigation.record")
     request_ready = active_run and bootstrap_precondition(snapshot, "configure_run") is None
     display_ready = (active_run and bootstrap_precondition(snapshot, "governance.present") is None
-                     and governance.interaction_error(governed) is None
+                     and governance.interaction_error(governed, confirmation.interactions(snapshot)) is None
                      and governance.sized(governed))
     return {"active": active, "next_actions": actions,
             "request_ready": request_ready, "display_ready": display_ready}
@@ -560,6 +837,123 @@ def plan_spike_result(snapshot: EvaluationSnapshot, request_body: Mapping[str, A
     return _decision(snapshot, state, artifacts=(result,))
 
 
+def _confirmation_artifact(snapshot: EvaluationSnapshot, receipt_id: str,
+                           item: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The artifact recording one receipt decision, or ``None`` when it names nothing in this run."""
+    stamps = {"route_stamp": snapshot.state.route_stamp,
+              "investigation_stamp": snapshot.state.investigation_stamp}
+    base = {"receipt_id": receipt_id, "outcome": item["outcome"], "approval_kind": "host_ui"}
+    if item["subject"] == "research":
+        record = next((a for a in snapshot.history if a["artifact_id"] == item["artifact_id"]
+                       and a.get("kind") == "research"), None)
+        if record is None:
+            return None
+        # ``record_id``, not ``artifact_id``: the latter names the confirmation itself.
+        body = {"subject": "research", "record_id": record["artifact_id"],
+                "claim_id": record["claim_id"], "claim_digest": record["claim_digest"],
+                **({"note": item["note"]} if "note" in item else {})}
+    else:
+        shown = confirmation.presentation(snapshot, receipt_id)
+        ended = ((shown or {}).get("terminal") or {})
+        body = {"subject": "claim", "claim_id": item["claim_id"], "claim_digest": item["claim_digest"],
+                **({"answer": item["answer"]} if "answer" in item else {}),
+                # The answer to the terminal item of a presentation is the consent to end; nothing else is marked.
+                **({"terminal": True} if (item["claim_id"], item["claim_digest"]) == (ended.get("status"), ended.get("digest"))
+                   else {})}
+    return artifact(confirmation.KIND, {**body, **base, **stamps})
+
+
+def _human_batch_block(snapshot: EvaluationSnapshot, *, terminal: bool = False) -> Decision | None:
+    """Why no human receipt or presentation is admitted now, else ``None``. An evidence batch is asked only of an investigated
+    run (every record of a human's answer carries the run's route and investigation witnesses). The consent to end a run is
+    its own admission: ending never requires approving or starting the work, so a route and a graph are enough."""
+    state = snapshot.state
+    if terminal:
+        if (why := terminal_unaskable(snapshot)) is not None:
+            return _decision(snapshot, state, "Block", reason=why[0], affected=why[1])
+    elif (blocked := _investigation_block(snapshot)) is not None:
+        return blocked
+    if snapshot.graph is None or frozen_scope_invalid(state, snapshot.graph):
+        return _decision(snapshot, state, "Block", reason="graph.invalid")
+    if not confirmation.human_available(snapshot):
+        return _decision(snapshot, state, "Block", reason="governance.approval_unavailable")
+    return None
+
+
+def plan_evidence_presentation(snapshot: EvaluationSnapshot, payload: Mapping[str, Any]) -> Decision:
+    """Purely record that the host showed the human the batch it names.
+
+    The receipt id names the presentation; sending it again is ``Inert``. A presentation of nothing is a conflict. Each
+    presentation spends one human interaction, so the interaction ceiling is what bounds asking: a batch left on Later,
+    cancelled or timed out may be shown again by an explicit report (ADR-0067); only the host's explicit
+    ``report_convergence`` presents (either intent: a report or a stop), never the Stop hook's pause or an auto continuation."""
+    state = snapshot.state
+    wanted = None if snapshot.graph is None else next(
+        (b for b in batch_candidates(snapshot, derive_claims(snapshot)) if b["key"] == payload["key"]), None)
+    if (blocked := _human_batch_block(snapshot, terminal=confirmation.is_terminal(wanted))) is not None:
+        return blocked
+    if confirmation.presentation(snapshot, payload["receipt_id"]) is not None:
+        return _decision(snapshot, state, "Inert")
+    batch = wanted
+    # The presentation names the batch the host showed; any other (a record joined, a wording changed) is refused
+    # and nothing is spent, so what a human was shown is exactly what is recorded as presented.
+    # A batch already shown may be shown again by the next explicit report (bounded below by the interaction ceiling).
+    if batch is None:
+        return _decision(snapshot, state, "Fault", reason="conflict")
+    if governance.interactions_remaining(
+            state.governance, confirmation.interactions(snapshot))["total"] == 0:
+        return _decision(snapshot, state, "Block", reason="governance.interaction_limit")
+    return _decision(snapshot, state, artifacts=(artifact(confirmation.PRESENTATION, {
+        "receipt_id": payload["receipt_id"], "key": batch["key"], "record_ids": batch["record_ids"],
+        "claims": batch["claims"], **({"terminal": batch["terminal"]} if confirmation.is_terminal(batch) else {}),
+        "approval_kind": "host_ui", "route_stamp": state.route_stamp,
+        "investigation_stamp": state.investigation_stamp}),))
+
+
+def plan_evidence_confirmation(snapshot: EvaluationSnapshot, payload: Mapping[str, Any]) -> Decision:
+    """Purely admit one human receipt of per-item decisions and plan its confirmation artifacts.
+
+    The receipt id must name the current presentation (the pending set has not changed since it was
+    shown) and every decision must be about something that presentation showed. An identical replay is
+    ``Inert``. A decision for something unknown, no longer current, not waiting on a human, or already
+    decided differently fails closed, and so does a receipt id reused for other content. Nothing is
+    admitted unless every decision is."""
+    state = snapshot.state
+    shown_first = confirmation.presentation(snapshot, payload["receipt_id"])
+    if (blocked := _human_batch_block(snapshot, terminal=confirmation.is_terminal(shown_first))) is not None:
+        return blocked
+    items = payload["decisions"]
+    planned = [_confirmation_artifact(snapshot, payload["receipt_id"], item) for item in items]
+    subjects = {(i["subject"], i.get("artifact_id", i.get("claim_id"))) for i in items}
+    if None in planned or len(subjects) != len(items):
+        return _decision(snapshot, state, "Fault", reason="conflict")
+    known = {a["artifact_id"] for a in snapshot.history}
+    if all(a["artifact_id"] in known for a in planned):
+        return _decision(snapshot, state, "Inert")
+    others = [a for a in snapshot.history if a.get("kind") == confirmation.KIND
+              and a["receipt_id"] == payload["receipt_id"]]
+    shown = confirmation.presentation(snapshot, payload["receipt_id"])
+    current = {b["key"] for b in batch_candidates(snapshot, derive_claims(snapshot))}
+    if others or shown is None or shown["key"] not in current:
+        return _decision(snapshot, state, "Fault", reason="conflict")
+    asked = {("research", r) for r in shown["record_ids"]} | {
+        ("claim", c["claim_id"], c["claim_digest"]) for c in shown["claims"]}
+    answered = {("research", i["artifact_id"]) if i["subject"] == "research"
+                else ("claim", i["claim_id"], i["claim_digest"]) for i in items}
+    if not answered <= asked:
+        return _decision(snapshot, state, "Fault", reason="conflict")
+    return _decision(snapshot, state, artifacts=tuple(planned))
+
+
+def approved_claim_ids(snapshot: EvaluationSnapshot) -> list[str]:
+    """Ids of the approved gating claims an audit reviews."""
+    if snapshot.graph is None or frozen_scope_invalid(snapshot.state, snapshot.graph):
+        return []
+    derivation = derive_claims(snapshot)
+    return [c["id"] for c in snapshot.graph["claims"]
+            if c["id"] in derivation.scope and derivation.states[c["id"]] == "approved"]
+
+
 def covered_artifact_ids(snapshot: EvaluationSnapshot) -> list[str]:
     """Return the exact active evidence set whose producer identity an audit covers."""
     if snapshot.graph is None or frozen_scope_invalid(snapshot.state, snapshot.graph):
@@ -602,6 +996,16 @@ def audit_attributions(
     return auditor, producers
 
 
+def audit_exclusions(snapshot: EvaluationSnapshot) -> list[str]:
+    """The opaque identity classes an auditor must not run on: the current author's and every producer of the evidence an
+    audit would cover (sorted). The verdict check refuses an auditor equal to one of them (``independence``), so a launch
+    on one of them would spend a spawn on a verdict that cannot count; the reservation refuses it first."""
+    by_id = {item.get("artifact_id"): item for item in snapshot.history}
+    producers = [by_id.get(artifact_id, {}).get("producer") for artifact_id in covered_artifact_ids(snapshot)]
+    classes = {identity_pair(producer) for producer in [_producer(snapshot.state), *producers]}
+    return sorted(value for value in classes if value is not None)
+
+
 def audit_binding(snapshot: EvaluationSnapshot) -> dict[str, Any]:
     """Derive the exact audit dossier binding from the current immutable snapshot."""
     if snapshot.graph is None or frozen_scope_invalid(snapshot.state, snapshot.graph):
@@ -610,21 +1014,37 @@ def audit_binding(snapshot: EvaluationSnapshot) -> dict[str, Any]:
     derivation = derive_claims(snapshot)
     gating = list(derivation.scope)
     deferred = [cid for cid in all_ids if cid not in set(gating)]
-    visible = [a["artifact_id"] for a in snapshot.history
-               if a.get("kind") in {"research", "spike_request", "spike"}]
     reviewed = []
     for claim in snapshot.graph["claims"]:
         if claim["id"] in gating and derivation.states[claim["id"]] == "approved":
             reviewed.append({"claim_id": claim["id"],
-                             "evidence_digest": digest(
-                                 [a["artifact_id"] for a in active_evidence(snapshot, claim)])})
-    return {"argument_digest": digest({"graph": snapshot.graph, "evidence": visible}),
+                             "evidence_digest": evidence_digest(snapshot, claim)})
+    return {"argument_digest": digest({"graph": snapshot.graph,
+                                             "evidence": dossier_artifact_ids(snapshot.history)}),
             "goal_digest": digest(snapshot.state.goal),
             "frozen_scope_digest": (None if snapshot.state.frozen_claim_ids is None
                                     else digest(gating)),
             "deferred_scope_digest": digest(deferred),
             "reviewed_claims": reviewed,
             "scope_review": ("pass" if snapshot.state.frozen_claim_ids is not None else None)}
+
+
+def audit_pending(snapshot: EvaluationSnapshot) -> bool:
+    """Whether a re-audit is in flight: an audit child that has not settled and whose launch dossier still binds the run.
+    The one selector of that fact (acceptance, the audit summary and the observer consume it)."""
+    return any(child["resource_class"] == "audit" and child["state"] in {"reserved", "launching", "pending"}
+               and audit_operation_current(snapshot, child) for child in snapshot.state.children)
+
+
+def audit_verdicts(snapshot: EvaluationSnapshot) -> tuple[Mapping[str, Any], ...]:
+    """Every recorded audit verdict of the run, in history order. The one selector of that fact."""
+    return tuple(item for item in snapshot.history if item.get("kind") == "audit_verdict")
+
+
+def latest_audit_verdict(snapshot: EvaluationSnapshot) -> Mapping[str, Any] | None:
+    """The run's latest recorded audit verdict, else ``None``: the last of ``audit_verdicts``."""
+    audits = audit_verdicts(snapshot)
+    return audits[-1] if audits else None
 
 
 def audit_operation_current(snapshot: EvaluationSnapshot, child: Mapping[str, Any]) -> bool:
@@ -642,11 +1062,17 @@ def audit_operation_current(snapshot: EvaluationSnapshot, child: Mapping[str, An
                 "argument_digest", "goal_digest", "frozen_scope_digest", "deferred_scope_digest")))
 
 
-def audit_passes(snapshot: EvaluationSnapshot, verdict: Mapping[str, Any]) -> bool:
+def audit_covers(snapshot: EvaluationSnapshot, verdict: Mapping[str, Any]) -> bool:
+    """Whether a recorded verdict, whatever it decided, still binds the current argument, goal and scope: the one
+    owner of an audit's *currency* (``audit_passes`` is a covering pass)."""
     expected = audit_binding(snapshot)
     child = next((c for c in snapshot.state.children if c["child_id"] == verdict.get("child_id")), None)
-    return (child is not None and audit_operation_current(snapshot, child) and bool(expected) and verdict.get("verdict") == "pass" and
+    return (child is not None and audit_operation_current(snapshot, child) and bool(expected) and
             all(_plain(verdict.get(key)) == value for key, value in expected.items()))
+
+
+def audit_passes(snapshot: EvaluationSnapshot, verdict: Mapping[str, Any]) -> bool:
+    return verdict.get("verdict") == "pass" and audit_covers(snapshot, verdict)
 
 
 INDEPENDENCE_REASONS = {
@@ -659,8 +1085,37 @@ INDEPENDENCE_REASONS = {
 def independence(snapshot: EvaluationSnapshot, verdict: Mapping[str, Any]) -> str:
     """Classify reviewer/producer independence from opaque host identities."""
     auditor, producers = audit_attributions(snapshot, verdict)
+    return _independence(auditor, producers, bool(approved_claim_ids(snapshot)))
+
+
+def independence_then(snapshot: EvaluationSnapshot, verdict: Mapping[str, Any]) -> str | None:
+    """A verdict's independence as it stood when it was recorded, never against today's evidence: its auditor as the
+    host attributed it before the verdict, against the producers of exactly the evidence its audit was launched over
+    (the launch dossier the run keeps for the audit child: the approved gating claims and their active evidence ids),
+    by the same classification as ``independence``. ``None`` when the run no longer holds that dossier."""
+    child = next((c for c in snapshot.state.children if c["child_id"] == verdict.get("child_id")), None)
+    dossier = child.get("audit_argument") if child is not None else None
+    position = next((n for n, item in enumerate(snapshot.history) if item is verdict
+                     or item.get("artifact_id") == verdict.get("artifact_id")), None)
+    if not isinstance(dossier, Mapping) or position is None:
+        return None
+    before = snapshot.history[:position]
+    auditor = next((item for item in reversed(before) if item.get("kind") == "attribution"
+                    and item.get("subject_kind") == "auditor" and item.get("child_id") == verdict.get("child_id")), None)
+    reviewed = [c for c in dossier["claims"] if c["gating"] and c["state"] == "approved"]
+    by_id = {item.get("artifact_id"): item for item in before}
+    producers = [by_id.get(artifact_id, {}).get("producer") for c in reviewed for artifact_id in c["active_evidence_ids"]]
+    return _independence(auditor, producers, bool(reviewed))
+
+
+def _independence(auditor: Mapping[str, Any] | None, producers: list[Mapping[str, Any] | None], approved: bool) -> str:
+    """The one classification of an auditor against the producers of the evidence it reviewed."""
     auditor_class = identity_pair(auditor)
     producer_classes = [identity_pair(producer) for producer in producers]
+    if auditor_class is not None and not producer_classes and approved:
+        # Every reviewed claim is a human's decision with no evidence behind it: nobody produced it, so
+        # there is no producer to be independent of. The audit over the argument is still required.
+        return "human_owned"
     if auditor_class is None or not producer_classes or any(value is None for value in producer_classes):
         return "unverified"
     if len(set(producer_classes)) != 1:
@@ -695,7 +1150,7 @@ def audit_blocker(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> 
 
     A blocker whose recovery needs a new audit spawn is named ``budget.exhausted`` once the audit
     spawn ceiling is reached, so the author is never told to retry what the core would refuse."""
-    blocker = _audit_reason(snapshot, derivation)
+    blocker = audit_acceptance(snapshot, derivation)
     budgets = snapshot.state.budgets
     if (blocker is not None and blocker["reason"] in AUDIT_SPAWN_REASONS
             and budgets["audit_spawns_used"] >= budgets["max_audit_spawns"]):
@@ -703,16 +1158,15 @@ def audit_blocker(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> 
     return blocker
 
 
-def _audit_reason(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> dict[str, Any] | None:
-    state = snapshot.state
-    if any(child["resource_class"] == "audit"
-           and child["state"] in {"reserved", "launching", "pending"}
-           and audit_operation_current(snapshot, child) for child in state.children):
+def audit_acceptance(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> dict[str, Any] | None:
+    """Why the gate does not accept the run's audit, as ``{"reason", "parameters"}``, else ``None``: the one predicate of
+    audit acceptance (a settled covering pass; independence, unless a claim is out of scope). The report's audit stage
+    blocks on it, and a claim is *assured* exactly when it holds for the claim's run (``core.observer.assurance``)."""
+    if audit_pending(snapshot):
         return {"reason": "audit.pending", "parameters": {}}
-    audits = [item for item in snapshot.history if item.get("kind") == "audit_verdict"]
-    if not audits:
+    audit = latest_audit_verdict(snapshot)
+    if audit is None:
         return {"reason": "audit.required", "parameters": {}}
-    audit = audits[-1]
     if not audit_passes(snapshot, audit):
         return {"reason": "audit.failed", "parameters": {}}
     if any(claim_id not in set(derivation.scope)
@@ -723,8 +1177,142 @@ def _audit_reason(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> 
     return None if reason is None else {"reason": reason, "parameters": {}}
 
 
+#: The stages of a report, in the order the gate meets them: the setup a run lacks, the claims that block, the human's
+#: answers, the pass ceiling, the audit, the human's consent to end the run. A requirement is *admissible* (the gate names it
+#: now) exactly when no earlier stage has an unmet one.
+REPORT_STAGES = ("setup", "claim", "confirmation", "passes", "audit", "terminal")
+#: The reasons that wait on a human; the auditor acts on ``audit.pending``; everything else is the agent's.
+HUMAN_WAITING_REASONS = frozenset({CONFIRMATION_REASON, TERMINAL_STOP_REASON})
+#: Where a requirement waits that is not admissible yet: for the stages before it.
+LATER = "later"
+
+
+@dataclass(frozen=True)
+class Requirement:
+    """One thing the report still requires of a run. ``reason`` and ``parameters`` are the gate's own when it blocks there; a
+    setup requirement has no reason and is worded by its obligation (``required``). ``claims`` are the claims it concerns.
+    ``admissible`` says whether the gate names it now; ``actor`` (``human``, ``auditor`` or ``agent``) and ``place`` (where it
+    happens: ``next_report``, ``explicit_report``, ``unavailable``, ``limit``, ``in_progress``, ``next_turn``, or ``LATER`` while
+    it is not admissible) say who acts. The human's evidence batch has its place whether or not it is admissible: its
+    presentability is the batch's (``prompt_error``), not the gate's order."""
+
+    stage: str
+    obligation: str
+    required: str
+    reason: str | None
+    parameters: Mapping[str, Any]
+    claims: tuple[str, ...]
+    affected: str | None
+    actor: str
+    place: str
+    admissible: bool
+
+
+def terminal_consent_parameters(snapshot: EvaluationSnapshot, derivation: ClaimDerivation, status: str,
+                                *, consent: bool = True) -> dict[str, Any] | None:
+    """The parameters of ``governance.terminal_stop_pending`` when a deliberative run needs the human's consent to end as
+    ``status`` and has not got it, else ``None``, with ``prompt_error`` as the host would meet it. The one predicate of the
+    gate's ``end`` and of the terminal requirement."""
+    if not (consent and snapshot.state.governance["control_mode"] == "deliberative" and terminal_askable(snapshot)
+            and not terminal_consented(snapshot, derivation, status)):
+        return None
+    key = terminal_key(status, terminal_digest(snapshot, derivation, status))
+    return {"status": status, "route": confirmation.human_route(snapshot),
+            "case": confirmation.terminal_case(confirmation.prompt_error(snapshot, key, terminal=True),
+                                               confirmation.presented(snapshot, key))}
+
+
+def report_requirements(snapshot: EvaluationSnapshot, derivation: ClaimDerivation | None,
+                        blockers: Sequence[Mapping[str, Any]] | None = None, *,
+                        setup: bool = True) -> tuple[Requirement, ...]:
+    """Everything an active run still owes before the report converges it, in the gate's order, each with who acts and where.
+
+    This is the one projection of the report's ordering. The gate blocks on the first requirement (``_evaluate``); the author
+    view lists them as its obligations and holds the ones behind an earlier stage (``core.projection``); the observer
+    publishes them as what the run owes and names the first admissible one next (``core.observer``). It is pure: nothing is
+    committed, so what the gate reaches only after charging a pass is listed without charging it.
+
+    A stage is listed when its predicate holds: the setup the run lacks (``setup``; the gate refuses it before this point);
+    every unmet scoped claim; the human's batch whenever anything waits on a human, even behind agent work (held, not
+    dropped); and then the pass ceiling, the audit, and the human's consent to end the run, each held until the stages before
+    it are clear (``admissible`` is false). Asked of a
+    run that has ended, it is what the report would still require of it (the author view's terminal obligations)."""
+    found: list[tuple] = []  # (stage, obligation, required, reason, parameters, claims, affected, prompt_error)
+    if setup:
+        found += [("setup", row["id"], row["must"], None, {}, (), None, None)
+                  for row in bootstrap_status(snapshot)["active"] if row["status"] != "satisfied"]
+    if snapshot.graph is not None and derivation is not None:
+        blockers = claim_blockers(snapshot, derivation) if blockers is None else blockers
+        batch = confirmation_batch(snapshot, derivation)
+        order = [c["id"] for c in snapshot.graph["claims"]]
+        for b in blockers:
+            if b["reason"] == CONFIRMATION_REASON and batch is not None:
+                continue  # the human's batch below is these claims' requirement, once
+            found.append(("confirmation" if b["reason"] == CONFIRMATION_REASON else "claim", "claim:" + b["claim_id"], "",
+                          b["reason"], b["parameters"], (b["target_claim_id"],), "claim:" + b["target_claim_id"],
+                          confirmation.route_error(confirmation.human_route(snapshot))))
+        if batch is not None:
+            waiting = {*pending_decisions(snapshot, derivation), *pending_human(snapshot, derivation.scope)}
+            found.append(("confirmation", snapshot.stage_obligations["confirmation"][0],
+                          snapshot.stage_obligations["confirmation"][1], CONFIRMATION_REASON,
+                          confirmation.parameters(snapshot, batch["record_ids"], [r["claim_id"] for r in batch["claims"]],
+                                                  batch["key"]),
+                          tuple(c for c in order if c in waiting), None, confirmation.prompt_error(snapshot, batch["key"])))
+        # The later stages are always listed (held behind an earlier one when there is one): the gate reaches them only
+        # then, but what the run will owe is no secret.
+        passes = pass_budget_blocker(snapshot, derivation_digest(snapshot, derivation))
+        audit = audit_blocker(snapshot, derivation)
+        if passes is not None:
+            obligation, required = snapshot.stage_obligations["passes"]
+            found.append(("passes", obligation, required, passes["reason"], passes["parameters"], (), None, None))
+        if audit is not None:
+            obligation, required = snapshot.audit_obligation
+            found.append(("audit", obligation, required, audit["reason"], audit["parameters"], (), "obligation.audit", None))
+        elif passes is None and any(claim_id not in set(derivation.scope) for claim_id in order):
+            consent = terminal_consent_parameters(snapshot, derivation, "stopped_frozen")
+            if consent is not None:
+                obligation, required = snapshot.stage_obligations["terminal"]
+                key = terminal_key("stopped_frozen", terminal_digest(snapshot, derivation, "stopped_frozen"))
+                found.append(("terminal", obligation, required, TERMINAL_STOP_REASON, consent, (), None,
+                              confirmation.prompt_error(snapshot, key, terminal=True)))
+    first = min((REPORT_STAGES.index(row[0]) for row in found), default=0)
+    # Who acts on a human's step is the human only while the request is with them (P3c): the configuration once the agent
+    # has asked and a host can show it (``governance.human_wait``); the end of the run unless the human already declined it
+    # (then the agent keeps working until the human tells it to stop again).
+    approval = next(o for p, o, _ in snapshot.bootstrap_requirements if p == "governance.approved")
+    configuration_waits = governance.human_wait(
+        snapshot.state.governance, governance.interaction_error(snapshot.state.governance, confirmation.interactions(snapshot)))
+    requirements = []
+    for stage, obligation, required, reason, parameters, claims, affected, prompt_error in found:
+        human = ((reason in HUMAN_WAITING_REASONS and not (reason == TERMINAL_STOP_REASON
+                                                            and parameters["case"] == "declined"))
+                 or (stage == "setup" and obligation == approval and configuration_waits))
+        actor = "human" if human else "auditor" if reason == "audit.pending" else "agent"
+        admissible = REPORT_STAGES.index(stage) == first
+        place = ((confirmation.ask_where(prompt_error) if reason else "next_report") if actor == "human"
+                 else "in_progress" if actor == "auditor" else "next_turn")
+        # Whether the gate names a requirement now (``admissible``) is one fact; whether a human will be shown the question is
+        # another, and the host's: the core projects the batch whatever else blocks, and an explicit report presents it
+        # (``confirmation.presentable``) even while the agent still owes claim work. So the human's batch is not "later"
+        # while the core would admit its presentation (``_human_batch_block``): a run not yet investigating (its route, its
+        # approval or its investigation missing) has its presentation refused, so nobody is shown it and it waits (P4).
+        asked = (obligation == snapshot.stage_obligations["confirmation"][0]
+                 and _investigation_block(snapshot) is None)
+        if actor == "human" and stage == "setup":
+            required = snapshot.contract.bootstrap_waiting[obligation]  # the human's words, not the agent's obligation
+        requirements.append(Requirement(stage, obligation, required, reason, parameters, claims, affected, actor,
+                                        place if admissible or asked else LATER, admissible))
+    return tuple(requirements)
+
+
 def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> Decision:
-    """Apply one validated command to the snapshot without performing I/O.
+    """Apply one validated command to the snapshot without performing I/O (see ``_evaluate``)."""
+    return _evaluate(snapshot, command, consent=True)
+
+
+def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent: bool) -> Decision:
+    """``consent=False`` is the gate without the deliberative consent to end non-converged (``pending_terminal`` asks what
+    it would have committed); ``evaluate_snapshot`` is the gate itself.
 
     Branches, in order: an invalid frozen scope blocks; a non-active (terminal) run allows only
     reads and ``stop``/``report_convergence`` evaluation and is otherwise ``Inert``; read commands
@@ -785,8 +1373,11 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                                                 investigation_stamp=state.stamp_seq + 1))
         if akind == "graph":
             graph = action.get("payload")
-            if not valid_graph(graph) or frozen_scope_invalid(state, graph):
-                return _decision(snapshot, state, "Block", reason="graph.invalid")
+            refusal = graph_refusal(graph)
+            if refusal == GRAPH_INVALID or frozen_scope_invalid(state, graph):
+                return _decision(snapshot, state, "Block", reason=GRAPH_INVALID)
+            if refusal is not None:
+                return _decision(snapshot, state, "Block", reason=refusal)
             graph = governance.canonical_graph(graph)
             art = artifact("graph", {"graph": graph})
             return _decision(snapshot, replace(state, selected_graph_artifact_id=art["artifact_id"]),
@@ -802,6 +1393,14 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
             if claim is None:
                 return _decision(snapshot, state, "Block", reason="graph.invalid")
             payload = action["payload"]
+            cited = snapshot.cited
+            problem = citations.submission_problem(
+                action["source_kind"], payload, cited.content if cited else None,
+                cited.observation.state if cited else ObservationState.UNREADABLE,
+                snapshot.workspace_root)
+            if problem is not None:
+                return _decision(snapshot, state, "Block", reason="research.citation_unverified",
+                                 parameters={"problem": problem})
             art = artifact("research", {
                 "claim_id": claim["id"], "claim_digest": claim_digest(claim),
                 "statement_digest": digest(payload),
@@ -811,8 +1410,8 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                 "route_stamp": state.route_stamp,
                 "investigation_stamp": state.investigation_stamp,
                 "producer": _producer(state),
-                **({"observed_content_digest": payload["observed_content_digest"]} if
-                   "observed_content_digest" in payload else {}),
+                **{key: payload[key] for key in ("observed_content_digest", "spike_unavailable")
+                   if key in payload},
             })
             return _decision(snapshot, state, artifacts=(art,))
         if akind == "freeze":
@@ -831,7 +1430,8 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                     ceiling = next(k for k, used in governance.CEILINGS.items() if proposed["budgets"][k] < state.budgets[used])
                     resource = governance.BUDGETS[ceiling].resource
                     return _decision(snapshot, state, "Block", reason="budget.exhausted", parameters={"resource": resource})
-                return _decision(snapshot, state, "Block", reason=reason)
+                return _decision(snapshot, state, "Block", reason=reason,
+                                 parameters=governance.refusal_parameters(state.governance, reason))
             if reason := governance.revision_error(state.governance, state.goal, proposed):
                 return _decision(snapshot, state, "Block", reason=reason)
             try:
@@ -845,6 +1445,22 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
                 return blocked
             execution = action["execution"]
             resource_class = action["resource_class"]
+            if resource_class == "audit" and snapshot.graph is not None:
+                # The audit gate comes after the confirmation the view and the report put first (ADR-0067): an audit
+                # launched while a human is about to be asked would be staled by the answer and spend its spawn.
+                derivation = derive_claims(snapshot)
+                batch = human_batch(snapshot, derivation)
+                if batch is not None and confirmation.prompt_error(snapshot, batch["key"]) in confirmation.ASKABLE:
+                    return _decision(snapshot, state, "Block", reason=CONFIRMATION_REASON,
+                                     parameters=confirmation.parameters(
+                                         snapshot, batch["record_ids"], [r["claim_id"] for r in batch["claims"]],
+                                         batch["key"]))
+            auditor_identity = action.get("auditor_identity") if resource_class == "audit" else None
+            if auditor_identity is not None and snapshot.graph is not None:
+                excluded = audit_exclusions(snapshot)
+                if auditor_identity in excluded:
+                    return _decision(snapshot, state, "Block", reason="audit.auditor_excluded",
+                                     parameters={"identities": excluded, "models": ", ".join(excluded)})
             if (execution == "async" and snapshot.host_tier != "full_async"
                     and not (resource_class == "audit"
                              and snapshot.host_audit_execution == "async")):
@@ -898,34 +1514,37 @@ def evaluate_snapshot(snapshot: EvaluationSnapshot, command: dict[str, Any]) -> 
         derivation = derive_claims(snapshot)
         states = [(c, derivation.states[c["id"]]) for c in snapshot.graph["claims"]]
         gating = set(derivation.scope)
+
+        def end(ended: OperationalState) -> Decision:
+            """A step that ends the run without converging: a deliberative run needs the human's consent first
+            (ADR-0063 amendment); the auto modes commit as before. A refusal is never a terminal state."""
+            asked = terminal_consent_parameters(snapshot, derivation, ended.status, consent=consent)
+            if asked is not None:
+                return decide(state, "Block", reason=TERMINAL_STOP_REASON, parameters=asked)
+            return decide(ended)
+
         if intent == "stop":
             if state.budgets["passes_used"] >= state.budgets["max_passes"]:
-                return decide(replace(state, status="stopped_budget"))
+                return end(replace(state, status="stopped_budget"))
             deferred = [c for c, _ in states if c["id"] not in gating]
             status = "stopped_frozen" if deferred else "stopped_residual"
-            return decide(replace(state, status=status))
-        blockers = claim_blockers(snapshot, derivation)
-        if blockers:
-            blocker = blockers[0]
-            return decide(state, "Block", reason=blocker["reason"],
-                          parameters=blocker["parameters"],
-                          affected="claim:" + blocker["target_claim_id"])
+            return end(replace(state, status=status))
+        # The first requirement of the report's one ordering (the author alone before the human, the passes before the audit)
+        # is what the gate names; the observer and the author view list the same requirements.
+        owed = report_requirements(snapshot, derivation, setup=False)
+        first = owed[0] if owed else None
+        if first is not None and first.stage in {"claim", "confirmation", "passes"}:
+            return decide(state, "Block", reason=first.reason, parameters=first.parameters, affected=first.affected)
         current_digest = derivation_digest(snapshot, derivation)
-        blocker = pass_budget_blocker(snapshot, current_digest)
-        if blocker:
-            return decide(state, "Block", reason=blocker["reason"],
-                          parameters=blocker["parameters"])
         if current_digest != state.last_derivation_digest:
             budgets = dict(state.budgets)
             budgets["passes_used"] += 1
             state = replace(state, budgets=budgets, last_derivation_digest=current_digest)
-        blocker = audit_blocker(snapshot, derivation)
-        if blocker:
-            return decide(state, "Block", reason=blocker["reason"],
-                          parameters=blocker["parameters"], affected="obligation.audit")
+        if first is not None and first.stage == "audit":
+            return decide(state, "Block", reason=first.reason, parameters=first.parameters, affected=first.affected)
         deferred = [c for c, _ in states if c["id"] not in gating]
         if deferred:
-            return decide(replace(state, status="stopped_frozen"))
+            return end(replace(state, status="stopped_frozen"))
         return decide(replace(state, status="converged"))
 
     return _decision(snapshot, state, "Fault", reason="unsupported")

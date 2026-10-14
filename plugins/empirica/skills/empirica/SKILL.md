@@ -2,7 +2,7 @@
 name: empirica
 description: "Empirical-convergence workflow for non-trivial work whose plan is uncertain. Route before investigating, represent unknowns as claims, require cited research before deterministic spikes, discard refuted claims, and request an independently audited convergence decision. Use for design-and-implement work, architectural uncertainty, competing approaches, and risky assumptions. Host capabilities differ; run the capability preflight before promising convergence. Invoke as /empirica <goal>."
 allowed-tools: Read Glob Grep Bash Edit Write Agent TaskCreate TaskUpdate WebFetch
-compatibility: Designed for Claude Code >=2.1.278,<2.2.0, Codex CLI >=0.146.0,<0.147.0, and Pi >=0.84.1,<1.1.0 with the external pi-subagents runtime (not bundled); requires python3 for hook-backed hosts. Exact observed versions remain receipt provenance; live capabilities still gate execution.
+compatibility: Designed for Claude Code >=2.1.278,<2.2.0 and Pi >=1.0.0,<2.0.0 with the external pi-subagents runtime (not bundled); requires python3 for hook-backed hosts. The exact observed versions are recorded in the run; live capabilities still gate execution.
 argument-hint: "[--auto] <goal>"
 ---
 
@@ -24,27 +24,28 @@ Identify the exact active host surface from the tools and lifecycle already pres
 **Do not read any file, including a skill reference, before the `investigate` witness is admitted
 (route → graph → approved configuration).** Use this inline bootstrap matrix:
 
-- **Claude Code capability profile (qualified on `2.1.278`, compatible
-  `>=2.1.278,<2.2.0`):** continue when the Empirica hooks and
+- **Claude Code capability profile (qualified on `2.1.296`, compatible
+  `>=2.1.278,<2.2.0`, documented and not checked: hook payloads carry no version):** continue when the Empirica hooks and
   public MCP tools are active and trusted; record route first. Canonical audits
   are host-owned async children; a current pending audit settles the parent turn
   until Claude's native completion notification resumes it.
-- **Pi capability profile (qualified on `0.84.1`, compatible
-  `>=0.84.1,<1.1.0`, with external `pi-subagents` installed by the user):** continue when `/empirica`
+- **Pi capability profile (qualified on `1.1.0`, compatible
+  `>=1.0.0,<2.0.0`, with external `pi-subagents` installed by the user):** continue when `/empirica`
   injected an opaque handle, `empirica_observe`, `empirica_read`, and `report_convergence` are present,
-  and the adapter accepted exactly one active `subagent` owner (its canonical package root, exact
-  version, and that package's own launch preflight). An unreviewed `pi-subagents` version fails closed
-  (the exact reviewed versions are listed in the README). Any other state is a `host.subagents_*`
+  and `/empirica` accepted the host (a Pi outside its range is refused at start) and exactly one active `subagent` owner (its canonical package root, exact
+  version, and that package's own launch preflight). A `pi-subagents` version outside the supported range fails closed
+  (the range and the reviewed versions are listed in the README); one inside it with no compat record is admitted
+  and shown as not reviewed. Any other state is a `host.subagents_*`
   refusal.
-- **Codex CLI observational profile (qualified on `0.146.0`, compatible
-  `>=0.146.0,<0.147.0`):** continue when activation injected the opaque
-  handle, the public MCP tools are present, and the Stop hook is trusted; audit
-  remains explicitly unsupported because verdict-producing identity is unobservable.
+- **Non-interactive Pi or Claude (print, JSON, SDK):** no human can approve a configuration or confirm evidence, so a
+  deliberative run is refused. Auto runs only with the operator's `EMPIRICA_AUTO_DELEGATION=1`; without it the start is
+  refused with the reason on stderr and exit code 1.
+- **Codex:** Empirica is not available on Codex.
 - **Unknown, partial, or outside a qualified compatibility range:** stop as unsupported pending
   qualification rather than borrowing another profile's capabilities. After admission, consult
 [references/host-capabilities.md](references/host-capabilities.md) only to diagnose a capability failure.
 
-The three public tools return one deterministic plain-text author view on Claude, Codex, and Pi.
+The three public tools return one deterministic plain-text author view on Claude and Pi.
 Read its first-line status/governance summary, `Reasons`, `Open obligations`, and rendered `Next`
 calls directly; do not parse it as JSON or look for hidden digests/governance internals. Pi retains
 validated structured details for host UI only. The host binds and injects the private audit dossier;
@@ -62,8 +63,7 @@ A runnable convergence workflow requires all of these capabilities:
 6. request the guarded convergence decision;
 7. obtain exact run-configuration approval through supported host UI (or explicit bounded auto).
 
-If any capability is absent — including a Pi surface without one verifiable external `pi-subagents` owner, a Codex
-session with untrusted hooks, or any host missing one of the three public tools — stop before
+If any capability is absent — including a Pi surface without one verifiable external `pi-subagents` owner, or any host missing one of the three public tools — stop before
 investigation and report the exact unsupported capability. Do not imitate the missing operation
 in prose or write runtime artifacts by hand.
 
@@ -71,7 +71,7 @@ The user invocation is `$ARGUMENTS`. Leading `--` values are invocation flags, n
 of the goal. The host adapter owns parsing. Surface unknown flags and read the
 resolved goal only from the public run view when that view is available.
 
-External actor CLIs are not metered or attributed in 4.0 (ADR 0061).
+External actor CLIs are not metered or attributed (ADR 0061).
 
 ## 1. Route before investigating
 
@@ -134,10 +134,17 @@ worklist. Counts and reason strings are telemetry, not authority.
 Read [references/evidence.md](references/evidence.md) before adding evidence.
 Apply the folds in order:
 
-1. **Research first for every gating claim.** Record a concrete code, docs,
+1. **Research first for every gating claim, except a `needs-decision` claim** (human-owned: it needs the human's answer, not research). Record a concrete code, docs,
    runtime, or web source that supports or refutes the exact current claim text.
    `source_ref` and the verbatim `citation` must identify the file or runtime observation that
    bears on this claim; generic precedent is not evidence for a repository-specific claim.
+   One source per record, quoted exactly: the service refuses a workspace citation that is not
+   verbatim in the cited file and lines (`research.citation_unverified`); a URL or an absolute path
+   is retrieved by the auditor where its host is observed to, otherwise confirmed by a human; a `runtime`
+   observation must say why no spike can establish it (`spike_unavailable`) and is always confirmed by a
+   human. What still needs a confirmation, who asks, when, and how often is owned by
+   [references/evidence.md](references/evidence.md) ("What still needs confirming"); a `needs-decision`
+   claim is human-owned and needs no research. A summary of what a source says is not a citation.
 2. **Spike second only for `needs-experiment`.** After supporting research,
    request a deterministic command and its non-empty dependent-file set through
    the service. The service captures immutable bytes, runs the harness once, and
@@ -148,7 +155,8 @@ Apply the folds in order:
    - refuting research refutes the claim;
    - a current passing spike satisfies Fold 2;
    - absent or stale evidence leaves the claim open;
-   - `needs-decision` remains a human residual.
+   - `needs-decision` is answered by the human at the end of the pass (approve or reject); until
+     then it is a human residual.
 
 Refuted claims are discarded or replaced with narrower claims. Never preserve a
 preferred design by grading contrary evidence away. New claims must attach to the
@@ -174,9 +182,12 @@ language. When budgets, a stall, or scope closure matter, read
 
 ## 5. Obtain independent audit
 
-When every in-scope gating claim is approved, read [references/audit.md](references/audit.md).
+Once confirmations are done (report first; the core refuses an audit while one is pending) and every in-scope gating claim is approved, read [references/audit.md](references/audit.md).
+Approval is not convergence: it means the evidence passed the service's rules, not that it
+convinces. Before requesting the audit, read `GetArgument`, the argument the auditor will receive,
+and check that each claim follows from its cited sources alone.
 Follow its exact host procedure once: Claude launches `empirica:empirica-auditor`, Pi calls the
-packaged auditor, and Codex ends the turn without launching an ordinary child. The host owns dossier
+packaged auditor. The host owns dossier
 binding, correlation, identity observation, and verdict admission. Audit may block but cannot
 manufacture deterministic machine evidence.
 
@@ -187,8 +198,7 @@ convergence is unsupported. Do not substitute an ordinary model response.
 
 Call the host's guarded convergence operation exactly once after the graph,
 evidence, and scope are current. On Claude and Pi this is `report_convergence`
-after the bound audit. On Codex the trusted Stop hook rejects the unsupported audit attempt and
-continues to block completion.
+after the bound audit.
 
 - Only a schema-guarded `Allow` permits reporting the result.
 - `Allow(converged=true)` permits a convergence claim.

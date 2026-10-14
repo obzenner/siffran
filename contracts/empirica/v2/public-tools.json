@@ -133,7 +133,12 @@
   },
   "settlement_notices": {
     "human_wait": "Empirica is paused for human governance input, not converged. Investigation remains blocked; no approval was granted by this pause.",
-    "budget_exhausted": "Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this pause. Stop honestly (report_convergence intent=stop), or in deliberative mode propose a raise for human approval; in auto mode start a fresh run."
+    "evidence_wait": "Empirica is paused: research evidence is waiting for your confirmation, and the run is not converged. No confirmation was granted by this pause. The agent presents it to you at the end of its next pass; if you leave it on Later or close the dialog it is shown again only when you tell the agent to report once more (each showing spends one of the run's human interactions), and otherwise the run must change or be accepted as a residual.",
+    "budget_exhausted": "Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this pause. Stop honestly (report_convergence intent=stop), or in deliberative mode propose a raise for human approval; in auto mode start a fresh run.",
+    "evidence_report": "Research evidence is waiting for your confirmation, and the run is not converged. Call report_convergence now: the human is asked inside that call, if this host can show a dialog; or end honestly with report_convergence intent=stop. No confirmation was granted by this block.",
+    "paused_for_human": "Empirica is paused for you, not converged: {reason} Nothing was approved or confirmed by this pause, and nobody was asked. The run stays open: tell the agent to carry out that step, or end the run.",
+    "paused_for_evidence": "Empirica is paused for you, not converged: research evidence is waiting for your confirmation. To continue, tell the agent to call report_convergence: you are asked in that call, if this host can show a dialog. Nothing was approved or confirmed by this pause, and nobody was asked.",
+    "unattended_continue": "Empirica is not converged: {reason} Auto mode does not hand the turn back to you: act on it, or end honestly with report_convergence intent=stop."
   },
   "author_view": {
     "labels": {
@@ -143,6 +148,8 @@
       "converged": "converged=",
       "run_id": "run_id:",
       "proposal_rationale": "proposal rationale:",
+      "host_unreviewed": "host:",
+      "host_unreviewed_note": "(not reviewed; preflight passed)",
       "audit": "Audit:",
       "finding": "finding:",
       "reasons": "Reasons:",
@@ -165,6 +172,12 @@
       "edges": "Edges:",
       "citations": "Citations:",
       "audit_status": "Audit status:",
+      "audit_verdict_none": "required",
+      "audit_verdict_passed": "passed",
+      "audit_verdict_failed": "failed",
+      "audit_pending": "pending",
+      "audit_not_current": "no longer current",
+      "audit_reaudit_pending": "re-audit pending",
       "claim_kind": "kind=",
       "claim_gating": "gating=",
       "claim_state": "state=",
@@ -174,17 +187,38 @@
       "contract": "Contract",
       "block": "Block",
       "fault": "Fault",
-      "inert": "Inert"
+      "inert": "Inert",
+      "waiting": "Waiting on a human:",
+      "waiting_record": "source:",
+      "waiting_claim": "decision needed on claim",
+      "waiting_terminal": "decision needed to end the run as",
+      "waiting_for_claim": "for claim",
+      "waiting_none_error": "a human can be asked at the end of your next pass",
+      "waiting_unavailable": "no human can be asked in this session",
+      "waiting_unobserved": "a human is asked when you report, if this host can show a dialog",
+      "waiting_already_presented": "already shown; an explicit report_convergence asks again, within the interaction limit",
+      "waiting_interaction_limit": "the human interaction limit is reached",
+      "waiting_surface_unrecorded": "the host could not tell whether a human can be asked, so nobody was asked; stop honestly, or report again after a change",
+      "waiting_presentation_failed": "the host could not show the confirmation dialog, so nobody was asked; stop honestly, or report again after a change",
+      "verified_by_service": "checked by the service",
+      "confirmed_by_human": "confirmed by a human",
+      "rejected_by_human": "rejected by a human",
+      "pending_human": "waiting for a human",
+      "human_note": "human note:",
+      "decision_approve": "approved by a human",
+      "decision_reject": "rejected by a human",
+      "human_answer": "human answer:",
+      "pending_audit": "for the audit to retrieve"
     }
   },
   "host_profiles": {
-    "claude-code@2.1.278": {
+    "claude-code": {
       "delegation_env": "EMPIRICA_AUTO_DELEGATION"
     },
-    "codex-cli@0.146.0": {
+    "codex-cli": {
       "delegation_env": "EMPIRICA_AUTO_DELEGATION"
     },
-    "pi@0.84.1+pi-subagents-foreground-audit-v1": {
+    "pi+pi-subagents-foreground-audit-v1": {
       "delegation_env": "EMPIRICA_AUTO_DELEGATION"
     }
   },
@@ -240,7 +274,16 @@
       ]
     },
     "host.subagents_version_unsupported": {
-      "message": "The active pi-subagents runtime is not a reviewed version or does not expose the launch preflight Empirica binds. Install a reviewed version and restart the host, or accept the residual.",
+      "message": "The active pi-subagents runtime is outside the supported range, or its tool schema or launch preflight cannot carry the Empirica audit launch. Install a version inside the supported range and restart the host, or accept the residual.",
+      "sections": [
+        "hosts/capabilities"
+      ],
+      "next_actions": [
+        "residual.accept"
+      ]
+    },
+    "host.subagents_tools_not_read_only": {
+      "message": "The preflight reports a tool Empirica does not allow the auditor (the refusal names the tools), so the audit cannot be read-only. Remove the extra tool from the auditor's configuration or update pi-subagents, restart the host, and start a fresh run, or accept the residual.",
       "sections": [
         "hosts/capabilities"
       ],
@@ -249,7 +292,7 @@
       ]
     },
     "host.subagents_launch_unsupported": {
-      "message": "During an Empirica run, `subagent` accepts exactly one launch form (for example `agent` or `workflow`) or a reviewed read-only action (`list`, `status`, `models`, ...); control, mutation, and ambiguous calls are refused. Retry with a supported call, or accept the residual.",
+      "message": "During an Empirica run, `subagent` accepts exactly one launch form (for example `agent` or `workflow`) or a read-only action that the runtime's reviewed versions know (`list`, `status`, `models`, ...); control, mutation, unknown-action, and ambiguous calls are refused. Retry with a supported call, or accept the residual.",
       "sections": [
         "hosts/capabilities"
       ],
@@ -257,8 +300,8 @@
         "residual.accept"
       ]
     },
-    "host.subagents_provenance_missing": {
-      "message": "The retained run or receipt lacks the exact pi-subagents version and owner path. Recapture a provenance-complete run; this one is not evidence.",
+    "host.version_unsupported": {
+      "message": "The active Pi is {version}, outside the range Empirica supports ({range}), or its version could not be read, so no run starts. Install a Pi inside the range and restart the host, or accept the residual.",
       "sections": [
         "hosts/capabilities"
       ],
@@ -322,7 +365,8 @@
               "GetContract",
               "RestoreRun"
             ],
-            "description": "Read the public run view, obtain the current audit argument, inspect the public contract, or restore a persisted run."
+            "description": "Read the public run view, obtain the current audit argument, inspect the public contract, or restore a persisted run.",
+            "type": "string"
           },
           "run_id": {
             "type": "string",
@@ -334,7 +378,8 @@
               "index",
               "section"
             ],
-            "description": "Contract projection for GetContract. Use section with section_id."
+            "description": "Contract projection for GetContract. Use section with section_id.",
+            "type": "string"
           },
           "section_id": {
             "type": "string",
@@ -366,7 +411,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "graph"
+                    "const": "graph",
+                    "type": "string"
                   },
                   "payload": {
                     "type": "object",
@@ -409,7 +455,8 @@
                                 "ordinary",
                                 "needs-experiment",
                                 "needs-decision"
-                              ]
+                              ],
+                              "type": "string"
                             },
                             "gating": {
                               "type": "boolean"
@@ -440,7 +487,8 @@
                               "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
                             },
                             "type": {
-                              "const": "SupportedBy"
+                              "const": "SupportedBy",
+                              "type": "string"
                             }
                           },
                           "description": "Closed author-supplied support edge for a graph action."
@@ -493,7 +541,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "research"
+                    "const": "research",
+                    "type": "string"
                   },
                   "claim_id": {
                     "type": "string",
@@ -505,13 +554,15 @@
                       "code",
                       "runtime",
                       "web"
-                    ]
+                    ],
+                    "type": "string"
                   },
                   "result": {
                     "enum": [
                       "supports",
                       "refutes"
-                    ]
+                    ],
+                    "type": "string"
                   },
                   "payload": {
                     "type": "object",
@@ -532,6 +583,11 @@
                       "observed_content_digest": {
                         "type": "string",
                         "pattern": "^sha256:[0-9a-f]{64}$"
+                      },
+                      "spike_unavailable": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Required for a runtime record whose source_ref is neither a workspace path nor a URL or absolute path: why no deterministic spike can establish the observation. Shown to the human verbatim."
                       }
                     }
                   }
@@ -548,7 +604,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "spike_request"
+                    "const": "spike_request",
+                    "type": "string"
                   },
                   "claim_id": {
                     "type": "string",
@@ -580,7 +637,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "configure_run"
+                    "const": "configure_run",
+                    "type": "string"
                   },
                   "budgets": {
                     "type": "object",
@@ -638,7 +696,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "route"
+                    "const": "route",
+                    "type": "string"
                   },
                   "reason": {
                     "type": "string",
@@ -661,7 +720,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "investigate"
+                    "const": "investigate",
+                    "type": "string"
                   }
                 },
                 "description": "Record the first investigation witness only after route and exact current host approval.",
@@ -679,7 +739,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "freeze"
+                    "const": "freeze",
+                    "type": "string"
                   }
                 }
               }
@@ -705,7 +766,8 @@
               "report_convergence",
               "stop"
             ],
-            "description": "Request convergence by default, or request an honest non-converged stop."
+            "description": "Request convergence by default, or request an honest non-converged stop.",
+            "type": "string"
           }
         }
       }
@@ -725,14 +787,16 @@
               "GetContract",
               "RestoreRun"
             ],
-            "description": "Read the public run view, obtain the current audit argument, inspect the public contract, or restore a persisted run."
+            "description": "Read the public run view, obtain the current audit argument, inspect the public contract, or restore a persisted run.",
+            "type": "string"
           },
           "target": {
             "enum": [
               "index",
               "section"
             ],
-            "description": "Contract projection for GetContract. Use section with section_id."
+            "description": "Contract projection for GetContract. Use section with section_id.",
+            "type": "string"
           },
           "section_id": {
             "type": "string",
@@ -758,7 +822,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "graph"
+                    "const": "graph",
+                    "type": "string"
                   },
                   "payload": {
                     "type": "object",
@@ -801,7 +866,8 @@
                                 "ordinary",
                                 "needs-experiment",
                                 "needs-decision"
-                              ]
+                              ],
+                              "type": "string"
                             },
                             "gating": {
                               "type": "boolean"
@@ -832,7 +898,8 @@
                               "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
                             },
                             "type": {
-                              "const": "SupportedBy"
+                              "const": "SupportedBy",
+                              "type": "string"
                             }
                           },
                           "description": "Closed author-supplied support edge for a graph action."
@@ -885,7 +952,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "research"
+                    "const": "research",
+                    "type": "string"
                   },
                   "claim_id": {
                     "type": "string",
@@ -897,13 +965,15 @@
                       "code",
                       "runtime",
                       "web"
-                    ]
+                    ],
+                    "type": "string"
                   },
                   "result": {
                     "enum": [
                       "supports",
                       "refutes"
-                    ]
+                    ],
+                    "type": "string"
                   },
                   "payload": {
                     "type": "object",
@@ -924,6 +994,11 @@
                       "observed_content_digest": {
                         "type": "string",
                         "pattern": "^sha256:[0-9a-f]{64}$"
+                      },
+                      "spike_unavailable": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Required for a runtime record whose source_ref is neither a workspace path nor a URL or absolute path: why no deterministic spike can establish the observation. Shown to the human verbatim."
                       }
                     }
                   }
@@ -940,7 +1015,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "spike_request"
+                    "const": "spike_request",
+                    "type": "string"
                   },
                   "claim_id": {
                     "type": "string",
@@ -972,7 +1048,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "configure_run"
+                    "const": "configure_run",
+                    "type": "string"
                   },
                   "budgets": {
                     "type": "object",
@@ -1030,7 +1107,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "route"
+                    "const": "route",
+                    "type": "string"
                   },
                   "reason": {
                     "type": "string",
@@ -1053,7 +1131,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "investigate"
+                    "const": "investigate",
+                    "type": "string"
                   }
                 },
                 "description": "Record the first investigation witness only after route and exact current host approval.",
@@ -1071,7 +1150,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "freeze"
+                    "const": "freeze",
+                    "type": "string"
                   }
                 }
               }
@@ -1090,7 +1170,8 @@
               "report_convergence",
               "stop"
             ],
-            "description": "Request convergence by default, or request an honest non-converged stop."
+            "description": "Request convergence by default, or request an honest non-converged stop.",
+            "type": "string"
           }
         }
       }

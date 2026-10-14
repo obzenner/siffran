@@ -17,7 +17,9 @@ PI = ROOT / "plugins/empirica/adapters/pi"
 sys.path.insert(0, str(ROOT / "plugins/empirica"))
 sys.path.insert(0, str(ROOT / "plugins/empirica/tests"))
 from governance_setup import invocation_for  # noqa: E402
-PROFILE = "pi@0.84.1+pi-subagents-foreground-audit-v1"
+from application.protocol import host_profile_id  # noqa: E402
+PI_PROFILE = host_profile_id("pi")
+PROFILE = PI_PROFILE
 
 
 class GitIoBootstrapTest(unittest.TestCase):

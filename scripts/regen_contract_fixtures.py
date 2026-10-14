@@ -12,8 +12,8 @@ PLUGIN = ROOT / "plugins" / "empirica"
 sys.path.insert(0, str(PLUGIN))
 
 from application.protocol import (  # noqa: E402
-    contract_digest, contract_result)
-from core.governance import proposal_digest  # noqa: E402
+    contract_digest, contract_result, public_contract, stored, to_stored)
+from core.governance import human_wait, proposal_digest  # noqa: E402
 
 FIXTURES = ROOT / "contracts" / "empirica" / "v2" / "fixtures"
 STATE_FIXTURES = ROOT / "contracts" / "empirica" / "v2" / "state-fixtures"
@@ -27,20 +27,20 @@ def _audit_summary(result: dict, run: dict) -> dict[str, object]:
     # A settled verdict is not derivable from children, so a Block fixture (which has no argument)
     # authors it on the run view; required/pending stay derived from the children below.
     argument_audit = result.get("argument", {}).get("audit") or run.get("audit", {})
-    state = argument_audit.get("state")
+    verdict = argument_audit.get("verdict", "none")
     if run.get("status") == "converged":
-        return {"state": "passed", "independence": "distinct", "findings": []}
-    if state not in {"passed", "failed"}:
-        state = ("pending" if any(child.get("resource_class") == "audit"
-                                  and child.get("state") in {"reserved", "launching", "pending"}
-                                  for child in run.get("children", ())) else "required")
-    return {"state": state,
-            "independence": argument_audit.get("independence", "unverified"),
-            "findings": list(argument_audit.get("findings", [])) if state == "failed" else []}
+        return {"verdict": "passed", "current": True, "pending": False, "independence": "distinct", "findings": []}
+    pending = any(child.get("resource_class") == "audit" and child.get("state") in {"reserved", "launching", "pending"}
+                  for child in run.get("children", ()))
+    settled = verdict != "none" and not pending
+    return {"verdict": verdict, "current": None if verdict == "none" else argument_audit.get("current", True),
+            "pending": pending,
+            "independence": argument_audit.get("independence") if settled else None,
+            "findings": list(argument_audit.get("findings", [])) if settled and verdict == "failed" else []}
 
 
 def generated(path: Path) -> str:
-    document = json.loads(path.read_text(encoding="utf-8"))
+    document = stored(json.loads(path.read_text(encoding="utf-8")))
     command = document.get("request", {}).get("command", {})
     if (command.get("type") == "GetContract" and "expected" in document
             and not document.get("refused")):
@@ -60,13 +60,38 @@ def generated(path: Path) -> str:
         argument_audit.setdefault("findings", [])
     if isinstance(run, dict) and run:
         run["audit"] = _audit_summary(result, run)
+        # Hand-authored fixtures wait on no human unless they say so (ADR-0067).
+        run.setdefault("confirmation_batch", None)
+    # Hand-authored fixtures observed no human surface unless they say so (ADR-0067).
+    for invocation in (run.get("invocation"), document.get("invocation"),
+                       document.get("request", {}).get("command", {}).get("invocation"),
+                       document.get("state", {}).get("invocation") if isinstance(document.get("state"), dict) else None):
+        if isinstance(invocation, dict):
+            invocation.setdefault("human_surface", "unavailable")
     if isinstance(run.get("contract"), dict):
         run["contract"]["digest"] = contract_digest()
+    _live_contract_label(document)
     if isinstance(governed, dict) and "proposal_digest" in governed:
         goal = run["goal"]
         governed.pop("scope", None)
         governed["proposal_digest"] = proposal_digest(goal, governed)
-    return json.dumps(document, indent=2) + "\n"
+    if isinstance(governed, dict) and "prompt_error" in governed:
+        # Who acts on the configuration is the core's answer, never a fixture's (core.governance.human_wait).
+        governed["human_wait"] = human_wait(governed, governed["prompt_error"])
+    return json.dumps(to_stored(document), indent=2) + "\n"
+
+
+def _live_contract_label(node) -> None:
+    """The contract's version is the contract's own: every reference to ``empirica/public`` states the live one (G14 D5), so a
+    label change is one edit of ``public-contract.json``, not one per fixture."""
+    if isinstance(node, dict):
+        if node.get("id") == "empirica/public" and "version" in node:
+            node["version"] = public_contract()["version"]
+        for value in node.values():
+            _live_contract_label(value)
+    elif isinstance(node, list):
+        for value in node:
+            _live_contract_label(value)
 
 
 def main() -> int:

@@ -5,6 +5,7 @@ import type { Block, Response } from "./contract.ts";
 import { PROTOCOL } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
 import { PUBLIC_TOOLS } from "./public-tools.ts";
+import { EVIDENCE_WAIT_NOTICE, evidenceConfirmationWait } from "./evidence-ui.ts";
 import { initialState, reduce, renderLines } from "./dialog-view.ts";
 import type { Dialog, DialogDecision, DialogState, DialogTheme } from "./dialog-view.ts";
 
@@ -14,6 +15,8 @@ interface Governance {
   state: string; control_mode: string; proposal_digest: string; plan_revision: number;
   first_approval: boolean;
   proposal: Proposal; prompt_error: string | null;
+  /** Whether the configuration waits on its human: the core's answer (`core.governance.human_wait`). */
+  human_wait: boolean;
   context: { author: { provider_id: string; model_id: string } | null; ingress: string;
     interactive: boolean | null; delegation: boolean };
 }
@@ -89,7 +92,7 @@ async function showDialog(ctx: ExtensionContext, dialog: Dialog, deadline: numbe
                           before?: Dialog): Promise<DialogDecision> {
   if (!ctx.ui.custom) return { type: "dismiss" };
   // Pi's RPC mode reports hasUI=true yet its `custom()` is `async () => undefined` (no component
-  // can be shown; 0.84.1-1.0.0 alike): "nothing was presented" is a dismissal, never an approval.
+  // can be shown; 1.0.0 and 1.1.0 alike): "nothing was presented" is a dismissal, never an approval.
   const decision = await ctx.ui.custom<DialogDecision | undefined>((tui, hostTheme, _keybindings, done) => {
     let state: DialogState = initialState(dialog, confirmation);
     let closed = false;
@@ -134,24 +137,22 @@ export function expectedApprovalKind(governance: Governance): "host_ui" | "auto"
   return "auto";
 }
 
-const HUMAN_WAIT_REASON: Readonly<Record<string, string>> = {
-  pending: "governance.approval_required", rejected: "governance.approval_required",
-  revision_pending: "governance.revision_required",
-};
+/** The reasons an unapproved configuration blocks with (`governance.approval_required` before the first approval or
+ * after a rejection, `governance.revision_required` for a revision): the blocker the host may pause on. */
+const CONFIGURATION_REASONS: ReadonlySet<string> = new Set(["governance.approval_required", "governance.revision_required"]);
 
-/** True only for the sole legitimate human-approval blocker of an active run (ADR-0063);
- * mirrors Python `completion._human_approval_wait` with the Pi ingress. */
+/** True only for the sole legitimate human-approval blocker of an active run (ADR-0063). Whether the configuration
+ * waits on its human is the core's answer in the run view (`governance.human_wait`, the predicate the observer reads
+ * too); the host adds only its own ingress (Pi's dialog) and that the configuration's blocker is the run's sole one. The same
+ * rule as Python `completion._human_approval_wait`, case for case (`fixtures/turn-end-predicates.json`). */
 export function humanApprovalWait(result: Response["result"]): boolean {
   if (result.type !== "Block" || !("run" in result) || !result.run || result.run.status !== "active")
     return false;
-  const g = result.run.governance as (Governance & {
-    interactions_remaining: { proposal: number; total: number } }) | null;
+  const g = result.run.governance as Governance | null;
   if (g === null) return false;
   const reasons = result.reasons;
-  return g.state in HUMAN_WAIT_REASON && expectedApprovalKind(g) === "host_ui"
-    && g.context.ingress === "pi_ui" && g.prompt_error === null
-    && g.interactions_remaining.proposal > 0 && g.interactions_remaining.total > 0
-    && reasons.length === 1 && reasons[0].code === HUMAN_WAIT_REASON[g.state];
+  return g.human_wait === true && g.context.ingress === "pi_ui"
+    && reasons.length === 1 && CONFIGURATION_REASONS.has(reasons[0].code);
 }
 
 /** True only for the sole `budget.exhausted` blocker of an active run (ADR-0063 exhaustion rule); mirrors
@@ -170,6 +171,7 @@ export const BUDGET_EXHAUSTED_NOTICE = PUBLIC_TOOLS.settlement_notices.budget_ex
  * generic gate applies. */
 export function settlementNotice(result: Response["result"]): string | null {
   if (humanApprovalWait(result)) return HUMAN_WAIT_NOTICE;
+  if (evidenceConfirmationWait(result)) return EVIDENCE_WAIT_NOTICE;
   if (!budgetExhaustedWait(result)) return null;
   const { resource } = (result as Block).reasons[0].parameters as { resource: string };
   return BUDGET_EXHAUSTED_NOTICE.replace("{resource}", () => resource);

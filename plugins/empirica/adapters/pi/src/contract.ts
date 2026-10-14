@@ -10,6 +10,8 @@
 // request — but a caller that compiles against these types must not assume they
 // are authoritative for any field not listed here.
 
+import type { RetrievalKind } from "./audit-retrieval.ts";
+
 export const PROTOCOL = "empirica/v2";
 
 // --- request: outbound subset only -----------------------------------------
@@ -30,12 +32,20 @@ export interface InvocationProvenance {
   interactive: boolean | null;
   signal: string;
   delegation: boolean;
-  /** Host-recorded audit-runtime provenance (host-runtime.ts); persisted with the run, never shown. */
+  /** The retrieval kinds the audit child is observed to cover (ADR-0067); recorded once, re-observed at audit launch. */
+  audit_retrieval: readonly RetrievalKind[];
+  /** Whether the host can show a dialog to a human now (Pi: `canPresent(ctx)`, a UI with `select` and `input`); sent again at every report_convergence. */
+  human_surface: "human" | "unavailable" | "unobserved";
+  /** Where the session can be found again, as the session manager reported it (Pi: the session id, and its file when it has one); absent when it reported nothing. */
+  session?: { label: string; locator: string };
+  /** Host-recorded audit-runtime provenance (host-runtime.ts); persisted with the run, shown only when not reviewed. */
   host_runtime?: {
     policy_id: string;
     subagents: {
       package: string; version: string; owner_path: string; package_root: string;
       preflight_path: string; source: string;
+      /** Whether this exact version has a checked-in compat record (false: admitted by observation, ADR-0069). */
+      reviewed: boolean;
     };
   };
 }
@@ -78,11 +88,15 @@ export interface GetContractCommand {
   section_id?: string;
 }
 
+/** What a host reports when it could not do the mediation a report asks of it (nobody was asked); never stored. */
+export type HostFailure = "surface_unrecorded" | "presentation_failed";
+
 export interface EvaluateRunCommand {
   type: "EvaluateRun";
   run_id: string;
   intent: EvaluateIntent;
   observed_at?: string | null;
+  host_failure?: HostFailure;
 }
 
 export interface RestoreRunCommand {
@@ -132,10 +146,31 @@ export type FaultCode =
 
 export type FailDirection = "open" | "closed";
 
+export interface ConfirmationBatch {
+  key: string;
+  record_ids: string[];
+  claim_ids: string[];
+  /** Only the terminal step of a deliberative run: the one item asks whether to end the run as `status`. */
+  terminal?: { status: "stopped_frozen" | "stopped_residual" | "stopped_budget"; digest: string };
+  records: { claim_id: string; source_kind: string; source_ref: string }[];
+  prompt_error: null | "unavailable" | "unobserved" | "already_presented" | "interaction_limit" | HostFailure;
+}
+
+/** Whether a confirmation batch is the terminal step of a deliberative run (ADR-0063): one item that asks whether to end
+ * the run as `terminal.status`. The one predicate every caller uses (Python: `core.confirmation.is_terminal`). */
+export function isTerminalBatch(batch: unknown): batch is ConfirmationBatch & { terminal: NonNullable<ConfirmationBatch["terminal"]> } {
+  return typeof batch === "object" && batch !== null && typeof (batch as ConfirmationBatch).terminal === "object"
+    && (batch as ConfirmationBatch).terminal !== null;
+}
+
 /** Minimum run fields the guard validates on Allow/Block branches. */
 export interface RunSnapshot {
   id: string;
   status: RunStatus;
+  /** The core's progress basis (a digest; `core.evaluation.progress_basis`): the one thing a host compares to know whether the run moved. */
+  basis?: string;
+  /** What a human would be shown now, or null (the core's projection; the host presents when `prompt_error` is null). */
+  confirmation_batch?: ConfirmationBatch | null;
   [key: string]: unknown;
 }
 

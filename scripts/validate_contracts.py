@@ -7,13 +7,13 @@ functions. No runtime contract engine is created here.
 
 Validated:
   * every ``*.schema.json`` under ``contracts/<protocol>/<version>/``;
-  * v1 substrate-neutral fixtures under ``contracts/fixtures/``;
+  * substrate-neutral fixture envelopes under ``contracts/fixtures/``;
   * the v2 public contract registry, host profiles, and generated wire exemplars
     under ``contracts/empirica/v2/fixtures`` (checked by ``regen_contract_fixtures.py``):
     referential integrity, closed values, exact key sets, child transitions,
     host profile facts, response reason/residual parameters and exact ordered
     next-action/section lists, child recovery actions, schema↔registry mirror,
-    banned v1 fields, Allow.converged==status==converged, required digest,
+    retired response fields, Allow.converged==status==converged, required digest,
     GetContract target correlation and materialization;
   * in-memory negative cases: one mutation each asserting an expected
     diagnostic substring so a case cannot pass for the wrong rejection reason.
@@ -24,6 +24,11 @@ import re
 import sys
 from pathlib import Path
 from typing import Any, Callable
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins" / "empirica"))
+import registry_doc  # noqa: E402 - the one generator of the design document's data regions
+from core.canonical import CONTRACT_DIGEST_PLACEHOLDER, replace_string_values  # noqa: E402 - pure, no runtime state
 
 try:
     from jsonschema import Draft202012Validator
@@ -43,18 +48,24 @@ V2 = CONTRACTS / "empirica" / "v2"
 # checks derive commands/decisions/statuses/actions/child states+transitions/
 # reason IDs/next-action IDs/D2A enums+delimiters/mode fields from the loaded
 # registry (public-contract.json) and compare them to the request/response
-# schemas; no Python vocabulary table duplicates the registry. The registry and
-# host-profiles releases are frozen by one compact reviewed SHA-256 digest each
-# (a deliberate, reviewed edit is required to drift). Only algorithmic/
-# structural constants are retained below.
+# schemas; no Python vocabulary table duplicates the registry. A change to the
+# registry is reviewed in its git diff (no pinned digest: ``run.contract.digest``
+# is computed from the file and fixtures store a placeholder); the host-profiles
+# release stays frozen by one compact reviewed SHA-256 digest (a deliberate,
+# reviewed edit is required to drift). Only algorithmic/structural constants are
+# retained below.
 # --------------------------------------------------------------------------- #
-# Compact reviewed digests of the canonical registries (D2A §8/§9). Changing a
-# canonical value requires updating the matching digest deliberately.
-REVIEWED_REGISTRY_DIGEST = "sha256:dfc3b1cb235da4d56b7225a8e9a60c2b208ad1c6405be53782666fa4431fb2e3"
-REVIEWED_HOST_PROFILES_DIGEST = "sha256:31f7dde3ecdb24e97e88ad8c6812db2f85ff039b0199ddbf0c4e0443de0f9d1b"
+# A research artifact row's verification, as the argument view requires it (ADR-0067).
+VERIFICATION = {"class": "verbatim", "status": "verified_by_service", "retrieve": True}
+#: The tools an auditor child may ever be given: the read-only tools and ``contact_supervisor`` (ADR-0069). The one
+#: closed list the profile's ``audit_child_tools`` is validated against; widening it is a reviewed edit of this file.
+AUDIT_CHILD_TOOL_VOCABULARY = frozenset({"read", "grep", "find", "ls", "contact_supervisor"})
+# The compact reviewed digest of the host-profiles registry (D2A §8/§9). Changing a
+# canonical value requires updating it deliberately.
+REVIEWED_HOST_PROFILES_DIGEST = "sha256:d4915422e2b04b6d6d44f4ff480d7134d69b81a94dfec0c6f4d52878868bfc14"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
-REGISTRY_VERSION = "3.0.0"
+REGISTRY_VERSION = "4.0.0"
 PROTOCOL = "empirica/v2"
 # Structural D1 constants that have no canonical-JSON vocabulary of their own: edge
 # types and research source kinds. Artifact kind/outcome/spike-gate vocabularies ARE
@@ -151,8 +162,8 @@ def check_getcontract_digest(contract_result: dict, registry: dict, errors: list
 # Pure v2 checks — each takes explicit (data, errors, where).
 # --------------------------------------------------------------------------- #
 def check_identity(contract: dict, errors: list[str], where: str) -> None:
-    """Structural identity constants (id/version/protocol); vocabulary values are frozen by the
-    reviewed digest and mirrored by check_schema_mirror, not by a Python table."""
+    """Structural identity constants (id/version/protocol); vocabulary values are mirrored by
+    check_schema_mirror, not held in a Python table."""
     for field, want in (("id", REGISTRY_ID), ("version", REGISTRY_VERSION), ("protocol", PROTOCOL)):
         if contract.get(field) != want:
             errors.append(f"{where}: {field} must be {want!r}, got {contract.get(field)!r}")
@@ -164,18 +175,6 @@ def check_identity(contract: dict, errors: list[str], where: str) -> None:
         for sub in ("author", "host", "trusted"):
             if sub not in actions:
                 errors.append(f"{where}: actions.{sub} is required")
-
-
-def check_registry_digest(contract: dict, errors: list[str], where: str) -> None:
-    """Freeze the reviewed PublicContract release by one compact canonical SHA-256.
-
-    A deliberate registry edit must update REVIEWED_REGISTRY_DIGEST; this replaces every
-    per-vocabulary EXPECTED_* table with a single reviewed assertion.
-    """
-    actual = registry_digest(contract)
-    if actual != REVIEWED_REGISTRY_DIGEST:
-        errors.append(f"{where}: registry digest {actual} != reviewed "
-                      f"{REVIEWED_REGISTRY_DIGEST}")
 
 
 def check_key_sets(contract: dict, errors: list[str], where: str) -> None:
@@ -265,10 +264,7 @@ def check_next_action_surfaces(contract: dict, public_tools: dict, errors: list[
 
     Host-owned operations must be one of: contract ``commands``, ``actions.host``,
     ``actions.trusted``, or the private governance operations.  Human-owned operations
-    must be exactly ``decision``, and only on a claim-scoped decision directive: its params
-    require ``claim_id`` and every reason that lists it lists only human-owned directives.
-    (The runtime tie to the ``needs-decision`` claim kind is asserted in C3 from the core's
-    own blocker derivation.)"""
+    is ``confirmation``: the one batch receipt for pending evidence and decisions, which takes no params."""
     next_actions = contract.get("next_actions", {})
     if not isinstance(next_actions, dict):
         return
@@ -279,9 +275,6 @@ def check_next_action_surfaces(contract: dict, public_tools: dict, errors: list[
     allowed_host_ops |= set(_actions.get("host", {}))
     allowed_host_ops |= set(_actions.get("trusted", {}))
     allowed_host_ops |= set(private_governance_ops)
-    human_owned = {name for name, row in next_actions.items()
-                   if isinstance(row, dict) and isinstance(row.get("surface"), dict)
-                   and row["surface"].get("owner") == "human"}
     for directive, entry in sorted(next_actions.items()):
         if not isinstance(entry, dict):
             continue
@@ -316,18 +309,9 @@ def check_next_action_surfaces(contract: dict, public_tools: dict, errors: list[
                               f"operation {operation!r} is not a known host operation")
         elif owner == "human":
             operation = surface.get("operation")
-            if operation != "decision":
+            if operation != "confirmation":
                 errors.append(f"{where}: next_actions.{directive} human-owned surface "
-                              f"operation {operation!r} must be 'decision'")
-            params = entry.get("params")
-            required = params.get("required", []) if isinstance(params, dict) else []
-            listing = [code for code, reason in contract.get("reasons", {}).items()
-                       if directive in reason.get("next_actions", [])]
-            if "claim_id" not in required or not listing or any(
-                    set(contract["reasons"][code]["next_actions"]) - human_owned
-                    for code in listing):
-                errors.append(f"{where}: next_actions.{directive} human-owned surface is "
-                              f"not a claim-scoped decision directive")
+                              f"operation {operation!r} must be 'confirmation'")
         else:
             errors.append(f"{where}: next_actions.{directive} surface is not a valid "
                           f"tool/owner binding: {surface!r}")
@@ -535,17 +519,20 @@ def inventory_versions(compat_dir: Path) -> frozenset[str]:
     return frozenset(found)
 
 
+def _semver_tuple(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in version.split("."))
+
+
 def check_subagents_compatibility(profile: dict, pwhere: str, inventory_versions: frozenset[str] | None,
                                   errors: list[str]) -> None:
-    """The external-runtime policy of a foreground-audit profile (Empirica 4.1 D5/D6).
+    """The external-runtime policy of a foreground-audit profile (ADR-0069).
 
-    Exactly the foreground hosts declare it; the profile id is ``<host>@<version>+<policy_id>``, so an
-    id can never encode a range or a runtime version; ``reviewed_versions`` are exact, unique and
-    ascending. ``inventory_versions`` is the set of checked-in reviewed inventories
-    (``adapters/pi/compat/pi-subagents-<version>.json``); when supplied it must equal
-    ``reviewed_versions``. The contract list is the reviewed decision and the inventories are the
-    evidence for it, so promoting a version is an explicit edit of both, never an implicit side effect
-    of generating a file; neither can drift from the other unnoticed."""
+    Exactly the foreground hosts declare it; the profile id is ``<host>+<policy_id>``, so an id can
+    never encode a range or a version. The policy is a half-open version range
+    ``[minimum, maximum_exclusive)``: a version inside it is admitted by what the adapter observes of it,
+    and a version with a checked-in compat record (``adapters/pi/compat/pi-subagents-<version>.json``) is
+    additionally *reviewed*. ``inventory_versions`` is the set of those records; when supplied every one
+    must lie inside the range (a record outside it could never be used, so it is dead evidence)."""
     policy = profile.get("subagents_compatibility")
     foreground = profile.get("audit_execution") == "foreground"
     if foreground and policy is None:
@@ -554,25 +541,22 @@ def check_subagents_compatibility(profile: dict, pwhere: str, inventory_versions
         errors.append(f"{pwhere}: subagents_compatibility applies only to foreground-audit hosts")
     if not isinstance(policy, dict):
         return
-    expected_id = f"{profile.get('host_id')}@{profile.get('version')}+{policy.get('policy_id')}"
+    expected_id = f"{profile.get('host_id')}+{policy.get('policy_id')}"
     if profile.get("profile_id") != expected_id:
-        errors.append(f"{pwhere}: profile_id must be '<host_id>@<version>+<policy_id>' = {expected_id!r}")
-    if policy.get("unreviewed_action") != "refuse":
-        errors.append(f"{pwhere}: subagents_compatibility.unreviewed_action must be 'refuse'")
-    reviewed = policy.get("reviewed_versions")
-    if not isinstance(reviewed, list) or not reviewed \
-            or not all(isinstance(v, str) and _EXACT_SEMVER.fullmatch(v) for v in reviewed):
-        errors.append(f"{pwhere}: reviewed_versions must be a nonempty list of exact MAJOR.MINOR.PATCH versions")
+        errors.append(f"{pwhere}: profile_id must be '<host_id>+<policy_id>' = {expected_id!r}")
+    minimum, maximum = policy.get("minimum"), policy.get("maximum_exclusive")
+    if not all(isinstance(v, str) and _EXACT_SEMVER.fullmatch(v) for v in (minimum, maximum)):
+        errors.append(f"{pwhere}: subagents_compatibility minimum and maximum_exclusive must be exact MAJOR.MINOR.PATCH versions")
         return
-    if len(set(reviewed)) != len(reviewed):
-        errors.append(f"{pwhere}: reviewed_versions must be unique")
-    if reviewed != sorted(reviewed, key=lambda v: tuple(int(part) for part in v.split("."))):
-        errors.append(f"{pwhere}: reviewed_versions must be in ascending version order")
-    if inventory_versions is not None and set(reviewed) != inventory_versions:
-        errors.append(
-            f"{pwhere}: reviewed_versions {sorted(reviewed)} != checked-in inventories {sorted(inventory_versions)} "
-            f"(missing inventory: {sorted(set(reviewed) - inventory_versions)}; "
-            f"inventory not reviewed: {sorted(inventory_versions - set(reviewed))})")
+    if _semver_tuple(minimum) >= _semver_tuple(maximum):
+        errors.append(f"{pwhere}: subagents_compatibility minimum must be below maximum_exclusive")
+        return
+    if set(policy) - {"package", "policy_id", "minimum", "maximum_exclusive"}:
+        errors.append(f"{pwhere}: subagents_compatibility has unknown fields {sorted(set(policy) - {'package', 'policy_id', 'minimum', 'maximum_exclusive'})}")
+    outside = sorted(v for v in (inventory_versions or ())
+                     if not _semver_tuple(minimum) <= _semver_tuple(v) < _semver_tuple(maximum))
+    if outside:
+        errors.append(f"{pwhere}: compat records outside the supported range [{minimum}, {maximum}): {outside}")
 
 
 def check_host_profiles(profiles_doc: dict, contract: dict, known_fixture_ids: set,
@@ -599,6 +583,8 @@ def check_host_profiles(profiles_doc: dict, contract: dict, known_fixture_ids: s
             errors.append(f"{where}.profiles[{i}]: duplicate profile_id {pid!r}")
         seen_ids.add(pid)
         pwhere = f"{where}.profiles[{i}] ({pid})"
+        if "subagents_compatibility" not in profile and pid != profile.get("host_id"):
+            errors.append(f"{pwhere}: a profile without an external-runtime policy has the host id as its profile_id")
         version = profile.get("version", "")
         if not isinstance(version, str) or RANGE_OPS.search(version):
             errors.append(f"{pwhere}: qualification version {version!r} must be exact")
@@ -645,6 +631,18 @@ def check_host_profiles(profiles_doc: dict, contract: dict, known_fixture_ids: s
             if isinstance(budget, dict) and isinstance(budget.get("soft"), int) \
                     and isinstance(budget.get("hard"), int) and budget["soft"] > budget["hard"]:
                 errors.append(f"{pwhere}: audit_launch_policy.tool_budget.soft must not exceed hard")
+            child_tools = policy.get("audit_child_tools")
+            if isinstance(child_tools, list):
+                for tool in child_tools:
+                    if tool not in AUDIT_CHILD_TOOL_VOCABULARY:
+                        errors.append(f"{pwhere}: audit_launch_policy.audit_child_tools names {tool!r}, which is "
+                                      f"outside the auditor vocabulary (read-only tools plus contact_supervisor) {sorted(AUDIT_CHILD_TOOL_VOCABULARY)}")
+            blocked = budget.get("block") if isinstance(budget, dict) else None
+            if isinstance(child_tools, list) and isinstance(blocked, list):
+                for tool in blocked:
+                    if tool not in child_tools:
+                        errors.append(f"{pwhere}: audit_launch_policy.tool_budget.block names {tool!r}, "
+                                      f"which is not in audit_child_tools")
     levels = profiles_doc.get("thinking_levels")
     if not isinstance(levels, list) or not levels or len(set(levels)) != len(levels) \
             or not all(isinstance(level, str) and re.fullmatch(r"[a-z]+", level) for level in levels):
@@ -661,6 +659,158 @@ def check_host_profiles(profiles_doc: dict, contract: dict, known_fixture_ids: s
     if actual != REVIEWED_HOST_PROFILES_DIGEST:
         errors.append(f"{where}: host-profiles digest {actual} != reviewed "
                       f"{REVIEWED_HOST_PROFILES_DIGEST}")
+
+
+def _test_declared(path: Path, names: list[str]) -> str | None:
+    """The first name in ``names`` that is not declared in ``path``, else None.
+
+    Python: each name is a ``def``/``class`` of exactly that name, and a name after a class is looked up inside that
+    class's block. Node: the name is the start of a ``test("<title>`` / ``it(`` / ``describe(`` title. ``*`` stands for
+    every test of the preceding class."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return names[0] if names else None
+    scope = text
+    for position, name in enumerate(names):
+        if name == "*":
+            # A wildcard stands for the tests of the class before it: there must be one, and it must hold a test.
+            if position == 0 or names[position - 1] == "*":
+                return name
+            if path.suffix == ".py" and re.search(r"^\s*(?:async\s+)?def\s+test", scope, re.M) is None:
+                return f"{names[position - 1]}::*"
+            if path.suffix != ".py" and re.search(
+                    rf"""^\s*describe(?:\.\w+)?\(\s*["'`]{re.escape(names[position - 1])}""", text, re.M) is None:
+                return f"{names[position - 1]}::*"  # a Node wildcard follows a describe block
+            continue
+        if path.suffix == ".py":
+            found = re.search(rf"^( *)(?:async\s+)?(?:def|class)\s+{re.escape(name)}\b", scope, re.M)
+            if found is None:
+                return name
+            indent, rest = len(found.group(1)), scope[found.end():].split("\n")
+            body = [rest[0]]
+            for line in rest[1:]:
+                if line.strip() and len(line) - len(line.lstrip()) <= indent:
+                    break
+                body.append(line)
+            scope = "\n".join(body)
+        elif re.search(rf"""^\s*(?:test|it|describe)(?:\.\w+)?\(\s*["'`]{re.escape(name)}""", scope, re.M) is None:
+            return name
+    return None
+
+
+def check_turn_end(doc: dict, errors: list[str], where: str, root: Path = ROOT) -> None:
+    """The turn-end table (ADR-0068) is closed: every cell names an outcome of the table's vocabulary and notices the
+    public contract defines, every row is proved for every host by scenarios that exist and together cover every control
+    mode, and every host names the table-driven scenario that enumerates its cells."""
+    table = doc.get("turn_end")
+    if not isinstance(table, dict):
+        return
+    modes = list(doc.get("control_modes") or [])
+    vocabulary = set(table.get("outcomes") or {})
+    scenarios = {s.get("id"): s for s in doc.get("scenarios", []) if isinstance(s, dict)}
+    contract_path = root / "contracts" / "empirica" / "v2" / "public-contract.json"
+    notices = set((json.loads(contract_path.read_text(encoding="utf-8")).get("settlement_notices") or {})
+                  if contract_path.is_file() else ())
+
+    def covers(ids: list, label: str) -> None:
+        unknown = [sid for sid in ids if sid not in scenarios]
+        if unknown:
+            errors.append(f"{where}: turn_end {label} names unknown scenario(s) {unknown}")
+            return
+        covered = {mode for sid in ids for mode in scenarios[sid].get("control_modes", [])}
+        if "any" not in covered and not set(modes) <= covered:
+            errors.append(f"{where}: turn_end {label} has no scenario for {sorted(set(modes) - covered)}")
+
+    for state in table.get("states", []):
+        for mode in modes:
+            cell = (state.get("outcomes") or {}).get(mode) or {}
+            if cell.get("outcome") not in vocabulary:
+                errors.append(f"{where}: turn_end state {state.get('id')} / {mode}: outcome "
+                              f"{cell.get('outcome')!r} is not in the table's vocabulary")
+            for key in cell.get("notices", []):
+                if key not in notices:
+                    errors.append(f"{where}: turn_end state {state.get('id')} / {mode}: notice {key!r} is not a "
+                                  "settlement notice of the public contract")
+        for host, ids in (state.get("scenarios") or {}).items():
+            covers(ids, f"state {state.get('id')} on {host}")
+    for host, surface in (table.get("hosts") or {}).items():
+        covers([surface.get("table_driven")], f"table-driven test of {host}")
+
+
+def check_host_boundaries(doc: dict, errors: list[str], where: str, root: Path = ROOT) -> None:
+    """The host-boundary registry is data (ADR-0068): ids are unique and closed, every scenario is
+    proved by tests that exist or is live-only with a qualification-ledger row that exists, each
+    control-mode-dependent expectation covers all four modes, and the design document's generated
+    regions equal what ``make registry-doc`` writes from the registry (ADR-0069)."""
+    modes = doc.get("control_modes") or []
+    boundary_ids = [b.get("id") for b in doc.get("boundaries", []) if isinstance(b, dict)]
+    expectation_ids = [e.get("id") for e in doc.get("expectations", []) if isinstance(e, dict)]
+    scenarios = [s for s in doc.get("scenarios", []) if isinstance(s, dict)]
+    scenario_ids = [s.get("id") for s in scenarios]
+    for label, ids in (("boundary", boundary_ids), ("expectation", expectation_ids),
+                       ("scenario", scenario_ids)):
+        dupes = sorted({i for i in ids if ids.count(i) > 1})
+        if dupes:
+            errors.append(f"{where}: duplicate {label} id(s) {dupes}")
+    known_scenarios = set(scenario_ids)
+    check_turn_end(doc, errors, where, root)
+    for e in doc.get("expectations", []):
+        if e.get("boundary") not in boundary_ids:
+            errors.append(f"{where}: expectation {e.get('id')} names unknown boundary {e.get('boundary')!r}")
+        for sid in e.get("scenarios", []):
+            if sid not in known_scenarios:
+                errors.append(f"{where}: expectation {e.get('id')} names unknown scenario {sid}")
+        if e.get("control_mode_dependent"):
+            covered: set[str] = set()
+            for s in scenarios:
+                if s.get("id") in e.get("scenarios", []):
+                    covered.update(s.get("control_modes", []))
+            if "any" not in covered and not set(modes) <= covered:
+                errors.append(f"{where}: control-mode-dependent expectation {e.get('id')} has no scenario "
+                              f"for {sorted(set(modes) - covered)}")
+    for key in ("HB-STOP", "HB-GOV", "HB-REPORT", "HB-OBS"):
+        if not any(e.get("boundary") == key and e.get("control_mode_dependent")
+                   for e in doc.get("expectations", [])):
+            errors.append(f"{where}: {key} must carry a control-mode-dependent expectation")
+    attached = {sid for e in doc.get("expectations", []) for sid in e.get("scenarios", [])}
+    for sid in sorted(known_scenarios - attached):
+        errors.append(f"{where}: scenario {sid} belongs to no expectation")
+    ledger_path = root / str(doc.get("ledger", ""))
+    ledger_text = ledger_path.read_text(encoding="utf-8") if ledger_path.is_file() else ""
+    if not ledger_text:
+        errors.append(f"{where}: ledger {doc.get('ledger')!r} is missing")
+    ledger_rows = set(re.findall(r"^\| `([a-z][a-z0-9_]*)` \|", ledger_text, re.M))
+    for s in scenarios:
+        sid = s.get("id")
+        live = s.get("live_only")
+        if s.get("boundary") not in boundary_ids:
+            errors.append(f"{where}: scenario {sid} names unknown boundary {s.get('boundary')!r}")
+        if not s.get("covered_by") and not live:
+            errors.append(f"{where}: scenario {sid} has no covering test and is not live-only")
+        if live and live not in ledger_rows:
+            errors.append(f"{where}: scenario {sid} is live-only but the ledger has no row {live!r}")
+        for row in s.get("ledger_rows", []):
+            if row not in ledger_rows:
+                errors.append(f"{where}: scenario {sid} names ledger row {row!r} that does not exist")
+        for ref in s.get("covered_by", []):
+            path_part, *names = ref.split("::")
+            file = root / path_part
+            if not file.is_file():
+                errors.append(f"{where}: scenario {sid} covered_by file {path_part!r} does not exist")
+                continue
+            missing = _test_declared(file, names)
+            if missing is not None:
+                errors.append(f"{where}: scenario {sid} covered_by {path_part}::{missing!r} is not declared there")
+    design = root / str(doc.get("design_document", ""))
+    if not design.is_file():
+        errors.append(f"{where}: design document {doc.get('design_document')!r} is missing")
+        return
+    try:
+        for problem in registry_doc.drift(doc, design.read_text(encoding="utf-8")):
+            errors.append(f"{where}: design document: {problem}")
+    except (KeyError, TypeError) as exc:  # a registry the generator cannot render is already reported by the schema
+        errors.append(f"{where}: design document cannot be generated from the registry ({exc!r})")
 
 
 def _scan_banned(obj: Any, errors: list[str], where: str, path: str) -> None:
@@ -1378,14 +1528,17 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
     # Audit cross-field conditions (D2A §4).
     audit = argument.get("audit")
     if isinstance(audit, dict):
-        if audit.get("state") not in set(contract.get("audit_states", [])):
-            errors.append(f"{where}: argument.audit.state {audit.get('state')!r} not canonical")
-        if audit.get("independence") not in set(contract.get("independence_states", [])):
+        if audit.get("verdict") not in set(contract.get("audit_outcomes", [])):
+            errors.append(f"{where}: argument.audit.verdict {audit.get('verdict')!r} not canonical")
+        if audit.get("independence") is not None and audit.get("independence") not in set(contract.get("independence_states", [])):
             errors.append(f"{where}: argument.audit.independence {audit.get('independence')!r} not canonical")
-        covered = audit.get("state") in {"passed", "failed", "stale"}
+        # Coverage is reported once a verdict is settled (not while a re-audit is pending).
+        covered = audit.get("verdict") in {"passed", "failed"} and audit.get("pending") is False
+        if (audit.get("verdict") == "none") != (audit.get("current") is None):
+            errors.append(f"{where}: argument.audit.current must be null exactly when there is no verdict")
         for field in ("reviewed_argument_digest", "reviewed_goal_digest", "reviewed_deferred_scope_digest"):
             if covered and audit.get(field) is None:
-                errors.append(f"{where}: argument.audit.{field} must be non-null when state={audit.get('state')!r}")
+                errors.append(f"{where}: argument.audit.{field} must be non-null when verdict={audit.get('verdict')!r}")
             if audit.get(field) is not None and not _is_digest(audit.get(field)):
                 errors.append(f"{where}: argument.audit.{field} must be null or sha256:<64hex>")
         # frozen digest equals null only when current frozen scope digest is null.
@@ -1397,7 +1550,7 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
                 errors.append(f"{where}: argument.audit.reviewed_frozen_scope_digest must be null or sha256:<64hex>")
         elif argument.get("frozen_scope_digest") is not None and covered:
             errors.append(f"{where}: argument.audit.reviewed_frozen_scope_digest must be non-null "
-                          f"when frozen_scope_digest is set and state={audit.get('state')!r}")
+                          f"when frozen_scope_digest is set and verdict={audit.get('verdict')!r}")
         # Reviewed claims resolve and are unique.
         reviewed_claims = audit.get("reviewed_claims", []) or []
         rc_keys: set[str] = set()
@@ -1412,11 +1565,11 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
             if rc.get("claim_id") in rc_keys:
                 errors.append(f"{where}: argument.audit.reviewed_claims[{i}] duplicate claim_id {rc.get('claim_id')!r}")
             rc_keys.add(rc.get("claim_id"))
-        # MAJOR-1: for passed/failed, reviewed_claims must equal exactly all current claims
-        # where gating=true and state=approved, with each reviewed evidence_digest equal to
-        # that claim's current evidence_digest. for not_required/required/pending they must be
-        # empty (the raw schema enforces this); stale retains prior coverage.
-        if audit.get("state") in {"passed", "failed"}:
+        # MAJOR-1: for a settled verdict that still covers the argument (current), reviewed_claims must equal exactly
+        # all current claims where gating=true and state=approved, with each reviewed evidence_digest equal to that
+        # claim's current evidence_digest. With no verdict or a pending re-audit they must be empty (the raw schema
+        # enforces this); a verdict that is no longer current retains its prior coverage.
+        if covered and audit.get("current") is True:
             expected_coverage = {c.get("claim_id"): c.get("evidence_digest")
                                  for c in claims if isinstance(c, dict)
                                  and c.get("gating") is True and c.get("state") == "approved"}
@@ -1427,15 +1580,15 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
                 extra_cov = sorted(set(reviewed_map) - set(expected_coverage))
                 if missing_cov:
                     errors.append(f"{where}: argument.audit.reviewed_claims missing gating-claim "
-                                  f"coverage {missing_cov} for state={audit.get('state')!r}")
+                                  f"coverage {missing_cov} for verdict={audit.get('verdict')!r}")
                 if extra_cov:
                     errors.append(f"{where}: argument.audit.reviewed_claims extra non-gating "
-                                  f"coverage {extra_cov} for state={audit.get('state')!r}")
+                                  f"coverage {extra_cov} for verdict={audit.get('verdict')!r}")
             for cid, exp_digest in expected_coverage.items():
                 if cid in reviewed_map and reviewed_map[cid] != exp_digest:
                     errors.append(f"{where}: argument.audit.reviewed_claims[{cid}] "
                                   f"evidence_digest {reviewed_map[cid]!r} != current "
-                                  f"{exp_digest!r} for state={audit.get('state')!r}")
+                                  f"{exp_digest!r} for verdict={audit.get('verdict')!r}")
 
 
 def check_getargument_exclusivity(request: dict, result: dict, errors: list[str], where: str) -> None:
@@ -1620,7 +1773,8 @@ def _minimal_valid_state() -> dict:
         "governance": json.loads((V2 / "state-fixtures/valid-active.json").read_text())["governance"],
         "goal": "g",
         "invocation": {"host": "test", "interactive": True,
-                       "signal": "validator fixture", "delegation": False},
+                       "signal": "validator fixture", "delegation": False,
+                       "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"},
         "status": "active",
         "budgets": {"max_passes": 1, "passes_used": 0,
                     "max_spawns": 1, "spawns_used": 0,
@@ -2165,10 +2319,11 @@ def check_schema_mirror(request_schema: dict, response_schema: dict, contract: d
     if cki != set(contract.get("claim_kinds", [])):
         errors.append(f"{where}: response claimItem.kind enum {sorted(cki)} != registry "
                       f"claim_kinds {sorted(contract.get('claim_kinds', []))}")
-    avs = set(defs.get("auditView", {}).get("properties", {}).get("state", {}).get("enum", []))
-    if avs != set(contract.get("audit_states", [])):
-        errors.append(f"{where}: response auditView.state enum {sorted(avs)} != registry {sorted(contract.get('audit_states', []))}")
-    avi = set(defs.get("auditView", {}).get("properties", {}).get("independence", {}).get("enum", []))
+    for view_name in ("auditView", "auditSummary"):
+        avs = set(defs.get(view_name, {}).get("properties", {}).get("verdict", {}).get("enum", []))
+        if avs != set(contract.get("audit_outcomes", [])):
+            errors.append(f"{where}: response {view_name}.verdict enum {sorted(avs)} != registry {sorted(contract.get('audit_outcomes', []))}")
+    avi = set(defs.get("auditView", {}).get("properties", {}).get("independence", {}).get("enum", [])) - {None}
     if avi != set(contract.get("independence_states", [])):
         errors.append(f"{where}: response auditView.independence enum {sorted(avi)} != registry {sorted(contract.get('independence_states', []))}")
     ud = defs.get("untrustedDelimiters", {}).get("properties", {})
@@ -2308,7 +2463,7 @@ def main() -> int:
             return {}
         return value
 
-    # --- schema discovery (auto-discovers v1 + v2) ---
+    # --- schema discovery (every protocol/version folder) ---
     schemas: dict[tuple[str, str], dict] = {}
     for path in sorted(CONTRACTS.glob("*/*/*.schema.json")):
         data = load(path)
@@ -2341,16 +2496,9 @@ def main() -> int:
         for error in validator.iter_errors(instance):
             errors.append(f"{where}: {error.message}")
 
-    # --- v1 substrate-neutral fixtures (D6-C: v1 schemas removed; structural checks only) ---
-    # D6-C deletes contracts/empirica/v1, so v1 fixture envelopes can no longer be schema-validated.
-    # The negative v1 wire examples remain allowed (spec §7) for host-suite strict refusal; only
-    # structural identity (request_id presence, request/expected protocol + id correlation) is
-    # enforced here. Schema validation below is best-effort: it runs only when a schema exists.
-    REQUIRED_EMPIRICA_FIXTURES = frozenset({"empirica-get-argument.json", "empirica-void-spawn.json"})
+    # --- substrate-neutral fixture envelopes (Methodologist): structural identity (request_id presence,
+    # request/expected protocol + id correlation), then the schema when one exists for that protocol.
     fixture_paths = sorted((CONTRACTS / "fixtures").glob("*.json"))
-    missing = REQUIRED_EMPIRICA_FIXTURES - {p.name for p in fixture_paths}
-    for name in sorted(missing):
-        errors.append(f"contracts/fixtures/{name}: required Empirica audit fixture is missing")
     for path in fixture_paths:
         fixture = load(path)
         for field, kind in (("request", "request"), ("expected", "response")):
@@ -2377,7 +2525,6 @@ def main() -> int:
         validate_schema_instance(registry, "empirica/v2", "public-contract",
                                  "contracts/empirica/v2/public-contract.json")
         check_identity(registry, errors, "public-contract")
-        check_registry_digest(registry, errors, "public-contract")
         check_key_sets(registry, errors, "public-contract")
         check_referential(registry, errors, "public-contract")
         check_clauses(registry, errors, "public-contract")
@@ -2482,6 +2629,15 @@ def main() -> int:
     else:
         errors.append("contracts/empirica/v2/host-profiles.json: required v2 host profiles are missing")
 
+    # --- host-boundary registry (ADR-0068) ---
+    host_boundaries_doc = load(V2 / "host-boundaries.json")
+    if host_boundaries_doc:
+        validate_schema_instance(host_boundaries_doc, "empirica/v2", "host-boundaries",
+                                 "contracts/empirica/v2/host-boundaries.json")
+        check_host_boundaries(host_boundaries_doc, errors, "host-boundaries")
+    else:
+        errors.append("contracts/empirica/v2/host-boundaries.json: the host-boundary registry is missing")
+
     # --- schema↔registry mirror ---
     req_schema = schemas.get(("empirica/v2", "request"), {})
     res_schema = schemas.get(("empirica/v2", "response"), {})
@@ -2501,7 +2657,7 @@ def main() -> int:
         "invalid-missing-goal", "invalid-missing-invocation", "invalid-extra-field", "invalid-status",
         "invalid-child-duplicate-id", "invalid-counter", "invalid-stamp",
         "invalid-child-branch", "invalid-deadline-nan", "invalid-refund-mismatch",
-        "invalid-budget-reconciliation", "invalid-governance-legacy-shape",
+        "invalid-budget-reconciliation", "invalid-governance-unknown-field",
         "invalid-receipt-kind", "invalid-approved-placeholder",
     }
     state_names = {p.name.removesuffix(".json") for p in state_fixture_paths}
@@ -2522,8 +2678,8 @@ def main() -> int:
         "invalid-deadline-nan": (False, "finite number"),
         "invalid-refund-mismatch": (False, "launch_rejected"),
         "invalid-budget-reconciliation": (False, "reconcile"),
-        "invalid-governance-legacy-shape": (False, "first_approval"),
-        "invalid-receipt-kind": (False, "legacy"),
+        "invalid-governance-unknown-field": (False, "first_approval"),
+        "invalid-receipt-kind": (False, "unknown_kind"),
         "invalid-approved-placeholder": (False, "approved placeholder"),
     }
     for path in state_fixture_paths:
@@ -2597,7 +2753,8 @@ def main() -> int:
     digest = registry_digest(registry) if registry else ""
 
     for path in v2_fixture_paths:
-        fx = load(path)
+        # Fixtures store a placeholder where the contract's digest belongs; it is the file's own digest here.
+        fx = replace_string_values(load(path), CONTRACT_DIGEST_PLACEHOLDER, digest)
         where = str(path.relative_to(ROOT))
         request = fx.get("request", {})
         # QUAL-1: `target: full` and any removed public surface must be refused at the request
@@ -2649,6 +2806,8 @@ def main() -> int:
             check_trusted_payload(request, result, registry,
                                   errors, f"{where}")
 
+    if host_boundaries_doc:
+        run_host_boundary_negatives(host_boundaries_doc, errors, validate_schema_instance)
     # --- in-memory negative cases: one mutation each, expected substring ---
     run_negatives(registry, host_profiles_doc, v2_names, res_schema, req_schema,
                   state_schema, load(V2 / "public-tools.json"), errors, validate_schema_instance,
@@ -2660,6 +2819,100 @@ def main() -> int:
     print(f"ok: {len(schemas)} schemas, {len(fixture_paths)} fixtures, "
           f"{len(v2_fixture_paths)} v2 fixtures")
     return 0
+
+
+def run_host_boundary_negatives(doc: dict, errors: list[str], validate_schema: Callable) -> None:
+    """One mutation per host-boundary rule, each with the diagnostic it must produce (ADR-0068)."""
+    import copy
+
+    def expect(mutate: Callable[[dict], None], expected: str, label: str, schema: bool = False) -> None:
+        bad = copy.deepcopy(doc)
+        mutate(bad)
+        local: list[str] = []
+        if schema:
+            before = len(errors)
+            validate_schema(bad, "empirica/v2", "host-boundaries", "neg")
+            local = errors[before:]
+            del errors[before:]
+        else:
+            check_host_boundaries(bad, local, "neg")
+        if not local:
+            errors.append(f"NEG host-boundaries {label}: expected rejection but none produced")
+        elif not any(expected in e for e in local):
+            errors.append(f"NEG host-boundaries {label}: no diagnostic contains {expected!r}; got {local}")
+
+    def scenario(d: dict, sid: str) -> dict:
+        return next(x for x in d["scenarios"] if x["id"] == sid)
+
+    expect(lambda d: d["scenarios"].append(copy.deepcopy(d["scenarios"][0])),
+           "duplicate scenario id", "duplicate scenario id")
+    expect(lambda d: d["expectations"].append(copy.deepcopy(d["expectations"][0])),
+           "duplicate expectation id", "duplicate expectation id")
+    expect(lambda d: scenario(d, "EHB-STOP-07").update(covered_by=[], ledger_rows=[]),
+           "no covering test", "a scenario with neither a test nor a live-only row")
+    expect(lambda d: scenario(d, "EHB-STOP-07").update(covered_by=[
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::test_that_was_never_written"]),
+           "is not declared there", "a covering test that does not exist")
+    expect(lambda d: scenario(d, "EHB-STOP-07").update(covered_by=[
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::AuditBoundaryTests::"
+        "test_EHB_STOP_07_deliberative_pauses_with_the_real_reason_on_the_first_and_a_later_turn_end"]),
+           "is not declared there", "a test that exists in the file but not in the named class")
+    expect(lambda d: scenario(d, "EHB-STOP-07").update(covered_by=["plugins/empirica/no_such_file.py::test_x"]),
+           "does not exist", "a covering file that does not exist")
+    expect(lambda d: scenario(d, "EHB-STOP-09").update(live_only="no_such_ledger_row"),
+           "has no row", "a live-only row absent from the ledger")
+    expect(lambda d: scenario(d, "EHB-STOP-07").update(covered_by=[
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::*"]),
+           "is not declared there", "a wildcard that follows no class")
+    expect(lambda d: scenario(d, "EHB-STOP-07").update(covered_by=[
+        "plugins/empirica/adapters/pi/test/gate.test.ts::"
+        "the resolver that starts a run and launches the audit refuses an auditor given a writing tool, "
+        "for every reviewed version::*"]),
+           "is not declared there", "a wildcard after a Node test that is not a describe block")
+    expect(lambda d: scenario(d, "EHB-STOP-07").update(covered_by=[
+        "scripts/tests/fixtures/class_holding_no_test.py::HoldsNoTest::*"]),
+           "is not declared there", "a wildcard after a Python class that holds no test")
+    expect(lambda d: scenario(d, "EHB-PRES-01").update(covered_by=[
+        "plugins/empirica/tests/v2/test_evidence_scenarios.py::NoSuchClass::*"]),
+           "is not declared there", "a wildcard after a class that does not exist")
+    expect(lambda d: d["expectations"][0].update(scenarios=[]), "non-empty", "an expectation proved by no scenario", schema=True)
+    expect(lambda d: d["turn_end"]["states"][0]["outcomes"]["deliberative"].update(outcome="no-such-outcome"),
+           "is not in the table's vocabulary", "a turn-end cell outside the outcome vocabulary")
+    expect(lambda d: d["turn_end"]["states"][3]["outcomes"]["deliberative"].update(notices=["no_such_notice"]),
+           "is not a settlement notice", "a turn-end cell naming a notice the contract does not define")
+    expect(lambda d: d["turn_end"]["states"][4]["scenarios"].update(claude=["EHB-STOP-21"]),
+           "has no scenario for", "a turn-end row proved for only some control modes")
+    expect(lambda d: d["turn_end"]["hosts"]["pi"].update(table_driven="EHB-STOP-99"),
+           "unknown scenario", "a host whose table-driven scenario does not exist")
+    expect(lambda d: d["expectations"][0].pop("sources"), "sources", "an expectation with no sources", schema=True)
+    expect(lambda d: scenario(d, "EHB-STOP-07").update(ledger_rows=["no_such_ledger_row"]),
+           "ledger row", "a named ledger row absent from the ledger")
+    expect(lambda d: d["scenarios"].append({**copy.deepcopy(d["scenarios"][0]), "id": "EHB-ACT-99"}),
+           "is stale", "a scenario the design document does not show")
+    expect(lambda d: scenario(d, "EHB-ACT-01").update(expected="changed in the registry only"),
+           "is stale", "a registry edit the design document has not been regenerated for")
+    expect(lambda d: d["expectations"].append({**copy.deepcopy(d["expectations"][0]), "id": "HX-ACT-99", "scenarios": []}),
+           "no generated region 'HX-ACT-99'", "an expectation the design document has no region for")
+    expect(lambda d: d["expectations"][0]["scenarios"].append("EHB-ACT-98"),
+           "names unknown scenario", "an expectation naming a scenario that does not exist")
+    expect(lambda d: ([d["scenarios"].remove(scenario(d, "EHB-ACT-05"))]
+                      + [e["scenarios"].remove("EHB-ACT-05") for e in d["expectations"]
+                         if "EHB-ACT-05" in e["scenarios"]]),
+           "is stale", "a design-document scenario the registry lacks")
+    expect(lambda d: scenario(d, "EHB-STOP-07").update(covered_by=[
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::test_EHB_STOP_07"]),
+           "is not declared there", "a covering name that is only a prefix of a test")
+    expect(lambda d: [x.update(control_modes=["deliberative"]) for x in d["scenarios"]
+                      if x["id"] in next(e for e in d["expectations"]
+                                         if e["id"] == "HX-STOP-03")["scenarios"]],
+           "has no scenario for", "a control-mode-dependent expectation missing a mode")
+    expect(lambda d: [e.update(control_mode_dependent=False) for e in d["expectations"]
+                      if e["boundary"] == "HB-STOP"],
+           "must carry a control-mode-dependent expectation", "HB-STOP not control-mode dependent")
+    expect(lambda d: scenario(d, "EHB-STOP-07").update(control_modes=["sometimes"]),
+           "is not one of", "a control mode outside the axis", schema=True)
+    expect(lambda d: d["expectations"][0].update(boundary="HB-NOWHERE"),
+           "unknown boundary", "an expectation on an unknown boundary")
 
 
 def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: set,
@@ -2686,8 +2939,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         return
     d64 = "sha256:" + "f" * 64
 
-    # Registry-side mutations. Exact vocabulary freeze is now via the reviewed digest
-    # and schema mirror; a one-sided mutation must still fail precisely.
+    # Registry-side mutations. The vocabulary is held by the schema mirror and the referential checks;
+    # a one-sided mutation must still fail precisely.
     bad = copy.deepcopy(registry)
     bad["reasons"]["run.no_active"]["next_actions"].append("bogus.action")
     expect(lambda e: check_referential(bad, e, "neg"), "unknown action", "unknown action link")
@@ -2703,18 +2956,6 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     bad = copy.deepcopy(registry)
     bad["child_lifecycle"]["terminal_states"].append("bogus_state")
     expect(lambda e: check_child_lifecycle(bad, e, "neg"), "subset of states", "nonterminal listed terminal")
-    bad = copy.deepcopy(registry)
-    bad["commands"].append("Bogus")
-    expect(lambda e: check_registry_digest(bad, e, "neg"), "registry digest", "unknown command")
-    bad = copy.deepcopy(registry)
-    bad["sections"].pop("core", None)
-    expect(lambda e: check_registry_digest(bad, e, "neg"), "registry digest", "section keys drift")
-    bad = copy.deepcopy(registry)
-    bad["reasons"].pop("run.no_active", None)
-    expect(lambda e: check_registry_digest(bad, e, "neg"), "registry digest", "remove reason id")
-    bad = copy.deepcopy(registry)
-    bad["next_actions"].pop("run.start_fresh", None)
-    expect(lambda e: check_registry_digest(bad, e, "neg"), "registry digest", "remove next_action id")
     # Directive surface must resolve against the projected model tool schemas.
     bad = copy.deepcopy(registry)
     bad["next_actions"]["graph.record"]["surface"] = {"tool": "empirica_observe",
@@ -2733,15 +2974,10 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                                               private_gov_ops),
            "not a known host operation", "surface names nonexistent host operation")
     bad = copy.deepcopy(registry)
-    bad["next_actions"]["human.request_decision"]["surface"]["operation"] = "reject"
+    bad["next_actions"]["human.confirm_evidence"]["surface"]["operation"] = "reject"
     expect(lambda e: check_next_action_surfaces(bad, public_tools_doc, e, "neg",
                                               private_gov_ops),
-           "must be 'decision'", "human op other than decision")
-    bad = copy.deepcopy(registry)
-    bad["next_actions"]["route.record"]["surface"] = {"owner": "human", "operation": "decision"}
-    expect(lambda e: check_next_action_surfaces(bad, public_tools_doc, e, "neg",
-                                              private_gov_ops),
-           "not a claim-scoped decision directive", "human ownership on an unrelated directive")
+           "must be 'confirmation'", "human op other than confirmation")
     bad = copy.deepcopy(registry)
     bad["next_actions"]["residual.accept"]["params"]["properties"] = {
         "note": {"type": "string"}}
@@ -2749,12 +2985,6 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                                               private_gov_ops),
            "not in the bound report_convergence tool shape",
            "params outside report tool shape")
-    bad = copy.deepcopy(registry)
-    bad["claim_states"] = ["open", "approved"]
-    expect(lambda e: check_registry_digest(bad, e, "neg"), "registry digest", "canonical claim_states drift")
-    bad = copy.deepcopy(registry)
-    bad["untrusted_delimiters"]["open"] = "<<<WRONG>>>"
-    expect(lambda e: check_registry_digest(bad, e, "neg"), "registry digest", "canonical delimiters drift")
 
     # Host profile: independent negatives with matching diagnostics.
     # (a) wrong version -> digest detects; range -> structural version check detects.
@@ -2774,7 +3004,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     # (c) extra unknown profile ID -> digest + structural detect.
     bad_extra = copy.deepcopy(host_profiles_doc)
     bad_extra["profiles"].append({
-        "host_id": "x", "profile_id": "x@1.0", "version": "1.0", "current_tier": "foreground_only",
+        "host_id": "x", "profile_id": "x", "version": "1.0", "current_tier": "foreground_only",
         "required_fixture_ids": [], "required_live_probe_ids": ["p"],
         "promotion_status": "pending_live",
         "input_private": "unverified", "output_private": False, "unsupported_reason_ids": [],
@@ -2802,11 +3032,20 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         "audit_launch_policy"]["tool_budget"]["soft"] = 31
     expect(lambda e: check_host_profiles(bad_budget, registry, required_fixtures, e, "neg"),
            "soft must not exceed hard", "tool budget soft above hard")
+    bad_child_tools = copy.deepcopy(host_profiles_doc)
+    next(p for p in bad_child_tools["profiles"] if p.get("host_id") == "pi")[
+        "audit_launch_policy"]["audit_child_tools"] = ["read"]
+    expect(lambda e: check_host_profiles(bad_child_tools, registry, required_fixtures, e, "neg"),
+           "is not in audit_child_tools", "a budgeted tool the auditor child may not be given")
+    bad_writer = copy.deepcopy(host_profiles_doc)
+    next(p for p in bad_writer["profiles"] if p.get("host_id") == "pi")[
+        "audit_launch_policy"]["audit_child_tools"].append("bash")
+    expect(lambda e: check_host_profiles(bad_writer, registry, required_fixtures, e, "neg"),
+           "outside the auditor vocabulary (read-only tools plus contact_supervisor)", "a writing tool the auditor child may be given")
     # (g) external-runtime policy: dropped, unreviewed inventory, missing inventory, order, id encoding.
     # Hermetic baseline: pretend exactly the reviewed versions are installed, so each mutant changes one fact
     # (the real directory is compared in main()).
-    installed = frozenset(next(p for p in host_profiles_doc["profiles"] if p.get("host_id") == "pi")
-                          ["subagents_compatibility"]["reviewed_versions"])
+    installed = frozenset({"0.50.0", "0.76.1"})
 
     def pi_mutant(mutate):
         doc = copy.deepcopy(host_profiles_doc)
@@ -2816,20 +3055,18 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     for label, mutate, needle in (
         ("foreground host without subagents_compatibility",
          lambda p: p.pop("subagents_compatibility"), "must declare subagents_compatibility"),
-        ("a reviewed version with no checked-in inventory",
-         lambda p: p["subagents_compatibility"]["reviewed_versions"].append("9.9.9"), "missing inventory: ['9.9.9']"),
-        ("a checked-in inventory that was never reviewed",
-         lambda p: p["subagents_compatibility"]["reviewed_versions"].remove("0.64.0"), "inventory not reviewed: ['0.64.0']"),
-        ("reviewed versions out of order",
-         lambda p: p["subagents_compatibility"]["reviewed_versions"].reverse(), "ascending version order"),
-        ("duplicate reviewed version",
-         lambda p: p["subagents_compatibility"]["reviewed_versions"].append("0.50.0"), "must be unique"),
-        ("a version range as a reviewed version",
-         lambda p: p["subagents_compatibility"].update(reviewed_versions=[">=0.50.0"]), "exact MAJOR.MINOR.PATCH"),
-        ("a profile id that does not carry the policy id",
-         lambda p: p.update(profile_id="pi@0.84.1"), "profile_id must be '<host_id>@<version>+<policy_id>'"),
-        ("an unknown unreviewed action",
-         lambda p: p["subagents_compatibility"].update(unreviewed_action="warn"), "unreviewed_action must be 'refuse'"),
+        ("a compat record above the range",
+         lambda p: p["subagents_compatibility"].update(maximum_exclusive="0.76.1"), "compat records outside the supported range [0.50.0, 0.76.1): ['0.76.1']"),
+        ("a compat record below the range",
+         lambda p: p["subagents_compatibility"].update(minimum="0.51.0"), "compat records outside the supported range [0.51.0, 1.0.0): ['0.50.0']"),
+        ("an inverted range",
+         lambda p: p["subagents_compatibility"].update(minimum="1.0.0", maximum_exclusive="0.50.0"), "minimum must be below maximum_exclusive"),
+        ("a prerelease as the maximum",
+         lambda p: p["subagents_compatibility"].update(maximum_exclusive="1.0.0-beta.1"), "must be exact MAJOR.MINOR.PATCH"),
+        ("a retired exact-version list",
+         lambda p: p["subagents_compatibility"].update(reviewed_versions=["0.50.0"]), "unknown fields ['reviewed_versions']"),
+        ("a profile id that encodes a version",
+         lambda p: p.update(profile_id="pi@1.1.0+pi-subagents-foreground-audit-v1"), "profile_id must be '<host_id>+<policy_id>'"),
     ):
         expect(lambda e, doc=pi_mutant(mutate): check_host_profiles(
             doc, registry, required_fixtures, e, "neg", installed), needle, label)
@@ -2878,13 +3115,13 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
          "digest": d64, "relevant_sections": []}}},
         e, "neg"), "RunView must not duplicate converged", "RunView converged duplication")
 
-    # Banned v1 fields.
+    # Retired response fields.
     expect(lambda e: check_banned_fields(
         {"protocol": "empirica/v2", "request_id": "x", "result": {"type": "Allow", "converged": False,
          "run": {"id": "r", "goal": "g", "status": "active", "contract": {"id": "empirica/public",
          "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
          "nonce": "abc", "phase": "investigate"}}},
-        e, "neg"), "banned field", "banned v1 fields in response")
+        e, "neg"), "banned field", "retired fields in response")
 
     # Protocol identity.
     expect(lambda e: check_protocol_identity(
@@ -3061,14 +3298,15 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         "contract_result.digest", "GetContract wrong-but-well-formed digest")
 
     # D2A §8/§9 negatives: one mutation each with its own expected diagnostic substring.
-    full_rv = {"governance": None, "id": "r", "goal": "g", "status": "active",
-               "audit": {"state": "required", "independence": "unverified", "findings": []},
+    full_rv = {"governance": None, "confirmation_batch": None, "id": "r", "goal": "g", "status": "active",
+               "basis": "sha256:" + "5" * 64,
+               "audit": {"verdict": "none", "current": None, "pending": False, "independence": None, "findings": []},
                "contract": {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
                "obligations": {"active": [], "deferred": []}, "residuals": [],
                "freshness": {"changes": []}, "children": [], "next_actions": [],
                "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
                                         "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
-               "host": {"profile_id": "claude-code@2.1.278", "tier": "foreground_only",
+               "host": {"profile_id": "claude-code", "tier": "foreground_only",
                         "missing_capabilities": ["host.async_unsupported"]}}
 
     # (a) old partial RunView omitting required fields is schema-rejected.
@@ -3160,7 +3398,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                         "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
                             "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
                         "claims": [], "edges": [], "artifacts": [],
-                        "audit": {"state": "not_required", "independence": "unverified",
+                        "audit": {"verdict": "none", "current": None, "pending": False, "independence": None,
                             "reviewed_argument_digest": None, "reviewed_goal_digest": None,
                             "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": None,
                             "reviewed_claims": [], "findings": []}}}
@@ -3196,7 +3434,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_audit_bad = copy.deepcopy(arg_bad_root)
     arg_audit_bad["argument"]["claims"] = [{"claim_id": "G0", "text": "t", "wording_digest": d64,
         "kind": "ordinary", "state": "approved", "gating": True, "evidence_digest": d64, "active_evidence_ids": []}]
-    arg_audit_bad["argument"]["audit"] = {"state": "passed", "independence": "distinct",
+    arg_audit_bad["argument"]["audit"] = {"verdict": "passed", "current": True, "pending": False, "independence": "distinct",
         "reviewed_argument_digest": None, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
         "reviewed_claims": [], "findings": []}
@@ -3206,7 +3444,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_audit_frozen = copy.deepcopy(arg_bad_root)
     arg_audit_frozen["argument"]["claims"] = [{"claim_id": "G0", "text": "t", "wording_digest": d64,
         "kind": "ordinary", "state": "approved", "gating": True, "evidence_digest": d64, "active_evidence_ids": []}]
-    arg_audit_frozen["argument"]["audit"] = {"state": "passed", "independence": "distinct",
+    arg_audit_frozen["argument"]["audit"] = {"verdict": "passed", "current": True, "pending": False, "independence": "distinct",
         "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": d64, "reviewed_deferred_scope_digest": d64,
         "reviewed_claims": [{"claim_id": "G0", "evidence_digest": d64}], "findings": []}
@@ -3239,7 +3477,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         "artifact_id": "sha256:" + "1" * 64, "claim_id": "G0", "claim_digest": d64,
         "kind": "research", "statement_digest": d64, "active": True, "outcome": "pass",
         "source_kind": "web", "source_ref": "https://example.test/s",
-        "citation": "Observed test source."}]
+        "citation": "Observed test source.", "verification": VERIFICATION}]
     expect(lambda e: check_argument_view(arg_bad_kind, registry, e, "neg"),
            "research outcome", "research artifact spike outcome")
 
@@ -3250,7 +3488,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_audit_empty = copy.deepcopy(arg_bad_root)
     arg_audit_empty["argument"]["claims"] = [{"claim_id": "G0", "text": "t", "wording_digest": d64,
         "kind": "ordinary", "state": "approved", "gating": True, "evidence_digest": d64, "active_evidence_ids": []}]
-    arg_audit_empty["argument"]["audit"] = {"state": "passed", "independence": "distinct",
+    arg_audit_empty["argument"]["audit"] = {"verdict": "passed", "current": True, "pending": False, "independence": "distinct",
         "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
         "reviewed_claims": [], "findings": []}
@@ -3260,7 +3498,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg_audit_stale = copy.deepcopy(arg_bad_root)
     arg_audit_stale["argument"]["claims"] = [{"claim_id": "G0", "text": "t", "wording_digest": d64,
         "kind": "ordinary", "state": "approved", "gating": True, "evidence_digest": d64, "active_evidence_ids": []}]
-    arg_audit_stale["argument"]["audit"] = {"state": "passed", "independence": "distinct",
+    arg_audit_stale["argument"]["audit"] = {"verdict": "passed", "current": True, "pending": False, "independence": "distinct",
         "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
         "reviewed_claims": [{"claim_id": "G0", "evidence_digest": "sha256:" + "e" * 64}], "findings": []}
@@ -3273,25 +3511,25 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
          "kind": "ordinary", "state": "approved", "gating": True, "evidence_digest": d64, "active_evidence_ids": []},
         {"claim_id": "G1", "text": "t", "wording_digest": d64,
          "kind": "ordinary", "state": "open", "gating": False, "evidence_digest": d64, "active_evidence_ids": []}]
-    arg_audit_extra["argument"]["audit"] = {"state": "passed", "independence": "distinct",
+    arg_audit_extra["argument"]["audit"] = {"verdict": "passed", "current": True, "pending": False, "independence": "distinct",
         "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
         "reviewed_claims": [{"claim_id": "G0", "evidence_digest": d64},
                             {"claim_id": "G1", "evidence_digest": d64}], "findings": []}
     expect(lambda e: check_argument_view(arg_audit_extra, registry, e, "neg"),
            "extra non-gating coverage", "audit passed extra non-gating reviewed claim")
-    # passed audit with non-null reviewed digest where schema requires null (not_required state).
+    # an audit with no verdict (none) that nevertheless carries a reviewed digest: the schema requires null there.
     arg_audit_nonnull = copy.deepcopy(arg_bad_root)
     arg_audit_nonnull["argument"]["claims"] = [{"claim_id": "G0", "text": "t", "wording_digest": d64,
         "kind": "ordinary", "state": "open", "gating": True, "evidence_digest": d64, "active_evidence_ids": []}]
-    arg_audit_nonnull["argument"]["audit"] = {"state": "not_required", "independence": "unverified",
+    arg_audit_nonnull["argument"]["audit"] = {"verdict": "none", "current": None, "pending": False, "independence": None,
         "reviewed_argument_digest": d64, "reviewed_goal_digest": None,
         "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": None,
         "reviewed_claims": [], "findings": []}
     if not schema_rejects({"protocol": "empirica/v2", "request_id": "x",
             "result": {"type": "Allow", "converged": False, "run": full_rv,
                         "argument": arg_audit_nonnull["argument"]}}, "response"):
-        errors.append("NEG schema not_required+non-null reviewed digest: expected schema rejection")
+        errors.append("NEG schema no-verdict audit with a non-null reviewed digest: expected schema rejection")
 
     # (q) unique artifact IDs: duplicate artifact_id in distinct artifact objects.
     arg_dup_art = copy.deepcopy(arg_bad_root)
@@ -3301,11 +3539,11 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         {"sequence": 0, "artifact_id": "sha256:" + "1" * 64, "claim_id": "G0", "claim_digest": d64,
          "kind": "research", "statement_digest": d64, "active": True, "outcome": "supporting",
          "source_kind": "web", "source_ref": "https://example.test/s",
-         "citation": "Observed test source."},
+         "citation": "Observed test source.", "verification": VERIFICATION},
         {"sequence": 1, "artifact_id": "sha256:" + "1" * 64, "claim_id": "G0", "claim_digest": d64,
          "kind": "research", "statement_digest": d64, "active": True, "outcome": "supporting",
          "source_kind": "web", "source_ref": "https://example.test/s",
-         "citation": "Observed test source."}]
+         "citation": "Observed test source.", "verification": VERIFICATION}]
     expect(lambda e: check_argument_view(arg_dup_art, registry, e, "neg"),
            "not unique", "duplicate artifact_id")
 
@@ -3335,11 +3573,11 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                 {"sequence": 0, "artifact_id": R1, "claim_id": "G0", "claim_digest": d64,
                  "kind": "research", "statement_digest": d64, "active": True,
                  "outcome": "supporting", "source_kind": "web",
-                 "source_ref": "https://example.test/s", "citation": "Observed test source."},
+                 "source_ref": "https://example.test/s", "citation": "Observed test source.", "verification": VERIFICATION},
                 {"sequence": 1, "artifact_id": R2, "claim_id": "G0", "claim_digest": d64,
                  "kind": "research", "statement_digest": d64, "active": True,
                  "outcome": "supporting", "source_kind": "code",
-                 "source_ref": "src/a.py", "citation": "Observed test source."},
+                 "source_ref": "src/a.py", "citation": "Observed test source.", "verification": VERIFICATION},
                 {"sequence": 2, "artifact_id": Q1, "claim_id": "G0", "claim_digest": d64,
                  "kind": "spike_request", "statement_digest": d64,
                  "harness_request_id": "h1", "command": "make test", "command_digest": d64,
@@ -3352,7 +3590,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                                    {"path": "tests/a_test.py", "sha256": d64}],
                  "exit_code": 0, "spike_gate": "pass", "supersedes": None}],
             "route_stamp": 1, "investigation_stamp": 2,
-            "audit": {"state": "passed", "independence": "distinct",
+            "audit": {"verdict": "passed", "current": True, "pending": False, "independence": "distinct",
                 "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
                 "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
                 "reviewed_claims": [{"claim_id": "G0", "evidence_digest": _ed}],
@@ -3535,7 +3773,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                 {"sequence": 0, "artifact_id": R1, "claim_id": "G0", "claim_digest": d64,
                  "kind": "research", "statement_digest": d64, "active": True,
                  "outcome": "supporting", "source_kind": "web",
-                 "source_ref": "https://example.test/s", "citation": "Observed test source."},
+                 "source_ref": "https://example.test/s", "citation": "Observed test source.", "verification": VERIFICATION},
                 {"sequence": 1, "artifact_id": Q1, "claim_id": "G0", "claim_digest": d64,
                  "kind": "spike_request", "statement_digest": d64,
                  "harness_request_id": "h1", "command": "make test", "command_digest": d64,
@@ -3559,7 +3797,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                                    {"path": "tests/a_test.py", "sha256": d64}],
                  "exit_code": 0, "spike_gate": "pass", "supersedes": P0}],
             "route_stamp": 1, "investigation_stamp": 2,
-            "audit": {"state": "passed", "independence": "distinct",
+            "audit": {"verdict": "passed", "current": True, "pending": False, "independence": "distinct",
                 "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
                 "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
                 "reviewed_claims": [{"claim_id": "G0", "evidence_digest": _ed}],
@@ -3672,8 +3910,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
             {"sequence": 0, "artifact_id": R1, "claim_id": "G0", "claim_digest": d64,
              "kind": "research", "statement_digest": d64, "active": True,
              "outcome": "supporting", "source_kind": "web",
-             "source_ref": "https://example.test/s", "citation": "Observed test source."}],
-        "audit": {"state": "not_required", "independence": "unverified",
+             "source_ref": "https://example.test/s", "citation": "Observed test source.", "verification": VERIFICATION}],
+        "audit": {"verdict": "none", "current": None, "pending": False, "independence": None,
             "reviewed_argument_digest": None, "reviewed_goal_digest": None,
             "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": None,
             "reviewed_claims": [], "findings": []}}
@@ -3723,7 +3961,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
             {"sequence": 0, "artifact_id": R1, "claim_id": "G0", "claim_digest": d64,
              "kind": "research", "statement_digest": d64, "active": True,
              "outcome": "supporting", "source_kind": "web",
-             "source_ref": "https://example.test/s", "citation": "Observed test source."},
+             "source_ref": "https://example.test/s", "citation": "Observed test source.", "verification": VERIFICATION},
             {"sequence": 1, "artifact_id": Q1, "claim_id": "G0", "claim_digest": d64,
              "kind": "spike_request", "statement_digest": d64,
              "harness_request_id": "h1", "command": "make test", "command_digest": d64,
@@ -3738,8 +3976,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
             {"sequence": 3, "artifact_id": R_X, "claim_id": "G1", "claim_digest": d64,
              "kind": "research", "statement_digest": d64, "active": True,
              "outcome": "supporting", "source_kind": "code",
-             "source_ref": "src/b.py", "citation": "Observed test source."}],
-        "audit": {"state": "not_required", "independence": "unverified",
+             "source_ref": "src/b.py", "citation": "Observed test source.", "verification": VERIFICATION}],
+        "audit": {"verdict": "none", "current": None, "pending": False, "independence": None,
             "reviewed_argument_digest": None, "reviewed_goal_digest": None,
             "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": None,
             "reviewed_claims": [], "findings": []}}
@@ -4021,7 +4259,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                               "digest": d64, "relevant_sections": sections or ["audit"]},
                 "obligations": {"active": [], "deferred": []}, "residuals": [],
                 "freshness": {"changes": []}, "children": children or [],
-                "host": {"profile_id": "claude-code@2.1.278", "tier": "foreground_only",
+                "host": {"profile_id": "claude-code", "tier": "foreground_only",
                           "missing_capabilities": []}}
 
     def _artifacts() -> list:
@@ -4029,7 +4267,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
             {"sequence": 0, "artifact_id": R1, "claim_id": "G0", "claim_digest": WORD,
              "kind": "research", "statement_digest": STMT, "active": True,
              "outcome": "supporting", "source_kind": "web", "source_ref": "src/a.py",
-             "citation": "Observed test source."},
+             "citation": "Observed test source.", "verification": VERIFICATION},
             {"sequence": 1, "artifact_id": Q1, "claim_id": "G0", "claim_digest": WORD,
              "kind": "spike_request", "statement_digest": STMT,
              "harness_request_id": "h1", "command": "make test", "command_digest": CMD,
@@ -4043,7 +4281,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
              "exit_code": 0, "spike_gate": "pass", "supersedes": None}]
 
     def _arg_view(frozen=None, audit_state="passed") -> dict:
-        covered = audit_state in ("passed", "failed", "stale")
+        covered = audit_state in ("passed", "failed")
         return {"root_claim_id": "G0", "argument_digest": ARG, "goal_digest": GOAL,
                 "frozen_scope_digest": frozen, "deferred_scope_digest": ARG,
                 "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
@@ -4052,7 +4290,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                     "state": "approved", "gating": True, "evidence_digest": EV,
                     "active_evidence_ids": [R1, P1], "kind": "needs-experiment"}],
                 "edges": [], "artifacts": _artifacts(),
-                "audit": {"state": audit_state, "independence": "distinct",
+                "audit": {"verdict": audit_state if covered else "none", "current": True if covered else None,
+                    "pending": False, "independence": "distinct" if covered else None,
                     "reviewed_argument_digest": ARG if covered else None,
                     "reviewed_goal_digest": GOAL if covered else None,
                     "reviewed_frozen_scope_digest": (frozen if (covered and frozen) else None),
@@ -4239,8 +4478,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
 
     # --- D2E presentation_selector negatives (one mutation each) ---
     # The JSON registry is the SSOT; these prove the procedural integrity check rejects
-    # each class of presentation_selector corruption, and that the reviewed digest
-    # freezes it. No selector algorithm or Python mapping is implemented here.
+    # each class of presentation_selector corruption. No selector algorithm or Python mapping is implemented here.
     bad = copy.deepcopy(registry)
     bad["presentation_selector"]["context_sections"].pop("block", None)
     expect(lambda e: check_presentation_selector(bad, e, "neg"),
@@ -4265,10 +4503,6 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     bad["reasons"]["audit.pending"]["sections"].append("bogus/section")
     expect(lambda e: check_referential(bad, e, "neg"),
            "unknown section", "presentation: unknown reason section")
-    bad = copy.deepcopy(registry)
-    bad["presentation_selector"]["terminal_sections"].append("core")
-    expect(lambda e: check_registry_digest(bad, e, "neg"),
-           "registry digest", "presentation: digest drift")
 
     # --- D6-A state-schema negatives (one mutation each) ---
     if state_schema:

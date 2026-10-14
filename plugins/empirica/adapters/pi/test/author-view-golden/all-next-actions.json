@@ -9,18 +9,24 @@
         "host": "test",
         "interactive": true,
         "signal": "fixture",
-        "delegation": false
+        "delegation": false,
+        "audit_retrieval": [
+          "local",
+          "workspace"
+        ],
+        "human_surface": "unavailable"
       },
       "status": "active",
+      "basis": "sha256:c567b9b11be5534f8b9c90f2e12813b3cb45dbfcb677d4393083bf3f4e4dad4c",
       "contract": {
         "id": "empirica/public",
-        "version": "3.0.0",
+        "version": "4.0.0",
         "relevant_sections": [
           "core",
           "roles",
           "hosts/capabilities"
         ],
-        "digest": "sha256:dfc3b1cb235da4d56b7225a8e9a60c2b208ad1c6405be53782666fa4431fb2e3"
+        "digest": "<contract-digest>"
       },
       "obligations": {
         "active": [
@@ -49,7 +55,7 @@
       },
       "children": [],
       "host": {
-        "profile_id": "claude-code@2.1.278",
+        "profile_id": "claude-code",
         "tier": "foreground_only",
         "missing_capabilities": [
           "host.async_unsupported"
@@ -64,14 +70,15 @@
         "research.record",
         "spike.run",
         "spike.regate",
-        "human.request_decision",
         "budget.raise",
         "child.spawn_auditor",
         "child.wait",
         "child.retry",
         "residual.accept",
         "host.repair_context",
-        "governance.propose"
+        "governance.propose",
+        "human.confirm_evidence",
+        "convergence.report"
       ],
       "untrusted_delimiters": {
         "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
@@ -122,14 +129,18 @@
         "next_action": "governance.propose",
         "first_approval": false,
         "pre_approval_revisions": 0,
-        "post_approval_revisions": 0
+        "post_approval_revisions": 0,
+        "human_wait": false
       },
       "audit": {
-        "state": "required",
-        "independence": "unverified",
+        "verdict": "none",
+        "current": null,
+        "pending": false,
+        "independence": null,
         "findings": []
-      }
+      },
+      "confirmation_batch": null
     }
   },
-  "text": "Allow (converged=false) active — governance: pending; passes/spawns/audits: 3/10 0/5 1/1\nrun_id: run-fx\nAudit: required\n\nOpen obligations:\n  obligation.route: Record routing before investigation.\n  obligation.graph: Propose a valid claim graph from supplied context before requesting review.\n\nNext:\n  host: StartRun\n  empirica_observe kind=graph\n  empirica_read GetRun\n  empirica_observe kind=route\n  empirica_observe kind=investigate\n  empirica_observe kind=research\n  empirica_observe kind=spike_request\n  empirica_observe kind=spike_request\n  human: decision\n  empirica_observe kind=configure_run\n  host: child_reserve\n  host: child_event\n  host: child_reserve\n  report_convergence intent=stop\n  host: governance_context\n  empirica_observe kind=configure_run"
+  "text": "Allow (converged=false) active — governance: pending; passes/spawns/audits: 3/10 0/5 1/1\nrun_id: run-fx\nAudit: required\n\nOpen obligations:\n  obligation.route: Record routing before investigation.\n  obligation.graph: Propose a valid claim graph from supplied context before requesting review.\n\nNext:\n  host: StartRun\n  empirica_observe kind=graph\n  empirica_read GetRun\n  empirica_observe kind=route\n  empirica_observe kind=investigate\n  empirica_observe kind=research\n  empirica_observe kind=spike_request\n  empirica_observe kind=spike_request\n  empirica_observe kind=configure_run\n  host: child_reserve\n  host: child_event\n  host: child_reserve\n  report_convergence intent=stop\n  host: governance_context\n  empirica_observe kind=configure_run\n  human: confirmation\n  report_convergence intent=report_convergence"
 }

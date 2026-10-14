@@ -18,6 +18,8 @@ PLUGIN = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN))
 
 from governance_setup import SIZED_RATIONALE  # noqa: E402
+from application.protocol import host_profile_id, stored  # noqa: E402
+CLAUDE_PROFILE = host_profile_id("claude-code")
 
 
 class PublicToolContractTests(unittest.TestCase):
@@ -34,7 +36,30 @@ class PublicToolContractTests(unittest.TestCase):
                 "result": {"type": "Inert", "reason": "no_run"},
             }
 
-        return PublicTools("claude-code@2.1.278", dispatch=dispatch)
+        return PublicTools(CLAUDE_PROFILE, dispatch=dispatch)
+
+    def test_every_allowed_value_list_says_its_type_so_every_model_sees_the_values(self):
+        """A typeless enum is valid JSON Schema, but OpenAI-family models see tools as TypeScript-like
+        signatures, where it renders as ``any`` and hides the values. A Pi session on GPT-5.6 failed
+        its first graph this way, guessing claim kinds and the edge type."""
+        artifact = json.loads((PLUGIN / "vendor/contracts/empirica/v2/public-tools.json").read_text())
+        typeless = []
+
+        def walk(node, where):
+            if isinstance(node, dict):
+                if ("enum" in node or "const" in node) and "type" not in node:
+                    typeless.append(where)
+                for key, item in node.items():
+                    walk(item, f"{where}/{key}")
+            elif isinstance(node, list):
+                for i, item in enumerate(node):
+                    walk(item, f"{where}/{i}")
+
+        walk(artifact["schemas"], "schemas")
+        self.assertEqual(typeless, [])
+        graph = artifact["schemas"]["host_handle"]["empirica_observe"]["properties"]["action"]["oneOf"][0]
+        claim = graph["properties"]["payload"]["properties"]["claims"]["items"]["properties"]["kind"]
+        self.assertEqual((claim["type"], claim["enum"]), ("string", ["ordinary", "needs-experiment", "needs-decision"]))
 
     def test_definitions_expose_only_public_read_observe_and_report(self):
         tools = self._tools()
@@ -108,7 +133,7 @@ class PublicToolContractTests(unittest.TestCase):
         )
         self.assertFalse(result["isError"])
         request, profile = self.requests[-1]
-        self.assertEqual(profile, "claude-code@2.1.278")
+        self.assertEqual(profile, CLAUDE_PROFILE)
         self.assertEqual(request["protocol"], "empirica/v2")
         self.assertEqual(
             request["command"],
@@ -180,7 +205,7 @@ class PublicToolContractTests(unittest.TestCase):
         from adapters.public_tools import PublicTools
 
         tools = PublicTools(
-            "claude-code@2.1.278",
+            CLAUDE_PROFILE,
             dispatch=lambda _request, _profile: (_ for _ in ()).throw(OSError("down")),
         )
         result = tools.call("empirica_read", {"run_id": "r", "operation": "GetRun"})
@@ -251,7 +276,7 @@ class McpTransportTests(unittest.TestCase):
         from adapters.public_tools import PublicTools
 
         return PublicTools(
-            "claude-code@2.1.278",
+            CLAUDE_PROFILE,
             dispatch=lambda request, _profile: {
                 "protocol": "empirica/v2",
                 "request_id": request["request_id"],
@@ -275,11 +300,11 @@ class McpTransportTests(unittest.TestCase):
 
         self.assertEqual(
             profile_from_environment({"CLAUDE_PLUGIN_ROOT": "/plugin"}),
-            "claude-code@2.1.278",
+            CLAUDE_PROFILE,
         )
         self.assertEqual(
             profile_from_environment({"PLUGIN_ROOT": "/plugin"}),
-            "codex-cli@0.146.0",
+            host_profile_id("codex-cli"),
         )
         with self.assertRaises(ValueError):
             profile_from_environment({})
@@ -318,12 +343,12 @@ class McpTransportTests(unittest.TestCase):
         from adapters.public_tools import PublicTools
 
         marker = "JSON_ONLY_RUNVIEW_MARKER"
-        fixture = json.loads((PLUGIN.parents[1] / "contracts" / "empirica" / "v2" / "fixtures" /
-                              "start-bootstrap-allow.json").read_text())
+        fixture = stored(json.loads((PLUGIN.parents[1] / "contracts" / "empirica" / "v2" / "fixtures" /
+                                     "start-bootstrap-allow.json").read_text()))
         valid_result = fixture["expected"]["result"]
         valid_result["run"]["goal"] = marker
         tools = PublicTools(
-            "claude-code@2.1.278",
+            CLAUDE_PROFILE,
             dispatch=lambda request, _profile: {
                 "protocol": "empirica/v2",
                 "request_id": request["request_id"],

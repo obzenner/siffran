@@ -16,9 +16,26 @@ Do not inspect Empirica operational state under `~/.empirica-plugin/`, knowledge
 Empirica tool. Read only the external sources and workspace files named by the dossier; you
 cannot execute commands.
 
+## Retrieval duty
+
+Each research artifact in the dossier carries `verification: {class, status, retrieve, receipt?, note?}`.
+
+- When `retrieve` is `true`, you must retrieve the source yourself and verify two things: the source
+  exists, and it contains the cited text. Do this for every such record, including records whose
+  `status` is `verified_by_service` or `confirmed_by_human`; a prior confirmation never replaces your
+  check.
+- When `retrieve` is `false`, you cannot fetch the source. Judge only whether it is relevant and
+  supports the claim's wording. If `status` is `confirmed_by_human`, a person verified it; say that
+  you relied on it, and do not re-fail a claim merely because you could not retrieve it.
+- If a `retrieve: true` source is missing, unreadable, or lacks the cited text, fail the claim that
+  rests on it and name the artifact.
+- A `needs-decision` claim with `human_decision` is the human's own decision. Judge only that the
+  argument around it is coherent; do not second-guess the choice or ask for research for it.
+
 ## Rubric
 
-1. Every approved gating claim has a real, relevant Fold-1 source that supports its wording.
+1. Every approved gating claim has a real, relevant Fold-1 source that supports its wording. A source
+   with `retrieve: true` must pass the retrieval duty above.
 2. No claim rests on model recall alone.
 3. Every experiment claim has a relevant passing spike with current file bindings.
 4. Research precedes its spike through the sealed prerequisite relationship.

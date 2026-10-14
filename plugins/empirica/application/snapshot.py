@@ -1,4 +1,4 @@
-"""Assemble immutable snapshots from reachable committed history and D5 capture."""
+"""Assemble immutable snapshots from reachable committed history and the workspace capture."""
 from __future__ import annotations
 
 import json
@@ -7,14 +7,17 @@ from typing import Any
 
 from core.canonical import canonical_json
 from core.evaluation import (EvaluationSnapshot, active_spike_heads, digest,
-                             frozen_scope_invalid, valid_graph)
-from core.freshness import FileObservation, ObservationState, observations_digest
+                             frozen_scope_invalid, graph_refusal)
+from core import citations
+from core.freshness import (FileObservation, FreshnessContractError, ObservationState, observations_digest,
+                            required_paths)
+from .ports import ObservationSnapshot
 from core.records import Artifact
 from core.run import OperationalState
 from core.governance import proposal_digest
 from . import protocol as _proto
 from .history_records import (
-    MANIFEST_KEYS, MANIFEST_KIND, MANIFEST_VERSION, OBSERVATION_BASIS_KEYS,
+    HISTORY_KINDS, MANIFEST_KEYS, MANIFEST_KIND, MANIFEST_VERSION, OBSERVATION_BASIS_KEYS,
     OBSERVATION_BASIS_KIND, OBSERVATION_BASIS_VERSION, OBSERVATION_ROW_KEYS,
     OBSERVATION_SOURCE_KEYS, POLICY_INPUT_KEYS,
 )
@@ -116,10 +119,8 @@ def _observation_basis(value: Artifact) -> dict[str, Any]:
     return item
 
 
-def traverse_history(state: OperationalState, stored: Any) -> tuple[dict[str, Any], ...]:
-    head = state.committed_artifact_head_id
-    if not _valid_digest(head):
-        raise HistoryCorrupt("missing committed manifest head")
+def index_artifacts(stored: Any) -> dict[str, Artifact]:
+    """The physical artifacts by content address; an unreachable malformed orphan is not authoritative and is skipped."""
     values = getattr(stored, "value", stored)
     if values is None:
         raise HistoryCorrupt("missing artifact store")
@@ -127,13 +128,20 @@ def traverse_history(state: OperationalState, stored: Any) -> tuple[dict[str, An
     try:
         for value in values:
             if not isinstance(value, Artifact) or not _valid_digest(value.artifact_id):
-                continue  # unreachable malformed physical orphan is not authoritative
+                continue
             prior = by_id.get(value.artifact_id)
             if prior is not None and prior != value:
                 raise HistoryCorrupt("colliding physical artifact IDs")
             by_id[value.artifact_id] = value
     except TypeError as exc:
         raise HistoryCorrupt("artifact store is not iterable") from exc
+    return by_id
+
+
+def manifest_chain(head: Any, by_id: dict[str, Artifact]) -> list[dict[str, Any]]:
+    """The committed manifests from genesis to ``head``, following ``parent`` links; each must be present and well formed."""
+    if not _valid_digest(head):
+        raise HistoryCorrupt("missing committed manifest head")
     chain: list[dict[str, Any]] = []
     seen: set[str] = set()
     cursor: str | None = head
@@ -150,25 +158,21 @@ def traverse_history(state: OperationalState, stored: Any) -> tuple[dict[str, An
     chain.reverse()
     if not chain or chain[0]["parent"] is not None:
         raise HistoryCorrupt("manifest chain lacks genesis")
+    return chain
+
+
+def committed_artifacts(chain: list[dict[str, Any]], by_id: dict[str, Artifact],
+                        before_manifest: Any = None) -> tuple[dict[str, Any], ...]:
+    """The domain artifacts the chain references, in commit order. A referenced artifact that is missing, repeated, or itself
+    a manifest is corrupt history. ``before_manifest`` (optional) is called with each manifest first, to add its own checks."""
     ordered: list[dict[str, Any]] = []
     referenced: set[str] = set()
     parent: str | None = None
-    prior_basis: str | None = None
-    seen_bases: set[str] = set()
     for item in chain:
         if item["parent"] != parent:
             raise HistoryCorrupt("broken manifest parent")
-        basis_digest = item["observation_basis_digest"]
-        basis_value = by_id.get(basis_digest)
-        if basis_value is None:
-            raise HistoryCorrupt("missing observation basis")
-        _observation_basis(basis_value)
-        changed = basis_digest != prior_basis
-        basis_appended = basis_digest in item["artifact_ids"]
-        if basis_appended != (changed and basis_digest not in seen_bases):
-            raise HistoryCorrupt("observation basis deduplication mismatch")
-        seen_bases.add(basis_digest)
-        prior_basis = basis_digest
+        if before_manifest is not None:
+            before_manifest(item)
         for aid in item["artifact_ids"]:
             if aid in referenced:
                 raise HistoryCorrupt("duplicate committed artifact reference")
@@ -181,12 +185,36 @@ def traverse_history(state: OperationalState, stored: Any) -> tuple[dict[str, An
             referenced.add(aid)
             ordered.append(domain)
         parent = item["artifact_id"]
+    return tuple(ordered)
+
+
+def traverse_history(state: OperationalState, stored: Any) -> tuple[dict[str, Any], ...]:
+    by_id = index_artifacts(stored)
+    chain = manifest_chain(state.committed_artifact_head_id, by_id)
+    prior_basis: str | None = None
+    seen_bases: set[str] = set()
+
+    def check_basis(item: dict[str, Any]) -> None:
+        nonlocal prior_basis
+        basis_digest = item["observation_basis_digest"]
+        basis_value = by_id.get(basis_digest)
+        if basis_value is None:
+            raise HistoryCorrupt("missing observation basis")
+        _observation_basis(basis_value)
+        changed = basis_digest != prior_basis
+        basis_appended = basis_digest in item["artifact_ids"]
+        if basis_appended != (changed and basis_digest not in seen_bases):
+            raise HistoryCorrupt("observation basis deduplication mismatch")
+        seen_bases.add(basis_digest)
+        prior_basis = basis_digest
+
+    ordered = committed_artifacts(chain, by_id, check_basis)
     if chain[-1]["next_state_digest"] != state_digest(state):
         raise HistoryCorrupt("latest manifest state witness mismatch")
     # Redundant with the state-digest witness above, but preserves the more specific diagnosis.
     if chain[-1]["observation_basis_digest"] != state.observation_basis_digest:
         raise HistoryCorrupt("latest observation basis state witness mismatch")
-    return tuple(ordered)
+    return ordered
 
 
 def graph_from_history(state: OperationalState, history: tuple[dict[str, Any], ...],
@@ -200,7 +228,7 @@ def graph_from_history(state: OperationalState, history: tuple[dict[str, Any], .
         return None
     item = next((a for a in history if a["artifact_id"] == selected), None)
     graph = item.get("graph") if item and item.get("kind") == "graph" else None
-    if not valid_graph(graph):
+    if graph_refusal(graph, admission=False) is not None:
         raise HistoryCorrupt("selected graph is missing, malformed, or structurally invalid")
     if frozen_scope_invalid(state, graph):
         raise HistoryCorrupt("selected graph conflicts with frozen semantic identity")
@@ -209,8 +237,18 @@ def graph_from_history(state: OperationalState, history: tuple[dict[str, Any], .
 
 def validate_investigation_history(state: OperationalState,
                                    history: tuple[dict[str, Any], ...]) -> None:
-    evidence_kinds = {"research", "spike_request", "spike", "attribution", "audit_verdict"}
-    evidence = [item for item in history if item.get("kind") in evidence_kinds]
+    # Every kind of a committed manifest but the graph and the observation basis carries the route-order witnesses.
+    evidence_kinds = set(HISTORY_KINDS) - {"graph", OBSERVATION_BASIS_KIND}
+    # The consent to end a run (a terminal presentation or its answer) is not investigation evidence: ending never requires
+    # starting the work, so it may be recorded before the investigation and must stay valid after it. It still
+    # carries the run's route witness.
+    for item in history:
+        if item.get("kind") in {"evidence_presentation", "evidence_confirmation"} and (
+                isinstance(item.get("terminal"), (dict, bool)) and item.get("terminal")):
+            if type(item.get("route_stamp")) is not int or item["route_stamp"] != state.route_stamp:
+                raise HistoryCorrupt("terminal consent conflicts with the route-order witness")
+    evidence = [item for item in history if item.get("kind") in evidence_kinds
+                and not (isinstance(item.get("terminal"), (dict, bool)) and item.get("terminal"))]
     if not evidence:
         return
     if state.route_stamp is None or state.investigation_stamp is None:
@@ -224,20 +262,66 @@ def validate_investigation_history(state: OperationalState,
             raise HistoryCorrupt("investigation evidence conflicts with route-order witnesses")
 
 
+def recorded_observations(history: tuple[dict[str, Any], ...], state: OperationalState,
+                          heads: Any) -> ObservationSnapshot | None:
+    """What the workspace held over ``heads`` when the run's last transaction ran: the workspace source of the run's latest
+    recorded observation basis (the one its state names), or ``None`` when that record does not hold every path the heads
+    bind. Nothing is read from the workspace; the record is what the run was judged against then."""
+    basis = next((item for item in history if item["artifact_id"] == state.observation_basis_digest
+                  and item.get("kind") == OBSERVATION_BASIS_KIND), None)
+    source = next((s for s in (basis or {}).get("sources", ()) if s.get("name") == "workspace"), None)
+    if source is None:
+        return None
+    rows = {row["path"]: row for row in source["observations"]}
+    paths = required_paths(heads)
+    if any(path not in rows for path in paths):
+        return None
+    observations = tuple(FileObservation(p, ObservationState(rows[p]["state"]), rows[p]["sha256"]) for p in paths)
+    return ObservationSnapshot(observations, source["basis_id"], observations_digest(observations))
+
+
 def assemble(state: OperationalState, stored: Any, workspace: Any, *, run_id: str,
-             profile_id: str, command: dict[str, Any], require_graph: bool = False) -> EvaluationSnapshot:
+             profile_id: str, command: dict[str, Any], require_graph: bool = False,
+             observe: Any = None) -> EvaluationSnapshot:
+    """The evaluation snapshot. ``observe`` (a reader's: active heads to the ``ObservationSnapshot``
+    ``build_observation_snapshot`` would give) lets a reader that indexes the workspace's files answer from its index."""
     history = traverse_history(state, stored)
     validate_investigation_history(state, history)
     graph = graph_from_history(state, history, required=require_graph)
     if proposal_digest(state.goal, state.governance) != state.governance["proposal_digest"]:
         raise HistoryCorrupt("proposal digest conflicts with selected graph/context")
-    observation = build_observation_snapshot(active_spike_heads(history, graph), workspace)
+    heads = active_spike_heads(history, graph)
+    observation = build_observation_snapshot(heads, workspace) if observe is None else observe(heads)
     profile = _proto.host_profile(profile_id)
+    cited = _cited(command, workspace)
     return EvaluationSnapshot(
         state=state, history=history, graph=graph, contract=_proto.CONTRACT_VIEW,
         observations=observation.observations, observation_basis_id=observation.basis_id,
         observation_digest=observation.digest, run_id=run_id,
         **_proto.policy_inputs(profile_id),
         host_tier=profile["current_tier"],
-        host_audit_execution=profile["audit_execution"], command=command,
+        host_audit_execution=profile["audit_execution"], command=command, cited=cited,
+        workspace_root=_root(workspace) if command.get("type") == "ObserveAction" else None,
     )
+
+
+def _root(workspace: Any) -> str | None:
+    root = getattr(workspace, "root", None)
+    return None if root is None else str(root)
+
+
+def _cited(command: dict[str, Any], workspace: Any) -> Any:
+    """The workspace's capture of the repository file a research action cites (``core.citations``),
+    or ``None``: not a research action, a source not checked there, a path the workspace refuses, or
+    no workspace (the core then reads the file as unavailable)."""
+    action = command.get("action") if command.get("type") == "ObserveAction" else None
+    if not action or action.get("kind") != "research" or workspace is None:
+        return None
+    path = citations.cited_file(action["source_kind"], action["payload"]["source_ref"])
+    if path is None:
+        return None
+    try:
+        (captured,) = workspace.observe((path,)).files
+    except (ValueError, OSError, FreshnessContractError):
+        return None
+    return captured

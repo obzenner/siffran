@@ -39,7 +39,7 @@ class ProjectionContextTests(ConformanceCase):
         # Block 2: admitted canonical ordinary graph → exact sole claim.research_missing (scoped)
         self.require_graph_admitted(drv, run_id, canonical_graph(n_claims=1, kind="ordinary"))
         resp2 = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
-        result2 = self.assert_block_sole_reason(resp2, "claim.research_missing")
+        result2 = self.assert_block_sole_reason(resp2, "claim.research_missing", parameters={"claim_id": "C0"})
         r = result2["reasons"][0]
         # Research-missing affected is exactly one obligation_id (no permissive affected-key subset)
         self.assertIn("affected", r, "claim.research_missing is scoped and must carry affected")

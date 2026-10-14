@@ -31,12 +31,9 @@ def static_validate() -> None:
         fail("Codex manifest does not package the shared skill")
 
     marketplace = json.loads((ROOT / ".agents" / "plugins" / "marketplace.json").read_text())
-    entries = {entry.get("name"): entry for entry in marketplace.get("plugins", [])}
-    entry = entries.get("empirica")
-    if not isinstance(entry, dict):
-        fail("Codex marketplace does not list Empirica")
-    if entry.get("source", {}).get("path") != "./plugins/empirica":
-        fail("Codex marketplace Empirica source is wrong")
+    # The package below stays in the tree, dormant, until the Codex code is removed; it is not offered to Codex users.
+    if any(entry.get("name") == "empirica" for entry in marketplace.get("plugins", [])):
+        fail("Empirica is not available on Codex (ADR-0069 G10-R1); remove it from .agents/plugins/marketplace.json")
 
     hooks = json.loads((PLUGIN / "hooks" / "codex.json").read_text())
     if set(hooks.get("hooks", {})) != EVENTS:

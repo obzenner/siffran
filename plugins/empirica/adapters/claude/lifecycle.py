@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 
@@ -23,16 +23,16 @@ from application import protocol as _protocol
 from adapters.audit import child_prompt, verdict_from_final_output
 from adapters.audit_protocol import (AuditLaunchPlan, AuditProtocol, AuditProtocolError,
                                      IdentityObservation)
-from adapters.identity import REVIEWER_FAMILIES, claude_observation, family
+from adapters.identity import REVIEWER_FAMILIES, claude_observation, family, observe
 from adapters.public_tools import EVIDENCE_ACTIONS, OBSERVE_TOOL
-from .completion import dispatch_stop, stop_result
+from .completion import dispatch_stop, stop_result, unchanged_basis
 from .restore import dispatch_restore, restore_context
 from .route import dispatch_investigation
 from .run_start import dispatch_resolve, dispatch_start_run
 from .invocation import parse_invocation
 from .selector import SelectorError
 from .spawn import dispatch_child_reserve, spawn_decision
-from .transport import CLAUDE_PROFILE_ID, Result
+from .transport import CLAUDE_PROFILE_ID, Response, Result
 
 
 @dataclass(frozen=True)
@@ -103,76 +103,45 @@ def _parse_current_assistant_model(path: object) -> str | None:
     return _served_model(messages[-1]) if messages else None
 
 
-def _parse_transcript_contents(path: object) -> tuple[list[str], str | None]:
-    """Return distinct served assistant models and the textual final message."""
-    messages = _parse_transcript_messages(path)
-    if messages is None:
-        return [], None
-    models: list[str] = []
-    final = None
-    for message in messages:
-        model = _served_model(message)
-        if model is not None and model not in models:
-            models.append(model)
-        content = message.get("content")
-        if isinstance(content, str):
-            final = content
-        elif isinstance(content, list):
-            text = [item.get("text") for item in content
-                    if isinstance(item, Mapping) and item.get("type") == "text"
-                    and isinstance(item.get("text"), str)]
-            if text:
-                final = "\n".join(text)
-    return models, final
-
-
-def _parse_transcript_all_text(path: object) -> str | None:
-    """Concatenate every assistant text block; None on any read error.
-
-    Used for the fallback verdict scan: the auditor may have written the verdict
-    fence in assistant text rather than the handback message.
-    """
-    messages = _parse_transcript_messages(path)
-    if messages is None:
-        return None
-    parts: list[str] = []
-    for message in messages:
-        content = message.get("content")
-        if isinstance(content, str):
-            parts.append(content)
-        elif isinstance(content, list):
-            for item in content:
-                if (isinstance(item, Mapping) and item.get("type") == "text"
-                        and isinstance(item.get("text"), str)):
-                    parts.append(item["text"])
-    return "\n".join(parts)
-
-
-def _parse_transcript_handbacks(path: object) -> tuple[bool, list[str]]:
-    """Return whether the transcript scan succeeded and all handback messages.
-
-    A handback containing a valid verdict wins (see ``subagent_stop_main``).
-    When no handback carries a verdict, the adapter falls back to scanning all
-    assistant text plus handback messages for exactly one valid verdict fence.
-    Unreadable or malformed transcripts are distinct from a valid transcript with
-    no handback so corruption can never enable the fallback.
-    """
-    messages = _parse_transcript_messages(path)
-    if messages is None:
-        return False, []
-    handbacks: list[str] = []
-    for message in messages:
-        content = message.get("content")
-        if not isinstance(content, list):
+def _carried_verdicts(message: Mapping) -> list[dict]:
+    """The valid verdicts one assistant message carries itself: one per handback, and one from its own text (the fence whole
+    within this message)."""
+    content = message.get("content")
+    texts = [content] if isinstance(content, str) else []
+    candidates: list[object] = []
+    for item in content if isinstance(content, list) else []:
+        if not isinstance(item, Mapping):
             continue
-        for item in content:
-            if (not isinstance(item, Mapping) or item.get("type") != "tool_use"
-                    or item.get("name") != "SubagentHandback"):
-                continue
+        if item.get("type") == "text" and isinstance(item.get("text"), str):
+            texts.append(item["text"])
+        elif item.get("type") == "tool_use" and item.get("name") == "SubagentHandback":
             tool_input = item.get("input")
-            candidate = tool_input.get("message") if isinstance(tool_input, Mapping) else None
-            handbacks.append(candidate if isinstance(candidate, str) else "")
-    return True, handbacks
+            candidates.append(tool_input.get("message") if isinstance(tool_input, Mapping) else None)
+    candidates.append("\n".join(texts))
+    return [verdict for candidate in candidates if (verdict := verdict_from_final_output(candidate)) is not None]
+
+
+def _audit_outcome(path: object) -> tuple[dict | None, str | None]:
+    """The one owner of what an audit child delivered: ``(verdict, the reviewer's served model)`` from one parse of its
+    transcript, or ``(None, None)`` (the caller fails closed).
+
+    Each assistant message yields its own verdict list (``_carried_verdicts``). There is a verdict only when at least one message
+    carries one and every verdict carried, in every message, is the identical one. The reviewer is the model the *carrying*
+    message(s) themselves served; it must be observed (not absent, empty or synthetic) and be the one non-synthetic model of
+    the whole child transcript. A verdict is never given an earlier message's model, and never assembled across messages.
+    The model comes back ``None`` (verdict kept, so the diagnostic can say which) when that does not hold."""
+    messages = _parse_transcript_messages(path)
+    if messages is None:
+        return None, None
+    carriers = [(message, found) for message in messages if (found := _carried_verdicts(message))]
+    distinct = {json.dumps(v, sort_keys=True) for _, found in carriers for v in found}
+    if len(distinct) != 1:
+        return None, None
+    verdict = carriers[0][1][0]
+    served = {model for message in messages if (model := _served_model(message)) is not None}
+    owner_models = {_served_model(message) for message, _ in carriers}
+    only = next(iter(served)) if len(served) == 1 else None
+    return verdict, (only if only is not None and owner_models == {only} else None)
 
 
 def _payload() -> HookPayload:
@@ -249,8 +218,33 @@ def _main_model(payload: Mapping[str, object]) -> str | None:
     return _parse_current_assistant_model(payload.get("transcript_path"))
 
 
-def _auditor_alias(payload: Mapping[str, object], environ: Mapping[str, str]) -> str | None:
-    """Choose only a host-resolvable alias different from the observed main family."""
+def _resolved_identity(name: str, environ: Mapping[str, str]) -> str | None:
+    """The one resolver, alias or concrete model to the identity class it runs on, else ``None``: a reviewer alias (``opus``)
+    is whatever its ``ANTHROPIC_DEFAULT_<ALIAS>_MODEL`` pin names (``None`` when unpinned); anything else is classified as the
+    concrete model it names."""
+    alias = name.lower() if name.lower() in REVIEWER_FAMILIES else None
+    target = environ.get(f"ANTHROPIC_DEFAULT_{alias.upper()}_MODEL") if alias else name
+    raw = _model_observation(target, source="claude-alias-pin" if alias else "claude-subagent-model") if target else None
+    classed = observe(raw["provider_id"], raw["model_id"], source=raw["source"]) if raw else None
+    return classed["identity"] if classed is not None else None
+
+
+def _effective_identity(name: str, environ: Mapping[str, str], excluded: Sequence[str]) -> str | None:
+    """The identity class the auditor would run on if launched as ``name`` (the one decision both the automatic pick and an
+    explicit ``CLAUDE_CODE_SUBAGENT_MODEL`` use): its resolved identity; when that is unknown (an unpinned alias), the excluded
+    class of the same family, so an unpinned alias is refused exactly when its family is excluded. The launch is refused when
+    this is in ``excluded`` and the core is handed it to judge."""
+    resolved = _resolved_identity(name, environ)
+    if resolved is not None:
+        return resolved
+    named = family(name)
+    return next((item for item in excluded if named is not None and family(item.partition("/")[2]) == named), None)
+
+
+def _auditor_alias(payload: Mapping[str, object], environ: Mapping[str, str],
+                   excluded: Sequence[str] = ()) -> str | None:
+    """Choose only a host-resolvable alias different from the observed main family and from every family the core excludes
+    (the earlier producers of the covered evidence)."""
     configured = environ.get("CLAUDE_CODE_SUBAGENT_MODEL")
     if configured and configured != "inherit":
         return None
@@ -263,7 +257,8 @@ def _auditor_alias(payload: Mapping[str, object], environ: Mapping[str, str]) ->
     third_party = any(environ.get(key) for key in (
         "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"))
     for reviewer_family in REVIEWER_FAMILIES:
-        if reviewer_family != main and (not third_party or environ.get(f"ANTHROPIC_DEFAULT_{reviewer_family.upper()}_MODEL")):
+        if (reviewer_family != main and _effective_identity(reviewer_family, environ, excluded) not in excluded
+                and (not third_party or environ.get(f"ANTHROPIC_DEFAULT_{reviewer_family.upper()}_MODEL"))):
             return reviewer_family
     raise AuditProtocolError(
         "no distinct reviewer alias is resolvable; set CLAUDE_CODE_SUBAGENT_MODEL or pin "
@@ -365,9 +360,13 @@ def spawn_main() -> int:
                     if decision.exit_code else 0)
         if "model" in tool_input:
             return _deny("empirica auditor launch forbids model overrides")
-        alias = _auditor_alias(payload, os.environ)
         audit_protocol = AuditProtocol(CLAUDE_PROFILE_ID, execution="async")
-        plan = audit_protocol.prepare(handle, role_profile="empirica:empirica-auditor")
+        excluded = audit_protocol.exclusions(handle)  # the core's set: the author and every covered producer
+        alias = _auditor_alias(payload, os.environ, excluded)
+        override = os.environ.get("CLAUDE_CODE_SUBAGENT_MODEL")
+        target = alias or override  # exactly one of them is set: an override disables the pick
+        plan = audit_protocol.prepare(handle, role_profile="empirica:empirica-auditor",
+                                      auditor_identity=_effective_identity(target, os.environ, excluded) if target else None)
         updated = {
             "subagent_type": "empirica:empirica-auditor",
             "description": "Bound Empirica audit",
@@ -423,7 +422,11 @@ def completion_main() -> int:
         handle, _ = _resolve(payload, strict=True)
         if handle is None:
             return 0  # exact no-active-run response → nothing to gate
-        mapped = stop_result(dispatch_stop(payload, handle))
+        response = dispatch_stop(payload, handle)
+        active = payload.get("stop_hook_active") is True
+        same = (isinstance(response, Response) and response.result.type == "Block"
+                and unchanged_basis(payload, response.result))
+        mapped = stop_result(response, stop_hook_active=active, no_progress=same)
     except SelectorError:
         return 0  # malformed non-session Stop events retain observational behavior
     except Exception as exc:  # noqa: BLE001 - completion is the fail-closed boundary
@@ -560,29 +563,7 @@ def subagent_stop_main() -> int:
         plan = _parse_durable_plan(handle, str(child_id)) if child_id else None
         if child is None or plan is None:
             return 0
-        child_path = payload.get("agent_transcript_path")
-        auditor_models, _ = _parse_transcript_contents(child_path)
-        auditor_model = auditor_models[0] if len(auditor_models) == 1 else None
-        handback_scan_ok, handbacks = _parse_transcript_handbacks(child_path)
-        if not handback_scan_ok:
-            verdict = None
-        else:
-            # A handback containing a valid verdict wins. Multiple valid handback
-            # verdicts fail closed (two different verdicts).
-            handback_verdicts = [v for v in
-                (verdict_from_final_output(hb) for hb in handbacks) if v is not None]
-            if handback_verdicts:
-                verdict = handback_verdicts[0] if len(handback_verdicts) == 1 else None
-            else:
-                # No handback verdict: accept the transcript only if it contains
-                # exactly one valid verdict fence across all assistant text and
-                # handbacks. Two fences, a malformed fence, or none → fail closed.
-                all_text = _parse_transcript_all_text(child_path)
-                if all_text is None:
-                    verdict = None
-                else:
-                    combined = "\n".join([all_text, *handbacks]) if handbacks else all_text
-                    verdict = verdict_from_final_output(combined)
+        verdict, auditor_model = _audit_outcome(payload.get("agent_transcript_path"))
         protocol = AuditProtocol(CLAUDE_PROFILE_ID)
         if verdict is None or auditor_model is None:
             protocol.observe_failure(plan, native_id, "failed")

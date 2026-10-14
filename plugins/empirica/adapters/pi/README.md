@@ -5,13 +5,14 @@ surface as the Claude and Codex adapters and owns no convergence policy.
 
 ## Capability profile
 
-The promoted profile is qualified on Pi `0.84.1` and admits compatible Pi releases
-`>=0.84.1,<1.1.0`; receipts still record the exact observed Pi version. The profile tier is
+The promoted profile is qualified on Pi `1.1.0` and admits compatible Pi releases
+`>=1.0.0,<2.0.0`; `/empirica` reads Pi's own version (`VERSION`) and refuses to start outside that range or when the version cannot be read (`host.version_unsupported`, exit 1 without a UI). The profile tier is
 `foreground_only`, with `promotion_status=promoted` after an installed-host foreground trace reached
 guarded `Allow(converged=true)`. `pi-subagents` is an external prerequisite
-(`pi install npm:pi-subagents@<reviewed version>`), never bundled or loaded by this package; it must
-provide the structured `subagent` tool. Only the exact versions in `subagents_compatibility.reviewed_versions`
-(`contracts/empirica/v2/host-profiles.json`) are supported; any other version is refused before a run starts. Asynchronous audit execution is not supported and is never silently
+(`pi install npm:pi-subagents@<a version in the supported range>`), never bundled or loaded by this package; it must
+provide the structured `subagent` tool. Versions inside `subagents_compatibility` `[minimum, maximum_exclusive)`
+(`contracts/empirica/v2/host-profiles.json`) are admitted by observation (ADR-0069); a version with a checked-in
+`compat/` record is reviewed, any other is recorded `reviewed: false`. A version outside the range is refused before a run starts. Asynchronous audit execution is not supported and is never silently
 downgraded.
 
 ## Audit runtime ownership
@@ -42,7 +43,7 @@ The runtime is recorded once, with the run, at `StartRun` (`invocation.host_runt
 at audit admission: the private `audit_prepare` carries the runtime the adapter observes now, and the
 Python application refuses closed (`audit_refused`, before any reservation or state write) when it is
 not exactly the recorded one, which the adapter turns into the same sticky `owner-changed` refusal.
-A run therefore cannot be audited by a different pi-subagents than the one its receipt will name: after
+A run therefore cannot be audited by a different pi-subagents than the one the run recorded: after
 a Pi or pi-subagents upgrade, start a new `/empirica` run.
 
 ## Governed initialization
@@ -62,8 +63,8 @@ accepts only non-raising revisions without another dialog. Missing UI never down
 Delegated auto requires recorded operator provenance and remains inside 8/1/2. See
 [governance](../../skills/empirica/references/governance.md) for limits, identity classes,
 and fresh-generation compatibility. These UI flows have fast simulated-control coverage and
-real-service governance coverage; the historical profile receipt does not certify native human
-approval for 4.0.0. Follow the operator-led procedure printed by `make native-qualification` for
+real-service governance coverage; no automated test certifies native human
+approval. Follow the operator-led procedure printed by `make native-qualification` for
 that boundary.
 
 ## Surface
@@ -82,8 +83,8 @@ The canonical auditor has no plugin model pin. The adapter chooses the project o
 resolves this package's own auditor, then derives the execution model from host settings in order:
 `subagents.agentOverrides["empirica.empirica-auditor"].model`, `subagents.defaultModel`, then the
 main model. It rejects an unavailable reviewer or one in the same identity class before launch,
-and rejects shadowed agent definitions and author-supplied overrides. `EMPIRICA_PI_AUDITOR_MODEL` no longer configures
-the auditor.
+and rejects shadowed agent definitions and author-supplied overrides. No environment variable configures
+the auditor model.
 The adapter never trusts `details.results[].model`, which is requested launch configuration.
 Instead it reads the exact result row's host-generated `sessionFile` and accepts identity only when
 the final native assistant record carries concrete provider/model fields and its sole verdict equals
@@ -116,11 +117,15 @@ active, and opens no dialog and makes no private call. Mixed reasons and termina
 deny.
 
 Pi has no native completion veto; the model must call `report_convergence` before making a
-convergence claim. A turn can otherwise finish without a terminal decision.
+convergence claim. The turn end follows the turn-end table of ADR-0068, acted on at
+`agent_before_settle` only (Pi 1.0.0 and later): a deliberative run pauses with one visible notice,
+an auto run is asked to continue with the next obligation, and the adapter ends an auto chain with
+the `unattended_continue` notice when the core's `run.basis` has not changed since its
+previous continuation (`no-progress`).
 
 ## Validation
 
 Run `make check-pi` for fast deterministic adapter coverage. Run the targeted diagnostics in
 `doc/testing.md` when changing persistence or full host-flow boundaries. Profile qualification is
-operator-led via `make native-qualification`; release promotion additionally requires
-`make empirica-host-live-check` with an honestly applicable retained installed-Pi receipt.
+operator-led via `make native-qualification`; release evidence is the long-running scenarios
+(`.agents/skills/native-qualification/references/scenarios.md`).

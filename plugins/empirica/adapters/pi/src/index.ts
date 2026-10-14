@@ -19,12 +19,16 @@ import * as path from "node:path";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 
-import type { Dispatch, InvocationProvenance, Request, Response, RunSelector } from "./contract.ts";
+import { isTerminalBatch, type Dispatch, type EvaluateIntent, type HostFailure, type InvocationProvenance, type Request, type Response, type RunSelector } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
+import type { RetrievalKind } from "./audit-retrieval.ts";
+import { canPresent, confirmEvidence, sessionLocator, evidenceConfirmationWait, evidenceHostFailure, observeSurface } from "./evidence-ui.ts";
 import { govern, governanceTimeout, piGovernanceContext, refreshGovernance, settlementNotice } from "./governance-ui.ts";
 import type {
   ExtensionAPI,
   ExtensionContext,
+  NotifyType,
+  BoundaryEvent,
   ToolCallEvent,
   ToolCallResult,
   ToolResultEvent,
@@ -34,12 +38,13 @@ import {
   type PrivateIngressRequest, type PrivateOperation, type PrivateResponses,
 } from "./private-transport.ts";
 import {
-  lifecycleEvent, redactVerdict, resultDigest, resultText as auditResultText, verdictFromText,
+  childNotTerminal, lifecycleEvent, redactVerdict, resultDigest, resultText as auditResultText, verdictFromText,
 } from "./audit.ts";
 import {
   identityFromSessionJsonl, sessionFileFromDetails,
 } from "./audit-identity.ts";
-import { createStdioBridgeDispatch, defaultBridgeConfig, HOST_PROFILE_ID } from "./stdio-transport.ts";
+import { HOST_COMPATIBILITY, HOST_PROFILE_ID, checkHostVersion } from "./host-profile.ts";
+import { createStdioBridgeDispatch, defaultBridgeConfig } from "./stdio-transport.ts";
 import { renderAuthorView } from "./author-view.ts";
 import {
   nodeOwnerIo, nodePreflightImporter, resolveOwnerInventory, resolveOwnerPreflight, resolveSubagentOwner, sameOwner,
@@ -47,13 +52,15 @@ import {
   type AuditRuntime, type BoundPreflight, type OwnerEnv, type OwnerIo, type OwnerRefusal,
   type PreflightImporter, type SubagentOwner, type SubagentsProvenance,
 } from "./runtime-owner.ts";
-import { launchUnsupportedReason, ownerRefusalBlock, ownerRefusalReason } from "./owner-refusal.ts";
+import { hostVersionReason, launchUnsupportedReason, ownerRefusalBlock, ownerRefusalReason, seamRefusalMessage } from "./owner-refusal.ts";
 import { AUDIT_LAUNCH_POLICY, SUBAGENTS_COMPATIBILITY } from "./host-profile.ts";
 import { buildHostRuntime } from "./host-runtime.ts";
 import { auditLaunchInput, preflightLaunch } from "./audit-launch.ts";
 import { admitAuditPreflight, withoutThinkingLevel } from "./preflight-seam.ts";
 import { loadInventory, type SubagentInventory } from "./subagent-inventory.ts";
 import { PUBLIC_TOOLS } from "./public-tools.ts";
+import { startObserver, type ObserverServer } from "./observer-ui.ts";
+import { turnEnd, type Basis } from "./turn-end.ts";
 import {
   REPORT_CONVERGENCE_INTENT,
   REPORT_CONVERGENCE_TOOL,
@@ -140,6 +147,16 @@ export interface ResolvedAuditContract {
   agentFilePath: string;
   model: string;
   agentScope: "project" | "user";
+  /** What the auditor is observed to retrieve (preflight effectiveAllowlist); recorded at start, re-sent at launch. */
+  auditRetrieval: readonly RetrievalKind[];
+  /** Where the model came from: an explicit per-agent override, a default/the main model, or a pick from `enabledModels`. */
+  source?: "override" | "default" | "main" | "enabledModels";
+  /** The models the user enabled, in Pi's order, as `provider/id` and available now (candidates for another class). */
+  candidates?: readonly string[];
+  /** Set when the model was picked from `enabledModels`: the configured model it replaced. */
+  replaced?: string;
+  /** The identity class the auditor will run on (set by the adapter after classification; sent with the reservation). */
+  identity?: string;
 }
 /** Resolves the audit launch contract through the bound owner's preflight, exact version, and inventory. */
 export type AuditContractResolver = (
@@ -161,6 +178,38 @@ export function resolvePiAuditorModel(global: Record<string, unknown>, project: 
   return model;
 }
 
+/** Whether the auditor model is an explicit per-agent override (never replaced), a default, or the main model. */
+export function piAuditorModelSource(global: Record<string, unknown>, project: Record<string, unknown>)
+    : "override" | "default" | "main" {
+  const subagents = (scope: Record<string, unknown>) => scope.subagents as Record<string, unknown> | undefined;
+  const override = (scope: Record<string, unknown>) =>
+    (subagents(scope)?.agentOverrides as Record<string, { model?: unknown }> | undefined)?.["empirica.empirica-auditor"]?.model;
+  if (typeof override(project) === "string" || typeof override(global) === "string") return "override";
+  return typeof subagents(project)?.defaultModel === "string" || typeof subagents(global)?.defaultModel === "string"
+    ? "default" : "main";
+}
+
+/**
+ * The models the user enabled (Pi `enabledModels`: project settings replace user settings, as Pi documents), expanded
+ * against the models available now, in the user's order. An entry is `provider/id` or `id`, with an optional trailing
+ * thinking level, and may use `*` globs (the `--models` pattern format).
+ */
+export function enabledAuditorCandidates(global: Record<string, unknown>, project: Record<string, unknown>,
+                                         available: ReadonlyArray<{ provider: string; id: string }>): string[] {
+  const listed = [project.enabledModels, global.enabledModels].find((value) => Array.isArray(value)) as unknown[] | undefined;
+  const out: string[] = [];
+  for (const entry of listed ?? []) {
+    if (typeof entry !== "string") continue;
+    const pattern = withoutThinkingLevel(entry);
+    const glob = new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")}$`, "i");
+    for (const model of available) {
+      const full = `${model.provider}/${model.id}`;
+      if ((glob.test(full) || glob.test(model.id)) && !out.includes(full)) out.push(full);
+    }
+  }
+  return out;
+}
+
 interface PiSettingsApi {
   SettingsManager: { create(cwd: string, agentDir?: string): {
     getGlobalSettings(): Record<string, unknown>; getProjectSettings(): Record<string, unknown> } };
@@ -178,10 +227,12 @@ export async function defaultAuditContractResolver(
   const global = settings.getGlobalSettings();
   const project = settings.getProjectSettings();
   const main = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
-  const model = resolvePiAuditorModel(global, project, main);
+  const preferred = typeof input.preferredModel === "string" ? input.preferredModel : undefined;
+  const model = preferred ?? resolvePiAuditorModel(global, project, main);
+  const source = preferred !== undefined ? "enabledModels" as const : piAuditorModelSource(global, project);
   const descriptor = {
     version: runtime.version, inventory: runtime.inventory,
-    expected: { agent_file_path: String(input.expectedAgent), model },
+    expected: { agent_file_path: String(input.expectedAgent), model, child_tools: AUDIT_LAUNCH_POLICY.audit_child_tools },
     // The launch request the adapter sends (`tool_call` applies the same `auditLaunchInput`; the task
     // and scope are irrelevant to the checked fields). forceTopLevelAsync lives in pi-subagents'
     // private config file and is not observable through the public preflight: it is undefined here and
@@ -194,7 +245,7 @@ export async function defaultAuditContractResolver(
     const response = await runtime.preflight.resolveSubagentLaunchContract({
       agent: String(input.agent),
       task: typeof input.task === "string" ? input.task : undefined,
-      context: "fresh", model, agentScope, cwd,
+      context: descriptor.launch.context as string, model, agentScope, cwd,
       availableModels: ctx.modelRegistry?.getAvailable(),
     });
     const admission = admitAuditPreflight(descriptor, response);
@@ -204,15 +255,19 @@ export async function defaultAuditContractResolver(
         unresolved = `auditor package unresolvable (${admission.code}: ${admission.detail})`;
         continue;
       }
+      const contractMessage = seamRefusalMessage(admission.code);
       throw new Error(admission.code === "model-substituted"
         ? "configured auditor model was substituted by preflight"
-        : `pi-subagents preflight refused (${admission.code}): ${admission.detail}`);
+        : `pi-subagents preflight refused (${admission.code}): ${admission.detail}`
+          + (contractMessage === undefined ? "" : `. ${contractMessage}`));
     }
     const identity = withoutThinkingLevel(model);
     const available = ctx.modelRegistry?.getAvailable() ?? [];
     if (!available.some((item) => `${item.provider}/${item.id}` === identity))
       throw new Error(`configured auditor model is unavailable: ${model}`);
-    return { agentFilePath: admission.contract.agent_file_path, model, agentScope };
+    return { agentFilePath: admission.contract.agent_file_path, model, agentScope,
+      auditRetrieval: admission.contract.audit_retrieval, source,
+      candidates: enabledAuditorCandidates(global, project, available) };
   }
   throw new Error(unresolved);
 }
@@ -236,12 +291,25 @@ export interface EmpiricaPiDeps {
   resolveAuditContract?: AuditContractResolver;
   /** File-system reads for owner resolution (default: the real file system). */
   ownerIo?: OwnerIo;
+  /** Pi's own version as the host reports it (default: ``VERSION`` exported by ``@earendil-works/pi-coding-agent``); anything unreadable is refused. */
+  hostVersion?: () => unknown | Promise<unknown>;
   /** Environment consulted for the pi-subagents child-process flag (default: ``process.env``). */
   ownerEnv?: OwnerEnv;
   /** Owner-anchored module resolution and loading (default: ``require.resolve`` from the owner + ``import``). */
   preflightImporter?: PreflightImporter;
-  /** The reviewed inventory of an exact pi-subagents version (default: the checked-in ``compat/`` files). */
+  /** Where a notice goes when there is no UI (default: the process's stderr and exit code). */
+  diagnostics?: Diagnostics;
+  /** How long a no-UI `/empirica` waits for its kickoff to start a run before it stops waiting (default 15 s). */
+  kickoffStartMs?: number;
+  /** The checked-in inventory of an exact pi-subagents version, if any (default: the ``compat/`` files; ADR-0069). */
   inventoryFor?: (version: string) => SubagentInventory | undefined;
+}
+
+/** Pi's version from the host (the injected reader, else the package's exported ``VERSION``); ``undefined`` when it cannot be read. */
+async function observeHostVersion(reader: EmpiricaPiDeps["hostVersion"]): Promise<unknown> {
+  try {
+    return reader !== undefined ? await reader() : ((await import("@earendil-works/pi-coding-agent")) as { VERSION?: unknown }).VERSION;
+  } catch { return undefined; }
 }
 
 function defaultSelectorProvider(): SelectorProvider {
@@ -252,6 +320,48 @@ function defaultSelectorProvider(): SelectorProvider {
     return { project, session };
   };
 }
+
+/** The one setting that chooses the auditor's model, as the user must write it. */
+const AUDITOR_MODEL_FIX = 'set subagents.agentOverrides["empirica.empirica-auditor"].model to another model '
+  + "in your Pi project or user settings (read at each launch; no restart needed)";
+/** A refused audit launch spends nothing and leaves the run active; the author must not end it for that. */
+const AUDIT_STILL_OPEN = "The run is still active and nothing was spent: once this is fixed, launch the auditor "
+  + "again. Do not stop the run because of this refusal.";
+/** The audit launch /empirica checks before starting a run: the one the skill tells the author to make. */
+const CANONICAL_AUDIT_CALL = { agent: "empirica.empirica-auditor", task: "Audit the host-provided dossier." };
+
+/**
+ * Where a notice goes when Pi has no UI. Print and JSON mode have none (`ctx.hasUI` is false; Pi docs `extensions.md`:
+ * "JSON and print modes have no UI"), so `ctx.ui.notify` shows nothing there and a refusal would end silently with exit
+ * 0 (claude/pi qualification F-Q6P-1). The text then goes to stderr, as Pi writes its own extension errors there
+ * (`print-mode.js`), and a warning or error asks for a failing exit by `process.exitCode`, which Pi keeps when its own result is 0
+ * (`main.js`: `if (exitCode !== 0) process.exitCode = exitCode`). stdout stays the model's answer or the JSON stream.
+ */
+export interface Diagnostics { write(text: string): void; fail(): void }
+const PROCESS_DIAGNOSTICS: Diagnostics = {
+  write: (text) => { process.stderr.write(`${text}\n`); },
+  fail: () => { process.exitCode = 1; },
+};
+
+/** Show a notice to the person: in the UI when there is one, else on stderr (an error also fails the exit). */
+function say(ctx: ExtensionContext, diagnostics: Diagnostics, message: string, type: NotifyType = "info"): void {
+  if (ctx.hasUI === false || ctx.mode === "print" || ctx.mode === "json") {
+    diagnostics.write(type === "info" ? message : `${type}: ${message}`);
+    if (type !== "info") diagnostics.fail();
+    return;
+  }
+  ctx.ui.notify(message, type);
+}
+
+/**
+ * With no UI (print and JSON mode) Pi ends the session when the command's promise settles: `print-mode.js` does
+ * `await session.prompt("/empirica …")` and then `runtimeHost.dispose()`, while `pi.sendUserMessage` (the kickoff) is
+ * fire-and-forget (`agent-session.js` `bindExtensions`, `.catch(...)` and no await), so the run it starts is torn down at
+ * once: the ctx goes stale, `turn_end could not resolve the persisted assistant entry ID` is raised per turn and no work
+ * is done (F-Q6P-2). The command therefore waits, with no UI, until the run it started is idle. This bounds the wait for
+ * the run to *start*; the run itself is bounded by the run's own budgets and, in auto, by the no-progress rule.
+ */
+const KICKOFF_START_MS = 15_000;
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -288,8 +398,9 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     ?? ((input, ctx, runtime) => defaultAuditContractResolver(input, ctx, { runtime }));
   const ownerIo = deps.ownerIo ?? nodeOwnerIo;
   const preflightImporter = deps.preflightImporter ?? nodePreflightImporter;
-  // The checked-in inventories are exactly the contract's reviewed versions (contract-check and
-  // host-profile.test.ts), and buildHostRuntime re-checks the version when a run starts.
+  const diagnostics = deps.diagnostics ?? PROCESS_DIAGNOSTICS;
+  const kickoffStartMs = deps.kickoffStartMs ?? KICKOFF_START_MS;
+  // A checked-in inventory marks a reviewed version; the admission rule is ADR-0069's (HX-ADM-02).
   const inventoryFor = deps.inventoryFor ?? ((version: string) => loadInventory(version));
   // Read once at load: a malformed EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS fails extension load with its message
   // instead of surfacing mid-run inside a configure_run that already dispatched.
@@ -323,14 +434,14 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       try {
         const resolved = resolveSubagentOwner(pi.getAllTools(), pi.getCommands(), ownerIo, ownerEnv());
         if (!resolved.ok) return { kind: "refused", refusal: resolved };
-        // The inventory is selected before any code of the owner is loaded: an unreviewed version
-        // is refused without importing its preflight.
+        // A version outside the range, or one whose schema cannot carry the audit launch, is refused before its
+        // preflight is imported; an in-range unreviewed version's preflight is imported (ADR-0069 trade-offs).
         const reviewed = resolveOwnerInventory(resolved, inventoryFor);
         if (!reviewed.ok) return { kind: "refused", refusal: reviewed };
         const preflight = await resolveOwnerPreflight(resolved, preflightImporter, ownerIo);
         if (!preflight.ok) return { kind: "refused", refusal: preflight };
         return { kind: "bound", binding: { owner: resolved, preflight, inventory: reviewed.inventory,
-          provenance: subagentsProvenance(resolved, preflight) } };
+          provenance: subagentsProvenance(resolved, preflight, reviewed.inventory.reviewed) } };
       } catch (error) {
         return { kind: "refused", refusal: { ok: false, code: "owner-unobservable",
           message: `the pi-subagents owner could not be observed: ${describe(error)}` } };
@@ -375,17 +486,21 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     const ownerDetail = (refusal: OwnerRefusal): string => `${refusal.code}: ${refusal.message}`;
 
     const completedAuditCalls = new Set<string>();
+    // The Pi turn-end bound (`turn-end.ts`): adapter memory only, never run state.
+    let lastContinuation: Basis | null = null;
     type ChildCorrelation = { runHandle: string; childId: string; nativeId: string };
     const children = new Map<string, ChildCorrelation>();
     const reportEvaluations = new Map<string, { intent: string; response: Response }>();
-    const terminalStatus = (response: Response): boolean => {
+    /**
+     * The one owner of ending a run (G17b): every path that can see a terminal result calls it (the gate that evaluates a
+     * report, the explicit `report_convergence`, and `agent_before_settle`). A terminal result writes the journal tombstone,
+     * keeps the handle readable (`retiredHandle`) and stops gating (`runHandle` null). It is idempotent: with no active
+     * handle a further terminal result does nothing.
+     */
+    const onTerminal = (response: Response): void => {
       const result = response.result;
-      if (result.type !== "Allow") return false;
-      return new Set(["converged", "stopped_budget", "stopped_frozen", "stopped_residual"])
-        .has(String(result.run.status));
-    };
-    const retireTerminal = (response: Response): void => {
-      if (!runHandle || !terminalStatus(response)) return;
+      if (!runHandle || result.type !== "Allow"
+          || !["converged", "stopped_budget", "stopped_frozen", "stopped_residual"].includes(String(result.run.status))) return;
       pi.appendEntry?.("empirica.run.done", { runHandle });
       retiredHandle = runHandle;
       runHandle = null;
@@ -401,6 +516,54 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     };
     const trusted = async <Op extends PrivateOperation>(request: PrivateIngressRequest<Op>): Promise<PrivateResponses[Op]> =>
       assertPrivateResponse(request.operation, await privateIngress(request));
+
+    const auditRuntimeOf = (binding: OwnerBinding): AuditRuntime => ({ preflight: binding.preflight.api,
+      version: binding.owner.version, inventory: binding.inventory });
+    /**
+     * The auditor this session would launch, and its independence from the author: the audit counts
+     * only when the auditor runs on another model. Both are known before a run exists, so /empirica
+     * checks this before starting one, and the audit launch checks it again (settings may change).
+     */
+    const independentAuditor = async (input: Record<string, unknown>, ctx: ExtensionContext,
+                                      runtime: AuditRuntime, excluded: ReadonlySet<string> = new Set()): Promise<ResolvedAuditContract> => {
+      const expectedAgent = path.resolve(skillsDir, "..", "agents", "pi", "empirica-auditor.md");
+      const resolved = await resolveAuditContract({ ...input, expectedAgent }, ctx, runtime);
+      const author = piGovernanceContext(ctx).author as Record<string, unknown> | null;
+      const authorIdentity = await trusted({ operation: "classify_identity",
+        payload: author ?? { provider_id: null, model_id: null, source: "pi-context" } });
+      const identityOf = (model: string) => {
+        const [provider, id] = modelPair(model, "pi-subagents");
+        return trusted({ operation: "classify_identity",
+          payload: { provider_id: provider, model_id: id, source: "pi-subagents-preflight" } });
+      };
+      const reviewerIdentity = await identityOf(resolved.model);
+      if (authorIdentity === null)
+        throw new Error("main author identity unobservable; select a concrete model");
+      if (reviewerIdentity === null)
+        throw new Error(`reviewer identity unobservable; ${AUDITOR_MODEL_FIX}`);
+      // The classes the auditor must differ from: the author's, and (at audit launch) every producer of covered evidence, which
+      // only the core knows (`excluded`, from its `audit.auditor_excluded` refusal).
+      const barred = (identity: string): boolean => identity === authorIdentity.identity || excluded.has(identity);
+      if (!barred(reviewerIdentity.identity)) return { ...resolved, identity: reviewerIdentity.identity };
+      // Same class as the author or a producer. An explicit override is the user's word and is never replaced. Otherwise the
+      // first model the user enabled that is available and of another class becomes the auditor (the same pick Claude's
+      // `_auditor_alias` makes); identity is still proven only by the child session the launch observes.
+      if (resolved.source !== "override") {
+        for (const candidate of resolved.candidates ?? []) {
+          if (candidate === resolved.model) continue;
+          let picked: ResolvedAuditContract;
+          try {
+            picked = await resolveAuditContract({ ...input, expectedAgent, preferredModel: candidate }, ctx, runtime);
+          } catch { continue; }
+          const identity = await identityOf(picked.model);
+          if (identity !== null && !barred(identity.identity))
+            return { ...picked, identity: identity.identity, source: "enabledModels", replaced: resolved.model };
+        }
+      }
+      throw new Error(`the auditor would run on ${excluded.size > 0 ? "a model that produced the evidence or is authoring it" : "your own model"} (${resolved.model}), so its audit could not `
+        + `count as independent; ${resolved.source === "override" ? "" : "no model in enabledModels is available in another class either; "}`
+        + AUDITOR_MODEL_FIX);
+    };
 
     pi.on("resources_discover", () => ({ skillPaths: [skillsDir] }));
 
@@ -465,9 +628,14 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       if (runHandle !== null) await refreshGovernance(runHandle, ctx, trusted);
     });
 
+    // The /empirica-ui server (registered below): one per extension instance, stopped here at shutdown.
+    let observer: Promise<ObserverServer> | null = null;
+
     // Foreground work should be terminal before shutdown. Any remaining correlation is orphaned;
     // a failed private acknowledgement leaves its durable entry available for the next restore.
     pi.on("session_shutdown", async () => {
+      void observer?.then((server) => server.stop(), () => undefined);
+      observer = null;
       for (const [toolCallId, child] of children) {
         try {
           await trusted({ operation: "child_event", run_id: child.runHandle,
@@ -492,6 +660,27 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     const READ_PARAMS = PUBLIC_TOOL_SCHEMAS.empirica_read;
     const resultText = (response: Response): string => renderAuthorView(response.result);
     let governanceDialog = false;
+    let evidenceDialog = false;
+    /**
+     * Evaluate a report or a stop with what this host can show a human observed first (the Python twin is
+     * `PublicTools._evaluate_observed`; the two differ only in how they reach the core). A host that could not observe says so
+     * with the evaluation (`reported`). A stop of an auto run asks nothing and needs no look: only when the core answers a stop
+     * with the consent to end a deliberative run (a terminal batch) does the host look, and evaluate once more. `mayAsk` is
+     * whether the host may now ask a human: it looked and recorded its surface, or it is a stop that needs no look.
+     */
+    const evaluateObserved = async (handle: string, intent: EvaluateIntent, ctx: ExtensionContext, trustedIngress: typeof trusted) => {
+      const look = async () => {
+        const recorded = await observeSurface(handle, ctx, trustedIngress);
+        return { mayAsk: recorded, reported: recorded ? undefined : "surface_unrecorded" as HostFailure };
+      };
+      let seen = intent === "stop" ? { mayAsk: true, reported: undefined as HostFailure | undefined } : await look();
+      let response = await dispatch(evaluateRunRequest(handle, intent, randomUUID(), seen.reported));
+      if (intent === "stop" && "run" in response.result && isTerminalBatch(response.result.run?.confirmation_batch)) {
+        seen = await look();
+        response = await dispatch(evaluateRunRequest(handle, intent, randomUUID(), seen.reported));
+      }
+      return { response, ...seen };
+    };
     if (pi.registerTool) {
       pi.registerTool({
         name: REPORT_CONVERGENCE_TOOL,
@@ -515,7 +704,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           const decision = gateFromDecision(response.result);
           if (decision.kind === "deny")
             throw new Error(`${decision.reason}\nhandle: ${runHandle ?? "terminal"}`);
-          retireTerminal(response);
+          onTerminal(response);
           return { content: [{ type: "text", text: resultText(response) }], details: response.result };
         },
       });
@@ -576,7 +765,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             // No run can be sized or approved for an audit that cannot launch.
             const owner = currentOwner();
             if (!owner.ok) {
-              ctx.ui.notify(`empirica: configure_run refused [${ownerDetail(owner)}]`, "error");
+              say(ctx, diagnostics, `empirica: configure_run refused [${ownerDetail(owner)}]`, "error");
               const current = await dispatch(getRunRequest(runHandle, randomUUID()));
               const run = (current.result.type === "Allow" || current.result.type === "Block")
                 ? current.result.run : undefined;
@@ -605,18 +794,47 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       });
     }
 
+    pi.registerCommand("empirica-ui", {
+      description: "Open the Empirica observer UI: every run in your store, read-only, on this machine (empirica.localhost).",
+      handler: async (_args, ctx) => {
+        const first = observer === null;
+        if (observer === null) {
+          const starting = startObserver(ctx.cwd ?? process.cwd());
+          observer = starting;
+          // A server that ends (killed, crashed) is forgotten, so the next /empirica-ui starts a new one.
+          void starting.then((s) => s.exited.then(() => { if (observer === starting) observer = null; }), () => undefined);
+        }
+        try {
+          const server = await observer;
+          say(ctx, diagnostics, `Empirica observer${first && !server.reused ? "" : " (already running)"}: ${server.url}`, "info");
+        } catch (error) {
+          observer = null;
+          say(ctx, diagnostics, `/empirica-ui could not start the observer: ${describe(error)}`, "error");
+        }
+      },
+    });
+
+    let onAgentStart: (() => void) | null = null;
+    pi.on("agent_start", () => { onAgentStart?.(); });
+
     pi.registerCommand("empirica", {
       description: "Start a complete Empirica v2 convergence run.",
       handler: async (args, ctx) => {
         if (ctx.isIdle?.() === false) {
-          ctx.ui.notify("/empirica requires an idle session; retry after the current turn finishes.",
-            "warning");
+          say(ctx, diagnostics, "/empirica requires an idle session; retry after the current turn finishes.", "warning");
           return;
         }
         const parsed = parseInvocationFlags(args);
         const goal = parsed.goal;
         if (parsed.unknownFlags.length) {
-          ctx.ui.notify(`empirica: not started — unknown flags: ${parsed.unknownFlags.join(" ")}`, "error");
+          say(ctx, diagnostics, `empirica: not started — unknown flags: ${parsed.unknownFlags.join(" ")}`, "error");
+          return;
+        }
+        // Pi's own version is the first admission: outside the profile's range, or unreadable, nothing starts.
+        const hostVersion = await observeHostVersion(deps.hostVersion);
+        const hostVerdict = checkHostVersion(HOST_COMPATIBILITY, hostVersion);
+        if (!hostVerdict.ok) {
+          say(ctx, diagnostics, `/empirica not started: ${hostVersionReason(hostVerdict).message}`, "error");
           return;
         }
         // Convergence needs the independent audit, which Pi can only launch through the external
@@ -625,7 +843,14 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         const owner = currentOwner();
         if (!owner.ok) {
           const notice = startRunNotice(ownerRefusalBlock(owner.code));
-          ctx.ui.notify(`${notice.text} [${ownerDetail(owner)}]`, "error");
+          say(ctx, diagnostics, `${notice.text} [${ownerDetail(owner)}]`, "error");
+          return;
+        }
+        let startAuditor: ResolvedAuditContract;
+        try {
+          startAuditor = await independentAuditor(CANONICAL_AUDIT_CALL, ctx, auditRuntimeOf(owner.binding));
+        } catch (error) {
+          say(ctx, diagnostics, `/empirica not started: ${describe(error)}`, "error");
           return;
         }
         try {
@@ -636,6 +861,9 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             host: "pi", interactive: INTERACTIVE_BY_MODE[ctx.mode ?? ""] ?? null,
             signal: `ctx.mode=${ctx.mode ?? "unknown"}`,
             delegation: process.env[PUBLIC_TOOLS.host_profiles[HOST_PROFILE_ID].delegation_env] === "1",
+            audit_retrieval: startAuditor.auditRetrieval,
+            human_surface: canPresent(ctx) ? "human" : "unavailable",
+            ...sessionLocator(ctx),
             // The observed audit runtime, recorded once with the run (receipts are derived from it).
             host_runtime: buildHostRuntime(SUBAGENTS_COMPATIBILITY, owner.binding.provenance),
           };
@@ -655,12 +883,33 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
             // Extension-injected slash commands are not passed through Pi's
             // interactive skill expander. Render the canonical SKILL.md itself
             // so no adapter-local workflow copy can drift.
+            const started = ctx.hasUI === false || ctx.mode === "print" || ctx.mode === "json"
+              ? new Promise<boolean>((resolve) => { onAgentStart = () => resolve(true); setTimeout(() => resolve(false), kickoffStartMs); })
+              : null;
             pi.sendUserMessage(kickoff, { deliverAs: "followUp" });
+            // No UI: "started" is said only once the agent has started; a kickoff that never starts is a visible failure.
+            const begun = started === null ? true : await started;
+            if (!begun) {
+              say(ctx, diagnostics, `/empirica: the agent did not start within ${Math.round(kickoffStartMs / 1000)} s, so nothing ran. `
+                + `The run ${runHandle} is still open and nothing was approved by it: send a message to continue it in this session, `
+                + "or end it with report_convergence intent=stop.", "error");
+              onAgentStart = null;
+              return;
+            }
+            const notice = startRunNotice(result);
+            say(ctx, diagnostics, notice.text, notice.type);
+            if (startAuditor.replaced !== undefined)
+              say(ctx, diagnostics, `empirica: auditor: ${startAuditor.model} (picked from enabledModels; ${startAuditor.replaced} `
+                + "is in your model's class)", "info");
+            // No UI: do not return (and so do not let Pi dispose the session) until the started run is idle.
+            if (started !== null) await ctx.waitForIdle?.();
+            onAgentStart = null;
+            return;
           }
           const notice = startRunNotice(result);
-          ctx.ui.notify(notice.text, notice.type);
+          say(ctx, diagnostics, notice.text, notice.type);
         } catch (error) {
-          ctx.ui.notify(`/empirica could not start a run: ${describe(error)}`, "error");
+          say(ctx, diagnostics, `/empirica could not start a run: ${describe(error)}`, "error");
         }
       },
     });
@@ -693,7 +942,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         const text = auditResultText(event);
         await trusted({ operation: "child_event", run_id: ordinary.runHandle,
           child_id: ordinary.childId, payload: lifecycleEvent("launching", ordinary.nativeId) });
-        if (event.isError === true || event.error !== undefined) {
+        if (event.isError === true || childNotTerminal(event)) {
           await trusted({ operation: "child_event", run_id: ordinary.runHandle,
             child_id: ordinary.childId, payload: lifecycleEvent("failed", ordinary.nativeId) });
         } else {
@@ -714,8 +963,9 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         return;
       }
       const text = auditResultText(event);
+      const notTerminal = childNotTerminal(event);
       redactVerdict(event);
-      const verdict = verdictFromText(text);
+      const verdict = notTerminal ? null : verdictFromText(text);
       const sessionFile = sessionFileFromDetails(event.details);
       const session = verdict && sessionFile ? readAuditSession(sessionFile) : null;
       const identity = verdict && session
@@ -727,7 +977,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           operation: "audit_start", run_id: correlation.runHandle,
           native_id: correlation.nativeId, plan: correlation.plan,
         });
-        if (event.isError === true || event.error !== undefined) {
+        if (event.isError === true || notTerminal) {
           await trusted({ operation: "audit_failure", run_id: correlation.runHandle,
             native_id: correlation.nativeId, plan: correlation.plan, state: "failed" });
           reconciled = true;
@@ -775,7 +1025,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           return { block: true, reason: `empirica governance context unavailable: ${describe(error)}` };
         }
       }
-      // Every subagent call is classified against the bound owner's reviewed inventory before anything
+      // Every subagent call is classified against the bound owner's inventory (checked-in or observed) before anything
       // else happens: a refusal here never records an investigation, reserves a child, or launches.
       let launch: { call: SubagentCallClassification; binding: OwnerBinding } | undefined;
       if (runHandle !== null && (event.toolName === subagentToolName || event.toolName === SUBAGENT_TOOL)) {
@@ -809,8 +1059,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         const requestedAuditor = event.input.agent === "empirica.empirica-auditor";
         // Admission binds to the owner verified above (now, in this call); a changed or vanished
         // owner already refused the launch before any reservation, plan, or preflight call.
-        const auditRuntime: AuditRuntime = { preflight: launch.binding.preflight.api,
-          version: launch.binding.owner.version, inventory: launch.binding.inventory };
+        const auditRuntime = auditRuntimeOf(launch.binding);
         if (!requestedAuditor) {
           const purpose = typeof event.input.task === "string" && event.input.task.trim()
             ? event.input.task : "author child";
@@ -841,31 +1090,25 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           if (current.result.type !== "Allow") throw new Error("approved configuration unavailable");
           const governed = current.result.run.governance as { state?: string } | undefined;
           if (governed?.state !== "approved") throw new Error("approved configuration unavailable");
-          const expectedAgent = path.resolve(skillsDir, "..", "agents", "pi", "empirica-auditor.md");
-          const resolvedAudit = await resolveAuditContract({ ...event.input, expectedAgent }, ctx, auditRuntime);
+          let resolvedAudit = await independentAuditor(event.input, ctx, auditRuntime);
           const roleProfile = "empirica.empirica-auditor";
-          const [auditorProvider, auditorModel] = modelPair(resolvedAudit.model, "pi-subagents");
           const nativeId = event.toolCallId;
-          const author = piGovernanceContext(ctx).author as Record<string, unknown> | null;
-          const authorIdentity = await trusted({ operation: "classify_identity",
-            payload: author ?? { provider_id: null, model_id: null, source: "pi-context" } });
-          const reviewerIdentity = await trusted({ operation: "classify_identity",
-            payload: { provider_id: auditorProvider, model_id: auditorModel,
-              source: "pi-subagents-preflight" } });
-          if (authorIdentity === null)
-            throw new Error("main author identity unobservable; select a concrete model");
-          if (reviewerIdentity === null)
-            throw new Error(
-              'reviewer identity unobservable; set subagents.agentOverrides["empirica.empirica-auditor"].model to a concrete model');
-          if (authorIdentity.identity === reviewerIdentity.identity)
-            throw new Error(
-              'auditor model equals the main model; set subagents.agentOverrides["empirica.empirica-auditor"].model');
           // The runtime is recorded once, at StartRun. The private bridge admits the audit only when the
           // runtime observed now is that record, so a receipt derived from the record cannot name a
           // package other than the one that runs this audit (a reload or resume may have swapped it).
-          const prepared = await trusted({ operation: "audit_prepare", run_id: runHandle,
+          const auditRun = runHandle;
+          const prepare = (audit: ResolvedAuditContract) => trusted({ operation: "audit_prepare", run_id: auditRun,
             role_profile: roleProfile,
-            payload: { host_runtime: buildHostRuntime(SUBAGENTS_COMPATIBILITY, launch.binding.provenance) } });
+            payload: { host_runtime: buildHostRuntime(SUBAGENTS_COMPATIBILITY, launch.binding.provenance),
+              audit_retrieval: audit.auditRetrieval, ...(audit.identity ? { auditor_identity: audit.identity } : {}) } });
+          let prepared = await prepare(resolvedAudit);
+          if (prepared.type === "audit_excluded" && resolvedAudit.source !== "override") {
+            // The core refused this auditor's class before any spawn: it produced covered evidence. Pick again outside the
+            // core's set (it also holds the author's class); an explicit override is never replaced.
+            resolvedAudit = await independentAuditor(event.input, ctx, auditRuntime, new Set(prepared.identities));
+            prepared = await prepare(resolvedAudit);
+          }
+          if (prepared.type === "audit_excluded") throw new Error(prepared.message);
           if (prepared.type === "audit_refused") {
             const refusal: OwnerRefusal = { ok: false, code: "owner-changed",
               message: `this run was started under a different pi-subagents runtime than the ${SUBAGENT_TOOL} owner `
@@ -894,20 +1137,37 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
               // Admission already fails closed; rejection failure must not permit launch.
             }
           }
-          return { block: true, reason: `empirica auditor admission failed: ${describe(error)}` };
+          return { block: true, reason: `empirica auditor admission failed: ${describe(error)}. ${AUDIT_STILL_OPEN}` };
         }
       }
       if (!gatedTools.has(event.toolName)) return;
       if (runHandle === null) return; // no run to gate against
       try {
         const intent = event.input.intent === "stop" ? "stop" : REPORT_CONVERGENCE_INTENT;
-        const response = await dispatch(
-          evaluateRunRequest(runHandle, intent, randomUUID()),
-        );
+        const evaluated = await evaluateObserved(runHandle, intent, ctx, trusted);
+        let { response, reported } = evaluated;
+        if (evaluated.mayAsk && !evidenceDialog) {
+          // The end of a pass (and the end of a deliberative run, ADR-0063): a block that waits on the human is
+          // presented once, then re-evaluated.
+          evidenceDialog = true;
+          const handle = runHandle;
+          try {
+            const confirmed = await confirmEvidence(response, handle, ctx, trusted,
+              (hostFailure) => dispatch(evaluateRunRequest(handle, intent, randomUUID(), hostFailure)),
+              Date.now() + governanceTimeoutMs);
+            response = confirmed.response;
+            reported = confirmed.failure;
+          } finally { evidenceDialog = false; }
+        }
+        // The host could not record its surface or could not show the batch, and the core said so: nobody was asked,
+        // so the block names that and leads to stop. It is never a pause for a human who was not shown the batch.
+        const hostFailure = evidenceHostFailure(response.result, reported);
+        if (hostFailure !== null) return { block: true, reason: `${hostFailure}\nhandle: ${runHandle}` };
         const decision = gateFromDecision(response.result);
         if (decision.kind === "deny" && settlementNotice(response.result) === null)
           return { block: true, reason: `${decision.reason}\nhandle: ${runHandle}` };
         reportEvaluations.set(event.toolCallId, { intent, response });
+        onTerminal(response);  // the core has ended the run: the adapter stops gating it now, not only when `execute` runs
         return; // permit; execute consumes this exact guarded result
       } catch (error) {
         // The gate is the trust boundary: an unavailable core fails closed.
@@ -916,6 +1176,26 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           reason: `empirica gate unavailable (failing closed): ${describe(error)}`,
         };
       }
+    });
+
+    // (agent_before_settle) The turn end of an active run is the registry's turn-end table (ADR-0068, `turn-end.ts`). This
+    // is the only turn-end boundary the adapter acts on (never `turn_end`), so one settle carries one notice. The run is
+    // read through the same guarded dispatch as the gate; an unreadable run ends the turn with nothing appended, because
+    // the gate at `tool_call` still holds.
+    pi.on("agent_before_settle", async (event: BoundaryEvent) => {
+      if (runHandle === null) return;
+      let action;
+      try {
+        const response = await dispatch(evaluateRunRequest(runHandle, REPORT_CONVERGENCE_INTENT, randomUUID()));
+        action = turnEnd(response.result, lastContinuation);
+        onTerminal(response);
+      } catch { lastContinuation = null; return; }
+      lastContinuation = action.kind === "continue" ? action.basis : null;
+      if (action.kind === "nothing") return;
+      const text = action.kind === "continue" ? action.message : action.notice;
+      if (action.kind === "no-progress") pi.appendEntry?.("empirica.turn_end", { outcome: "no-progress" });
+      const entries = [...event.entries, { type: "custom_message" as const, customType: "empirica.turn_end", content: text, display: true }];
+      return action.kind === "continue" ? { entries, continue: true } : { entries };
     });
 
     // (session_before_compact) Restore the run state after compaction — only if

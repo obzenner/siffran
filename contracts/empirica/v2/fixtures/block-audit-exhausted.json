@@ -20,13 +20,19 @@
           "host": "test",
           "interactive": true,
           "signal": "fixture",
-          "delegation": false
+          "delegation": false,
+          "audit_retrieval": [
+            "local",
+            "workspace"
+          ],
+          "human_surface": "unavailable"
         },
         "status": "active",
+        "basis": "sha256:d9a25a79200993f7e0c83b1858f4a69d1a0e04a29fc11116571a8d46ac8b76e2",
         "contract": {
           "id": "empirica/public",
-          "version": "3.0.0",
-          "digest": "sha256:dfc3b1cb235da4d56b7225a8e9a60c2b208ad1c6405be53782666fa4431fb2e3",
+          "version": "4.0.0",
+          "digest": "<contract-digest>",
           "relevant_sections": [
             "budget"
           ]
@@ -120,7 +126,7 @@
           }
         ],
         "host": {
-          "profile_id": "claude-code@2.1.278",
+          "profile_id": "claude-code",
           "tier": "foreground_only",
           "missing_capabilities": [
             "host.async_unsupported"
@@ -176,15 +182,19 @@
           },
           "request_ready": true,
           "display_ready": true,
-          "next_action": "run.inspect"
+          "next_action": "run.inspect",
+          "human_wait": false
         },
         "audit": {
-          "state": "failed",
+          "verdict": "failed",
+          "current": true,
+          "pending": false,
           "independence": "distinct",
           "findings": [
             "citation names line 895, not 891"
           ]
-        }
+        },
+        "confirmation_batch": null
       },
       "reasons": [
         {

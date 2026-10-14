@@ -1,0 +1,1087 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://siffran.dev/contracts/empirica-ui-view/v1/run.schema.json",
+  "title": "Empirica observer: one run's detail (GET /api/run?key=)",
+  "description": "One run's detail with its own row and every attempt's row (GET /api/run?key=): what the side sheet shows, in one request. The detail's facts are the ones the row does not hold; the row (its standing, state, ask, claims with their words, graph and audit summary) owns what it holds and is given beside the detail, so a reader never joins two requests or derives a fact. Reason wording comes from core.confirmation.reason_text over the public-contract registry. A null is unknown (the run was not read that far), never an empty list. Enumerations are held equal to their owners by scripts/validate_ui_view.py.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "key",
+    "version",
+    "goal",
+    "governance",
+    "audit",
+    "stop",
+    "residuals",
+    "now",
+    "outstanding",
+    "stale",
+    "author",
+    "auditor",
+    "steps",
+    "claims",
+    "audits",
+    "dropped",
+    "decisions",
+    "row",
+    "attempts"
+  ],
+  "properties": {
+    "contract": {
+      "const": "empirica-ui-view/v1"
+    },
+    "key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Equal to the run's version in the view it belongs to: the cache version of the published document, not a plugin digest."
+    },
+    "goal": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "governance": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "approval",
+            "proposal_pending",
+            "ceilings",
+            "proposed",
+            "interactions"
+          ],
+          "properties": {
+            "mode": {
+              "enum": [
+                "deliberative",
+                "auto"
+              ]
+            },
+            "approval": {
+              "enum": [
+                "pending",
+                "approved",
+                "revision_pending",
+                "rejected"
+              ]
+            },
+            "proposal_pending": {
+              "type": "boolean",
+              "description": "The proposed ceilings wait on the human's approval (approval is pending or revision_pending)."
+            },
+            "ceilings": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "passes",
+                "spawns",
+                "audit_spawns"
+              ],
+              "description": "The ceilings in force, with what the run has used of each.",
+              "properties": {
+                "passes": {
+                  "$ref": "#/$defs/budget"
+                },
+                "spawns": {
+                  "$ref": "#/$defs/budget"
+                },
+                "audit_spawns": {
+                  "$ref": "#/$defs/budget"
+                }
+              }
+            },
+            "proposed": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "passes",
+                    "spawns",
+                    "audit_spawns"
+                  ],
+                  "properties": {
+                    "passes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "spawns": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "audit_spawns": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              ],
+              "description": "The ceilings proposed: what the human is asked to approve; null unless proposal_pending. They differ from the ceilings in force while a proposal waits."
+            },
+            "interactions": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "left",
+                    "of"
+                  ],
+                  "properties": {
+                    "left": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Human dialogs the run may still show (a configuration or an evidence presentation each spends one)."
+                    },
+                    "of": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                }
+              ],
+              "description": "Null when the history that counts them was not read."
+            }
+          }
+        }
+      ],
+      "description": "How the run is governed (core.observer.governance_facts)."
+    },
+    "audit": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "findings"
+          ],
+          "properties": {
+            "findings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The latest verdict's findings while it is the current failure."
+            }
+          }
+        }
+      ],
+      "description": "Null when the history was not read. The verdict, its currency, pending and independence are the row's audit."
+    },
+    "stop": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "basis",
+            "status",
+            "frozen",
+            "required",
+            "deferred"
+          ],
+          "properties": {
+            "basis": {
+              "enum": [
+                "recorded",
+                "unavailable"
+              ],
+              "description": "recorded: the residuals are read from the observation basis the run recorded when it stopped; unavailable: that record cannot hold them (they are unknown, not none)."
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1
+            },
+            "frozen": {
+              "type": "boolean",
+              "description": "Whether the run was frozen to a scope when it stopped."
+            },
+            "required": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "The claims the run had to approve to converge."
+            },
+            "deferred": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "The claims outside the frozen scope."
+            }
+          }
+        }
+      ],
+      "description": "What a run that ended stopped on: its status, whether it was frozen, the scope it kept and the scope it deferred, and the basis its residuals are read from. Null for a run that has not ended and when the run was not read."
+    },
+    "residuals": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "claims",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "minLength": 1
+              },
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": "The claims this reason is about; rows with the same reason and wording are one row."
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The reason in the past tense of a stopped run (core.confirmation.reason_text, ended)."
+              }
+            }
+          }
+        }
+      ],
+      "description": "Why the run stopped short (the plugin's residuals), read from what the run recorded when it stopped, never from today's files; identical rows grouped. Null when not read, and when the record cannot hold the stop (stop.basis is unavailable)."
+    },
+    "now": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "claims",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "minLength": 1
+              },
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": "The claims this reason is about; rows with the same reason and wording are one row."
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The reason in the present tense (core.confirmation.reason_text), judged against today's workspace."
+              }
+            }
+          }
+        }
+      ],
+      "description": "Only for a run that ended and whose files have changed since: what it would leave unresolved against the workspace now. Null otherwise (nothing changed, or the run is still going). Never a stop-time fact. Every other current fact of an ended run (its audit and its currency, each claim's state, review and assurance, the freshness of its proof) is also as of now, from the live snapshot, exactly as the author view reads it; only stop and residuals are read from the stop."
+    },
+    "stale": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "description": "Files whose current workspace observation differs from what an active spike executed against (the plugin's freshness changes), as of now, for a run that ended too.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "state"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "state": {
+                "enum": [
+                  "present",
+                  "missing",
+                  "unreadable",
+                  "non_regular",
+                  "outside_workspace"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "description": "Files whose current workspace observation differs from what an active spike executed against (the plugin's freshness changes). Null when not read."
+    },
+    "author": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The host-observed author identity; null when none was observed."
+    },
+    "auditor": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The host-observed identity of the latest verdict's auditor; null when none."
+    },
+    "steps": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "description": "Every recorded history artifact in causal order.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "n",
+              "at",
+              "kind",
+              "subject",
+              "claim",
+              "outcome",
+              "terminal",
+              "command",
+              "standing",
+              "bookkeeping"
+            ],
+            "properties": {
+              "n": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "at": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "When the write that first committed this artifact landed (seconds since the epoch, UTC), from that write's own entry in the run's timeline (adapters/state/timeline.py, ADR-0070). A local label, never an order: steps are in causal order whatever their times say. Null when that write's entry is missing, malformed or does not chain to the entry of the write before it; never a later or earlier write's time."
+              },
+              "kind": {
+                "enum": [
+                  "graph",
+                  "research",
+                  "spike_request",
+                  "spike",
+                  "attribution",
+                  "audit_verdict",
+                  "evidence_presentation",
+                  "evidence_confirmation",
+                  "observation_basis"
+                ]
+              },
+              "outcome": {
+                "enum": [
+                  "supporting",
+                  "refuting",
+                  "pass",
+                  "fail",
+                  "confirm",
+                  "reject",
+                  "approve",
+                  null
+                ],
+                "description": "research: supporting/refuting; spike: its gate; audit_verdict: its verdict; evidence_confirmation: the human's answer (confirm/reject a record, approve/reject a claim or the end of the run); null otherwise."
+              },
+              "claim": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "command": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "subject": {
+                "enum": [
+                  "run",
+                  "claim",
+                  "record"
+                ],
+                "description": "What the artifact is about: the run, a claim, or one research record."
+              },
+              "terminal": {
+                "type": "boolean",
+                "description": "The human's consent to end the run (its outcome is the answer to ending); the artifact names no claim."
+              },
+              "standing": {
+                "enum": [
+                  "current",
+                  "replaced",
+                  "gone",
+                  null
+                ],
+                "description": "Whether the claim it names still stands: current, replaced (reworded since), or gone (no longer in the graph); null when it names none."
+              },
+              "bookkeeping": {
+                "type": "boolean",
+                "description": "Whether the step records how the run was kept (its observation basis, who authored it) rather than what it came to; false for the human's consent to end the run, whatever else."
+              }
+            }
+          }
+        }
+      ],
+      "description": "Every recorded history artifact in causal order. Null when not read."
+    },
+    "claims": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "blocker_message",
+              "records",
+              "decision",
+              "research",
+              "proof"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "records": {
+                "type": "array",
+                "description": "Every research record on the claim as worded now, in the order recorded, with how each is verified (ADR-0067).",
+                "items": {
+                  "$ref": "#/$defs/record"
+                }
+              },
+              "decision": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "status",
+                      "outcome",
+                      "answer",
+                      "where"
+                    ],
+                    "properties": {
+                      "status": {
+                        "enum": [
+                          "approved",
+                          "rejected",
+                          "waiting",
+                          "unanswered",
+                          "deferred",
+                          "not_asked"
+                        ],
+                        "description": "approved/rejected: the human answered. deferred: outside the run's scope, nobody is asked. waiting: the human is asked (where). unanswered: the run ended with it open. not_asked: in scope but nothing asks it (it was refuted, say)."
+                      },
+                      "outcome": {
+                        "enum": [
+                          "approve",
+                          "reject",
+                          null
+                        ],
+                        "description": "The human's answer; null unless answered."
+                      },
+                      "answer": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "The human's optional answer, in their words."
+                      },
+                      "where": {
+                        "enum": [
+                          "next_report",
+                          "explicit_report",
+                          "if_available",
+                          "unavailable",
+                          "limit",
+                          null
+                        ],
+                        "description": "Where the human is asked; null unless status is waiting."
+                      }
+                    }
+                  }
+                ],
+                "description": "A needs-decision claim's human decision; null for every other claim kind."
+              },
+              "blocker_message": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The public-contract registry's message for the claim's blocker in the view; null exactly when that blocker is null."
+              },
+              "research": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Active supporting research."
+              },
+              "proof": {
+                "type": "array",
+                "description": "Every spike executed for this claim as its wording stands, in the order they ran, each as the plugin's dossier states it (empty: none ran). Output of the command is not retained.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "command",
+                    "outcome",
+                    "exit_code",
+                    "gate",
+                    "files",
+                    "state",
+                    "output"
+                  ],
+                  "properties": {
+                    "command": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "outcome": {
+                      "enum": [
+                        "pass",
+                        "fail"
+                      ],
+                      "description": "How the spike ended (registry artifact_outcomes)."
+                    },
+                    "exit_code": {
+                      "type": "integer"
+                    },
+                    "gate": {
+                      "enum": [
+                        "pass",
+                        "fail"
+                      ],
+                      "description": "The spike gate the execution produced (registry spike_gates)."
+                    },
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "path",
+                          "sha256"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "sha256": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        }
+                      },
+                      "description": "The files, with their digests, the execution was bound to."
+                    },
+                    "state": {
+                      "enum": [
+                        "current",
+                        "stale",
+                        "superseded"
+                      ],
+                      "description": "current: its files are unchanged; stale: a bound file changed since (the freshness owner's verdict); superseded: a later spike replaced it."
+                    },
+                    "output": {
+                      "enum": [
+                        "not_retained"
+                      ],
+                      "description": "The command's output is not kept by the plugin."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "description": "Null when not read; parallel to the row's claims."
+    },
+    "outstanding": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "need",
+              "claims",
+              "message",
+              "who",
+              "where"
+            ],
+            "properties": {
+              "need": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The reason code, or the bootstrap obligation id, that is unmet."
+              },
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1
+              },
+              "who": {
+                "enum": [
+                  "human",
+                  "agent",
+                  "auditor"
+                ],
+                "description": "Who acts: the human (a confirmation or decision), the auditor (an audit in progress), or the agent."
+              },
+              "where": {
+                "enum": [
+                  "next_report",
+                  "explicit_report",
+                  "if_available",
+                  "unavailable",
+                  "limit",
+                  "next_turn",
+                  "in_progress",
+                  "later"
+                ],
+                "description": "next_report: the host asks the human inside the author's next report; explicit_report: only an explicit report asks again; if_available: the host has not yet looked for a dialog, so a human may be asked at the next report if it finds one (unknown, not a promise); unavailable: the host has nobody to ask; limit: the run's human interactions are spent; next_turn: the agent's next step; in_progress: an audit is running; later: it waits for the items before it (the report names those first)."
+              }
+            }
+          }
+        }
+      ],
+      "description": "What an active run still owes (the author view's obligations), identical rows grouped. Empty for a run that has ended. Null when not read."
+    },
+    "audits": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "verdict",
+              "findings",
+              "auditor",
+              "independence",
+              "at"
+            ],
+            "properties": {
+              "verdict": {
+                "enum": [
+                  "passed",
+                  "failed"
+                ]
+              },
+              "findings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "auditor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "independence": {
+                "enum": [
+                  "distinct",
+                  "mixed",
+                  "same_model",
+                  "unverified",
+                  "human_owned",
+                  null
+                ],
+                "description": "The verdict's independence as it stood when it was recorded (core.evaluation.independence_then): its auditor against the producers of exactly the evidence its audit was launched over, never today's evidence. Null when the run no longer holds that launch dossier."
+              },
+              "at": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Seconds since the epoch (UTC) of the write that recorded it, from the run's timeline (ADR-0070): a label, never an order; null when unknown."
+              }
+            }
+          }
+        }
+      ],
+      "description": "Every audit verdict, newest first (core.evaluation.audit_verdicts reversed; the first is the latest, the one that decides the run): its findings, the auditor the host recorded, its independence and when it was recorded. Null when not read."
+    },
+    "dropped": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "claim",
+              "text",
+              "kind",
+              "removed",
+              "why",
+              "source",
+              "citation",
+              "command",
+              "at"
+            ],
+            "properties": {
+              "claim": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "ordinary",
+                  "needs-experiment",
+                  "needs-decision"
+                ]
+              },
+              "removed": {
+                "type": "boolean",
+                "description": "Declared by an earlier graph and not by the selected one."
+              },
+              "why": {
+                "enum": [
+                  "refuted",
+                  "spike_failed",
+                  "rejected",
+                  "removed"
+                ],
+                "description": "The gate's own cause (core.evaluation.claim_state_cause): refuting research, a failed spike, a human's no; or removed in a regraph with no evidence against it."
+              },
+              "source": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "citation": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "command": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "at": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Seconds since the epoch (UTC) of the write that recorded it, from the run's timeline (ADR-0070): a label, never an order; null when unknown."
+              }
+            }
+          }
+        }
+      ],
+      "description": "The claims the run no longer stands on, each with why (core.observer.dropped). Null when not read."
+    },
+    "decisions": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "asked",
+              "claim",
+              "source",
+              "plan",
+              "answer",
+              "effect",
+              "at"
+            ],
+            "properties": {
+              "asked": {
+                "enum": [
+                  "approve_configuration",
+                  "approve_revision",
+                  "decide_claim",
+                  "confirm_source",
+                  "consent_stop",
+                  "freeze_scope"
+                ]
+              },
+              "claim": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The claim the answer is attached to: the claim decided (decide_claim), or the claim the confirmed source supports (confirm_source); null for a configuration or the run's end."
+              },
+              "source": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The research record's source the answer confirms or rejects (confirm_source only)."
+              },
+              "plan": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1,
+                "description": "The configuration's plan revision the answer approves, amends or rejects (approve_configuration, approve_revision only)."
+              },
+              "answer": {
+                "enum": [
+                  "approve",
+                  "reject",
+                  "later"
+                ]
+              },
+              "effect": {
+                "enum": [
+                  "configuration_approved",
+                  "configuration_amended",
+                  "configuration_rejected",
+                  "record_confirmed",
+                  "record_rejected",
+                  "claim_approved",
+                  "claim_rejected",
+                  "run_ended",
+                  "run_continued",
+                  "none"
+                ]
+              },
+              "at": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Seconds since the epoch (UTC) of the write that recorded the answer (a configuration receipt: the first write whose timeline entry lists it, ADR-0070); a label, never an order; null when unknown."
+              }
+            }
+          }
+        }
+      ],
+      "description": "Every answer a human gave (core.observer.decisions): configuration receipts from a dialog, then confirmations and items left for later in history order. Null when not read."
+    },
+    "row": {
+      "$ref": "https://siffran.dev/contracts/empirica-ui-view/v1/row.schema.json#/$defs/row",
+      "description": "This run's row, exactly as the store index holds it."
+    },
+    "attempts": {
+      "type": "array",
+      "items": {
+        "$ref": "https://siffran.dev/contracts/empirica-ui-view/v1/row.schema.json#/$defs/row"
+      },
+      "minItems": 1,
+      "description": "Every attempt at this run (the same project and run), by generation, this one included, each as its row. Order is the generation, never a time."
+    }
+  },
+  "$defs": {
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "source_kind",
+        "quote",
+        "outcome",
+        "class",
+        "status",
+        "wait",
+        "retrieve",
+        "spike_unavailable",
+        "note"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The record's source_ref."
+        },
+        "source_kind": {
+          "enum": [
+            "code",
+            "docs",
+            "runtime",
+            "web"
+          ]
+        },
+        "quote": {
+          "type": "string",
+          "description": "The verbatim citation."
+        },
+        "outcome": {
+          "enum": [
+            "supporting",
+            "refuting"
+          ]
+        },
+        "class": {
+          "enum": [
+            "verbatim",
+            "retrievable",
+            "observed"
+          ],
+          "description": "How the record can be verified (core/citations.py)."
+        },
+        "status": {
+          "enum": [
+            "verified_by_service",
+            "confirmed_by_human",
+            "rejected_by_human",
+            "pending"
+          ]
+        },
+        "wait": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "who",
+                "where"
+              ],
+              "properties": {
+                "who": {
+                  "enum": [
+                    "auditor",
+                    "human"
+                  ]
+                },
+                "where": {
+                  "enum": [
+                    "next_report",
+                    "explicit_report",
+                    "if_available",
+                    "unavailable",
+                    "limit",
+                    "next_turn",
+                    "in_progress",
+                    "nobody"
+                  ],
+                  "description": "As for outstanding.where; nobody: the run has ended."
+                }
+              }
+            }
+          ],
+          "description": "Who a pending confirmation waits on and where; null unless the record is pending."
+        },
+        "retrieve": {
+          "type": "boolean",
+          "description": "The auditor must retrieve the source (its kind is within the host's observed retrieval)."
+        },
+        "spike_unavailable": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why no deterministic spike could establish an observed record; null for other classes."
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The human's note to the author, when the receipt has one."
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "used",
+        "max"
+      ],
+      "properties": {
+        "used": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

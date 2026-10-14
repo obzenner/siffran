@@ -11,10 +11,10 @@ PLUGIN = Path(__file__).resolve().parents[2]
 if str(PLUGIN) not in sys.path:
     sys.path.insert(0, str(PLUGIN))
 
-from adapters import bridge  # noqa: E402
+from adapters import bridge, confirmation  # noqa: E402
 from application import host_runtime  # noqa: E402
 from adapters.audit_protocol import (  # noqa: E402
-    AuditLaunchPlan, AuditProtocol, IdentityObservation,
+    AuditLaunchPlan, AuditorExcluded, AuditProtocol, IdentityObservation,
 )
 from adapters.identity import observe  # noqa: E402
 
@@ -58,7 +58,11 @@ def _audit_prepare(profile: str, raw: dict, payload: dict):
     if recorded is None or not host_runtime.same_runtime(
             recorded.get("host_runtime"), payload.get("host_runtime")):
         return {"type": "audit_refused", "reason": "runtime_changed"}
-    plan = AuditProtocol(profile).prepare(raw["run_id"], role_profile=raw["role_profile"])
+    try:
+        plan = AuditProtocol(profile, audit_retrieval=payload["audit_retrieval"]).prepare(
+            raw["run_id"], role_profile=raw["role_profile"], auditor_identity=payload.get("auditor_identity"))
+    except AuditorExcluded as excluded:  # before any spawn: the adapter picks another class, or shows the core's text
+        return {"type": "audit_excluded", "message": str(excluded), "identities": excluded.identities}
     return {"type": "audit_plan", "plan": _plan_json(plan)}
 
 
@@ -92,6 +96,28 @@ def _audit_verdict(profile: str, raw: dict, payload: dict):
     return {"type": "audit_verdict", "admitted": admitted}
 
 
+def _evidence_presentation(profile: str, raw: dict, payload: dict):
+    """Record the presentation and hand back the items to show (shared flow: adapters/confirmation.py)."""
+    batch = payload.get("batch")
+    shown = confirmation.present(profile, raw["run_id"], terminal=batch if confirmation.is_terminal(batch) else None)
+    if isinstance(shown, confirmation.Outcome):  # nothing was shown or spent; the host reports presentation_failed
+        return {"type": "evidence_refused", "result": {"failure": shown.failure}}
+    receipt_id, items = shown
+    return {"type": "evidence_presentation", "receipt_id": receipt_id, "items": items}
+
+
+def _human_surface(profile: str, raw: dict, payload: dict):
+    return bridge.trusted_human_surface(profile, raw["run_id"], {"run_id": raw["run_id"], **payload})
+
+
+def _evidence_confirmation(profile: str, raw: dict, payload: dict):
+    stored = confirmation.submit(profile, raw["run_id"], payload["receipt_id"], payload["items"],
+                                 payload["answers"])
+    if stored is None:
+        return {"type": "evidence_none"}
+    return {"type": "evidence_receipt", "result": stored}
+
+
 def _child_event(profile: str, raw: dict, payload: dict):
     return bridge.trusted_child_event(profile, raw["run_id"], raw["child_id"], payload)
 
@@ -114,6 +140,9 @@ _HANDLERS = {
     "audit_identity": _audit_identity,
     "audit_failure": _audit_failure,
     "audit_verdict": _audit_verdict,
+    "human_surface": _human_surface,
+    "evidence_presentation": _evidence_presentation,
+    "evidence_confirmation": _evidence_confirmation,
     "child_event": _child_event,
     "attribution": _attribution,
     "evidence_leaf": _evidence_leaf,

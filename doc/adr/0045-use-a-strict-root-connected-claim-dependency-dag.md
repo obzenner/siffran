@@ -82,3 +82,14 @@ unchanged. Transaction tests remove or corrupt a selected graph artifact and req
 `run.corrupt` with no semantic leakage or write. Positive fixtures retain single-node, branching,
 and multi-level acyclic rooted graphs. Contract validation and vendor parity bind the public edge
 enum and clauses.
+
+## Amendment (2026-10-08): the root claim must be gating
+
+The graph validator checked only that the root is one of the claims. A graph whose root has `gating: false` was accepted, although a claim's state is derived from its **own** evidence plus its scoped children (ADR 46), never from its children alone. Convergence is therefore unreachable from the graph action onward, and nothing said so. A non-gating root with no evidence of its own stays open: qualification Q3 (finding F-Q3-3) showed the views listing it as open with no missing code and no step to take, until `report_convergence` ended the run `stopped_frozen` (ADR-0026). A non-gating root that carries evidence has a state of its own, but any non-gating claim, the root included, makes `report_convergence` end the run `stopped_frozen` (ADR-0026), so such a run can at best end `stopped_frozen` and never converges.
+
+The validator now refuses a graph whose root is not `gating: true`, at graph time, with a closed reason of its own, `graph.root_not_gating` (a contract reason with a recovery row; the prior selected argument is unchanged, as for `graph.invalid`). The root is the goal-level assurance claim and always gates; scope the author wants to defer belongs in non-gating claims below it. `claim-graph.md` states the rule. Existing runs carry no compatibility (ADR-0067: no backwards compatibility).
+
+* Good, because an unreachable run is refused at the first action instead of discovered at the terminal step.
+* Bad, because a goal that is only a container of deferred scope must say so in a gating root claim with its own evidence.
+
+Confirmation: a conformance case submits a graph with a non-gating root and requires sole `graph.root_not_gating` with the prior selected argument unchanged; the author view shows the reason and its recovery row; no fixture or golden graph has a non-gating root.

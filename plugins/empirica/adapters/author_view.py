@@ -13,6 +13,7 @@ from application.protocol import (
     untrusted_delimiters,
     validate_public_result,
 )
+from core.confirmation import is_terminal
 from core.freshness import valid_claim_id
 from core.governance import CEILINGS
 from core.projection import safe_text
@@ -45,13 +46,14 @@ class TextSafety:
 
 @dataclass(frozen=True)
 class Header:
-    """First-line result, run, governance summary, and public proposal rationale."""
+    """First-line result, run, governance summary, public proposal rationale, and the unreviewed-runtime note."""
 
     result_type: Trusted
     status: Trusted
     governance: Trusted
     run_id: Trusted
     proposal_rationale: Untrusted | None
+    host_note: Trusted | None = None
 
 
 @dataclass(frozen=True)
@@ -95,10 +97,13 @@ class Freshness:
 
 @dataclass(frozen=True)
 class AuditSummary:
-    """Contract-owned audit state and host-observed independence classification."""
+    """The audit's latest verdict, its currency, whether a re-audit is pending, and (once settled) the host-observed
+    independence classification: the core's four facts, worded by ``audit_text``."""
 
-    state: Trusted
-    independence: Trusted
+    verdict: Trusted
+    current: bool | None
+    pending: bool
+    independence: Trusted | None
     findings: tuple[Untrusted, ...]
 
 
@@ -115,6 +120,7 @@ class AuthorView:
     children: tuple[Child, ...]
     freshness: tuple[Freshness, ...]
     next_actions: tuple[Trusted, ...]
+    waiting: tuple[str, ...] = ()
 
 
 def _fallback(result: Any) -> str:
@@ -172,6 +178,8 @@ def _value_renderer(schema: dict[str, Any]) -> ValueRenderer | None:
         return lambda value, safety: safety.untrusted(value)
     if schema.get("type") == "array":
         item = _value_renderer(schema["items"])
+        if item is None:  # elements are intentionally omitted (digests), so the whole array is
+            return None
         separator = ", " if _is_string(schema["items"]) else "; "
         return lambda value, safety: separator.join(item(row, safety) for row in value)
     if schema.get("type") == "object":
@@ -278,6 +286,26 @@ def _child_label(row: dict[str, Any], safety: TextSafety) -> Trusted | Untrusted
     return safety.untrusted(row["purpose"])
 
 
+_WAIT_STATE = {None: "waiting_none_error", "unavailable": "waiting_unavailable", "unobserved": "waiting_unobserved",
+               "already_presented": "waiting_already_presented", "interaction_limit": "waiting_interaction_limit",
+               "surface_unrecorded": "waiting_surface_unrecorded", "presentation_failed": "waiting_presentation_failed"}
+
+
+def _waiting(run: dict[str, Any], safety: TextSafety) -> tuple[str, ...]:
+    """What waits on a human, where each record is cited from and for which claim, and whether a human will be asked."""
+    batch = run.get("confirmation_batch")
+    if not batch:
+        return ()
+    return (
+        *(f"  {_LABELS['waiting_record']} {row['source_kind']} {safety.untrusted(row['source_ref'])} "
+          f"{_LABELS['waiting_for_claim']} {safety.claim_id(row['claim_id'])}" for row in batch["records"]),
+        *(f"  {_LABELS['waiting_claim']} {safety.claim_id(claim_id)}" for claim_id in batch["claim_ids"]),
+        # The terminal step of a deliberative run asks about the run, not about a claim; the status is the core's own word.
+        *((f"  {_LABELS['waiting_terminal']} {batch['terminal']['status']}",) if is_terminal(batch) else ()),
+        f"  {_LABELS[_WAIT_STATE[batch['prompt_error']]]}",
+    )
+
+
 def _parse(result: dict[str, Any]) -> AuthorView:
     """Parse one schema-valid run-bearing Allow or Block result."""
     run = result["run"]
@@ -287,9 +315,12 @@ def _parse(result: dict[str, Any]) -> AuthorView:
     if result_type == "Allow":
         result_type += f" ({_LABELS['converged']}{'true' if result['converged'] else 'false'})"
     rationale = run["governance"]["proposal"]["rationale"] if run["governance"] is not None else None
+    unreviewed = run["host"].get("unreviewed_runtime")
+    host_note = (Trusted(f"{_LABELS['host_unreviewed']} {unreviewed['package']} {unreviewed['version']} "
+                         f"{_LABELS['host_unreviewed_note']}") if unreviewed is not None else None)
     header = Header(Trusted(result_type), Trusted(run["status"]), _governance(run),
                     Trusted(run["id"]),
-                    safety.untrusted(rationale) if rationale is not None else None)
+                    safety.untrusted(rationale) if rationale is not None else None, host_note)
     terminal_next = tuple(render_surface(action) for action in run["next_actions"])
     terminal = run["status"] != "active"
     obligations = tuple(
@@ -319,14 +350,13 @@ def _parse(result: dict[str, Any]) -> AuthorView:
         Freshness(safety.untrusted(row["path"]), Trusted(row["state"]))
         for row in run["freshness"]["changes"])
     return AuthorView(
-        header, AuditSummary(Trusted(run["audit"]["state"]),
-                             Trusted(run["audit"]["independence"]),
-                             tuple(safety.untrusted(item) for item in run["audit"]["findings"])),
+        header, _audit_summary(run["audit"], safety),
         # Only Block carries reasons; a run-bearing Allow has none.
         (tuple(_reason(row, safety) for row in result["reasons"])
          if result["type"] == "Block" else ()),
         obligations, satisfied, residuals, children, freshness,
         () if terminal else terminal_next,
+        _waiting(run, safety),
     )
 
 
@@ -371,10 +401,33 @@ def _freshness_lines(rows: tuple[Freshness, ...]) -> tuple[str, ...]:
     return tuple(f"  {row.path}: {row.state}" for row in rows)
 
 
+def _audit_summary(audit: dict[str, Any], safety: TextSafety) -> AuditSummary:
+    return AuditSummary(Trusted(audit["verdict"]), audit["current"], audit["pending"],
+                        None if audit["independence"] is None else Trusted(audit["independence"]),
+                        tuple(safety.untrusted(item) for item in audit["findings"]))
+
+
+def audit_text(audit: AuditSummary | dict[str, Any]) -> str:
+    """The audit in words, from the core's four facts: the verdict (or that one is owed or pending), no longer current
+    when the verdict does not cover the argument, a pending re-audit, and the independence of a settled verdict. Only
+    contract labels are used."""
+    get = (lambda key: getattr(audit, key)) if isinstance(audit, AuditSummary) else audit.__getitem__
+    verdict, current, pending, independence = get("verdict"), get("current"), get("pending"), get("independence")
+    if verdict == "none":
+        parts = [_LABELS["audit_pending" if pending else "audit_verdict_none"]]
+    else:
+        parts = [_LABELS[f"audit_verdict_{verdict}"]]
+        if current is False:
+            parts.append(_LABELS["audit_not_current"])
+        if pending:
+            parts.append(_LABELS["audit_reaudit_pending"])
+    suffix = f" ({independence})" if independence is not None else ""
+    return ", ".join(parts) + suffix
+
+
 def _audit_lines(audit: AuditSummary) -> tuple[str, ...]:
-    """Render independence once a verdict exists, then the findings a failed audit reported."""
-    suffix = f" ({audit.independence})" if audit.state in {"passed", "failed"} else ""
-    return (f"{_LABELS['audit']} {audit.state}{suffix}",
+    """Render the audit in words, then the findings a failed audit reported."""
+    return (f"{_LABELS['audit']} {audit_text(audit)}",
             *(f"  {_LABELS['finding']} {item}" for item in audit.findings))
 
 
@@ -384,10 +437,12 @@ def _render(view: AuthorView) -> str:
             f"{_LABELS['run_id']} {view.header.run_id}",
             *((f"{_LABELS['proposal_rationale']} {view.header.proposal_rationale}",)
               if view.header.proposal_rationale is not None else ()),
+            *((view.header.host_note,) if view.header.host_note is not None else ()),
             *_audit_lines(view.audit))
     sections = (
         (_LABELS["reasons"], _reason_lines(view.reasons)),
         (_LABELS["open_obligations"], _obligation_lines(view.obligations)),
+        (_LABELS["waiting"], view.waiting),
         (_LABELS["satisfied_obligations"], tuple(f"  {item}" for item in view.satisfied)),
         (_LABELS["residuals"], _reason_lines(view.residuals)),
         (_LABELS["children"], _child_lines(view.children)),
@@ -398,24 +453,47 @@ def _render(view: AuthorView) -> str:
     return "\n\n".join(("\n".join(base), *blocks))
 
 
+_VERIFICATION = {"verified_by_service": "verified_by_service", "confirmed_by_human": "confirmed_by_human",
+                 "rejected_by_human": "rejected_by_human"}
+
+
+def _verification_label(verification: dict[str, Any]) -> str:
+    """Plain words for one record's verification: what the service did, what a human did, or who retrieves it."""
+    if verification["status"] == "pending":
+        return _LABELS["pending_audit" if verification["retrieve"] else "pending_human"]
+    return _LABELS[_VERIFICATION[verification["status"]]]
+
+
 def _argument_lines(argument: dict[str, Any], safety: TextSafety) -> tuple[str, ...]:
     """Render the graph projection without private identity or artifact fields."""
     claims = tuple(
-        f"  {safety.claim_id(row['claim_id'])} {_LABELS['claim_kind']}{row['kind']} "
-        f"{_LABELS['claim_gating']}{'true' if row['gating'] else 'false'} "
-        f"{_LABELS['claim_state']}{row['state']} "
-        f"{_LABELS['claim_evidence']}"
-        f"{_LABELS['evidence_present'] if row['active_evidence_ids'] else _LABELS['evidence_none']}: "
-        f"{safety.untrusted(row['text'])}"
+        line
         for row in argument["claims"]
+        for line in (
+            f"  {safety.claim_id(row['claim_id'])} {_LABELS['claim_kind']}{row['kind']} "
+            f"{_LABELS['claim_gating']}{'true' if row['gating'] else 'false'} "
+            f"{_LABELS['claim_state']}{row['state']} "
+            f"{_LABELS['claim_evidence']}"
+            f"{_LABELS['evidence_present'] if row['active_evidence_ids'] else _LABELS['evidence_none']}: "
+            f"{safety.untrusted(row['text'])}",
+            *((f"    {_LABELS['decision_' + row['human_decision']['outcome']]}"
+               + (f" — {_LABELS['human_answer']} {safety.untrusted(row['human_decision']['answer'])}"
+                  if row["human_decision"]["answer"] else ""),) if row.get("human_decision") else ()),
+        )
     )
     edges = tuple(
         f"  {safety.claim_id(row['from'])} -{row['type']}-> {safety.claim_id(row['to'])}"
         for row in argument["edges"]
     )
     citations = tuple(
-        f"  {safety.untrusted(row['citation'])}"
+        line
         for row in argument["artifacts"] if row.get("citation")
+        for line in (
+            f"  {safety.untrusted(row['citation'])}"
+            + (f" — {_verification_label(row['verification'])}" if row.get("verification") else ""),
+            *((f"    {_LABELS['human_note']} {safety.untrusted(row['verification']['note'])}",)
+              if row.get("verification", {}).get("note") else ()),
+        )
     )
     audit = argument["audit"]
     return (
@@ -424,7 +502,7 @@ def _argument_lines(argument: dict[str, Any], safety: TextSafety) -> tuple[str, 
         _LABELS["claims"], *claims,
         *((_LABELS["edges"], *edges) if edges else ()),
         *((_LABELS["citations"], *citations) if citations else ()),
-        f"{_LABELS['audit_status']} {audit['state']} ({audit['independence']})",
+        f"{_LABELS['audit_status']} {audit_text(audit)}",
         *(f"  {_LABELS['finding']} {safety.untrusted(item)}" for item in audit["findings"]),
     )
 

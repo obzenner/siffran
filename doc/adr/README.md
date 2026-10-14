@@ -34,6 +34,8 @@ Deterministic evidence and a distinct, host-observed audit gate convergence; rou
 - [ADR-0051](0051-separate-managed-audit-execution-from-generic-child-tier.md) — Separate managed-audit execution from the generic child tier
 - [ADR-0052](0052-separate-harness-compatibility-from-receipt-provenance.md) — Separate harness compatibility from receipt provenance
 - [ADR-0056](0056-align-bootstrap-admission-and-agent-guidance.md) — Align bootstrap admission and agent guidance
+- [ADR-0066](0066-check-workspace-citations-verbatim-when-research-is-submitted.md) — Check workspace citations verbatim when research is submitted
+- [ADR-0067](0067-verify-every-research-record-by-its-class-and-surface-every-confirmation-it-still-needs.md) — Verify every research record by its class and surface every confirmation it still needs (proposed)
 
 ## Governance and budgets
 
@@ -53,6 +55,8 @@ Operational run state (active generations, freeze, freshness) and Git-backed kno
 - [ADR-0029](0029-record-per-run-exit-codes-and-automate-re-gating-after-a-formatter.md) — Record per-run exit codes and automate re-gating after a formatter
 - [ADR-0031](0031-split-operational-state-from-git-backed-knowledge-artifacts.md) — Split operational state from Git-backed knowledge artifacts
 - [ADR-0059](0059-batch-git-artifact-reads-without-changing-publication.md) — Batch Git artifact reads without changing publication
+- [ADR-0065](0065-observe-runs-through-a-plugin-owned-read-only-read-model-served-on-loopback.md) — Observe runs through a plugin-owned read-only read model served on loopback
+- [ADR-0070](0070-record-event-time-beside-the-record-never-inside-it.md) — Record event time beside the record, never inside it
 
 ## Hosts and compatibility
 
@@ -62,6 +66,8 @@ Adapters share one host-neutral bridge; Claude and Pi translate into it.
 - [ADR-0032](0032-port-claude-completion-gating-to-a-gated-domain-operation-on-pi.md) — Port Claude completion gating to a gated domain operation on Pi
 - [ADR-0033](0033-activate-claude-through-the-host-neutral-bridge.md) — Activate Claude through the host-neutral bridge
 - [ADR-0038](0038-warn-when-the-checkout-is-behind-the-installed-plugin.md) — Warn when the checkout is behind the installed plugin
+- [ADR-0068](0068-record-host-boundaries-as-data-and-end-every-turn-by-control-mode.md) — Record host boundaries as data and end every turn by control mode, on every host
+- [ADR-0069](0069-admit-hosts-and-audit-runtimes-by-range-and-observed-capability.md) — Admit hosts and audit runtimes by range and observed capability
 
 ## Empirica 4.0 consolidation
 
@@ -69,3 +75,7 @@ Withdrawn modes stay withdrawn and the legacy theta/unknowns/race models are ret
 
 - [ADR-0061](0061-withdraw-the-cli-exec-and-multi-provider-run-modes-from-empirica-4-0.md) — Withdraw the cli_exec and multi_provider run modes from Empirica 4.0
 - [ADR-0062](0062-retire-confidence-theta-spec-unknowns-and-racing-convergence-models.md) — Retire confidence theta spec unknowns and racing convergence models
+
+## Labels in the records
+
+Some records cite round and finding labels (`G14`, `F-Q4-3`, `A6-1`, `Q3`, `R3`, `m1`). They name build rounds, qualification findings and review findings of the 5.0.0 work, kept outside this repository (research notes and operator evidence); the rule each one names is written out in the record that cites it, and no decision depends on opening the source.

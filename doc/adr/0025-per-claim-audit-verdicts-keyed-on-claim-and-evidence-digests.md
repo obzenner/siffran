@@ -17,6 +17,8 @@ links:
   kind: Relates to
 - target: 27
   kind: Amended by
+- target: 67
+  kind: Relates to
 ---
 
 # Per-claim audit verdicts keyed on claim and evidence digests

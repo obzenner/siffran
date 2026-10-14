@@ -1,7 +1,7 @@
 """Strict v2 persisted-state classification and codec (D6 spec §4–5).
 
-Only the exact current protocol/schema identity is decoded. Every other value is corrupt; there is
-no old-state category, field default, migration, or mutation.
+Only the exact current protocol/schema identity is decoded. Every other value is corrupt: one
+category, with no field default or mutation.
 """
 from __future__ import annotations
 

@@ -11,18 +11,18 @@ from adapters.identity import observe
 from core.governance import expected_approval_kind
 
 TEST_INVOCATION = {"host": "test", "interactive": True,
-                   "signal": "test", "delegation": False}
+                   "signal": "test", "delegation": False, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}
 
 
 def host_runtime_for(profile_id):
     """The runtime provenance a host of ``profile_id`` records at StartRun (``None`` for a profile with
-    no external audit runtime), built from the profile's own reviewed policy."""
+    no external audit runtime), the newest checked-in-reviewed version."""
     policy = _proto.host_profile(profile_id).get("subagents_compatibility")
     if policy is None:
         return None
     root = "/opt/" + policy["package"]
     return {"policy_id": policy["policy_id"],
-            "subagents": {"package": policy["package"], "version": policy["reviewed_versions"][-1],
+            "subagents": {"package": policy["package"], "version": "0.76.1", "reviewed": True,
                           "owner_path": root + "/src/extension/index.js", "package_root": root,
                           "preflight_path": root + "/src/api/preflight.js", "source": root + "/index.ts"}}
 
@@ -67,9 +67,7 @@ def approve_current(coordinator, run_id, *, author=None, auditor=None):
                                    budgets=g["proposal"]["budgets"],
                                    rationale=SIZED_RATIONALE)}, "test-consent-configure")
         assert configured["result"]["type"] == "Allow", configured
-    ingress = "pi_ui" if c.profile_id.startswith("pi@") else "mcp_elicitation"
-    if c.profile_id.startswith("codex"):
-        ingress = "unavailable"
+    ingress = _proto.host_profile(c.profile_id)["approval_ingress"]
     context = {"author": author, "ingress": ingress}
     response = transact(c, run_id, context, context=True)
     assert response["result"]["type"] in {"Allow", "Inert"}, response
@@ -86,3 +84,24 @@ def approve_current(coordinator, run_id, *, author=None, auditor=None):
         decision["outcome"] = "approve"
     approved = transact(c, run_id, decision)
     assert approved["result"]["type"] == "Allow", approved
+
+
+def end_with_consent(coordinator, run_id, intent="stop"):
+    """``stop`` or ``report_convergence`` that ends the run non-converged, as the human who approves ending it: the
+    response that committed it (ADR-0063 amendment; the auto modes need no consent and answer at once)."""
+    c = coordinator
+
+    def evaluate():
+        return c.handle({"type": "EvaluateRun", "run_id": run_id, "intent": intent}, "test-end")
+    response = evaluate()
+    if not any(r["code"] == "governance.terminal_stop_pending" for r in response["result"].get("reasons", [])):
+        return response
+    c.trusted_human_surface(run_id, {"run_id": run_id, "surface": "human"})
+    batch = evaluate()["result"]["run"]["confirmation_batch"]
+    shown = c.trusted_evidence_presentation(run_id, {"run_id": run_id, "receipt_id": "test-end", "key": batch["key"]})
+    assert shown["result"]["type"] == "Allow", shown
+    decision = {"subject": "claim", "claim_id": batch["terminal"]["status"],
+                "claim_digest": batch["terminal"]["digest"], "outcome": "approve"}
+    answered = c.trusted_evidence_confirmation(run_id, {"run_id": run_id, "receipt_id": "test-end", "decisions": [decision]})
+    assert answered["result"]["type"] == "Allow", answered
+    return evaluate()

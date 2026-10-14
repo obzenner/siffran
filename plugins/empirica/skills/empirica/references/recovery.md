@@ -3,7 +3,8 @@
 Generated from `contracts/empirica/v2/public-contract.json` by `scripts/gen_recovery_reference.py`
 (`make empirica-recovery-reference`); do not edit by hand. Reason codes and next actions are the
 contract's; the author guidance column is the one sentence to act on. Next actions are shown as the
-text view renders them.
+text view renders them. The list is the contract's full set; the run view may omit some of these, and the
+confirmation row's guidance says which.
 
 | Reason | Next actions | Author guidance |
 |---|---|---|
@@ -13,6 +14,7 @@ text view renders them.
 | `run.corrupt` | `host: StartRun` | Stop using this run and start a fresh one; corrupt state is never repaired. |
 | `graph.missing` | `empirica_observe kind=graph` | Submit a claim graph from the supplied context before sizing the run; no investigation is needed first. |
 | `graph.invalid` | `empirica_read GetRun` | Read the run, then resubmit a closed, root-connected graph that matches the tool schema; do not change claims inside a frozen scope. |
+| `graph.root_not_gating` | `empirica_observe kind=graph` | Resubmit the graph with a gating root: the root is the goal-level assurance claim, and a non-gating root never converges; defer scope in non-gating claims below it. |
 | `route.required` | `empirica_observe kind=route` | Record the route before any investigation. |
 | `investigation.required` | `empirica_observe kind=investigate` | Once the run is approved, record the investigate witness before any native read, command, evidence, or child. |
 | `route.late` | `empirica_read GetRun` | The route came after investigation began and cannot be repaired: read the residuals, then stop or start a fresh run. |
@@ -21,7 +23,6 @@ text view renders them.
 | `claim.spike_missing` | `empirica_observe kind=spike_request` | Request a deterministic spike for the named `needs-experiment` claim. |
 | `claim.spike_prerequisite_missing` | `empirica_observe kind=research`; `empirica_observe kind=spike_request` | Record supporting research for the claim first, then request the spike. |
 | `claim.spike_stale` | `empirica_observe kind=spike_request` | The spike's inputs changed: request it again against the current research and dependent files. |
-| `claim.human_decision` | `human: decision` | Ask the human for the decision; no author action settles a `needs-decision` claim. |
 | `claim.refuted` | `empirica_read GetRun` | Active evidence refutes the claim: read the run, then discard or restate the claim in a new graph. |
 | `evidence.conflict` | `empirica_read GetRun`; `report_convergence intent=stop` | Supporting and refuting research both exist for the claim's current text, and more research cannot clear it: revise or discard the contradicted claim (a frozen claim cannot be rewritten) and research the revised claim, or stop with the residual; never edit a claim cosmetically to evade adverse evidence. |
 | `budget.exhausted` | `empirica_observe kind=configure_run`; `host: StartRun`; `report_convergence intent=stop` | A ceiling is spent: stop honestly with `report_convergence intent=stop`; in deliberative mode you may propose a raise for human approval, in auto mode start a fresh run. |
@@ -31,6 +32,7 @@ text view renders them.
 | `audit.failed` | `empirica_read GetRun`; `host: child_reserve` | Address every finding listed under `Audit:`, then retry within the audit ceiling (normally once); stop if it fails again. |
 | `audit.stale` | `host: child_reserve` | The graph or evidence changed after the audit: launch a fresh audit of the current scope. |
 | `audit.same_model` | `host: child_reserve`; `report_convergence intent=stop` | The auditor matched a covered producer's model: launch an auditor from a different model, or accept the residual. |
+| `audit.auditor_excluded` | `host: child_reserve`; `report_convergence intent=stop` | The reservation was refused before any spawn: the auditor would run on a model that produced covered evidence or is authoring it. Choose an auditor of another model (an override, or `enabledModels` on Pi) and launch again. |
 | `audit.independence_unverified` | `host: child_reserve`; `report_convergence intent=stop` | The host could not verify auditor independence: relaunch under a distinct observed model, or accept the residual. |
 | `child.terminal` | `host: child_reserve`; `report_convergence intent=stop` | A child ended in a terminal state: retry within the ceiling (normally once), or accept the residual and stop. |
 | `host.async_unsupported` | `report_convergence intent=stop` | This host cannot run the audit asynchronously: run it in the foreground, or accept the residual and stop. |
@@ -39,9 +41,10 @@ text view renders them.
 | `host.subagents_tool_inactive` | `report_convergence intent=stop` | The `subagent` tool is registered but not active: call `subagents_enable` and retry, or set pi-subagents `toolActivation: eager` and reload the host; a restart alone does not change this. Or accept the residual. |
 | `host.subagents_owner_unverified` | `report_convergence intent=stop` | The active audit runtime cannot be proven (owner, package, or version unobservable, or a subagent child process): do not retry blindly; restart the host with one supported runtime, or accept the residual. |
 | `host.subagents_duplicate_owner` | `report_convergence intent=stop` | Two extensions register the `subagent` tool: remove the duplicate, restart the host, and start a fresh run, or accept the residual. |
-| `host.subagents_version_unsupported` | `report_convergence intent=stop` | The active pi-subagents is not a reviewed version or lacks the launch preflight: install a reviewed version and restart, or accept the residual. |
-| `host.subagents_launch_unsupported` | `report_convergence intent=stop` | During a run `subagent` accepts exactly one launch form or a reviewed read-only action (`list`, `status`, ...); control, mutation and ambiguous calls are refused: retry with a supported call, or accept the residual. |
-| `host.subagents_provenance_missing` | `report_convergence intent=stop` | The run or receipt lacks the exact pi-subagents version and owner path: recapture a provenance-complete run; this one is not evidence. |
+| `host.subagents_version_unsupported` | `report_convergence intent=stop` | The active pi-subagents is outside the supported range, or its schema or launch preflight cannot carry the audit launch: install a version inside the range and restart, or accept the residual. |
+| `host.subagents_tools_not_read_only` | `report_convergence intent=stop` | The preflight would give the auditor a tool Empirica does not allow it (the refusal names it): remove it from the auditor's configuration or update pi-subagents, restart, and start fresh, or accept the residual. |
+| `host.subagents_launch_unsupported` | `report_convergence intent=stop` | During a run `subagent` accepts exactly one launch form or a read-only action the reviewed versions know (`list`, `status`, ...); control, mutation, unknown-action and ambiguous calls are refused: retry with a supported call, or accept the residual. |
+| `host.version_unsupported` | `report_convergence intent=stop` | The active Pi is outside the range Empirica supports (the reason names the version read and the range), or its version could not be read: install a Pi inside the range, restart the host and start again; nothing was started. |
 | `freeze.deferred` | `report_convergence intent=stop` | Deferred claims stay residual: accept them when you stop, or investigate them before freezing. |
 | `governance.auto_invocation_required` | `host: StartRun` | Auto needs an interactive invocation or operator-set `EMPIRICA_AUTO_DELEGATION=1`: run interactively or have the operator set it, then start fresh. |
 | `governance.approval_required` | `empirica_observe kind=configure_run`; `report_convergence intent=stop` | Submit a task-sized `configure_run` (all three ceilings plus a 1-600 character rationale) and wait for host approval; nothing is authorized before it. |
@@ -55,4 +58,7 @@ text view renders them.
 | `governance.receipt_replay` | `empirica_observe kind=configure_run`; `report_convergence intent=stop` | A superseded or conflicting decision was replayed and changed nothing: read the current proposal and act on that. |
 | `governance.interaction_limit` | `empirica_observe kind=configure_run`; `report_convergence intent=stop` | The dialog allowance is spent (3 per configuration, 128 per run): stop honestly or start a fresh run. |
 | `governance.decision_conflict` | `empirica_observe kind=configure_run` | The submitted control and edited fields disagreed and nothing was approved: use one explicit decision path. |
+| `governance.terminal_stop_pending` | `report_convergence intent=report_convergence`; `human: confirmation`; `empirica_read GetRun` | A deliberative run does not end without converging until a human agrees: nothing was granted and the run stays active. The case in the parameters says what happens next (not asked yet, declined, no dialog, no interactions left); keep working, or stop again when the human is ready to be asked. |
 | `audit.producers_mixed` | `report_convergence intent=stop` | Covered evidence has mixed producers: if only the latest spike differs, re-run it under the research producer, otherwise accept the residual. |
+| `research.citation_unverified` | `empirica_observe kind=research` | The record was refused: re-read the source and quote it exactly (a workspace file as `path` or `path:N-M`, `…` between excerpts), cite an http(s) URL or an absolute path for a source outside the workspace (an absolute path inside it is refused: use the repository-relative path), or, for a runtime observation, say why no spike can establish it (`spike_unavailable`); never paraphrase. |
+| `evidence.confirmation_required` | `report_convergence intent=report_convergence`; `human: confirmation`; `report_convergence intent=stop` | Research or a decision waits on a human: keep working, and when the Stop blocks you with the directive, call `report_convergence` (the human is asked inside it, if this host can show a dialog); after Later, cancel or timeout, or with no human ingress, stop with the residual (`residual.accept`); an explicit `report_convergence` asks again, and each showing spends one human interaction. |

@@ -6,7 +6,12 @@
     "host": "test",
     "interactive": true,
     "signal": "fixture",
-    "delegation": false
+    "delegation": false,
+    "audit_retrieval": [
+      "local",
+      "workspace"
+    ],
+    "human_surface": "unavailable"
   },
   "status": "active",
   "budgets": {
@@ -25,7 +30,7 @@
   "stamp_seq": 0,
   "last_derivation_digest": null,
   "children": [],
-  "legacy_marker": true,
+  "extra_marker": true,
   "committed_artifact_head_id": null,
   "governance": {
     "state": "pending",

@@ -165,19 +165,46 @@ def admission(governance: Mapping) -> str | None:
             "governance.approval_required")
 
 
-def interactions_remaining(governance: Mapping) -> dict:
-    """Host-dialog presentations left: ``proposal`` for the current plan revision and ``total``."""
+def interactions_remaining(governance: Mapping, confirmations: int) -> dict:
+    """Host-dialog presentations left: ``proposal`` for the current plan revision and ``total``.
+
+    The one count of human interactions: a configuration receipt and an evidence presentation (ADR-0067,
+    ``confirmations`` of them) each spend one unit of ``total``; every path that admits or shows an
+    interaction reads this function."""
     receipts = governance["receipts"]
     shown = sum(r["plan_revision"] == governance["plan_revision"] for r in receipts)
     return {"proposal": max(0, PROPOSAL_INTERACTIONS - shown),
-            "total": MAX_INTERACTIONS - len(receipts)}
+            "total": max(0, MAX_INTERACTIONS - len(receipts) - confirmations)}
 
 
-def interaction_error(governance: Mapping) -> str | None:
+def interaction_error(governance: Mapping, confirmations: int) -> str | None:
     """``governance.interaction_limit`` once either interaction allowance is spent, else ``None``."""
-    if min(interactions_remaining(governance).values()) == 0:
+    if min(interactions_remaining(governance, confirmations).values()) == 0:
         return "governance.interaction_limit"
     return None
+
+
+#: The configuration states that wait on a human's answer: a proposal not approved yet (``pending``, or
+#: ``revision_pending`` after the first approval) and one the human rejected (the human says what to propose instead).
+HUMAN_WAIT_STATES = frozenset({"pending", "revision_pending", "rejected"})
+
+
+def human_wait(governance: Mapping, prompt_error: str | None) -> bool:
+    """Whether the run's configuration waits on its human now: the agent has asked (a sized ``configure_run``, not the
+    StartRun placeholder), the configuration is in ``HUMAN_WAIT_STATES`` (not approved yet, or rejected), this phase is a
+    human's to approve (``host_ui``), the host that mediated it can show a human its dialog (``approval_capability``) and
+    another presentation is still admissible (``prompt_error``, the interaction ceiling: ``interaction_error``). Its
+    dialog is open, was closed without an answer, or was answered no; it is shown again at the agent's next
+    ``configure_run``, and until the human says how to go on the next act is theirs. Otherwise the agent acts next: it
+    has yet to ask, or nobody can be asked (the agent may only stop honestly).
+
+    Read from the governance of the run's state or of its author view (the same keys); the author view publishes the
+    answer as ``governance.human_wait``. The one predicate of who acts on a configuration: the report's requirements
+    (``evaluation.report_requirements``) and so the observer's standing and ask, and the hosts' turn-end wait, which reads
+    the view's answer and adds only its own approval ingress and the sole-blocker check."""
+    return (governance["state"] in HUMAN_WAIT_STATES and sized(governance)
+            and expected_approval_kind(governance) == "host_ui"
+            and governance["context"]["approval_capability"] == HUMAN_CONFIGURATION and prompt_error is None)
 
 
 def expected_approval_kind(governance: Mapping) -> str:
@@ -220,6 +247,18 @@ def configuration_error(state, proposed: Mapping) -> str | None:
     return None  # before first approval, interactive auto / deliberative: schema bounds only
 
 
+def ceiling_bound(governance: Mapping) -> str:
+    """Which text of ``governance.auto_ceiling`` is true (its ``bound``): ``approved`` once a first approval fixed the ceilings (an interactive
+    run is held to what it approved), else ``envelope`` (a delegated run is held to the operator's envelope). The core
+    chooses; the contract holds one text per case."""
+    return "approved" if governance["first_approval"] else "envelope"
+
+
+def refusal_parameters(governance: Mapping, reason: str) -> dict[str, str]:
+    """The typed parameters of a configuration refusal: only ``governance.auto_ceiling`` has any (its ``bound``)."""
+    return {"bound": ceiling_bound(governance)} if reason == "governance.auto_ceiling" else {}
+
+
 def resolve_submission(governance: Mapping, submission: Mapping,
                        actions: tuple[tuple[str, Mapping], ...]) -> tuple[dict | None, str | None]:
     """Resolve one raw human choice using the finite application-supplied policy.
@@ -240,7 +279,8 @@ def resolve_submission(governance: Mapping, submission: Mapping,
     return resolved, None
 
 
-def decision_error(run_id: str, governance: Mapping, decision: Mapping) -> str | None:
+def decision_error(run_id: str, governance: Mapping, decision: Mapping,
+                   confirmations: int) -> str | None:
     """Validate one governance decision against current policy; ``inert`` signals an exact
     historical replay that must not reopen authority."""
     outcome = decision.get("outcome")
@@ -266,7 +306,7 @@ def decision_error(run_id: str, governance: Mapping, decision: Mapping) -> str |
     if (decision["run_id"] != run_id or decision["proposal_digest"] != governance["proposal_digest"]
             or decision["plan_revision"] != governance["plan_revision"]):
         return "governance.stale_proposal"
-    if prior is None and (reason := interaction_error(governance)):
+    if prior is None and (reason := interaction_error(governance, confirmations)):
         return reason
     expected = expected_approval_kind(governance)
     auto_authorized = (governance["first_approval"] or

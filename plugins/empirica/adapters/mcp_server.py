@@ -16,7 +16,9 @@ if str(_PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_ROOT))
 
 from adapters.public_tools import PublicTools  # noqa: E402
+from adapters.confirmation import HostConfirmation  # noqa: E402
 from adapters.governance import HostGovernance, governance_timeout  # noqa: E402
+from application.protocol import host_profile_id  # noqa: E402
 
 PROTOCOL_VERSION = "2025-11-25"
 
@@ -27,9 +29,9 @@ def profile_from_environment(environ: dict[str, str] | None = None) -> str:
     if explicit:
         return explicit
     if env.get("CLAUDE_PLUGIN_ROOT"):
-        return "claude-code@2.1.278"
+        return host_profile_id("claude-code")
     if env.get("PLUGIN_ROOT"):
-        return "codex-cli@0.146.0"
+        return host_profile_id("codex-cli")
     raise ValueError("Empirica MCP requires an exact host profile")
 
 
@@ -93,7 +95,9 @@ class McpSession:
         self.timeout = governance_timeout() if timeout is None else timeout
         self.active_call_id = None
         self.mediator = HostGovernance(profile)
-        self.tools = tools or PublicTools(profile, govern=self.mediator)
+        # Codex has no human ingress: its route is `unavailable`, which `HostConfirmation` never presents.
+        self.confirmer = HostConfirmation(profile, timeout=lambda: self.timeout)
+        self.tools = tools or PublicTools(profile, govern=self.mediator, confirm=self.confirmer)
         self.initialized = False
 
     def process(self, message):
@@ -117,6 +121,7 @@ class McpSession:
             if response and "result" in response:
                 self.initialized = True
                 self.mediator.elicit = self.elicit if form_supported else None
+                self.confirmer.elicit = self.elicit if form_supported else None
             return response
         # Unsolicited replies, including late dialog responses, are never new calls.
         if isinstance(message, dict) and "method" not in message:

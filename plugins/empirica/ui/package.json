@@ -1,0 +1,28 @@
+{
+  "name": "empirica-ui",
+  "private": true,
+  "description": "Dev-only toolchain for the Empirica observer UI. Only its committed outputs (dist/, vendor/) are used at run time.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@fontsource/ibm-plex-mono": "5.3.0",
+    "@stryker-mutator/core": "10.0.0",
+    "@stryker-mutator/vitest-runner": "10.0.0",
+    "@tailwindcss/cli": "4.3.3",
+    "basecoat-css": "1.0.2",
+    "culori": "4.0.2",
+    "fast-check": "4.10.2",
+    "happy-dom": "20.14.6",
+    "idiomorph": "0.8.0",
+    "lucide-static": "1.51.0",
+    "style-dictionary": "5.6.0",
+    "tailwindcss": "4.3.3",
+    "vitest": "5.0.3"
+  },
+  "overrides": {
+    "zod": "4.6.5",
+    "electron-to-chromium": "1.5.440"
+  }
+}

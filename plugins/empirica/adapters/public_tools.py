@@ -12,6 +12,7 @@ import jsonschema
 
 from application import protocol as _protocol
 from adapters import bridge as _bridge
+from core.confirmation import is_terminal
 
 READ_TOOL = "empirica_read"
 OBSERVE_TOOL = "empirica_observe"
@@ -26,6 +27,11 @@ Dispatch = Callable[[dict, str], dict]
 
 
 _PRIVATE_RESULT_KEYS = ("presentation", "dialog", "scope")
+
+
+def _with_host_failure(command: Mapping[str, Any], failure: str | None) -> dict[str, Any]:
+    """``command`` with the host's own failure of this call attached, when there is one."""
+    return {**command, **({"host_failure": failure} if failure else {})}
 
 
 def _contains_private(value: Any) -> bool:
@@ -75,6 +81,29 @@ def _checked_validator(schema: dict):
     cls = jsonschema.validators.validator_for(schema)
     cls.check_schema(schema)
     return cls(schema)
+
+
+_JSON_TYPES = ((bool, "boolean"), (int, "integer"), (float, "number"), (str, "string"))
+
+
+def _typed(value: Any) -> Any:
+    """Give every ``enum``/``const`` node the JSON type of its values.
+
+    JSON Schema allows a typeless ``enum``, but a model only sees the schema as its host renders
+    it, and some renderings (OpenAI-family models, which see a TypeScript-like signature) show a
+    typeless node as ``any``, hiding the allowed values. A model-facing schema must say them."""
+    if isinstance(value, list):
+        return [_typed(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    result = {key: _typed(item) for key, item in value.items()}
+    values = result.get("enum", [result["const"]] if "const" in result else None)
+    if values is not None and "type" not in result:
+        types = {next((name for kind, name in _JSON_TYPES if type(v) is kind), None) for v in values}
+        if len(types) != 1 or None in types:
+            raise RuntimeError(f"a model-facing enum needs values of one JSON type: {values!r}")
+        result["type"] = types.pop()
+    return result
 
 
 def _project_schemas() -> dict[str, dict]:
@@ -133,7 +162,8 @@ def _project_schemas() -> dict[str, dict]:
             },
         },
     }
-    return {READ_TOOL: read, OBSERVE_TOOL: observe, REPORT_TOOL: report}
+    return {name: _typed(schema)
+            for name, schema in ((READ_TOOL, read), (OBSERVE_TOOL, observe), (REPORT_TOOL, report))}
 
 
 def _host_handle_schemas(model: dict[str, dict]) -> dict[str, dict]:
@@ -188,12 +218,14 @@ def _load_artifact() -> dict:
 class PublicTools:
     """Profile-bound public tools over the canonical Empirica bridge."""
 
-    def __init__(self, profile_id: str, *, dispatch: Dispatch = _bridge.handle, govern=None):
+    def __init__(self, profile_id: str, *, dispatch: Dispatch = _bridge.handle, govern=None,
+                 confirm=None):
         if profile_id not in _PROFILES:
             raise ValueError(f"unknown exact Empirica profile: {profile_id!r}")
         self._profile_id = profile_id
         self._dispatch = dispatch
         self._govern = govern
+        self._confirm = confirm
         self._artifact = _load_artifact()
         self._schemas = copy.deepcopy(self._artifact["schemas"]["model"])
         # Built once per server: jsonschema.validate would re-check each schema on every call.
@@ -247,13 +279,26 @@ class PublicTools:
             "request_id": str(uuid.uuid4()),
             "command": command,
         }
+        # A report presents the evidence waiting on a human; a report or a stop of a deliberative run presents the
+        # consent to end non-converged (ADR-0063 amendment). The core says which, in the batch it returns.
+        mediated = bool(self._confirm and name == REPORT_TOOL)
         try:
-            response = self._dispatch(request, self._profile_id)
-            result = response.get("result") if isinstance(response, dict) else None
+            if mediated:
+                request, result = self._evaluate_observed(request, arguments["run_id"])
+            else:
+                response = self._dispatch(request, self._profile_id)
+                result = response.get("result") if isinstance(response, dict) else None
             if not isinstance(result, dict):
                 return self._error("Empirica bridge returned no typed result.")
             if self._govern and name == OBSERVE_TOOL and arguments["action"]["kind"] == "configure_run":
                 result = self._govern(result)
+            elif mediated:
+                # The end of a pass: a block that waits on the human is presented once, then re-evaluated; a batch the
+                # host could not present is evaluated again with that failure, so the response says nobody was asked.
+                result = self._confirm(result, lambda failure: self._dispatch(
+                    {**request, "request_id": str(uuid.uuid4()),
+                     "command": _with_host_failure(command, failure)},
+                    self._profile_id)["result"])
         except Exception:  # public transport or mediation failure remains a typed tool error
             return self._error("Empirica bridge unavailable.")
         if not isinstance(result, dict) or _contains_private(result):
@@ -269,6 +314,25 @@ class PublicTools:
         if include_internal:
             tool_result["structuredContent"] = result
         return tool_result
+
+    def _evaluate_observed(self, request: dict, run_id: str) -> tuple[dict, object]:
+        """Evaluate a mediated ``report_convergence``, with what this host can show a human observed first. A host that could
+        not observe says so with the evaluation, so the response does not promise a question nobody will ask. A stop of an
+        auto run asks nothing and needs no look: only when the core answers a stop with the consent to end a deliberative
+        run (a terminal batch) does the host look, and evaluate once more. Returns the request last sent and the result."""
+        command = request["command"]
+        stop = command.get("intent") == "stop"
+        if not stop:
+            request = {**request, "command": _with_host_failure(command, self._confirm.observe(run_id).failure)}
+        response = self._dispatch(request, self._profile_id)
+        result = response.get("result") if isinstance(response, dict) else None
+        run = result.get("run") if isinstance(result, dict) else None
+        if stop and isinstance(run, dict) and is_terminal(run.get("confirmation_batch")):
+            request = {**request, "request_id": str(uuid.uuid4()),
+                       "command": _with_host_failure(command, self._confirm.observe(run_id).failure)}
+            response = self._dispatch(request, self._profile_id)
+            result = response.get("result") if isinstance(response, dict) else None
+        return request, result
 
     @staticmethod
     def _read_argument_error(name: str, arguments: Mapping[str, object]) -> str | None:

@@ -26,7 +26,9 @@
         "host",
         "interactive",
         "signal",
-        "delegation"
+        "delegation",
+        "audit_retrieval",
+        "human_surface"
       ],
       "properties": {
         "host": {
@@ -47,7 +49,7 @@
           "type": "boolean"
         },
         "host_runtime": {
-          "description": "Optional host-observed facts about the runtime that executes this host's foreground audit, recorded once with the run (Pi: the pi-subagents owner). Validated at the application boundary against the host profile's subagents_compatibility, persisted opaquely, and never interpreted or projected by the core.",
+          "description": "Optional host-observed facts about the runtime that executes this host's foreground audit, recorded once with the run (Pi: the pi-subagents owner). Validated at the application boundary against the host profile's subagents_compatibility range, persisted opaquely, and read by the core only for `reviewed` (a version with no checked-in compat record is recorded `reviewed: false` and shown in the run view; it is admitted by what the adapter observed of it, ADR-0069).",
           "type": "object",
           "additionalProperties": false,
           "required": [
@@ -98,10 +100,57 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 4096
+                },
+                "reviewed": {
+                  "type": "boolean",
+                  "description": "Whether this exact version has a checked-in compat record. false is admitted when the live preflight and the tool's parameter schema passed; it is never a refusal by itself. An absent value reads as false (not reviewed); a present value that is not a boolean is malformed."
                 }
               }
             }
           }
+        },
+        "session": {
+          "description": "Optional host-observed fact: where this run's session can be found again, recorded once at StartRun by the host from what it observed (Claude: the hook payload's session_id and transcript_path; Pi: the session manager's id and session file). The author has no StartRun and cannot supply or change it. Absent when the host observed nothing: it reads as unknown, never as a guess.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "label",
+            "locator"
+          ],
+          "properties": {
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "description": "A short human name for the session (its id)."
+            },
+            "locator": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "description": "A copyable path or id that finds the session again: its transcript or session file when the host has one, otherwise its id."
+            }
+          }
+        },
+        "audit_retrieval": {
+          "description": "The retrieval kinds this host's auditor is observed to cover, recorded once at StartRun and re-observed at audit launch (a divergence refuses the launch). workspace: files inside the workspace; local: absolute or home paths; web: http(s) URLs. A research record of any other kind is confirmed by a human (ADR-0067).",
+          "type": "array",
+          "items": {
+            "enum": [
+              "local",
+              "web",
+              "workspace"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "human_surface": {
+          "description": "Whether the host last observed a surface to show a dialog to a human now: Claude form elicitation advertised by the client, Pi `ctx.hasUI` in the TUI or RPC. Recorded at StartRun and updated by the host's private ingress at every report_convergence. `unobserved` means the host has not yet looked (Claude's start hook runs before the MCP client declares form elicitation); a host that can tell at start records `human` or `unavailable` at once. Evidence is presented to a human only when this is `human`, the run is not delegated or non-interactive, and the profile has a human approval ingress (ADR-0067); while it is `unobserved` such a run is told a human is asked when it reports, if the host can show a dialog.",
+          "enum": [
+            "human",
+            "unavailable",
+            "unobserved"
+          ]
         }
       }
     },

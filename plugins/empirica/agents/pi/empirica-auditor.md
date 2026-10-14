@@ -15,4 +15,6 @@ completionGuard: false
 # Empirica auditor
 
 Follow the host-owned task exactly; do not inspect `~/.empirica-plugin/` or
-`refs/empirica/*`; return only the requested `empirica-verdict` block.
+`refs/empirica/*`; return only the requested `empirica-verdict` block. Read every source whose
+`verification.retrieve` is `true` and check that it exists and contains the cited text; judge relevance
+only for the rest.

@@ -10,6 +10,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { renderAuthorView } from "../src/author-view.ts";
+import { readStoredText } from "./stored.ts";
 import { createEmpiricaExtension, DEFAULT_SKILLS_DIR } from "../src/index.ts";
 import type { Response } from "../src/contract.ts";
 import type { Request } from "../src/contract.ts";
@@ -48,6 +49,12 @@ test("registers the /empirica command with a description", () => {
   assert.equal(typeof command.handler, "function");
 });
 
+test("registers the /empirica-ui command with a description", () => {
+  const command = register().commands.get("empirica-ui");
+  assert.ok(command, "expected an 'empirica-ui' command to be registered");
+  assert.ok((command.description ?? "").length > 0);
+});
+
 test("does NOT register removed commands", () => {
   const pi = register();
   assert.equal(pi.commands.get("empirica-status"), undefined);
@@ -68,7 +75,7 @@ test("registers the shared public driving tools", () => {
     ["empirica_observe", "empirica_read", "report_convergence"]);
 });
 
-test("does NOT register legacy empirica_knowledge tool", () => {
+test("does NOT register an empirica_knowledge tool", () => {
   const pi = register();
   assert.equal(pi.tools.get("empirica_knowledge"), undefined);
 });
@@ -148,13 +155,13 @@ test("empirica_observe configure_run fails closed when the governance ingress th
 // QUAL-2 C5 measures the final rendered text returned after mediation. The same measured
 // ceiling is enforced by Python and Pi.
 const POST_MEDIATION_CEILING = 1200;
-const APPROVED_CONFIGURE = JSON.parse(readFileSync(
+const APPROVED_CONFIGURE = JSON.parse(readStoredText(
   path.join(HERE, "fixtures", "approved-configure-runview.json"), "utf8")) as
   { type: string; converged: boolean; run: { id: string; governance: Record<string, unknown> } };
 const PRESENTATION = { dialog: {
   epoch: 0, control_mode: "deliberative", state: "pending",
   reviews_left: { proposal: 2, total: 127 }, goal: "Review the run configuration below.",
-  invocation: { host: "pi", interactive: true, signal: "operator", delegation: false },
+  invocation: { host: "pi", interactive: true, signal: "operator", delegation: false, audit_retrieval: ["local", "workspace"], human_surface: "unavailable" },
   budgets: [
     { key: "max_passes", label: "Investigation passes", short: "passes", help: "Investigation passes the run may use", value: 8, used: 0, minimum: 1, maximum: 1024 },
     { key: "max_spawns", label: "Child spawns", short: "spawns", help: "Non-audit child agents", value: 1, used: 0, minimum: 0, maximum: 128 },
@@ -209,7 +216,7 @@ function mediatedObserve(choice: "approve" | "dismiss"): {
 test("Pi rendered-text ceiling matches Python and covers audit-pending and terminal views", () => {
   assert.equal(POST_MEDIATION_CEILING, 1200, "Pi and Python must share the measured ceiling");
   for (const name of ["block-pending-audit", "allow-converged"]) {
-    const golden = JSON.parse(readFileSync(
+    const golden = JSON.parse(readStoredText(
       path.join(HERE, "author-view-golden", `${name}.json`), "utf8"));
     const text = renderAuthorView(golden.result);
     assert.equal(text, golden.text, `${name} must measure the final rendered text`);

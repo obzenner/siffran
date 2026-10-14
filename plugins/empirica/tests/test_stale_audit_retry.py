@@ -15,9 +15,11 @@ from adapters.audit_protocol import AuditProtocol, AuditProtocolError, IdentityO
 from adapters.identity import POLICY_VERSION, observe
 from core.evaluation import audit_binding
 from core.records import Corrupt, Present, Revision
-from governance_setup import SIZED_RATIONALE, TEST_INVOCATION, approve_current
+from governance_setup import SIZED_RATIONALE, TEST_INVOCATION, approve_current, end_with_consent
+from application.protocol import host_profile_id  # noqa: E402
+PI_PROFILE = host_profile_id("pi")
 
-PROFILE = "pi@0.84.1+pi-subagents-foreground-audit-v1"
+PROFILE = PI_PROFILE
 
 
 class StaleAuditRetryTests(unittest.TestCase):
@@ -36,7 +38,7 @@ class StaleAuditRetryTests(unittest.TestCase):
         approve_current(self.coordinator, self.run_id)
         activate_investigation(self.coordinator, self.run_id)
         self.action({"kind": "research", "claim_id": "G0", "source_kind": "code",
-                     "result": "supports", "payload": {"source_ref": "source.py",
+                     "result": "supports", "payload": {"source_ref": "notes.md",
                                                            "citation": "tested"}})
         self.restore()
 
@@ -54,7 +56,7 @@ class StaleAuditRetryTests(unittest.TestCase):
     def restore(self):
         self.coordinator = ProductionCoordinator(
             self.workspace, Harness(), self.runs, self.artifacts, PROFILE, {})
-        self.protocol = AuditProtocol(PROFILE,
+        self.protocol = AuditProtocol(PROFILE, audit_retrieval=["local", "workspace"],
             dispatch=lambda request, _profile: self.coordinator.handle(request["command"], "protocol"),
             child_event_ingress=lambda _p, run, child, event:
                 self.coordinator.trusted_child_event(run, child, event),
@@ -213,7 +215,7 @@ class StaleAuditRetryTests(unittest.TestCase):
         self.action({"kind": "graph", "payload": self.graph})
         approve_current(self.coordinator, self.run_id)
         self.action({"kind": "research", "claim_id": "G0", "source_kind": "code",
-            "result": "supports", "payload": {"source_ref": "source.py", "citation": "tested"}})
+            "result": "supports", "payload": {"source_ref": "notes.md", "citation": "tested"}})
         self.workspace.write("source.py", b"original")
         self.action({"kind": "spike_request", "claim_id": "G0", "command": "test",
                      "dependent_files": ["source.py"]})
@@ -342,8 +344,7 @@ class StaleAuditRetryTests(unittest.TestCase):
     def test_corrupt_and_terminal_runs_never_recover(self):
         self.pending()
         self.change_argument()
-        self.coordinator.handle({"type": "EvaluateRun", "run_id": self.run_id,
-                                 "intent": "stop"}, "stop")
+        end_with_consent(self.coordinator, self.run_id)
         before = self.runs.data[self.key]
         with self.assertRaises(AuditProtocolError):
             self.prepare()

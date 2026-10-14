@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// The reviewed pi-subagents matrix: prove, for every version the contract lists as reviewed, that the
-// checked-in evidence still describes the package the registry serves (Empirica 4.1, D3/D7).
+// The reviewed pi-subagents matrix: prove, for every version that has a checked-in compat record, that the
+// checked-in evidence still describes the package the registry serves (ADR-0069).
 //
-// Per reviewed version (the list is `subagents_compatibility.reviewed_versions` in
-// contracts/empirica/v2/host-profiles.json; the version the repository's devDependency pins is used
-// in place, every other one is fetched from the registry into <TMPDIR>/empirica-subagents-matrix/<version>/):
+// Per reviewed version (the versions with a `compat/pi-subagents-<version>.json`, each of which must lie in the
+// range of `subagents_compatibility` in contracts/empirica/v2/host-profiles.json; the version the repository's
+// devDependency pins is used in place, every other one is fetched from the registry into
+// <TMPDIR>/empirica-subagents-matrix/<version>/):
 //   inventory   `gen_pi_subagents_inventory.mjs --check` — the generated launch/action inventory equals
 //               the checked-in compat/pi-subagents-<version>.json
 //   schema      every parameter the adapter writes on the audit launch (`auditLaunchInput`) is declared
@@ -13,13 +14,15 @@
 //   classifier  the call classifier, given this version's inventory, admits exactly the reviewed surface:
 //               each launch form alone is executable, two are malformed, every action outside the
 //               read-only allowlist is unsupported, every allowlisted one present is management
+//   retrieval   the retrieval kinds derived from the live preflight's `contract.tools.effectiveAllowlist`
+//               through the adapter's one tool->kind table equal the set reviewed for every version (ADR-0067)
 // One JSON line per version on stdout; exit 1 when any version fails, times out, or cannot be fetched.
 //
 // Usage: node scripts/empirica_subagents_matrix.mjs [--root DIR]
-//        node scripts/empirica_subagents_matrix.mjs --update     list registry versions newer than the newest reviewed
+//        node scripts/empirica_subagents_matrix.mjs --update   list registry versions newer than the newest reviewed
 // (The hidden `--cell` mode is the per-version child; each cell runs in its own process so a hang is a timeout.)
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -45,13 +48,24 @@ export function compareVersions(a, b) {
   return 0;
 }
 
-/** The reviewed versions and policy of the Pi profile, read from the parsed host-profiles document. */
-export function reviewedFrom(document) {
+export const COMPAT_DIR = path.join(repo, "plugins", "empirica", "adapters", "pi", "compat");
+
+/**
+ * The reviewed versions (those with a checked-in compat record, ascending) and the policy id of the Pi profile.
+ * A record outside the profile's range is dead evidence and an error.
+ */
+export function reviewedFrom(document, compatDir = COMPAT_DIR) {
   const found = document.profiles.filter((profile) => profile.subagents_compatibility !== undefined);
   if (found.length !== 1) throw new Error(`expected exactly one profile with subagents_compatibility, found ${found.length}`);
   const policy = found[0].subagents_compatibility;
   if (policy.package !== PACKAGE) throw new Error(`subagents_compatibility is for ${policy.package}, not ${PACKAGE}`);
-  return { versions: [...policy.reviewed_versions].sort(compareVersions), policy_id: policy.policy_id };
+  const versions = readdirSync(compatDir).map((file) => new RegExp(`^${PACKAGE}-(.+)\\.json$`).exec(file)?.[1])
+    .filter((version) => version !== undefined).sort(compareVersions);
+  const outside = versions.filter((version) => compareVersions(version, policy.minimum) < 0
+    || compareVersions(version, policy.maximum_exclusive) >= 0);
+  if (outside.length > 0)
+    throw new Error(`compat records outside the supported range [${policy.minimum}, ${policy.maximum_exclusive}): ${outside.join(", ")}`);
+  return { versions, policy_id: policy.policy_id };
 }
 
 /** One cell per reviewed version: the devDependency's own version runs in place, the rest are fetched. */
@@ -72,7 +86,7 @@ export function reviewCommands(version, root) {
     `npm install ${PACKAGE}@${version} --prefix ${dir}/install --ignore-scripts --omit=peer --omit=dev --no-package-lock --cache ${root}/npm-cache`,
     `make pi-subagents-inventory PACKAGE_ROOT=${dir}/install/node_modules/${PACKAGE}`,
     `make pi-preflight-fixture PACKAGE_ROOT=${dir}/install/node_modules/${PACKAGE}`,
-    `# review the two generated files, then add "${version}" to subagents_compatibility.reviewed_versions in contracts/empirica/v2/host-profiles.json`,
+    `# review the two generated files and add the classifier cases; "${version}" is reviewed once its compat record is checked in (it must lie in the profile's range)`,
     "make contract-schemas vendor-contracts contract-check && make empirica-subagents-matrix",
   ];
 }
@@ -81,14 +95,24 @@ export function reviewCommands(version, root) {
  * The four checks of one version, from evidence already read. Pure: every input is data.
  * `expected` is the checked-in evidence, `observed` what the package serves now.
  */
-export function evaluateCell({ version, request, properties, inventory, liveFixture, checkedFixture, classify, managementActions }) {
+export function evaluateCell({ version, request, properties, inventory, liveFixture, checkedFixture, classify, managementActions, retrieval }) {
   const checks = {};
   const missing = Object.keys(request).filter((key) => !properties.includes(key));
   checks.schema = missing.length === 0 ? { ok: true } : { ok: false, detail: `parameters not declared by the package: ${missing.join(", ")}` };
   const same = JSON.stringify(maskMachineDigests(liveFixture)) === JSON.stringify(maskMachineDigests(checkedFixture));
   checks.preflight = same ? { ok: true } : { ok: false, detail: "live preflight differs from the checked-in fixture" };
   checks.classifier = classifierVerdict({ version, inventory, classify, managementActions });
+  if (retrieval !== undefined) checks.retrieval = retrievalVerdict(version, retrieval);
   return checks;
+}
+
+/** The retrieval kinds every reviewed pi-subagents version is pinned to give the canonical auditor: it reads files, never the web. */
+export const REVIEWED_RETRIEVAL = ["local", "workspace"];
+
+/** `observed` is derived from the live preflight by the adapter's own table; it must equal the reviewed set. */
+export function retrievalVerdict(version, { observed, reviewed = REVIEWED_RETRIEVAL }) {
+  return JSON.stringify(observed) === JSON.stringify(reviewed) ? { ok: true }
+    : { ok: false, detail: `${version}: the auditor's retrieval is ${JSON.stringify(observed)}, reviewed ${JSON.stringify(reviewed)}` };
 }
 
 /** The launch-contract members that are hashes over path-bearing content (verified: the same package
@@ -192,11 +216,16 @@ async function cellMain(argv) {
   if (generated.version !== version) throw new Error(`the package at ${packageRoot} is ${generated.version}, not ${version}`);
   const inventory = loadInventory(version);
   if (inventory === undefined) throw new Error(`no checked-in inventory for ${version}`);
+  const { auditRetrievalFrom } = await import("../plugins/empirica/adapters/pi/src/audit-retrieval.ts");
+  const liveFixture = await captureFixture(packageRoot);
+  const allowlist = liveFixture.cases.canonical_auditor?.response?.contract?.tools?.effectiveAllowlist;
   const request = { agent: "empirica.empirica-auditor", ...auditLaunchInput({ task: "t", model: "audit/reviewer", agentScope: "user", policy: AUDIT_LAUNCH_POLICY }) };
   const checks = evaluateCell({
     version, request, properties: await subagentParamProperties(packageRoot), inventory,
-    liveFixture: await captureFixture(packageRoot), checkedFixture: readJson(fixturePath(FIXTURE_DIR, version)),
+    liveFixture, checkedFixture: readJson(fixturePath(FIXTURE_DIR, version)),
     classify: classifySubagentCall, managementActions: MANAGEMENT_ACTIONS,
+    // A preflight that reports no allowlist derives nothing, which never equals the reviewed set.
+    retrieval: { observed: Array.isArray(allowlist) ? auditRetrievalFrom(allowlist) : null },
   });
   process.stdout.write(`${JSON.stringify(checks)}\n`);
 }
@@ -231,7 +260,7 @@ async function main(argv) {
     const newer = newerThanReviewed(registryVersions({ name: PACKAGE, cache }), reviewed.versions);
     if (newer.length === 0) console.log(`no ${PACKAGE} release is newer than ${reviewed.versions.at(-1)} (the newest reviewed)`);
     for (const version of newer) {
-      console.log(`${PACKAGE}@${version} is unreviewed; the adapter refuses it. To review it:`);
+      console.log(`${PACKAGE}@${version} has no compat record; inside the supported range the adapter admits it by observation, outside it refuses it. To review it:`);
       for (const command of reviewCommands(version, root)) console.log(`  ${command}`);
     }
     return 0;

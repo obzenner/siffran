@@ -18,11 +18,13 @@ from application.v2 import compose
 from test_governance import CONTEXT, GRAPH, AUTHOR
 from governance_setup import TEST_INVOCATION, SIZED_RATIONALE
 from test_d7_transactions import Runs, Artifacts, Workspace, Harness
+from application.protocol import host_profile_id  # noqa: E402
+CLAUDE_PROFILE = host_profile_id("claude-code")
 
 
 class GovernanceHostTests(unittest.TestCase):
     def setUp(self):
-        self.profile = "claude-code@2.1.278"
+        self.profile = CLAUDE_PROFILE
         self.service = compose(Workspace(), Harness(), Runs(), Artifacts(), None, self.profile, {}, None)
         self.sequence = 0
         response = self.dispatch({"type": "StartRun", "control_mode": "deliberative", "goal": "supplied task",
@@ -254,7 +256,7 @@ class GovernanceHostTests(unittest.TestCase):
         self.assertEqual(stopped["result"]["type"], "Block")
         from adapters.claude.transport import Response
         typed = Response.from_envelope({"request_id": stopped["request_id"]}, stopped)
-        self.assertEqual(stop_result(typed).exit_code, 0)
+        self.assertEqual(stop_result(typed, stop_hook_active=False).exit_code, 0)
         for command in ({"type": "ObserveAction", "action": {"kind": "investigate"}},
                         {"type": "ObserveAction", "action": {"kind": "child_reserve", "purpose": "test",
                          "role_profile": "worker", "execution": "foreground", "resource_class": "investigation"}},
@@ -490,7 +492,7 @@ class GovernanceHostTests(unittest.TestCase):
         self.assertEqual(self.sent, [])
         run = self.dispatch({"type": "GetRun", "run_id": self.run})["result"]["run"]
         self.assertEqual(run["governance"]["interactions_remaining"], {"proposal": 3, "total": 128})
-        self.mediator.profile = "codex-cli@0.146.0"
+        self.mediator.profile = host_profile_id("codex-cli")
         self.mediator.elicit = self.session.elicit
         self.assertEqual(self.propose()["result"]["structuredContent"]["type"], "Block")
         self.assertEqual(self.sent, [])
@@ -577,7 +579,7 @@ class GovernancePresentationTests(unittest.TestCase):
         from core.governance import initial, revise
         budgets = {"max_passes": 8, "max_spawns": 0, "max_audit_spawns": 1}
         invocation = {"host": "test", "interactive": True,
-                      "signal": "operator", "delegation": False}
+                      "signal": "operator", "delegation": False, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}
         g = revise("Exact goal", initial("Exact goal", budgets, "deliberative", invocation, None),
                    proposal={"budgets": budgets, "rationale": SIZED_RATIONALE})
         g.update(scope=copy.deepcopy(GRAPH), context=copy.deepcopy(CONTEXT),

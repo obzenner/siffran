@@ -15,6 +15,10 @@ from adapters.audit_protocol import (  # noqa: E402
 )
 
 
+#: What these fakes record at start and observe at launch.
+RETRIEVAL = ["local", "workspace"]
+
+
 def response(result: dict) -> dict:
     return {"protocol": "empirica/v2", "request_id": "x", "result": result}
 
@@ -57,12 +61,12 @@ class AuditProtocolTests(unittest.TestCase):
             return response({"type": "Allow", "converged": True, "run": {}})
 
         self.protocol = AuditProtocol(
-            "test-profile", dispatch=dispatch, child_event_ingress=child,
+            "test-profile", dispatch=dispatch, audit_retrieval=RETRIEVAL, child_event_ingress=child,
             attribution_ingress=attribution, verdict_ingress=verdict,
             plan_ingress=lambda _profile, _run, child_id: {
                 "operation_id": "sha256:" + "b" * 64,
                 "child_id": child_id, "role_profile": "canonical-auditor",
-                "argument": self.argument,
+                "argument": self.argument, "audit_retrieval": RETRIEVAL,
             })
 
     def test_happy_trace_has_one_reservation_and_ordered_observations(self) -> None:
@@ -89,6 +93,7 @@ class AuditProtocolTests(unittest.TestCase):
     def test_async_execution_is_explicit_and_invalid_modes_fail_before_dispatch(self) -> None:
         protocol = AuditProtocol(
             "test-profile", execution="async", dispatch=self.protocol._dispatch,
+            audit_retrieval=RETRIEVAL,
             child_event_ingress=self.protocol._child_event,
             attribution_ingress=self.protocol._attribution,
             verdict_ingress=self.protocol._verdict, plan_ingress=self.protocol._plan)
@@ -98,6 +103,16 @@ class AuditProtocolTests(unittest.TestCase):
         self.assertEqual(reservation["execution"], "async")
         with self.assertRaises(ValueError):
             AuditProtocol("test-profile", execution="background")
+
+    def test_a_launch_with_another_retrieval_than_the_one_recorded_is_refused_and_rejected(self) -> None:
+        protocol = AuditProtocol(
+            "test-profile", dispatch=self.protocol._dispatch, audit_retrieval=["workspace"],
+            child_event_ingress=self.protocol._child_event,
+            attribution_ingress=self.protocol._attribution,
+            verdict_ingress=self.protocol._verdict, plan_ingress=self.protocol._plan)
+        with self.assertRaisesRegex(AuditProtocolError, "retrieval capability changed"):
+            protocol.prepare("run", role_profile="canonical-auditor")
+        self.assertEqual(self.events[-1][:3], ("child", "ch-1", "launch_rejected"))
 
     def test_purpose_collision_does_not_block_or_orphan_investigation_child(self) -> None:
         ordinary = {"child_id": "ordinary", "purpose": "audit",
@@ -122,13 +137,14 @@ class AuditProtocolTests(unittest.TestCase):
             raise AssertionError(kind)
 
         protocol = AuditProtocol(
-            "test-profile", dispatch=dispatch,
+            "test-profile", dispatch=dispatch, audit_retrieval=RETRIEVAL,
             child_event_ingress=self.protocol._child_event,
             attribution_ingress=self.protocol._attribution,
             verdict_ingress=self.protocol._verdict,
             plan_ingress=lambda _profile, _run, child_id: {
                 "operation_id": "sha256:" + "b" * 64, "child_id": child_id,
                 "role_profile": "canonical-auditor", "argument": self.argument,
+                "audit_retrieval": RETRIEVAL,
             })
         self.assertEqual(protocol.prepare("run", role_profile="canonical-auditor").child_id,
                          "ch-1")
@@ -144,7 +160,7 @@ class AuditProtocolTests(unittest.TestCase):
                 return response({"type": "Allow", "run": {"children": self.children}})
             return response({"type": "Block", "reasons": []})
         protocol = AuditProtocol(
-            "test-profile", dispatch=dispatch,
+            "test-profile", dispatch=dispatch, audit_retrieval=RETRIEVAL,
             child_event_ingress=self.protocol._child_event,
             attribution_ingress=self.protocol._attribution,
             verdict_ingress=self.protocol._verdict,
@@ -161,7 +177,7 @@ class AuditProtocolTests(unittest.TestCase):
 
     def test_rejected_verdict_closes_exact_operation_failed(self) -> None:
         protocol = AuditProtocol(
-            "test-profile", dispatch=self.protocol._dispatch,
+            "test-profile", dispatch=self.protocol._dispatch, audit_retrieval=RETRIEVAL,
             child_event_ingress=self.protocol._child_event,
             attribution_ingress=self.protocol._attribution,
             verdict_ingress=lambda *_args: response({"type": "Fault", "code": "conflict"}),
@@ -172,7 +188,7 @@ class AuditProtocolTests(unittest.TestCase):
 
     def test_identity_ingress_failure_closes_exact_operation_failed(self) -> None:
         protocol = AuditProtocol(
-            "test-profile", dispatch=self.protocol._dispatch,
+            "test-profile", dispatch=self.protocol._dispatch, audit_retrieval=RETRIEVAL,
             child_event_ingress=self.protocol._child_event,
             attribution_ingress=lambda *_args: (_ for _ in ()).throw(OSError("down")),
             verdict_ingress=self.protocol._verdict, plan_ingress=self.protocol._plan)
@@ -196,7 +212,7 @@ class AuditProtocolTests(unittest.TestCase):
             return response({"type": "Allow", "run": {"children": active}})
 
         protocol = AuditProtocol(
-            "test-profile", dispatch=dispatch,
+            "test-profile", dispatch=dispatch, audit_retrieval=RETRIEVAL,
             child_event_ingress=self.protocol._child_event,
             attribution_ingress=self.protocol._attribution,
             verdict_ingress=self.protocol._verdict)

@@ -18,10 +18,10 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = ROOT / "contracts" / "empirica" / "v2"
 TARGETS = ("request.schema.json", "response.schema.json", "state.schema.json")
 IDENTITY_KEYS = ("identity", "provider_id", "model_id", "policy_version", "source", "observed_by")
-INVOCATION_KEYS = ("host", "interactive", "signal", "delegation")
+INVOCATION_KEYS = ("host", "interactive", "signal", "delegation", "audit_retrieval", "human_surface")
 # Optional members of the shared invocation definition: an inline copy that lists them is still the
 # shared shape (`required` stays INVOCATION_KEYS).
-INVOCATION_OPTIONAL_KEYS = ("host_runtime",)
+INVOCATION_OPTIONAL_KEYS = ("host_runtime", "session")
 # Extra closed shared definitions copied verbatim into the targets that reference them.
 # The graph payload is the SSOT for the model-facing graph action shape (defence in depth for
 # core.evaluation.valid_graph); governancePresentation is the private-only dialog body.

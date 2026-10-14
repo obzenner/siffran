@@ -26,6 +26,8 @@ from application.protocol import (  # noqa: E402
     untrusted_delimiters,
     validate_public_result,
 )
+from application.protocol import host_profile_id, stored  # noqa: E402
+PI_PROFILE = host_profile_id("pi")
 
 
 def _fallback(result: object) -> str:
@@ -69,7 +71,7 @@ ARGUMENT_FIXTURES = [
 
 
 def _load_fixture(name: str) -> dict:
-    return json.loads((FIXTURES / f"{name}.json").read_text())["expected"]["result"]
+    return stored(json.loads((FIXTURES / f"{name}.json").read_text()))["expected"]["result"]
 
 
 class NoFallbackTests(unittest.TestCase):
@@ -84,8 +86,8 @@ class NoFallbackTests(unittest.TestCase):
                 f"{name}: renderer fell back to compact JSON")
 
     def test_governance_proposal_without_rationale_never_renders_as_a_view(self):
-        golden = json.loads((PLUGIN / "adapters/pi/test/author-view-golden/governance-approved.json")
-                            .read_text())["result"]
+        golden = stored(json.loads((PLUGIN / "adapters/pi/test/author-view-golden/governance-approved.json")
+                                   .read_text()))["result"]
         placeholder = json.loads(json.dumps(golden))
         placeholder["run"]["governance"]["proposal"]["rationale"] = None
         self.assertNotEqual(render_author_view(placeholder, strict=True), _fallback(placeholder))
@@ -98,7 +100,7 @@ class NoFallbackTests(unittest.TestCase):
         mode: a renderer/schema disagreement raises instead of hiding behind the fallback."""
         rendered = 0
         for path in sorted(FIXTURES.glob("*.json")):
-            result = json.loads(path.read_text()).get("expected", {}).get("result")
+            result = stored(json.loads(path.read_text())).get("expected", {}).get("result")
             if not validate_public_result(result):
                 continue
             text = render_author_view(result, strict=True)
@@ -193,7 +195,7 @@ class RedirectedObligationTests(unittest.TestCase):
     GOLDEN = ROOT / "plugins" / "empirica" / "adapters" / "pi" / "test" / "author-view-golden"
 
     def test_redirected_obligation_names_the_blocking_claim(self):
-        golden = json.loads((self.GOLDEN / "block-open-claim-redirected.json").read_text())
+        golden = stored(json.loads((self.GOLDEN / "block-open-claim-redirected.json").read_text()))
         row = next(row for row in golden["result"]["run"]["obligations"]["active"]
                    if row["id"] == "claim:G0")
         self.assertEqual(row["missing"]["target_claim_id"], "S1")
@@ -205,7 +207,7 @@ class RedirectedObligationTests(unittest.TestCase):
 
     def test_unredirected_obligation_renders_the_bare_code(self):
         for name in ("block-open-claim", "audit-mixed"):
-            result = json.loads((self.GOLDEN / f"{name}.json").read_text())["result"]
+            result = stored(json.loads((self.GOLDEN / f"{name}.json").read_text()))["result"]
             text = render_author_view(result, strict=True)
             rows = [row for row in result["run"]["obligations"]["active"] if row["missing"]]
             self.assertTrue(rows, name)
@@ -310,8 +312,13 @@ class ContentCompletenessTests(unittest.TestCase):
         self.assertIn("block-pending-audit", views)
         for name, result in views.items():
             audit = result["run"]["audit"]
-            suffix = f" ({audit['independence']})" if audit["state"] in {"passed", "failed"} else ""
-            self.assertIn(f"\nAudit: {audit['state']}{suffix}\n", render_author_view(result), name)
+            word = {"none": "required", "passed": "passed", "failed": "failed"}[audit["verdict"]]
+            if audit["verdict"] == "none" and audit["pending"]:
+                word = "pending"
+            if audit["verdict"] != "none":
+                word += ("" if audit["current"] is not False else ", no longer current") + (", re-audit pending" if audit["pending"] else "")
+            suffix = f" ({audit['independence']})" if audit["independence"] else ""
+            self.assertIn(f"\nAudit: {word}{suffix}\n", render_author_view(result), name)
 
     def test_every_reason_code_and_message_appears(self):
         for name in RUNVIEW_FIXTURES:
@@ -419,7 +426,7 @@ class InjectionSafetyTests(unittest.TestCase):
         from test_d7_transactions import Artifacts, Harness, Runs, Workspace
 
         svc = compose(Workspace(), Harness(), Runs(), Artifacts(), None,
-                      "pi@0.84.1+pi-subagents-foreground-audit-v1", {}, None)
+                      PI_PROFILE, {}, None)
 
         def request(command):
             return svc.dispatch({"protocol": "empirica/v2", "request_id": "injection",
@@ -559,9 +566,147 @@ class ContractLabelTests(unittest.TestCase):
         rendered = []
         with mock.patch.object(author_view, "_LABELS", tagged):
             for path in sorted(self.GOLDEN.glob("*.json")):
-                rendered.append(render_author_view(json.loads(path.read_text())["result"]))
+                rendered.append(render_author_view(stored(json.loads(path.read_text()))["result"]))
         text = "\n".join(rendered)
         self.assertEqual([key for key in tagged if f"[{key}]" not in text], [])
+
+
+def sample(schema: dict, defs: dict, index: int = 0) -> object:
+    """A schema-valid instance built from the schema alone: every property (required or optional), and every array
+    non-empty with two distinct items of its element type, so no element renderer can go unexercised."""
+    if "$ref" in schema:
+        return sample(defs[schema["$ref"].rsplit("/", 1)[-1]], defs, index)
+    if "const" in schema:
+        return schema["const"]
+    if "enum" in schema:
+        return schema["enum"][index % len(schema["enum"])]
+    for key in ("anyOf", "oneOf"):
+        if key in schema:
+            return sample(next(row for row in schema[key] if row != {"type": "null"}), defs, index)
+    kind = schema.get("type")
+    if kind == "string":
+        pattern = schema.get("pattern")
+        if pattern is None:
+            return "x" * max(1, schema.get("minLength", 1)) + str(index)
+        candidates = ("sha256:" + f"{index + 1:x}" * 64, f"C{index}", f"dir/file{index}.py")
+        match = next((c for c in candidates if re.search(pattern, c)), None)
+        assert match is not None, f"no sample for pattern {pattern!r}"
+        return match
+    if kind == "integer":
+        return max(schema.get("minimum", 0), 0) + index
+    if kind == "boolean":
+        return True
+    if kind == "array":
+        count = min(schema.get("maxItems", 2), max(2, schema.get("minItems", 0)))
+        return [sample(schema["items"], defs, i) for i in range(count)]
+    if kind == "object":
+        return {name: sample(sub, defs, index) for name, sub in schema.get("properties", {}).items()}
+    raise AssertionError(f"no sample for schema {schema!r}")
+
+
+class EveryRegistryReasonRendersStrictly(unittest.TestCase):
+    """The class of defect, not one instance: every reason in the registry, with schema-built parameters (non-empty arrays
+    of every element type), and every next action, renders as readable text in strict mode with no digest and no JSON."""
+
+    CONTRACT = json.loads((ROOT / "contracts" / "empirica" / "v2" / "public-contract.json").read_text())
+    DEFS = response_schema_defs()
+
+    def reasons(self):
+        for branch in self.DEFS["reasonPayload"]["oneOf"]:
+            code = branch["properties"]["code"]["const"]
+            yield code, sample(branch["properties"]["parameters"], self.DEFS)
+
+    def check(self, result: dict, label: str) -> str:
+        self.assertTrue(validate_public_result(result), f"{label}: the sampled result is not schema-valid")
+        text = render_author_view(result, strict=True)
+        self.assertNotEqual(text, _fallback(result), f"{label}: fell back to JSON")
+        self.assertFalse(text.startswith("{"), label)
+        self.assertNotIn("sha256:", text, label)
+        return text
+
+    def test_every_registry_reason_as_a_block_reason(self):
+        count = 0
+        for code, parameters in self.reasons():
+            meta = self.CONTRACT["reasons"][code]
+            result = _load_fixture("block-open-claim")
+            result["reasons"] = [{"code": code, "message": meta["message"], "parameters": parameters,
+                                  "next_actions": meta["next_actions"], "sections": meta["sections"]}]
+            self.assertIn(code, self.check(result, code))
+            count += 1
+        self.assertEqual(count, len(self.CONTRACT["reasons"]))
+
+    def test_every_registry_reason_as_a_residual(self):
+        for code, parameters in self.reasons():
+            meta = self.CONTRACT["reasons"][code]
+            result = _load_fixture("block-open-claim")
+            result["run"]["residuals"] = [{"code": code, "parameters": parameters,
+                                           "next_actions": meta["next_actions"], "sections": meta["sections"]}]
+            self.assertIn(code, self.check(result, f"residual {code}"))
+
+    def test_every_next_action_shape(self):
+        result = _load_fixture("block-open-claim")
+        meta = self.CONTRACT["reasons"]["run.no_active"]
+        result["reasons"] = [{"code": "run.no_active", "message": meta["message"], "parameters": {},
+                              "next_actions": list(next_action_surfaces()), "sections": meta["sections"]}]
+        text = self.check(result, "all next actions")
+        for action in next_action_surfaces():
+            surface = next_action_surfaces()[action]
+            self.assertIn(author_view.render_surface(action), text, surface)
+
+    def test_the_pending_record_reason_names_its_recovery_and_hides_the_digests(self):
+        result = _load_fixture("block-open-claim")
+        meta = self.CONTRACT["reasons"]["evidence.confirmation_required"]
+        record = "sha256:" + "a" * 64
+        result["reasons"] = [{"code": "evidence.confirmation_required", "message": meta["message"],
+                              "parameters": {"route": "human", "record_ids": [record, "sha256:" + "b" * 64]},
+                              "next_actions": meta["next_actions"], "sections": meta["sections"]}]
+        text = self.check(result, "pending records")
+        self.assertIn("route=human", text)
+        self.assertIn("report_convergence intent=stop", text)
+
+
+class PendingEvidenceGoldens(unittest.TestCase):
+    """The public-boundary goldens for ``evidence.confirmation_required`` with non-empty ``record_ids``."""
+
+    GOLDEN = PLUGIN / "adapters" / "pi" / "test" / "author-view-golden"
+    RECOVERY = {"evidence-reason-askable": ("report_convergence intent=report_convergence", "human: confirmation",
+                                            "report_convergence intent=stop"),
+                "evidence-reason-later": ("human: confirmation", "report_convergence intent=stop"),
+                "evidence-reason-unavailable": ("report_convergence intent=stop",),
+                "evidence-reason-unobserved": ("report_convergence intent=report_convergence", "report_convergence intent=stop",
+                                               "a human is asked when you report, if this host can show a dialog"),
+                "evidence-reason-mixed": ("report_convergence intent=report_convergence", "human: confirmation",
+                                          "report_convergence intent=stop", "decision needed on claim D1"),
+                "evidence-reason-terminal-residual": ("human: confirmation", "report_convergence intent=stop")}
+
+    def test_each_state_renders_the_same_normally_and_strictly_with_recovery_and_no_digest(self):
+        for name, calls in self.RECOVERY.items():
+            result = stored(json.loads((self.GOLDEN / f"{name}.json").read_text()))["result"]
+            if name != "evidence-reason-terminal-residual":
+                self.assertTrue(result["reasons"][0]["parameters"]["record_ids"], name)
+            text = render_author_view(result, strict=True)
+            self.assertEqual(render_author_view(result), text, name)
+            self.assertFalse(text.startswith("{"), name)
+            self.assertNotIn("sha256:", text, name)
+            for call in calls:
+                self.assertIn(call, text, f"{name}: {call}")
+
+    def test_an_unobserved_surface_never_says_nobody_can_be_asked_and_leads_with_the_report(self):
+        text = render_author_view(stored(json.loads((self.GOLDEN / "evidence-reason-unobserved.json").read_text()))["result"])
+        self.assertNotIn("no human can be asked", text)
+        self.assertNotIn("human: confirmation", text)
+        self.assertLess(text.index("report_convergence intent=report_convergence"), text.index("report_convergence intent=stop"))
+
+    def test_human_text_is_fenced(self):
+        result = stored(json.loads((self.GOLDEN / "evidence-reason-mixed.json").read_text()))["result"]
+        delimiters = result["run"]["untrusted_delimiters"]
+        text = render_author_view(result, strict=True)
+        for row in result["run"]["confirmation_batch"]["records"]:
+            line = next(line for line in text.splitlines() if line.strip().startswith(f"source: {row['source_kind']}"))
+            self.assertIn(delimiters["open"], line)
+            self.assertIn(delimiters["close"], line)
+            self.assertNotIn("\n", line)
+        self.assertNotIn("FORGED <<<EMPIRICA", text)  # the hostile source's delimiter text is escaped, never raw
 
 
 class TotalityTests(unittest.TestCase):

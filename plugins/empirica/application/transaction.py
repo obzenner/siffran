@@ -7,12 +7,15 @@ from typing import Any
 
 from core.context_selector import select_sections
 from core import governance
-from core.evaluation import (READ_COMMANDS, SPAWN_BUDGET, Decision, EvaluationSnapshot,
+from core.evaluation import (READ_COMMANDS, SPAWN_BUDGET, Decision, EvaluationSnapshot, audit_exclusions,
                              active_spike_heads as captured_heads, audit_binding,
                              audit_operation_current, digest,
-                             evaluate_snapshot, frozen_scope_invalid, plan_spike_request,
+                             evaluate_snapshot, frozen_scope_invalid, plan_evidence_confirmation, plan_evidence_presentation,
+                             plan_spike_request,
                              plan_spike_result, valid_attribution)
-from core.projection import project_argument, project_runview, project_presentation, recovery_actions
+from core import confirmation
+from core.projection import (confirmation_actions, project_argument, project_runview, project_presentation,
+                             recovery_actions)
 from core.ports import RunRepository
 from core.records import Conflict, Corrupt, RunKey
 from core.run import OperationalState, delegated_auto, effective_ceilings, start_admission
@@ -327,11 +330,109 @@ class Coordinator:
             "child_id": child_id,
             "role_profile": child["audit_role_profile"],
             "argument": _plain(child["audit_argument"]),
+            "audit_retrieval": _plain(loaded.state.invocation["audit_retrieval"]),
         }
+
+    def trusted_audit_exclusions(self, run_id: str) -> list[str] | None:
+        """The identity classes an auditor must not run on (core.evaluation.audit_exclusions); ``None`` when unreadable."""
+        key = decode_handle(run_id)
+        loaded = self._load(key) if key is not None else None
+        if not isinstance(loaded, Loaded):
+            return None
+        try:
+            snapshot = self._assemble(key, loaded.state, {"type": "GetArgument", "run_id": run_id}, require_graph=True)
+        except Exception:  # noqa: BLE001 - an unreadable run has no exclusion; the reservation and the verdict still refuse
+            return None
+        return audit_exclusions(snapshot)
 
     def trusted_attribution(self, run_id: str, payload: dict[str, Any],
                             request_id: str = "trusted-ingress") -> dict[str, Any]:
         return self._trusted_artifact(run_id, "attribution", payload, request_id)
+
+    def trusted_evidence_confirmation(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Admit one human receipt as content-addressed confirmation artifacts in a single CAS write."""
+        return self._human_batch(run_id, payload, plan_evidence_confirmation, "trusted-confirmation")
+
+    def trusted_evidence_presentation(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Record that the host showed the human the pending batch (one interaction) in a single CAS write."""
+        return self._human_batch(run_id, payload, plan_evidence_presentation, "trusted-presentation")
+
+    def trusted_human_surface(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Record whether the host can show a human a dialog now (``invocation.human_surface``).
+
+        The latest observation counts; an unchanged one is ``Inert``. Evidence presented under an earlier
+        observation stays presented, so a change of surface never invalidates a key."""
+        request_id = "trusted-surface"
+        key = decode_handle(run_id)
+        if key is None:
+            return self._inert(request_id)
+        for _ in range(8):
+            loaded = self._load(key)
+            if isinstance(loaded, CorruptLoad):
+                return self._safe_block(key, request_id, "run.corrupt")
+            if isinstance(loaded, AbsentLoad):
+                return self._inert(request_id)
+            read, state = loaded.read, loaded.state
+            if state.status != "active":
+                return self._inert(request_id)
+            try:
+                snapshot = self._assemble(key, state, {"type": "GetRun", "run_id": run_id},
+                                          require_graph=False)
+            except HistoryCorrupt:
+                if not self._revision_unchanged(key, read.revision):
+                    continue
+                return self._safe_block(key, request_id, "run.corrupt")
+            if state.invocation["human_surface"] == payload["surface"]:
+                return self._inert_with_run(request_id, snapshot)
+            changed = replace(state, invocation={**_plain(state.invocation), "human_surface": payload["surface"]})
+            try:
+                committed, _, _, planned = self._commit(key, read.revision, snapshot, changed, ())
+            except Exception as exc:
+                if self._is_conflict(exc):
+                    continue
+                return self._fault(request_id, "unavailable")
+            self.last_state = committed
+            return self._allow(request_id, planned)
+        return self._fault(request_id, "conflict")
+
+    def _human_batch(self, run_id: str, payload: dict[str, Any], plan: Any,
+                     request_id: str) -> dict[str, Any]:
+        key = decode_handle(run_id)
+        if key is None:
+            return self._inert(request_id)
+        for _ in range(8):
+            loaded = self._load(key)
+            if isinstance(loaded, CorruptLoad):
+                return self._safe_block(key, request_id, "run.corrupt")
+            if isinstance(loaded, AbsentLoad):
+                return self._inert(request_id)
+            read, state = loaded.read, loaded.state
+            if state.status != "active":
+                return self._inert(request_id)
+            try:
+                snapshot = self._assemble(key, state, {"type": "GetRun", "run_id": run_id},
+                                          require_graph=False)
+            except HistoryCorrupt:
+                if not self._revision_unchanged(key, read.revision):
+                    continue
+                return self._safe_block(key, request_id, "run.corrupt")
+            decision = plan(snapshot, payload)
+            if decision.result_type == "Fault":
+                return self._fault_with_run(request_id, snapshot)
+            if decision.result_type == "Inert":
+                return self._inert_with_run(request_id, snapshot)
+            if decision.result_type == "Block":
+                return self._response(request_id, snapshot, decision)
+            try:
+                committed, _, _, planned = self._commit(
+                    key, read.revision, snapshot, state, decision.intent.artifacts)
+            except Exception as exc:
+                if self._is_conflict(exc):
+                    continue
+                return self._fault(request_id, "unavailable")
+            self.last_state = committed
+            return self._allow(request_id, planned)
+        return self._fault(request_id, "conflict")
 
     def _trusted_artifact(self, run_id: str, kind: str, payload: dict[str, Any], request_id: str,
                           child_id: str | None = None) -> dict[str, Any]:
@@ -383,7 +484,10 @@ class Coordinator:
                 expected = audit_binding(snapshot)
                 bound_keys = ("argument_digest", "goal_digest", "frozen_scope_digest",
                               "deferred_scope_digest", "reviewed_claims")
-                if any(payload.get(name) != expected[name] for name in bound_keys):
+                # A settled verdict reviews at least one approved claim (the response contract's audit, minItems 1): one
+                # over a run with none approved is refused, so the run's argument stays readable (P4).
+                if (any(payload.get(name) != expected[name] for name in bound_keys)
+                        or not expected.get("reviewed_claims")):
                     return self._fault_with_run(request_id, snapshot)
                 expected_scope = expected["scope_review"]
                 if ((expected_scope is None and payload.get("scope_review") is not None) or
@@ -706,12 +810,13 @@ class Coordinator:
         return {"protocol": _proto.protocol_id(), "request_id": request_id, "result": result}
 
     def _reason(self, code: str, parameters: dict[str, Any] | None = None,
-                affected: str | None = None, *, exclusions: tuple[str, ...] = ()):
+                affected: str | None = None):
+        """A reason row with the contract's own recovery actions; a Block built from a snapshot adjusts them (see
+        ``_block_from_snapshot``)."""
         spec = _proto.public_contract()["reasons"][code]
-        next_actions = recovery_actions(exclusions, list(spec["next_actions"]))
         row = {"code": code, "parameters": parameters or {},
-               "next_actions": next_actions, "sections": list(spec["sections"]),
-               "message": spec["message"]}
+               "next_actions": list(spec["next_actions"]), "sections": list(spec["sections"]),
+               "message": confirmation.reason_text(spec, parameters or {})}
         if affected:
             row["affected"] = {"obligation_id": affected}
         return row
@@ -721,13 +826,13 @@ class Coordinator:
                              *, presentation: bool = False):
         self.last_snapshot = snapshot
         control_mode = snapshot.state.governance["control_mode"]
-        reason = self._reason(
-            code, parameters, affected,
-            exclusions=snapshot.contract.recovery_exclusions[control_mode],
-        )
+        reason = self._reason(code, parameters, affected)
         run = project_runview(snapshot, select_sections(
             _proto.public_contract(), "block", [code],
             snapshot.state.status if snapshot.state.status != "active" else None))
+        reason["next_actions"] = recovery_actions(
+            snapshot.contract.recovery_exclusions[control_mode],
+            confirmation_actions(code, parameters, reason["next_actions"], run["confirmation_batch"]))
         result = {"type": "Block", "run": run, "reasons": [reason]}
         if presentation:
             result["presentation"] = project_presentation(snapshot)
@@ -754,14 +859,15 @@ class Coordinator:
         profile = _proto.host_profile(self.profile_id)
         run_id = encode_handle(key) if isinstance(key, RunKey) else str(key)
         run = {
-            "id": run_id, "goal": goal, "status": "active", "governance": None,
+            "id": run_id, "goal": goal, "status": "active", "governance": None, "confirmation_batch": None,
+            "basis": digest({"unreadable_run": code}),  # an unreadable run has no state to move: one fixed basis per reason
             "contract": {"id": _proto.public_contract()["id"],
                          "version": _proto.public_contract()["version"],
                          "digest": _proto.contract_digest(), "relevant_sections": sections},
             "obligations": {"active": [], "deferred": []}, "residuals": [],
             "freshness": {"changes": []}, "children": [], "next_actions": [],
             # Nothing about an unreadable run is known, so no audit can be claimed for it.
-            "audit": {"state": "required", "independence": "unverified", "findings": []},
+            "audit": {"verdict": "none", "current": None, "pending": False, "independence": None, "findings": []},
             "untrusted_delimiters": dict(_proto.untrusted_delimiters()),
             "host": {"profile_id": self.profile_id, "tier": profile["current_tier"],
                      "missing_capabilities": list(profile["unsupported_reason_ids"])},

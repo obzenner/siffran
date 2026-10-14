@@ -9,7 +9,7 @@
 import * as path from "node:path";
 
 import type { InvocationProvenance } from "./contract.ts";
-import type { SubagentsCompatibility } from "./host-profile.ts";
+import { inSubagentsRange, type SubagentsCompatibility } from "./host-profile.ts";
 
 /** The recorded object (closed: exactly the members the request schema allows). */
 export type HostRuntime = NonNullable<InvocationProvenance["host_runtime"]>;
@@ -44,7 +44,8 @@ export function hostRuntimeRejection(policy: SubagentsCompatibility | undefined,
   const subagents = hostRuntime.subagents;
   if (hostRuntime.policy_id !== policy.policy_id) return "policy";
   if (subagents.package !== policy.package) return "package";
-  if (typeof subagents.version !== "string" || !policy.reviewed_versions.includes(subagents.version)) return "version";
+  if (!inSubagentsRange(policy, subagents.version)) return "version";
+  if ("reviewed" in subagents && typeof subagents.reviewed !== "boolean") return "malformed";
   if (!inside(subagents.owner_path, subagents.package_root) || !inside(subagents.preflight_path, subagents.package_root)) return "paths";
   return undefined;
 }

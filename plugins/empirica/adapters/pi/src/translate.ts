@@ -11,6 +11,7 @@ import {
   type Budgets,
   type EvaluateIntent,
   type FaultCode,
+  type HostFailure,
   type InvocationProvenance,
   type Request,
   type Result,
@@ -131,11 +132,12 @@ export function evaluateRunRequest(
   runId: string,
   intent: EvaluateIntent,
   requestId: string,
+  hostFailure?: HostFailure,
 ): Request {
   return {
     protocol: PROTOCOL,
     request_id: requestId,
-    command: { type: "EvaluateRun", run_id: runId, intent },
+    command: { type: "EvaluateRun", run_id: runId, intent, ...(hostFailure ? { host_failure: hostFailure } : {}) },
   };
 }
 
@@ -201,7 +203,7 @@ export interface Notice {
   text: string;
 }
 
-/** A user-facing notice describing a StartRun attempt (D6). Truthful about the
+/** A user-facing notice describing a start: plain words, no internal labels. Truthful about the
  * attempt and any failure — never relabels a start as a status read. */
 export function startRunNotice(result: Result): Notice {
   switch (result.type) {
@@ -209,15 +211,15 @@ export function startRunNotice(result: Result): Notice {
       return {
         type: "info",
         text: result.converged
-          ? `empirica: D6 StartRun attempt — run ${result.run.id} already converged.`
-          : `empirica: D6 StartRun attempt — run ${result.run.id} active.`,
+          ? `/empirica started: run ${result.run.id} (already converged)`
+          : `/empirica started: run ${result.run.id}`,
       };
     case "Block":
-      return { type: "warning", text: `empirica: D6 StartRun attempt blocked — ${blockReason(result)}` };
+      return { type: "warning", text: `/empirica not started: ${blockReason(result)}` };
     case "Inert":
-      return { type: "warning", text: "empirica: D6 StartRun attempt — no run created." };
+      return { type: "warning", text: "/empirica not started: no run was created" };
     case "Fault":
-      return { type: "error", text: `empirica: D6 StartRun attempt could not start — ${result.code}: ${faultReason(result.code, result.message)}` };
+      return { type: "error", text: `/empirica not started: ${result.code}: ${faultReason(result.code, result.message)}` };
   }
 }
 
@@ -259,8 +261,9 @@ export function statusNotice(result: Result): Notice {
 
 // --- native subagent launch classification ----------------------------------
 //
-// Every `subagent` tool call is exactly one of four things, decided against the reviewed inventory
-// of the pi-subagents version that owns the tool (compat/pi-subagents-<version>.json):
+// Every `subagent` tool call is exactly one of four things, decided against the inventory of the
+// pi-subagents version that owns the tool (compat/pi-subagents-<version>.json, or the one observed for an in-range
+// version with no record; ADR-0069):
 //   executable  - starts exactly one child through one launch form; enters investigation + binding
 //   management  - a reviewed read-only action; inert
 //   unsupported - any other action (control, mutation, schedule, mission, worktree, unknown)

@@ -14,6 +14,10 @@ links:
   kind: Depends on
 - target: 59
   kind: Refines
+- target: 65
+  kind: Amended by
+- target: 70
+  kind: Amended by
 ---
 
 # Split operational state from Git-backed knowledge artifacts
@@ -74,3 +78,15 @@ idempotent migration operation. Normal reads and writes never inspect `.claude` 
 Integration tests must prove concurrent CAS behavior, append commutativity, generation isolation,
 crash recovery, no-remote operation, and byte-identical user HEAD/index/worktree before and after an
 artifact write.
+
+## Amendment (2026-10-11): deterministic artifact commits, and where time lives
+
+The Git artifact adapter's tree layout and commit metadata are deterministic: the same set of artifacts yields the same
+tree and the same commit object on any machine at any time. Each artifact is stored at a path derived only from its
+content address, and every artifact commit carries a fixed identity (`empirica <empirica@localhost>`) and the fixed
+dates `@0 +0000` for author and committer (`adapters/git/artifact_repo.py`, `_COMMIT_IDENTITY`). Nothing in the
+knowledge plane reads the wall clock or the user's Git identity. This is the rule the adapter cites as "ADR-31
+deterministic tree layout and commit metadata".
+
+When an event happened is therefore not recorded in the knowledge plane or in the operational state. It is recorded
+beside the operational state, in a machine-local timeline per run generation that no decision reads (ADR-70).

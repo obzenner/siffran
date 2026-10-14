@@ -3,7 +3,7 @@
 This module owns native payload parsing and native JSON hook output only. Run allocation,
 ordering, budgets, evidence, audit coverage, and convergence remain in the application/core.
 
-Codex is the documented refusal host (``codex-cli@0.146.0``, ``observational`` tier,
+Codex is the documented refusal host (``codex-cli``, ``observational`` tier,
 ``audit_execution: unavailable``). Public author/read operations are exposed through the shared
 MCP server. Hooks allocate and resolve durable runs, inject the opaque handle, and enforce Stop.
 No auditor is launched: native 0.146.0 hooks cannot observe the verdict-producing child, so when
@@ -114,7 +114,7 @@ def build_start_run_request(
         "control_mode": "auto" if "--auto" in leading else "deliberative",
         "invocation": provenance(
             "codex", None, "codex hook has no interactive signal", env,
-            profile_id=CODEX_PROFILE_ID,
+            profile_id=CODEX_PROFILE_ID, human_surface="unavailable",  # no human ingress: nobody to look for
         ),
     }
     budgets: dict[str, int] = {}

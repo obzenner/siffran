@@ -445,7 +445,7 @@ class AsyncChildrenTests(ConformanceCase):
                     profile_id=pid)
                 run_id = self.start_run(drv, goal=self.GOAL, control_mode="auto",
                     invocation={"host": "test", "interactive": False,
-                                "signal": "delegated v2 harness", "delegation": True})
+                                "signal": "delegated v2 harness", "delegation": True, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"})
                 self.require_route_admitted(drv, run_id)
                 self.require_investigate_admitted(drv, run_id)
                 resp = self.dispatch(drv, observe_action(run_id=run_id, action=action_child_reserve(

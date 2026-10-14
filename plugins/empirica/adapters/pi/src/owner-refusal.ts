@@ -6,8 +6,10 @@
 // (`public-tools.json` `recovery`), never written here.
 
 import type { Block, RunSnapshot } from "./contract.ts";
+import type { AdmissionRefusalCode } from "./preflight-seam.ts";
 import type { OwnerRefusalCode } from "./runtime-owner.ts";
 import { PUBLIC_TOOLS } from "./public-tools.ts";
+import type { HostVersionVerdict } from "./host-profile.ts";
 
 /** Every resolver/binding refusal code and the contract reason that reports it. */
 export const OWNER_REFUSAL_REASON: Readonly<Record<OwnerRefusalCode, string>> = {
@@ -18,10 +20,21 @@ export const OWNER_REFUSAL_REASON: Readonly<Record<OwnerRefusalCode, string>> = 
   "version-unobservable": "host.subagents_owner_unverified",
   "child-process": "host.subagents_owner_unverified",
   "preflight-unavailable": "host.subagents_version_unsupported",
-  "version-unreviewed": "host.subagents_version_unsupported",
+  "version-unsupported": "host.subagents_version_unsupported",
   "tool-inactive": "host.subagents_tool_inactive",
   "owner-changed": "host.subagents_owner_unverified",
 };
+
+/** The preflight-seam refusals that are permanent for the installed runtime and so have a contract reason. */
+export const SEAM_REFUSAL_REASON: Readonly<Partial<Record<AdmissionRefusalCode, string>>> = {
+  "tools-not-read-only": "host.subagents_tools_not_read_only",
+};
+
+/** The contract message for a seam refusal code, or `undefined` when the code has no contract reason of its own. */
+export function seamRefusalMessage(code: AdmissionRefusalCode): string | undefined {
+  const reason = SEAM_REFUSAL_REASON[code];
+  return reason === undefined ? undefined : contractReason(reason, `seam refusal ${code}`).message;
+}
 
 /** The `host.subagents_launch_unsupported` reason: a `subagent` call Empirica cannot classify or correlate. */
 export const LAUNCH_UNSUPPORTED_REASON = "host.subagents_launch_unsupported";
@@ -42,6 +55,19 @@ export function ownerRefusalBlock(code: OwnerRefusalCode, run?: RunSnapshot): Bl
   return run === undefined
     ? { type: "Block", reasons: [ownerRefusalReason(code)] }
     : { type: "Block", run, reasons: [ownerRefusalReason(code)] };
+}
+
+/** The `host.version_unsupported` reason: the Pi itself is outside its profile's range, or its version was unreadable. */
+export const HOST_VERSION_REASON = "host.version_unsupported";
+
+/**
+ * The refusal of `/empirica` for a Pi outside the supported range: the contract reason with its parameters and its
+ * message filled in (the observed version and the range), by plain replacement.
+ */
+export function hostVersionReason(refused: Extract<HostVersionVerdict, { ok: false }>): Block["reasons"][number] {
+  const row = contractReason(HOST_VERSION_REASON, "an unsupported host version");
+  const parameters = { version: refused.version, range: refused.range };
+  return { ...row, parameters, message: (row.message ?? "").replace("{version}", () => refused.version).replace("{range}", () => refused.range) };
 }
 
 /** The contract reason reported when a `subagent` call is `unsupported` or `malformed` during a run. */

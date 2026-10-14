@@ -17,7 +17,7 @@
     "audit_execution_modes",
     "claim_states",
     "claim_kinds",
-    "audit_states",
+    "audit_outcomes",
     "independence_states",
     "freshness_states",
     "artifact_kinds",
@@ -44,7 +44,7 @@
       "const": "empirica/public"
     },
     "version": {
-      "const": "3.0.0"
+      "const": "4.0.0"
     },
     "protocol": {
       "const": "empirica/v2"
@@ -206,7 +206,7 @@
       "uniqueItems": true,
       "minItems": 1
     },
-    "audit_states": {
+    "audit_outcomes": {
       "type": "array",
       "items": {
         "type": "string",
@@ -394,6 +394,7 @@
       "required": [
         "requirements",
         "audit_obligation",
+        "stage_obligations",
         "operations",
         "actions",
         "tools",
@@ -426,6 +427,26 @@
             }
           }
         },
+        "stage_obligations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "confirmation",
+            "passes",
+            "terminal"
+          ],
+          "properties": {
+            "confirmation": {
+              "$ref": "#/$defs/stageObligation"
+            },
+            "passes": {
+              "$ref": "#/$defs/stageObligation"
+            },
+            "terminal": {
+              "$ref": "#/$defs/stageObligation"
+            }
+          }
+        },
         "requirements": {
           "type": "array",
           "minItems": 4,
@@ -453,6 +474,11 @@
                 "minLength": 1
               },
               "must": {
+                "type": "string",
+                "minLength": 1
+              },
+              "waiting": {
+                "description": "The requirement's words when the human is the one to act on it (core.evaluation.report_requirements: the configuration waiting on its human, core.governance.human_wait).",
                 "type": "string",
                 "minLength": 1
               }
@@ -605,6 +631,21 @@
                 "start_refused",
                 "host_recovery"
               ]
+            },
+            "case_messages": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "minProperties": 1
+            },
+            "case_parameter": {
+              "type": "string",
+              "minLength": 1
+            },
+            "ended_message": {
+              "type": "string",
+              "minLength": 1
             }
           }
         }
@@ -783,10 +824,19 @@
       "additionalProperties": false,
       "required": [
         "human_wait",
-        "budget_exhausted"
+        "evidence_wait",
+        "budget_exhausted",
+        "evidence_report",
+        "paused_for_human",
+        "paused_for_evidence",
+        "unattended_continue"
       ],
       "properties": {
         "human_wait": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence_wait": {
           "type": "string",
           "minLength": 1
         },
@@ -794,6 +844,24 @@
           "type": "string",
           "minLength": 1,
           "pattern": "^[^{}]*\\{resource\\}[^{}]*$"
+        },
+        "evidence_report": {
+          "type": "string",
+          "minLength": 1
+        },
+        "paused_for_human": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^{}]*\\{reason\\}[^{}]*$"
+        },
+        "paused_for_evidence": {
+          "type": "string",
+          "minLength": 1
+        },
+        "unattended_continue": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^{}]*\\{reason\\}[^{}]*$"
         }
       }
     },
@@ -814,6 +882,8 @@
             "converged",
             "run_id",
             "proposal_rationale",
+            "host_unreviewed",
+            "host_unreviewed_note",
             "audit",
             "finding",
             "reasons",
@@ -845,7 +915,34 @@
             "contract",
             "block",
             "fault",
-            "inert"
+            "inert",
+            "waiting",
+            "waiting_record",
+            "waiting_claim",
+            "waiting_terminal",
+            "waiting_for_claim",
+            "waiting_none_error",
+            "waiting_unavailable",
+            "waiting_unobserved",
+            "waiting_already_presented",
+            "waiting_interaction_limit",
+            "waiting_surface_unrecorded",
+            "waiting_presentation_failed",
+            "verified_by_service",
+            "confirmed_by_human",
+            "rejected_by_human",
+            "pending_human",
+            "pending_audit",
+            "human_note",
+            "decision_approve",
+            "decision_reject",
+            "human_answer",
+            "audit_verdict_none",
+            "audit_verdict_passed",
+            "audit_verdict_failed",
+            "audit_pending",
+            "audit_not_current",
+            "audit_reaudit_pending"
           ],
           "properties": {
             "no_governance": {
@@ -869,6 +966,14 @@
               "minLength": 1
             },
             "proposal_rationale": {
+              "type": "string",
+              "minLength": 1
+            },
+            "host_unreviewed": {
+              "type": "string",
+              "minLength": 1
+            },
+            "host_unreviewed_note": {
               "type": "string",
               "minLength": 1
             },
@@ -999,6 +1104,114 @@
             "inert": {
               "type": "string",
               "minLength": 1
+            },
+            "waiting": {
+              "type": "string",
+              "minLength": 1
+            },
+            "waiting_record": {
+              "type": "string",
+              "minLength": 1
+            },
+            "waiting_claim": {
+              "type": "string",
+              "minLength": 1
+            },
+            "waiting_terminal": {
+              "type": "string",
+              "minLength": 1
+            },
+            "waiting_for_claim": {
+              "type": "string",
+              "minLength": 1
+            },
+            "waiting_none_error": {
+              "type": "string",
+              "minLength": 1
+            },
+            "waiting_unavailable": {
+              "type": "string",
+              "minLength": 1
+            },
+            "waiting_already_presented": {
+              "type": "string",
+              "minLength": 1
+            },
+            "waiting_interaction_limit": {
+              "type": "string",
+              "minLength": 1
+            },
+            "waiting_surface_unrecorded": {
+              "type": "string",
+              "minLength": 1
+            },
+            "waiting_presentation_failed": {
+              "type": "string",
+              "minLength": 1
+            },
+            "waiting_unobserved": {
+              "type": "string",
+              "minLength": 1
+            },
+            "verified_by_service": {
+              "type": "string",
+              "minLength": 1
+            },
+            "confirmed_by_human": {
+              "type": "string",
+              "minLength": 1
+            },
+            "rejected_by_human": {
+              "type": "string",
+              "minLength": 1
+            },
+            "pending_human": {
+              "type": "string",
+              "minLength": 1
+            },
+            "human_note": {
+              "type": "string",
+              "minLength": 1
+            },
+            "decision_approve": {
+              "type": "string",
+              "minLength": 1
+            },
+            "decision_reject": {
+              "type": "string",
+              "minLength": 1
+            },
+            "human_answer": {
+              "type": "string",
+              "minLength": 1
+            },
+            "pending_audit": {
+              "type": "string",
+              "minLength": 1
+            },
+            "audit_verdict_none": {
+              "type": "string",
+              "minLength": 1
+            },
+            "audit_verdict_passed": {
+              "type": "string",
+              "minLength": 1
+            },
+            "audit_verdict_failed": {
+              "type": "string",
+              "minLength": 1
+            },
+            "audit_pending": {
+              "type": "string",
+              "minLength": 1
+            },
+            "audit_not_current": {
+              "type": "string",
+              "minLength": 1
+            },
+            "audit_reaudit_pending": {
+              "type": "string",
+              "minLength": 1
             }
           }
         }
@@ -1006,6 +1219,24 @@
     }
   },
   "$defs": {
+    "stageObligation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "obligation_id",
+        "must"
+      ],
+      "properties": {
+        "obligation_id": {
+          "type": "string",
+          "pattern": "^obligation\\.[a-z]+$"
+        },
+        "must": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
     "nextActionSurface": {
       "type": "object",
       "description": "Exactly one machine-readable execution surface for a directive: a model author action (empirica_observe), a report intent (report_convergence), a read operation (empirica_read), or an explicit host/human owner with the operation it activates.",

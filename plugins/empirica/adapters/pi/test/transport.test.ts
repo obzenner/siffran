@@ -9,10 +9,12 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createStdioBridgeDispatch, HOST_PROFILE_ID } from "../src/stdio-transport.ts";
+import { HOST_PROFILE_ID } from "../src/host-profile.ts";
+import { createStdioBridgeDispatch } from "../src/stdio-transport.ts";
 import { createPrivateIngress, type PrivateOperation } from "../src/private-transport.ts";
 import { resolveRunRequest } from "../src/translate.ts";
 import { GuardError } from "../src/guard.ts";
+import { contractProfileId } from "./fakes.ts";
 
 // A stand-in bridge: read the whole request, echo request_id, return Inert(no_run).
 const ECHO_BRIDGE =
@@ -122,8 +124,8 @@ test("private ingress kills and rejects a bridge that exceeds its deadline", asy
   }
 });
 
-test("HOST_PROFILE_ID is the exact pi profile with no default", () => {
-  assert.equal(HOST_PROFILE_ID, "pi@0.84.1+pi-subagents-foreground-audit-v1");
+test("HOST_PROFILE_ID is the contract's pi profile with no default", () => {
+  assert.equal(HOST_PROFILE_ID, contractProfileId("pi"));
 });
 
 test("assertPrivateResponse accepts the real private shapes and rejects every malformed one", async () => {
@@ -134,6 +136,7 @@ test("assertPrivateResponse accepts the real private shapes and rejects every ma
     ["classify_identity", { identity: "anthropic/claude" }],
     ["audit_prepare", { type: "audit_plan", plan }],
     ["audit_prepare", { type: "audit_refused", reason: "runtime_changed" }],
+    ["audit_prepare", { type: "audit_excluded", message: "x", identities: ["a/b"] }],
     ["audit_verdict", { type: "audit_verdict", admitted: true }],
     ["audit_verdict", { type: "audit_verdict", admitted: false }],
     ["audit_start", { type: "audit_started" }],
@@ -149,6 +152,7 @@ test("assertPrivateResponse accepts the real private shapes and rejects every ma
     ["audit_prepare", { type: "audit_plan", plan: { ...plan, argument: "x" } }],
     ["audit_prepare", { type: "audit_refused", reason: "anything else" }],
     ["audit_prepare", { type: "audit_refused" }],
+    ["audit_prepare", { type: "audit_excluded", message: "x", identities: [1] }],
     ["audit_verdict", { type: "audit_verdict", admitted: {} }],
     ["audit_verdict", { type: "audit_verdict" }],
     ["audit_start", { type: "audit_terminal" }],

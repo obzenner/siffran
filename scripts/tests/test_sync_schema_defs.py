@@ -60,10 +60,12 @@ class SyncSchemaDefsTests(unittest.TestCase):
         invocation = shared["invocationProvenance"]
         self.assertIn("host_runtime", invocation["properties"])
         self.assertNotIn("host_runtime", invocation["required"], "optional: Claude and Codex record none")
+        self.assertIn("session", invocation["properties"])
+        self.assertNotIn("session", invocation["required"], "optional: a host that cannot say where its session is records none")
         # Carrying the member is the shared shape; it collapses to the reference.
         self.assertEqual(sync_schema_defs._replace_shared(copy.deepcopy(invocation), shared),
                          {"$ref": "#/$defs/invocationProvenance"})
-        # An embedding that still has the four 4.0 members is a near match, not silently collapsed.
+        # An embedding that lacks the shared member is a near match, not silently collapsed.
         stale = copy.deepcopy(invocation)
         del stale["properties"]["host_runtime"]
         with self.assertRaisesRegex(sync_schema_defs.SchemaGenerationError, r"#/\$defs/old"):
@@ -139,10 +141,15 @@ EXPECTED_CLAIM_ID_POSITIONS = {
         "/$defs/reviewedClaimItemRequest/properties/claim_id",
         "/$defs/actionResearch/properties/claim_id",
         "/$defs/actionSpikeRequest/properties/claim_id",
+        "/$defs/evidenceConfirmationPayload/properties/decisions/items/oneOf/1/properties/claim_id",
         *_GRAPH_POSITIONS,
     ),
     "response.schema.json": (
         "/$defs/auditStaleParams/properties/claim_id",
+        "/$defs/claimNamedParams/properties/claim_id",
+        "/$defs/confirmationRequiredParams/properties/claim_ids",
+        "/$defs/runView/properties/confirmation_batch/anyOf/1/properties/claim_ids",
+        "/$defs/runView/properties/confirmation_batch/anyOf/1/properties/records/items/properties/claim_id",
         "/$defs/freezeDeferredParams/properties/claim_ids",
         "/$defs/residualItem/allOf/1/properties/claim_id",
         "/$defs/residualItem/allOf/1/properties/target_claim_id",
@@ -163,8 +170,10 @@ EXPECTED_CLAIM_ID_POSITIONS = {
         "/next_actions/research.record/params/properties/claim_id",
         "/next_actions/spike.run/params/properties/claim_id",
         "/next_actions/spike.regate/params/properties/claim_id",
-        "/next_actions/human.request_decision/params/properties/claim_id",
         "/reasons/audit.stale/params/properties/claim_id",
+        *(f"/reasons/{code}/params/properties/claim_id" for code in (
+            "claim.research_missing", "claim.research_unbound", "claim.spike_missing", "claim.refuted")),
+        "/reasons/evidence.confirmation_required/params/properties/claim_ids",
         "/reasons/freeze.deferred/params/properties/claim_ids",
     ),
     "public-tools.json": tuple(f"/schemas/{surface}/empirica_observe{path}"

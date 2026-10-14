@@ -1,0 +1,128 @@
+{
+  "result": {
+    "type": "Block",
+    "run": {
+      "id": "run-fx",
+      "goal": "Prove the public contract is internally consistent.",
+      "status": "active",
+      "basis": "sha256:3bf1fa8c12f85e8dbcbc2e664191fd8c72bebf5a711ea32c7ba75dc3b16da159",
+      "contract": {
+        "id": "empirica/public",
+        "version": "4.0.0",
+        "relevant_sections": [
+          "evidence/research"
+        ],
+        "digest": "<contract-digest>"
+      },
+      "obligations": {
+        "active": [
+          {
+            "id": "obligation.route",
+            "required": "Record routing before investigation.",
+            "observed": [],
+            "missing": null,
+            "next": [],
+            "status": "satisfied"
+          },
+          {
+            "id": "obligation.graph",
+            "required": "Propose a valid claim graph from supplied context before requesting review.",
+            "observed": [],
+            "missing": null,
+            "next": [],
+            "status": "satisfied"
+          },
+          {
+            "id": "obligation.approval",
+            "required": "Obtain exact host-mediated approval for the current run configuration.",
+            "observed": [],
+            "missing": null,
+            "next": [],
+            "status": "satisfied"
+          },
+          {
+            "id": "obligation.investigation",
+            "required": "Record investigation only after routing and current approval.",
+            "observed": [],
+            "missing": null,
+            "next": [],
+            "status": "satisfied"
+          },
+          {
+            "id": "claim:G0",
+            "required": "The public contract is internally consistent.",
+            "observed": [],
+            "missing": {
+              "code": "claim.research_missing",
+              "target_claim_id": "G0",
+              "parameters": {
+                "claim_id": "G0"
+              }
+            },
+            "next": [
+              "research.record"
+            ],
+            "status": "residual"
+          }
+        ],
+        "deferred": []
+      },
+      "residuals": [],
+      "freshness": {
+        "changes": []
+      },
+      "children": [],
+      "host": {
+        "profile_id": "claude-code",
+        "tier": "foreground_only",
+        "missing_capabilities": [
+          "host.async_unsupported"
+        ]
+      },
+      "next_actions": [],
+      "untrusted_delimiters": {
+        "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+        "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+      },
+      "governance": null,
+      "audit": {
+        "verdict": "none",
+        "current": null,
+        "pending": false,
+        "independence": null,
+        "findings": []
+      },
+      "confirmation_batch": {
+        "key": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+        "record_ids": [],
+        "claim_ids": [],
+        "records": [],
+        "prompt_error": null,
+        "terminal": {
+          "status": "stopped_residual",
+          "digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+        }
+      }
+    },
+    "reasons": [
+      {
+        "code": "governance.terminal_stop_pending",
+        "message": "Ending the run as stopped_residual needs a human's agreement, and nobody has been asked yet. Stop again (report_convergence intent=stop) and the human is asked whether to end the run.",
+        "parameters": {
+          "status": "stopped_residual",
+          "route": "human",
+          "case": "ask"
+        },
+        "sections": [
+          "governance"
+        ],
+        "next_actions": [
+          "convergence.report",
+          "human.confirm_evidence",
+          "run.inspect"
+        ]
+      }
+    ]
+  },
+  "text": "Block active — no governance\nrun_id: run-fx\nAudit: required\n\nReasons:\n  governance.terminal_stop_pending: Ending the run as stopped_residual needs a human's agreement, and nobody has been asked yet. Stop again (report_convergence intent=stop) and the human is asked whether to end the run.\n    params: case=ask; route=human; status=stopped_residual\n    next: report_convergence intent=report_convergence; human: confirmation; empirica_read GetRun\n\nOpen obligations:\n  claim:G0: <<<EMPIRICA_UNTRUSTED_DATA>>>The public contract is internally consistent.<<<END_EMPIRICA_UNTRUSTED_DATA>>>\n    missing: claim.research_missing\n    next: empirica_observe kind=research\n\nWaiting on a human:\n  decision needed to end the run as stopped_residual\n  a human can be asked at the end of your next pass\n\nSatisfied obligations:\n  obligation.route\n  obligation.graph\n  obligation.approval\n  obligation.investigation"
+}

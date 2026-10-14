@@ -2,6 +2,8 @@
 // registration, translation, gating, and guard behaviour, with no Pi runtime
 // and no network.
 
+import { readFileSync } from "node:fs";
+import { HOST_PROFILES_PATH } from "../src/host-profile.ts";
 import type {
   CommandDefinition,
   ExtensionAPI,
@@ -69,7 +71,7 @@ export class FakePi implements ExtensionAPI {
   /** Set to make ``getCommands`` throw. */
   commandsError: Error | null = null;
 
-  /** First-wins by tool name (Pi 0.87.1 ``extensions/runner.js:370-380``); non-records pass through untouched. */
+  /** First-wins by tool name (Pi ``extensions/runner.js``, first registrant wins); non-records pass through untouched. */
   getAllTools(): ToolInfo[] {
     if (this.inventoryError) throw this.inventoryError;
     const own: ToolInfo[] = [...this.tools.keys()].map((name) => ({ name,
@@ -113,7 +115,12 @@ export class FakePi implements ExtensionAPI {
                   options?: { deliverAs?: "steer" | "followUp" }): void {
     this.userMessages.push(content);
     this.userMessageOptions.push(options);
+    // Pi starts the run on a later tick (`agent-session.js` `prompt()` awaits input handlers first) and announces it.
+    const started = this.handlers.get("agent_start");
+    if (this.startsRunOnUserMessage && typeof started === "function") queueMicrotask(() => { void (started as () => unknown)(); });
   }
+  /** Whether a user message starts a run, as Pi does when the session is idle (default). */
+  startsRunOnUserMessage = true;
 
   registerCommand(name: string, def: CommandDefinition): void {
     this.commands.set(name, def);
@@ -149,4 +156,12 @@ export class FakePi implements ExtensionAPI {
     }
     return handler;
   }
+}
+
+/** The profile id of a host as `host-profiles.json` declares it: the one place a test learns an id. */
+export function contractProfileId(hostId: string): string {
+  const document = JSON.parse(readFileSync(HOST_PROFILES_PATH, "utf8")) as { profiles: { host_id: string; profile_id: string }[] };
+  const ids = document.profiles.filter((profile) => profile.host_id === hostId).map((profile) => profile.profile_id);
+  if (ids.length !== 1) throw new Error(`expected one profile for ${hostId}, found ${ids.length}`);
+  return ids[0];
 }

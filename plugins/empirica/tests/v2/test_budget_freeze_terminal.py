@@ -109,7 +109,7 @@ class BudgetFreezeTerminalTests(ConformanceCase):
             # Evaluate to consume the derivation pass (semantic progress).
             self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
             # Stop after pass budget exhausts -> stopped_budget.
-            resp = self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))
+            resp = self.stop(drv, run_id)
             result = self.assert_allow(resp, converged=False)
             self.assert_status(result["run"], "stopped_budget")
             spec = REASONS["budget.exhausted"]
@@ -355,7 +355,7 @@ class BudgetFreezeTerminalTests(ConformanceCase):
         self.dispatch(drv, observe_action(run_id=run_id,
             action=action_graph(payload=two_claim)))
         # Stop/evaluate.
-        resp = self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))
+        resp = self.stop(drv, run_id)
         result = self.assert_allow(resp, converged=False)
         self.assert_status(result["run"], "stopped_frozen")
         # GetArgument must show C0 as the only frozen/audited claim, C1 in deferred scope.
@@ -412,7 +412,7 @@ class BudgetFreezeTerminalTests(ConformanceCase):
             root_id = graph["root"]
             self.dispatch(drv, observe_action(run_id=run_id, action=action_research(
                 claim_id=root_id, source_kind="code", result="refutes")))
-            resp = self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))
+            resp = self.stop(drv, run_id)
             result = self.assert_allow(resp, converged=False)
             self.assert_status(result["run"], "stopped_residual")
             self.assertFalse(result["converged"], "a refuted root must not converge")
@@ -426,7 +426,7 @@ class BudgetFreezeTerminalTests(ConformanceCase):
             self.require_frozen_scope(drv, run_id)
             self.dispatch(drv, observe_action(run_id=run_id,
                 action=action_graph(payload=canonical_graph(n_claims=2, kind="ordinary"))))
-            resp = self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))
+            resp = self.stop(drv, run_id)
             result = self.assert_allow(resp, converged=False)
             self.assert_status(result["run"], "stopped_frozen")
             self.assertFalse(result["converged"], "a frozen stop must not converge")
@@ -445,7 +445,7 @@ class BudgetFreezeTerminalTests(ConformanceCase):
                 action={"kind": "spike_request", "claim_id": root_id,
                         "command": _COMMAND, "dependent_files": [_BOUND]}))
             self.dispatch(drv2, evaluate(run_id=run_id, intent="report_convergence"))
-            resp = self.dispatch(drv2, evaluate(run_id=run_id, intent="stop"))
+            resp = self.stop(drv2, run_id)
             result = self.assert_allow(resp, converged=False)
             self.assert_status(result["run"], "stopped_budget")
             self.assertFalse(result["converged"], "a budget stop must not converge")
@@ -533,7 +533,7 @@ class BudgetFreezeTerminalTests(ConformanceCase):
             root_id = graph["root"]
             self.dispatch(drv, observe_action(run_id=run_id, action=action_research(
                 claim_id=root_id, source_kind="code", result="refutes")))
-            self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))
+            self.stop(drv, run_id)
             return "stopped_residual"
         elif variant == "stopped_frozen":
             # Research-only freeze (no spike): claim kind is ordinary.
@@ -543,7 +543,7 @@ class BudgetFreezeTerminalTests(ConformanceCase):
             self.require_frozen_scope(drv, run_id)
             self.dispatch(drv, observe_action(run_id=run_id,
                 action=action_graph(payload=canonical_graph(n_claims=2, kind="ordinary"))))
-            self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))
+            self.stop(drv, run_id)
             return "stopped_frozen"
         elif variant == "stopped_budget":
             graph = self.require_graph_admitted(drv, run_id, canonical_graph(n_claims=1))
@@ -555,7 +555,7 @@ class BudgetFreezeTerminalTests(ConformanceCase):
                 action={"kind": "spike_request", "claim_id": root_id,
                         "command": _COMMAND, "dependent_files": [_BOUND]}))
             self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
-            self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))
+            self.stop(drv, run_id)
             return "stopped_budget"
         raise ValueError(f"unknown variant {variant!r}")
 

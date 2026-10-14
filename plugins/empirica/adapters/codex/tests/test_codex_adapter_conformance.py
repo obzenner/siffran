@@ -17,6 +17,8 @@ if str(PLUGIN_ROOT) not in sys.path:
 from adapters.codex.lifecycle import _start, _stop  # noqa: E402
 from adapters.public_tools import PublicTools  # noqa: E402
 from adapters.governance import HostGovernance  # noqa: E402
+from application.protocol import host_profile_id  # noqa: E402
+CODEX_PROFILE = host_profile_id("codex-cli")
 
 
 class CodexAdapterConformanceTests(unittest.TestCase):
@@ -51,7 +53,7 @@ class CodexAdapterConformanceTests(unittest.TestCase):
                 for prefix in ("", "mcp__empirica__"):
                     for tool in ("empirica_read", "empirica_observe", "report_convergence"):
                         self.assertIsNone(_pre_tool_use({**payload, "tool_name": prefix + tool}))
-                tools = PublicTools("codex-cli@0.146.0", govern=HostGovernance("codex-cli@0.146.0"))
+                tools = PublicTools(CODEX_PROFILE, govern=HostGovernance(CODEX_PROFILE))
                 tools.call_internal("empirica_observe", {"run_id": handle, "action": {"kind": "route", "reason": "route first"}})
                 tools.call_internal("empirica_observe", {"run_id": handle, "action": {"kind": "graph", "payload": {
                     "root": "G0", "claims": [{"id": "G0", "text": "identity", "gating": True, "kind": "ordinary"}], "edges": []}}})
@@ -85,7 +87,7 @@ class CodexAdapterConformanceTests(unittest.TestCase):
                 started = _start(payload)
                 context = started["hookSpecificOutput"]["additionalContext"]
                 handle = re.search(r"er2:[^ ]+", context).group(0).rstrip(".)")
-                tools = PublicTools("codex-cli@0.146.0", govern=HostGovernance("codex-cli@0.146.0"))
+                tools = PublicTools(CODEX_PROFILE, govern=HostGovernance(CODEX_PROFILE))
 
                 def observe(action: dict) -> dict:
                     out = tools.call_internal("empirica_observe", {"run_id": handle, "action": action})
@@ -107,7 +109,7 @@ class CodexAdapterConformanceTests(unittest.TestCase):
                 observe({"kind": "investigate"})
                 observe({"kind": "research", "claim_id": "G0", "source_kind": "code",
                          "result": "supports", "payload": {"source_ref": "probe.py",
-                                                               "citation": "The probe executes successfully."}})
+                                                               "citation": "print('reachable')"}})
                 observe({"kind": "spike_request", "claim_id": "G0",
                          "command": "python3 probe.py", "dependent_files": ["probe.py"]})
                 observe({"kind": "freeze"})

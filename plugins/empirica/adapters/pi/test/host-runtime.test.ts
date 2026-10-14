@@ -27,8 +27,8 @@ test("every shared case is decided as the fixture states (the Python application
 });
 
 test("the rule reads the policy it is given, not a literal", () => {
-  const good = CASES.find((row) => row.id === "newest-reviewed")!.host_runtime;
-  const narrowed: SubagentsCompatibility = { ...SUBAGENTS_COMPATIBILITY, reviewed_versions: ["0.75.1"] };
+  const good = CASES.find((row) => row.id === "a-reviewed-version")!.host_runtime;
+  const narrowed: SubagentsCompatibility = { ...SUBAGENTS_COMPATIBILITY, minimum: "0.76.0" };
   assert.equal(hostRuntimeRejection(narrowed, good), "version");
   assert.equal(hostRuntimeRejection(SUBAGENTS_COMPATIBILITY, good), undefined);
 });

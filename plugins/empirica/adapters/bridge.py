@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The shared JSON bridge between any host adapter and the Empirica v2 core (ADR-30/31/32, D6-C).
+"""The shared JSON bridge between any host adapter and the Empirica v2 core (ADR-30/31/32).
 
 A host adapter — the Pi extension over stdio, or the Claude/Codex hooks in-process — speaks the
 ``empirica/v2`` contract but owns no domain rules. This module is the single transport target that
@@ -10,9 +10,9 @@ core to storage:
       -> application.v2 service (composed with an explicit exact registry profile)
       -> response envelope (dict)
 
-D7 composition boundary: the bridge composes ``application.v2`` with the hardened located run
+Composition boundary: the bridge composes ``application.v2`` with the hardened located run
 facade and Git artifact repository. Public handles are decoded only by the strict ``er2`` codec;
-raw selectors are hashed into safe storage IDs and no selector index or legacy decoder exists.
+raw selectors are hashed into safe storage IDs and there is no selector index.
 
 Each host supplies an exact registry ``profile_id`` at bridge construction, never in a public
 request. The generic bridge has no host default. Missing, malformed, or unknown profile returns
@@ -43,6 +43,7 @@ from collections.abc import Mapping
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 # plugins/empirica/adapters/bridge.py -> plugins/empirica (so core/application/adapters import).
@@ -54,9 +55,11 @@ from application import host_runtime  # noqa: E402
 from application import protocol as _proto  # noqa: E402
 from application import v2 as _v2  # noqa: E402
 from adapters.execution import FilesystemWorkspace, SubprocessSpikeHarness  # noqa: E402
-from adapters.git.artifact_repo import GitArtifactRepository  # noqa: E402
+from adapters.git.artifact_repo import GitArtifactRepository, toplevel  # noqa: E402
 from adapters.identity import POLICY_VERSION, observe  # noqa: E402
 from adapters.state.located import LocatedRunRepository  # noqa: E402
+from adapters.state.locations import Locations  # noqa: E402
+from adapters.state.timeline import Timeline  # noqa: E402
 
 _PROTOCOL = _proto.protocol_id()
 _PROFILES = _proto.profile_ids()
@@ -110,19 +113,64 @@ class _LazyGitArtifactRepository:
         return getattr(self._repository, name)
 
 
-def build_service(profile_id: str):
+class _RecordingRuns:
+    """The run repository, recording two kinds of display data beside each run, neither read by a run's decisions:
+
+    * where each run it creates works (``adapters.state.locations``): the repository holding its knowledge store and
+      its workspace, so a reader finds them later (only when ``repo_dir`` is given);
+    * when each successful write happened (``adapters.state.timeline``, ADR-0070): after a ``create`` or a
+      ``compare_and_set`` lands, one entry with the time of ``clock``. This is the only place the plugin reads a
+      clock for a run; a write that raises (a lost compare-and-set) records nothing and reads no clock.
+
+    Failing to record either never fails or changes the run: the write stands either way and simply has no record."""
+
+    def __init__(self, runs, repo_dir: Path | None = None, workspace_dir: Path | None = None, *,
+                 timeline=None, clock=time.time) -> None:
+        self._runs, self._repo_dir, self._workspace_dir = runs, repo_dir, workspace_dir
+        self._timeline = timeline if timeline is not None else Timeline()
+        self._clock = clock
+
+    def __getattr__(self, name: str):
+        if name == "_runs":  # not yet set (a copy being rebuilt): never recurse into ourselves
+            raise AttributeError(name)
+        return getattr(self._runs, name)
+
+    def _record(self, key, previous, revision, value) -> None:
+        try:
+            self._timeline.append(key, previous, revision, value, self._clock())
+        except Exception:  # noqa: BLE001 - display data: no failure of it may reach the run
+            pass
+
+    def create(self, key, value):
+        revision = self._runs.create(key, value)
+        self._record(key, None, revision, value)
+        if self._repo_dir is not None:
+            try:
+                Locations().record(key, toplevel(self._repo_dir), self._workspace_dir.resolve())
+            except (OSError, ValueError):
+                pass
+        return revision
+
+    def compare_and_set(self, key, value, expected):
+        revision = self._runs.compare_and_set(key, value, expected)
+        self._record(key, expected, revision, value)
+        return revision
+
+
+def build_service(profile_id: str, *, clock=time.time):
     """Compose the v2 service with an explicit exact registry ``profile_id`` (D6-C §4).
 
     Requires an explicit exact ``profile_id``; there is no host default. A missing (``None``) or
     unknown profile raises :class:`ValueError`. The machine-local run repository is composed
     eagerly; Git artifact discovery is deferred until a resolved run needs its knowledge plane.
+    ``clock`` times the run's writes for its timeline (display data only, ADR-0070).
     """
     if not isinstance(profile_id, str) or not profile_id:
         raise ValueError("an explicit exact registry profile_id is required")
     if profile_id not in _PROFILES:
         raise ValueError(f"unknown host profile_id: {profile_id!r}")
-    runs = LocatedRunRepository()
     repo_dir = Path(os.environ.get("EMPIRICA_REPO_DIR", Path.cwd()))
+    runs = _RecordingRuns(LocatedRunRepository(), repo_dir, Path.cwd(), clock=clock)
     artifacts = _LazyGitArtifactRepository(repo_dir)
     return _v2.compose(
         workspace=FilesystemWorkspace(Path.cwd()), harness=SubprocessSpikeHarness(),
@@ -153,9 +201,29 @@ def trusted_governance_decision(profile_id: str, run_id: str, payload: dict) -> 
     return build_service(profile_id).trusted_governance_decision(run_id=run_id, payload=payload)
 
 
+def trusted_evidence_confirmation(profile_id: str, run_id: str, payload: dict) -> dict:
+    """One human receipt of per-item decisions; private, never exposed by public dispatch."""
+    return build_service(profile_id).trusted_evidence_confirmation(run_id=run_id, payload=payload)
+
+
+def trusted_human_surface(profile_id: str, run_id: str, payload: dict) -> dict:
+    """Host-observed: can a human be shown a dialog now? Never exposed by public dispatch."""
+    return build_service(profile_id).trusted_human_surface(run_id=run_id, payload=payload)
+
+
+def trusted_evidence_presentation(profile_id: str, run_id: str, payload: dict) -> dict:
+    """Record that the host showed the human the pending batch; private, never exposed by public dispatch."""
+    return build_service(profile_id).trusted_evidence_presentation(run_id=run_id, payload=payload)
+
+
 def trusted_audit_plan(profile_id: str, run_id: str, child_id: str) -> dict | None:
     """Load the immutable operation committed with one audit reservation."""
     return build_service(profile_id).trusted_audit_plan(run_id=run_id, child_id=child_id)
+
+
+def trusted_audit_exclusions(profile_id: str, run_id: str) -> list | None:
+    """The identity classes an auditor must not run on: the author and every producer of covered evidence."""
+    return build_service(profile_id).trusted_audit_exclusions(run_id=run_id)
 
 
 def trusted_host_runtime(profile_id: str, run_id: str) -> dict | None:

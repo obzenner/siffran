@@ -1,6 +1,6 @@
 {
   "id": "empirica/public",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "protocol": "empirica/v2",
   "commands": [
     "StartRun",
@@ -160,19 +160,17 @@
     "needs-experiment",
     "needs-decision"
   ],
-  "audit_states": [
-    "not_required",
-    "required",
-    "pending",
+  "audit_outcomes": [
     "passed",
     "failed",
-    "stale"
+    "none"
   ],
   "independence_states": [
     "distinct",
     "mixed",
     "same_model",
-    "unverified"
+    "unverified",
+    "human_owned"
   ],
   "freshness_states": [
     "present",
@@ -285,7 +283,8 @@
       {
         "predicate": "governance.approved",
         "obligation_id": "obligation.approval",
-        "must": "Obtain exact host-mediated approval for the current run configuration."
+        "must": "Obtain exact host-mediated approval for the current run configuration.",
+   "waiting": "Waiting for a human to approve the run's configuration in the host's dialog."
       },
       {
         "predicate": "investigation.recorded",
@@ -296,6 +295,20 @@
     "audit_obligation": {
       "obligation_id": "obligation.audit",
       "must": "Obtain a current independent audit of every approved gating claim."
+    },
+    "stage_obligations": {
+      "confirmation": {
+        "obligation_id": "obligation.confirmation",
+        "must": "Get the human's answers to the research and decisions that wait on them."
+      },
+      "passes": {
+        "obligation_id": "obligation.passes",
+        "must": "Make progress within the run's pass ceiling, or stop honestly."
+      },
+      "terminal": {
+        "obligation_id": "obligation.terminal",
+        "must": "Get the human's consent to end the run."
+      }
     },
     "actions": {
       "route": {
@@ -549,7 +562,7 @@
       }
     },
     "research.record": {
-      "description": "Record one externally observed Fold-1 research citation bound to a claim.",
+      "description": "Record one externally observed research citation bound to a claim.",
       "surface": {
         "tool": "empirica_observe",
         "action": "research"
@@ -601,6 +614,10 @@
               "observed_content_digest": {
                 "type": "string",
                 "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "spike_unavailable": {
+                "type": "string",
+                "minLength": 1
               }
             }
           }
@@ -675,29 +692,6 @@
               "minLength": 1,
               "pattern": "^[^/].*$"
             }
-          }
-        }
-      }
-    },
-    "human.request_decision": {
-      "description": "Request a human decision for a residual claim.",
-      "surface": {
-        "owner": "human",
-        "operation": "decision"
-      },
-      "params": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "claim_id"
-        ],
-        "properties": {
-          "claim_id": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
-          },
-          "question": {
-            "type": "string"
           }
         }
       }
@@ -887,6 +881,30 @@
           }
         }
       }
+    },
+    "human.confirm_evidence": {
+      "description": "Show the human the pending research records and needs-decision claims in one batch: record one presentation, then submit one receipt of per-item decisions. Offered only when the run has a human ingress.",
+      "surface": {
+        "owner": "human",
+        "operation": "confirmation"
+      },
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
+    "convergence.report": {
+      "description": "Report convergence with the default intent. The host first looks for a human it can ask; when there is one it shows them the pending research records and decisions in one dialog, and when there is none the response says so.",
+      "surface": {
+        "tool": "report_convergence",
+        "intent": "report_convergence"
+      },
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
     }
   },
   "reasons": {
@@ -976,6 +994,20 @@
       ],
       "message": "Argument graph is malformed or unsupported."
     },
+    "graph.root_not_gating": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "graph.record"
+      ],
+      "sections": [
+        "claims/graph"
+      ],
+      "message": "The root claim must be gating: it is the goal-level assurance claim, and a run whose root is non-gating can never converge. Record the graph again with a gating root; scope you want to defer belongs in non-gating claims below it."
+    },
     "route.required": {
       "params": {
         "type": "object",
@@ -1022,7 +1054,15 @@
       "params": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "required": [
+          "claim_id"
+        ],
+        "properties": {
+          "claim_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+          }
+        }
       },
       "next_actions": [
         "research.record"
@@ -1030,13 +1070,22 @@
       "sections": [
         "evidence/research"
       ],
-      "message": "Record Fold-1 research for this claim."
+      "message": "Record research for claim {claim_id}.",
+      "ended_message": "No research was recorded for claim {claim_id} before the run stopped."
     },
     "claim.research_unbound": {
       "params": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "required": [
+          "claim_id"
+        ],
+        "properties": {
+          "claim_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+          }
+        }
       },
       "next_actions": [
         "research.record"
@@ -1044,13 +1093,22 @@
       "sections": [
         "evidence/research"
       ],
-      "message": "Research is not bound to the current claim digest."
+      "message": "Research for claim {claim_id} is not bound to the current claim digest.",
+      "ended_message": "Research for claim {claim_id} did not match the claim as it was finally worded."
     },
     "claim.spike_missing": {
       "params": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "required": [
+          "claim_id"
+        ],
+        "properties": {
+          "claim_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+          }
+        }
       },
       "next_actions": [
         "spike.run"
@@ -1058,7 +1116,8 @@
       "sections": [
         "evidence/spike"
       ],
-      "message": "Run a deterministic spike for this claim."
+      "message": "Run a deterministic spike for claim {claim_id}.",
+      "ended_message": "No spike was run for claim {claim_id} before the run stopped."
     },
     "claim.spike_prerequisite_missing": {
       "params": {
@@ -1073,7 +1132,8 @@
       "sections": [
         "evidence/order"
       ],
-      "message": "Spike has no active supporting research prerequisite."
+      "message": "Spike has no active supporting research prerequisite.",
+      "ended_message": "The spike had no supporting research behind it when the run stopped."
     },
     "claim.spike_stale": {
       "params": {
@@ -1120,27 +1180,22 @@
       "sections": [
         "evidence/freshness"
       ],
-      "message": "Spike prerequisites changed; re-gate."
-    },
-    "claim.human_decision": {
-      "params": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {}
-      },
-      "next_actions": [
-        "human.request_decision"
-      ],
-      "sections": [
-        "claims/residuals"
-      ],
-      "message": "Claim requires a human decision."
+      "message": "Spike prerequisites changed; re-gate.",
+      "ended_message": "The spike's files changed after it ran, and it was not run again."
     },
     "claim.refuted": {
       "params": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "required": [
+          "claim_id"
+        ],
+        "properties": {
+          "claim_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+          }
+        }
       },
       "next_actions": [
         "run.inspect"
@@ -1148,7 +1203,8 @@
       "sections": [
         "claims/refutation"
       ],
-      "message": "Active evidence refutes this claim."
+      "message": "Refuted by active evidence; claim {claim_id} still blocks this scope.",
+      "ended_message": "Active evidence refuted claim {claim_id}; it still blocked this scope when the run stopped."
     },
     "evidence.conflict": {
       "params": {
@@ -1163,7 +1219,8 @@
       "sections": [
         "claims/refutation"
       ],
-      "message": "Simultaneous supporting and refuting research fails closed; resolve or stop with residual."
+      "message": "Simultaneous supporting and refuting research fails closed; resolve or stop with residual.",
+      "ended_message": "Supporting and refuting research conflicted when the run stopped."
     },
     "budget.exhausted": {
       "params": {
@@ -1190,7 +1247,8 @@
       "sections": [
         "budget"
       ],
-      "message": "{resource} budget exhausted."
+      "message": "{resource} budget exhausted.",
+      "ended_message": "{resource} budget was exhausted when the run stopped."
     },
     "audit.required": {
       "params": {
@@ -1204,7 +1262,8 @@
       "sections": [
         "audit"
       ],
-      "message": "Audit is owed; spawn an independent auditor."
+      "message": "Audit is owed; spawn an independent auditor.",
+      "ended_message": "No audit had been done when the run stopped."
     },
     "audit.pending": {
       "params": {
@@ -1218,7 +1277,8 @@
       "sections": [
         "audit"
       ],
-      "message": "Audit child is pending; wait."
+      "message": "Audit child is pending; wait.",
+      "ended_message": "An audit was still pending when the run stopped."
     },
     "audit.unreadable": {
       "params": {
@@ -1232,7 +1292,8 @@
       "sections": [
         "audit"
       ],
-      "message": "Audit output is unreadable; retry."
+      "message": "Audit output is unreadable; retry.",
+      "ended_message": "The audit output was unreadable when the run stopped."
     },
     "audit.failed": {
       "params": {
@@ -1247,7 +1308,8 @@
       "sections": [
         "audit"
       ],
-      "message": "Audit failed or its coverage went stale; address any findings listed under Audit, then retry."
+      "message": "Audit failed or its coverage went stale; address any findings listed under Audit, then retry.",
+      "ended_message": "The latest audit failed, or no longer covered the argument, when the run stopped."
     },
     "audit.stale": {
       "params": {
@@ -1276,7 +1338,8 @@
       "sections": [
         "audit"
       ],
-      "message": "Audit coverage is stale for {scope}; re-audit."
+      "message": "Audit coverage is stale for {scope}; re-audit.",
+      "ended_message": "The audit no longer covered {scope} when the run stopped."
     },
     "audit.same_model": {
       "params": {
@@ -1291,7 +1354,44 @@
       "sections": [
         "audit/independence"
       ],
-      "message": "Auditor is the same model as covered evidence; spawn a distinct auditor or accept the residual."
+      "message": "Auditor is the same model as covered evidence; spawn a distinct auditor or accept the residual.",
+      "ended_message": "The auditor was the same model as the covered evidence when the run stopped."
+    },
+    "audit.auditor_excluded": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "identities",
+          "models"
+        ],
+        "properties": {
+          "identities": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "models": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        }
+      },
+      "next_actions": [
+        "child.spawn_auditor",
+        "residual.accept"
+      ],
+      "sections": [
+        "audit/independence"
+      ],
+      "message": "The auditor would run on a model that made this evidence ({models}). Set another: an override, or enabledModels on Pi.",
+      "ended_message": "No auditor on another model could be set when the run stopped."
     },
     "audit.independence_unverified": {
       "params": {
@@ -1306,7 +1406,8 @@
       "sections": [
         "audit/independence"
       ],
-      "message": "Audit independence is unverified; spawn a distinct auditor or accept the residual."
+      "message": "Audit independence is unverified; spawn a distinct auditor or accept the residual.",
+      "ended_message": "The audit's independence was unverified when the run stopped."
     },
     "child.terminal": {
       "params": {
@@ -1334,7 +1435,8 @@
       "sections": [
         "children"
       ],
-      "message": "Child terminated in state {state}."
+      "message": "Child terminated in state {state}.",
+      "ended_message": "A child ended in state {state} and was not retried before the run stopped."
     },
     "host.async_unsupported": {
       "params": {
@@ -1436,7 +1538,22 @@
       "sections": [
         "hosts/capabilities"
       ],
-      "message": "The active pi-subagents runtime is not a reviewed version or does not expose the launch preflight Empirica binds. Install a reviewed version and restart the host, or accept the residual.",
+      "message": "The active pi-subagents runtime is outside the supported range, or its tool schema or launch preflight cannot carry the Empirica audit launch. Install a version inside the supported range and restart the host, or accept the residual.",
+      "disposition": "host_recovery"
+    },
+    "host.subagents_tools_not_read_only": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "residual.accept"
+      ],
+      "sections": [
+        "hosts/capabilities"
+      ],
+      "message": "The preflight reports a tool Empirica does not allow the auditor (the refusal names the tools), so the audit cannot be read-only. Remove the extra tool from the auditor's configuration or update pi-subagents, restart the host, and start a fresh run, or accept the residual.",
       "disposition": "host_recovery"
     },
     "host.subagents_launch_unsupported": {
@@ -1451,14 +1568,29 @@
       "sections": [
         "hosts/capabilities"
       ],
-      "message": "During an Empirica run, `subagent` accepts exactly one launch form (for example `agent` or `workflow`) or a reviewed read-only action (`list`, `status`, `models`, ...); control, mutation, and ambiguous calls are refused. Retry with a supported call, or accept the residual.",
+      "message": "During an Empirica run, `subagent` accepts exactly one launch form (for example `agent` or `workflow`) or a read-only action that the runtime's reviewed versions know (`list`, `status`, `models`, ...); control, mutation, unknown-action, and ambiguous calls are refused. Retry with a supported call, or accept the residual.",
       "disposition": "host_recovery"
     },
-    "host.subagents_provenance_missing": {
+    "host.version_unsupported": {
       "params": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "required": [
+          "range",
+          "version"
+        ],
+        "properties": {
+          "range": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
       },
       "next_actions": [
         "residual.accept"
@@ -1466,7 +1598,7 @@
       "sections": [
         "hosts/capabilities"
       ],
-      "message": "The retained run or receipt lacks the exact pi-subagents version and owner path. Recapture a provenance-complete run; this one is not evidence.",
+      "message": "The active Pi is {version}, outside the range Empirica supports ({range}), or its version could not be read, so no run starts. Install a Pi inside the range and restart the host, or accept the residual.",
       "disposition": "host_recovery"
     },
     "freeze.deferred": {
@@ -1499,7 +1631,8 @@
       "sections": [
         "freeze"
       ],
-      "message": "Deferred claims are residual; accept."
+      "message": "Deferred claims are residual; accept.",
+      "ended_message": "Claims deferred by the frozen scope were left unresolved."
     },
     "governance.auto_invocation_required": {
       "params": {
@@ -1566,7 +1699,17 @@
       "params": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "required": [
+          "bound"
+        ],
+        "properties": {
+          "bound": {
+            "enum": [
+              "approved",
+              "envelope"
+            ]
+          }
+        }
       },
       "next_actions": [
         "run.start_fresh",
@@ -1575,7 +1718,12 @@
       "sections": [
         "governance"
       ],
-      "message": "Auto cannot increase operational ceilings, including audit retries, and a delegated proposal cannot exceed the 8/1/2 policy envelope. Reduce scope or use an approval-capable host interactively; after exhaustion, start a fresh run with the larger approved size."
+      "message": "Auto cannot increase operational ceilings, including audit retries. The bound in the parameters says which text applies; the core chooses it from whether the run was already approved.",
+      "case_messages": {
+        "approved": "Auto cannot raise the approved ceilings; lower or keep them, or start a fresh run with a larger approved size.",
+        "envelope": "A delegated proposal cannot exceed the 8/1/2 policy envelope (or the narrower limit the operator set): reduce scope, or use an approval-capable host interactively."
+      },
+      "case_parameter": "bound"
     },
     "governance.budget_contradictory": {
       "params": {
@@ -1684,6 +1832,60 @@
       "message": "The submitted control and fields conflict. Nothing was approved; use one explicit decision path.",
       "disposition": "host_recovery"
     },
+    "governance.terminal_stop_pending": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "route",
+          "case"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "stopped_frozen",
+              "stopped_residual",
+              "stopped_budget"
+            ]
+          },
+          "route": {
+            "enum": [
+              "human",
+              "unavailable",
+              "unobserved"
+            ]
+          },
+          "case": {
+            "enum": [
+              "ask",
+              "declined",
+              "unobserved",
+              "unavailable",
+              "interaction_limit",
+              "host_failed"
+            ]
+          }
+        }
+      },
+      "next_actions": [
+        "convergence.report",
+        "human.confirm_evidence",
+        "run.inspect"
+      ],
+      "sections": [
+        "governance"
+      ],
+      "message": "A deliberative run does not end without converging until a human agrees to the status in the parameters. Nothing was granted and the run stays active. The case in the parameters says which text applies; the core chooses it from the route, the reason a dialog cannot be shown, and whether the human already declined this end.",
+      "case_messages": {
+        "ask": "Ending the run as {status} needs a human's agreement, and nobody has been asked yet. Stop again (report_convergence intent=stop) and the human is asked whether to end the run.",
+        "declined": "You declined ending the run as {status}. Tell the agent to stop again to be asked, or keep working.",
+        "unobserved": "Ending the run as {status} needs a human's agreement, and this host has not yet looked for a dialog. Stop again (report_convergence intent=stop): the host looks, and asks if one can be shown.",
+        "unavailable": "Ending the run as {status} needs a human's agreement, and this host cannot show a dialog, so the run stays active and only a host that can show a dialog can end it; keep working.",
+        "interaction_limit": "This run can no longer ask you: its human interactions are spent, so it cannot be ended as {status} without converging. It can still end by converging; keep working toward that.",
+        "host_failed": "Ending the run as {status} needs a human's agreement, and the host could not ask (it could not record its dialog or could not show the question), so nobody was asked and the run stays active. Stop again to try again."
+      }
+    },
     "audit.producers_mixed": {
       "params": {
         "type": "object",
@@ -1696,7 +1898,90 @@
       "sections": [
         "audit/independence"
       ],
-      "message": "Covered evidence has mixed producer identities. Research is never superseded; if the only differing producer is a latest spike, re-run that spike under the research producer, otherwise accept the residual."
+      "message": "Covered evidence has mixed producers; re-run the latest spike under the research producer or accept the residual.",
+      "ended_message": "The covered evidence had mixed producers when the run stopped."
+    },
+    "research.citation_unverified": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "problem"
+        ],
+        "properties": {
+          "problem": {
+            "enum": [
+              "source_ref_form",
+              "file_unavailable",
+              "lines_out_of_range",
+              "text_not_found",
+              "spike_reason_missing"
+            ]
+          }
+        }
+      },
+      "next_actions": [
+        "research.record"
+      ],
+      "sections": [
+        "evidence/research"
+      ],
+      "message": "Research refused ({problem}). A workspace source must be cited as one file, `path` or `path:N-M`, quoted exactly, joining excerpts with …; a code, docs or web source must be a workspace path, an http(s) URL or an absolute path outside the workspace (an absolute path inside it is refused: cite the repository-relative path); a runtime observation that is none of these must say why no spike can establish it (payload.spike_unavailable)."
+    },
+    "evidence.confirmation_required": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "route",
+          "record_ids"
+        ],
+        "properties": {
+          "route": {
+            "enum": [
+              "human",
+              "unavailable",
+              "unobserved"
+            ]
+          },
+          "record_ids": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          },
+          "claim_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+            }
+          },
+          "asking": {
+            "enum": [
+              "again"
+            ]
+          }
+        }
+      },
+      "next_actions": [
+        "convergence.report",
+        "human.confirm_evidence",
+        "residual.accept"
+      ],
+      "sections": [
+        "evidence/research"
+      ],
+      "message": "Waiting for a human to confirm research or answer a decision.",
+      "case_parameter": "asking",
+      "case_messages": {
+        "again": "Research or a decision was shown to the human and left open (Later, cancel or timeout). An explicit report_convergence asks the human again; each asking spends one of the run's human interactions."
+      },
+      "ended_message": "Unanswered when this run stopped: research or a decision needed a human."
     }
   },
   "sections": {
@@ -1754,7 +2039,7 @@
         },
         {
           "id": "run/lifecycle/corrupt",
-          "text": "Any persisted aggregate that is not exactly valid empirica/v2 state and history returns run.corrupt with run.start_fresh; rejected data contributes no fields, defaults, terminal inference, migration, or repair."
+          "text": "Any persisted aggregate that is not exactly valid empirica/v2 state and history returns run.corrupt with run.start_fresh; rejected data contributes no fields, defaults, terminal inference, or repair."
         }
       ]
     },
@@ -1798,7 +2083,7 @@
       "clauses": [
         {
           "id": "claims/residuals/human_decision",
-          "text": "A declared human or data hold that is valid and surfaced is a residual with claim.human_decision and human.request_decision."
+          "text": "A declared human or data hold that is valid and surfaced is a residual; a needs-decision claim waiting on a human is part of the one human batch (evidence.confirmation_required)."
         },
         {
           "id": "claims/residuals/needs_decision",
@@ -1826,7 +2111,7 @@
     },
     "evidence/research": {
       "title": "Research evidence",
-      "summary": "Content-addressed Fold-1 research leaves.",
+      "summary": "Content-addressed research leaves.",
       "clauses": [
         {
           "id": "evidence/research/leaf",
@@ -1839,6 +2124,14 @@
         {
           "id": "evidence/research/missing",
           "text": "An ordinary claim with no active supporting research yields claim.research_missing with research.record."
+        },
+        {
+          "id": "evidence/research/verification",
+          "text": "A research record is verified by its class, derived from source_ref: verbatim (a workspace path, checked by the service at submission), retrievable (an http(s) URL or an absolute path, retrieved by the audit when the host's auditor is observed to cover its kind, otherwise confirmed by a human), or observed (a runtime record that is neither, confirmed by a human and carrying payload.spike_unavailable)."
+        },
+        {
+          "id": "evidence/research/confirmation",
+          "text": "A pending confirmation is part of its claim's obligation from the response that records the research. A claim whose only support waits on a human is not approved, and a run with pending human confirmations cannot report convergence. The host records a presentation of the pending set (it spends one human interaction); the human answers in one receipt that names it, one decision per item; an item left out stays pending, and nothing asks again by itself, but the next explicit report may show it again until the run's human interactions are spent. A host with no human ingress leaves the requirement open as unavailable."
         }
       ]
     },
@@ -1944,7 +2237,7 @@
       "clauses": [
         {
           "id": "audit/independence/derived",
-          "text": "Independence is derived by the application as distinct, mixed, same_model, or unverified from trusted normalized identities; it is never supplied in the verdict."
+          "text": "Independence is derived by the application as distinct, mixed, same_model, or unverified from trusted normalized identities, or human_owned when every reviewed claim is a human decision with no evidence behind it; it is never supplied in the verdict."
         },
         {
           "id": "audit/independence/required",
@@ -2107,6 +2400,10 @@
         {
           "id": "trusted/ingress/evidence_sealed",
           "text": "An evidence_leaf is a deterministic spike result; its file_bindings, exit_code, command digest, prerequisite research IDs, and result digest correlate exactly and in order to the admitted sealed spike result bindings, not only to request dependent paths."
+        },
+        {
+          "id": "trusted/ingress/confirmation",
+          "text": "An evidence confirmation is one private human receipt of per-item decisions, admitted only through the run's human approval ingress as content-addressed artifacts bound to the research record or claim digest; an identical replay is Inert, a conflicting, stale or already-decided item fails closed, and it enters the claim's evidence digest so an earlier audit is stale."
         }
       ]
     },
@@ -2137,8 +2434,8 @@
           "text": "The only accepted wire and persisted-state protocol identifier is exactly empirica/v2; every other wire identity is invalid_request and every other persisted identity is run.corrupt."
         },
         {
-          "id": "protocol/no_migration",
-          "text": "Rejected persisted data is never decoded, migrated, adjudicated, or repaired and contributes no public fields. Transaction manifest version 2 and its observation-basis link are required; pre-M5 version 1 manifests are not accepted because current state has no migration path and no current writer emits them."
+          "id": "protocol/rejected_state",
+          "text": "Rejected persisted data is never decoded, adjudicated, or repaired and contributes no public fields. Transaction manifest version 2 and its observation-basis link are required."
         },
         {
           "id": "protocol/no_internal_fields",
@@ -2198,7 +2495,7 @@
         },
         {
           "id": "governance/hosts",
-          "text": "Claude uses negotiated MCP form elicitation; Pi uses hasUI/select/input/confirm. Codex deliberative approval is unavailable. Reviewer configuration is host-owned and is not part of approval. Hosts observe the actual reviewer identity; availability, authorization and independence still fail closed. Operator hooks/RPC may answer; physical human identity and same-OS-principal isolation are not claimed. input_private remains unverified until native qualification. Incompatible older governance state requires a fresh generation without migration."
+          "text": "Claude uses negotiated MCP form elicitation; Pi uses hasUI/select/input/confirm. Codex deliberative approval is unavailable. Reviewer configuration is host-owned and is not part of approval. Hosts observe the actual reviewer identity; availability, authorization and independence still fail closed. Operator hooks/RPC may answer; physical human identity and same-OS-principal isolation are not claimed. input_private remains unverified until native qualification."
         },
         {
           "id": "governance/human_decisions",
@@ -2269,7 +2566,12 @@
   },
   "settlement_notices": {
     "human_wait": "Empirica is paused for human governance input, not converged. Investigation remains blocked; no approval was granted by this pause.",
-    "budget_exhausted": "Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this pause. Stop honestly (report_convergence intent=stop), or in deliberative mode propose a raise for human approval; in auto mode start a fresh run."
+    "evidence_wait": "Empirica is paused: research evidence is waiting for your confirmation, and the run is not converged. No confirmation was granted by this pause. The agent presents it to you at the end of its next pass; if you leave it on Later or close the dialog it is shown again only when you tell the agent to report once more (each showing spends one of the run's human interactions), and otherwise the run must change or be accepted as a residual.",
+    "budget_exhausted": "Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this pause. Stop honestly (report_convergence intent=stop), or in deliberative mode propose a raise for human approval; in auto mode start a fresh run.",
+    "evidence_report": "Research evidence is waiting for your confirmation, and the run is not converged. Call report_convergence now: the human is asked inside that call, if this host can show a dialog; or end honestly with report_convergence intent=stop. No confirmation was granted by this block.",
+    "paused_for_human": "Empirica is paused for you, not converged: {reason} Nothing was approved or confirmed by this pause, and nobody was asked. The run stays open: tell the agent to carry out that step, or end the run.",
+    "paused_for_evidence": "Empirica is paused for you, not converged: research evidence is waiting for your confirmation. To continue, tell the agent to call report_convergence: you are asked in that call, if this host can show a dialog. Nothing was approved or confirmed by this pause, and nobody was asked.",
+    "unattended_continue": "Empirica is not converged: {reason} Auto mode does not hand the turn back to you: act on it, or end honestly with report_convergence intent=stop."
   },
   "author_view": {
     "labels": {
@@ -2279,6 +2581,8 @@
       "converged": "converged=",
       "run_id": "run_id:",
       "proposal_rationale": "proposal rationale:",
+      "host_unreviewed": "host:",
+      "host_unreviewed_note": "(not reviewed; preflight passed)",
       "audit": "Audit:",
       "finding": "finding:",
       "reasons": "Reasons:",
@@ -2301,6 +2605,12 @@
       "edges": "Edges:",
       "citations": "Citations:",
       "audit_status": "Audit status:",
+      "audit_verdict_none": "required",
+      "audit_verdict_passed": "passed",
+      "audit_verdict_failed": "failed",
+      "audit_pending": "pending",
+      "audit_not_current": "no longer current",
+      "audit_reaudit_pending": "re-audit pending",
       "claim_kind": "kind=",
       "claim_gating": "gating=",
       "claim_state": "state=",
@@ -2310,7 +2620,28 @@
       "contract": "Contract",
       "block": "Block",
       "fault": "Fault",
-      "inert": "Inert"
+      "inert": "Inert",
+      "waiting": "Waiting on a human:",
+      "waiting_record": "source:",
+      "waiting_claim": "decision needed on claim",
+      "waiting_terminal": "decision needed to end the run as",
+      "waiting_for_claim": "for claim",
+      "waiting_none_error": "a human can be asked at the end of your next pass",
+      "waiting_unavailable": "no human can be asked in this session",
+      "waiting_unobserved": "a human is asked when you report, if this host can show a dialog",
+      "waiting_already_presented": "already shown; an explicit report_convergence asks again, within the interaction limit",
+      "waiting_interaction_limit": "the human interaction limit is reached",
+      "waiting_surface_unrecorded": "the host could not tell whether a human can be asked, so nobody was asked; stop honestly, or report again after a change",
+      "waiting_presentation_failed": "the host could not show the confirmation dialog, so nobody was asked; stop honestly, or report again after a change",
+      "verified_by_service": "checked by the service",
+      "confirmed_by_human": "confirmed by a human",
+      "rejected_by_human": "rejected by a human",
+      "pending_human": "waiting for a human",
+      "human_note": "human note:",
+      "decision_approve": "approved by a human",
+      "decision_reject": "rejected by a human",
+      "human_answer": "human answer:",
+      "pending_audit": "for the audit to retrieve"
     }
   }
 }

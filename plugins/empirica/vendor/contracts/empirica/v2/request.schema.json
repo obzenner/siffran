@@ -93,7 +93,9 @@
         "host",
         "interactive",
         "signal",
-        "delegation"
+        "delegation",
+        "audit_retrieval",
+        "human_surface"
       ],
       "properties": {
         "host": {
@@ -114,7 +116,7 @@
           "type": "boolean"
         },
         "host_runtime": {
-          "description": "Optional host-observed facts about the runtime that executes this host's foreground audit, recorded once with the run (Pi: the pi-subagents owner). Validated at the application boundary against the host profile's subagents_compatibility, persisted opaquely, and never interpreted or projected by the core.",
+          "description": "Optional host-observed facts about the runtime that executes this host's foreground audit, recorded once with the run (Pi: the pi-subagents owner). Validated at the application boundary against the host profile's subagents_compatibility range, persisted opaquely, and read by the core only for `reviewed` (a version with no checked-in compat record is recorded `reviewed: false` and shown in the run view; it is admitted by what the adapter observed of it, ADR-0069).",
           "type": "object",
           "additionalProperties": false,
           "required": [
@@ -165,10 +167,57 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 4096
+                },
+                "reviewed": {
+                  "type": "boolean",
+                  "description": "Whether this exact version has a checked-in compat record. false is admitted when the live preflight and the tool's parameter schema passed; it is never a refusal by itself. An absent value reads as false (not reviewed); a present value that is not a boolean is malformed."
                 }
               }
             }
           }
+        },
+        "session": {
+          "description": "Optional host-observed fact: where this run's session can be found again, recorded once at StartRun by the host from what it observed (Claude: the hook payload's session_id and transcript_path; Pi: the session manager's id and session file). The author has no StartRun and cannot supply or change it. Absent when the host observed nothing: it reads as unknown, never as a guess.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "label",
+            "locator"
+          ],
+          "properties": {
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "description": "A short human name for the session (its id)."
+            },
+            "locator": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "description": "A copyable path or id that finds the session again: its transcript or session file when the host has one, otherwise its id."
+            }
+          }
+        },
+        "audit_retrieval": {
+          "description": "The retrieval kinds this host's auditor is observed to cover, recorded once at StartRun and re-observed at audit launch (a divergence refuses the launch). workspace: files inside the workspace; local: absolute or home paths; web: http(s) URLs. A research record of any other kind is confirmed by a human (ADR-0067).",
+          "type": "array",
+          "items": {
+            "enum": [
+              "local",
+              "web",
+              "workspace"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "human_surface": {
+          "description": "Whether the host last observed a surface to show a dialog to a human now: Claude form elicitation advertised by the client, Pi `ctx.hasUI` in the TUI or RPC. Recorded at StartRun and updated by the host's private ingress at every report_convergence. `unobserved` means the host has not yet looked (Claude's start hook runs before the MCP client declares form elicitation); a host that can tell at start records `human` or `unavailable` at once. Evidence is presented to a human only when this is `human`, the run is not delegated or non-interactive, and the profile has a human approval ingress (ADR-0067); while it is `unobserved` such a run is told a human is asked when it reports, if the host can show a dialog.",
+          "enum": [
+            "human",
+            "unavailable",
+            "unobserved"
+          ]
         }
       }
     },
@@ -215,6 +264,11 @@
         },
         "observed_content_digest": {
           "$ref": "#/$defs/digest256"
+        },
+        "spike_unavailable": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Required for a runtime record whose source_ref is neither a workspace path nor a URL or absolute path: why no deterministic spike can establish the observation. Shown to the human verbatim."
         }
       }
     },
@@ -833,6 +887,11 @@
             "string",
             "null"
           ]
+        },
+        "auditor_identity": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
         }
       }
     },
@@ -1072,6 +1131,13 @@
           "type": [
             "string",
             "null"
+          ]
+        },
+        "host_failure": {
+          "description": "What the host reports about this call when it could not do the mediation a report asks of it: surface_unrecorded (it could not record whether a human can be asked) or presentation_failed (it could not show the pending batch). Nobody was asked. The core projects it as the batch's prompt_error, never stores it, and spends and approves nothing; a refusal it already knows (already_presented, interaction_limit, unavailable) takes precedence.",
+          "enum": [
+            "surface_unrecorded",
+            "presentation_failed"
           ]
         }
       }
@@ -1494,6 +1560,144 @@
     "claimId": {
       "type": "string",
       "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+    },
+    "evidenceConfirmationPayload": {
+      "description": "One human receipt of per-item decisions on the batch a presentation showed. The receipt id is the presentation's; it is admitted only while the pending set is unchanged since. Omitted items stay pending. Admitted only through the run's human approval ingress.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "receipt_id",
+        "decisions"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "receipt_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "decisions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "subject",
+                  "artifact_id",
+                  "outcome"
+                ],
+                "properties": {
+                  "subject": {
+                    "const": "research"
+                  },
+                  "artifact_id": {
+                    "$ref": "#/$defs/digest256"
+                  },
+                  "outcome": {
+                    "enum": [
+                      "confirm",
+                      "reject"
+                    ]
+                  },
+                  "note": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2048
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "subject",
+                  "claim_id",
+                  "claim_digest",
+                  "outcome"
+                ],
+                "properties": {
+                  "subject": {
+                    "const": "claim"
+                  },
+                  "claim_id": {
+                    "$ref": "#/$defs/claimId"
+                  },
+                  "claim_digest": {
+                    "$ref": "#/$defs/digest256"
+                  },
+                  "outcome": {
+                    "enum": [
+                      "approve",
+                      "reject"
+                    ]
+                  },
+                  "answer": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "evidencePresentationPayload": {
+      "description": "The host records that it showed the human the batch it names (the run view's confirmation_batch.key), once per derivation; the receipt id names the presentation. Refused, spending nothing, when the key is not the current batch's. Spends one human interaction. Admitted only through the run's human approval ingress.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "receipt_id",
+        "key"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "receipt_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "key": {
+          "$ref": "#/$defs/digest256"
+        }
+      }
+    },
+    "humanSurfacePayload": {
+      "description": "The host's observation of whether it can show a dialog to a human now (Claude form elicitation advertised by the client; Pi `ctx.hasUI`). Sent with every report_convergence; the latest observation counts and records invocation.human_surface.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "surface"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "surface": {
+          "enum": [
+            "human",
+            "unavailable"
+          ]
+        }
+      }
     }
   }
 }

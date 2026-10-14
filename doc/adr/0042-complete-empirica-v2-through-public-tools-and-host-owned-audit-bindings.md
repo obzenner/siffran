@@ -25,6 +25,8 @@ links:
   kind: Amended by
 - target: 52
   kind: Amended by
+- target: 67
+  kind: Amended by
 ---
 
 # Complete Empirica v2 through public tools and host-owned audit bindings

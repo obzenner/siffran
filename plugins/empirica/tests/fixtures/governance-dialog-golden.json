@@ -16,7 +16,12 @@
         "host": "test",
         "interactive": true,
         "signal": "operator",
-        "delegation": false
+        "delegation": false,
+        "audit_retrieval": [
+          "local",
+          "workspace"
+        ],
+        "human_surface": "unavailable"
       },
       "budgets": [
         {
@@ -67,7 +72,12 @@
         "host": "test",
         "interactive": true,
         "signal": "operator",
-        "delegation": false
+        "delegation": false,
+        "audit_retrieval": [
+          "local",
+          "workspace"
+        ],
+        "human_surface": "unavailable"
       },
       "budgets": [
         {
@@ -118,7 +128,12 @@
         "host": "test",
         "interactive": true,
         "signal": "operator",
-        "delegation": false
+        "delegation": false,
+        "audit_retrieval": [
+          "local",
+          "workspace"
+        ],
+        "human_surface": "unavailable"
       },
       "budgets": [
         {
@@ -169,7 +184,12 @@
         "host": "test",
         "interactive": true,
         "signal": "operator",
-        "delegation": false
+        "delegation": false,
+        "audit_retrieval": [
+          "local",
+          "workspace"
+        ],
+        "human_surface": "unavailable"
       },
       "budgets": [
         {

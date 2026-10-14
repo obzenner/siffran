@@ -14,6 +14,8 @@ export type AuthorViewLabel =
   | "converged"
   | "run_id"
   | "proposal_rationale"
+  | "host_unreviewed"
+  | "host_unreviewed_note"
   | "audit"
   | "finding"
   | "reasons"
@@ -45,7 +47,28 @@ export type AuthorViewLabel =
   | "contract"
   | "block"
   | "fault"
-  | "inert";
+  | "inert"
+  | "waiting"
+  | "waiting_record"
+  | "waiting_claim"
+  | "waiting_terminal"
+  | "waiting_for_claim"
+  | "waiting_none_error"
+  | "waiting_unavailable"
+  | "waiting_already_presented"
+  | "waiting_interaction_limit"
+  | "waiting_surface_unrecorded"
+  | "waiting_presentation_failed"
+  | "waiting_unobserved"
+  | "verified_by_service"
+  | "confirmed_by_human"
+  | "rejected_by_human"
+  | "pending_human"
+  | "pending_audit"
+  | "human_note"
+  | "decision_approve"
+  | "decision_reject"
+  | "human_answer";
 
 /** Contract-owned author-view headings and line labels (contract `author_view.labels`). */
 export type AuthorViewLabels = Readonly<Record<AuthorViewLabel, string>>;
@@ -60,7 +83,8 @@ export interface PublicToolsProjection {
     controls: DecisionControls;
     confirmation: { title: string; actions: string[] };
   };
-  settlement_notices: { human_wait: string; budget_exhausted: string };
+  settlement_notices: { human_wait: string; evidence_wait: string; evidence_report: string; budget_exhausted: string;
+    paused_for_human: string; paused_for_evidence: string; unattended_continue: string };
   author_view: { labels: AuthorViewLabels };
 }
 

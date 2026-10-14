@@ -457,7 +457,6 @@ research.record
 spike.run
 spike.regate
 claim.record_refutation
-human.request_decision
 budget.raise
 child.spawn_auditor
 child.wait
@@ -486,7 +485,6 @@ the host but must preserve IDs and parameters.
 | `claim.spike_missing` | `spike.run` | `evidence/spike` |
 | `claim.spike_prerequisite_missing` | `research.record`, `spike.run` | `evidence/order` |
 | `claim.spike_stale` | `spike.regate` | `evidence/freshness` |
-| `claim.human_decision` | `human.request_decision` | `claims/residuals` |
 | `claim.refuted` | `run.inspect` | `claims/refutation` |
 | `evidence.conflict` | `run.inspect`, `residual.accept` | `claims/refutation` |
 | `budget.exhausted` `{resource: spawn|pass}` | `budget.raise`, `residual.accept` | `budget` |

@@ -151,7 +151,37 @@ class ProjectionConformanceTests(unittest.TestCase):
         self.assertEqual(recovery_actions(table["deliberative"], actions), actions)
         self.assertEqual(recovery_actions(table["auto"], actions), ["residual.accept"])
 
-    """Validate 190 pairwise cases (including every status × child-variant pair)."""
+    def test_the_confirmation_rule_and_the_exclusions_commute_through_project_prompt_error(self):
+        """``project_prompt_error`` patches rows that already carry the mode's exclusions and applies none itself. That is
+        right only if the two rules give the same row in either order, for every mode, route and ``prompt_error``; the
+        next exclusion that names a confirmation action fails here, in the projected row, not in a view."""
+        from core.evaluation import CONFIRMATION_REASON
+        from core.projection import CONFIRMATION_ACTIONS, confirmation_actions, project_prompt_error
+        table = protocol.CONTRACT_VIEW.recovery_exclusions
+        self.assertFalse(CONFIRMATION_ACTIONS & {action for excluded in table.values() for action in excluded})
+        raw = ["budget.raise", *sorted(CONFIRMATION_ACTIONS), "residual.accept"]
+        for mode, excluded in table.items():
+            for route in ("human", "unobserved", "unavailable"):
+                for prompt_error in (None, "unobserved", "unavailable", "already_presented", "presentation_failed"):
+                    batch = {"key": "k", "record_ids": [], "claim_ids": [], "records": [], "prompt_error": prompt_error}
+                    parameters = {"route": route}
+                    exclusion_first = confirmation_actions(CONFIRMATION_REASON, parameters,
+                                                           recovery_actions(excluded, raw), batch)
+                    rule_first = recovery_actions(excluded, confirmation_actions(CONFIRMATION_REASON, parameters,
+                                                                                 raw, batch))
+                    label = (mode, route, prompt_error)
+                    self.assertEqual(exclusion_first, rule_first, label)
+                    # The row `project_prompt_error` patches already carries the exclusions and must come out equal.
+                    start = {**batch, "prompt_error": "already_presented"}
+                    result = {"run": {"confirmation_batch": start, "obligations": {"active": [{
+                        "missing": {"code": CONFIRMATION_REASON, "parameters": parameters},
+                        "next": recovery_actions(excluded, confirmation_actions(
+                            CONFIRMATION_REASON, parameters, raw, start))}]}},
+                        "reasons": [{"code": CONFIRMATION_REASON, "parameters": parameters,
+                                     "next_actions": recovery_actions(excluded, raw)}]}
+                    projected = project_prompt_error(result, prompt_error)
+                    self.assertEqual(projected["run"]["obligations"]["active"][0]["next"], rule_first, label)
+                    self.assertEqual(projected["reasons"][0]["next_actions"], rule_first, label)
 
     def test_contract_declared_audit_obligation_conforms(self):
         """The generated projection suite covers the contract-owned audit row."""

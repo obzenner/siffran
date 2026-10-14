@@ -15,6 +15,8 @@ from assertions import (
     canonical_graph,
     observe_action,
 )
+from application.protocol import host_profile_id  # noqa: E402
+CLAUDE_PROFILE = host_profile_id("claude-code")
 
 
 class PublicHostPathTests(ConformanceCase):
@@ -23,7 +25,7 @@ class PublicHostPathTests(ConformanceCase):
             "D11", "public-host-path",
             "Public model tools drive every author transition; host-only ingress binds audit")
         run_id = self.start_run(drv, goal="Prove one host-reachable Empirica path.")
-        tools = PublicTools("claude-code@2.1.278",
+        tools = PublicTools(CLAUDE_PROFILE,
                             dispatch=lambda request, _profile: drv.request(request))
 
         def observe(action: dict) -> dict:
@@ -37,9 +39,7 @@ class PublicHostPathTests(ConformanceCase):
         observe(action_graph(graph))
         self.require_governance_approved(drv, run_id)
         observe(action_investigate())
-        observe(action_research(
-            claim_id=root_id, source_kind="code", result="supports",
-            payload={"source_ref": "plugins/empirica/core/evaluation.py"}))
+        observe(action_research(claim_id=root_id, source_kind="code", result="supports"))
 
         drv.workspace_write("src/reachable.py", b"print('reachable')\n")
         drv.harness_complete("python src/reachable.py", 0)

@@ -19,8 +19,11 @@ if str(PLUGIN) not in sys.path:
 
 from adapters.claude import lifecycle  # noqa: E402
 from adapters.claude.run_start import dispatch_start_run  # noqa: E402
+from adapters.confirmation import HostConfirmation  # noqa: E402
 from adapters.public_tools import PublicTools  # noqa: E402
 from adapters.governance import HostGovernance  # noqa: E402
+from application.protocol import host_profile_id  # noqa: E402
+CLAUDE_PROFILE = host_profile_id("claude-code")
 
 
 class ClaudeReachabilityTests(unittest.TestCase):
@@ -66,9 +69,9 @@ class ClaudeReachabilityTests(unittest.TestCase):
                     started = dispatch_start_run(payload, environ={})
                     run_id = started["result"]["run"]["id"]
                     lifecycle._governance_context(payload, run_id)
-                    mediator = HostGovernance("claude-code@2.1.278", elicit=lambda _m, _s: {
+                    mediator = HostGovernance(CLAUDE_PROFILE, elicit=lambda _m, _s: {
                         "action": "accept", "content": {}})
-                    tools = PublicTools("claude-code@2.1.278", govern=mediator)
+                    tools = PublicTools(CLAUDE_PROFILE, govern=mediator)
 
                     def observe(action: dict) -> dict:
                         result = tools.call_internal("empirica_observe", {
@@ -93,7 +96,7 @@ class ClaudeReachabilityTests(unittest.TestCase):
                     observe({"kind": "research", "claim_id": "G0",
                              "source_kind": "code", "result": "supports",
                              "payload": {"source_ref": "probe.py",
-                                         "citation": "The probe executes successfully."}})
+                                         "citation": "print('reachable')"}})
                     observe({"kind": "spike_request", "claim_id": "G0",
                              "command": "python3 probe.py",
                              "dependent_files": ["probe.py"]})
@@ -189,6 +192,137 @@ class ClaudeReachabilityTests(unittest.TestCase):
                     self.assertEqual(final["structuredContent"]["run"]["status"], "converged")
             finally:
                 os.chdir(old_cwd)
+
+
+class ClaudeAuditLaunchOrderTests(unittest.TestCase):
+    """ADR-0067 (F-Q4-1): ``PreToolUse:Agent`` reserves the audit only after the confirmation the view puts first, unless
+    nobody can be asked. The real service, the real hook and the real confirmation mediator."""
+
+    def run_to_the_q4_shape(self, root: Path, *, human: bool, author: str = "claude-sonnet-5"):
+        """An ordinary claim approved by a verbatim workspace record, a web record that needs a human, nothing audited."""
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        (root / "probe.py").write_text("print('reachable')\n", encoding="utf-8")
+        transcript = root / "parent.jsonl"
+        transcript.write_text(json.dumps({"message": {"role": "assistant", "model": author,
+                                                      "content": "author"}}) + "\n")
+        payload = {"session_id": "claude-q4", "cwd": str(root), "transcript_path": str(transcript),
+                   "command_name": "empirica:empirica", "command_args": "audit order", "model": author}
+        started = dispatch_start_run(payload, environ={})
+        run_id = started["result"]["run"]["id"]
+        lifecycle._governance_context(payload, run_id)
+        self.answers: list[dict] = []
+
+        def human_says(_message, schema):
+            self.answers.append(schema)
+            return {"action": "accept", "content": {"d1": "confirm"}}
+
+        confirmer = HostConfirmation(CLAUDE_PROFILE, elicit=human_says if human else None, timeout=lambda: 900)
+        tools = PublicTools(CLAUDE_PROFILE, confirm=confirmer,
+                            govern=HostGovernance(CLAUDE_PROFILE, elicit=lambda _m, _s: {"action": "accept", "content": {}}))
+
+        def observe(action: dict) -> dict:
+            result = tools.call_internal("empirica_observe", {"run_id": run_id, "action": action})
+            self.assertFalse(result["isError"], result)
+            return result["structuredContent"]
+
+        observe({"kind": "route", "reason": "route first"})
+        observe({"kind": "graph", "payload": {"root": "G0", "claims": [
+            {"id": "G0", "text": "The probe prints.", "gating": True, "kind": "ordinary"}], "edges": []}})
+        observe({"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2},
+                 "rationale": "one claim and an audit"})
+        observe({"kind": "investigate"})
+        for kind, ref in (("code", "probe.py"), ("web", "https://example.test/spec")):
+            observe({"kind": "research", "claim_id": "G0", "source_kind": kind, "result": "supports",
+                     "payload": {"source_ref": ref, "citation": "print('reachable')"}})
+        observe({"kind": "freeze"})
+        agent = {**payload, "tool_use_id": "claude-audit-q4", "tool_name": "Agent",
+                 "tool_input": {"subagent_type": "empirica:empirica-auditor", "prompt": "audit"}}
+        return tools, run_id, agent
+
+    def launch(self, agent: dict) -> tuple[int, str]:
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(lifecycle, "_payload", return_value=agent), redirect_stdout(out), \
+                patch("sys.stderr", new=err):
+            code = lifecycle.spawn_main()
+        return code, out.getvalue() + err.getvalue()
+
+    def test_the_audit_launch_is_denied_while_a_human_is_about_to_be_asked(self):
+        with tempfile.TemporaryDirectory() as raw, patch.dict(
+                os.environ, {"EMPIRICA_HOME": str(Path(raw) / "state"), "EMPIRICA_REPO_DIR": raw}, clear=False):
+            old = Path.cwd()
+            os.chdir(raw)
+            try:
+                tools, run_id, agent = self.run_to_the_q4_shape(Path(raw).resolve(), human=True)
+                code, said = self.launch(agent)
+                self.assertEqual(code, 2, said)
+                self.assertIn("confirm", said.lower())
+                view = tools.call_internal("empirica_read", {"run_id": run_id, "operation": "GetRun"})["structuredContent"]
+                self.assertEqual([c for c in view["run"]["children"] if c["resource_class"] == "audit"], [])
+                # The report asks the human (the dialog), the answer is recorded, and the audit is then admitted.
+                tools.call_internal("report_convergence", {"run_id": run_id})
+                self.assertEqual(len(self.answers), 1)
+                code, said = self.launch(agent)
+                self.assertEqual(code, 0, said)
+            finally:
+                os.chdir(old)
+
+    def test_the_audit_launch_is_admitted_when_nobody_can_be_asked(self):
+        with tempfile.TemporaryDirectory() as raw, patch.dict(
+                os.environ, {"EMPIRICA_HOME": str(Path(raw) / "state"), "EMPIRICA_REPO_DIR": raw}, clear=False):
+            old = Path.cwd()
+            os.chdir(raw)
+            try:
+                tools, run_id, agent = self.run_to_the_q4_shape(Path(raw).resolve(), human=False)
+                tools.call_internal("report_convergence", {"run_id": run_id})  # looks for a surface, finds none
+                code, said = self.launch(agent)
+                self.assertEqual(code, 0, said)
+            finally:
+                os.chdir(old)
+
+    def test_the_auditor_differs_from_the_earlier_producer_and_the_switched_author_through_the_real_bridge(self):
+        """G15 F-P2-1, Claude, no stubs: evidence by fable, then the author switches to opus (the pi-2 shape). The real
+        `exclusions()` read through the bridge gives the core's set {fable, opus}; the default alias is outside both (an author-only
+        check would pick fable, the first family), and an explicit CLAUDE_CODE_SUBAGENT_MODEL in the set is refused before any spawn."""
+        with tempfile.TemporaryDirectory() as raw:
+            env = {"EMPIRICA_HOME": str(Path(raw) / "state"), "EMPIRICA_REPO_DIR": raw}
+            with patch.dict(os.environ, env, clear=False):
+                for key in ("CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
+                            "CLAUDE_CODE_USE_FOUNDRY"):
+                    os.environ.pop(key, None)
+                old = Path.cwd()
+                os.chdir(raw)
+                try:
+                    tools, run_id, agent = self.run_to_the_q4_shape(Path(raw).resolve(), human=False, author="claude-fable-1")
+                    tools.call_internal("report_convergence", {"run_id": run_id})  # looks for a surface, finds none
+                    Path(agent["transcript_path"]).write_text(json.dumps({"message": {
+                        "role": "assistant", "model": "claude-opus-4-8", "content": "author"}}) + "\n")  # /model
+                    lifecycle._governance_context(agent, run_id)
+                    audits = lambda: [c for c in tools.call_internal("empirica_read", {  # noqa: E731
+                        "run_id": run_id, "operation": "GetRun"})["structuredContent"]["run"]["children"]
+                        if c["resource_class"] == "audit"]
+                    for configured in ("claude-fable-1", "fable", "claude-opus-4-8"):  # the producer, its alias, the author
+                        with self.subTest(configured=configured), patch.dict(os.environ, {"CLAUDE_CODE_SUBAGENT_MODEL": configured}):
+                            code, said = self.launch(agent)
+                            self.assertEqual(code, 2, said)
+                            self.assertIn("anthropic/claude-fable-1", said)
+                            self.assertIn("anthropic/claude-opus-4-8", said)
+                            self.assertEqual(audits(), [], "refused before any spawn")
+                    # G17 H2-02: an explicit alias override runs on its pin; `sonnet` pinned to the producer is refused
+                    with patch.dict(os.environ, {"CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
+                                                 "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-fable-1"}):
+                        code, said = self.launch(agent)
+                    self.assertEqual(code, 2, said)
+                    self.assertIn("anthropic/claude-fable-1", said)
+                    self.assertEqual(audits(), [], "refused before any spawn")
+                    budgets = tools.call_internal("empirica_read", {"run_id": run_id, "operation": "GetRun"}
+                                                  )["structuredContent"]["run"]["governance"]["budgets"]
+                    self.assertEqual(budgets["audit_spawns_used"], 0)
+                    code, said = self.launch(agent)
+                    self.assertEqual(code, 0, said)
+                    self.assertEqual(json.loads(said)["hookSpecificOutput"]["updatedInput"]["model"], "sonnet")
+                    self.assertEqual(len(audits()), 1)
+                finally:
+                    os.chdir(old)
 
 
 if __name__ == "__main__":

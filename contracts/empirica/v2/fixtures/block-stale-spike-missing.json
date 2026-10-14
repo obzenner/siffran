@@ -17,13 +17,14 @@
         "id": "run-fx",
         "goal": "Prove the public contract is internally consistent.",
         "status": "active",
+        "basis": "sha256:05ac9f23e36712a25df4a97c98dfe14df896e5eeb0cea63df20230a6a2bce728",
         "contract": {
           "id": "empirica/public",
-          "version": "3.0.0",
+          "version": "4.0.0",
           "relevant_sections": [
             "evidence/freshness"
           ],
-          "digest": "sha256:dfc3b1cb235da4d56b7225a8e9a60c2b208ad1c6405be53782666fa4431fb2e3"
+          "digest": "<contract-digest>"
         },
         "obligations": {
           "active": [],
@@ -40,7 +41,7 @@
         },
         "children": [],
         "host": {
-          "profile_id": "claude-code@2.1.278",
+          "profile_id": "claude-code",
           "tier": "foreground_only",
           "missing_capabilities": [
             "host.async_unsupported"
@@ -53,10 +54,13 @@
         },
         "governance": null,
         "audit": {
-          "state": "required",
-          "independence": "unverified",
+          "verdict": "none",
+          "current": null,
+          "pending": false,
+          "independence": null,
           "findings": []
-        }
+        },
+        "confirmation_batch": null
       },
       "reasons": [
         {

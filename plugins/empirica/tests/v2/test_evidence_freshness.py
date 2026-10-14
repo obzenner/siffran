@@ -274,7 +274,7 @@ class EvidenceFreshnessTests(ConformanceCase):
                                     "claim approval must not equal final run convergence")
                 if do_setup == "failing":
                     self.assert_block_reason(ev, "claim.refuted")
-                    self.dispatch(drv, evaluate(run_id=run_id, intent="stop"))
+                    self.stop(drv, run_id)
                     stopped = self.dispatch(drv, get_run(run_id=run_id))["result"]["run"]
                     self.assertIn("claim.refuted", {r["code"] for r in stopped["residuals"]},
                                   "honest stop must preserve failed-spike dominance")

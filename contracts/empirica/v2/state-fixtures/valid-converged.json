@@ -6,7 +6,12 @@
     "host": "test",
     "interactive": true,
     "signal": "test",
-    "delegation": false
+    "delegation": false,
+    "audit_retrieval": [
+      "local",
+      "workspace"
+    ],
+    "human_surface": "unavailable"
   },
   "status": "converged",
   "budgets": {
@@ -120,14 +125,21 @@
             "outcome": "supporting",
             "source_kind": "code",
             "source_ref": "supplied",
-            "citation": "observed"
+            "citation": "observed",
+            "verification": {
+              "class": "verbatim",
+              "status": "verified_by_service",
+              "retrieve": true
+            }
           }
         ],
         "route_stamp": 1,
         "investigation_stamp": 2,
         "audit": {
-          "state": "required",
-          "independence": "unverified",
+          "verdict": "none",
+          "current": null,
+          "pending": false,
+          "independence": null,
           "reviewed_argument_digest": null,
           "reviewed_goal_digest": null,
           "reviewed_frozen_scope_digest": null,

@@ -6,14 +6,15 @@
       "id": "run-fx",
       "goal": "Prove the public contract is internally consistent.",
       "status": "stopped_budget",
+      "basis": "sha256:9e8745d6be67c59d3117de33ccbb253b19887274a1a49440b51a79d7f86e7f3e",
       "contract": {
         "id": "empirica/public",
-        "version": "3.0.0",
+        "version": "4.0.0",
         "relevant_sections": [
           "budget",
           "terminal"
         ],
-        "digest": "sha256:dfc3b1cb235da4d56b7225a8e9a60c2b208ad1c6405be53782666fa4431fb2e3"
+        "digest": "<contract-digest>"
       },
       "obligations": {
         "active": [],
@@ -38,7 +39,7 @@
       },
       "children": [],
       "host": {
-        "profile_id": "claude-code@2.1.278",
+        "profile_id": "claude-code",
         "tier": "foreground_only",
         "missing_capabilities": [
           "host.async_unsupported"
@@ -54,10 +55,13 @@
       },
       "governance": null,
       "audit": {
-        "state": "required",
-        "independence": "unverified",
+        "verdict": "none",
+        "current": null,
+        "pending": false,
+        "independence": null,
         "findings": []
-      }
+      },
+      "confirmation_batch": null
     }
   },
   "text": "Allow (converged=false) stopped_budget — no governance\nrun_id: run-fx\nAudit: required\n\nResiduals:\n  budget.exhausted\n    params: resource=pass\n    next: empirica_read GetRun"

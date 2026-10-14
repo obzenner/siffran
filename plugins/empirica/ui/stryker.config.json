@@ -1,0 +1,44 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "_comment": "make mutate (scripts/mutate.py) runs Stryker with this configuration and --mutate set to the changed lines (file:start-end) of each changed source. The Vitest runner (vitest.config.mjs) runs, for each mutant, only the tests that cover it (perTest), among the tests that import the mutated file (vitest.related). Incremental: reports/stryker-incremental.json (gitignored, local) keeps each mutant's result while neither its code nor its tests changed. The sandbox is .stryker-tmp (gitignored), inside this folder, so node_modules is found by Node's own lookup and never linked. The tests find the plugin's fixtures through EMPIRICA_PLUGIN_ROOT. A survivor is a finding, printed by make mutate from reports/mutation.json. The worker cap is not here: make mutate passes --concurrency (min(4, cores/2), JOBS= to choose; each worker is about 600 MB). Each test runner's heap is capped at 768 MB (testRunnerNodeArgs; V8's flag holds for Vitest's worker threads too), so a mutant that allocates without end dies of out-of-memory at once, which Stryker counts as killed, and a mutant that spins is a timeout after 1.5 times the test's time plus 5 s.",
+  "testRunner": "vitest",
+  "plugins": [
+    "@stryker-mutator/vitest-runner"
+  ],
+  "vitest": {
+    "configFile": "vitest.config.mjs",
+    "related": true
+  },
+  "coverageAnalysis": "perTest",
+  "incremental": true,
+  "incrementalFile": "reports/stryker-incremental.json",
+  "mutate": [
+    "app/**/*.js",
+    "elements/**/*.js"
+  ],
+  "ignorePatterns": [
+    "node_modules",
+    ".stryker-tmp",
+    "reports"
+  ],
+  "symlinkNodeModules": false,
+  "tempDirName": ".stryker-tmp",
+  "cleanTempDir": true,
+  "reporters": [
+    "json",
+    "progress"
+  ],
+  "jsonReporter": {
+    "fileName": "reports/mutation.json"
+  },
+  "timeoutMS": 5000,
+  "thresholds": {
+    "high": 100,
+    "low": 80,
+    "break": null
+  },
+  "testRunnerNodeArgs": [
+    "--max-old-space-size=768"
+  ],
+  "timeoutFactor": 1.5
+}

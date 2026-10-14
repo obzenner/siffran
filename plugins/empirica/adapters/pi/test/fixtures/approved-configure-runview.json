@@ -8,9 +8,15 @@
       "host": "test",
       "interactive": true,
       "signal": "test",
-      "delegation": false
+      "delegation": false,
+      "audit_retrieval": [
+        "local",
+        "workspace"
+      ],
+      "human_surface": "unavailable"
     },
     "status": "active",
+    "basis": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
     "governance": {
       "state": "approved",
       "control_mode": "deliberative",
@@ -56,11 +62,12 @@
       "next_action": "investigation.record",
       "first_approval": true,
       "pre_approval_revisions": 0,
-      "post_approval_revisions": 0
+      "post_approval_revisions": 0,
+      "human_wait": false
     },
     "contract": {
       "id": "empirica/public",
-      "version": "3.0.0",
+      "version": "4.0.0",
       "digest": "sha256:aa5a3d52b597af56d32d567ad5ec440710333f7ada4acf7cc6c7a8ed90072a9e",
       "relevant_sections": []
     },
@@ -105,7 +112,9 @@
           "missing": {
             "code": "claim.research_missing",
             "target_claim_id": "C0",
-            "parameters": {}
+            "parameters": {
+              "claim_id": "C0"
+            }
           },
           "next": [
             "research.record"
@@ -121,8 +130,10 @@
     },
     "children": [],
     "audit": {
-      "state": "required",
-      "independence": "unverified",
+      "verdict": "none",
+      "current": null,
+      "pending": false,
+      "independence": null,
       "findings": []
     },
     "next_actions": [
@@ -133,11 +144,12 @@
       "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
     },
     "host": {
-      "profile_id": "pi@0.84.1+pi-subagents-foreground-audit-v1",
+      "profile_id": "pi+pi-subagents-foreground-audit-v1",
       "tier": "foreground_only",
       "missing_capabilities": [
         "host.async_unsupported"
       ]
-    }
+    },
+    "confirmation_batch": null
   }
 }

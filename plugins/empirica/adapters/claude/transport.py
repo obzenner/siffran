@@ -6,11 +6,11 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from adapters import bridge
-from application.protocol import validate_public_result
+from application.protocol import host_profile_id, validate_public_result
 
 from .correlation import correlate
 
-CLAUDE_PROFILE_ID = "claude-code@2.1.278"
+CLAUDE_PROFILE_ID = host_profile_id("claude-code")
 
 
 def _freeze(value: Any) -> Any:

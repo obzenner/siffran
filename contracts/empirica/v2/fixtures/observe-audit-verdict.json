@@ -40,15 +40,16 @@
         "id": "run-fx",
         "goal": "Prove the public contract is internally consistent.",
         "status": "converged",
+        "basis": "sha256:a4b769726c7214c8ca0ddd3bfd42592d7cfdc7f4dffb9219e129eff79547c38f",
         "contract": {
           "id": "empirica/public",
-          "version": "3.0.0",
+          "version": "4.0.0",
           "relevant_sections": [
             "terminal",
             "audit",
             "audit/independence"
           ],
-          "digest": "sha256:dfc3b1cb235da4d56b7225a8e9a60c2b208ad1c6405be53782666fa4431fb2e3"
+          "digest": "<contract-digest>"
         },
         "obligations": {
           "active": [],
@@ -67,7 +68,7 @@
           }
         ],
         "host": {
-          "profile_id": "claude-code@2.1.278",
+          "profile_id": "claude-code",
           "tier": "foreground_only",
           "missing_capabilities": [
             "host.async_unsupported"
@@ -82,10 +83,13 @@
         },
         "governance": null,
         "audit": {
-          "state": "passed",
+          "verdict": "passed",
+          "current": true,
+          "pending": false,
           "independence": "distinct",
           "findings": []
-        }
+        },
+        "confirmation_batch": null
       },
       "argument": {
         "root_claim_id": "G0",
@@ -126,7 +130,12 @@
             "outcome": "supporting",
             "source_kind": "web",
             "source_ref": "https://example.test/s",
-            "citation": "The observed source supports G0."
+            "citation": "The observed source supports G0.",
+            "verification": {
+              "class": "retrievable",
+              "status": "pending",
+              "retrieve": false
+            }
           },
           {
             "sequence": 1,
@@ -179,7 +188,9 @@
         "route_stamp": 1,
         "investigation_stamp": 2,
         "audit": {
-          "state": "passed",
+          "verdict": "passed",
+          "current": true,
+          "pending": false,
           "independence": "distinct",
           "reviewed_argument_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
           "reviewed_goal_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
