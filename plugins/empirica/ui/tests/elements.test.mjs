@@ -90,7 +90,14 @@ test("ev-meter says how much of a budget is used, and marks it full only at its 
   assert.ok(el.querySelector("meter").hasAttribute("data-full"));
   el.setAttribute("show", "amount");
   assert.equal(el.querySelector("span span").children.length, 1, "the amount alone");
-  assert.ok(!mount("ev-meter", undefined, { used: "0", max: "0" }).querySelector("meter").hasAttribute("data-full"), "no budget is never full");
+});
+
+test("ev-meter with a zero ceiling draws no native meter (max must exceed min) but still says 0 of 0, with its name for assistive tech (CP-4)", () => {
+  const el = mount("ev-meter", undefined, { label: "budget.passes", used: "0", max: "0" }), said = `${plain("budget.passes")}: ${plain("budget.of", { used: 0, max: 0 })}`;
+  assert.ok(!el.querySelector("meter"), "no <meter min=0 max=0>");  // not assert.equal: a failing diff of a happy-dom node never ends
+  assert.ok(text(el).includes(plain("budget.of", { used: 0, max: 0 })), "0 of 0 visible");
+  assert.equal(el.querySelector("[data-meter]")?.getAttribute("aria-label"), said);
+  assert.equal(el.querySelector("[data-meter]")?.getAttribute("role"), "img");
 });
 
 test("ev-copy shows its value, copies it, says so for copied_ms, and says when the browser refused", async () => {

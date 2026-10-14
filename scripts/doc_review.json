@@ -1,5 +1,5 @@
 {
-  "README.md": ["plugins/*/.claude-plugin/plugin.json", "plugins/*/.codex-plugin/plugin.json", "plugins/empirica/skills/**", "plugins/empirica/ui/**", "plugins/empirica/commands/**", "Makefile"],
+  "README.md": ["plugins/*/.claude-plugin/plugin.json", "plugins/*/.codex-plugin/plugin.json", "plugins/empirica/skills/**", "plugins/empirica/ui/**", "plugins/empirica/commands/**", "Makefile", "doc/images/*"],
   "plugins/empirica/ui/README.md": ["plugins/empirica/ui/**", "Makefile"],
   "doc/testing.md": ["Makefile", "scripts/verify.py", "scripts/run_suites.py"]
 }

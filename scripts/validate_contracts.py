@@ -62,7 +62,7 @@ VERIFICATION = {"class": "verbatim", "status": "verified_by_service", "retrieve"
 AUDIT_CHILD_TOOL_VOCABULARY = frozenset({"read", "grep", "find", "ls", "contact_supervisor"})
 # The compact reviewed digest of the host-profiles registry (D2A §8/§9). Changing a
 # canonical value requires updating it deliberately.
-REVIEWED_HOST_PROFILES_DIGEST = "sha256:7200c601ae9a3ae27ec1e135a27b645f27ffc867997c0c9d79240c1299f52bfb"
+REVIEWED_HOST_PROFILES_DIGEST = "sha256:d4915422e2b04b6d6d44f4ff480d7134d69b81a94dfec0c6f4d52878868bfc14"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
 REGISTRY_VERSION = "4.0.0"

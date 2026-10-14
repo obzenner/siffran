@@ -5,14 +5,17 @@
 observer instead of read from frozen JSON. Prints the address and serves until
 it is stopped.
 
-    python3 plugins/empirica/tests/v2/serve_generated.py [--runs N] [--demo [--open]]
+    python3 plugins/empirica/tests/v2/serve_generated.py [--runs N] [--demo [--open] [--now SECONDS] [--clean]]
 
 ``--runs N`` serves N runs instead (``observer_store.ScaleSource``: each a copy of one of the store's runs under a key of
 its own), indexed progressively as the UI polls, for trying the observer at volume (contract v1).
 
 ``--demo`` serves what ``make ui-demo`` shows (``observer_store.DemoSource``): every standing and ask kind, dropped claims,
 audits with findings, several attempts and several projects, with times spread over about 60 days from now, at N runs
-(300 unless ``--runs`` says). It needs no Empirica store. ``--open`` opens the page in the browser.
+(300 unless ``--runs`` says). It needs no Empirica store. ``--open`` opens the page in the browser. ``--now`` fixes the
+instant the demo's times are spread back from (epoch seconds; default the wall clock), so the same N and ``--now`` serve
+the same store; ``--clean`` leaves out the runs read in part or not at all and the unnamed projects (both ``make
+readme-image``; every other demo keeps those hard cases).
 """
 from __future__ import annotations
 
@@ -42,10 +45,13 @@ def main() -> None:
     parser.add_argument("--runs", type=int, help="serve this many generated runs (the store's runs, copied)")
     parser.add_argument("--demo", action="store_true", help="the demo store (times over 60 days, attempts, proven runs)")
     parser.add_argument("--open", action="store_true", help="open the page in the browser")
+    parser.add_argument("--clean", action="store_true", help="the demo without unread runs or unnamed projects (the README's picture)")
+    parser.add_argument("--now", type=float, help="the demo's instant, epoch seconds (default: the wall clock)")
     args = parser.parse_args()
     if args.demo:
         runs = args.runs or 300
-        source = DemoSource(build_demo_store(min(120, max(24, runs // 8))), runs, now=time.time())
+        source = DemoSource(build_demo_store(min(120, max(24, runs // 8))), runs,
+                            now=time.time() if args.now is None else args.now, clean=args.clean)
     else:
         store = build_store()
         source = FixtureSource(store) if args.runs is None else ScaleSource(store, args.runs)

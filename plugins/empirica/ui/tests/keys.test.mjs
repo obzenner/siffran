@@ -23,3 +23,9 @@ test("typing in a field is never a command, except Esc; chorded keys are the bro
   assert.equal(keys.command(key("j", { metaKey: true })), null);
   assert.equal(keys.command(key("j", { ctrlKey: true })), null);
 });
+test("an armed g is dropped by typing in a field and by a modifier chord: g, x in an input, n is nothing; g, Ctrl+k, n is nothing (CP-3)", () => {
+  const keys = new Keys();
+  keys.command(key("g")); assert.equal(keys.command(typing("x")), null); assert.equal(keys.command(key("n")), null);
+  keys.command(key("g")); assert.equal(keys.command(key("k", { ctrlKey: true })), null); assert.equal(keys.command(key("n")), null);
+  for (const mod of ["metaKey", "altKey"]) { keys.command(key("g")); keys.command(key("k", { [mod]: true })); assert.equal(keys.command(key("n")), null, mod); }
+});

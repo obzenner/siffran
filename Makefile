@@ -514,16 +514,18 @@ pi-canary-unit-check: ## Test that the dogfood settings and canary recipes never
 ## --- Qualify
 
 .PHONY: skills-check suites-check
-skills-check: ## Validate every SKILL.md against the Agent Skills spec, the Claude symlink and relative links (with negative controls)
+skills-check: ## Validate every SKILL.md against the Agent Skills spec, the Claude symlink and relative links (with negative controls), and test the native-qualification census
 	@$(PYTHON) $(SCRIPTS)/validate_skills.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_validate_skills.py
+	@$(PYTHON) $(SCRIPTS)/tests/test_native_qualification_census.py
 
-suites-check: ## Test the parallel suite runner, that every test module belongs to exactly one suite, make verify's step runner and make mutate's plan
+suites-check: ## Test the parallel suite runner, that every test module belongs to exactly one suite, make verify's step runner and make mutate's plan, and docs-check's README image check
 	@$(PYTHON) $(SCRIPTS)/tests/test_run_suites.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_suite_ownership.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_verify.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_mutate.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_doc_review.py
+	@$(PYTHON) $(SCRIPTS)/tests/test_check_generated_docs.py
 
 .PHONY: native-qualification
 native-qualification: ## Print the operator-led native qualification skill entrypoint (never launches a host)
@@ -743,6 +745,10 @@ ui-shots: ## About ten deterministic PNGs of the demo (fixed clock, no motion, b
 	cd $(EMPIRICA_UI) && MODE=shots OUT="$(OUT)" node tests/browser.journeys.mjs
 
 ui-build: ui-vendor ui-css ui-contrast check-ui ui-browser ## Rebuild everything the UI ships, then check it (needs the toolchain and Chrome)
+
+.PHONY: readme-image
+readme-image: ## Write README's picture of the Universe: doc/images/universe-{dark,light}.png, the generated demo store (300 runs, --clean: no unread run or unnamed project) as of a fixed instant in UTC, no motion, 1600x1000 at DPR 1.5 (ui-shots' machinery; the same inputs give the same bytes; needs Chrome)
+	cd $(EMPIRICA_UI) && MODE=readme OUT="$(CURDIR)/doc/images" node tests/browser.journeys.mjs
 
 .PHONY: ui-dev ui-look
 ui-dev: ## While building: one live demo for this worktree, N=1000 runs by default, started once and then reused (its PID in .cache/ui-dev/); prints the URL; STOP=1 stops it

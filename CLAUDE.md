@@ -30,6 +30,7 @@ Why this is a rule and not a preference: a command that lives only in a chat mes
 | what CI runs (no Node/Pi on the runner) | `make check-ci` (`PI_CHECKS=1` to include the Pi and UI suites) |
 | hand-editing a `version` field | `make bump PLUGIN=<name> PART=minor` |
 | guessing whether the doc tables are current | `make docs-check` |
+| a hand-taken screenshot for the README | `make readme-image` (both schemes into `doc/images/`; the same inputs give the same bytes) |
 
 **UI work: read `plugins/empirica/ui/CLAUDE.md` first.**
 

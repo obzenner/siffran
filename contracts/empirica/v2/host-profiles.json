@@ -13,7 +13,7 @@
     {
       "host_id": "claude-code",
       "profile_id": "claude-code",
-      "version": "2.1.294",
+      "version": "2.1.296",
       "compatibility": {
         "minimum": "2.1.278",
         "maximum_exclusive": "2.2.0"

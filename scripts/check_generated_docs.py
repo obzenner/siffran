@@ -8,7 +8,8 @@ target can always TELL you the docs are stale, even where it cannot fix them.
 
 It also guards the UI developer guide (``plugins/empirica/ui/CLAUDE.md``): every ``make <target>`` it names is a target
 ``make help`` lists (a line ``target: ... ## description`` in the Makefile, the same rule ``make help`` reads), and it stays
-at most ``GUIDE_MAX_LINES`` lines, so the guide cannot drift from the lifecycle or grow into prose.
+at most ``GUIDE_MAX_LINES`` lines, so the guide cannot drift from the lifecycle or grow into prose. And every image
+README.md names under ``doc/images/`` exists (``make readme-image`` writes them; this only checks, it renders nothing).
 
 Exit 0 = in sync; 1 = stale or markers missing, with the offending file named.
 
@@ -29,6 +30,7 @@ GUIDE = Path("plugins/empirica/ui/CLAUDE.md")
 GUIDE_MAX_LINES = 150
 HELP_TARGET = re.compile(r"^([a-zA-Z0-9_-]+):.*?## ", re.M)  # the line make help prints (its awk pattern)
 NAMED_TARGET = re.compile(r"\bmake ([a-zA-Z0-9][a-zA-Z0-9_-]*)")
+IMAGE_REF = re.compile(r"""(?:\]\(|src=["']|srcset=["'])\s*(?:\./)?(doc/images/[^\s"')]+)""")
 HEADER = "| Plugin | Version | Description |\n|--------|---------|-------------|\n"
 
 
@@ -58,6 +60,15 @@ def guide_problems(guide: Path = GUIDE, makefile: Path = Path("Makefile")) -> li
     if lines > GUIDE_MAX_LINES:
         problems.append(f"{guide}: {lines} lines, over the {GUIDE_MAX_LINES}-line limit (keep it commands, not prose)")
     return problems
+
+
+def image_problems(readme: Path = Path("README.md"), root: Path = Path(".")) -> list[str]:
+    """Each image under doc/images/ that ``readme`` names (Markdown, ``src`` or ``srcset``) and that does not exist."""
+    if not readme.is_file():
+        return []
+    named = dict.fromkeys(IMAGE_REF.findall(readme.read_text()))
+    return [f"{readme.name}: names {ref}, which does not exist (make readme-image writes the README's images)"
+            for ref in named if not (root / ref).is_file()]
 
 
 def main() -> int:
@@ -91,13 +102,14 @@ def main() -> int:
             problems.append(f"{name}: plugin table is stale — run the `checkup` skill "
                             f"(see `make docs`)")
     problems += guide_problems()
+    problems += image_problems()
 
     if problems:
         for problem in problems:
             print(f"  FAIL {problem}", file=sys.stderr)
         return 1
 
-    print(f"  ok: generated tables in {', '.join(TARGETS)} match the manifests; {GUIDE} names only make help's targets")
+    print(f"  ok: generated tables in {', '.join(TARGETS)} match the manifests; {GUIDE} names only make help's targets; README's doc/images exist")
     return 0
 
 

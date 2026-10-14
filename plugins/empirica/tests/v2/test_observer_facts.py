@@ -300,6 +300,38 @@ class DecisionShapeTests(unittest.TestCase):
         self.assertLessEqual({"decide_claim", "confirm_source", "approve_configuration", "consent_stop"}, seen)
 
 
+class CleanDemoStoreTests(unittest.TestCase):
+    """``make readme-image``'s store (``DemoSource(..., clean=True)``): the demo without its hard cases, no run read in
+    part or not at all and no unnamed project, every other run as the default demo has it; the default keeps both."""
+
+    NOW = T0 + 90 * 86400
+
+    @staticmethod
+    def facts(clean):
+        observer = Observer(DemoSource(build_demo_store(24), 160, now=CleanDemoStoreTests.NOW, clean=clean))
+        rows, summary = observer.rows(), observer.summary(None, "UTC")
+        unnamed = {p["id"] for p in summary["projects"] if p["name"] is None}
+        return rows, {r["key"]: r for r in rows}, summary["coverage"], unnamed
+
+    def test_the_clean_store_has_no_unread_run_and_no_unnamed_project_and_the_default_has_both(self):
+        for clean in (False, True):
+            rows, _, coverage, unnamed = self.facts(clean)
+            unread = [r for r in rows if r["diagnostic"] is not None]
+            with self.subTest(clean=clean):
+                self.assertEqual(len(rows), 160)
+                if clean:
+                    self.assertEqual((unread, unnamed, coverage["unreadable"] + coverage["partial"]), ([], set(), 0))
+                else:
+                    self.assertTrue(unread and unnamed and coverage["unreadable"] + coverage["partial"] > 0)
+
+    def test_the_clean_store_keeps_the_other_runs_as_they_are(self):
+        default, clean = self.facts(False)[1], self.facts(True)[1]
+        same = [k for k in clean if k in default]
+        self.assertGreater(len(same), 100)
+        for k in same:
+            self.assertEqual(clean[k], default[k], k)
+
+
 class DemoStoreTests(unittest.TestCase):
     """``make ui-demo``'s store (``observer_store.DemoSource``): what the real service wrote, shifted onto a calendar that
     ends now, never after it (P3: "asked in 2 hr." was a time the generator put in the future), with goals, claims and

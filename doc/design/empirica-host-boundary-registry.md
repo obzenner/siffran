@@ -14,7 +14,7 @@
 - **`UNSOURCED`.** An outcome or rule that no source below fixes. It is listed so that the user decides it; it is not a rule.
 - **`PROPOSED`.** A new ruling offered for the user's decision. Not implemented, not binding.
 - **`CONFLICT`.** Two sources disagree. Listed in section 8.3.
-- **Hosts.** Claude = Claude Code, range `>=2.1.278,<2.2.0`, qualified 2.1.294 (installed). Pi = `>=1.0.0,<2.0.0` (user ruling 2026-10-08; nothing older is supported), qualified 1.1.0 (installed). Codex = CLI 0.146.0, `observational`, `wip_unsupported`. "Not declared" means the host profile and ADRs say nothing for Codex.
+- **Hosts.** Claude = Claude Code, range `>=2.1.278,<2.2.0`, qualified 2.1.296 (installed). Pi = `>=1.0.0,<2.0.0` (user ruling 2026-10-08; nothing older is supported), qualified 1.1.0 (installed). Codex = CLI 0.146.0, `observational`, `wip_unsupported`. "Not declared" means the host profile and ADRs say nothing for Codex.
 - **Paths.** `P/` = `plugins/empirica/`. Test shorthand: `CT` = `P/adapters/claude/tests/`, `PT` = `P/adapters/pi/test/`, `V2` = `P/tests/v2/`, `TT` = `P/tests/`. Research and build documents live outside the repository, under `…/ui/.research/citations/`; they are cited as `research:<path>`.
 
 ## 1. Sources
@@ -133,7 +133,7 @@ Each entry lists `trigger`, `obligation`, closed `outcomes` (Claude / Pi / Codex
 <!-- BEGIN GENERATED: HX-ADM-01 (make registry-doc) -->
 - **outcomes.**
   - Pi: `>=1.0.0,<2.0.0` (user ruling 2026-10-08; nothing older is supported, ADR-0069); qualified version `1.1.0`; profile id `pi+pi-subagents-foreground-audit-v1` (the policy, never a version, ADR-0069). `/empirica` reads Pi's own version (`VERSION` of `@earendil-works/pi-coding-agent`) and refuses to start outside the range, or when the version cannot be read, with `host.version_unsupported` naming the observed version and the range; in print and JSON mode the refusal goes to stderr and exits 1. The one check is `checkHostVersion` in `host-profile.ts`, which reads the range from the contract.
-  - Claude: interval `>=2.1.278,<2.2.0`; qualified version `2.1.294` (the version the long-running scenarios run on); profile id `claude-code`, which never carries a version (ADR-0069). The interval is the documented supported range and is **not checked**: hook payloads carry no host version. Claude is admitted by observed capability.
+  - Claude: interval `>=2.1.278,<2.2.0`; qualified version `2.1.296` (the version the long-running scenarios run on); profile id `claude-code`, which never carries a version (ADR-0069). The interval is the documented supported range and is **not checked**: hook payloads carry no host version. Claude is admitted by observed capability.
   - pi-subagents: its range is enforced at runtime (`HX-ADM-02`).
   - Codex: exact `0.146.0`.
 - **conformance_scenarios.** `EHB-ADM-01`, `EHB-ADM-02`

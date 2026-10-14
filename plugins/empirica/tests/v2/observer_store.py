@@ -288,9 +288,11 @@ class DemoSource(ScaleSource):
     lands on its day (the chain of writes, their order and their gaps are the real ones; only where they sit on the
     calendar differs, and none is after ``now``). The store's own runs are in it under their own keys (an audit binds the
     run it was made for, so only those keep a current pass: the proven and audit-pending standings come from them and from
-    the copies of the runs that are not read in part). Deterministic for a ``seed``."""
+    the copies of the runs that are not read in part). Deterministic for a ``seed``. ``clean`` (``make readme-image``) leaves
+    out the store's own runs that are read in part or not at all and those of an unnamed project, its hard cases; every
+    other run is drawn as without it (the same seed, the same draws), and copies fill the store up to ``n``."""
 
-    def __init__(self, store: Store, n: int, *, now: float, days: int = 60, seed: int = 7) -> None:
+    def __init__(self, store: Store, n: int, *, now: float, days: int = 60, seed: int = 7, clean: bool = False) -> None:
         import random
         super().__init__(store, 0)
         from application.observer import Observer
@@ -307,12 +309,18 @@ class DemoSource(ScaleSource):
         def last(entries) -> float:
             return max((e["at"] for e in entries or ()), default=T0)
 
+        def hard(key) -> bool:
+            return rows[run_key(key)]["diagnostic"] is not None or self._own.project(key.project_id).name is None
+
         for index, key in enumerate(self._own.keys()):
             if len(self._map) >= n:
                 break
-            self._map[key] = [index, 0]
             age = (rng.random() ** 2) * days * 86400
-            self._shift[key] = None if rng.random() < 0.03 else now - age - last(self._own.timeline(key))
+            untimed = rng.random() < 0.03
+            if clean and hard(key):
+                continue
+            self._map[key] = [index, 0]
+            self._shift[key] = None if untimed else now - age - last(self._own.timeline(key))
         while len(self._map) < n:
             name, repo = DEMO_PROJECTS[i % len(DEMO_PROJECTS)]
             project = storage_id(name)

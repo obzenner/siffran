@@ -173,6 +173,12 @@ Pi and Claude async promotion remains separate and unsupported.
 
 ## Watching the store
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="doc/images/universe-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="doc/images/universe-light.png">
+  <img src="doc/images/universe-light.png" width="800" alt="The observer's Universe on a generated demo store of 300 runs: each project an island of run marks coloured by standing, labelled with its run count and how many need you; three callouts point at runs waiting on a human decision; the bottom bar shows the period and the failed-audit, refuted, decided and changed-since-audit counts.">
+</picture>
+
 The Empirica plugin ships a read-only observer UI: the **Universe** (every run a mark, each project an
 island), the **Inbox** (what needs you, the calendar, runs by standing) and a run's **sheet** (its claims, proof,
 audits and history). It is served by the plugin itself on

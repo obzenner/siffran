@@ -1,6 +1,6 @@
 {
   "$description": "The tests no import can show: the headless-Chrome journeys load a page in a browser. Each names its file, the page it loads (what it holds is computed from that page's module script, scripts/imports.mjs) and the make targets that run it. tests/imports.test.mjs: every tests/*.journeys.mjs is here, and every file and page named here exists. Everything else is found from the imports (make ui-test, vitest related).",
   "journeys": [
-    { "file": "tests/browser.journeys.mjs", "page": "app/index.html", "make": ["ui-browser", "ui-smoke", "ui-shots"] }
+    { "file": "tests/browser.journeys.mjs", "page": "app/index.html", "make": ["ui-browser", "ui-smoke", "ui-shots", "readme-image"] }
   ]
 }

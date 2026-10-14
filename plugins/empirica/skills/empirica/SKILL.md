@@ -24,7 +24,7 @@ Identify the exact active host surface from the tools and lifecycle already pres
 **Do not read any file, including a skill reference, before the `investigate` witness is admitted
 (route → graph → approved configuration).** Use this inline bootstrap matrix:
 
-- **Claude Code capability profile (qualified on `2.1.294`, compatible
+- **Claude Code capability profile (qualified on `2.1.296`, compatible
   `>=2.1.278,<2.2.0`, documented and not checked: hook payloads carry no version):** continue when the Empirica hooks and
   public MCP tools are active and trusted; record route first. Canonical audits
   are host-owned async children; a current pending audit settles the parent turn

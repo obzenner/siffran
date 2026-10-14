@@ -10,6 +10,9 @@
 //     and a zoom's frames, and what only many runs have (a calendar of many project-days, a list longer than a page).
 //   MODE=shots OUT=<dir>  (make ui-shots)   about ten deterministic PNGs of the demo: a fixed clock, no motion, both
 //     schemes, written outside the repository, with their sha256.
+//   MODE=readme OUT=<dir>  (make readme-image)   the README's picture: the Universe of the generated demo store at
+//     README_N runs as of the same fixed instant, clean (no unread run, no unnamed project: only here), in UTC, no sheet open, both schemes, README_SIZE at README_DPR (the
+//     shots' machinery: the same session, clock and stillness); the same inputs give the same bytes.
 // Each journey states how many clicks it may take; typing is not a click. Every number the page shows is compared with
 // the observer's own answer. One line per check; exits 1 on any failure.
 import { execFileSync, spawn } from "node:child_process";
@@ -36,11 +39,14 @@ function start(args, cwd = home) {
   });
 }
 const MODE = process.env.MODE ?? "journeys";
-if (!["journeys", "smoke", "shots"].includes(MODE)) throw new Error(`MODE=${MODE}: journeys, smoke or shots`);
+if (!["journeys", "smoke", "shots", "readme"].includes(MODE)) throw new Error(`MODE=${MODE}: journeys, smoke, shots or readme`);
+const FROZEN = Date.UTC(2026, 9, 13, 12, 0, 0);
+const README_N = 300, README_SIZE = "1600x1000", README_DPR = 1.5;
 const servers = {
   journeys: () => Promise.all([start([CLI, "serve", "--port", "0", "--demo"]), start([CLI, "serve", "--port", "0", "--home", home]), start([GENERATED])]),
   smoke: async () => [null, null, null, await start([GENERATED, "--demo", "--runs", "1000"])],
   shots: async () => [await start([CLI, "serve", "--port", "0", "--demo"])],
+  readme: async () => [null, null, null, await start([GENERATED, "--demo", "--runs", String(README_N), "--now", String(FROZEN / 1000), "--clean"])],
 };
 const [DEMO, EMPTY, LIVE, BIG] = await servers[MODE]();
 const SOURCES = [{ name: "demo", base: DEMO, data: "demo" }, { name: "generated", base: LIVE, data: "store" }];
@@ -53,12 +59,14 @@ let failed = 0, total = 0;
 function check(name, ok, got) { total++; if (!ok) failed++; console.log(`${ok ? "ok  " : "FAIL"} ${name}${ok ? "" : `  got ${JSON.stringify(got)?.slice(0, 600)}`}`); }
 
 /** A page for one source and size, with the helpers every journey uses; `clicks` counts what a person would click. */
-async function session(src, size, fn, { wait = 0, scheme = null, clock = null, still = false } = {}) {
+async function session(src, size, fn, { wait = 0, scheme = null, clock = null, still = false, tz = null, dpr = 1 } = {}) {
   await withPage(`${src.base}/app/?data=${src.data}`, size, async (P) => {
     const E = P.evalJs;
     await P.send("Page.enable");  // scripts added for new documents (the safe-text journey) need the page domain
     const media = [...(scheme ? [{ name: "prefers-color-scheme", value: scheme }] : []), ...(still ? [{ name: "prefers-reduced-motion", value: "reduce" }] : [])];
     if (media.length) await P.send("Emulation.setEmulatedMedia", { features: media });
+    if (tz) await P.send("Emulation.setTimezoneOverride", { timezoneId: tz });
+    if (dpr !== 1) { const [w, h] = size.split("x").map(Number); await P.send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: dpr, mobile: false }); }
     // a frozen clock: every "ago" and window reads one instant, so a picture is the same on every run
     if (clock !== null) await P.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => { const T = ${clock}, D = Date; globalThis.Date = class extends D { constructor(...a) { super(...(a.length ? a : [T])); } static now() { return T; } }; })();` });
     let clicks = 0;
@@ -73,7 +81,7 @@ async function session(src, size, fn, { wait = 0, scheme = null, clock = null, s
       reset: () => { clicks = 0; },
       get clicks() { return clicks; },
     };
-    if (clock !== null || media.length) await A.go("");
+    if (clock !== null || media.length || tz || dpr !== 1) await A.go("");
     A.api = (u, extra = "") => json(src.base, `${u}${u.includes("?") ? "&" : "?"}source=${src.data}${extra}`);
     A.summary = await A.api("/api/summary");
     A.rows = (await A.api("/api/runs", "&limit=200")).rows;
@@ -870,7 +878,6 @@ async function universeMotion(A) {
 }
 
 // ---- S · deterministic pictures (make ui-shots): the demo, a fixed clock, no motion, both schemes ----------------------------
-const FROZEN = Date.UTC(2026, 9, 13, 12, 0, 0);
 const SHOTS = [["universe", ""], ["island", "&zoom=*"], ["inbox", "&view=inbox"], ["work", "&view=work"], ["run", "&view=inbox&run=*verification"],
   ["claim", "&view=inbox&run=*verification&claim=*"], ["attempts", "&view=inbox&run=*audit-failed"], ["orbit", "&run=*verification"]];
 async function shots() {
@@ -892,6 +899,25 @@ async function shots() {
       const sum = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex").slice(0, 16);
       check(`shot ${path.basename(file)} ${sum}`, fs.statSync(file).size > 1000, fs.statSync(file).size);
     }, { scheme, clock: FROZEN, still: true });
+  }
+  console.log(`pictures in ${out}`);
+}
+
+// ---- R · the README's picture (make readme-image): the Universe at the store's zoom, no sheet, both schemes ------------------
+async function readme() {
+  if (!process.env.OUT) throw new Error("OUT=<dir>: where the README's pictures go");
+  const out = path.resolve(process.env.OUT), crypto = await import("node:crypto");
+  fs.mkdirSync(out, { recursive: true });
+  for (const scheme of SCHEMES.slice().reverse()) {
+    await session({ name: "readme", base: BIG, data: "store" }, README_SIZE, async (A) => {
+      await A.go(""); await A.P.sleep(900);
+      const shown = await A.E(`({ islands: document.querySelectorAll("[data-island-label]").length, callouts: document.querySelectorAll("[data-callout]").length, chips: document.querySelectorAll("[data-hl]").length, sheet: document.body.hasAttribute("data-sheet") })`);
+      check(`readme ${scheme}: the Universe with its islands, at most ${catalogue.universe.callouts} callouts and the chips, no sheet`, shown.islands > 1 && shown.callouts >= 1 && shown.callouts <= catalogue.universe.callouts && shown.chips > 0 && !shown.sheet, shown);
+      const file = path.join(out, `universe-${scheme}.png`);
+      await A.P.shot(file);
+      const sum = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex").slice(0, 16);
+      check(`readme ${path.basename(file)} ${fs.statSync(file).size} bytes ${sum}`, fs.statSync(file).size > 1000, fs.statSync(file).size);
+    }, { scheme, clock: FROZEN, still: true, tz: "UTC", dpr: README_DPR });
   }
   console.log(`pictures in ${out}`);
 }
@@ -934,13 +960,13 @@ const SMOKE = {
   calendar: () => session({ name: "1k", base: BIG, data: "store" }, WIDE, calendar),
   stale: () => session({ name: "1k", base: BIG, data: "store" }, WIDE, stale),
 };
-const GROUPS = { journeys: JOURNEYS, smoke: SMOKE, shots: { shots } }[MODE];
+const GROUPS = { journeys: JOURNEYS, smoke: SMOKE, shots: { shots }, readme: { readme } }[MODE];
 // Each journey (a group above) ends within JOURNEY_LIMIT_S or fails the run with its name: a hang is a bug to fix, not to
 // wait out. The shots are one group of many pages, bounded by each page's own guard (cdp.mjs) instead.
 const JOURNEY_LIMIT_S = 60;
 const within = (name, work) => { let t; return Promise.race([work.finally(() => clearTimeout(t)), new Promise((_, rej) => { t = setTimeout(() => rej(new Error(`journey ${name} timed out after ${JOURNEY_LIMIT_S} s`)), JOURNEY_LIMIT_S * 1000); })]); };
 try {
-  for (const [name, run] of Object.entries(GROUPS)) if (!ONLY || ONLY.has(name)) await (MODE === "shots" ? run() : within(name, run()));
+  for (const [name, run] of Object.entries(GROUPS)) if (!ONLY || ONLY.has(name)) await (MODE === "shots" || MODE === "readme" ? run() : within(name, run()));
 } finally {
   // after a timeout the journey's Chrome is still a child: kill every child by its exact pid (pgrep -P this process)
   try { for (const pid of execFileSync("pgrep", ["-P", String(process.pid)], { encoding: "utf8" }).split(/\s+/).filter(Boolean)) try { process.kill(Number(pid), "SIGKILL"); } catch {} } catch {}

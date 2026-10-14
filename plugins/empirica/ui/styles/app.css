@@ -80,7 +80,8 @@ body[data-words] .ev-word { position: static; inline-size: auto; block-size: aut
 
 /* Native <meter> in token colours: quiet track, neutral fill; a full budget turns cautionary. */
 @layer components {
-  meter.ev-meter { inline-size: 100%; block-size: var(--spacing-2xs); border-radius: var(--radius-full); background: var(--muted); appearance: none; }
+  meter.ev-meter, span.ev-meter { inline-size: 100%; block-size: var(--spacing-2xs); border-radius: var(--radius-full); background: var(--muted); appearance: none; }
+  span.ev-meter { display: block; }  /* a zero ceiling: the empty track alone (ev-meter.js) */
   meter.ev-meter::-webkit-meter-bar { background: var(--muted); border: 0; border-radius: var(--radius-full); block-size: var(--spacing-2xs); }
   meter.ev-meter::-webkit-meter-optimum-value, meter.ev-meter::-webkit-meter-suboptimum-value, meter.ev-meter::-webkit-meter-even-less-good-value { background: var(--tone-neutral); border-radius: var(--radius-full); }
   meter.ev-meter[data-full]::-webkit-meter-optimum-value { background: var(--tone-caution); }
