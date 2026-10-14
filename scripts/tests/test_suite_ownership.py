@@ -16,10 +16,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 INTEGRATION = ("empirica-core-integration", "empirica-host-integration", "empirica-subagents-matrix",
-               "empirica-pi-api-typecheck", "empirica-governance-check")
+               "empirica-pi-api-typecheck", "empirica-governance-check", "observer-smoke", "observer-deep", "ui-smoke")
 # Test files deliberately outside every suite, with the reason. None today.
 EXCEPTIONS: dict[str, str] = {}
-NOT_TESTS = re.compile(r"(^|/)(node_modules|\.git|__pycache__|vendor)/")
+NOT_TESTS = re.compile(r"(^|/)(node_modules|\.git|__pycache__|vendor|\.stryker-tmp|\.venv)/")
 TEST_FILE = re.compile(r"(^|/)test_[^/]*\.py$|\.test\.(mjs|ts)$")
 
 
@@ -68,6 +68,8 @@ def owned_paths(text: str) -> set[str]:
                     for token in after:
                         if not token.startswith("-"):
                             _add(owned, cwd, token.split(".")[0] + ".py")
+            if any(token.endswith("/.bin/vitest") for token in tokens) and "run" in tokens:
+                _add(owned, cwd, "tests/*.test.mjs")  # `vitest run`: its config's include (ui/tests/imports.test.mjs)
             if any(token.endswith("validate_pi_adapter.py") for token in tokens) and "--package-only" not in tokens:
                 for token in tokens[tokens.index(next(t for t in tokens if t.endswith("validate_pi_adapter.py"))) + 1:]:
                     if not token.startswith("-"):

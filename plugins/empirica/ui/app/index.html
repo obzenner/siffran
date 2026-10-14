@@ -5,28 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; font-src 'self'">
   <title></title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Cpath d=%27M8 1.5 14.5 8 8 14.5 1.5 8Z%27 fill=%27none%27 stroke=%27%23888%27 stroke-width=%271.6%27/%3E%3C/svg%3E">
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg">
   <link rel="stylesheet" href="../vendor/basecoat/basecoat-nova.css">
   <link rel="stylesheet" href="../vendor/fonts/fonts.css">
   <link rel="stylesheet" href="../dist/tokens.css">
   <link rel="stylesheet" href="../dist/ui.css">
   <script type="module" src="./app.js"></script>
 </head>
-<body class="flex h-dvh flex-col overflow-hidden bg-background font-sans text-foreground">
+<body class="flex h-dvh flex-col overflow-hidden bg-background font-sans text-m font-normal text-foreground">
   <noscript>Empirica UI renders with JavaScript.</noscript>
-  <header id="bar" class="shrink-0 border-b border-border bg-background px-l py-s"></header>
+  <header id="bar" class="shrink-0 border-b border-border bg-background px-m py-xs"></header>
   <div class="flex min-h-0 flex-1">
-    <section id="list" class="flex min-h-0 w-full flex-col overflow-y-auto px-l py-m" aria-labelledby="list-title">
-      <div class="flex max-w-page flex-col gap-s">
-        <h2 id="list-title" class="sr-only"></h2>
-        <div class="flex flex-col gap-xs">
-          <input id="search" type="search" class="input" autocomplete="off">
-          <p id="coverage" class="text-xs text-muted-foreground" aria-live="polite"></p>
-        </div>
-        <ev-runs id="runs" class="flex flex-col gap-m"></ev-runs>
-      </div>
-    </section>
-    <main id="workspace" class="min-h-0 min-w-0 flex-1 overflow-y-auto px-l py-m"><ev-run id="run" class="block max-w-page"></ev-run></main>
+    <aside id="rail-pane" class="hidden w-rail shrink-0 overflow-y-auto border-r border-border p-s lg:block"><ev-rail id="rail" class="block"></ev-rail></aside>
+    <main id="main" class="min-h-0 min-w-0 flex-1 overflow-y-auto"><ev-universe id="universe" class="block h-full"></ev-universe><ev-inbox id="inbox" class="block p-m"></ev-inbox><ev-work id="work" class="block h-full"></ev-work></main>
+    <aside id="sheet-pane" class="min-h-0 w-sheet shrink-0 overflow-y-auto border-l border-border bg-background p-m"><ev-sheet id="sheet" class="block"></ev-sheet></aside>
   </div>
 </body>
 </html>

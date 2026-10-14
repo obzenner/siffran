@@ -3,7 +3,7 @@
     python3 plugins/empirica/adapters/observer/cli.py [--home DIR] [--repo DIR ...] [--run KEY]
     python3 plugins/empirica/adapters/observer/cli.py serve [--home DIR] [--repo DIR ...] [--port N] [--open] [--demo]
 
-Without a command it prints the store summary (or one run's detail, with ``--run``) as JSON. With
+Without a command it prints the store summary (or one run's sheet, with ``--run``) as JSON. With
 ``serve`` it serves that and the UI on 127.0.0.1 and prints the address; ``--demo`` serves only the
 plugin's demo data and reads no store. When an observer of the same store already answers on the
 port, ``serve`` says so (``already running``), opens that one with ``--open``, and exits.
@@ -31,6 +31,7 @@ if str(_PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_ROOT))
 
 from adapters.git.artifact_repo import toplevel  # noqa: E402
+from adapters.observer import civil  # noqa: E402
 from adapters.observer.source import StoreSource  # noqa: E402
 from adapters.state.repository import empirica_home  # noqa: E402
 from application.observer import Observer  # noqa: E402
@@ -58,7 +59,7 @@ def _store_options(p: argparse.ArgumentParser, defaults: bool) -> None:
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="observe", description=__doc__.splitlines()[0])
     _store_options(p, defaults=True)
-    p.add_argument("--run", help="print this run's detail (a key from the summary)")
+    p.add_argument("--run", help="print this run's sheet (its key, or its short id)")
     sub = p.add_subparsers(dest="command")
     s = sub.add_parser("serve", help="serve the read model and the UI on 127.0.0.1")
     _store_options(s, defaults=False)
@@ -70,7 +71,7 @@ def parser() -> argparse.ArgumentParser:
     return p
 
 
-ABOUT_LIMIT = 4096  # bytes: an /api/about answer is two short strings
+ABOUT_LIMIT = 4096  # bytes: an /api/about answer is a few short strings
 ABOUT_SECONDS = 1.0
 
 
@@ -122,6 +123,7 @@ def announce(label: str, port: int, page: str, suffix: str = "") -> str:
 
 
 def _serve(args, source: StoreSource | None) -> int:
+    from adapters.observer.indexer import Indexer
     from adapters.observer.server import Sources, serve
     store = identity(source, args.repo or [])
     page = "/app/" + ("?data=demo" if args.demo else "")
@@ -130,7 +132,12 @@ def _serve(args, source: StoreSource | None) -> int:
         if args.open:
             webbrowser.open(url)
         return 0
-    sources = Sources(None if source is None else Observer(source), identity=store)
+    # The store is indexed in the background (its clock bounds each slice), so a request never pays for indexing and a
+    # cold start answers at once with what has been read so far.
+    observer = None if source is None else Observer(source, clock=time.monotonic, zones=civil.zone)
+    sources = Sources(observer, identity=store)
+    if observer is not None:
+        Indexer(observer, after=sources.prepare).start()
     try:
         server = serve(sources, args.port)
     except OSError:
@@ -168,14 +175,16 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.command == "serve":
         return _serve(args, source)
-    view, details = Observer(source).observe()
+    observer = Observer(source, zones=civil.zone)
+    observer.index()
     if args.run is not None:
-        if args.run not in details:
+        sheet = observer.sheet(args.run)
+        if sheet is None:
             print(f"observe: no run {args.run}", file=sys.stderr)
             return 1
-        json.dump(details[args.run], sys.stdout, ensure_ascii=False, indent=1)
+        json.dump(sheet, sys.stdout, ensure_ascii=False, indent=1)
     else:
-        json.dump(view, sys.stdout, ensure_ascii=False, indent=1)
+        json.dump(observer.summary(), sys.stdout, ensure_ascii=False, indent=1)
     sys.stdout.write("\n")
     return 0
 

@@ -1,11 +1,10 @@
 basecoat-css 1.0.2
 lucide-static 1.51.0
-@fontsource-variable/ibm-plex-sans 5.3.0
 @fontsource/ibm-plex-mono 5.3.0
 
 98ca5bbecf6bbe67226cdfeb9700173d0f31532ce8772ea34871f6bcfb3f198f  basecoat/basecoat-nova.css
-e2291e842cf5af167122a22881a740c7f2dda7716f1e8cd76680264f4a859470  fonts/ibm-plex-sans-latin-wght-normal.woff2
+d2ce22595d55a52b0c63f837515729bd97706bfa1b833816509f13d93daa59b5  fonts/ibm-plex-mono-latin-300-normal.woff2
 08949f728dc52d528e69b1667d15c89a5686a4ee9a296ff90983985f99c380f7  fonts/ibm-plex-mono-latin-400-normal.woff2
 01d285447409c8a588692162439a038b8cbd7871309ee20267b0d2d91c6e8e22  fonts/ibm-plex-mono-latin-500-normal.woff2
-f56a27edf30667a1f7e4d43c689e5bc050f9383dfd6fdd453ec389b3dffef05e  fonts/fonts.css
-77db0c5bea9113578b315f6da938a5c1f56d5b3ecb05b711538236d7aa0cb6da  lucide/sprite.svg
+ad14760da763ef524172d720be7054b615c736378cd50ab8fea67c9b0dddec2b  fonts/fonts.css
+aebe2e9c5fe4b10b80b4bd60145bbe00ec2311fb7ca945ee6e7d11ddb04694f4  lucide/sprite.svg

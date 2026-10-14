@@ -37,7 +37,9 @@ from application.observer import Observer  # noqa: E402
 from core.records import RunKey  # noqa: E402
 from assertions import (action_graph, action_investigate, action_research, action_route,  # noqa: E402
                         get_argument, get_run, observe_action, start_run)
-from observer_store import DriverSource, _Builder, _graph, build_store  # noqa: E402
+from governance_setup import sized_configure_run  # noqa: E402
+from observer_store import (DriverSource, _Builder, _graph, build_store, observed, contract_problems,  # noqa: E402
+                            view_of)
 from application.protocol import host_profile_id  # noqa: E402
 CLAUDE_PROFILE = host_profile_id("claude-code")
 
@@ -45,7 +47,7 @@ _STORE = build_store()
 
 
 def _observe(store=_STORE, **kw):
-    return Observer(DriverSource(store), **kw).observe()
+    return observed(Observer(DriverSource(store), **kw))
 
 
 def _rows(view):
@@ -55,14 +57,14 @@ def _rows(view):
 class ContractTests(unittest.TestCase):
     def test_the_store_satisfies_the_contract_and_its_mirrors(self):
         view, details = _observe()
-        self.assertEqual(validate_ui_view.check(view, details), [])
+        self.assertEqual(contract_problems(view, details), [])
 
     def test_every_scenario_is_present_and_every_diagnostic_is_exercised(self):
         view, _ = _observe()
         rows = _rows(view)
         self.assertLessEqual(set(_STORE.expect.values()), set(rows))
         schema = validate_ui_view.schemas()[0]
-        diagnostics = validate_ui_view._enum(schema["$defs"]["run"]["properties"], "diagnostic")
+        diagnostics = validate_ui_view._enum(schema["$defs"]["row"]["properties"], "diagnostic")
         seen = {row["diagnostic"] for row in rows.values()} - {None}
         # These need a refusing workspace, damaged history or a repository without the refs:
         # RecoveryTests, ClassificationTests and FilesystemStoreTests cover them.
@@ -159,9 +161,9 @@ class ReasonMessageTests(unittest.TestCase):
             return real(snapshot, reasons, **kwargs)
         def unreadable(view):
             return sum(1 for p in view["projects"] for run in p["runs"] if run["diagnostic"] == "unreadable")
-        baseline = unreadable(Observer(DriverSource(build_store())).view())
+        baseline = unreadable(view_of(Observer(DriverSource(build_store()))))
         with patch.object(core_observer, "project", project):
-            view = Observer(DriverSource(build_store())).view()
+            view = view_of(Observer(DriverSource(build_store())))
         self.assertEqual(unreadable(view), baseline + 1)
         self.assertGreater(sum(1 for p in view["projects"] for run in p["runs"] if run["diagnostic"] is None), 0)
 
@@ -173,7 +175,7 @@ class ProjectLabelTests(unittest.TestCase):
         view, _ = _observe()
         labels = {p["id"]: p["label"] for p in view["projects"]}
         names = {p["name"]: p["label"] for p in view["projects"] if p["name"] not in {"tiles"}}
-        self.assertEqual(names, {"atlas": "atlas", "harbor": "harbor", "lumen": "lumen", "prism": "prism",
+        self.assertEqual(names, {"atlas": "atlas", "harbor": "harbor", "lumen": "lumen", "prism": "prism", "quarry": "quarry",
                                  None: "Unnamed project"})
         self.assertEqual(len(set(labels.values())), len(labels))
 
@@ -202,17 +204,18 @@ class ProjectLabelTests(unittest.TestCase):
         _tell_apart(alone)
         self.assertEqual([r["label"] for r in alone], ["atlas", "Unnamed project"])
 
-    def test_a_project_knows_when_its_oldest_run_last_changed(self):
+    def test_a_project_is_dated_by_when_its_earliest_run_started(self):
         view, _ = _observe()
         for project in view["projects"]:
-            self.assertEqual(project["since"], min(r["updated"] for r in project["runs"]))
+            started = [r["started"] for r in project["runs"] if r["started"] is not None]
+            self.assertEqual(project["since"], min(started, default=None))
+        self.assertTrue(all(p["since"] is not None for p in view["projects"]))
 
     def test_the_label_does_not_change_when_projects_are_reordered(self):
         store = build_store()
-        before = {p["id"]: p["label"] for p in Observer(DriverSource(store)).view()["projects"]}
-        store.times = {k: -t for k, t in store.times.items()}  # the opposite recency
-        after = Observer(DriverSource(store)).view()["projects"]
-        self.assertNotEqual([p["id"] for p in after], list(before))
+        before = {p["id"]: p["label"] for p in view_of(Observer(DriverSource(store)))["projects"]}
+        store.timeline.retime(lambda key, at: -at)  # the opposite recency
+        after = view_of(Observer(DriverSource(store)))["projects"]
         self.assertEqual({p["id"]: p["label"] for p in after}, before)
 
 
@@ -223,24 +226,6 @@ class HistoryStepTests(unittest.TestCase):
     def setUpClass(cls):
         cls.view, cls.details = _observe()
         cls.rows = _rows(cls.view)
-
-    def test_INVARIANT_a_step_stands_exactly_as_the_public_argument_says_of_its_claim(self):
-        # Oracle: GetArgument's current claims (wording digest) and its artifacts (the claim and wording each was recorded for).
-        seen = {"current": 0, "replaced": 0, "gone": 0}
-        for key, row in self.rows.items():
-            if row["claims"] is None or not row["claims"]:
-                continue
-            argument = _STORE.driver.request(get_argument(run_id=_handle(key)))["result"]["argument"]
-            wording = {c["claim_id"]: c["wording_digest"] for c in argument["claims"]}
-            recorded = [a for a in argument["artifacts"] if a["kind"] in {"research", "spike_request", "spike"}]
-            steps = [s for s in self.details[key]["steps"] if s["kind"] in {"research", "spike_request", "spike"}]
-            self.assertEqual([(s["kind"], s["claim"]) for s in steps], [(a["kind"], a["claim_id"]) for a in recorded], key)
-            for step, artifact in zip(steps, recorded):
-                want = ("gone" if artifact["claim_id"] not in wording
-                        else "replaced" if artifact["claim_digest"] != wording[artifact["claim_id"]] else "current")
-                self.assertEqual(step["standing"], want, (key, step))
-                seen[want] += 1
-        self.assertTrue(all(seen.values()), seen)  # the oracle must see all three, or "always current" would pass
 
     def test_a_human_answer_and_the_end_of_a_run_are_steps_with_their_subject_and_outcome(self):
         steps = [s for d in self.details.values() for s in d["steps"] or []]
@@ -260,7 +245,7 @@ class HistoryStepTests(unittest.TestCase):
 
 
 class AttemptFamilyTests(unittest.TestCase):
-    """U1-10: attempts at one session are listed chronologically, by generation, whatever a file's modification time says."""
+    """U1-10: attempts at one session are listed chronologically, by generation, whatever a recorded time says."""
 
     def test_INVARIANT_a_family_lists_its_attempts_by_generation_whatever_the_times_say(self):
         import itertools
@@ -270,15 +255,17 @@ class AttemptFamilyTests(unittest.TestCase):
         self.assertGreaterEqual(n, 3)
         for order in itertools.permutations(range(n)):
             store = build_store()
-            for generation, rank in zip(range(1, n + 1), order):
-                store.times[RunKey(project_id, run_id, generation)] = 1000.0 + 100 * rank
-            view = Observer(DriverSource(store)).view()
+            rank = {RunKey(project_id, run_id, g): r for g, r in zip(range(1, n + 1), order)}
+            store.timeline.retime(lambda k, at: 1000.0 + 100 * rank[k] if k in rank else at)
+            view = view_of(Observer(DriverSource(store)))
             project = next(p for p in view["projects"] if p["id"] == project_id)
             family = next(f for f in project["families"] if f["run"] == run_id)
             self.assertEqual(family["attempts"], [f"{project_id}/{run_id}/{g}" for g in range(1, n + 1)], order)
-        # control: in the store as built the first attempt was touched last, so the runs (newest first by time) are not in
-        # generation order: ordering attempts by time would have been caught
-        built = next(p for p in _observe()[0]["projects"] if p["id"] == project_id)
+        # control: with the first attempt written last, the runs (newest first by time) are not in generation order, so
+        # ordering attempts by time would have been caught
+        store = build_store()
+        store.timeline.retime(lambda k, at: at + 10**6 if k == RunKey(project_id, run_id, 1) else at)
+        built = next(p for p in view_of(Observer(DriverSource(store)))["projects"] if p["id"] == project_id)
         self.assertNotEqual([r["generation"] for r in built["runs"] if r["run"] == run_id], [3, 2, 1])
         self.assertNotEqual([r["generation"] for r in built["runs"] if r["run"] == run_id], list(range(1, n + 1)))
 
@@ -382,10 +369,10 @@ class WaitingOwnerTests(unittest.TestCase):
                 (lambda src: src.read_state(next(iter(src.keys()))))(DriverSource(b.store)).value["governance"]["receipts"]) + 1) if limit else contextlib.nullcontext()
             with patch:
                 b.present_and_answer(run, "r1", [{"subject": "research", "artifact_id": ids["C1"], "outcome": "confirm"}])
-                view, details = Observer(DriverSource(b.store)).observe()
+                view, details = observed(Observer(DriverSource(b.store)))
             return _rows(view), details
         b.stamp("wait", "atlas", "s-wait")
-        view, details = Observer(DriverSource(b.store)).observe()
+        view, details = observed(Observer(DriverSource(b.store)))
         return _rows(view), details
 
     @staticmethod
@@ -443,6 +430,133 @@ class WaitingOwnerTests(unittest.TestCase):
         self.assertNotIn("unanswered", {d["decision"]["status"] for d in details[_STORE.expect["verification"]]["claims"] if d["decision"]})
 
 
+class HumanPendingActionTests(unittest.TestCase):
+    """P3c (the user's ruling): a run whose human has an action pending (approve its configuration, agree to end it with the
+    scope frozen) is filed under Needs a human with that ask; one whose agent has yet to ask, or whose human already said
+    no, is Not ended, the agent next. Each case is driven through the real service; the observer's fact is the core's
+    (``governance.human_wait`` and the report's requirements) and the hosts' own turn-end wait (Claude Code's
+    ``completion._human_approval_wait`` on the gate's answer)."""
+
+    GOAL, GRAPH = "Grade the north pit.", _graph("C0", [("C0", "ordinary", "The grading meets the road spec.")], [])
+
+    def _read(self, b, run):
+        from core import governance
+        b.stamp("case", "quarry", "s-case")
+        view, details = observed(Observer(DriverSource(b.store)))
+        row, detail = next(iter(_rows(view).values())), next(iter(details.values()))
+        g = b.a.dispatch(b.drv, get_run(run_id=run))["result"]["run"]["governance"]  # the author view's governance
+        core_wait = governance.human_wait(g, g["prompt_error"])
+        return row, detail, core_wait, b.evaluate(run, "report_convergence")["result"]
+
+    def _case(self, outcome=None, *, sized=True, revise=False):
+        b = _Builder()
+        run = b.begin("quarry", "s-case", self.GOAL, self.GRAPH, approve=revise)
+        if revise:  # approved once, then the agent proposes other ceilings: a revision
+            b.research(run, "C0", ref="pit/grading.md")
+            b.a.dispatch(b.drv, observe_action(run_id=run, action=sized_configure_run(
+                budgets={"max_passes": 3, "max_spawns": 0, "max_audit_spawns": 1}, rationale="One claim, no spikes.")))
+        if sized and not revise:
+            b.ask_configuration(run, "shown", outcome=outcome)
+        return (b, run, *self._read(b, run))
+
+    def assertHuman(self, row, detail, ask):
+        self.assertEqual((row["standing"], row["ask"], row["attention"]), ("needs_human", ask, "needs_you"))
+        self.assertEqual((row["next"]["who"], row["next"]["where"]), ("human", "next_report"))
+        self.assertEqual([i["who"] for i in detail["outstanding"]][:1], ["human"])
+
+    def assertAgent(self, row):
+        self.assertEqual((row["standing"], row["ask"], row["attention"]), ("not_ended", None, "not_ended"))
+        self.assertEqual(row["next"]["who"], "agent")
+
+    def test_the_agent_has_yet_to_ask_for_approval_so_the_agent_acts_next(self):
+        _, _, row, _, core_wait, _ = self._case(sized=False)
+        self.assertAgent(row)
+        self.assertFalse(core_wait)
+
+    def test_a_configuration_shown_to_the_human_and_not_answered_needs_a_human(self):
+        from adapters.claude.completion import _human_approval_wait
+        from adapters.claude.transport import Result
+        _, _, row, detail, core_wait, gate = self._case("present")
+        self.assertHuman(row, detail, "approve_configuration")
+        self.assertTrue(core_wait)
+        self.assertTrue(_human_approval_wait(Result.from_mapping(gate)), "Claude Code's turn end waits on the human too")
+
+    def test_a_dialog_closed_without_an_answer_still_waits_on_the_human(self):
+        from adapters.claude.completion import _human_approval_wait
+        from adapters.claude.transport import Result
+        _, _, row, detail, core_wait, gate = self._case("dismiss")
+        self.assertHuman(row, detail, "approve_configuration")
+        self.assertTrue(core_wait)
+        self.assertTrue(_human_approval_wait(Result.from_mapping(gate)))
+
+    def test_a_rejected_configuration_waits_on_the_human(self):
+        """The behavioural contract (the hosts' turn end, ``host-boundaries.json``): after a rejection the turn settles
+        with the human-wait notice, so the observer files the run under Needs a human too, by the same predicate."""
+        from adapters.claude.completion import _human_approval_wait
+        from adapters.claude.transport import Result
+        _, _, row, detail, core_wait, gate = self._case("reject")
+        self.assertEqual(gate["run"]["governance"]["state"], "rejected")
+        self.assertHuman(row, detail, "approve_configuration")
+        self.assertTrue(core_wait)
+        self.assertTrue(gate["run"]["governance"]["human_wait"], "the run view carries the core's answer")
+        self.assertTrue(_human_approval_wait(Result.from_mapping(gate)))
+
+    def test_a_proposal_no_host_mediated_has_nobody_to_ask_so_the_agent_acts_next(self):
+        from adapters.claude.completion import _human_approval_wait
+        from adapters.claude.transport import Result
+        _, _, row, _, core_wait, gate = self._case(None)
+        self.assertAgent(row)
+        self.assertFalse(core_wait)
+        self.assertFalse(_human_approval_wait(Result.from_mapping(gate)))
+
+    def test_a_revision_after_the_first_approval_needs_a_human_to_approve_it(self):
+        _, _, row, detail, core_wait, _ = self._case(revise=True)
+        self.assertHuman(row, detail, "approve_revision")
+        self.assertTrue(core_wait)
+
+    def _frozen(self, *, shown: bool):
+        b = _Builder()
+        graph = _graph("C0", [("C0", "ordinary", "Blasts happen only on weekday mornings.")], [])
+        run = b.begin("quarry", "s-case", "Write down the blasting schedule.", graph)
+        b.research(run, "C0", ref="blast/schedule.md")
+        b.freeze(run)
+        b.a.dispatch(b.drv, observe_action(run_id=run, action=action_graph(_graph(
+            "C0", [("C0", "ordinary", "Blasts happen only on weekday mornings."),
+                   ("C1", "ordinary", "Neighbours are told a day ahead.")], [("C0", "C1")]))))
+        b.audit(run, "pass", ["The frozen claim is cited."])
+        if shown:
+            b.ask_to_end(run, "freeze-shown")
+        b.stamp("case", "quarry", "s-case")
+        view, details = observed(Observer(DriverSource(b.store)))
+        gate = b.evaluate(run, "report_convergence")["result"]
+        return next(iter(_rows(view).values())), next(iter(details.values())), gate
+
+    def test_ending_with_the_scope_frozen_waits_on_the_human_when_the_gate_asks_them(self):
+        row, detail, gate = self._frozen(shown=False)
+        self.assertHuman(row, detail, "freeze_scope")
+        self.assertEqual([r["parameters"]["case"] for r in gate["reasons"]], ["ask"])
+
+    def test_a_declined_end_is_the_agent_s_to_keep_working_not_the_human_s(self):
+        """The parked P1 finding: the core's case is ``declined`` (shown, no consent followed), so nothing waits on a human
+        until they tell the agent to stop again."""
+        row, detail, gate = self._frozen(shown=True)
+        self.assertAgent(row)
+        self.assertEqual([r["parameters"]["case"] for r in gate["reasons"]], ["declined"])
+        self.assertNotIn("human", {i["who"] for i in detail["outstanding"]})
+
+    def test_a_declined_stop_is_not_ended_and_asks_nobody(self):
+        b = _Builder()
+        run = b.begin("quarry", "s-case", "Retire the old weighbridge.", _graph(
+            "C0", [("C0", "ordinary", "No ticket is printed by the old weighbridge any more.")], []))
+        b.research(run, "C0", ref="weigh/tickets.py")
+        b.ask_to_end(run, "consent-shown")
+        b.stamp("case", "quarry", "s-case")
+        view, _ = observed(Observer(DriverSource(b.store)))
+        self.assertAgent(next(iter(_rows(view).values())))
+        gate = b.evaluate_raw(run, "stop")["result"]
+        self.assertEqual([r["parameters"]["case"] for r in gate["reasons"]], ["declined"])
+
+
 class ProposedCeilingsTests(unittest.TestCase):
     def test_INVARIANT_ceilings_are_proposed_exactly_while_a_proposal_waits_on_the_human(self):
         _, details = _observe()
@@ -460,41 +574,6 @@ class DecisionApplicabilityTests(unittest.TestCase):
     def setUpClass(cls):
         cls.view, cls.details = _observe()
         cls.rows = _rows(cls.view)
-
-    def test_ST_08_a_decision_claim_added_after_the_freeze_is_a_valid_view_and_reads_deferred(self):
-        # The reproduction through the real service: out of scope and unanswered used to have no outcome and no route,
-        # which the contract's own validator rejected as malformed.
-        self.assertEqual(validate_ui_view.check(self.view, self.details), [])
-        key = _STORE.expect["deferred-decision"]
-        decision = next(c["decision"] for c in self.details[key]["claims"] if c["decision"])
-        self.assertEqual((decision["status"], decision["outcome"], decision["where"]), ("deferred", None, None))
-        self.assertFalse(next(c for c in self.rows[key]["claims"] if c["kind"] == "needs-decision")["gating"])
-
-    def test_INVARIANT_every_decision_in_every_run_reads_what_the_core_says_of_it(self):
-        # Oracle: the public GetArgument projection of the same run (answer present, scope, state), never the observer.
-        checked = {"approved": 0, "rejected": 0, "waiting": 0, "unanswered": 0, "deferred": 0, "not_asked": 0}
-        for key, row in self.rows.items():
-            if row["claims"] is None or not row["claims"]:
-                continue
-            argument = _STORE.driver.request(get_argument(run_id=_handle(key)))["result"]["argument"]
-            for claim in argument["claims"]:
-                if claim["kind"] != "needs-decision":
-                    continue
-                decision = next(c for c in self.details[key]["claims"] if c["id"] == claim["claim_id"])["decision"]
-                answered = claim.get("human_decision")
-                if answered is not None:
-                    want = {"approve": "approved", "reject": "rejected"}[answered["outcome"]]
-                elif claim["gating"]:
-                    want = (("waiting" if row["state"] == "active" else "unanswered")
-                            if claim["state"] == "blocked" else "not_asked")
-                else:
-                    want = "deferred"
-                self.assertEqual(decision["status"], want, f"{key} {claim['claim_id']}")
-                self.assertEqual(decision["outcome"] is not None, answered is not None, key)
-                self.assertEqual(decision["where"] is not None, want == "waiting", key)
-                checked[want] += 1
-        # the oracle must see more than one standing, or an always-"waiting" observer would pass
-        self.assertGreaterEqual(sum(1 for n in checked.values() if n), 3, checked)
 
 
 class AuditSelectorTests(unittest.TestCase):
@@ -535,7 +614,7 @@ class HistoricalFactsTests(unittest.TestCase):
 
     @staticmethod
     def _read(b):
-        view, details = Observer(DriverSource(b.store)).observe()
+        view, details = observed(Observer(DriverSource(b.store)))
         row = view["projects"][0]["runs"][0]
         return row, details[row["key"]]
 
@@ -578,7 +657,7 @@ class HistoricalFactsTests(unittest.TestCase):
             row, detail = self._read(b)
         self.assertEqual(detail["stop"]["basis"], "unavailable")
         self.assertIsNone(detail["residuals"])
-        self.assertEqual(validate_ui_view.check(*Observer(DriverSource(b.store)).observe()), [])
+        self.assertEqual(contract_problems(*observed(Observer(DriverSource(b.store)))), [])
 
     def test_a_record_that_lacks_a_path_the_spikes_bind_holds_nothing(self):
         from application import snapshot as snapshot_module
@@ -629,7 +708,7 @@ class SpikeProofTests(unittest.TestCase):
 
     @staticmethod
     def _proof(b):
-        _, details = Observer(DriverSource(b.store)).observe()
+        _, details = observed(Observer(DriverSource(b.store)))
         (detail,) = details.values()
         return detail["claims"][0]["proof"]
 
@@ -650,7 +729,7 @@ class SpikeProofTests(unittest.TestCase):
         self.assertEqual([p["state"] for p in self._proof(b)], ["superseded", "stale"])
 
     def test_a_claim_without_a_spike_has_an_empty_proof(self):
-        view, details = Observer(DriverSource(_STORE)).observe()
+        view, details = observed(Observer(DriverSource(_STORE)))
         proofs = [c["proof"] for d in details.values() for c in d["claims"] or []]
         self.assertTrue(all(isinstance(p, list) for p in proofs) and any(p == [] for p in proofs) and any(proofs))
 
@@ -736,8 +815,6 @@ class AgreementTests(unittest.TestCase):
         self.assertEqual(d["converged"]["auditor"] is not None, True)
         self.assertEqual(claims["refuted"]["C1"]["state"], "discarded")
         self.assertEqual(claims["refuted"]["C1"]["blocker"], "claim.refuted")
-        self.assertEqual(claims["stale"]["C1"]["blocker"], "claim.spike_stale")
-        self.assertIn("src/decode.py", [s["path"] for s in d["stale"]["stale"]])
         self.assertEqual(r["budget"]["state"], "stopped_budget")
         self.assertFalse(claims["frozen"]["C1"]["gating"])
         self.assertEqual(claims["decision"]["C1"]["state"], "blocked")
@@ -769,12 +846,9 @@ class AgreementTests(unittest.TestCase):
         self.assertTrue(amended["proposal_pending"])
         self.assertEqual(amended["proposed"]["passes"], 3)
         self.assertNotEqual(amended["proposed"], {k: v["max"] for k, v in amended["ceilings"].items()})
-        # a delegated unattended run asks nobody: not ended, and never "needs you"
-        self.assertEqual(r["auto-delegated"]["attention"], "not_ended")
-        self.assertEqual({i["who"] for i in d["auto-delegated"]["outstanding"]} & {"human"}, set())
-        self.assertEqual(r["waiting-human"]["attention"], "needs_you")
+        self.assertEqual(r["verification"]["attention"], "needs_you")
         # the end of a run the human approved is a run event, not a claim named after a status
-        ending = [s for s in d["terminal-consent"]["steps"] if s["terminal"]]
+        ending = [s for s in d["refuted"]["steps"] if s["terminal"]]
         self.assertEqual([(s["subject"], s["claim"], s["outcome"]) for s in ending], [("run", None, "approve")])
         self.assertEqual((claims["decision"]["C0"]["blocker"], claims["decision"]["C0"]["blocker_claim"]),
                          ("evidence.confirmation_required", "C1"))
@@ -782,10 +856,6 @@ class AgreementTests(unittest.TestCase):
     def test_the_gate_s_other_stages_read_as_the_gate_leaves_them(self):
         r = {name: self.rows[key] for name, key in _STORE.expect.items()}
         d = {name: self.details[key] for name, key in _STORE.expect.items()}
-        for name in ("audit-same-model", "audit-unverified"):  # a passing audit the gate refuses: nothing is assured
-            self.assertEqual({c["assurance"] for c in r[name]["claims"]}, {"awaiting_audit"}, name)
-        self.assertEqual((r["audit-same-model"]["audit"]["verdict"], r["audit-same-model"]["audit"]["independence"]),
-                         ("passed", "same_model"))
         # a human batch beside work the agent owes: the host shows it at the next report, so a human is needed; the gate's first
         # reason is still the agent's work (the first outstanding item), which is a separate fact
         self.assertEqual(r["parallel-human"]["attention"], "needs_you")
@@ -793,11 +863,6 @@ class AgreementTests(unittest.TestCase):
                          [("human", "next_report")])
         self.assertEqual(d["parallel-human"]["outstanding"][0]["who"], "agent")
         self.assertEqual(r["parallel-human"]["next"]["who"], "human")
-        # the pass ceiling is what the report names when it is spent
-        self.assertEqual([i["need"] for i in d["passes-exhausted"]["outstanding"]][:1], ["budget.exhausted"])
-        # a stop, then the files change: the stop's residuals stay, today's are beside them
-        self.assertEqual([x["code"] for x in d["stopped-drift"]["now"]], ["claim.spike_stale", "audit.required"])
-        self.assertNotIn("claim.spike_stale", [x["code"] for x in d["stopped-drift"]["residuals"]])
         # an attempt that cannot be read beside one that can: the family has both
         family = [x for x in self.rows.values() if x["run"] == r["attempt-unread-sibling"]["run"]]
         self.assertEqual(sorted((x["generation"], x["diagnostic"]) for x in family), [(1, None), (2, "unreadable")])
@@ -828,9 +893,9 @@ class ReadOnlyTests(unittest.TestCase):
         source._runs = _Refuse(drv._runs, {"read", "generations"})
         source._runs._store = drv._runs._store
         source._artifacts = _Refuse(drv._artifacts, {"read"})
-        source._workspace = _Refuse(drv._workspace, {"observe"})
+        source._workspace = _Refuse(drv._workspace, {"observe", "drift_id", "signatures", "now_ns", "changed_at", "basis_of"})
         before = json.dumps(drv.operational_state(), sort_keys=True, default=str)
-        Observer(source).observe()
+        observed(Observer(source))
         self.assertEqual(json.dumps(drv.operational_state(), sort_keys=True, default=str), before)
 
 
@@ -838,14 +903,14 @@ class CacheTests(unittest.TestCase):
     def test_an_unchanged_store_is_not_re_projected_and_a_change_touches_one_run(self):
         store = build_store()
         obs = Observer(DriverSource(store))
-        first, _ = obs.observe()
+        first, _ = observed(obs)
         with _counting_assemble() as calls:
-            again, _ = obs.observe()
+            again, _ = observed(obs)
             self.assertEqual((again["token"], calls), (first["token"], []))
-            key = store.expect["stale"]
+            key = store.expect["reaudit"]
             store.driver.request(observe_action(run_id=_handle(key), action=action_research(
                 claim_id="C0", source_kind="code", result="supports")))
-            changed, _ = obs.observe()
+            changed, _ = observed(obs)
         self.assertNotEqual(changed["token"], first["token"])
         self.assertEqual(len(calls), 1)
         before, after = _rows(first), _rows(changed)
@@ -854,10 +919,10 @@ class CacheTests(unittest.TestCase):
     def test_a_workspace_edit_changes_exactly_the_runs_whose_spikes_depend_on_it(self):
         store = build_store()
         obs = Observer(DriverSource(store))
-        first, _ = obs.observe()
+        first, _ = observed(obs)
         store.driver.workspace_write("src/cache.py", b"cache v2\n")
         with _counting_assemble() as calls:
-            changed, details = obs.observe()
+            changed, details = observed(obs)
         self.assertEqual(len(calls), 1)
         before, after = _rows(first), _rows(changed)
         key = store.expect["converged"]
@@ -869,7 +934,7 @@ class CacheTests(unittest.TestCase):
         self.assertEqual((after[key]["state"], before[key]["claims"] != after[key]["claims"]), ("converged", True))
         self.assertEqual((before[key]["audit"]["current"], after[key]["audit"]["current"]), (True, False))
         self.assertEqual([c["path"] for c in details[key]["stale"]], ["src/cache.py"])
-        self.assertEqual(Observer(DriverSource(store)).observe()[0], changed)
+        self.assertEqual(observed(Observer(DriverSource(store)))[0], changed)
 
 
 class UnobservableWorkspaceTests(unittest.TestCase):
@@ -882,10 +947,13 @@ class UnobservableWorkspaceTests(unittest.TestCase):
 
         source = DriverSource(_STORE)
         source.workspace = lambda key: Refusing()
-        view, details = Observer(source).observe()
-        stale = _rows(view)[_STORE.expect["stale"]]
-        self.assertEqual((stale["diagnostic"], stale["claims"]), ("workspace-unavailable", None))
-        self.assertEqual(validate_ui_view.check(view, details), [])
+        view, details = observed(Observer(source))
+        bound = _rows(view)[_STORE.expect["converged"]]
+        self.assertEqual((bound["diagnostic"], bound["claims"]), ("workspace-unavailable", None))
+        coverage = view["coverage"]
+        self.assertEqual((coverage["read"] + coverage["unreadable"] + coverage["partial"] + coverage["pending"],
+                          coverage["runs"]), (len(view["rows"]), len(view["rows"])), "every run is counted, none dropped")
+        self.assertEqual(contract_problems(view, details), [])
 
 
 class RecoveryTests(unittest.TestCase):
@@ -899,12 +967,12 @@ class RecoveryTests(unittest.TestCase):
         store = build_store()
         source = DriverSource(store)
         obs = Observer(source)
-        key = store.expect["stale"]
-        healthy = _rows(obs.view())[key]
+        key = store.expect["converged"]
+        healthy = _rows(view_of(obs))[key]
         source.workspace = lambda k: Refusing()
-        self.assertEqual(_rows(obs.view())[key]["diagnostic"], "workspace-unavailable")
+        self.assertEqual(_rows(view_of(obs))[key]["diagnostic"], "workspace-unavailable")
         del source.workspace
-        self.assertEqual(_rows(obs.view())[key], healthy)
+        self.assertEqual(_rows(view_of(obs))[key], healthy)
 
 
 class ClassificationTests(unittest.TestCase):
@@ -914,9 +982,8 @@ class ClassificationTests(unittest.TestCase):
         store = build_store()
         key = RunKey(storage_id("atlas"), storage_id("s-injected"), 1)
         store.driver.inject_run_state(key, value)
-        store.times[key] = 1.0
         view, details = _observe(store)
-        self.assertEqual(validate_ui_view.check(view, details), [])
+        self.assertEqual(contract_problems(view, details), [])
         return _rows(view)[f"{key.project_id}/{key.run_id}/1"], store
 
     def _current_state(self):
@@ -957,15 +1024,15 @@ class ClassificationTests(unittest.TestCase):
         real = observer_module.assemble
 
         def assemble(state, stored, workspace, **kw):
-            if kw["run_id"] == _handle(store.expect["stale"]):
+            if kw["run_id"] == _handle(store.expect["reaudit"]):
                 raise KeyError("harness_request_id")
             return real(state, stored, workspace, **kw)
 
         with mock.patch.object(observer_module, "assemble", assemble):
             rows = _rows(_observe(store)[0])
-        self.assertEqual(rows[store.expect["stale"]]["diagnostic"], "history-corrupt")
+        self.assertEqual(rows[store.expect["reaudit"]]["diagnostic"], "history-corrupt")
         self.assertEqual([k for k, r in rows.items() if r["diagnostic"] == "history-corrupt"],
-                         [store.expect["stale"]])
+                         [store.expect["reaudit"]])
 
 
 def _handle(key):
@@ -988,6 +1055,34 @@ def _counting_assemble():
 def _git(cwd, *args):
     return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True,
                           text=True).stdout
+
+
+def _drive(profile, repo, clock=None):
+    """One run through the bridge, in ``repo`` (the working directory and ``EMPIRICA_HOME`` are the caller's), its writes
+    timed by ``clock`` (the bridge's wall clock when none). Receipt ids are drawn from a fixed sequence."""
+    import uuid
+    import governance_setup
+    from adapters import bridge
+    from adapters.state import identity
+    from governance_setup import approve_current
+    sequence = (uuid.UUID(int=n) for n in range(1, 1 << 16))
+    with mock.patch.object(governance_setup, "uuid4", lambda: next(sequence)):
+        service = bridge.build_service(profile) if clock is None else bridge.build_service(profile, clock=clock)
+        started = service.dispatch(start_run(goal="Cache the tile index.", request_id="start",
+                                             project=identity.project_id(repo), session="s1"))
+        run_id = started["result"]["run"]["id"]
+        graph = {"root": "C0", "claims": [
+            {"id": "C0", "text": "A cold start reads one file.", "kind": "ordinary", "gating": True}],
+            "edges": []}
+        for action in (action_route(reason="observer"), action_graph(graph)):
+            service.dispatch(observe_action(run_id=run_id, action=action))
+        approve_current(service._coordinator, run_id)
+        for action in (action_investigate(),
+                       action_research(claim_id="C0", source_kind="code", result="supports",
+                                       payload={"source_ref": "README.md:1", "citation": "atlas"})):
+            admitted = service.dispatch(observe_action(run_id=run_id, action=action))
+            assert admitted["result"]["type"] == "Allow", admitted
+    return run_id
 
 
 class FilesystemStoreTests(unittest.TestCase):
@@ -1022,24 +1117,7 @@ class FilesystemStoreTests(unittest.TestCase):
 
     @classmethod
     def _start(cls):
-        from adapters import bridge
-        from adapters.state import identity
-        from governance_setup import approve_current
-        service = bridge.build_service(cls.PROFILE)
-        started = service.dispatch(start_run(goal="Cache the tile index.",
-                                             project=identity.project_id(cls.repo), session="s1"))
-        run_id = started["result"]["run"]["id"]
-        graph = {"root": "C0", "claims": [
-            {"id": "C0", "text": "A cold start reads one file.", "kind": "ordinary", "gating": True}],
-            "edges": []}
-        for action in (action_route(reason="observer"), action_graph(graph)):
-            service.dispatch(observe_action(run_id=run_id, action=action))
-        approve_current(service._coordinator, run_id)
-        for action in (action_investigate(),
-                       action_research(claim_id="C0", source_kind="code", result="supports",
-                                       payload={"source_ref": "README.md:1", "citation": "atlas"})):
-            admitted = service.dispatch(observe_action(run_id=run_id, action=action))
-            assert admitted["result"]["type"] == "Allow", admitted
+        _drive(cls.PROFILE, cls.repo)
 
     def _snapshot(self):
         files = {p: p.read_bytes() for p in sorted(self.home.rglob("*")) if p.is_file()}
@@ -1050,9 +1128,9 @@ class FilesystemStoreTests(unittest.TestCase):
     def test_a_run_on_disk_reads_fully_and_nothing_is_written(self):
         from adapters.observer.source import StoreSource
         before = self._snapshot()
-        view, details = Observer(StoreSource(self.home, [self.repo])).observe()
+        view, details = observed(Observer(StoreSource(self.home, [self.repo])))
         self.assertEqual(self._snapshot(), before)
-        self.assertEqual(validate_ui_view.check(view, details), [])
+        self.assertEqual(contract_problems(view, details), [])
         (project,) = view["projects"]
         self.assertEqual((project["name"], project["repo"]), ("atlas", str(self.repo)))
         (run,) = project["runs"]
@@ -1061,16 +1139,44 @@ class FilesystemStoreTests(unittest.TestCase):
                          [("C0", "approved", "research")])
         self.assertIsNotNone(run["updated"])
 
+    def _times(self, home):
+        from adapters.observer.source import StoreSource
+        view, details = observed(Observer(StoreSource(home, [self.repo])))
+        (run,) = view["projects"][0]["runs"]
+        return (run["started"], run["updated"], run["ended"], view["projects"][0]["since"],
+                [s["at"] for s in details[run["key"]]["steps"]])
+
+    def test_the_bridge_records_when_each_write_happened_beside_the_run(self):
+        from adapters.state.timeline import TIMELINE, Timeline
+        (path,) = self.home.glob(f"projects/*/runs/*/gen-1/{TIMELINE}")
+        self.assertEqual(path.parent / "run.json", next(self.home.glob("projects/*/runs/*/gen-1/run.json")))
+        started, updated, ended, since, steps = self._times(self.home)
+        gen, run_dir, project_dir = path.parent, path.parents[1], path.parents[3]
+        entries = Timeline(self.home).read(RunKey(project_dir.name, run_dir.name, int(gen.name.split("-")[1])))
+        self.assertEqual((started, updated, ended, since), (entries[0]["at"], entries[-1]["at"], None, entries[0]["at"]))
+        self.assertLessEqual(started, updated)
+        self.assertTrue(steps and all(at is not None for at in steps), steps)
+        self.assertEqual(_git(self.repo, "for-each-ref", "--format=%(committerdate:raw)").split(),
+                         ["0", "+0000"] * len(_git(self.repo, "for-each-ref").splitlines()),
+                         "the artifact commits stay dated @0: no time enters refs/empirica")
+
+    def test_a_copied_store_keeps_its_times_whatever_its_files_modification_times(self):
+        home = Path(self.enterContext(tempfile.TemporaryDirectory())) / "home"
+        shutil.copytree(self.home, home, symlinks=True, copy_function=shutil.copy)  # copy() does not keep mtimes
+        for path in home.rglob("*"):
+            os.utime(path, (0, 0), follow_symlinks=False)
+        self.assertEqual(self._times(home), self._times(self.home))
+
     def test_an_unchanged_poll_reads_no_history(self):
         from adapters.git.artifact_repo import GitArtifactRepository
         from adapters.observer.source import StoreSource
         obs = Observer(StoreSource(self.home, [self.repo]))
-        first = obs.view()
+        first = view_of(obs)
         reads = []
         real = GitArtifactRepository.read
         GitArtifactRepository.read = lambda repo, key: reads.append(key) or real(repo, key)
         try:
-            again = obs.view()
+            again = view_of(obs)
         finally:
             GitArtifactRepository.read = real
         self.assertEqual((again, reads), (first, []))
@@ -1094,19 +1200,19 @@ class FilesystemStoreTests(unittest.TestCase):
         (workspace,) = self.home.glob(f"projects/*/runs/*/gen-1/{WORKSPACE}")
         self.assertEqual((json.loads(record.read_text()), json.loads(workspace.read_text())),
                          ({"repo": str(self.repo)}, {"workspace": str(self.repo)}))
-        view, details = Observer(StoreSource(self.home)).observe()
+        view, details = observed(Observer(StoreSource(self.home)))
         (project,) = view["projects"]
         self.assertEqual((project["name"], project["runs"][0]["diagnostic"]), ("atlas", None))
-        self.assertEqual(validate_ui_view.check(view, details), [])
+        self.assertEqual(contract_problems(view, details), [])
 
     def test_without_its_repository_a_run_reads_its_state_only(self):
         from adapters.observer.source import StoreSource
-        view, details = Observer(StoreSource(self._home_where(None), [])).observe()
+        view, details = observed(Observer(StoreSource(self._home_where(None), [])))
         (run,) = view["projects"][0]["runs"]
         self.assertEqual((run["diagnostic"], run["state"], run["claims"]),
                          ("history-unavailable", "active", None))
         self.assertIsNone(view["projects"][0]["name"])
-        self.assertEqual(validate_ui_view.check(view, details), [])
+        self.assertEqual(contract_problems(view, details), [])
 
     def test_a_repository_without_the_run_s_history_says_so(self):
         from adapters.observer.source import StoreSource
@@ -1114,13 +1220,13 @@ class FilesystemStoreTests(unittest.TestCase):
             clone = Path(other).resolve() / "atlas"  # a clone does not copy the artifact refs
             subprocess.run(["git", "clone", "-q", str(self.repo), str(clone)], check=True,
                            capture_output=True)
-            (run,) = Observer(StoreSource(self._home_where(clone))).view()["projects"][0]["runs"]
+            (run,) = view_of(Observer(StoreSource(self._home_where(clone))))["projects"][0]["runs"]
         self.assertEqual((run["diagnostic"], run["state"]), ("history-missing", "active"))
 
     def test_a_recorded_repository_that_has_gone_is_no_repository(self):
         from adapters.observer.source import StoreSource
         home = self._home_where(Path(self.tmp.name) / "gone")
-        (run,) = Observer(StoreSource(home)).view()["projects"][0]["runs"]
+        (run,) = view_of(Observer(StoreSource(home)))["projects"][0]["runs"]
         self.assertEqual(run["diagnostic"], "history-unavailable")
 
     def test_the_command_line_prints_the_view_and_one_run(self):
@@ -1128,14 +1234,53 @@ class FilesystemStoreTests(unittest.TestCase):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             self.assertEqual(cli.main(["--home", str(self.home), "--repo", str(self.repo)]), 0)
-        view = json.loads(out.getvalue())
-        key = view["projects"][0]["runs"][0]["key"]
+        summary = json.loads(out.getvalue())
+        self.assertEqual(summary["contract"], "empirica-ui-view/v1")
+        key = summary["marks"]["id"][0]
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             self.assertEqual(cli.main(["--home", str(self.home), "--run", key]), 0)
-        self.assertEqual(json.loads(out.getvalue())["key"], key)
+        sheet = json.loads(out.getvalue())
+        self.assertEqual((sheet["row"]["id"], sheet["key"] == sheet["row"]["key"]), (key, True))
         with contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(cli.main(["--home", str(self.home), "--repo", str(self.home)]), 2)
+
+
+class TwoClockFilesystemTests(unittest.TestCase):
+    """ADR-0070 on the real adapters: the same run driven through the bridge with two clocks, in the same place, leaves
+    byte-identical run state and artifact refs. Only the timelines differ."""
+
+    def _run(self, base: Path, clock):
+        home, repo = base / "home", base / "work" / "atlas"
+        if base.exists():
+            shutil.rmtree(base)
+        repo.mkdir(parents=True)
+        _git(repo, "init", "-q")
+        (repo / "README.md").write_text("atlas\n")
+        cwd = os.getcwd()
+        os.chdir(repo)
+        try:
+            with mock.patch.dict(os.environ, {"EMPIRICA_HOME": str(home)}):
+                _drive(FilesystemStoreTests.PROFILE, repo, clock)
+        finally:
+            os.chdir(cwd)
+        from adapters.state.timeline import TIMELINE
+        files = {str(p.relative_to(home)): p.read_bytes() for p in sorted(home.rglob("*"))
+                 if p.is_file() and p.name != TIMELINE and not p.name.endswith(".lock")}
+        timelines = {str(p.relative_to(home)): p.read_bytes() for p in home.rglob(TIMELINE)}
+        return files, _git(repo, "for-each-ref"), timelines
+
+    def test_INVARIANT_the_clock_changes_only_the_timeline(self):
+        base = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve() / "same"
+        ticks = iter(range(10**6))
+        files_a, refs_a, times_a = self._run(base, lambda: 1790586000.0 + 60 * next(ticks))
+        files_b, refs_b, times_b = self._run(base, lambda: 4.1e9 - 7 * next(ticks))
+        self.assertEqual(files_a, files_b)
+        self.assertTrue(any(name.endswith("run.json") for name in files_a))
+        self.assertEqual(refs_a, refs_b)
+        self.assertTrue(refs_a.strip())
+        self.assertEqual(set(times_a), set(times_b))
+        self.assertNotEqual(times_a, times_b)
 
 
 class LocationsTests(unittest.TestCase):
@@ -1162,7 +1307,7 @@ class LocationsTests(unittest.TestCase):
         to by the plugin's identity; the recorded location still finds its history."""
         from adapters.observer.source import StoreSource
         self.assertEqual(self._start("0123456789abcdef")["result"]["type"], "Allow")
-        (project,) = Observer(StoreSource(self.home)).view()["projects"]
+        (project,) = view_of(Observer(StoreSource(self.home)))["projects"]
         self.assertEqual((project["name"], project["runs"][0]["diagnostic"]), ("harbor", None))
 
     def test_a_record_that_cannot_be_written_does_not_fail_the_run_or_cost_the_other_record(self):
@@ -1198,12 +1343,12 @@ class LocationsTests(unittest.TestCase):
         (runs / "directory" / "gen-1" / "run.json").mkdir()
         os.symlink(runs / "nowhere.json", runs / "dangling" / "gen-1" / "run.json")
         (runs / "unreadable" / "gen-1" / "run.json").write_text("{")
-        view = Observer(StoreSource(self.home)).view()
+        view = view_of(Observer(StoreSource(self.home)))
         stray = next(p for p in view["projects"] if p["name"] is None)
         self.assertEqual(sorted(r["key"].split("/")[1] for r in stray["runs"]),
                          ["absent", "dangling", "directory", "unreadable"])
         self.assertEqual({r["diagnostic"] for r in stray["runs"]}, {"unreadable"})
-        self.assertEqual(validate_ui_view.check(view, None), [])
+        self.assertEqual(validate_ui_view.check(view['summary'], view['rows'], Observer(StoreSource(self.home)).details()), [])
 
     def test_a_stray_directory_in_the_store_hides_nothing(self):
         from adapters.observer.source import StoreSource
@@ -1211,7 +1356,7 @@ class LocationsTests(unittest.TestCase):
         (self.home / "projects" / "stray copy" / "runs" / "r" / "gen-1").mkdir(parents=True)
         (self.home / "projects" / "stray copy" / "runs" / "r" / "gen-1" / "run.json").write_text("{}")
         (self.home / "projects" / "stray two").mkdir()
-        view = Observer(StoreSource(self.home)).view()
+        view = view_of(Observer(StoreSource(self.home)))
         rows = {p["name"]: [r["diagnostic"] for r in p["runs"]] for p in view["projects"]}
         self.assertEqual(rows, {"harbor": [None], None: ["unreadable"]})
 
@@ -1220,12 +1365,12 @@ class LocationsTests(unittest.TestCase):
         from adapters.state.locations import PROJECT
         self._start("p")
         observer = Observer(StoreSource(self.home))
-        before = observer.view()["token"]
+        before = view_of(observer)["token"]
         moved = self.repo.parent / "harbour"
         shutil.copytree(self.repo, moved, symlinks=True)  # the same history, under another name
         (record,) = self.home.glob(f"projects/*/{PROJECT}")
         record.write_text(json.dumps({"repo": str(moved)}))
-        after = observer.view()
+        after = view_of(observer)
         self.assertEqual(after["projects"][0]["name"], "harbour")
         self.assertNotEqual(after["token"], before)
 

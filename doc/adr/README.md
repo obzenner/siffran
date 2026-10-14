@@ -56,6 +56,7 @@ Operational run state (active generations, freeze, freshness) and Git-backed kno
 - [ADR-0031](0031-split-operational-state-from-git-backed-knowledge-artifacts.md) — Split operational state from Git-backed knowledge artifacts
 - [ADR-0059](0059-batch-git-artifact-reads-without-changing-publication.md) — Batch Git artifact reads without changing publication
 - [ADR-0065](0065-observe-runs-through-a-plugin-owned-read-only-read-model-served-on-loopback.md) — Observe runs through a plugin-owned read-only read model served on loopback
+- [ADR-0070](0070-record-event-time-beside-the-record-never-inside-it.md) — Record event time beside the record, never inside it
 
 ## Hosts and compatibility
 

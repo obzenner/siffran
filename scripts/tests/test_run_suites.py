@@ -1,5 +1,6 @@
 """run_suites: a failing suite fails the run, logs are kept and separate, only failures print their log."""
 import atexit
+import io
 import itertools
 import os
 import shutil
@@ -70,11 +71,15 @@ class RunSuites(unittest.TestCase):
         self.assertIn("cannot start", done.stdout)
 
     def test_suites_run_concurrently(self):
-        sleeper = f"{PY} -c \"import time; time.sleep(1.5)\""
-        began = time.monotonic()
-        done = run(f"a={sleeper}", f"b={sleeper}", f"c={sleeper}")
-        self.assertEqual(done.returncode, 0)
-        self.assertLess(time.monotonic() - began, 3.5)  # serial would take 4.5 s
+        """A rendezvous, not a stopwatch: each suite marks itself started and passes only once all three are, so the run
+        passes only if they run side by side (run one at a time, the first would wait for the others and fail)."""
+        with tempfile.TemporaryDirectory() as directory:
+            def meet(name: str) -> str:
+                flags = [str(Path(directory) / n) for n in "abc"]
+                wait = " && ".join(f"[ -f {f} ]" for f in flags)
+                return f"sh -c 'touch {Path(directory) / name}; for i in $(seq 600); do {wait} && exit 0; sleep 0.1; done; exit 1'"
+            done = run(f"a={meet('a')}", f"b={meet('b')}", f"c={meet('c')}")
+        self.assertEqual(done.returncode, 0, done.stdout)
 
     def test_bad_arguments_are_refused(self):
         for bad in (["nocommand"], ["=x"], ["a="], ["a=x", "a=y"], []):
@@ -152,15 +157,34 @@ class Lifecycle(unittest.TestCase):
     def test_a_suite_over_the_timeout_is_killed_and_fails_the_run(self):
         with tempfile.TemporaryDirectory() as directory:
             pidfile = Path(directory) / "pid"
-            began = time.monotonic()
+            # killed, not waited for: the stuck suite sleeps 300 s, so the run ending at all (a liveness bound) with the
+            # runner's own timeout message is the proof
             done = subprocess.run([PY, str(SCRIPT), f"stuck={stuck(pidfile)}", f"fine={say('ok')}"], capture_output=True,
-                                  text=True, env=runner_env(RUN_SUITES_TIMEOUT="1"), timeout=30)
-            self.assertLess(time.monotonic() - began, 15)
+                                  text=True, env=runner_env(RUN_SUITES_TIMEOUT="1"), timeout=120)
             self.assertEqual(done.returncode, 1)
             self.assertIn("timed out after 1 s", done.stdout)
             self.assertIn("ok    fine", done.stdout)
             time.sleep(0.3)
             self.assertFalse(alive(int(pidfile.read_text())))
+
+    def test_a_suite_s_declared_limit_replaces_the_default_for_it_alone(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pidfile = Path(directory) / "pid"
+            # the default stays 600 s: only the suite that declares @1 is bounded at 1 s, and its group is killed
+            done = subprocess.run([PY, str(SCRIPT), f"stuck@1={stuck(pidfile)}", f"fine={say('ok')}"], capture_output=True,
+                                  text=True, env=runner_env(), timeout=120)
+            self.assertEqual(done.returncode, 1)
+            self.assertIn("FAIL  stuck", done.stdout)
+            self.assertIn("timed out after 1 s", done.stdout)
+            self.assertIn("ok    fine", done.stdout)
+            time.sleep(0.3)
+            self.assertFalse(alive(int(pidfile.read_text())))
+
+    def test_a_declared_limit_must_be_a_finite_positive_number(self):
+        for bad in ("a@=true", "a@0=true", "a@-1=true", "a@x=true", "a@inf=true"):
+            done = subprocess.run([PY, str(SCRIPT), bad], capture_output=True, text=True, env=runner_env(), timeout=60)
+            self.assertEqual(done.returncode, 1, bad)
+            self.assertIn("run_suites:", done.stderr + done.stdout, bad)
 
     def test_a_grandchild_that_outlives_its_leader_is_gone_after_the_runner_exits(self):
         for code in (0, 7):
@@ -440,6 +464,99 @@ class LoadAware(unittest.TestCase):
         self.assertIn(default, testing)
         self.assertIn("doc/testing.md", source)
         self.assertIn("doc/testing.md", (root / "Makefile").read_text())
+
+
+#: A leader that starts a child ignoring SIGTERM, prints the child's pid once it is ready, and then waits; the leader itself
+#: dies on SIGTERM, so a cleanup that stops at the leader's exit leaves the child behind.
+LEADER_EXITS = """import os, signal, sys
+r, w = os.pipe()
+pid = os.fork()
+if pid == 0:
+    os.close(r); signal.signal(signal.SIGTERM, signal.SIG_IGN); os.write(w, b'R'); os.close(w)
+    while True:
+        signal.pause()
+os.close(w); os.read(r, 1); os.close(r); print(pid, flush=True)
+while True:
+    signal.pause()
+"""
+
+
+class SharedOwner(unittest.TestCase):
+    """AST-4: the one process-group owner (``Groups``/``stop``) that run_suites and verify share. Tiny graces only."""
+
+    def setUp(self):
+        sys.path.insert(0, str(SCRIPT.parent))
+        import run_suites
+        self.rs = run_suites
+
+    def kill_group(self, pgid: int) -> None:
+        """Test cleanup: the exact group this test created, if anything of it is left."""
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+    def test_cleanup_kills_a_child_that_ignores_sigterm_even_when_its_leader_exits_on_sigterm(self):
+        owner = self.rs.Groups()
+        entry = owner.start([PY, "-u", "-c", LEADER_EXITS], None, time.monotonic(), stdout=subprocess.PIPE, text=True)
+        self.addCleanup(self.kill_group, entry.pgid)
+        child = int(entry.process.stdout.readline())
+        self.assertTrue(alive(child))
+        began = time.monotonic()
+        self.assertTrue(self.rs.stop([entry], grace=0.3))
+        self.assertLess(time.monotonic() - began, 5)
+        entry.process.stdout.close()
+        self.assertEqual(entry.process.returncode, -signal.SIGTERM, "the leader exited on SIGTERM")
+        self.assertFalse(alive(child), "the child that ignores SIGTERM outlived its leader's exit")
+        owner.close()
+        self.assertFalse(owner.root.exists(), "an emptied owner leaves no registry behind")
+
+    def test_a_registration_lasts_until_its_group_is_empty_and_never_names_the_caller(self):
+        owner = self.rs.Groups()
+        entry = owner.start([PY, "-c", "import time; time.sleep(30)"], None, time.monotonic())
+        self.addCleanup(self.kill_group, entry.pgid)
+        self.assertEqual((entry.slot / "pgid").read_text(), str(entry.pgid))
+        nested = entry.slot / "groups-x" / "g1"
+        nested.mkdir(parents=True)
+        (nested / "pgid").write_text(str(os.getpgrp()))  # a registry naming this process's own group is ignored
+        self.assertEqual(entry.descendants(), set())
+        self.assertIsNone(entry.poll())
+        self.assertTrue(self.rs.stop([entry], grace=0.2))
+        self.assertTrue(entry.done)
+        self.assertFalse(entry.slot.exists())
+        self.assertTrue(self.rs.stop([entry], grace=0.2), "a cleaned-up group is not signalled again")
+
+    def test_a_suite_over_its_limit_that_runs_run_suites_takes_the_inner_suites_with_it(self):
+        """A nested runner: run_suites' timeout on a suite that is itself a run_suites whose suite ignores SIGTERM. The
+        inner runner's own grace is far longer than the test, so only the outer owner's registry can end that suite."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pidfile = root / "inner.pid"
+            (root / "inner_logs").mkdir()
+            (root / "outer_logs").mkdir()
+            suite = (f"import os, signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                     f"open({str(pidfile) + '.tmp'!r}, 'w').write(str(os.getpid())); "
+                     f"os.replace({str(pidfile) + '.tmp'!r}, {str(pidfile)!r}); time.sleep(60)")
+            (root / "runner.py").write_text(
+                "import sys\n"
+                "from pathlib import Path\n"
+                f"sys.path.insert(0, {str(SCRIPT.parent)!r})\n"
+                "import run_suites\n"
+                "run_suites.GRACE = 60.0\n"
+                f"run_suites.run([('stubborn', [sys.executable, '-c', {suite!r}])], Path({str(root / 'inner_logs')!r}), "
+                "timeout=60, load=lambda: 0.0, max_load=99.0)\n")
+            self.rs.GRACE, saved = 0.3, self.rs.GRACE
+            self.addCleanup(setattr, self.rs, "GRACE", saved)
+            began = time.monotonic()
+            results = self.rs.run([("nested", [PY, str(root / "runner.py")])], root / "outer_logs", out=io.StringIO(),
+                                  timeout=1.5, load=lambda: 0.0, max_load=99.0)
+            self.assertEqual(results["nested"][0], "timeout")
+            self.assertLess(time.monotonic() - began, 10)
+            self.assertTrue(pidfile.exists(), "the inner suite never started")
+            inner = int(pidfile.read_text())
+            self.addCleanup(self.kill_group, inner)  # its own group (start_new_session), should it be left
+            time.sleep(0.2)
+            self.assertFalse(alive(inner), "the inner runner's suite outlived the outer timeout")
 
 
 if __name__ == "__main__":

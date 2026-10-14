@@ -21,7 +21,7 @@
 
 | Key | Source |
 |---|---|
-| ADR-19, 32, 33, 44, 48, 51, 52, 60, 63, 65, 67, 68, 69 | `doc/adr/00NN-*.md` (69 = *Admit hosts and audit runtimes by range and observed capability*; 68 = *Record host boundaries as data and end the Claude Stop loop by control mode*; 67 = *Verify every research record by its class and surface every confirmation it still needs*, with its Scenarios table; 52 carries the 2026-10 amendment) |
+| ADR-19, 32, 33, 44, 48, 51, 52, 60, 63, 65, 67, 68, 69, 70 | `doc/adr/00NN-*.md` (70 = *Record event time beside the record, never inside it*; 69 = *Admit hosts and audit runtimes by range and observed capability*; 68 = *Record host boundaries as data and end the Claude Stop loop by control mode*; 67 = *Verify every research record by its class and surface every confirmation it still needs*, with its Scenarios table; 52 carries the 2026-10 amendment) |
 | D1H | `doc/design/empirica-2.0-d1h-host-capabilities.md` (host tiers, Claude and Pi binding protocols, conformance cases, stop conditions) |
 | T1, T2, T4 | `research:reports/T1-interaction-trace.md`, `T2-boundary-trace.md`, `T4-unobserved-surface.md` (T4 = the 17-row surface scenario matrix) |
 | PROG | `research:build/PROGRESS.md`, by round heading (F7, F8, A7, S5, G1) |
@@ -111,7 +111,7 @@ Each entry lists `trigger`, `obligation`, closed `outcomes` (Claude / Pi / Codex
 - **failure_policy.** `report-limitation`: an unknown fact is carried as unknown, never defaulted to a stronger one.
 - **recovery.** The surface is re-observed at each report (`HB-OBS`).
 - **visibility.** `model-context` (run view route), `human-ui` (observer).
-- **forbidden_substitutions.** Defaulting an unobserved surface to `unavailable` (the live defect Q1) or to `human`.
+- **forbidden_substitutions.** Defaulting an unobserved surface to `unavailable` (the live defect Q1) or to `human`. Recording a time in the run: no host time (`observed_at` included) enters the state, an artifact or a receipt; when each write happened is recorded by the bridge beside the run, machine-local (ADR-70).
 
 ### HB-ADM — host and package admission
 <!-- BEGIN GENERATED: HX-ACT-02 (make registry-doc) -->

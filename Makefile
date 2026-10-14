@@ -43,6 +43,9 @@ EMPIRICA_CITATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_citations.py
 EMPIRICA_OBSERVER_TESTS := $(PLUGINS_DIR)/empirica/tests/test_observer.py
 EMPIRICA_OBSERVER_SERVER_TESTS := $(PLUGINS_DIR)/empirica/tests/test_observer_server.py
 EMPIRICA_UI := $(PLUGINS_DIR)/empirica/ui
+# The pinned Python dev tools (requirements-dev.txt: Hypothesis, mutmut with whatthepatch, jsonschema), installed by `make dev-install`.
+VENV := $(CURDIR)/.venv
+DEV_PYTHON := $(VENV)/bin/python
 EMPIRICA_OBSERVE := $(PLUGINS_DIR)/empirica/adapters/observer/cli.py
 EMPIRICA_GIT_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/adapters/git/tests/test_git_artifact_repo.py
 EMPIRICA_GIT_IO_BOOTSTRAP_TESTS := $(PLUGINS_DIR)/empirica/adapters/git/tests/test_git_io_bootstrap.py
@@ -160,11 +163,26 @@ check-evidence: ## Fast evidence rules: citations, confirmation, scenarios, A1 b
 	@$(PYTHON) $(EMPIRICA_CITATION_TESTS)
 	@cd $(PLUGINS_DIR)/empirica/tests/v2 && PYTHONPATH=..:../.. $(PYTHON) -m unittest -q test_evidence_confirmation test_evidence_hosts test_evidence_scenarios test_a1_boundaries test_home_isolation
 
-check-observer: ## Fast observer store, projection and server tests
+check-observer: dev-python ## Fast observer store, projection and server tests; its cost by operation counts at n and 2n; the stateful observer = core machine (Hypothesis, fixed seed)
 	@printf '$(BOLD)==> observer suite$(RESET)\n'
-	@$(PYTHON) $(EMPIRICA_OBSERVER_TESTS)
-	@cd $(PLUGINS_DIR)/empirica/tests/v2 && PYTHONPATH=..:../..:../../../../scripts $(PYTHON) -m unittest -q test_observer_agreement
-	@$(PYTHON) $(EMPIRICA_OBSERVER_SERVER_TESTS)
+	@# Four processes side by side (the filesystem cases mostly wait on git); the suite fails if any of them does.
+	@cd $(PLUGINS_DIR)/empirica/tests/v2 && { \
+		PYTHONPATH=..:../..:../../../../scripts $(PYTHON) -m unittest -q test_observer_fs test_observer_complexity & fs=$$!; \
+		PYTHONPATH=..:../..:../../../../scripts $(PYTHON) -m unittest -q test_observer_agreement test_timeline test_observer_facts test_observer_incremental & facts=$$!; \
+		PYTHONPATH=..:../..:../../../../scripts $(DEV_PYTHON) -m unittest -q test_observer_stateful & machine=$$!; \
+		$(PYTHON) $(CURDIR)/$(EMPIRICA_OBSERVER_TESTS) && $(PYTHON) $(CURDIR)/$(EMPIRICA_OBSERVER_SERVER_TESTS); obs=$$?; \
+		wait $$fs; f=$$?; wait $$facts; g=$$?; wait $$machine; m=$$?; \
+		[ $$obs -eq 0 ] && [ $$f -eq 0 ] && [ $$g -eq 0 ] && [ $$m -eq 0 ]; }
+
+.PHONY: observer-deep ui-deps dev-python
+observer-deep: dev-python ## The stateful observer = core machine with its deeper bounded profile (verify only; fixed seed, no database)
+	@cd $(PLUGINS_DIR)/empirica/tests/v2 && EMPIRICA_STATEFUL_PROFILE=deep \
+		PYTHONPATH=..:../..:../../../../scripts $(DEV_PYTHON) -m unittest -q test_observer_stateful.ObserverEqualsCoreTests
+
+.PHONY: observer-smoke
+observer-smoke: ## One timed smoke run of the observer at the realistic size (1,000 runs on the filesystem store, served with the background indexer): the contract's budgets (in make verify; what a pass costs is counted in check-observer)
+	@printf '$(BOLD)==> observer smoke run at 1,000 runs$(RESET)\n'
+	@cd $(PLUGINS_DIR)/empirica/tests/v2 && PYTHONPATH=.:..:../..:../../../../scripts $(PYTHON) -m unittest -v test_observer_smoke
 
 check-claude: ## Fast Claude payload, lifecycle translation, and fail-closed adapter tests
 	@printf '$(BOLD)==> claude suite$(RESET)\n'
@@ -190,9 +208,9 @@ check-codex: methodologist-codex-check empirica-codex-check ## Fast Codex packag
 check-pi: pi-governance-dialog-golden pi-bundle-check methodologist-pi-check empirica-pi-check pi-auditor-resolution-unit-check empirica-identity-pi-levels-check ## Fast Pi package, type, unit, guard, and bounded bridge tests — needs Node
 	@printf '$(BOLD)==> pi suite ok$(RESET)\n'
 
-check-ui: ## Fast observer-UI checks: contract coverage, client, filters, layout, conventions — needs Node, not its toolchain
+check-ui: ui-deps ## Fast observer-UI checks: every Vitest unit test (client, filters, layout, conventions, the elements and the page in happy-dom, properties over schema-derived rows and sheets, fixed fast-check seed; no watch, no coverage) and the audit — needs Node and make ui-install
 	@printf '$(BOLD)==> ui suite$(RESET)\n'
-	@cd $(EMPIRICA_UI) && node --test --test-reporter=dot tests/*.test.mjs
+	@cd $(EMPIRICA_UI) && node_modules/.bin/vitest run
 	@cd $(EMPIRICA_UI) && node scripts/audit.mjs
 	@printf '$(BOLD)==> ui suite ok$(RESET)\n'
 
@@ -233,8 +251,8 @@ empirica-core-integration: ## Diagnose governance, persistence, transaction, ret
 	@$(MAKE) empirica-v2-check
 
 .PHONY: empirica-v2-check
-empirica-v2-check: ## Diagnose v2 behavior with unittest discovery (ARGS="-k test_name" selects a regression)
-	@cd $(PLUGINS_DIR)/empirica/tests/v2 && PYTHONPATH=..:../.. $(PYTHON) -m unittest discover -v -p 'test_*.py' $(ARGS)
+empirica-v2-check: dev-python ## Diagnose v2 behavior with unittest discovery (the observer smoke run opts out; ARGS="-k test_name" selects a regression)
+	@cd $(PLUGINS_DIR)/empirica/tests/v2 && PYTHONPATH=..:../..:../../../../scripts $(DEV_PYTHON) -m unittest discover -v -p 'test_*.py' $(ARGS)
 
 .PHONY: empirica-activation-lifecycle-check
 empirica-activation-lifecycle-check: ## Check isolated Claude hook lifecycle (ARGS="-k test_name" selects cases)
@@ -285,7 +303,7 @@ adr-check: ## Check ADR link health and numbering (adrs doctor)
 	fi
 
 .PHONY: contract-check contract-fixtures contract-schemas contract-schema-generator-unit-check registry-doc
-contract-fixtures: ## Regenerate runtime-derived Empirica contract fixture fields and observer fixtures
+contract-fixtures: ## Regenerate the Empirica wire-fixture fields (contracts/empirica/v2/fixtures, from the real service), and the observer fixtures from build_store's FIXTURE_SCENARIOS through the real service and observer, into contracts/empirica-ui-view/v1/fixtures and its byte copy plugins/empirica/vendor/contracts/empirica-ui-view/v1/fixtures (the built-in demo)
 	@$(PYTHON) $(SCRIPTS)/regen_contract_fixtures.py
 	@$(PYTHON) $(SCRIPTS)/regen_ui_view_fixtures.py
 
@@ -298,7 +316,7 @@ contract-schemas: ## Regenerate shared Empirica schema definitions and local emb
 contract-schema-generator-unit-check: ## Check shared-schema drift, near-match, collision, and stale-definition handling
 	@$(PYTHON) -m unittest -q $(SCRIPTS)/tests/test_sync_schema_defs.py
 
-contract-check: ## Validate schemas, generated shared definitions, conformance and observer fixtures
+contract-check: dev-python ## Validate schemas, shared definitions, wire fixtures and conformance; the observer fixtures: both copies byte-equal, no drift from a regeneration, the UI-view validator, the schema-derived generator (every declared enum value producible), and the contract id equal to its folder
 	@printf '$(BOLD)==> contracts$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/sync_schema_defs.py --check
 	@$(MAKE) --no-print-directory contract-schema-generator-unit-check
@@ -307,6 +325,7 @@ contract-check: ## Validate schemas, generated shared definitions, conformance a
 	@$(PYTHON) $(SCRIPTS)/regen_ui_view_fixtures.py --check
 	@$(PYTHON) $(SCRIPTS)/validate_ui_view.py
 	@$(PYTHON) -m unittest -q $(SCRIPTS)/tests/test_validate_ui_view.py
+	@$(DEV_PYTHON) -m unittest -q $(SCRIPTS)/tests/test_ui_view_generators.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_stored_contract_digest.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_contract_label.py
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) -c 'import adapters.public_tools'
@@ -327,6 +346,23 @@ activation-check: ## Verify Empirica runtime isolation and thin Claude hook acti
 	@printf '$(BOLD)==> empirica activation$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_empirica_activation.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_validate_empirica_activation.py
+
+# The Python dev tools. `dev-install` is an install step: it runs with the real HOME (the user's uv may be a firewall shim
+# that reads its configuration there). The checks only require it (`dev-python`): they never install.
+.PHONY: dev-install dev-python
+dev-install: ## Install the pinned Python dev tools (requirements-dev.txt: Hypothesis, mutmut with whatthepatch, jsonschema) into the gitignored .venv with uv
+	@printf '$(BOLD)==> installing Python dev tools into .venv (uv)$(RESET)\n'
+	@uv venv --quiet --allow-existing --python "$$(command -v $(PYTHON))" $(VENV)
+	@uv pip sync --quiet --python $(DEV_PYTHON) --require-hashes requirements-dev.txt
+	@touch $(VENV)/installed
+
+ui-deps:
+	@if [ ! -d $(EMPIRICA_UI)/node_modules/fast-check ] || [ ! -x $(EMPIRICA_UI)/node_modules/.bin/vitest ]; then \
+		printf 'the pinned UI dev tools are missing: run make ui-install\n' >&2; exit 1; fi
+
+dev-python:
+	@if [ ! -f $(VENV)/installed ] || [ requirements-dev.txt -nt $(VENV)/installed ]; then \
+		printf 'the pinned Python dev tools are missing or older than requirements-dev.txt: run make dev-install\n' >&2; exit 1; fi
 
 # devDependencies (typescript, @types/node, and pi-subagents as a unit-test fixture only — never a
 # runtime provisioned by this checkout) that turn the Pi adapter typecheck
@@ -482,9 +518,11 @@ skills-check: ## Validate every SKILL.md against the Agent Skills spec, the Clau
 	@$(PYTHON) $(SCRIPTS)/validate_skills.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_validate_skills.py
 
-suites-check: ## Test the parallel suite runner and that every test module belongs to exactly one suite
+suites-check: ## Test the parallel suite runner, that every test module belongs to exactly one suite, make verify's step runner and make mutate's plan
 	@$(PYTHON) $(SCRIPTS)/tests/test_run_suites.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_suite_ownership.py
+	@$(PYTHON) $(SCRIPTS)/tests/test_verify.py
+	@$(PYTHON) $(SCRIPTS)/tests/test_mutate.py
 
 .PHONY: native-qualification
 native-qualification: ## Print the operator-led native qualification skill entrypoint (never launches a host)
@@ -602,13 +640,17 @@ docs-sync: ## Deterministically regenerate the marked plugin tables from manifes
 	@$(PYTHON) $(SCRIPTS)/check_generated_docs.py --write
 
 .PHONY: docs-check
-docs-check: ## Verify the generated plugin tables and the skill recovery reference match their sources
+docs-check: ## Verify the generated plugin tables and the skill recovery reference match their sources, and guard the UI guide (plugins/empirica/ui/CLAUDE.md: only make help targets, at most 150 lines)
 	@$(PYTHON) $(SCRIPTS)/check_generated_docs.py
 	@$(PYTHON) $(SCRIPTS)/gen_recovery_reference.py --check
 
 .PHONY: empirica-recovery-reference
 empirica-recovery-reference: ## Regenerate the skill's reason-code recovery reference from the public contract
 	@$(PYTHON) $(SCRIPTS)/gen_recovery_reference.py
+
+.PHONY: verify
+verify: ## The one hermetic gate: the installs (node_modules, dev-install, ui-install), release-check's targets, ui-contrast, ui-browser and ui-smoke (UI=0 skips both), observer-smoke and observer-deep, under a scratch HOME, EMPIRICA_HOME, TMPDIR and npm cache removed on exit; the registry steps (the installs, empirica-subagents-matrix, empirica-pi-api-typecheck) keep the real HOME, denied writes to ~/.claude and ~/.pi; stops at the first FAIL
+	@$(PYTHON) $(SCRIPTS)/verify.py $(if $(filter 0,$(UI)),--no-ui)
 
 .PHONY: release-check
 release-check: check empirica-core-integration empirica-governance-check empirica-host-integration empirica-subagents-matrix empirica-pi-api-typecheck ## Deliberate pre-release gate: fast checks, integration diagnostics, the reviewed pi-subagents and Pi API matrices
@@ -659,8 +701,8 @@ empirica-public-tools-sync: vendor-contracts ## Regenerate public tool schemas a
 ui: ## Serve the observer UI for your Empirica store on 127.0.0.1 (REPO=<checkout> adds a repository for runs without a recorded location)
 	@$(PYTHON) $(EMPIRICA_OBSERVE) serve --open $(if $(REPO),--repo "$(REPO)")
 
-ui-demo: ## Serve the observer UI on the plugin's demo data only (reads no store)
-	@$(PYTHON) $(EMPIRICA_OBSERVE) serve --open --demo
+ui-demo: ## Serve the observer UI on a generated demo store, N=300 runs by default (N=1000, N=10000 at volume); reads no Empirica store, prints the URL
+	@$(PYTHON) plugins/empirica/tests/v2/serve_generated.py --demo --runs $(or $(N),300) $(if $(OPEN),--open)
 
 ui-install: ## Install the pinned dev-only UI toolchain (npm ci in plugins/empirica/ui)
 	cd $(EMPIRICA_UI) && npm ci
@@ -674,13 +716,47 @@ ui-vendor: ## Re-vendor the UI's pinned Basecoat, fonts and Lucide subset (recor
 ui-css: ui-tokens ## Rebuild the UI's dist/ui.css (Tailwind CLI, only its token utilities)
 	cd $(EMPIRICA_UI) && npx --no-install @tailwindcss/cli -i styles/app.css -o dist/ui.css --minify
 
+.PHONY: ui-test
+ui-test: ui-deps ## While building: the UI tests related to FILES=app/x.js,… (vitest related, from the imports), or to the UI files changed in the worktree; names the browser journeys that also hold them
+	@cd $(EMPIRICA_UI) && node scripts/imports.mjs --related "$(FILES)"
+
 ui-contrast: ## WCAG contrast of every semantic colour pair of the UI, in both schemes (culori)
 	cd $(EMPIRICA_UI) && node scripts/contrast.mjs
 
 ui-enums: ## Regenerate the UI's value lists (enums.json) from the observer contract
 	cd $(EMPIRICA_UI) && node scripts/enums.mjs
 
-ui-browser: ## Headless-Chrome journeys T1-T7 and the standing rules against the observer server (needs Chrome; integration)
+ui-browser: ## Headless-Chrome journeys, each once at fixture size (what needs me, narrowing, one run's proof, attempts, search, keyboard, the Universe), the standing rules, and the layout invariants in both colour schemes at 1440x900 and 1024x768 (needs Chrome; integration)
 	cd $(EMPIRICA_UI) && node tests/browser.journeys.mjs
 
+.PHONY: mutate
+mutate: ## Mutation testing of the changed lines (git diff HEAD, and untracked files whole), each survivor printed as file:line original → mutant: Stryker (Vitest runner, perTest, incremental) for the UI, mutmut (patch-scoped, in a scratch copy) for Python; FILES=a.py,b.js[:10-20] and LINES=10-20 override, RUNNER= replaces the tests per Python mutant; Stryker runs at most min(4, cores/2) workers (JOBS= to choose), each heap capped at 768 MB, mutmut one at a time; never edits the worktree (needs make ui-install, make dev-install)
+	@$(PYTHON) $(SCRIPTS)/mutate.py
+
+.PHONY: ui-smoke ui-shots
+ui-smoke: ## One headless-Chrome smoke run at 1,000 generated runs: first render, DOM bounds, a zoom's frames (needs Chrome; in make verify)
+	cd $(EMPIRICA_UI) && MODE=smoke node tests/browser.journeys.mjs
+
+ui-shots: ## About ten deterministic PNGs of the demo (fixed clock, no motion, both schemes) for review, written outside the repository (OUT=<dir>, default $$TMPDIR/empirica-ui-shots; needs Chrome)
+	cd $(EMPIRICA_UI) && MODE=shots OUT="$(OUT)" node tests/browser.journeys.mjs
+
 ui-build: ui-vendor ui-css ui-contrast check-ui ui-browser ## Rebuild everything the UI ships, then check it (needs the toolchain and Chrome)
+
+.PHONY: ui-dev ui-look
+ui-dev: ## While building: one live demo for this worktree, N=1000 runs by default, started once and then reused (its PID in .cache/ui-dev/); prints the URL; STOP=1 stops it
+	@d="$(CURDIR)/.cache/ui-dev"; mkdir -p "$$d"; [ -f "$(CURDIR)/.cache/.gitignore" ] || printf '*\n' > "$(CURDIR)/.cache/.gitignore"; \
+	pid=$$(cat "$$d/pid" 2>/dev/null); \
+	alive() { [ -n "$$pid" ] && ps -p "$$pid" -o command= 2>/dev/null | grep -q serve_generated.py; }; \
+	if [ -n "$(STOP)" ]; then if alive; then kill "$$pid" && echo "ui-dev: stopped pid $$pid"; else echo "ui-dev: none running"; fi; rm -f "$$d/pid" "$$d/url" "$$d/runs"; exit 0; fi; \
+	if alive && [ -s "$$d/url" ]; then echo "$$(cat "$$d/url")  (reused: pid $$pid, $$(cat "$$d/runs") runs; make ui-dev STOP=1 stops it)"; exit 0; fi; \
+	: > "$$d/log"; \
+	perl -MPOSIX -e 'my ($$d, $$n) = splice(@ARGV, 0, 2); pipe(my $$r, my $$w) or die "pipe: $$!\n"; my $$p = fork; defined $$p or die "fork: $$!\n"; if (!$$p) { close $$r; POSIX::setsid(); open STDIN, "<", "/dev/null"; open STDOUT, ">&", $$w; open STDERR, ">>", "$$d/log"; exec @ARGV or die "exec: $$!\n"; } close $$w; $$SIG{ALRM} = sub { kill "TERM", $$p; die "ui-dev: no URL within 60 s; see $$d/log\n" }; alarm 60; my $$url = <$$r>; alarm 0; defined $$url or die "ui-dev: the demo exited; see $$d/log\n"; chomp $$url; for (["pid", $$p], ["url", $$url], ["runs", $$n]) { open my $$f, ">", "$$d/$$_->[0]" or die; print $$f "$$_->[1]\n"; } print "$$url  (started: pid $$p, $$n runs; make ui-dev STOP=1 stops it)\n";' \
+		"$$d" "$(or $(N),1000)" $(PYTHON) plugins/empirica/tests/v2/serve_generated.py --demo --runs "$(or $(N),1000)"
+
+ui-look: ## While building: one PNG of URL=<page> (OUT=<file.png>, default in $$TMPDIR; SIZE=1440x900), Chrome in a scratch TMPDIR, killed after 30 s; prints the PNG's path to open with the read tool (needs Chrome)
+	@test -n "$(URL)" || { printf 'usage: make ui-look URL=<page> [OUT=<file.png>] [SIZE=1440x900]\n' >&2; exit 2; }
+	@out="$(or $(OUT),$${TMPDIR:-/tmp}/empirica-ui-look-$$(date +%Y%m%d-%H%M%S).png)"; \
+	case "$$out" in /*) ;; *) out="$(CURDIR)/$$out" ;; esac; \
+	scratch=$$(mktemp -d); trap 'rm -rf "$$scratch"' EXIT; \
+	cd $(EMPIRICA_UI) && TMPDIR="$$scratch" perl -e 'my $$t = shift; my $$p = fork; defined $$p or die "fork: $$!\n"; if (!$$p) { setpgrp(0, 0); exec @ARGV or die "exec: $$!\n"; } setpgrp($$p, $$p); $$SIG{ALRM} = sub { kill "KILL", -$$p; waitpid $$p, 0; print STDERR "ui-look: timed out after $$t s\n"; exit 124 }; alarm $$t; waitpid $$p, 0; exit($$? & 127 ? 1 : $$? >> 8);' \
+		30 node tests/cdp.mjs shot "$(URL)" "$$out" "$(or $(SIZE),1440x900)" > /dev/null && echo "$$out"

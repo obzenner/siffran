@@ -40,11 +40,18 @@ function families(states, cat, enums) {
     "mode.*": of("mode", enums.mode),
     "approval.*": of("approval", enums.approval),
     "budget.*": of("budget", enums.budgets),
-    "now.*": of("now", enums.attention),
+    "app.status.*": of("app.status", cat.statuses),
+    "ask.*": of("ask", enums.ask),
+    "ask.part.*": of("ask.part", enums.ask),
+    "effect.*": of("effect", enums.effect),
+    "flag.*": of("flag", enums.flag),
+    "period.*": of("period", cat.periods),
+    "filter.*": of("filter", cat.filters),
     "record.class.*": of("record.class", enums.record_class),
     "list.empty.*": of("list.empty", cat.data_sources),
     "app.data.*": of("app.data", cat.data_sources),
     "host.*": of("host", cat.hosts),
+    "switch.*": of("switch", cat.switch),
   };
 }
 
@@ -162,6 +169,8 @@ export function audit({ code, copy, states, icons, catalogue, enums, tokens = nu
     for (const m of src.matchAll(/(?<![\w.#-])\d+(?:\.\d+)?(px|ms)\b/g)) report("T1 raw unit", `${f}: ${m[0]}`);
     // a colour is a token (a semantic utility or `var(--color-*)`), never a hex literal in code or app.css
     for (const m of src.matchAll(/(?<![\w&])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})\b/g)) report("T1 raw colour", `${f}: ${m[0]}`);
+    // nor a functional colour written in code (the canvas too reads its colours from the tokens)
+    for (const m of src.matchAll(/\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(\s*[\d.]/g)) report("T1 raw colour", `${f}: ${m[0]}`);
     // a delay is a duration token (`--duration-*`) or catalogue data, not a number in a timer call (0 defers a tick)
     for (const m of src.matchAll(/\b(?:setTimeout|setInterval)\((?:[^()]|\([^()]*\))*?,\s*(\d+(?:\.\d+)?)\s*\)/g)) if (Number(m[1]) !== 0) report("T1 bare duration", `${f}: ${m[0].slice(0, 50)}`);
     // SVG geometry: no number written into an attribute (rx="6") or into an expression in one (${x + 4}); the numbers

@@ -2,19 +2,22 @@
 """Check the observer read model (``contracts/empirica-ui-view/v1``) and its fixtures.
 
     python3 scripts/validate_ui_view.py                 committed fixtures + enum mirrors
-    python3 scripts/validate_ui_view.py VIEW [RUNS]      a view (and its details) from observe
+    python3 scripts/validate_ui_view.py SUMMARY ROWS [RUNS]   a summary, rows and details (as ``observe`` gives them)
 
 Three kinds of check, each a pure function returning one line per problem:
 
-* ``mirror_problems``: every enumeration in the two schemas equals its owner (the public-contract
-  registry, the state schema, or the plugin's history kinds), so the contract cannot drift from
-  the plugin it describes.
-* ``view_problems``: the schema, then what a schema cannot say: unique keys, a project's runs
-  newest first, families that list each run's attempts by generation, ``previous`` naming the same run's
-  prior generation, unique labels, a coverage that counts the diagnostics, claims and edges closed over
-  the run, diagnostics only on partial rows (whose derived facts are null, never zero), blocker codes that
-  are real reasons, and the token.
-* ``detail_problems``: each detail against its schema and its row in the view.
+* ``mirror_problems`` and ``owner_mirror_problems``: every enumeration in the schemas equals its owner (the public-contract
+  registry, the state schema, the plugin's history kinds, or the core's own vocabularies), so the contract cannot drift
+  from the plugin it describes.
+* ``row_problems``: each row against what a schema cannot say: a key that is its parts, diagnostics only on partial rows
+  (whose derived facts are null, never zero), claims and edges closed over the run, an attention that is ended exactly
+  when the run is, blocker codes that are real reasons, assurance that agrees with the claim, a ``previous`` that names
+  the same run's prior generation.
+* ``detail_problems``: each detail against its schema and its row (the row it carries is the index's row).
+* ``view_problems``: the summary, rows, a page and each detail against their schemas; coverage that sums, marks that are the
+  rows, ids that are functions of the key, places in each project's start order (the untimed in the outer band), the
+  projects in island order, the calendar each project's runs by civil day in its zone, window flags within the flags, a standing that agrees with the read and the attention, asks only
+  on active runs, the latest audit as the row's verdict, flags that are the details' facts, and the needs list.
 """
 from __future__ import annotations
 
@@ -25,16 +28,16 @@ from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator
+from referencing import Registry, Resource
 
 ROOT = Path(__file__).resolve().parents[1]
-CONTRACT = ROOT / "contracts/empirica-ui-view/v1"
 V2 = ROOT / "contracts/empirica/v2"
-FIXTURES = CONTRACT / "fixtures"
+UI_VIEW = ROOT / "contracts/empirica-ui-view/v1"
+FIXTURES = UI_VIEW / "fixtures"
 sys.path.insert(0, str(ROOT / "plugins/empirica"))
 
 from application.history_records import HISTORY_KINDS  # noqa: E402
 from core import citations, confirmation  # noqa: E402
-from core.canonical import canonical_digest  # noqa: E402
 from core.evaluation import INDEPENDENCE_REASONS  # noqa: E402
 from core.observer import (ACTORS, ASSURANCE_STATES, ATTENTION_STATES, CLAIM_STANDING, DECISION_STATUSES,  # noqa: E402
                            EVIDENCE_KINDS, HUMAN_REACHABLE, LATER, PLACES, REVIEW_STATES, SPIKE_STATES, STEP_SUBJECTS, message_problems)
@@ -45,7 +48,8 @@ def _load(path: Path) -> Any:
 
 
 def schemas() -> tuple[dict, dict]:
-    return _load(CONTRACT / "view.schema.json"), _load(CONTRACT / "run.schema.json")
+    """The row schema and the run (detail) schema of the contract."""
+    return _load(UI_VIEW / "row.schema.json"), _load(UI_VIEW / "run.schema.json")
 
 
 def registry() -> dict:
@@ -62,8 +66,9 @@ def _enum(schema: dict, *path: str) -> set:
 
 
 def mirror_problems(view_schema: dict, run_schema: dict, reg: dict, state_schema: dict) -> list[str]:
+    """Every enumeration of the row and run schemas against its owner (``view_schema`` is the row schema)."""
     defs = view_schema["$defs"]
-    run = defs["run"]["properties"]
+    run = defs["row"]["properties"]
     claim = defs["claim"]["properties"]
     audit = defs["auditSummary"]["properties"]
     detail = run_schema["properties"]
@@ -122,130 +127,93 @@ def mirror_problems(view_schema: dict, run_schema: dict, reg: dict, state_schema
             for name, ours, theirs, owner in pairs if ours != theirs]
 
 
-def _structure(instance: Any, schema: dict, where: str) -> list[str]:
+def _structure(instance: Any, schema: dict, where: str, ui: dict[str, dict] | None = None) -> list[str]:
     return [f"{where}{''.join(f'[{p!r}]' for p in e.absolute_path)}: {e.message}"
-            for e in Draft202012Validator(schema).iter_errors(instance)]
+            for e in Draft202012Validator(schema, registry=_registry(ui or view_schemas())).iter_errors(instance)]
 
 
-def token_of(view: dict) -> str:
-    """``core.canonical.canonical_digest`` of each project's [id, name, repo, [[key, version], ...]]
-    in order (compact, sorted)."""
-    pairs = [[p["id"], p["name"], p["repo"], [[run["key"], run["version"]] for run in p["runs"]]]
-             for p in view["projects"]]
-    return canonical_digest(pairs)
-
-
-def _newest(run: dict) -> tuple:
-    return (run["updated"] is None, -(run["updated"] or 0.0), run["key"])
-
-
-def view_problems(view: dict, view_schema: dict, reasons: set[str]) -> list[str]:
-    out = _structure(view, view_schema, "view")
-    if out:
-        return out
-    runs: dict[str, dict] = {}
-    ids = [p["id"] for p in view["projects"]]
-    if len(set(ids)) != len(ids):
-        out.append("projects: duplicate id")
-    labels = [p["label"] for p in view["projects"]]
-    if len(set(labels)) != len(labels):
-        out.append("projects: two projects share a label")
-    firsts = [_newest(p["runs"][0]) for p in view["projects"]]
-    if firsts != sorted(firsts):
-        out.append("projects: not ordered by their newest run")
-    for project in view["projects"]:
-        order = [_newest(r) for r in project["runs"]]
-        if order != sorted(order):
-            out.append(f"project {project['id']}: runs not newest first")
-        keys = {r["key"]: r for r in project["runs"]}
-        listed = [k for f in project["families"] for k in f["attempts"]]
-        if sorted(listed) != sorted(keys) or len(set(listed)) != len(listed):
-            out.append(f"project {project['id']}: families must list every run exactly once")
-        for family in project["families"]:
-            attempts = [keys[k] for k in family["attempts"] if k in keys]
-            if [r["generation"] for r in attempts] != sorted(r["generation"] for r in attempts) or any(
-                    r["run"] != family["run"] for r in attempts):
-                out.append(f"project {project['id']}: family {family['run']} is not one run's attempts by generation")
-        for run in project["runs"]:
-            at = f"run {run['key']}"
-            if run["key"] in runs:
-                out.append(f"{at}: duplicate key")
-            runs[run["key"]] = run
-            if run["project"] != project["id"]:
-                out.append(f"{at}: project {run['project']} listed under {project['id']}")
-            parts = run["key"].split("/")
-            if len(parts) != 3 or parts[0] != run["project"] or parts[1] != run["run"] or parts[2] != str(run["generation"]):
-                out.append(f"{at}: key is not <project>/<run>/<generation>")
-            partial = run["diagnostic"] is not None
-            derived = ("audit", "claims", "edges", "attention", "progress")
-            if partial and (run["next"] is not None or any(run[f] is not None for f in derived)):
-                out.append(f"{at}: a {run['diagnostic']} row carries derived facts")
-            if not partial and (run["state"] is None or any(run[f] is None for f in derived)):
-                out.append(f"{at}: a fully read row lacks its state or a derived fact")
-            if run["diagnostic"] == "unreadable" and (run["state"] is not None or run["goal"] is not None
-                                                      or run["session"] is not None):
-                out.append(f"{at}: an unreadable row reports facts of its state")
-            if run["diagnostic"] != "unreadable" and (run["state"] is None or run["goal"] is None or run["session"] is None):
-                out.append(f"{at}: a decoded state reports its status, goal and session")
-            if not partial and (run["attention"] == "ended") != (run["state"] != "active"):
-                out.append(f"{at}: attention is ended exactly when the run is not active")
-            if partial:
-                continue
-            claims = run["claims"]
-            claim_ids = [c["id"] for c in claims]
-            if len(set(claim_ids)) != len(claim_ids):
-                out.append(f"{at}: duplicate claim id")
-            if (run["root"] is None) != (not claim_ids) or (
-                    run["root"] is not None and run["root"] not in claim_ids):
-                out.append(f"{at}: root must be one of its claims, and null exactly when it has none")
-            out += [f"{at}: edge {e['from']}->{e['to']} leaves the run's claims"
-                    for e in run["edges"] if not {e["from"], e["to"]} <= set(claim_ids)]
-            scoped = [c for c in claims if c["gating"]]
-            if run["progress"] != {"required": len(scoped), "approved": sum(c["state"] == "approved" for c in scoped)}:
-                out.append(f"{at}: progress is not the count of its scoped and approved claims")
-            for claim in claims:
-                where = f"{at} claim {claim['id']}"
-                if claim["blocker"] is not None and claim["blocker"] not in reasons:
-                    out.append(f"{where}: blocker {claim['blocker']!r} is not a registry reason")
-                blocked = claim["gating"] and claim["state"] != "approved"
-                if (claim["blocker"] is not None) != blocked:
-                    out.append(f"{where}: exactly the scoped claims that are not approved have a blocker")
-                if (claim["blocker_claim"] is None) != (claim["blocker"] is None) or (
-                        claim["blocker_claim"] is not None and claim["blocker_claim"] not in claim_ids):
-                    out.append(f"{where}: blocker_claim must be one of the run's claims, null exactly "
-                               "when blocker is")
-                # Only what the view itself contradicts is checked here: whether the gate accepts the audit is
-                # core.evaluation.audit_acceptance's, and tests/v2/test_observer_agreement.py proves the two agree.
-                if claim["assurance"] == "assured" and (claim["state"] != "approved" or claim["review"] != "passed"
-                                                        or run["audit"]["pending"]):
-                    out.append(f"{where}: assured is never said of a claim that is not approved, not reviewed by a current "
-                               "pass, or under a pending re-audit")
-                if (claim["assurance"] == "assured" and all(c["gating"] for c in claims)
-                        and run["audit"]["independence"] in INDEPENDENCE_REASONS):
-                    out.append(f"{where}: assured under an audit the registry names as not independent")
-                if (claim["assurance"] == "not_approved") != (claim["state"] != "approved"):
-                    out.append(f"{where}: not_approved exactly when the claim is not approved")
-            audit = run["audit"]
-            if (audit["verdict"] == "none") != (audit["current"] is None):
-                out.append(f"{at}: the audit's currency is null exactly when it has no verdict")
-            if audit["verdict"] == "none" and audit["independence"] is not None:
-                out.append(f"{at}: independence of an audit that has no verdict")
-    for run in runs.values():
+def row_problems(rows: list[dict], reasons: set[str]) -> list[str]:
+    """What the row schema cannot say about the rows of a store: each row's key, its derived facts and diagnostic, its
+    claims, edges and blockers, and ``previous`` naming the prior generation of the same run."""
+    out: list[str] = []
+    by_key: dict[str, dict] = {}
+    for run in rows:
+        at = f"run {run['key']}"
+        if run["key"] in by_key:
+            out.append(f"{at}: duplicate key")
+        by_key[run["key"]] = run
+        parts = run["key"].split("/")
+        if len(parts) != 3 or parts[0] != run["project"] or parts[1] != run["run"] or parts[2] != str(run["generation"]):
+            out.append(f"{at}: key is not <project>/<run>/<generation>")
+        partial = run["diagnostic"] is not None
+        derived = ("audit", "claims", "edges", "attention", "progress")
+        if partial and (run["next"] is not None or any(run[f] is not None for f in derived)):
+            out.append(f"{at}: a {run['diagnostic']} row carries derived facts")
+        if not partial and (run["state"] is None or any(run[f] is None for f in derived)):
+            out.append(f"{at}: a fully read row lacks its state or a derived fact")
+        if run["diagnostic"] == "unreadable" and (run["state"] is not None or run["goal"] is not None
+                                                  or run["session"] is not None):
+            out.append(f"{at}: an unreadable row reports facts of its state")
+        if run["diagnostic"] != "unreadable" and (run["state"] is None or run["goal"] is None or run["session"] is None):
+            out.append(f"{at}: a decoded state reports its status, goal and session")
+        if not partial and (run["attention"] == "ended") != (run["state"] != "active"):
+            out.append(f"{at}: attention is ended exactly when the run is not active")
+        # Times are labels (ADR-0070): nothing orders by them, but an undecoded state has none to give and only a run
+        # that ended has an end.
+        if run["state"] is None and any(run[f] is not None for f in ("started", "updated", "ended")):
+            out.append(f"{at}: a state that was not decoded has a time")
+        if run["ended"] is not None and run["state"] in (None, "active"):
+            out.append(f"{at}: an end time on a run that has not ended")
+        if partial:
+            continue
+        claims = run["claims"]
+        claim_ids = [c["id"] for c in claims]
+        if len(set(claim_ids)) != len(claim_ids):
+            out.append(f"{at}: duplicate claim id")
+        if (run["root"] is None) != (not claim_ids) or (
+                run["root"] is not None and run["root"] not in claim_ids):
+            out.append(f"{at}: root must be one of its claims, and null exactly when it has none")
+        out += [f"{at}: edge {e['from']}->{e['to']} leaves the run's claims"
+                for e in run["edges"] if not {e["from"], e["to"]} <= set(claim_ids)]
+        scoped = [c for c in claims if c["gating"]]
+        if run["progress"] != {"required": len(scoped), "approved": sum(c["state"] == "approved" for c in scoped)}:
+            out.append(f"{at}: progress is not the count of its scoped and approved claims")
+        for claim in claims:
+            where = f"{at} claim {claim['id']}"
+            if claim["blocker"] is not None and claim["blocker"] not in reasons:
+                out.append(f"{where}: blocker {claim['blocker']!r} is not a registry reason")
+            blocked = claim["gating"] and claim["state"] != "approved"
+            if (claim["blocker"] is not None) != blocked:
+                out.append(f"{where}: exactly the scoped claims that are not approved have a blocker")
+            if (claim["blocker_claim"] is None) != (claim["blocker"] is None) or (
+                    claim["blocker_claim"] is not None and claim["blocker_claim"] not in claim_ids):
+                out.append(f"{where}: blocker_claim must be one of the run's claims, null exactly "
+                           "when blocker is")
+            # Only what the row itself contradicts is checked here: whether the gate accepts the audit is
+            # core.evaluation.audit_acceptance's, and tests/v2/test_observer_agreement.py proves the two agree.
+            if claim["assurance"] == "assured" and (claim["state"] != "approved" or claim["review"] != "passed"
+                                                    or run["audit"]["pending"]):
+                out.append(f"{where}: assured is never said of a claim that is not approved, not reviewed by a current "
+                           "pass, or under a pending re-audit")
+            if (claim["assurance"] == "assured" and all(c["gating"] for c in claims)
+                    and run["audit"]["independence"] in INDEPENDENCE_REASONS):
+                out.append(f"{where}: assured under an audit the registry names as not independent")
+            if (claim["assurance"] == "not_approved") != (claim["state"] != "approved"):
+                out.append(f"{where}: not_approved exactly when the claim is not approved")
+        audit = run["audit"]
+        if (audit["verdict"] == "none") != (audit["current"] is None):
+            out.append(f"{at}: the audit's currency is null exactly when it has no verdict")
+        if audit["verdict"] == "none" and audit["independence"] is not None:
+            out.append(f"{at}: independence of an audit that has no verdict")
+    for run in rows:
         prev = run["previous"]
         if prev is None:
             continue
-        before = runs.get(prev)
+        before = by_key.get(prev)
         if (before is None or before["project"] != run["project"]
                 or prev.split("/")[1] != run["key"].split("/")[1]
                 or before["generation"] != run["generation"] - 1):
-            out.append(f"run {run['key']}: previous {prev} is not this run's prior generation in the view")
-    unreadable = sum(r["diagnostic"] == "unreadable" for r in runs.values())
-    read = sum(r["diagnostic"] is None for r in runs.values())
-    if view["coverage"] != {"runs": len(runs), "read": read, "unreadable": unreadable,
-                            "partial": len(runs) - read - unreadable}:
-        out.append("view: coverage does not count the runs by their diagnostics")
-    if view["token"] != token_of(view):
-        out.append("view: token is not the digest of the ordered run versions")
+            out.append(f"run {run['key']}: previous {prev} is not this run's prior generation in the index")
     return out
 
 
@@ -266,11 +234,14 @@ def _worded(spec: dict, text: str, ended: bool) -> bool:
     return any(fits(template, text) for template in _wordings(spec, ended))
 
 
-def detail_problems(details: dict, view: dict, run_schema: dict, reg: dict) -> list[str]:
+def detail_problems(details: dict, rows: list[dict], run_schema: dict, reg: dict) -> list[str]:
     out: list[str] = []
-    rows = {r["key"]: r for p in view["projects"] for r in p["runs"]}
+    attempts = {}
+    for r in rows:
+        attempts.setdefault((r["project"], r["run"]), []).append(r)
+    rows = {r["key"]: r for r in rows}
     if set(details) != set(rows):
-        out.append(f"details: keys differ from the view's runs ({len(details)} vs {len(rows)})")
+        out.append(f"details: keys differ from the index's runs ({len(details)} vs {len(rows)})")
     specs = reg["reasons"]
     for key, detail in sorted(details.items()):
         at = f"detail {key}"
@@ -282,7 +253,11 @@ def detail_problems(details: dict, view: dict, run_schema: dict, reg: dict) -> l
         if row is None:
             continue
         if detail["key"] != key or detail["version"] != row["version"]:
-            out.append(f"{at}: key or version differs from its view row")
+            out.append(f"{at}: key or version differs from its row")
+        if detail["row"] != row:
+            out.append(f"{at}: the row it carries is not the index's row")
+        if detail["attempts"] != sorted(attempts[(row["project"], row["run"])], key=lambda r: r["generation"]):
+            out.append(f"{at}: attempts are not every attempt at the run, by generation")
         read = row["diagnostic"] is None
         if (detail["audit"] is not None) != read:
             out.append(f"{at}: audit detail must be present exactly when the row was read in full")
@@ -303,15 +278,15 @@ def detail_problems(details: dict, view: dict, run_schema: dict, reg: dict) -> l
             out.append(f"{at}: today's evaluation is published only beside a recorded stop")
         if not read:
             if detail["goal"] != row["goal"]:
-                out.append(f"{at}: goal differs from its view row")
+                out.append(f"{at}: goal differs from its row")
             continue
         ended = row["state"] != "active"
         if stop is not None and stop["status"] != row["state"]:
-            out.append(f"{at}: stop status differs from its view row")
+            out.append(f"{at}: stop status differs from its row")
         if detail["goal"] != row["goal"]:
-            out.append(f"{at}: goal differs from its view row")
+            out.append(f"{at}: goal differs from its row")
         if [c["id"] for c in detail["claims"]] != [c["id"] for c in row["claims"]]:
-            out.append(f"{at}: claims differ from its view row")
+            out.append(f"{at}: claims differ from its row")
         out += [f"{at} claim {c['id']}: blocker_message is not the registry wording of its blocker, filled in"
                 for c, r in zip(detail["claims"], row["claims"])
                 if (c["blocker_message"] is None) != (r["blocker"] is None)
@@ -367,31 +342,277 @@ def detail_problems(details: dict, view: dict, run_schema: dict, reg: dict) -> l
     return out
 
 
-def check(view: dict, details: dict | None) -> list[str]:
-    view_schema, run_schema = schemas()
+def view_schemas() -> dict[str, dict]:
+    return {name: _load(UI_VIEW / f"{name}.schema.json") for name in ("summary", "row", "page", "run")}
+
+
+def _registry(ui: dict[str, dict]) -> Registry:
+    """The four contract schemas by their ``$id``, so the detail's reference to a row resolves."""
+    return Registry().with_resources([(schema["$id"], Resource.from_contents(schema)) for schema in ui.values()])
+
+
+def _schema_errors(schema: dict, value: Any, at: str, ui: dict[str, dict] | None = None) -> list[str]:
+    return [f"{at}: {'/'.join(map(str, e.absolute_path)) or '(root)'}: {e.message}"
+            for e in Draft202012Validator(schema, registry=_registry(ui or view_schemas())).iter_errors(value)]
+
+
+def owner_mirror_problems(ui: dict[str, dict]) -> list[str]:
+    """Every contract vocabulary equals its owner in the core (``core.observer``) or the index (``application.observer_index``)."""
+    from application import observer_index as index
+    from core import observer as owner
+    row = ui["row"]["$defs"]["row"]["properties"]
+    run = ui["run"]["properties"]
+    item = lambda name: run[name]["oneOf"][1]["items"]["properties"]  # noqa: E731
+    pairs = [("row standing", row["standing"]["enum"], owner.STANDINGS), ("row ask", row["ask"]["enum"], [*owner.ASKS, None]),
+             ("marks standings", ui["summary"]["properties"]["marks"]["properties"]["standings"]["const"], owner.STANDINGS),
+             ("marks flag bits", ui["summary"]["properties"]["marks"]["properties"]["flag_bits"]["const"], index.FLAGS),
+             ("dropped why", item("dropped")["why"]["enum"], owner.DROP_REASONS),
+             ("decision asked", item("decisions")["asked"]["enum"], owner.ASKS),
+             ("decision answer", item("decisions")["answer"]["enum"], owner.ANSWERS),
+             ("decision effect", item("decisions")["effect"]["enum"], owner.EFFECTS),
+             ("audit verdict", item("audits")["verdict"]["enum"], owner.AUDIT_OUTCOMES),
+             ("facets", ui["summary"]["properties"]["facets"]["required"], list(index.FACETS))]
+    return [f"vocabulary {name}: schema {list(got)} != owner {list(want)}" for name, got, want in pairs if list(got) != list(want)]
+
+
+def view_problems(summary: dict, rows: list, details: dict, ui: dict[str, dict] | None = None) -> list[str]:
+    """The summary, rows and details: their schemas, then what a schema cannot say."""
+    from application import observer_index as index
+    from adapters.observer import civil
+    from core.observer import STANDINGS
+    ui = ui or view_schemas()
+    out = owner_mirror_problems(ui)
+    out += _schema_errors(ui["summary"], summary, "summary", ui)
+    out += _schema_errors(ui["row"], rows, "rows", ui)
+    out += [p for key, d in details.items() for p in _schema_errors(ui["run"], d, f"run {key}", ui)]
+    labels = {p["id"]: p["label"] for p in summary["projects"]}
+    out += _schema_errors(ui["page"], {"contract": "empirica-ui-view/v1", "pending": 0,
+                                       **index.page(rows, labels, lambda r: True, None, index.PAGE_LIMIT,
+                                                   summary["token"])}, "page", ui)
+    if out:
+        return out
     reg = registry()
-    out = mirror_problems(view_schema, run_schema, reg, _load(V2 / "state.schema.json"))
     out += [f"registry message not plain: {p}" for code, spec in reg["reasons"].items() for p in message_problems(code, spec)]
-    out += view_problems(view, view_schema, set(reg["reasons"]))
-    if details is not None and not out:
-        out += detail_problems(details, view, run_schema, reg)
+    out += mirror_problems(ui["row"], ui["run"], reg, _load(V2 / "state.schema.json"))
+    out += row_problems(rows, set(reg["reasons"]))
+    if out:
+        return out
+    cov = summary["coverage"]
+    if cov["read"] + cov["unreadable"] + cov["partial"] + cov["pending"] != cov["runs"]:
+        out.append("summary: coverage does not sum to runs")
+    if len(rows) != cov["runs"] - cov["pending"]:
+        out.append("summary: a row for every run read, and none for a pending one")
+    if cov["reindexing"] > cov["read"] + cov["unreadable"] + cov["partial"]:
+        out.append("summary: only a run read before can be reindexing")
+    if sorted(rows, key=index.order) != rows:
+        out.append("rows: not in page order (standing precedence, then each bucket's declared order: the needs bucket oldest question first, every other the most recent activity first; then key)")
+    marks = summary["marks"]
+    columns = {k: v for k, v in marks.items() if k not in {"standings", "flag_bits"}}
+    if any(w & ~f for w, f in zip(marks["window_flags"], marks["flags"])):
+        out.append("marks: a run carries a flag within the window only when it carries it")
+    if summary["aggregates"]["since"] is None and marks["window_flags"] != marks["flags"]:
+        out.append("marks: without a window the window flags are the flags")
+    if index.island_order(summary["projects"]) != summary["projects"]:
+        out.append("summary: the projects are in island order (the first run's start, then id)")
+    cal, ids = summary["calendar"], [p["id"] for p in summary["projects"]]
+    if index.calendar(rows, ids, cal["tz"], civil.zone(cal["tz"])) != cal:
+        out.append("summary: the calendar is each project's runs by their civil day of updated, in its tz")
+    if {len(v) for v in columns.values()} != {len(rows)}:
+        out.append("marks: every column has one entry per row")
+    if marks["id"] != [r["id"] for r in rows] or len(set(marks["id"])) != len(rows):
+        out.append("marks: ids are the rows' ids, each once")
+    for n, r in enumerate(rows):
+        at = f"row {r['key']}"
+        if r["id"] != index.short_id(r["key"]):
+            out.append(f"{at}: id is not its key's short id")
+        if (r["standing"] == "unreadable") != (r["diagnostic"] is not None):
+            out.append(f"{at}: unreadable exactly when the run was not read in full")
+        if r["standing"] == "needs_human" and r["attention"] != "needs_you":
+            out.append(f"{at}: needs_human exactly when a human is owed a question a host shows")
+        if r["ask"] is not None and r["state"] != "active":
+            out.append(f"{at}: only an active run asks a human")
+        if r["asked_at"] is not None and r["ask"] is None:
+            out.append(f"{at}: asked_at without an ask")
+        if marks["standing"][n] != STANDINGS.index(r["standing"]) or marks["updated"][n] != r["updated"]:
+            out.append(f"{at}: its mark is not its row")
+        d = details.get(r["key"])
+        if d is None:
+            out.append(f"{at}: no detail")
+            continue
+        if r["diagnostic"] is not None:
+            if any(d[k] is not None for k in ("audits", "dropped", "decisions")) or r["flags"] is not None:
+                out.append(f"{at}: a run not read in full has no audits, dropped claims, decisions or flags (null)")
+            continue
+        audits = d["audits"]
+        if (audits[-1]["verdict"] if audits else "none") != r["audit"]["verdict"]:
+            out.append(f"{at}: the latest of audits is the row's audit verdict")
+        known = {c["id"] for c in r["claims"] or ()} | {x["claim"] for x in d["dropped"]}
+        if any(x["claim"] is not None and x["claim"] not in known for x in d["decisions"]):
+            out.append(f"{at}: a decision is attached to a claim of its run")
+        if r["flags"]["failed_audit"] != any(a["verdict"] == "failed" for a in audits):
+            out.append(f"{at}: failed_audit exactly when an audit failed")
+        if r["flags"]["refuted"] != any(x["why"] in {"refuted", "spike_failed"} for x in d["dropped"]):
+            out.append(f"{at}: refuted exactly when evidence dropped a claim")
+        if r["standing"] == "changed_since_audit" and not r["flags"]["changed_since_audit"]:
+            out.append(f"{at}: changed_since_audit standing without its flag")
+    # every project is read in full once nothing is pending: each place is then given; before, a given place is final
+    places = index.places(rows, [p["id"] for p in summary["projects"]])
+    for n, r in enumerate(rows):
+        given = marks["place"][n]
+        if (given is None and cov["pending"] == 0) or (given is not None and given != places[r["key"]]):
+            out.append(f"row {r['key']}: its place is not its ordinal in its project's start order")
+    needs = sorted((n for n in summary["needs"]), key=index.asked_order)
+    if {n["id"] for n in summary["needs"]} != {r["id"] for r in rows if r["standing"] == "needs_human"}:
+        out.append("summary: needs lists exactly the runs that need a human")
+    if summary["needs"] != needs:
+        out.append("summary: needs is in asked order (the oldest question first), never grouped by project")
+    for p in summary["projects"]:
+        if p["needs"] != sum(r["project"] == p["id"] for r in rows if r["standing"] == "needs_human"):
+            out.append(f"summary: project {p['id']} needs counts exactly its runs that need a human")
+        held = [r["standing"] for r in rows if r["project"] == p["id"]]
+        if p["standings"] != {k: held.count(k) for k in STANDINGS if k in held}:
+            out.append(f"summary: project {p['id']} standings count exactly its runs by standing")
+    read = [r for r in rows if r["diagnostic"] is None]
+    if summary["aggregates"]["not_read"] != len(rows) - len(read):
+        out.append("summary: aggregates count the runs not read")
+    if summary["aggregates"]["since"] is None and sum(summary["facets"]["standing"].values()) != len(read):
+        out.append("summary: the standing facet counts every read run once")
+    if summary["aggregates"]["total"] != sum(summary["aggregates"]["by"]["standing"].values()):
+        out.append("summary: the aggregates' total is the runs they count")
+    if summary["aggregates"]["since"] is None and summary["aggregates"]["by"] != summary["facets"]:
+        out.append("summary: without a window the aggregates are the facets")
+    if not out:
+        out += detail_problems(details, rows, ui["run"], reg)
     return out
+
+
+class _Empty:
+    """A store with no runs: what the observer serves for it is the contract id it serves for any store."""
+
+    def keys(self):
+        return []
+
+    def refresh(self):
+        pass
+
+
+def contract_id_problems(schemas: dict[str, dict] | None = None, folder: Path = UI_VIEW) -> list[str]:
+    """The contract's folder owns its id (``empirica-ui-view/<folder>``): every schema's ``$id`` and ``$ref`` and its
+    declared ``contract``, what the observer serves, what the server's demo serves, both copies of the fixtures, and what
+    the UI's client expects all say it."""
+    from adapters.observer.server import Demo
+    from application.observer import Observer
+    want = f"empirica-ui-view/{folder.name}"
+    base = f"https://siffran.dev/contracts/{want}/"
+    out = []
+    for name, schema in (schemas or view_schemas()).items():
+        if schema["$id"] != f"{base}{name}.schema.json":
+            out.append(f"{name}.schema.json: $id {schema['$id']} is not under {base}")
+        declared = schema.get("properties", {}).get("contract", {}).get("const")
+        if declared is not None and declared != want:
+            out.append(f"{name}.schema.json: declares contract {declared}, not {want}")
+        refs = re.findall(r'"\$ref": "(https://siffran\.dev/contracts/empirica-ui-view/[^"#]*)', json.dumps(schema, indent=0))
+        out += [f"{name}.schema.json: refers to {ref}, not under {base}" for ref in refs if not ref.startswith(base)]
+    observer = Observer(_Empty())
+    demo = Demo()
+    any_key = next(iter(_load(FIXTURES / "runs.json")))
+    served = {"the observer's summary": observer.summary()["contract"], "the observer's runs page": observer.runs({})["contract"],
+              "the demo's summary": demo.summary()["contract"], "the demo's runs page": demo.runs({})["contract"],
+              "the demo's search": demo.search("")["contract"], "the demo's sheet": demo.sheet(any_key)["contract"]}
+    out += [f"served by {where}: {got}, not {want}" for where, got in served.items() if got != want]
+    vendored = ROOT / "plugins/empirica/vendor/contracts/empirica-ui-view" / folder.name / "fixtures"
+    for copy in (FIXTURES, vendored):
+        held = {_load(copy / "summary.json")["contract"], *(d["contract"] for d in _load(copy / "runs.json").values())}
+        out += [f"{copy.relative_to(ROOT)}: holds contract {got}, not {want}" for got in sorted(held - {want})]
+    client = (ROOT / "plugins/empirica/ui/app/client.js").read_text(encoding="utf-8")
+    expected = re.search(r'const CONTRACT = "([^"]+)"', client)
+    if expected is None or expected.group(1) != want:
+        out.append(f"expected by the UI's client (ui/app/client.js): {expected and expected.group(1)}, not {want}")
+    return out
+
+
+_BRANCHES: dict[tuple[int, int], tuple[dict, Draft202012Validator]] = {}
+
+
+def _branch(branch: dict, doc: dict, ui: dict[str, dict]) -> Draft202012Validator:
+    """One validator per alternative of a loaded schema (kept with it, so its identity is not reused)."""
+    key = (id(branch), id(ui))
+    if key not in _BRANCHES or _BRANCHES[key][0] is not branch:
+        _BRANCHES[key] = (branch, Draft202012Validator({**branch, "$id": doc["$id"], "$defs": doc.get("$defs", {})},
+                                                       registry=_registry(ui)))
+    return _BRANCHES[key][1]
+
+
+def _walk(node: dict, doc: dict, value: Any, pointer: str, ui: dict[str, dict], seen: dict[str, set]) -> None:
+    """What a document holds of each enumeration (the schema-derived generators' reachability oracle, T1 B): record under each enumeration's ``schema#pointer`` (references resolved, so a definition used in several places
+    is one enumeration) the values ``value`` holds there; a ``oneOf`` or ``anyOf`` is followed into the branches it fits."""
+    by_id = {s["$id"]: s for s in ui.values()}
+    while "$ref" in node:
+        url, _, fragment = node["$ref"].partition("#")
+        doc = by_id[url] if url else doc
+        node, pointer = doc, fragment
+        for part in (p for p in fragment.split("/") if p):
+            node = node[part]
+    if "enum" in node:
+        seen.setdefault(f"{doc['$id'].rsplit('/', 1)[1]}#{pointer}", set()).add(json.dumps(value))
+    for word in ("oneOf", "anyOf"):
+        for n, branch in enumerate(node.get(word, ())):
+            if _branch(branch, doc, ui).is_valid(value):
+                _walk(branch, doc, value, f"{pointer}/{word}/{n}", ui, seen)
+    if isinstance(value, dict):
+        for name, sub in node.get("properties", {}).items():
+            if name in value:
+                _walk(sub, doc, value[name], f"{pointer}/properties/{name}", ui, seen)
+        extra = node.get("additionalProperties")
+        if isinstance(extra, dict):
+            for name, sub in value.items():
+                if name not in node.get("properties", {}):
+                    _walk(extra, doc, sub, f"{pointer}/additionalProperties", ui, seen)
+    if isinstance(value, list) and isinstance(node.get("items"), dict):
+        for item in value:
+            _walk(node["items"], doc, item, f"{pointer}/items", ui, seen)
+
+
+def declared_values(ui: dict[str, dict] | None = None) -> dict[str, list]:
+    """Every enumeration the contract declares, by ``schema#pointer``, with its values."""
+    out: dict[str, list] = {}
+
+    def collect(node: Any, name: str, pointer: str) -> None:
+        if isinstance(node, dict):
+            if "enum" in node:
+                out[f"{name}.schema.json#{pointer}"] = node["enum"]
+            for key, sub in node.items():
+                collect(sub, name, f"{pointer}/{key}")
+        elif isinstance(node, list):
+            for n, sub in enumerate(node):
+                collect(sub, name, f"{pointer}/{n}")
+    for name, schema in (ui or view_schemas()).items():
+        collect(schema, name, "")
+    return out
+
+
+def check(summary: dict, rows: list, details: dict) -> list[str]:
+    """Every problem of a summary, its rows and their details."""
+    return view_problems(summary, rows, details)
 
 
 def main(argv: list[str]) -> int:
     if argv:
-        view = _load(Path(argv[0]))
-        details = _load(Path(argv[1])) if len(argv) > 1 else None
+        summary, rows = _load(Path(argv[0])), _load(Path(argv[1]))
+        details = _load(Path(argv[2])) if len(argv) > 2 else None
+        if details is None:
+            print("a summary and rows are checked with their details: give the third file")
+            return 2
     else:
-        view, details = _load(FIXTURES / "view.json"), _load(FIXTURES / "runs.json")
-    problems = check(view, details)
+        summary, rows, details = (_load(FIXTURES / f) for f in ("summary.json", "rows.json", "runs.json"))
+    problems = check(summary, rows, details)
+    if not argv:
+        problems += contract_id_problems()
     for line in problems:
         print(line)
     if problems:
         return 1
-    runs = sum(len(p["runs"]) for p in view["projects"])
-    print(f"ok: empirica-ui-view/v1, {len(view['projects'])} projects, {runs} runs"
-          + (f", {len(details)} details" if details is not None else ""))
+    print(f"ok: empirica-ui-view/v1, {len(rows)} runs, {len(details)} details")
     return 0
 
 

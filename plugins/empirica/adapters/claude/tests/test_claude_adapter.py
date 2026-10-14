@@ -427,8 +427,22 @@ class ChildReserveTests(unittest.TestCase):
                 build_child_reserve_request(payload, "opaque-run", **bad)
 
 
+def _asked(governance: dict) -> dict:
+    """A configuration the agent asked for (a sized ``configure_run``) through a host that can show its human the dialog."""
+    governance["proposal"]["rationale"] = governance["proposal"]["rationale"] or "sized"
+    governance["context"]["approval_capability"] = "human_configuration"
+    return governance
+
+
 def _stop(result: dict, **kwargs):
-    """The Stop hook's result; a first Stop (`stop_hook_active` false) unless the caller says otherwise."""
+    """The Stop hook's result; a first Stop (`stop_hook_active` false) unless the caller says otherwise. The run view's
+    ``governance.human_wait`` is the core's answer on the result's governance, as the service publishes it."""
+    from core.governance import human_wait
+    governance = (result.get("run") or {}).get("governance")
+    if governance is not None:
+        if min(governance["interactions_remaining"].values()) == 0:  # a spent allowance is the core's interaction limit
+            governance["prompt_error"] = "governance.interaction_limit"
+        governance["human_wait"] = human_wait(governance, governance["prompt_error"])
     return stop_result(_typed(result), **{"stop_hook_active": False, **kwargs})
 
 
@@ -438,7 +452,7 @@ class ResponseMappingTests(unittest.TestCase):
     def test_human_governance_wait_settles_turn_without_convergence(self) -> None:
         def result(state="pending", code="governance.approval_required"):
             run = json.loads(json.dumps(_valid_active_allow()["run"]))
-            run["governance"].update({
+            _asked(run["governance"]).update({
                 "state": state, "control_mode": "deliberative"})
             run["governance"]["context"]["ingress"] = "mcp_elicitation"
             return {"type": "Block", "run": run, "reasons": [{
@@ -472,7 +486,7 @@ class ResponseMappingTests(unittest.TestCase):
                 self.assertEqual(_stop(blocked).exit_code, 2)  # an auto run that cannot be asked continues
         for changed in ("auto", "delegated", "proposal_exhausted", "total_exhausted",
                         "prompt_error", "approved", "missing_context", "mixed", "terminal",
-                        "mismatched_reason"):
+                        "not_a_configuration_reason"):
             blocked = result()
             if changed == "auto":
                 blocked["run"]["governance"].update({"control_mode": "auto", "first_approval": True})
@@ -495,8 +509,8 @@ class ResponseMappingTests(unittest.TestCase):
                                            "message": "corrupt"})
             elif changed == "terminal":
                 blocked["run"]["status"] = "converged"
-            elif changed == "mismatched_reason":
-                blocked["reasons"][0]["code"] = "governance.revision_required"
+            elif changed == "not_a_configuration_reason":
+                blocked["reasons"][0]["code"] = "governance.interaction_limit"
             with self.subTest(changed=changed):
                 got = _stop(blocked)
                 if changed in ("auto", "delegated", "terminal"):  # an auto run continues; a terminal run is no hand-off
@@ -722,7 +736,7 @@ class StopModeTests(unittest.TestCase):
             reason = {"code": "audit.pending", "parameters": {}, "next_actions": ["child.wait"], "sections": ["audit"],
                       "message": "An audit is pending."}
         elif kind in ("human_wait", "approval_unanswerable"):
-            run["governance"].update({"state": "pending"})
+            _asked(run["governance"]).update({"state": "pending"})
             if kind == "approval_unanswerable":  # the approval cannot be asked here: spent, errored or no MCP ingress
                 run["governance"]["context"]["ingress"] = "unavailable"
             reason = {"code": "governance.approval_required", "parameters": {}, "next_actions": [], "sections": ["governance"],
@@ -1762,16 +1776,39 @@ class TurnEndPredicateParityTests(unittest.TestCase):
                 target[last] = patch_["value"]
         return result
 
-    def test_the_python_predicates_give_the_shared_answers(self):
-        from adapters.claude.completion import _async_audit_wait, _evidence_report_directive
+    def cases(self):
         cases = json.loads((self.PI_TEST / "fixtures" / "turn-end-predicates.json").read_text(encoding="utf-8"))["cases"]
-        self.assertGreater(len(cases), 10)
+        self.assertGreater(len(cases), 20)
         for case in cases:
+            golden = stored(json.loads((self.PI_TEST / "author-view-golden" / f"{case['golden']}.json").read_text(encoding="utf-8")))
+            yield case, self.patched(golden["result"], case.get("patch", []))
+
+    def test_the_python_predicates_give_the_shared_answers(self):
+        from adapters.claude.completion import _async_audit_wait, _evidence_report_directive, _human_approval_wait
+        for case, raw in self.cases():
             with self.subTest(case=case["name"]):
-                golden = stored(json.loads((self.PI_TEST / "author-view-golden" / f"{case['golden']}.json").read_text(encoding="utf-8")))
-                result = _typed(self.patched(golden["result"], case.get("patch", []))).result
+                governance = (raw.get("run") or {}).get("governance")
+                if governance is not None:  # mediated through Claude's own dialog, or Pi's when the case says another's
+                    governance["context"]["ingress"] = "pi_ui" if case.get("foreign_ingress") else "mcp_elicitation"
+                result = _typed(raw).result
                 self.assertEqual(_evidence_report_directive(result), case["evidence_askable"])
                 self.assertEqual(_async_audit_wait(result), case["audit_pending"])
+                self.assertEqual(_human_approval_wait(result), case["approval_wait"])
+
+    def test_the_core_and_so_the_observer_give_the_shared_answer_on_who_acts_on_a_configuration(self):
+        """The case's governance through the core's own predicate (the one the observer's standing and the run view's
+        ``governance.human_wait`` read): the golden, the case and the core agree."""
+        from core.governance import human_wait
+        governed = 0
+        for case, raw in self.cases():
+            governance = (raw.get("run") or {}).get("governance")
+            if "human_wait" not in case:
+                continue
+            governed += 1
+            with self.subTest(case=case["name"]):
+                self.assertEqual(human_wait(governance, governance["prompt_error"]), case["human_wait"])
+                self.assertEqual(governance["human_wait"], case["human_wait"], "the run view publishes the core's answer")
+        self.assertGreaterEqual(governed, 10)
 
     def test_a_pending_audit_child_without_an_id_is_not_the_audit_to_wait_for(self):
         """HQ-G9-11: the response schema refuses such a child, but the rule does not lean on it; Pi's `auditPending` says the same

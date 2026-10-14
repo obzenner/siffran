@@ -521,10 +521,10 @@ class ConformanceCase(unittest.TestCase):
     # ---- SUT binding -------------------------------------------------------
 
     def bind_driver(self, owner: str, case_id: str, behavior: str,
-                    profile_id: str | None = None, limits: dict | None = None):
+                    profile_id: str | None = None, limits: dict | None = None, **ports):
         pid = profile_id or self.DEFAULT_PROFILE
         try:
-            drv = new_driver(profile_id=pid, limits=limits)
+            drv = new_driver(profile_id=pid, limits=limits, **ports)
         except V2SeamAbsent as exc:
             self.fail(f"[{owner}] {case_id}: {behavior} — v2 SUT seam absent: {exc}")
         return drv

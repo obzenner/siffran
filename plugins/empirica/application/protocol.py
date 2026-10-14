@@ -58,6 +58,8 @@ if (tuple(row["predicate"] for row in _bootstrap["requirements"]) != _BOOTSTRAP_
     raise RuntimeError("unknown or reordered bootstrap contract binding")
 _BOOTSTRAP_REQUIREMENTS = tuple((row["predicate"], row["obligation_id"], row["must"])
                                 for row in _bootstrap["requirements"])
+#: The words of a bootstrap requirement when its human acts on it (``waiting``), by obligation id.
+_BOOTSTRAP_WAITING = {row["obligation_id"]: row["waiting"] for row in _bootstrap["requirements"] if "waiting" in row}
 _AUDIT_OBLIGATION = (_bootstrap["audit_obligation"]["obligation_id"],
                      _bootstrap["audit_obligation"]["must"])
 _STAGE_OBLIGATIONS = {stage: (row["obligation_id"], row["must"])
@@ -119,6 +121,7 @@ _DIGEST = canonical_digest(_PUBLIC_CONTRACT)
 CONTRACT_VIEW = ContractView(
     reason_metadata=_REASON_METADATA,
     bootstrap_requirements=_BOOTSTRAP_REQUIREMENTS,
+    bootstrap_waiting=_BOOTSTRAP_WAITING,
     audit_obligation=_AUDIT_OBLIGATION,
     stage_obligations=_STAGE_OBLIGATIONS,
     bootstrap_operations=_BOOTSTRAP_OPERATIONS,

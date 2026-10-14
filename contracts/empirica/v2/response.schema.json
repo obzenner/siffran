@@ -1557,7 +1557,8 @@
                 "display_ready",
                 "next_action",
                 "interactions_remaining",
-                "prompt_error"
+                "prompt_error",
+                "human_wait"
               ],
               "properties": {
                 "state": {
@@ -1801,6 +1802,10 @@
                     null,
                     "governance.interaction_limit"
                   ]
+                },
+                "human_wait": {
+                  "description": "Whether the configuration waits on its human (core.governance.human_wait, the one predicate of who acts on it: the agent asked, it is pending, a revision pending or rejected, a human approves this phase, the host that mediated it can show its dialog and a presentation is admissible). A host's turn end reads it and adds only its own approval ingress.",
+                  "type": "boolean"
                 }
               }
             },

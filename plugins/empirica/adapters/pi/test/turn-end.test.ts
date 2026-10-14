@@ -14,6 +14,7 @@ import { PROTOCOL, type Request, type Response, type Result } from "../src/contr
 import { createEmpiricaExtension, DEFAULT_SKILLS_DIR } from "../src/index.ts";
 import { PUBLIC_TOOLS } from "../src/public-tools.ts";
 import { auditPending, evidenceAskable, fill, turnEnd, type Basis } from "../src/turn-end.ts";
+import { humanApprovalWait } from "../src/governance-ui.ts";
 import { FakePi, fakeCtx } from "./fakes.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -32,7 +33,9 @@ function governance(mode: Mode, pending = false) {
   return { state: pending ? "pending" : "approved", control_mode: auto ? "auto" : "deliberative",
     first_approval: mode === "auto-interactive-post" || mode === "auto-delegated", prompt_error: null,
     interactions_remaining: { proposal: 3, total: 128 }, proposal: { budgets: {} },
-    context: { ingress: "pi_ui", interactive: mode !== "auto-delegated", delegation: mode === "auto-delegated", author: null } };
+    context: { ingress: "pi_ui", interactive: mode !== "auto-delegated", delegation: mode === "auto-delegated", author: null },
+    // the core's answer (core.governance.human_wait): a pending configuration this phase's human approves
+    human_wait: pending && (mode === "deliberative" || mode === "auto-interactive-pre") };
 }
 
 function block(mode: Mode, kind: "real" | "budget" | "evidence" | "audit" | "human_wait" = "real"): Result {
@@ -202,9 +205,10 @@ test("G16 H-02: a run that converges at the turn end is retired like an explicit
 test("the turn-end predicates give the answers Claude's give on the shared cases", () => {
   const shared = JSON.parse(readFileSync(path.resolve(HERE, "fixtures", "turn-end-predicates.json"), "utf8")) as {
     cases: Array<{ name: string; golden: string; evidence_askable?: boolean; audit_pending?: boolean;
+      approval_wait: boolean; foreign_ingress?: boolean;
       patch?: Array<{ path: Array<string | number>; value?: unknown; append?: unknown }> }>;
   };
-  assert.ok(shared.cases.length > 10);
+  assert.ok(shared.cases.length > 20);
   for (const item of shared.cases) {
     const golden = JSON.parse(readStoredText(path.resolve(HERE, "author-view-golden", `${item.golden}.json`), "utf8")).result;
     for (const change of item.patch ?? []) {
@@ -215,6 +219,10 @@ test("the turn-end predicates give the answers Claude's give on the shared cases
     }
     assert.equal(evidenceAskable(golden), item.evidence_askable, `${item.name}: evidenceAskable`);
     assert.equal(auditPending(golden), item.audit_pending, `${item.name}: auditPending`);
+    // mediated through Pi's own dialog unless the case says another host's was
+    const governance = golden.run?.governance;
+    if (governance) governance.context.ingress = item.foreign_ingress ? "mcp_elicitation" : "pi_ui";
+    assert.equal(humanApprovalWait(golden), item.approval_wait, `${item.name}: humanApprovalWait`);
   }
 });
 

@@ -281,13 +281,17 @@ def recorded_observations(history: tuple[dict[str, Any], ...], state: Operationa
 
 
 def assemble(state: OperationalState, stored: Any, workspace: Any, *, run_id: str,
-             profile_id: str, command: dict[str, Any], require_graph: bool = False) -> EvaluationSnapshot:
+             profile_id: str, command: dict[str, Any], require_graph: bool = False,
+             observe: Any = None) -> EvaluationSnapshot:
+    """The evaluation snapshot. ``observe`` (a reader's: active heads to the ``ObservationSnapshot``
+    ``build_observation_snapshot`` would give) lets a reader that indexes the workspace's files answer from its index."""
     history = traverse_history(state, stored)
     validate_investigation_history(state, history)
     graph = graph_from_history(state, history, required=require_graph)
     if proposal_digest(state.goal, state.governance) != state.governance["proposal_digest"]:
         raise HistoryCorrupt("proposal digest conflicts with selected graph/context")
-    observation = build_observation_snapshot(active_spike_heads(history, graph), workspace)
+    heads = active_spike_heads(history, graph)
+    observation = build_observation_snapshot(heads, workspace) if observe is None else observe(heads)
     profile = _proto.host_profile(profile_id)
     cited = _cited(command, workspace)
     return EvaluationSnapshot(

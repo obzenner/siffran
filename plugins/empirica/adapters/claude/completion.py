@@ -10,7 +10,6 @@ from pathlib import Path
 from application.protocol import (
     BUDGET_EXHAUSTED_NOTICE, EVIDENCE_REPORT_NOTICE, HUMAN_WAIT_NOTICE, PAUSED_FOR_EVIDENCE_NOTICE, PAUSED_FOR_HUMAN_NOTICE,
     UNATTENDED_CONTINUE_NOTICE, render_notice)
-from core.governance import expected_approval_kind
 from core.projection import ASKABLE
 from .correlation import PROTOCOL, request_id as new_request_id
 from .fail_direction import FailureDirection, blocks_on_failure
@@ -81,29 +80,24 @@ def _async_audit_wait(result: Result) -> bool:
                 and bool(child.child_id) for child in run.children) == 1)
 
 
-_HUMAN_WAIT_REASON = {"pending": "governance.approval_required",
-                      "rejected": "governance.approval_required",
-                      "revision_pending": "governance.revision_required"}
+#: The reasons an unapproved configuration blocks with (``governance.approval_required`` before the first approval or
+#: after a rejection, ``governance.revision_required`` for a revision): the blocker the host may pause on.
+_CONFIGURATION_REASONS = frozenset({"governance.approval_required", "governance.revision_required"})
 
 
 def _human_approval_wait(result: Result) -> bool:
     """True only for the sole legitimate human-approval blocker of an active run.
 
-    The phase must call for a human decision (ADR-0063), the host dialog must be reachable, and a
-    new presentation must still be admissible; an exhausted, delegated, or post-approval auto
-    run keeps blocking rather than pausing."""
+    Whether the configuration waits on its human is the core's answer, published in the run view
+    (``governance.human_wait``: ``core.governance.human_wait``, the predicate the observer reads too); the host adds only
+    its own ingress (the dialog is Claude's MCP form) and that the configuration's blocker is the run's sole one. An exhausted,
+    delegated, or post-approval auto run keeps blocking rather than pausing."""
     run = result.run
     if run is None or run.governance is None or run.status != "active":
         return False
-    governance = run.governance
-    interactions = governance["interactions_remaining"]
-    return (governance.state in _HUMAN_WAIT_REASON
-            and expected_approval_kind(governance) == "host_ui"
-            and governance.context.ingress == "mcp_elicitation"
-            and governance["prompt_error"] is None
-            and interactions["proposal"] > 0 and interactions["total"] > 0
-            and len(result.reasons) == 1
-            and result.reasons[0].code == _HUMAN_WAIT_REASON[governance.state])
+    return (run.governance["human_wait"] is True
+            and run.governance.context.ingress == "mcp_elicitation"
+            and len(result.reasons) == 1 and result.reasons[0].code in _CONFIGURATION_REASONS)
 
 
 def _evidence_report_directive(result: Result) -> bool:

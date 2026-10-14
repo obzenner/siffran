@@ -3,10 +3,13 @@
 
     python3 scripts/regen_ui_view_fixtures.py [--check]
 
-The store is ``plugins/empirica/tests/v2/observer_store.build_store``: real runs driven through
-the v2 service. The observer projects it; nothing in the fixtures is written by hand. The demo copy
-vendored into the plugin (``plugins/empirica/vendor/contracts/empirica-ui-view/v1/fixtures``) is
-written alongside; ``--check`` compares both copies with a fresh render.
+The runs are ``plugins/empirica/tests/v2/observer_store.build_store``'s, driven through the real service, and of
+them only the minimal named selection ``FIXTURE_SCENARIOS`` (one per standing and per ask kind the service reaches;
+``FixtureSource``). The observer projects them; nothing in the fixtures is written by hand.
+The contract's fixtures (summary, rows, sheets and the scenario table) are written to
+``contracts/empirica-ui-view/v1/fixtures`` and byte for byte to the plugin's built-in demo
+(``plugins/empirica/vendor/contracts/empirica-ui-view/v1/fixtures``). ``--check`` fails on any byte difference between
+the two copies, then on any difference from a fresh render. This is the fixtures' one generator.
 """
 from __future__ import annotations
 
@@ -21,27 +24,45 @@ for path in (PLUGIN / "tests/v2", PLUGIN / "tests", PLUGIN):
     sys.path.insert(0, str(path))
 
 from application.observer import Observer  # noqa: E402
-from observer_store import DriverSource, build_store  # noqa: E402
+from observer_store import FixtureSource, build_store, fixture_scenarios  # noqa: E402
 
 FIXTURES = Path("contracts/empirica-ui-view/v1/fixtures")
 TARGETS = (ROOT / FIXTURES, PLUGIN / "vendor" / FIXTURES)
 
 
-def render() -> dict[str, str]:
+def _text(value) -> str:
+    return json.dumps(value, ensure_ascii=False, indent=1, sort_keys=True) + "\n"
+
+
+def render() -> dict[Path, dict[str, str]]:
+    """Each fixture folder's files: the summary, rows and sheets (one observer over the fixture runs) and the scenario
+    table."""
     store = build_store()
-    view, details = Observer(DriverSource(store)).observe()
-    files = {"view.json": view, "runs.json": details, "scenarios.json": dict(sorted(store.expect.items()))}
-    return {name: json.dumps(value, ensure_ascii=False, indent=1, sort_keys=True) + "\n"
-            for name, value in files.items()}
+    observer = Observer(FixtureSource(store))
+    files = {"summary.json": observer.summary(), "rows.json": observer.rows(), "runs.json": observer.details(),
+             "scenarios.json": fixture_scenarios(store)}
+    return {target: {name: _text(value) for name, value in files.items()} for target in TARGETS}
+
+
+def copy_problems(contract: Path = ROOT / FIXTURES, vendored: Path = PLUGIN / "vendor" / FIXTURES) -> list[str]:
+    """The vendored fixtures are a byte copy of the contract's: the same files, the same bytes."""
+    names = sorted({p.name for p in contract.iterdir()} | {p.name for p in vendored.iterdir()})
+    return [f"{vendored / name} is not a byte copy of {contract / name}" for name in names
+            if not (contract / name).is_file() or not (vendored / name).is_file()
+            or (contract / name).read_bytes() != (vendored / name).read_bytes()]
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--check", action="store_true", help="fail when a committed file differs")
     args = parser.parse_args()
-    files = render()
+    if args.check and (copies := copy_problems()):
+        print("the vendored observer fixtures differ from the contract's (run scripts/regen_ui_view_fixtures.py):",
+              *copies, sep="\n  ")
+        return 1
+    rendered = render()
     stale = []
-    for target in TARGETS:
+    for target, files in rendered.items():
         for name, text in files.items():
             path = target / name
             if args.check:
@@ -53,7 +74,7 @@ def main() -> int:
     if stale:
         print("stale observer fixtures (run scripts/regen_ui_view_fixtures.py):", *stale, sep="\n  ")
         return 1
-    print(f"ok: {'checked' if args.check else 'wrote'} {len(files)} observer fixtures x {len(TARGETS)}")
+    print(f"ok: {'checked' if args.check else 'wrote'} {sum(map(len, rendered.values()))} observer fixtures")
     return 0
 
 

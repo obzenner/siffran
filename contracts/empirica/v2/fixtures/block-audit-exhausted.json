@@ -182,7 +182,8 @@
           },
           "request_ready": true,
           "display_ready": true,
-          "next_action": "run.inspect"
+          "next_action": "run.inspect",
+          "human_wait": false
         },
         "audit": {
           "verdict": "failed",

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run named suites in parallel, each with its own log, and fail if any suite fails.
 
-Usage: run_suites.py NAME='COMMAND ARGS...' [NAME='COMMAND ...' ...]
+Usage: run_suites.py NAME[@SECONDS]='COMMAND ARGS...' [NAME[@SECONDS]='COMMAND ...' ...]
 
 Scheduling: every suite runs; when each starts (load admission, longest first, the ``JOBS`` cap) is stated in ``doc/testing.md``.
 
@@ -10,8 +10,9 @@ group, and its stdout and stderr go to ``<logdir>/<NAME>.log`` (a fresh temporar
 line per suite shows its result and elapsed seconds, and a failed suite's log is printed the moment it fails. Exit status is
 1 if any suite failed, else 0.
 
-Limits: a suite that runs longer than ``RUN_SUITES_TIMEOUT`` seconds (a finite number, default 600) is killed and fails
-with a ``timed out`` line. The signal and cleanup rules (process groups, SIGTERM then SIGKILL, exit 130 or 143) are those of
+Limits: a suite that runs longer than its limit is stopped (:func:`stop`: its group and every group a runner inside it
+registered, SIGTERM then SIGKILL) and fails with a ``timed out after N s`` line. The limit is declared per suite
+(``NAME@SECONDS``), else ``RUN_SUITES_TIMEOUT`` seconds (a finite number, default 600). The signal and cleanup rules (process groups, SIGTERM then SIGKILL, exit 130 or 143) are those of
 :func:`stop` and :func:`run`."""
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ import json
 import math
 import os
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -30,6 +32,8 @@ from typing import Callable
 DEFAULT_TIMEOUT = 600.0
 GRACE = 5.0
 POLL = 0.05
+#: The registry folder of the group a process runs in (see :class:`Groups`); a nested runner registers below it.
+GROUPS_ENV = "RUN_SUITES_GROUPS"
 
 
 class Interrupted(Exception):
@@ -39,27 +43,43 @@ class Interrupted(Exception):
         self.stopped = stopped  # whether cleanup verified that every launched group is empty
 
 
+def _seconds(raw: str, what: str) -> float:
+    try:
+        value = float(raw)
+    except ValueError:
+        raise SystemExit(f"run_suites: {what} must be a number of seconds, got {raw!r}") from None
+    if not math.isfinite(value) or value <= 0:
+        raise SystemExit(f"run_suites: {what} must be a finite positive number of seconds")
+    return value
+
+
+def _split(argument: str) -> tuple[str, float | None, str]:
+    """``NAME[@SECONDS]=COMMAND`` -> (name, its declared limit or None, command)."""
+    head, sep, command = argument.partition("=")
+    name, at, limit = head.partition("@")
+    if not sep or not name or not command.strip() or "/" in name or (at and not limit):
+        raise SystemExit(f"run_suites: expected NAME[@SECONDS]='COMMAND', got {argument!r}")
+    return name, _seconds(limit, f"the limit of {name}") if at else None, command
+
+
 def parse(arguments: list[str]) -> list[tuple[str, list[str]]]:
     suites = []
     for argument in arguments:
-        name, sep, command = argument.partition("=")
-        if not sep or not name or not command.strip() or "/" in name:
-            raise SystemExit(f"run_suites: expected NAME='COMMAND', got {argument!r}")
+        name, _limit, command = _split(argument)
         suites.append((name, shlex.split(command)))
     if not suites or len({name for name, _ in suites}) != len(suites):
         raise SystemExit("run_suites: give at least one suite, each with a distinct name")
     return suites
 
 
+def limits(arguments: list[str]) -> dict[str, float]:
+    """The limits the suites declare (``NAME@SECONDS``); a suite not here has ``RUN_SUITES_TIMEOUT``'s."""
+    return {name: limit for name, limit, _ in map(_split, arguments) if limit is not None}
+
+
 def timeout_seconds() -> float:
     raw = os.environ.get("RUN_SUITES_TIMEOUT", "")
-    try:
-        value = float(raw) if raw else DEFAULT_TIMEOUT
-    except ValueError:
-        raise SystemExit(f"run_suites: RUN_SUITES_TIMEOUT must be a number of seconds, got {raw!r}") from None
-    if not math.isfinite(value) or value <= 0:
-        raise SystemExit("run_suites: RUN_SUITES_TIMEOUT must be a finite positive number of seconds")
-    return value
+    return _seconds(raw, "RUN_SUITES_TIMEOUT") if raw else DEFAULT_TIMEOUT
 
 
 def jobs_cap() -> int | None:
@@ -132,12 +152,18 @@ def record_durations(path: Path, results: dict[str, tuple[int | str, float]]) ->
 
 
 class Launched:
-    """One suite's process group, tracked until cleaned up. The leader's exit is observed without reaping it (``waitid``
-    with ``WNOWAIT``), so its zombie keeps the group id from being reused until cleanup."""
+    """One process group, tracked until cleaned up. The leader's exit is observed without reaping it (``waitid`` with
+    ``WNOWAIT``), so its zombie keeps the group id from being reused until cleanup. ``slot`` is the group's folder in
+    its owner's registry (:class:`Groups`); a runner started inside the group registers its own groups below it."""
 
-    def __init__(self, process: subprocess.Popen, log, began: float):
-        self.process, self.log, self.began = process, log, began
+    def __init__(self, process: subprocess.Popen, log, began: float, slot: Path | None = None):
+        self.process, self.log, self.began, self.slot = process, log, began, slot
         self.code: int | None = None
+        self.done = False  # cleaned up: every member and registered descendant gone, the leader reaped
+
+    @property
+    def pgid(self) -> int:
+        return self.process.pid  # the leader's pid is the group id (start_new_session)
 
     def poll(self) -> int | None:
         """The leader's exit code once it has exited (negative for a signal), else None. Does not reap."""
@@ -148,52 +174,164 @@ class Launched:
         return self.code
 
     def signal(self, signum: int) -> None:
-        try:
-            os.killpg(self.process.pid, signum)  # the leader's pid is the group id (start_new_session)
-        except (ProcessLookupError, PermissionError):
-            pass
+        _signal_group(self.pgid, signum)
 
     def occupied(self) -> bool:
         """Whether the group still holds a process (the unreaped leader's zombie counts until it is reaped)."""
         try:
-            os.killpg(self.process.pid, 0)
+            os.killpg(self.pgid, 0)
         except ProcessLookupError:
             return False
         except PermissionError:
             return True
         return True
 
+    def descendants(self) -> set[int]:
+        """The groups registered below this one (by runners it started, at any depth), never the caller's own."""
+        if self.slot is None:
+            return set()
+        own = self.slot / "pgid"
+        try:
+            files = [path for path in self.slot.rglob("pgid") if path != own]
+        except OSError:
+            return set()
+        found = set()
+        for path in files:
+            try:
+                pgid = int(path.read_text().strip())
+            except (OSError, ValueError):
+                continue
+            if pgid > 1 and pgid != os.getpgrp():
+                found.add(pgid)
+        return found
 
-def stop(launched: list[Launched], grace: float = GRACE) -> bool:
-    """SIGTERM every group, wait up to ``grace`` s, SIGKILL what remains, reap every leader, and return whether every
-    group is verifiably empty. Never interrupted by a signal: the handlers only record while this runs."""
-    for entry in launched:
+    def unregister(self) -> None:
+        if self.slot is not None:
+            shutil.rmtree(self.slot, ignore_errors=True)
+
+
+def _signal_group(pgid: int, signum: int) -> None:
+    try:
+        os.killpg(pgid, signum)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def _census() -> dict[int, int]:
+    """Live (non-zombie) processes by group id, from ``ps``; empty when ``ps`` is unavailable (the SIGKILL pass follows
+    anyway)."""
+    try:
+        rows = subprocess.run(["ps", "-A", "-o", "pgid=,stat="], capture_output=True, text=True, check=False,
+                              timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    counts: dict[int, int] = {}
+    for row in rows.splitlines():
+        fields = row.split()
+        if len(fields) >= 2 and fields[0].isdigit() and not fields[1].startswith("Z"):
+            counts[int(fields[0])] = counts.get(int(fields[0]), 0) + 1
+    return counts
+
+
+class Groups:
+    """The one owner of the process groups a runner starts (``run_suites`` and ``verify`` both use it), and of every group
+    a runner inside them starts in turn.
+
+    Each group gets a folder in this owner's registry holding its id; the group's processes inherit ``GROUPS_ENV``
+    pointing at that folder, so a nested runner's owner registers its groups below it. A nested group leaves its parent's
+    process group (``start_new_session``), so killing the parent's group alone would orphan it: :func:`stop` therefore
+    kills every group registered below an entry as well. A registration is removed only once its group is empty, before
+    its leader is reaped, so a registered id is pinned (by a live member or the unreaped leader) while it is listed."""
+
+    def __init__(self) -> None:
+        inherited = os.environ.get(GROUPS_ENV, "")
+        base = inherited if inherited and os.path.isdir(inherited) else None
+        try:
+            self.root = Path(tempfile.mkdtemp(prefix="groups-", dir=base))
+        except OSError:
+            self.root = Path(tempfile.mkdtemp(prefix="groups-"))
+        self.entries: list[Launched] = []
+        self._count = 0
+
+    def start(self, command: list[str], log, began: float, *, env: dict | None = None, **popen) -> Launched:
+        """``command`` in a new session (its own group), registered before anything else can happen to it."""
+        self._count += 1
+        slot = self.root / f"g{self._count}"
+        slot.mkdir()
+        child_env = {**(os.environ if env is None else env), GROUPS_ENV: str(slot)}
+        try:
+            process = subprocess.Popen(command, env=child_env, start_new_session=True, **popen)
+        except OSError:
+            shutil.rmtree(slot, ignore_errors=True)
+            raise
+        entry = Launched(process, log, began, slot)
+        self.entries.append(entry)
+        scratch = slot / "pgid.tmp"
+        scratch.write_text(str(process.pid))
+        os.replace(scratch, slot / "pgid")
+        return entry
+
+    def stop(self, entries: list[Launched] | None = None, grace: float | None = None) -> bool:
+        return stop(self.entries if entries is None else entries, grace)
+
+    def close(self) -> None:
+        """Remove the registry if every group was cleaned up; a group left behind stays registered for an outer owner."""
+        if all(entry.done for entry in self.entries):
+            shutil.rmtree(self.root, ignore_errors=True)
+
+
+def stop(launched: list[Launched], grace: float | None = None) -> bool:
+    """Clean up the groups: first cooperatively, SIGTERM to each group and every group registered below it, waiting up to
+    ``grace`` s (``GRACE``) for them to empty (a nested runner cleans up its own groups then); then SIGKILL every
+    registered descendant group, every group itself, and the descendants once more, always, even where a leader already
+    exited. Each emptied group is unregistered, then its leader reaped; returns whether every group is verifiably empty.
+    Never interrupted by a signal in ``run``: the handlers only record while this runs."""
+    grace = GRACE if grace is None else grace
+    entries = [entry for entry in launched if not entry.done]
+    if not entries:
+        return True
+
+    def registered() -> set[int]:
+        return {pgid for entry in entries for pgid in entry.descendants()}
+
+    def live() -> bool:
+        census = _census()
+        return any(census.get(pgid) for pgid in {entry.pgid for entry in entries} | registered())
+
+    for entry in entries:
         entry.signal(signal.SIGTERM)
+    for pgid in registered():
+        _signal_group(pgid, signal.SIGTERM)
     deadline = time.monotonic() + grace
-    while time.monotonic() < deadline and any(_members(entry) for entry in launched):
+    while time.monotonic() < deadline and live():
         time.sleep(0.05)
-    for entry in launched:
+    for pgid in registered():  # while this owner's leaders are unreaped, so the runner holding these ids still lives
+        _signal_group(pgid, signal.SIGKILL)
+    for entry in entries:
         entry.signal(signal.SIGKILL)  # also takes any grandchild the leader left behind
+    for pgid in registered():  # anything registered while its runner was dying
+        _signal_group(pgid, signal.SIGKILL)
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline and live():
+        time.sleep(0.02)
+    census = _census()
+    emptied = {}
+    for entry in entries:
+        emptied[entry] = not census.get(entry.pgid) and not any(census.get(g) for g in entry.descendants())
+        if emptied[entry]:
+            entry.unregister()  # before the reap: until then the leader's zombie pins the id
         try:
             entry.process.wait(timeout=grace)  # reaps the leader
         except subprocess.TimeoutExpired:  # pragma: no cover - SIGKILL cannot be ignored
             pass
-        entry.log.close()
+        if entry.log is not None and not entry.log.closed:
+            entry.log.close()
     deadline = time.monotonic() + grace
-    while time.monotonic() < deadline and any(entry.occupied() for entry in launched):
+    while time.monotonic() < deadline and any(entry.occupied() for entry in entries):
         time.sleep(0.02)
-    return not any(entry.occupied() for entry in launched)
-
-
-def _members(entry: Launched) -> int:
-    """Live (non-zombie) members of the group, from ``ps``; 0 when ``ps`` is unavailable (the SIGKILL pass follows anyway)."""
-    try:
-        rows = subprocess.run(["ps", "-A", "-o", "pgid=,stat="], capture_output=True, text=True, check=False).stdout
-    except OSError:
-        return 0
-    fields = (row.split() for row in rows.splitlines())
-    return sum(1 for pgid, stat in (f[:2] for f in fields if len(f) >= 2)
-               if pgid == str(entry.process.pid) and not stat.startswith("Z"))
+    for entry in entries:
+        entry.done = emptied[entry] and not entry.occupied()
+    return all(entry.done for entry in entries)
 
 
 def _failed(name: str, code: int | str, seconds: float, logdir: Path, out, note: str = "") -> None:
@@ -205,12 +343,13 @@ def _failed(name: str, code: int | str, seconds: float, logdir: Path, out, note:
 
 
 def run(suites: list[tuple[str, list[str]]], logdir: Path, out=sys.stdout,
-        timeout: float = DEFAULT_TIMEOUT, *, load: Callable[[], float] = system_load,
+        timeout: float = DEFAULT_TIMEOUT, *, limits: dict[str, float] | None = None,
+        load: Callable[[], float] = system_load,
         max_load: float | None = None, jobs: int | None = None,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic) -> dict[str, tuple[int | str, float]]:
     """Start the suites in the given order as the admission rule in ``doc/testing.md`` allows; return
-    ``{name: (exit_code, seconds)}``.
+    ``{name: (exit_code, seconds)}``. A suite runs at most ``limits[name]`` seconds, else ``timeout``.
 
     Prints a start line (also at the top of the suite's log), a status line as each suite finishes, and a failed
     suite's log. When the suites finish, fail, time out or are interrupted, every launched group is cleaned up (see
@@ -218,7 +357,7 @@ def run(suites: list[tuple[str, list[str]]], logdir: Path, out=sys.stdout,
     cleanup is done."""
     started = clock()
     limit = max_load if max_load is not None else max_load_limit()
-    launched: dict[str, Launched] = {}
+    owner = Groups()  # every suite's group, and every group a runner inside a suite registers below it
     running: dict[str, Launched] = {}
     results: dict[str, tuple[int | str, float]] = {}
     state: dict[str, int | None] = {"signal": None}
@@ -252,15 +391,15 @@ def run(suites: list[tuple[str, list[str]]], logdir: Path, out=sys.stdout,
                 log.flush()
                 print(f"  start {name:<10} {note}", file=out, flush=True)
                 try:
-                    process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                                               start_new_session=True)
+                    entry = owner.start(command, log, clock(), stdout=log, stderr=subprocess.STDOUT,
+                                        stdin=subprocess.DEVNULL)
                 except OSError as error:
                     log.write(f"cannot start {command[0]}: {error}\n".encode())
                     log.close()
                     results[name] = (127, 0.0)
                     _failed(name, 127, 0.0, logdir, out)
                     return
-                launched[name] = running[name] = Launched(process, log, clock())
+                running[name] = entry
 
             def admit() -> None:
                 while queue and (jobs is None or len(running) < jobs):
@@ -274,10 +413,11 @@ def run(suites: list[tuple[str, list[str]]], logdir: Path, out=sys.stdout,
                 for name, entry in list(running.items()):
                     code = entry.poll()
                     elapsed = clock() - entry.began
-                    if code is None and elapsed > timeout:
-                        entry.log.write(f"\nrun_suites: {name} timed out after {timeout:g} s and was killed\n".encode())
+                    limit_s = (limits or {}).get(name, timeout)
+                    if code is None and elapsed > limit_s:
+                        entry.log.write(f"\nrun_suites: {name} timed out after {limit_s:g} s and was killed\n".encode())
                         entry.log.flush()
-                        entry.signal(signal.SIGKILL)
+                        stop([entry])  # cooperative first, then SIGKILL its group and every group registered below it
                         code = "timeout"
                     if code is None:
                         continue
@@ -286,9 +426,10 @@ def run(suites: list[tuple[str, list[str]]], logdir: Path, out=sys.stdout,
                     if code == 0:
                         print(f"  ok    {name:<10} {elapsed:6.1f}s", file=out, flush=True)
                     else:
-                        entry.log.flush()
+                        if not entry.log.closed:
+                            entry.log.flush()
                         _failed(name, code, elapsed, logdir, out,
-                                f"  timed out after {timeout:g} s" if code == "timeout" else "")
+                                f"  timed out after {limit_s:g} s" if code == "timeout" else "")
                 admit()
                 sleep(POLL)
             print(f"  total       {clock() - started:6.1f}s (wall)", file=out, flush=True)
@@ -296,7 +437,9 @@ def run(suites: list[tuple[str, list[str]]], logdir: Path, out=sys.stdout,
             pass
         finally:
             cleaning["now"] = True  # from here on a signal is only recorded, never raised
-            clean = stop(list(launched.values()))
+            clean = stop(owner.entries)
+            if clean:
+                owner.close()
     finally:
         for signum, handler in previous.items():
             signal.signal(signum, handler)
@@ -316,7 +459,7 @@ def main(arguments: list[str]) -> int:
     print(f"==> {len(suites)} suites, load-aware (limit {limit:g}, jobs {jobs if jobs else 'uncapped'}, longest first); "
           f"logs in {logdir}; per-suite timeout {timeout:g} s", flush=True)
     try:
-        results = run(suites, logdir, timeout=timeout, max_load=limit, jobs=jobs)
+        results = run(suites, logdir, timeout=timeout, limits=limits(arguments), max_load=limit, jobs=jobs)
     except Interrupted as interruption:
         claim = ("every suite was stopped" if interruption.stopped
                  else "some processes could not be verified stopped (their groups may still be running)")

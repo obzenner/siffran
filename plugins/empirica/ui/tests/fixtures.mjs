@@ -1,11 +1,16 @@
-// The real-service fixtures the plugin vendors (what `make contract-fixtures` generates through the v2 service): the
-// store view, every run's document and the scenario -> run key table. Tests build from these, never from hand-written JSON.
+// The real-service fixtures the plugin vendors (what `make contract-fixtures` generates through the real service): the
+// summary, every run's row, every run's sheet and the scenario -> run key table. Tests build from these, never from
+// hand-written JSON.
 import { readFileSync } from "node:fs";
+import { URL } from "node:url";  // Node's, as in paths.mjs
+import { FIXTURES as dir } from "./paths.mjs";
 
-const dir = new URL("../../vendor/contracts/empirica-ui-view/v1/fixtures/", import.meta.url);
 const read = (f) => JSON.parse(readFileSync(new URL(f, dir), "utf8"));
-export const view = read("view.json"), details = read("runs.json"), scenarios = read("scenarios.json");
-export const rows = view.projects.flatMap((p) => p.runs.map((row) => ({ project: p, row })));
-export const byKey = new Map(rows.map(({ row }) => [row.key, row]));
-export const projectOf = new Map(rows.map(({ row, project }) => [row.key, project]));
+export const summary = read("summary.json"), rows = read("rows.json"), sheets = read("runs.json"), scenarios = read("scenarios.json");
+export const byKey = new Map(rows.map((r) => [r.key, r]));
 export const row = (scenario) => byKey.get(scenarios[scenario]);
+export const sheet = (scenario) => sheets[scenarios[scenario]];
+/** A runs-page line, as /api/runs gives it (the fields the row schema calls a line). */
+export const line = (r) => ({ key: r.key, id: r.id, goal: r.goal, standing: r.standing, ask: r.ask, asked_at: r.asked_at, project: r.project,
+  project_label: summary.projects.find((p) => p.id === r.project)?.label ?? r.project, host: r.session?.host ?? null, session: r.session?.label ?? null,
+  updated: r.updated, generation: r.generation });

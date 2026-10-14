@@ -1,6 +1,6 @@
 // app/poll.js on a fake clock: paused while hidden, resumed (at once) when shown, later after each failure, a cap.
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import { Poller, backoff } from "../app/poll.js";
 
 function harness({ answers = [], hidden = false } = {}) {
@@ -73,12 +73,15 @@ test("waking while a question is out or a timer is pending asks nothing extra; a
 });
 
 test("a tick that throws counts as a failure and the loop goes on", async () => {
-  let calls = 0, timers = [];
-  const p = new Poller({ interval: 10, cap: 40, hidden: () => false, tick: async () => { calls++; throw new Error("x"); },
+  // waits on the state (the fourth failed tick), not on time
+  let calls = 0, fourth;
+  const timers = [], reached = new Promise((r) => { fourth = r; });
+  const p = new Poller({ interval: 10, cap: 40, hidden: () => false, tick: async () => { if (++calls === 4) fourth(); throw new Error("x"); },
     setTimer: (fn, ms) => { timers.push(ms); return setTimeout(fn, 0); }, clearTimer: clearTimeout });
   p.start();
-  await new Promise((r) => setTimeout(r, 30));
+  await reached;
+  await new Promise((r) => setImmediate(r));  // the fourth failure is counted and the next wait scheduled
   p.stop();
-  assert.ok(calls >= 3);
-  assert.deepEqual(timers.slice(0, 4), [10, 20, 40, 40]);
+  assert.equal(calls, 4);
+  assert.deepEqual(timers.slice(0, 5), [10, 20, 40, 40, 40]);
 });

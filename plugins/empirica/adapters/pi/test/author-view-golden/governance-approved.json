@@ -63,7 +63,8 @@
         "next_action": "investigation.record",
         "first_approval": true,
         "pre_approval_revisions": 0,
-        "post_approval_revisions": 0
+        "post_approval_revisions": 0,
+        "human_wait": false
       },
       "contract": {
         "id": "empirica/public",

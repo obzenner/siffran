@@ -476,6 +476,11 @@
               "must": {
                 "type": "string",
                 "minLength": 1
+              },
+              "waiting": {
+                "description": "The requirement's words when the human is the one to act on it (core.evaluation.report_requirements: the configuration waiting on its human, core.governance.human_wait).",
+                "type": "string",
+                "minLength": 1
               }
             }
           }

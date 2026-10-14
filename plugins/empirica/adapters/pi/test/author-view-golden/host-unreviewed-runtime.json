@@ -118,7 +118,8 @@
         "next_action": "governance.propose",
         "first_approval": false,
         "pre_approval_revisions": 0,
-        "post_approval_revisions": 0
+        "post_approval_revisions": 0,
+        "human_wait": false
       },
       "audit": {
         "verdict": "none",

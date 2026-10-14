@@ -1,5 +1,5 @@
 {
-  "$description": "What scripts/vendor.mjs copies into vendor/ (UI.md, Tokens, styles, vendor). Versions come from package-lock.json.",
+  "$description": "What scripts/vendor.mjs copies into vendor/ (UI.md, Tokens, styles, vendor). Versions come from package-lock.json. Fonts: the weights tokens.json names (weight: 300 body, 400 medium, 500 semibold), nothing heavier. `lucide.stroke_width` is the sprite's line width (V2 thinned it from Lucide's 2).",
   "basecoat": {
     "styles": [
       "nova"
@@ -7,10 +7,10 @@
   },
   "fonts": [
     {
-      "family": "IBM Plex Sans Variable",
-      "package": "@fontsource-variable/ibm-plex-sans",
-      "file": "ibm-plex-sans-latin-wght-normal.woff2",
-      "weight": "100 700"
+      "family": "IBM Plex Mono",
+      "package": "@fontsource/ibm-plex-mono",
+      "file": "ibm-plex-mono-latin-300-normal.woff2",
+      "weight": "300"
     },
     {
       "family": "IBM Plex Mono",
@@ -24,5 +24,8 @@
       "file": "ibm-plex-mono-latin-500-normal.woff2",
       "weight": "500"
     }
-  ]
+  ],
+  "lucide": {
+    "stroke_width": 1.5
+  }
 }

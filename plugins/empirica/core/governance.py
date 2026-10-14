@@ -184,6 +184,29 @@ def interaction_error(governance: Mapping, confirmations: int) -> str | None:
     return None
 
 
+#: The configuration states that wait on a human's answer: a proposal not approved yet (``pending``, or
+#: ``revision_pending`` after the first approval) and one the human rejected (the human says what to propose instead).
+HUMAN_WAIT_STATES = frozenset({"pending", "revision_pending", "rejected"})
+
+
+def human_wait(governance: Mapping, prompt_error: str | None) -> bool:
+    """Whether the run's configuration waits on its human now: the agent has asked (a sized ``configure_run``, not the
+    StartRun placeholder), the configuration is in ``HUMAN_WAIT_STATES`` (not approved yet, or rejected), this phase is a
+    human's to approve (``host_ui``), the host that mediated it can show a human its dialog (``approval_capability``) and
+    another presentation is still admissible (``prompt_error``, the interaction ceiling: ``interaction_error``). Its
+    dialog is open, was closed without an answer, or was answered no; it is shown again at the agent's next
+    ``configure_run``, and until the human says how to go on the next act is theirs. Otherwise the agent acts next: it
+    has yet to ask, or nobody can be asked (the agent may only stop honestly).
+
+    Read from the governance of the run's state or of its author view (the same keys); the author view publishes the
+    answer as ``governance.human_wait``. The one predicate of who acts on a configuration: the report's requirements
+    (``evaluation.report_requirements``) and so the observer's standing and ask, and the hosts' turn-end wait, which reads
+    the view's answer and adds only its own approval ingress and the sole-blocker check."""
+    return (governance["state"] in HUMAN_WAIT_STATES and sized(governance)
+            and expected_approval_kind(governance) == "host_ui"
+            and governance["context"]["approval_capability"] == HUMAN_CONFIGURATION and prompt_error is None)
+
+
 def expected_approval_kind(governance: Mapping) -> str:
     """The permitted approval kind for the current phase, from neutral admitted facts.
 

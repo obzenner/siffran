@@ -1,53 +1,61 @@
 {
-  "about": "The two predicates of the turn end (Pi `evidenceAskable`/`auditPending`, Claude `_evidence_report_directive`/`_async_audit_wait`) answer the same question on the same results. Each case is a result of `author-view-golden/<golden>.json`, optionally patched; both suites read this file and assert the expected answers (HQ-G9-08, HQ-G9-11).",
+  "about": "The predicates of the turn end answer the same question on the same results in both hosts and the observer: Pi `evidenceAskable`/`auditPending`/`humanApprovalWait`, Claude `_evidence_report_directive`/`_async_audit_wait`/`_human_approval_wait`, and the core's `governance.human_wait` (the one predicate of who acts on a configuration, which the observer's standing reads). Each case is a result of `author-view-golden/<golden>.json`, optionally patched; `human_wait` is the core's answer on the case's governance (the golden publishes it), `approval_wait` the host's turn end with the run mediated through that host's own dialog (each host's suite sets its ingress unless the case is `foreign_ingress`). All three suites read this file (HQ-G9-08, HQ-G9-11).",
   "cases": [
     {
       "name": "evidence-reason-askable",
       "golden": "evidence-reason-askable",
       "evidence_askable": true,
-      "audit_pending": false
+      "audit_pending": false,
+      "approval_wait": false
     },
     {
       "name": "evidence-reason-unobserved",
       "golden": "evidence-reason-unobserved",
       "evidence_askable": true,
-      "audit_pending": false
+      "audit_pending": false,
+      "approval_wait": false
     },
     {
       "name": "evidence-reason-mixed",
       "golden": "evidence-reason-mixed",
       "evidence_askable": true,
-      "audit_pending": false
+      "audit_pending": false,
+      "approval_wait": false
     },
     {
       "name": "evidence-reason-later",
       "golden": "evidence-reason-later",
       "evidence_askable": false,
-      "audit_pending": false
+      "audit_pending": false,
+      "approval_wait": false
     },
     {
       "name": "evidence-reason-unavailable",
       "golden": "evidence-reason-unavailable",
       "evidence_askable": false,
-      "audit_pending": false
+      "audit_pending": false,
+      "approval_wait": false
     },
     {
       "name": "evidence-reason-presentation-failed",
       "golden": "evidence-reason-presentation-failed",
       "evidence_askable": false,
-      "audit_pending": false
+      "audit_pending": false,
+      "approval_wait": false
     },
     {
       "name": "evidence-reason-surface-unrecorded",
       "golden": "evidence-reason-surface-unrecorded",
       "evidence_askable": false,
-      "audit_pending": false
+      "audit_pending": false,
+      "approval_wait": false
     },
     {
       "name": "a single pending audit",
       "golden": "block-pending-audit",
       "evidence_askable": false,
-      "audit_pending": true
+      "audit_pending": true,
+      "approval_wait": false
     },
     {
       "name": "a pending child that is an investigation, not an audit",
@@ -64,25 +72,29 @@
           ],
           "value": "investigation"
         }
-      ]
+      ],
+      "approval_wait": false
     },
     {
       "name": "a stale-scope audit",
       "golden": "audit-stale-scope",
       "evidence_askable": false,
-      "audit_pending": false
+      "audit_pending": false,
+      "approval_wait": false
     },
     {
       "name": "an open claim",
       "golden": "block-open-claim",
       "evidence_askable": false,
-      "audit_pending": false
+      "audit_pending": false,
+      "approval_wait": false
     },
     {
       "name": "a converged run",
       "golden": "allow-converged",
       "evidence_askable": false,
-      "audit_pending": false
+      "audit_pending": false,
+      "approval_wait": false
     },
     {
       "name": "an askable batch that is not the sole blocker",
@@ -106,6 +118,114 @@
               "obligations"
             ],
             "message": "Record research."
+          }
+        }
+      ],
+      "approval_wait": false
+    },
+    {
+      "name": "a configuration the agent asked for, not approved yet",
+      "golden": "governance-wait-pending",
+      "evidence_askable": false,
+      "audit_pending": false,
+      "human_wait": true,
+      "approval_wait": true
+    },
+    {
+      "name": "a revision after the first approval",
+      "golden": "governance-wait-revision-pending",
+      "evidence_askable": false,
+      "audit_pending": false,
+      "human_wait": true,
+      "approval_wait": true
+    },
+    {
+      "name": "a configuration the human rejected",
+      "golden": "governance-wait-rejected",
+      "evidence_askable": false,
+      "audit_pending": false,
+      "human_wait": true,
+      "approval_wait": true
+    },
+    {
+      "name": "the StartRun placeholder, not yet asked for",
+      "golden": "governance-wait-unsized",
+      "evidence_askable": false,
+      "audit_pending": false,
+      "human_wait": false,
+      "approval_wait": false
+    },
+    {
+      "name": "a configuration past its interaction limit",
+      "golden": "governance-wait-interaction-limit",
+      "evidence_askable": false,
+      "audit_pending": false,
+      "human_wait": false,
+      "approval_wait": false
+    },
+    {
+      "name": "a configuration nobody can be asked about",
+      "golden": "governance-wait-unavailable",
+      "evidence_askable": false,
+      "audit_pending": false,
+      "human_wait": false,
+      "approval_wait": false
+    },
+    {
+      "name": "a delegated auto run",
+      "golden": "governance-wait-delegated-auto",
+      "evidence_askable": false,
+      "audit_pending": false,
+      "human_wait": false,
+      "approval_wait": false
+    },
+    {
+      "name": "a revision of an interactive auto run after its first approval",
+      "golden": "governance-wait-post-approval-auto",
+      "evidence_askable": false,
+      "audit_pending": false,
+      "human_wait": false,
+      "approval_wait": false
+    },
+    {
+      "name": "an approved configuration",
+      "golden": "governance-approved",
+      "evidence_askable": false,
+      "audit_pending": false,
+      "human_wait": false,
+      "approval_wait": false
+    },
+    {
+      "name": "a rejected configuration another host's dialog mediated",
+      "golden": "governance-wait-rejected",
+      "evidence_askable": false,
+      "audit_pending": false,
+      "human_wait": true,
+      "approval_wait": false,
+      "foreign_ingress": true
+    },
+    {
+      "name": "a configuration wait that is not the sole blocker",
+      "golden": "governance-wait-pending",
+      "evidence_askable": false,
+      "audit_pending": false,
+      "human_wait": true,
+      "approval_wait": false,
+      "patch": [
+        {
+          "path": [
+            "reasons"
+          ],
+          "append": {
+            "code": "claim.research_missing",
+            "parameters": {
+              "claim_id": "C0"
+            },
+            "message": "research missing",
+            "next_actions": [],
+            "sections": [
+              "claims"
+            ]
           }
         }
       ]

@@ -20,10 +20,18 @@ Why this is a rule and not a preference: a command that lives only in a chat mes
 | the skills and the test-suite layout | `make skills-check` / `make suites-check` |
 | `adrs --ng doctor` | `make adr-check` |
 | **everything, before you commit** | **`make check`** |
+| a hand-written gate script, or `release-check` plus the UI and smoke checks one by one | `make verify` (hermetic; `UI=0` skips the browser steps) |
+| `pip install hypothesis` or any ad-hoc dev tool install | `make dev-install` (pinned, hashed `requirements-dev.txt` into `.venv`; `make ui-install` for the UI's) |
+| hand-mutating code to see whether a test notices | `make mutate` (the changed lines; each survivor printed as `file:line original → mutant`; `FILES=`/`LINES=` to choose; Stryker incremental on Vitest, mutmut in a scratch copy, never in the worktree) |
+| running a UI test file by hand, or guessing which tests a change touches | `make ui-test` (the tests related to the changed UI files, from the imports; `FILES=app/geometry.js` to name them) |
+| a hand-driven Chrome or a screenshot script to see the UI | `make ui-look URL=<page> [OUT=x.png] [SIZE=1440x900]` (one PNG within 30 s; open it with the read tool) |
+| starting a second demo server, or one in the foreground | `make ui-dev` (one demo per worktree, N=1000, reused while it runs; prints the URL; `STOP=1` stops it) |
 | only the suite you touched | `make check-static` / `check-core` / `check-evidence` / `check-observer` / `check-claude` / `check-codex` / `check-pi` / `check-ui` |
 | what CI runs (no Node/Pi on the runner) | `make check-ci` (`PI_CHECKS=1` to include the Pi and UI suites) |
 | hand-editing a `version` field | `make bump PLUGIN=<name> PART=minor` |
 | guessing whether the doc tables are current | `make docs-check` |
+
+**UI work: read `plugins/empirica/ui/CLAUDE.md` first.**
 
 Rules that follow from this:
 

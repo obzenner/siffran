@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://siffran.dev/contracts/empirica-ui-view/v1/run.schema.json",
-  "title": "Empirica observer: one run's detail (GET /api/run?key=KEY, observe --run KEY)",
-  "description": "What the detail panel shows for one run, beyond its row in the store summary (the row owns state, diagnostic, attention and the audit summary; nothing here repeats them). Same ownership as view.schema.json; reason wording comes from core.confirmation.reason_text over the public-contract registry. A null is unknown (the run was not read that far), never an empty list. Enumerations are held equal to their owners by scripts/validate_ui_view.py.",
+  "title": "Empirica observer: one run's detail (GET /api/run?key=)",
+  "description": "One run's detail with its own row and every attempt's row (GET /api/run?key=): what the side sheet shows, in one request. The detail's facts are the ones the row does not hold; the row (its standing, state, ask, claims with their words, graph and audit summary) owns what it holds and is given beside the detail, so a reader never joins two requests or derives a fact. Reason wording comes from core.confirmation.reason_text over the public-contract registry. A null is unknown (the run was not read that far), never an empty list. Enumerations are held equal to their owners by scripts/validate_ui_view.py.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -20,7 +20,12 @@
     "author",
     "auditor",
     "steps",
-    "claims"
+    "claims",
+    "audits",
+    "dropped",
+    "decisions",
+    "row",
+    "attempts"
   ],
   "properties": {
     "contract": {
@@ -33,7 +38,7 @@
     "version": {
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$",
-      "description": "Equal to the run's version in the view it belongs to."
+      "description": "Equal to the run's version in the view it belongs to: the cache version of the published document, not a plugin digest."
     },
     "goal": {
       "type": [
@@ -376,6 +381,7 @@
             "additionalProperties": false,
             "required": [
               "n",
+              "at",
               "kind",
               "subject",
               "claim",
@@ -389,6 +395,13 @@
               "n": {
                 "type": "integer",
                 "minimum": 1
+              },
+              "at": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "When the write that first committed this artifact landed (seconds since the epoch, UTC), from that write's own entry in the run's timeline (adapters/state/timeline.py, ADR-0070). A local label, never an order: steps are in causal order whatever their times say. Null when that write's entry is missing, malformed or does not chain to the entry of the write before it; never a later or earlier write's time."
               },
               "kind": {
                 "enum": [
@@ -700,6 +713,243 @@
         }
       ],
       "description": "What an active run still owes (the author view's obligations), identical rows grouped. Empty for a run that has ended. Null when not read."
+    },
+    "audits": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "verdict",
+              "findings",
+              "auditor",
+              "independence",
+              "at"
+            ],
+            "properties": {
+              "verdict": {
+                "enum": [
+                  "passed",
+                  "failed"
+                ]
+              },
+              "findings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "auditor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "independence": {
+                "enum": [
+                  "distinct",
+                  "mixed",
+                  "same_model",
+                  "unverified",
+                  "human_owned",
+                  null
+                ],
+                "description": "The verdict's independence as it stood when it was recorded (core.evaluation.independence_then): its auditor against the producers of exactly the evidence its audit was launched over, never today's evidence. Null when the run no longer holds that launch dossier."
+              },
+              "at": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Seconds since the epoch (UTC) of the write that recorded it, from the run's timeline (ADR-0070): a label, never an order; null when unknown."
+              }
+            }
+          }
+        }
+      ],
+      "description": "Every audit verdict in history order (core.evaluation.audit_verdicts; the last is the latest): its findings, the auditor the host recorded, its independence and when it was recorded. Null when not read."
+    },
+    "dropped": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "claim",
+              "text",
+              "kind",
+              "removed",
+              "why",
+              "source",
+              "citation",
+              "command",
+              "at"
+            ],
+            "properties": {
+              "claim": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "ordinary",
+                  "needs-experiment",
+                  "needs-decision"
+                ]
+              },
+              "removed": {
+                "type": "boolean",
+                "description": "Declared by an earlier graph and not by the selected one."
+              },
+              "why": {
+                "enum": [
+                  "refuted",
+                  "spike_failed",
+                  "rejected",
+                  "removed"
+                ],
+                "description": "The gate's own cause (core.evaluation.claim_state_cause): refuting research, a failed spike, a human's no; or removed in a regraph with no evidence against it."
+              },
+              "source": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "citation": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "command": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "at": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Seconds since the epoch (UTC) of the write that recorded it, from the run's timeline (ADR-0070): a label, never an order; null when unknown."
+              }
+            }
+          }
+        }
+      ],
+      "description": "The claims the run no longer stands on, each with why (core.observer.dropped). Null when not read."
+    },
+    "decisions": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "asked",
+              "claim",
+              "source",
+              "plan",
+              "answer",
+              "effect",
+              "at"
+            ],
+            "properties": {
+              "asked": {
+                "enum": [
+                  "approve_configuration",
+                  "approve_revision",
+                  "decide_claim",
+                  "confirm_source",
+                  "consent_stop",
+                  "freeze_scope"
+                ]
+              },
+              "claim": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The claim the answer is attached to: the claim decided (decide_claim), or the claim the confirmed source supports (confirm_source); null for a configuration or the run's end."
+              },
+              "source": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The research record's source the answer confirms or rejects (confirm_source only)."
+              },
+              "plan": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1,
+                "description": "The configuration's plan revision the answer approves, amends or rejects (approve_configuration, approve_revision only)."
+              },
+              "answer": {
+                "enum": [
+                  "approve",
+                  "reject",
+                  "later"
+                ]
+              },
+              "effect": {
+                "enum": [
+                  "configuration_approved",
+                  "configuration_amended",
+                  "configuration_rejected",
+                  "record_confirmed",
+                  "record_rejected",
+                  "claim_approved",
+                  "claim_rejected",
+                  "run_ended",
+                  "run_continued",
+                  "none"
+                ]
+              },
+              "at": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Seconds since the epoch (UTC) of the write that recorded the answer (a configuration receipt: the first write whose timeline entry lists it, ADR-0070); a label, never an order; null when unknown."
+              }
+            }
+          }
+        }
+      ],
+      "description": "Every answer a human gave (core.observer.decisions): configuration receipts from a dialog, then confirmations and items left for later in history order. Null when not read."
+    },
+    "row": {
+      "$ref": "https://siffran.dev/contracts/empirica-ui-view/v1/row.schema.json#/$defs/row",
+      "description": "This run's row, exactly as the store index holds it."
+    },
+    "attempts": {
+      "type": "array",
+      "items": {
+        "$ref": "https://siffran.dev/contracts/empirica-ui-view/v1/row.schema.json#/$defs/row"
+      },
+      "minItems": 1,
+      "description": "Every attempt at this run (the same project and run), by generation, this one included, each as its row. Order is the generation, never a time."
     }
   },
   "$defs": {

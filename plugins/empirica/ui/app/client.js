@@ -1,98 +1,118 @@
 // The app's data client for the observer server (adapters/observer/server.py, contract empirica-ui-view/v1).
-// It asks whether the store changed (ETag → 304), fetches a run's detail only when the view's version of that run
-// is newer than the one it has, and reports every outcome as a value: nothing it returns throws. A reply that is
-// not the contract (not JSON, the wrong `contract`, a missing required part) is `invalid`, never trusted. One
-// request per (run, version) is ever in flight, and the cache keeps only the runs the current view lists.
-// No DOM. Tested in tests/client.test.mjs.
+// It asks for the store summary with its ETag (304 when nothing changed), in the viewer's time zone (`tz`), for pages of rows (`/api/runs`, `/api/search`)
+// and for one run's sheet (`/api/run`, with its ETag). It reports every outcome as a value: nothing it returns throws. A
+// reply that is not the contract (not JSON, the wrong `contract`, a missing required part) is `invalid`, never trusted.
+// One request per run's sheet is ever in flight. A page asked with a cursor from another published view is `stale`
+// (the server's 409): the caller starts the walk again. No DOM. Tested in tests/client.test.mjs.
 
 const CONTRACT = "empirica-ui-view/v1";
 const isObject = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
-const ARRAYS = { run: ["edges", "claims"], detail: ["residuals", "outstanding", "stale", "steps", "claims"] };
-// A list is a list, or null: a run that was not read has no list, which is not an empty one.
-const listOrNull = (x) => x === null || Array.isArray(x);
 
-/** Whether `v` has the view's required shape: its discriminator, token, coverage, and every project with its runs and their
- * claims as lists (or null where a run was not read). The schema (view.schema.json) is checked in the build; this is the cheap check at the boundary. */
-export function validView(v) {
-  return isObject(v) && v.contract === CONTRACT && typeof v.token === "string" && isObject(v.coverage) && Array.isArray(v.projects)
-    && v.projects.every((p) => isObject(p) && typeof p.id === "string" && typeof p.label === "string" && Array.isArray(p.runs) && Array.isArray(p.families)
-      && p.runs.every((r) => isObject(r) && typeof r.key === "string" && typeof r.version === "string"
-        && ARRAYS.run.every((k) => listOrNull(r[k]))));
-}
-/** Whether `d` has a run document's required shape. */
-export function validDetail(d) {
-  return isObject(d) && d.contract === CONTRACT && typeof d.key === "string" && typeof d.version === "string"
-    && ARRAYS.detail.every((k) => listOrNull(d[k]));
-}
+/** Whether `v` has a summary's required shape. The schema (summary.schema.json) is checked in the build; this is the cheap check at the boundary. */
+export const validSummary = (v) => isObject(v) && v.contract === CONTRACT && typeof v.token === "string" && isObject(v.coverage)
+  && isObject(v.facets) && isObject(v.aggregates) && isObject(v.marks) && isObject(v.calendar) && Array.isArray(v.projects) && Array.isArray(v.needs);
+/** Whether `v` has a page's required shape. */
+export const validPage = (v) => isObject(v) && v.contract === CONTRACT && typeof v.token === "string" && Array.isArray(v.rows)
+  && typeof v.total === "number" && (v.next === null || typeof v.next === "string") && v.rows.every((r) => isObject(r) && typeof r.key === "string" && typeof r.id === "string");
+/** Whether `v` has a sheet's required shape: a run's detail, its own row and every attempt's. */
+export const validSheet = (v) => isObject(v) && v.contract === CONTRACT && typeof v.key === "string" && typeof v.version === "string"
+  && isObject(v.row) && Array.isArray(v.attempts) && v.attempts.every((a) => isObject(a) && typeof a.key === "string");
 
 export class Client {
-  #fetch; #source; #etag = null; #details = new Map(); #flying = new Map(); #checked = null; #now;
-  /** @param {string} source - one of catalogue.data_sources; @param {typeof fetch} fetcher */
-  constructor(source, fetcher = (...a) => fetch(...a), now = () => Date.now()) { this.#source = source; this.#fetch = fetcher; this.#now = now; }
-
-  /** When the observer last gave a good answer about the store (an unchanged one counts), in ms since the epoch;
-   * null before the first. A failed answer does not move it, so the page can say how old what it shows is. */
-  get checked() { return this.#checked; }
-
-  /** `missing`: the server does not serve this source; `offline`: no answer at all; `error`: the server answered
-   * with a failure (a 5xx); `invalid`: an answer that is not the view contract.
-   * @returns {Promise<{status:"changed",view:object}|{status:"same"|"missing"|"offline"|"error"|"invalid"}>} */
-  async view() {
-    const r = await this.#get(`/api/view?${new URLSearchParams({ source: this.#source })}`, this.#etag ? { "If-None-Match": this.#etag } : {});
-    if (!r) return { status: "offline" };
-    if (r.status === 304) { this.#checked = this.#now(); return { status: "same" }; }
-    if (r.status === 404) return { status: "missing" };
-    if (!r.ok) return { status: "error" };
-    const view = await r.json().catch(() => undefined);
-    if (!validView(view)) return { status: "invalid" };
-    this.#etag = r.headers.get("ETag");
-    this.#checked = this.#now();
-    this.prune(view.projects.flatMap((p) => p.runs.map((x) => x.key)));
-    return { status: "changed", view };
+  #fetch; #source; #now; #tz; #summaries = new Map(); #sheets = new Map(); #flying = new Map(); #checked = null;
+  /** @param {string} source - one of catalogue.data_sources; @param {typeof fetch} fetcher; `tz`: the viewer's IANA time
+   * zone, whose civil days the observer counts the calendar in (the browser's own by default). */
+  constructor(source, fetcher = (...a) => fetch(...a), now = () => Date.now(), tz = Intl.DateTimeFormat().resolvedOptions().timeZone) {
+    this.#source = source; this.#fetch = fetcher; this.#now = now; this.#tz = tz;
   }
 
-  /** The detail of `run` at its version in the view. `missing`: the server has no such run (any more) or it has
-   * moved on (the next view brings the new version); `offline`: no answer; `error`: the server answered with a
-   * failure; `invalid`: an answer that is not a run document. Requests for one (run, version) are shared.
-   * @returns {Promise<{status:"ok",detail:object}|{status:"missing"|"offline"|"error"|"invalid"}>} */
-  detail(run) {
-    const have = this.cached(run);
-    if (have) return Promise.resolve({ status: "ok", detail: have });
-    const id = `${run.key}@${run.version}`;
-    if (!this.#flying.has(id)) this.#flying.set(id, this.#fetchDetail(run).finally(() => this.#flying.delete(id)));
+  /** When the observer last gave a good answer (an unchanged one counts), in ms since the epoch; null before the first. A
+   * failed answer does not move it, so the page can say how old what it shows is. */
+  get checked() { return this.#checked; }
+
+  /** The summary within `since` (seconds; null: all time). `same` carries the summary the caller already has (its ETag
+   * matched). `missing`: the server does not serve this source; `offline`: no answer; `error`: a 5xx; `invalid`: not the contract.
+   * @returns {Promise<{status:"changed"|"same",summary:object}|{status:"missing"|"offline"|"error"|"invalid"}>} */
+  async summary(since = null) {
+    const key = String(since), have = this.#summaries.get(key);
+    const r = await this.#get(this.#url("/api/summary", { ...(since === null ? {} : { since }), ...(this.#tz ? { tz: this.#tz } : {}) }), have ? { "If-None-Match": have.etag } : {});
+    if (!r) return { status: "offline" };
+    if (r.status === 304 && have) { this.#checked = this.#now(); return { status: "same", summary: have.summary }; }
+    const failed = this.#failure(r);
+    if (failed) return failed;
+    const summary = await r.json().catch(() => undefined);
+    if (!validSummary(summary)) return { status: "invalid" };
+    this.#summaries.set(key, { etag: r.headers.get("ETag"), summary });
+    this.#checked = this.#now();
+    return { status: have && have.summary.token === summary.token ? "same" : "changed", summary };
+  }
+
+  /** One page of rows for `filters` (the facets, and `since`), after `cursor`. `stale`: the cursor belongs to a published
+   * view the store has moved on from (`token` is the current one): walk again from the first page.
+   * @returns {Promise<{status:"ok",page:object}|{status:"stale",token:string}|{status:"missing"|"offline"|"error"|"invalid"|"refused"}>} */
+  runs(filters = {}, cursor = null, limit = null) { return this.#page("/api/runs", { ...filters, ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}) }); }
+  /** The same for the server's search: the runs whose goal, claim text, project or session holds every word of `q`. */
+  search(q, cursor = null, limit = null) { return this.#page("/api/search", { q, ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}) }); }
+
+  async #page(path, query) {
+    const r = await this.#get(this.#url(path, query));
+    if (!r) return { status: "offline" };
+    if (r.status === 409) {
+      const body = await r.json().catch(() => undefined);
+      return isObject(body) && typeof body.token === "string" ? { status: "stale", token: body.token } : { status: "invalid" };
+    }
+    const failed = this.#failure(r);
+    if (failed) return failed;
+    const page = await r.json().catch(() => undefined);
+    return validPage(page) ? { status: "ok", page } : { status: "invalid" };
+  }
+
+  /** The sheet of the run with compact id (or key) `id`: its detail, its row and every attempt's row. The server's ETag
+   * keeps a revisit to one cheap question. Requests for one run are shared.
+   * @returns {Promise<{status:"ok",sheet:object}|{status:"missing"|"offline"|"error"|"invalid"}>} */
+  sheet(id) {
+    if (!this.#flying.has(id)) this.#flying.set(id, this.#fetchSheet(id).finally(() => this.#flying.delete(id)));
     return this.#flying.get(id);
   }
 
-  async #fetchDetail(run) {
-    const r = await this.#get(`/api/run?${new URLSearchParams({ source: this.#source, key: run.key })}`);
+  async #fetchSheet(id) {
+    const have = this.#sheets.get(id);
+    const r = await this.#get(this.#url("/api/run", { key: id }), have ? { "If-None-Match": have.etag } : {});
     if (!r) return { status: "offline" };
-    if (r.status === 404) return { status: "missing" };
-    if (!r.ok) return { status: "error" };
-    const d = await r.json().catch(() => undefined);
-    if (!validDetail(d) || d.key !== run.key) return { status: "invalid" };
-    if (d.version !== run.version) return { status: "missing" };
-    this.#details.set(run.key, d);
-    return { status: "ok", detail: d };
+    if (r.status === 304 && have) { this.#checked = this.#now(); return { status: "ok", sheet: have.sheet }; }
+    if (r.status === 404) { this.#sheets.delete(id); return { status: "missing" }; }
+    const failed = this.#failure(r);
+    if (failed) return failed;
+    const sheet = await r.json().catch(() => undefined);
+    if (!validSheet(sheet)) return { status: "invalid" };
+    this.#sheets.set(id, { etag: r.headers.get("ETag"), sheet });
+    return { status: "ok", sheet };
   }
 
-  /** The response, or null when the server cannot be reached. A response that carries no data (a 304, an error)
-   * has its body read and dropped: an unread body leaves the browser reporting the request as cancelled
-   * (`net::ERR_ABORTED`), once per poll. */
+  /** What each data source serves, by the server's word (`/api/about`: `store` is "store" or "generated", `demo` is
+   * "fixtures"), or {} when it does not say or cannot be reached. It names the sources; it is not a summary. */
+  async about() {
+    const r = await this.#get("/api/about");
+    const body = r?.ok ? await r.json().catch(() => undefined) : undefined;
+    return isObject(body?.sources) ? body.sources : {};
+  }
+
+  #url(path, query) {
+    const params = new URLSearchParams({ source: this.#source });
+    for (const [k, v] of Object.entries(query)) params.set(k, v);
+    return `${path}?${params}`;
+  }
+  /** A reply that is not a good one, as a value. */
+  #failure(r) {
+    if (r.status === 404) return { status: "missing" };
+    if (r.status === 400) return { status: "refused" };
+    return r.ok ? null : { status: "error" };
+  }
+  /** The response, or null when the server cannot be reached. A response that carries no data (a 304, an error) has its
+   * body read and dropped: an unread body leaves the browser reporting the request as cancelled (`net::ERR_ABORTED`). */
   async #get(url, headers = {}) {
     const r = await this.#fetch(url, { headers }).catch(() => null);
-    if (r && (r.status === 304 || !r.ok)) await r.arrayBuffer?.().catch(() => {});
+    if (r && (r.status === 304 || (!r.ok && r.status !== 409))) await r.arrayBuffer?.().catch(() => {});
     return r;
-  }
-
-  /** The cached detail of `run` at its version, without asking. */
-  cached(run) {
-    const have = this.#details.get(run.key);
-    return have?.version === run.version ? have : null;
-  }
-
-  /** Forget every cached detail whose run is not among `keys` (the runs of the view just received). */
-  prune(keys) {
-    const live = new Set(keys);
-    for (const key of this.#details.keys()) if (!live.has(key)) this.#details.delete(key);
   }
 }

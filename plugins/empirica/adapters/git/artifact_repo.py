@@ -25,12 +25,14 @@ worktrees share one artifact namespace because ``refs/empirica/*`` lives in the 
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import io
 import json
 import os
 import re
 import subprocess
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -189,12 +191,122 @@ class GitArtifactRepository:
         )
 
     def ref_heads(self) -> dict[str, str]:
-        """Every artifact ref and the commit it names, in one read-only ``for-each-ref``: what a
+        """Every artifact ref and the object it names, in one read-only ``for-each-ref`` that opens no object: what a
         reader polls to learn which runs' histories moved without reading any of them."""
         proc = self._git("for-each-ref", "--format=%(refname) %(objectname)", "refs/empirica/artifacts/")
         if proc.returncode != 0:
             raise GitError(f"for-each-ref failed: {proc.stderr.strip()}")
         return dict(line.split(" ", 1) for line in proc.stdout.splitlines() if " " in line)
+
+    #: What a refs signature holds besides the artifact directories: a change to any of these may move any ref.
+    REFS_GLOBAL = ("packed-refs", "reftable", "reftable/tables.list")
+
+    def refs_signature(self) -> dict[str, tuple[int, int, int, int] | None] | None:
+        """What changes whenever an artifact ref could have moved, read without running git, by path under the common
+        directory: the ``lstat`` of ``packed-refs`` and ``reftable/`` (``REFS_GLOBAL``), and of every directory under
+        ``refs/empirica/artifacts`` down to each project's (git moves a loose ref, packs refs and adds a table by
+        writing a lock file and renaming it, so the directory that holds it changes; a run's ref is a file in its
+        project's directory). Compared for equality only, never read as a time. ``None`` when it cannot be read: the
+        caller then lists everything."""
+        base = str(self._common_dir) + "/"
+        try:
+            signature = {name: _lstat(base + name) for name in self.REFS_GLOBAL}
+            root = "refs/empirica/artifacts"
+            signature[root] = _lstat(base + root)
+            for level in _subdirs(base, root):  # generations, then each one's projects
+                signature[level] = _lstat(base + level)
+                for project in _subdirs(base, level):
+                    signature[project] = _lstat(base + project)
+        except OSError:
+            return None
+        return signature
+
+    def ref_heads_under(self, directories: Iterable[str]) -> dict[str, str]:
+        """``ref_heads`` for the refs in these project directories only (``refs_signature`` paths), in one
+        ``for-each-ref``."""
+        patterns = sorted({d.rstrip("/") + "/" for d in directories})
+        if not patterns:
+            return {}
+        proc = self._git("for-each-ref", "--format=%(refname) %(objectname)", *patterns)
+        if proc.returncode != 0:
+            raise GitError(f"for-each-ref failed: {proc.stderr.strip()}")
+        return dict(line.split(" ", 1) for line in proc.stdout.splitlines() if " " in line)
+
+    def read_listed(self, commits: Iterable[str]) -> dict[str, Read[frozenset[Artifact]]]:
+        """The histories at many listed commits (``ref_heads`` values), by commit, through one ``cat-file --batch``
+        process in all (three rounds: the commits, their trees, every blob they name) rather than five processes per
+        history. Each is exactly what ``read`` returns for a ref at that commit; one that is not plainly a commit whose
+        flat tree of artifact blobs reads and decodes whole is left out, for the caller's single ``read`` to answer
+        (including as ``Corrupt``)."""
+        wanted = {c for c in commits if _OID.fullmatch(c)}
+        if not wanted:
+            return {}
+        with self._cat_file() as batch:
+            trees_of = {}
+            for commit, raw in batch(wanted, "commit").items():
+                first = raw.split(b"\n", 1)[0].split(b" ")
+                if len(first) == 2 and first[0] == b"tree" and _OID.fullmatch(first[1].decode("ascii", "replace")):
+                    trees_of[commit] = first[1].decode("ascii")
+            trees = batch(set(trees_of.values()), "tree")
+            descriptors: dict[str, list[tuple[str, str]]] = {}
+            for commit, tree in trees_of.items():
+                parsed = _tree_entries(trees.get(tree), len(tree) // 2)
+                if parsed is not None:
+                    descriptors[commit] = parsed
+            blobs = batch({oid for entries in descriptors.values() for _, oid in entries}, "blob")
+        out: dict[str, Read[frozenset[Artifact]]] = {}
+        for commit, entries in descriptors.items():
+            try:
+                artifacts = frozenset(Artifact(e.artifact_id, e.body) for e in
+                                      (_entry(path, oid, blobs.get(oid)) for path, oid in entries))
+            except _CorruptTree:
+                continue
+            out[commit] = Present(artifacts, Revision(trees_of[commit]))
+        return out
+
+    @contextlib.contextmanager
+    def _cat_file(self):
+        """One ``cat-file --batch`` process for several rounds of reads: ``batch(oids, kind)`` returns the bodies of those
+        of type ``kind``; any that is missing or of another type is left out, and a frame error ends the session
+        (nothing read after it is trusted)."""
+        proc = subprocess.Popen(["git", "cat-file", "--batch"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, env=self._git_env())
+        broken: list[object] = []
+
+        def batch(oids: set[str], kind: str) -> dict[str, bytes]:
+            found: dict[str, bytes] = {}
+            if not oids or broken:
+                return found
+            order = sorted(oids)
+            try:
+                proc.stdin.write(b"".join(o.encode("ascii") + b"\n" for o in order))
+                proc.stdin.flush()
+                for oid in order:
+                    fields = proc.stdout.readline().split()
+                    if len(fields) == 2 and fields[1] == b"missing":
+                        continue
+                    if len(fields) != 3 or not fields[2].isdigit():
+                        broken.append(oid)
+                        return found
+                    size = int(fields[2])
+                    body = proc.stdout.read(size)
+                    if len(body) != size or proc.stdout.read(1) != b"\n":
+                        broken.append(oid)
+                        return found
+                    if fields[0] == oid.encode("ascii") and fields[1] == kind.encode("ascii"):
+                        found[oid] = body
+            except OSError:
+                broken.append(None)
+            return found
+        try:
+            yield batch
+        finally:
+            for stream in (proc.stdin, proc.stdout):
+                try:
+                    stream.close()
+                except OSError:
+                    pass
+            proc.wait()
 
     # --- git plumbing --------------------------------------------------------
 
@@ -400,6 +512,62 @@ class GitArtifactRepository:
 
 class _CorruptTree(Exception):
     """Internal signal: the stored tree violates a structural invariant (read returns Corrupt)."""
+
+
+def _lstat(path: str) -> tuple[int, int, int, int] | None:
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    return st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns
+
+
+def _subdirs(base: str, relative: str) -> list[str]:
+    """The real subdirectories of ``base + relative``, as paths relative to ``base``."""
+    try:
+        with os.scandir(base + relative) as entries:
+            return sorted(f"{relative}/{e.name}" for e in entries if e.is_dir(follow_symlinks=False))
+    except FileNotFoundError:
+        return []
+
+
+_OID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+#: Tree modes ``ls-tree`` reports as blobs; anything else makes ``read`` answer ``Corrupt``.
+_BLOB_MODES = (b"100644", b"100755", b"120000")
+#: Names ``ls-tree`` prints unquoted, so a tree whose names are all of these lists the same either way.
+_PLAIN_NAME = re.compile(rb"[\x21-\x7e]+")
+
+
+def _tree_entries(raw: bytes | None, width: int) -> list[tuple[str, str]] | None:
+    """A raw tree object's ``(path, blob oid)`` entries, in tree order, exactly as ``ls-tree`` would list them; ``None``
+    when that is not certain (an entry that is not a blob, a name ``ls-tree`` would quote, a malformed frame)."""
+    if raw is None:
+        return None
+    entries, at = [], 0
+    while at < len(raw):
+        space, nul = raw.find(b" ", at), raw.find(b"\0", at)
+        if space < 0 or nul < space or nul + 1 + width > len(raw):
+            return None
+        mode, name = raw[at:space], raw[space + 1:nul]
+        if mode not in _BLOB_MODES or not _PLAIN_NAME.fullmatch(name) or b'"' in name or b"\\" in name:
+            return None
+        entries.append((name.decode("ascii"), raw[nul + 1:nul + 1 + width].hex()))
+        at = nul + 1 + width
+    return entries
+
+
+def _entry(path: str, oid: str, encoded: bytes | None) -> _Entry:
+    """One artifact blob decoded and checked as ``_batch_read_entries`` checks it."""
+    if encoded is None:
+        raise _CorruptTree(f"blob {oid} at {path!r} was not read")
+    try:
+        blob = encoded.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise _CorruptTree(f"blob {oid} at {path!r} is not valid UTF-8") from exc
+    artifact_id, body = _decode_body(blob, path)
+    if tree_path(artifact_id) != path:
+        raise _CorruptTree(f"artifact id/path mismatch at {path!r}: blob records id {artifact_id!r}")
+    return _Entry(path=path, artifact_id=artifact_id, body=body, blob_oid=oid)
 
 
 # --- encoding helpers --------------------------------------------------------

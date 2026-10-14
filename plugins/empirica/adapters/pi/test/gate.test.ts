@@ -989,7 +989,7 @@ test("gate: with route unavailable the requirement stays a denial and nothing is
 function waitingRun(overrides: Record<string, unknown> = {}, context: Record<string, unknown> = {},
                     controlMode = "deliberative") {
   return { id: HANDLE, status: "active" as never, governance: {
-    state: "pending", control_mode: controlMode, first_approval: false, prompt_error: null,
+    state: "pending", control_mode: controlMode, first_approval: false, prompt_error: null, human_wait: true,
     interactions_remaining: { proposal: 3, total: 128 },
     proposal: { budgets: {}, rationale: "sized" },
     context: { ingress: "pi_ui", interactive: true, delegation: false, author: null, ...context },
@@ -1034,14 +1034,12 @@ for (const controlMode of ["deliberative", "auto"]) {
 test("gate: only the legitimate initial-approval blocker is a human wait", async () => {
   const cases: Array<[string, Record<string, unknown>]> = [
     ["mixed reasons", { reasons: [APPROVAL_REQUIRED, { code: "run.corrupt", message: "corrupt" }] }],
-    ["proposal exhausted", { run: waitingRun({ interactions_remaining: { proposal: 0, total: 128 } }) }],
-    ["total exhausted", { run: waitingRun({ interactions_remaining: { proposal: 3, total: 0 } }) }],
-    ["prompt error", { run: waitingRun({ prompt_error: "governance.interaction_limit" }) }],
+    // the core says nobody waits on a human (core.governance.human_wait: exhausted, delegated, post-approval auto...);
+    // its every state is a shared case (fixtures/turn-end-predicates.json)
+    ["the core's answer is no", { run: waitingRun({ human_wait: false, prompt_error: "governance.interaction_limit" }) }],
     ["ui unavailable", { run: waitingRun({}, { ingress: "unavailable" }) }],
-    ["delegated auto", { run: waitingRun({}, { interactive: false, delegation: true }, "auto") }],
-    ["post-approval auto", { run: waitingRun({ first_approval: true, state: "revision_pending" }, {}, "auto"),
-      reasons: [{ code: "governance.revision_required", message: "revision required" }] }],
-    ["malformed reason", { reasons: [{ code: "governance.revision_required", message: "mismatch" }] }],
+    ["another host's dialog", { run: waitingRun({}, { ingress: "mcp_elicitation" }) }],
+    ["not a configuration's reason", { reasons: [{ code: "governance.interaction_limit", message: "limit" }] }],
   ];
   for (const [name, changed] of cases) {
     const blocked = { type: "Block" as const, run: waitingRun(), reasons: [APPROVAL_REQUIRED], ...changed };

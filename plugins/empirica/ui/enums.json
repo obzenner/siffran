@@ -1,4 +1,23 @@
 {
+  "standing": [
+    "unreadable",
+    "needs_human",
+    "audit_pending",
+    "changed_since_audit",
+    "not_ended",
+    "proven",
+    "stopped_residual",
+    "stopped_budget",
+    "stopped_frozen"
+  ],
+  "ask": [
+    "approve_configuration",
+    "approve_revision",
+    "decide_claim",
+    "confirm_source",
+    "consent_stop",
+    "freeze_scope"
+  ],
   "run": [
     "active",
     "converged",
@@ -12,11 +31,6 @@
     "history-missing",
     "history-corrupt",
     "workspace-unavailable"
-  ],
-  "attention": [
-    "needs_you",
-    "not_ended",
-    "ended"
   ],
   "audit": [
     "passed",
@@ -96,7 +110,7 @@
     "reject",
     "approve"
   ],
-  "standing": [
+  "step_standing": [
     "current",
     "replaced",
     "gone"
@@ -146,9 +160,38 @@
     "revision_pending",
     "rejected"
   ],
+  "why": [
+    "refuted",
+    "spike_failed",
+    "rejected",
+    "removed"
+  ],
+  "answer": [
+    "approve",
+    "reject",
+    "later"
+  ],
+  "effect": [
+    "configuration_approved",
+    "configuration_amended",
+    "configuration_rejected",
+    "record_confirmed",
+    "record_rejected",
+    "claim_approved",
+    "claim_rejected",
+    "run_ended",
+    "run_continued",
+    "none"
+  ],
   "budgets": [
     "passes",
     "spawns",
     "audit_spawns"
+  ],
+  "flag": [
+    "failed_audit",
+    "refuted",
+    "decided",
+    "changed_since_audit"
   ]
 }

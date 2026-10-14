@@ -484,7 +484,10 @@ class Coordinator:
                 expected = audit_binding(snapshot)
                 bound_keys = ("argument_digest", "goal_digest", "frozen_scope_digest",
                               "deferred_scope_digest", "reviewed_claims")
-                if any(payload.get(name) != expected[name] for name in bound_keys):
+                # A settled verdict reviews at least one approved claim (the response contract's audit, minItems 1): one
+                # over a run with none approved is refused, so the run's argument stays readable (P4).
+                if (any(payload.get(name) != expected[name] for name in bound_keys)
+                        or not expected.get("reviewed_claims")):
                     return self._fault_with_run(request_id, snapshot)
                 expected_scope = expected["scope_review"]
                 if ((expected_scope is None and payload.get("scope_review") is not None) or

@@ -112,7 +112,7 @@ interface HarnessSettings {
 function harness(keyScripts: string[][] = [[ENTER, ENTER]]) {
   const dialog = structuredClone(reviewDialog);
   const g = { state: "pending", control_mode: "deliberative", proposal_digest: "sha256:" + "a".repeat(64),
-    plan_revision: 0, first_approval: false, prompt_error: null as string | null, proposal: {
+    plan_revision: 0, first_approval: false, prompt_error: null as string | null, human_wait: true, proposal: {
       budgets: Object.fromEntries(dialog.budgets.map(row => [row.key, row.value])) as Record<string, number>,
       rationale: dialog.rationale,
     }, context: { author: null, ingress: "pi_ui", interactive: true, delegation: false } };

@@ -1,5 +1,66 @@
 {
-  "$description": "Presentation of each contract value: tone (semantic colour), icon (a meaning in icons.json, only ever beside the word) and copy (a prefix in copy/en.json: `.label`). Keyed by the values of enums.json, which is generated from the observer contract; tests/contract.test.mjs holds the two equal. It decides nothing about the value.",
+  "$description": "Presentation of each contract value: tone (semantic colour), icon (a meaning in icons.json: the glyph, always with the word beside it or in its label) and copy (a prefix in copy/en.json: `.label`). `standing` and `claim` also have a `shape` in the Universe (app/universe.js shapePath: one shape per standing, a run's mark; one per claim state, a claim's node in a run's graph), and says whether the value is `urgent` (a human is owed an answer: the calendar draws its cell taller, the row pulses). Keyed by the values of enums.json, which is generated from the observer contract; tests/contract.test.mjs holds the two equal. It decides nothing about the value.",
+  "standing": {
+    "needs_human": {
+      "tone": "human",
+      "icon": "waiting-human",
+      "copy": "standing.needs_human",
+      "urgent": true,
+      "live": true,
+      "shape": "diamond"
+    },
+    "audit_pending": {
+      "tone": "audit",
+      "icon": "audit-pending",
+      "copy": "standing.audit_pending",
+      "live": true,
+      "shape": "ring"
+    },
+    "changed_since_audit": {
+      "tone": "audit",
+      "icon": "audit-stale",
+      "copy": "standing.changed_since_audit",
+      "live": true,
+      "shape": "triangle"
+    },
+    "not_ended": {
+      "tone": "info",
+      "icon": "running",
+      "copy": "standing.not_ended",
+      "live": true,
+      "shape": "half"
+    },
+    "proven": {
+      "tone": "positive",
+      "icon": "converged",
+      "copy": "standing.proven",
+      "shape": "circle"
+    },
+    "stopped_residual": {
+      "tone": "neutral",
+      "icon": "stopped",
+      "copy": "standing.stopped_residual",
+      "shape": "square"
+    },
+    "stopped_budget": {
+      "tone": "neutral",
+      "icon": "budget-out",
+      "copy": "standing.stopped_budget",
+      "shape": "hollow-square"
+    },
+    "stopped_frozen": {
+      "tone": "neutral",
+      "icon": "frozen",
+      "copy": "standing.stopped_frozen",
+      "shape": "hexagon"
+    },
+    "unreadable": {
+      "tone": "negative",
+      "icon": "unreadable",
+      "copy": "standing.unreadable",
+      "shape": "cross"
+    }
+  },
   "run": {
     "active": {
       "tone": "info",
@@ -54,23 +115,6 @@
       "copy": "diagnostic.workspace-unavailable"
     }
   },
-  "attention": {
-    "needs_you": {
-      "tone": "human",
-      "icon": "waiting-human",
-      "copy": "attention.needs_you"
-    },
-    "not_ended": {
-      "tone": "neutral",
-      "icon": "running",
-      "copy": "attention.not_ended"
-    },
-    "ended": {
-      "tone": "neutral",
-      "icon": "run-ended",
-      "copy": "attention.ended"
-    }
-  },
   "audit": {
     "passed": {
       "tone": "audit",
@@ -92,22 +136,26 @@
     "approved": {
       "tone": "positive",
       "icon": "verified",
-      "copy": "claim.approved"
+      "copy": "claim.approved",
+      "shape": "square"
     },
     "open": {
       "tone": "info",
       "icon": "open",
-      "copy": "claim.open"
+      "copy": "claim.open",
+      "shape": "ring"
     },
     "blocked": {
       "tone": "caution",
       "icon": "blocked",
-      "copy": "claim.blocked"
+      "copy": "claim.blocked",
+      "shape": "triangle"
     },
     "discarded": {
       "tone": "neutral",
       "icon": "discarded",
-      "copy": "claim.discarded"
+      "copy": "claim.discarded",
+      "shape": "hollow-square"
     }
   },
   "evidence": {
@@ -344,6 +392,45 @@
       "tone": "neutral",
       "icon": "open",
       "copy": "assurance.not_approved"
+    }
+  },
+  "answer": {
+    "approve": {
+      "tone": "positive",
+      "icon": "confirmed",
+      "copy": "answer.approve"
+    },
+    "reject": {
+      "tone": "negative",
+      "icon": "rejected",
+      "copy": "answer.reject"
+    },
+    "later": {
+      "tone": "neutral",
+      "icon": "asked",
+      "copy": "answer.later"
+    }
+  },
+  "why": {
+    "refuted": {
+      "tone": "negative",
+      "icon": "failed",
+      "copy": "why.refuted"
+    },
+    "spike_failed": {
+      "tone": "negative",
+      "icon": "spike",
+      "copy": "why.spike_failed"
+    },
+    "rejected": {
+      "tone": "negative",
+      "icon": "rejected",
+      "copy": "why.rejected"
+    },
+    "removed": {
+      "tone": "neutral",
+      "icon": "discarded",
+      "copy": "why.removed"
     }
   },
   "unknown": {

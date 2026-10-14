@@ -21,6 +21,7 @@ sys.path.insert(0, str(PLUGIN))
 
 from adapters.author_view import render_author_view, validate_public_result  # noqa: E402
 from application.protocol import contract_result, next_action_surfaces, stored, to_stored  # noqa: E402
+from core.governance import human_wait  # noqa: E402
 from core.projection import confirmation_actions  # noqa: E402
 
 FIXTURES = ROOT / "contracts" / "empirica" / "v2" / "fixtures"
@@ -213,6 +214,43 @@ def _synthetic_results() -> list[tuple[str, object]]:
                                         "evidence.confirmation_required", {"route": "human"}, list(meta["next_actions"]), None)}]
     evidence["evidence-reason-terminal-residual"] = stopped
 
+    # Who acts on the configuration, in each governance state (the turn-end cases both hosts and the observer read,
+    # adapters/pi/test/fixtures/turn-end-predicates.json): the run view publishes the core's answer, never a golden's.
+    def governance_wait(state, reason, *, first_approval=False, control_mode="deliberative", rationale="sized",
+                        prompt_error=None, capability="human_configuration", ingress="pi_ui", interactive=True,
+                        delegation=False):
+        view = copy.deepcopy(approved)
+        view["type"] = "Block"
+        view.pop("converged", None)
+        g = view["run"]["governance"]
+        g.update(state=state, first_approval=first_approval, control_mode=control_mode, prompt_error=prompt_error,
+                 approved_digest=g["approved_digest"] if first_approval else None,
+                 approval_kind=g["approval_kind"] if first_approval else None)
+        g["proposal"]["rationale"] = rationale
+        g["context"].update(approval_capability=capability, ingress=ingress, interactive=interactive,
+                            delegation=delegation)
+        g["human_wait"] = human_wait(g, prompt_error)
+        meta = contract["reasons"][reason]
+        view["reasons"] = [{"code": reason, "parameters": {}, "message": meta["message"],
+                            "next_actions": list(meta["next_actions"]), "sections": meta["sections"]}]
+        return view
+
+    governance = {
+        "governance-wait-pending": governance_wait("pending", "governance.approval_required"),
+        "governance-wait-revision-pending": governance_wait("revision_pending", "governance.revision_required",
+                                                            first_approval=True),
+        "governance-wait-rejected": governance_wait("rejected", "governance.approval_required"),
+        "governance-wait-unsized": governance_wait("pending", "governance.approval_required", rationale=None),
+        "governance-wait-interaction-limit": governance_wait("pending", "governance.approval_required",
+                                                             prompt_error="governance.interaction_limit"),
+        "governance-wait-unavailable": governance_wait("pending", "governance.approval_unavailable",
+                                                       capability="unavailable", ingress="unavailable"),
+        "governance-wait-delegated-auto": governance_wait("pending", "governance.approval_required",
+                                                          control_mode="auto", interactive=False, delegation=True),
+        "governance-wait-post-approval-auto": governance_wait("revision_pending", "governance.revision_required",
+                                                              first_approval=True, control_mode="auto"),
+    }
+
     # The author reads what the human answered: every verification status, the note, the decision and its answer.
     answered = copy.deepcopy(stored(json.loads((FIXTURES / "getargument-active.json").read_text()))["expected"]["result"])
     base = answered["argument"]["artifacts"][0]
@@ -237,6 +275,7 @@ def _synthetic_results() -> list[tuple[str, object]]:
         ("host-unreviewed-runtime", unreviewed_runtime),
         *waiting.items(),
         *evidence.items(),
+        *governance.items(),
         ("getargument-human-answers", answered),
         ("audit-stale-scope", audit_stale),
         ("audit-mixed", audit_mixed),

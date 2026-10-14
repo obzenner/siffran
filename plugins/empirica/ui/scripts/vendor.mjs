@@ -27,7 +27,7 @@ const icons = json("icons.json");
 const ids = [...new Set(Object.entries(icons).filter(([k]) => !k.startsWith("$")).map(([, v]) => v))].sort();
 const symbols = ids.map((id) => {
   const body = readFileSync(`node_modules/lucide-static/icons/${id}.svg`, "utf8").replace(/^[\s\S]*?<svg[^>]*>/, "").replace(/<\/svg>\s*$/, "").trim();
-  return `  <symbol id="${id}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${body}</symbol>`;
+  return `  <symbol id="${id}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${spec.lucide.stroke_width}" stroke-linecap="round" stroke-linejoin="round">${body}</symbol>`;
 });
 writeFileSync("vendor/lucide/sprite.svg", `<!-- lucide-static ${version("lucide-static")} (ISC), subset from icons.json -->\n<svg xmlns="http://www.w3.org/2000/svg">\n${symbols.join("\n")}\n</svg>\n`);
 files.push("vendor/lucide/sprite.svg");

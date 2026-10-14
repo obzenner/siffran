@@ -9,6 +9,7 @@ import signal
 import stat
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from application.ports import CapturedFile, ExecutionSnapshot, HarnessResult, WorkspaceCapture
@@ -61,6 +62,65 @@ class FilesystemWorkspace:
             if file_fd >= 0:
                 os.close(file_fd)
             os.close(directory_fd)
+
+    # --- change detection for a reader (the observer's drift index); none of it is read by a run decision ----------
+
+    def drift_id(self) -> str:
+        """Which workspace this is, for a reader that indexes its files across polls: its root."""
+        return str(self.root)
+
+    @staticmethod
+    def now_ns() -> int:
+        """The reference a reader compares a file's change time with to tell a racily clean file (as Git does): this
+        machine's wall clock, floored to the second, so a filesystem whose times are coarser than a nanosecond (up to
+        one second) never makes a file written after a hash look older than it. A file changed in the same second is
+        hashed again the next time; nothing is ordered or decided by it."""
+        return time.time_ns() // 1_000_000_000 * 1_000_000_000
+
+    def signatures(self, paths) -> dict[str, tuple | None]:
+        """Each path's change signature, from ``lstat`` alone (nothing is opened or read): the root's identity, each
+        directory on the way down by type and inode (what ``observe`` refuses to follow is told apart), and the file's
+        type, inode, size, modification and change times. Users cannot set a change time, so every write changes the
+        last field. A component that is not there ends the signature with ``None``."""
+        try:
+            root = os.lstat(self.root)
+            head = (root.st_dev, root.st_ino)
+        except OSError:
+            head = None
+        seen: dict[str, tuple | None] = {}
+        out = {}
+        base = str(self.root)
+        for relative in paths:
+            parts = relative.split("/")
+            sig: list = [head]
+            prefix = base
+            for n, part in enumerate(parts):
+                prefix = prefix + "/" + part
+                leaf = n == len(parts) - 1
+                if prefix not in seen or leaf:
+                    try:
+                        st = os.lstat(prefix)
+                    except OSError as exc:
+                        seen[prefix] = ("absent", exc.errno)
+                    else:
+                        seen[prefix] = ((stat.S_IFMT(st.st_mode), st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+                                        if leaf else (stat.S_IFMT(st.st_mode), st.st_ino))
+                sig.append(seen[prefix])
+                if seen[prefix][0] == "absent" or (not leaf and seen[prefix][0] != stat.S_IFDIR):
+                    break
+            out[relative] = tuple(sig)
+        return out
+
+    @staticmethod
+    def changed_at(signature: tuple | None) -> int | None:
+        """The change time a signature holds for its file, or ``None`` (a file that is not there)."""
+        leaf = signature[-1] if signature else None
+        return leaf[4] if isinstance(leaf, tuple) and len(leaf) == 5 else None
+
+    @staticmethod
+    def basis_of(observations) -> str:
+        """The ``basis_id`` ``observe`` gives a capture of exactly these observations."""
+        return canonical_digest([(o.path, o.state.value, o.sha256) for o in observations])
 
     def observe(self, paths: tuple[str, ...]) -> WorkspaceCapture:
         for relative in paths:

@@ -1,0 +1,786 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://siffran.dev/contracts/empirica-ui-view/v1/summary.schema.json",
+ "title": "Empirica observer: the store summary (GET /api/summary)",
+ "description": "Facets, aggregates (within since), coverage, the runs that need a human, each bucket's page order and the universe marks. Every count is of read runs only, with not_read beside it.",
+ "type": "object",
+ "additionalProperties": false,
+ "required": [
+  "contract",
+  "token",
+  "coverage",
+  "projects",
+  "facets",
+  "aggregates",
+  "needs",
+  "orders",
+  "marks",
+  "calendar"
+ ],
+ "properties": {
+  "contract": {
+   "const": "empirica-ui-view/v1"
+  },
+  "token": {
+   "type": "string",
+   "pattern": "^sha256:[0-9a-f]{64}$",
+   "description": "The cache version of this published document (its ETag): equal exactly when the summary is. It changes when any published field does, the recorded times included, so a 304 never serves stale times; it is not a plugin digest (ADR-0070's clock independence covers the plugin's state, artifacts, receipts, manifests and its own views, not the observer's cache versions). A page's cursor belongs to the view this token names."
+  },
+  "coverage": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "runs",
+    "read",
+    "unreadable",
+    "partial",
+    "pending",
+    "reindexing"
+   ],
+   "properties": {
+    "runs": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "read": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "unreadable": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "partial": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "pending": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "reindexing": {
+     "type": "integer",
+     "minimum": 0
+    }
+   },
+   "description": "runs: every run listed; read in full, unreadable, partial, and pending: not read yet (a cold start). They sum to runs. reindexing: of the runs read, those a pass found changed and has not read again yet (known stale: shown as last read; the token moves while it is not zero)."
+  },
+  "projects": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "id",
+     "name",
+     "label",
+     "repo",
+     "runs",
+     "needs",
+     "standings",
+     "since"
+    ],
+    "properties": {
+     "id": {
+      "type": "string",
+      "minLength": 1
+     },
+     "name": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "label": {
+      "type": "string",
+      "minLength": 1
+     },
+     "repo": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "runs": {
+      "type": "integer",
+      "minimum": 0
+     },
+     "needs": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How many of the project's runs need a human (standing needs_human): the observer's count, equal to the project's entries in needs."
+     },
+     "standings": {
+      "type": "object",
+      "additionalProperties": {
+       "type": "integer",
+       "minimum": 1
+      },
+      "description": "How many of the project's runs stand at each standing, every run read or not (they sum to runs); a standing it has none of is left out. The observer's count: the Universe's project card shows it."
+     },
+     "since": {
+      "type": [
+       "number",
+       "null"
+      ]
+     }
+    }
+   },
+   "description": "The projects (the Universe's islands) in slot order (application.observer_index.island_order): by when each one's earliest run started (since; a project with none after every timed one), then id, so a project whose first run starts later takes the next slot."
+  },
+  "facets": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "standing",
+    "ask",
+    "project",
+    "host",
+    "mode",
+    "audit"
+   ],
+   "properties": {
+    "standing": {
+     "type": "object",
+     "additionalProperties": {
+      "type": "integer",
+      "minimum": 0
+     }
+    },
+    "ask": {
+     "type": "object",
+     "additionalProperties": {
+      "type": "integer",
+      "minimum": 0
+     }
+    },
+    "project": {
+     "type": "object",
+     "additionalProperties": {
+      "type": "integer",
+      "minimum": 0
+     }
+    },
+    "host": {
+     "type": "object",
+     "additionalProperties": {
+      "type": "integer",
+      "minimum": 0
+     }
+    },
+    "mode": {
+     "type": "object",
+     "additionalProperties": {
+      "type": "integer",
+      "minimum": 0
+     }
+    },
+    "audit": {
+     "type": "object",
+     "additionalProperties": {
+      "type": "integer",
+      "minimum": 0
+     }
+    }
+   },
+   "description": "All-time counts of read runs per facet value (what a filter can select)."
+  },
+  "aggregates": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "since",
+    "total",
+    "not_read",
+    "untimed_runs",
+    "by",
+    "runs",
+    "facts",
+    "untimed",
+    "decisions_by"
+   ],
+   "properties": {
+    "since": {
+     "type": [
+      "number",
+      "null"
+     ],
+     "description": "The window's start as counted: the requested epoch snapped down to its whole UTC hour (windows are sums of hour buckets), or null for all time."
+    },
+    "total": {
+     "type": "integer",
+     "minimum": 0,
+     "description": "The read runs the window counts (those updated inside it; every read run without a window): the value strip's runs, so no consumer sums the standings itself."
+    },
+    "not_read": {
+     "type": "integer",
+     "minimum": 0,
+     "description": "Runs not read in full: in no count, because unknown is never zero."
+    },
+    "untimed_runs": {
+     "type": "integer",
+     "minimum": 0,
+     "description": "Read runs left out of a window because their updated time is unknown (0 without a window)."
+    },
+    "by": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "standing",
+      "ask",
+      "project",
+      "host",
+      "mode",
+      "audit"
+     ],
+     "properties": {
+      "standing": {
+       "type": "object",
+       "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "ask": {
+       "type": "object",
+       "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "project": {
+       "type": "object",
+       "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "host": {
+       "type": "object",
+       "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "mode": {
+       "type": "object",
+       "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "audit": {
+       "type": "object",
+       "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+       }
+      }
+     },
+     "description": "Read runs (inside the window) per facet value."
+    },
+    "runs": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "failed_audits",
+      "refutations",
+      "decisions"
+     ],
+     "properties": {
+      "failed_audits": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "refutations": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "decisions": {
+       "type": "integer",
+       "minimum": 0
+      }
+     },
+     "description": "Read runs with at least one such fact inside the window."
+    },
+    "facts": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "failed_audits",
+      "refutations",
+      "decisions"
+     ],
+     "properties": {
+      "failed_audits": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "refutations": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "decisions": {
+       "type": "integer",
+       "minimum": 0
+      }
+     },
+     "description": "How many such facts are inside the window."
+    },
+    "untimed": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "failed_audits",
+      "refutations",
+      "decisions"
+     ],
+     "properties": {
+      "failed_audits": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "refutations": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "decisions": {
+       "type": "integer",
+       "minimum": 0
+      }
+     },
+     "description": "Such facts left out of a window because their time is unknown."
+    },
+    "decisions_by": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "approve_configuration",
+      "approve_revision",
+      "decide_claim",
+      "confirm_source",
+      "consent_stop",
+      "freeze_scope"
+     ],
+     "properties": {
+      "approve_configuration": {
+       "type": "object",
+       "additionalProperties": false,
+       "required": [
+        "runs",
+        "facts",
+        "untimed"
+       ],
+       "properties": {
+        "runs": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "facts": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "untimed": {
+         "type": "integer",
+         "minimum": 0
+        }
+       }
+      },
+      "approve_revision": {
+       "type": "object",
+       "additionalProperties": false,
+       "required": [
+        "runs",
+        "facts",
+        "untimed"
+       ],
+       "properties": {
+        "runs": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "facts": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "untimed": {
+         "type": "integer",
+         "minimum": 0
+        }
+       }
+      },
+      "decide_claim": {
+       "type": "object",
+       "additionalProperties": false,
+       "required": [
+        "runs",
+        "facts",
+        "untimed"
+       ],
+       "properties": {
+        "runs": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "facts": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "untimed": {
+         "type": "integer",
+         "minimum": 0
+        }
+       }
+      },
+      "confirm_source": {
+       "type": "object",
+       "additionalProperties": false,
+       "required": [
+        "runs",
+        "facts",
+        "untimed"
+       ],
+       "properties": {
+        "runs": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "facts": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "untimed": {
+         "type": "integer",
+         "minimum": 0
+        }
+       }
+      },
+      "consent_stop": {
+       "type": "object",
+       "additionalProperties": false,
+       "required": [
+        "runs",
+        "facts",
+        "untimed"
+       ],
+       "properties": {
+        "runs": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "facts": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "untimed": {
+         "type": "integer",
+         "minimum": 0
+        }
+       }
+      },
+      "freeze_scope": {
+       "type": "object",
+       "additionalProperties": false,
+       "required": [
+        "runs",
+        "facts",
+        "untimed"
+       ],
+       "properties": {
+        "runs": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "facts": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "untimed": {
+         "type": "integer",
+         "minimum": 0
+        }
+       }
+      }
+     },
+     "description": "The human answers counted in decisions (every answer but later, from the one owner core.observer.decisions), by what was asked: the read runs with one inside the window, how many are inside, and how many were left out for want of a time."
+    }
+   }
+  },
+  "needs": {
+   "type": "array",
+   "description": "Every run that needs a human (standing needs_human), the oldest question first (application.observer_index.asked_order: asked_at ascending, a question with no recorded time after every timed one, then key); never grouped by project.",
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "id",
+     "key",
+     "ask",
+     "asked_at",
+     "host",
+     "session"
+    ],
+    "properties": {
+     "id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{12}$",
+      "description": "A run's compact id: the first hex digits of the sha256 of its key (application.observer_index.short_id)."
+     },
+     "key": {
+      "type": "string",
+      "minLength": 1
+     },
+     "ask": {
+      "enum": [
+       "approve_configuration",
+       "approve_revision",
+       "decide_claim",
+       "confirm_source",
+       "consent_stop",
+       "freeze_scope",
+       null
+      ],
+      "description": "What a human is asked about an active run (core.observer.ask), read from the item the core presents; null when nothing is asked or the run was not read."
+     },
+     "asked_at": {
+      "type": [
+       "number",
+       "null"
+      ],
+      "description": "Seconds since the epoch (UTC) of the write that recorded it, from the run's timeline (ADR-0070): a label, never an order; null when unknown."
+     },
+     "host": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "session": {
+      "type": [
+       "string",
+       "null"
+      ]
+     }
+    }
+   }
+  },
+  "orders": {
+   "description": "Each bucket's declared order inside a page (application.observer_index.ORDERS), by standing: the time it reads (by: a row field) and which comes first. The needs-a-human bucket is the needs list's (asked_at, the oldest question first); every other bucket the most recent activity first (updated, the newest first). In every bucket a run with no recorded time comes after every timed one, then key.",
+   "const": {
+    "unreadable": {
+     "by": "updated",
+     "first": "newest"
+    },
+    "needs_human": {
+     "by": "asked_at",
+     "first": "oldest"
+    },
+    "audit_pending": {
+     "by": "updated",
+     "first": "newest"
+    },
+    "changed_since_audit": {
+     "by": "updated",
+     "first": "newest"
+    },
+    "not_ended": {
+     "by": "updated",
+     "first": "newest"
+    },
+    "proven": {
+     "by": "updated",
+     "first": "newest"
+    },
+    "stopped_residual": {
+     "by": "updated",
+     "first": "newest"
+    },
+    "stopped_budget": {
+     "by": "updated",
+     "first": "newest"
+    },
+    "stopped_frozen": {
+     "by": "updated",
+     "first": "newest"
+    }
+   }
+  },
+  "marks": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "standings",
+    "flag_bits",
+    "id",
+    "project",
+    "place",
+    "attempt",
+    "standing",
+    "updated",
+    "started",
+    "flags",
+    "window_flags"
+   ],
+   "description": "The universe marks, columnar: index i of every column is one run.",
+   "properties": {
+    "standings": {
+     "const": [
+      "unreadable",
+      "needs_human",
+      "audit_pending",
+      "changed_since_audit",
+      "not_ended",
+      "proven",
+      "stopped_residual",
+      "stopped_budget",
+      "stopped_frozen"
+     ]
+    },
+    "flag_bits": {
+     "const": [
+      "failed_audit",
+      "refuted",
+      "decided",
+      "changed_since_audit"
+     ]
+    },
+    "id": {
+     "type": "array",
+     "items": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{12}$",
+      "description": "A run's compact id: the first hex digits of the sha256 of its key (application.observer_index.short_id)."
+     }
+    },
+    "project": {
+     "type": "array",
+     "items": {
+      "type": "integer",
+      "minimum": 0
+     }
+    },
+    "place": {
+     "type": "array",
+     "items": {
+      "type": [
+       "integer",
+       "null"
+      ],
+      "minimum": 0
+     },
+     "description": "Each run's place on its project's island (application.observer_index.places): a timed run's ordinal among the project's timed runs, each attempt one, in start order (started, then key), so a run started later takes the next place and no place given moves; a run with no recorded start takes the next place of the outer band (from UNTIMED_FROM, 96, or after every timed run once they reach it), by key; null until every run of its project is read. A deleted run, or a time recovered late, may renumber the places after it (a documented limitation)."
+    },
+    "attempt": {
+     "type": "array",
+     "items": {
+      "type": "integer",
+      "minimum": 1
+     },
+     "description": "The run's generation (its attempt)."
+    },
+    "standing": {
+     "type": "array",
+     "items": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8
+     }
+    },
+    "updated": {
+     "type": "array",
+     "items": {
+      "type": [
+       "number",
+       "null"
+      ]
+     }
+    },
+    "started": {
+     "type": "array",
+     "items": {
+      "type": [
+       "number",
+       "null"
+      ]
+     }
+    },
+    "flags": {
+     "type": "array",
+     "items": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 15
+     }
+    },
+    "window_flags": {
+     "type": "array",
+     "items": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 15
+     },
+     "description": "The flags each run carries within the summary's window (application.observer_index.flagged): failed_audit, refuted and decided by their event's own time (the aggregates' time), changed_since_audit by the run's updated; without a window, flags."
+    }
+   }
+  },
+  "calendar": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "tz",
+    "project",
+    "day",
+    "start",
+    "runs",
+    "standing"
+   ],
+   "description": "The inbox calendar's cells, columnar (application.observer_index.calendar): index i of every column is one cell, a project and a civil day in the viewer's IANA time zone (the request's tz, default UTC) with runs last updated that day; ordered by project, then day. A run with no updated is on no day.",
+   "properties": {
+    "tz": {
+     "type": "string",
+     "minLength": 1
+    },
+    "project": {
+     "type": "array",
+     "items": {
+      "type": "integer",
+      "minimum": 0
+     },
+     "description": "An index into projects."
+    },
+    "day": {
+     "type": "array",
+     "items": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+     },
+     "description": "The civil day, ISO YYYY-MM-DD, in tz."
+    },
+    "start": {
+     "type": "array",
+     "items": {
+      "type": "number"
+     },
+     "description": "The epoch (seconds) of the day's first moment in tz."
+    },
+    "runs": {
+     "type": "array",
+     "items": {
+      "type": "integer",
+      "minimum": 1
+     },
+     "description": "How many of the project's runs were last updated that day."
+    },
+    "standing": {
+     "type": "array",
+     "items": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8
+     },
+     "description": "The most urgent standing among them (an index into marks.standings: precedence is urgency)."
+    }
+   }
+  }
+ }
+}

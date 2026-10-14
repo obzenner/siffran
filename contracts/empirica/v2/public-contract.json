@@ -283,7 +283,8 @@
       {
         "predicate": "governance.approved",
         "obligation_id": "obligation.approval",
-        "must": "Obtain exact host-mediated approval for the current run configuration."
+        "must": "Obtain exact host-mediated approval for the current run configuration.",
+   "waiting": "Waiting for a human to approve the run's configuration in the host's dialog."
       },
       {
         "predicate": "investigation.recorded",

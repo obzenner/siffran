@@ -55,6 +55,8 @@ def _producer(state: OperationalState) -> dict[str, Any] | None:
 class ContractView:
     reason_metadata: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...]
     bootstrap_requirements: tuple[tuple[str, str, str], ...]
+    #: A bootstrap requirement's words when its human acts on it, by obligation id (the contract's ``waiting``).
+    bootstrap_waiting: Mapping[str, str]
     audit_obligation: tuple[str, str]
     #: ``(obligation id, must)`` of the report's other stages: ``confirmation``, ``passes`` and ``terminal``.
     stage_obligations: Mapping[str, tuple[str, str]]
@@ -69,6 +71,7 @@ class ContractView:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "stage_obligations", _freeze(self.stage_obligations))
+        object.__setattr__(self, "bootstrap_waiting", _freeze(self.bootstrap_waiting))
         object.__setattr__(self, "governance_controls", _freeze(self.governance_controls))
         object.__setattr__(self, "recovery_exclusions", _freeze(self.recovery_exclusions))
         object.__setattr__(self, "untrusted_delimiters", _freeze(self.untrusted_delimiters))
@@ -403,6 +406,15 @@ def effective_scope_ids(snapshot: EvaluationSnapshot) -> tuple[str, ...]:
 
 def local_claim_state(snapshot: EvaluationSnapshot, claim: dict[str, Any],
                       stale: set[str]) -> str:
+    return claim_state_cause(snapshot, claim, stale)[0]
+
+
+def claim_state_cause(snapshot: EvaluationSnapshot, claim: dict[str, Any],
+                      stale: set[str]) -> tuple[str, Mapping[str, Any] | None]:
+    """A claim's own state, before its supporters are considered, and for a ``discarded`` one the recorded artifact that
+    discarded it: the failed spike, else the first refuting research, else the human's answer that rejected a
+    ``needs-decision`` claim (``None`` for every other state). The one rule of a claim's own state: the gate's
+    ``local_claim_state`` is its first element, and the observer's dropped claims read their cause from it."""
     evidence = active_evidence(snapshot, claim)
     research = [a for a in evidence if a["kind"] == "research"]
     supporting = any(a["outcome"] == "supporting" and confirmation.counts(snapshot, a)
@@ -413,17 +425,19 @@ def local_claim_state(snapshot: EvaluationSnapshot, claim: dict[str, Any],
     sensitive = _freshness_sensitive(snapshot, claim)
     spike_ok = bool(sensitive and spikes[-1]["artifact_id"] not in stale)
     if supporting and refuting and not spike_failed:
-        return "open"
-    if spike_failed or refuting:
-        return "discarded"
+        return "open", None
+    if spike_failed:
+        return "discarded", spikes[-1]
+    if refuting:
+        return "discarded", next(a for a in research if a["outcome"] == "refuting")
     if claim["kind"] == "needs-decision":
         answer = confirmation.decision(snapshot, claim["id"], claim_digest(claim))
         if answer is None:
-            return "blocked"
-        return "approved" if answer["outcome"] == confirmation.APPROVE else "discarded"
+            return "blocked", None
+        return ("approved", None) if answer["outcome"] == confirmation.APPROVE else ("discarded", answer)
     approved = supporting and (claim["kind"] == "ordinary" or
                                (claim["kind"] == "needs-experiment" and spike_ok))
-    return "approved" if approved else "open"
+    return ("approved" if approved else "open"), None
 
 
 def _awaiting_human(snapshot: EvaluationSnapshot, research: list[dict[str, Any]]) -> list[str]:
@@ -1022,9 +1036,14 @@ def audit_pending(snapshot: EvaluationSnapshot) -> bool:
                and audit_operation_current(snapshot, child) for child in snapshot.state.children)
 
 
+def audit_verdicts(snapshot: EvaluationSnapshot) -> tuple[Mapping[str, Any], ...]:
+    """Every recorded audit verdict of the run, in history order. The one selector of that fact."""
+    return tuple(item for item in snapshot.history if item.get("kind") == "audit_verdict")
+
+
 def latest_audit_verdict(snapshot: EvaluationSnapshot) -> Mapping[str, Any] | None:
-    """The run's latest recorded audit verdict, else ``None``. The one selector of that fact."""
-    audits = [item for item in snapshot.history if item.get("kind") == "audit_verdict"]
+    """The run's latest recorded audit verdict, else ``None``: the last of ``audit_verdicts``."""
+    audits = audit_verdicts(snapshot)
     return audits[-1] if audits else None
 
 
@@ -1066,9 +1085,34 @@ INDEPENDENCE_REASONS = {
 def independence(snapshot: EvaluationSnapshot, verdict: Mapping[str, Any]) -> str:
     """Classify reviewer/producer independence from opaque host identities."""
     auditor, producers = audit_attributions(snapshot, verdict)
+    return _independence(auditor, producers, bool(approved_claim_ids(snapshot)))
+
+
+def independence_then(snapshot: EvaluationSnapshot, verdict: Mapping[str, Any]) -> str | None:
+    """A verdict's independence as it stood when it was recorded, never against today's evidence: its auditor as the
+    host attributed it before the verdict, against the producers of exactly the evidence its audit was launched over
+    (the launch dossier the run keeps for the audit child: the approved gating claims and their active evidence ids),
+    by the same classification as ``independence``. ``None`` when the run no longer holds that dossier."""
+    child = next((c for c in snapshot.state.children if c["child_id"] == verdict.get("child_id")), None)
+    dossier = child.get("audit_argument") if child is not None else None
+    position = next((n for n, item in enumerate(snapshot.history) if item is verdict
+                     or item.get("artifact_id") == verdict.get("artifact_id")), None)
+    if not isinstance(dossier, Mapping) or position is None:
+        return None
+    before = snapshot.history[:position]
+    auditor = next((item for item in reversed(before) if item.get("kind") == "attribution"
+                    and item.get("subject_kind") == "auditor" and item.get("child_id") == verdict.get("child_id")), None)
+    reviewed = [c for c in dossier["claims"] if c["gating"] and c["state"] == "approved"]
+    by_id = {item.get("artifact_id"): item for item in before}
+    producers = [by_id.get(artifact_id, {}).get("producer") for c in reviewed for artifact_id in c["active_evidence_ids"]]
+    return _independence(auditor, producers, bool(reviewed))
+
+
+def _independence(auditor: Mapping[str, Any] | None, producers: list[Mapping[str, Any] | None], approved: bool) -> str:
+    """The one classification of an auditor against the producers of the evidence it reviewed."""
     auditor_class = identity_pair(auditor)
     producer_classes = [identity_pair(producer) for producer in producers]
-    if auditor_class is not None and not producer_classes and approved_claim_ids(snapshot):
+    if auditor_class is not None and not producer_classes and approved:
         # Every reviewed claim is a human's decision with no evidence behind it: nobody produced it, so
         # there is no producer to be independent of. The audit over the argument is still required.
         return "human_owned"
@@ -1232,16 +1276,30 @@ def report_requirements(snapshot: EvaluationSnapshot, derivation: ClaimDerivatio
                 found.append(("terminal", obligation, required, TERMINAL_STOP_REASON, consent, (), None,
                               confirmation.prompt_error(snapshot, key, terminal=True)))
     first = min((REPORT_STAGES.index(row[0]) for row in found), default=0)
+    # Who acts on a human's step is the human only while the request is with them (P3c): the configuration once the agent
+    # has asked and a host can show it (``governance.human_wait``); the end of the run unless the human already declined it
+    # (then the agent keeps working until the human tells it to stop again).
+    approval = next(o for p, o, _ in snapshot.bootstrap_requirements if p == "governance.approved")
+    configuration_waits = governance.human_wait(
+        snapshot.state.governance, governance.interaction_error(snapshot.state.governance, confirmation.interactions(snapshot)))
     requirements = []
     for stage, obligation, required, reason, parameters, claims, affected, prompt_error in found:
-        actor = "human" if reason in HUMAN_WAITING_REASONS else "auditor" if reason == "audit.pending" else "agent"
+        human = ((reason in HUMAN_WAITING_REASONS and not (reason == TERMINAL_STOP_REASON
+                                                            and parameters["case"] == "declined"))
+                 or (stage == "setup" and obligation == approval and configuration_waits))
+        actor = "human" if human else "auditor" if reason == "audit.pending" else "agent"
         admissible = REPORT_STAGES.index(stage) == first
-        place = (confirmation.ask_where(prompt_error) if actor == "human"
+        place = ((confirmation.ask_where(prompt_error) if reason else "next_report") if actor == "human"
                  else "in_progress" if actor == "auditor" else "next_turn")
         # Whether the gate names a requirement now (``admissible``) is one fact; whether a human will be shown the question is
         # another, and the host's: the core projects the batch whatever else blocks, and an explicit report presents it
-        # (``confirmation.presentable``) even while the agent still owes work. So the human's batch is never "later".
-        asked = obligation == snapshot.stage_obligations["confirmation"][0]
+        # (``confirmation.presentable``) even while the agent still owes claim work. So the human's batch is not "later"
+        # while the core would admit its presentation (``_human_batch_block``): a run not yet investigating (its route, its
+        # approval or its investigation missing) has its presentation refused, so nobody is shown it and it waits (P4).
+        asked = (obligation == snapshot.stage_obligations["confirmation"][0]
+                 and _investigation_block(snapshot) is None)
+        if actor == "human" and stage == "setup":
+            required = snapshot.contract.bootstrap_waiting[obligation]  # the human's words, not the agent's obligation
         requirements.append(Requirement(stage, obligation, required, reason, parameters, claims, affected, actor,
                                         place if admissible or asked else LATER, admissible))
     return tuple(requirements)

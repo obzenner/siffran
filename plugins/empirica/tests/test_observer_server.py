@@ -2,7 +2,7 @@
 """The observer server (``adapters/observer/server.py``): what it serves, and what it refuses.
 
 Loopback only, GET and HEAD only, a ``Host`` that is not its own refused (DNS rebinding), no CORS,
-an allowlist of UI files with no way out of it, the store summary behind an ETag, a run's detail by
+an allowlist of UI files with no way out of it, the store summary behind an ETag, a run's sheet by
 key, and the vendored demo data as a second source. The store is ``observer_store.build_store``.
 
 Run: python3 plugins/empirica/tests/test_observer_server.py
@@ -33,6 +33,7 @@ from adapters.observer import server as server_module  # noqa: E402
 from adapters.observer.server import DEMO, Demo, Sources, serve, static_path  # noqa: E402
 from application.observer import Observer, run_key  # noqa: E402
 from observer_store import DriverSource, build_store  # noqa: E402
+from application import observer_index as index  # noqa: E402
 
 _STORE = build_store()
 
@@ -67,7 +68,8 @@ class ServerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.observer = Observer(DriverSource(_STORE))
-        cls.view, cls.details = cls.observer.observe()
+        cls.details = cls.observer.details()
+        cls.summary = cls.observer.summary()
         cls.served = _Served(Sources(cls.observer))
 
     @classmethod
@@ -83,54 +85,58 @@ class ServerTests(unittest.TestCase):
                      f"empirica.localhost:{port + 1}", f"evil.localhost:{port}", f"empirica.localhost.evil.com:{port}",
                      f"x.empirica.localhost:{port}", "empirica.localhost"):
             with self.subTest(host=host):
-                response, _ = self.served.get("/api/view", host=host)
+                response, _ = self.served.get("/api/summary", host=host)
                 self.assertEqual(response.status, 403)
         for host in (f"localhost:{port}", f"127.0.0.1:{port}", f"empirica.localhost:{port}"):
             with self.subTest(host=host):
-                response, _ = self.served.get("/api/view", host=host)
+                response, _ = self.served.get("/api/summary", host=host)
                 self.assertEqual(response.status, 200)
 
     def test_the_summary_is_the_observer_s_with_its_token_as_etag(self):
-        response, body = self.served.get("/api/view")
+        response, body = self.served.get("/api/summary")
         self.assertEqual(response.status, 200)
-        self.assertEqual(json.loads(body), self.view)
-        self.assertEqual(response.getheader("ETag"), f'"{self.view["token"]}"')
+        self.assertEqual(json.loads(body), self.summary)
+        self.assertEqual(response.getheader("ETag"), f'"{self.summary["token"]}"')
         self.assertEqual(response.getheader("Cache-Control"), "no-store")
 
     def test_an_unchanged_store_answers_304_with_no_body(self):
-        response, body = self.served.get("/api/view", headers={"If-None-Match": f'"{self.view["token"]}"'})
+        response, body = self.served.get("/api/summary", headers={"If-None-Match": f'"{self.summary["token"]}"'})
         self.assertEqual((response.status, body), (304, b""))
-        response, _ = self.served.get("/api/view", headers={"If-None-Match": '"sha256:other"'})
+        response, _ = self.served.get("/api/summary", headers={"If-None-Match": '"sha256:other"'})
         self.assertEqual(response.status, 200)
 
     def test_a_run_s_detail_is_served_by_key_and_an_unknown_key_is_404(self):
         key = next(iter(self.details))
         response, body = self.served.get(f"/api/run?key={quote(key, safe='')}")
         self.assertEqual((response.status, json.loads(body)), (200, self.details[key]))
-        for path in ("/api/run?key=nope", "/api/run"):
-            with self.subTest(path=path):
-                self.assertEqual(self.served.get(path)[0].status, 404)
+        tag = response.getheader("ETag")
+        self.assertEqual(tag, f'"{index.sheet_tag(self.details[key])}"')
+        self.assertEqual(self.served.get(f"/api/run?key={quote(key, safe='')}", headers={"If-None-Match": tag})[0].status, 304)
+        again, _ = self.served.get(f"/api/run?key={quote(key, safe='')}", headers={"If-None-Match": '"sha256:other"'})
+        self.assertEqual(again.status, 200)
+        self.assertEqual(self.served.get("/api/run?key=nope")[0].status, 404)
+        self.assertEqual(self.served.get("/api/run")[0].status, 400, "a key is required")
 
     def test_a_detail_projects_one_run_and_not_the_store(self):
         """Q3a-4: ``/api/run`` asks the observer for that run only."""
         observer = Observer(DriverSource(_STORE))
-        key = next(iter(self.details))
+        key = next(k for k, d in self.details.items() if len(d["attempts"]) == 1)
         with mock.patch.object(Observer, "_run", autospec=True, side_effect=Observer._run) as run:
-            detail = observer.detail(key)
-        self.assertEqual((detail, [run_key(call.args[1]) for call in run.call_args_list]),
-                         (self.details[key], [key]))
-        self.assertIsNone(observer.detail("nope"))
+            detail = observer.sheet(key)
+        self.assertEqual((detail, {run_key(call.args[1]) for call in run.call_args_list}),
+                         (self.details[key], {key}))
+        self.assertIsNone(observer.sheet("nope"))
 
     def test_the_demo_source_is_the_vendored_fixtures(self):
-        response, body = self.served.get("/api/view?source=demo")
-        self.assertEqual(json.loads(body), json.loads((DEMO / "view.json").read_text(encoding="utf-8")))
-        self.assertEqual(self.served.get("/api/view?source=other")[0].status, 404)
+        response, body = self.served.get("/api/summary?source=demo")
+        self.assertEqual(json.loads(body), json.loads((DEMO / "summary.json").read_text(encoding="utf-8")))
+        self.assertEqual(self.served.get("/api/summary?source=other")[0].status, 404)
 
     def test_without_a_store_only_the_demo_is_served(self):
         served = _Served(Sources(None))
         try:
-            self.assertEqual(served.get("/api/view")[0].status, 404)
-            self.assertEqual(served.get("/api/view?source=demo")[0].status, 200)
+            self.assertEqual(served.get("/api/summary")[0].status, 404)
+            self.assertEqual(served.get("/api/summary?source=demo")[0].status, 200)
         finally:
             served.close()
 
@@ -144,36 +150,36 @@ class ServerTests(unittest.TestCase):
 
     def test_an_observer_that_fails_answers_500_and_the_server_goes_on(self):
         class Broken:
-            def view(self):
+            def summary(self, *args, **kwargs):
                 raise RuntimeError("boom")
         served = _Served(Sources(Broken()))
         try:
             with contextlib.redirect_stderr(io.StringIO()) as err:
-                self.assertEqual([served.get("/api/view")[0].status for _ in range(2)], [500, 500])
+                self.assertEqual([served.get("/api/summary")[0].status for _ in range(2)], [500, 500])
             lines = err.getvalue().splitlines()
             self.assertEqual((lines[0], lines[-2:]), ("Traceback (most recent call last):",
                                                       ["observer: RuntimeError: boom"] * 2),
                              "the traceback once, then one line per failure")
             self.assertEqual(err.getvalue().count("Traceback"), 1)
-            self.assertEqual(served.get("/api/view?source=demo")[0].status, 200)
+            self.assertEqual(served.get("/api/summary?source=demo")[0].status, 200)
         finally:
             served.close()
 
     def test_only_get_and_head_are_served(self):
-        self.assertEqual(self.served.get("/api/view", method="HEAD")[1], b"")
+        self.assertEqual(self.served.get("/api/summary", method="HEAD")[1], b"")
         for method in ("POST", "PUT", "DELETE", "OPTIONS"):
             with self.subTest(method=method):
-                self.assertNotIn(self.served.get("/api/view", method=method)[0].status, range(200, 400))
+                self.assertNotIn(self.served.get("/api/summary", method=method)[0].status, range(200, 400))
 
     def test_no_response_allows_another_origin(self):
-        for path in ("/api/view", "/app/", "/nope"):
+        for path in ("/api/summary", "/app/", "/nope"):
             response, _ = self.served.get(path, headers={"Origin": "https://evil.example"})
             self.assertFalse([h for h, _ in response.getheaders() if h.lower().startswith("access-control-")], path)
 
     def test_the_ui_is_served_with_a_same_origin_policy(self):
         response, body = self.served.get("/app/")
         self.assertEqual(response.status, 200)
-        self.assertIn(b"<ev-runs", body)
+        self.assertIn(b"<ev-inbox", body)
         self.assertIn("default-src 'self'", response.getheader("Content-Security-Policy"))
         self.assertIn("frame-ancestors 'none'", response.getheader("Content-Security-Policy"))
         self.assertEqual(response.getheader("X-Content-Type-Options"), "nosniff")
@@ -209,7 +215,8 @@ class StaticPathTests(unittest.TestCase):
         try:
             reply, body = served.get("/api/about")
             self.assertEqual((reply.status, json.loads(body)),
-                             (200, {"observer": "empirica-observer", "identity": "sha256:abc"}))
+                             (200, {"observer": "empirica-observer", "identity": "sha256:abc",
+                                    "sources": {"demo": "fixtures"}}))
         finally:
             served.close()
 
@@ -246,9 +253,9 @@ class StaticPathTests(unittest.TestCase):
 
     def test_the_demo_data_is_vendored_with_the_plugin(self):
         demo = Demo()
-        keys = {r["key"] for p in demo.view()["projects"] for r in p["runs"]}
-        self.assertTrue(all(demo.detail(key)["key"] == key for key in keys))
-        self.assertIsNone(demo.detail("nope"))
+        keys = {r["key"] for r in demo.runs({}, limit=200)["rows"]}
+        self.assertTrue(keys and all(demo.sheet(key)["key"] == key for key in keys))
+        self.assertIsNone(demo.sheet("nope"))
 
 
 class DroppedClientTests(unittest.TestCase):
@@ -284,7 +291,7 @@ class DroppedClientTests(unittest.TestCase):
     def _answers(self, port: int) -> bool:
         try:
             conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-            conn.request("GET", "/api/view?source=demo")
+            conn.request("GET", "/api/summary?source=demo")
             return conn.getresponse().status == 200
         except OSError:
             return False

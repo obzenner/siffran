@@ -13,7 +13,7 @@ sys.path.insert(0, str(PLUGIN))
 
 from application.protocol import (  # noqa: E402
     contract_digest, contract_result, public_contract, stored, to_stored)
-from core.governance import proposal_digest  # noqa: E402
+from core.governance import human_wait, proposal_digest  # noqa: E402
 
 FIXTURES = ROOT / "contracts" / "empirica" / "v2" / "fixtures"
 STATE_FIXTURES = ROOT / "contracts" / "empirica" / "v2" / "state-fixtures"
@@ -75,6 +75,9 @@ def generated(path: Path) -> str:
         goal = run["goal"]
         governed.pop("scope", None)
         governed["proposal_digest"] = proposal_digest(goal, governed)
+    if isinstance(governed, dict) and "prompt_error" in governed:
+        # Who acts on the configuration is the core's answer, never a fixture's (core.governance.human_wait).
+        governed["human_wait"] = human_wait(governed, governed["prompt_error"])
     return json.dumps(to_stored(document), indent=2) + "\n"
 
 

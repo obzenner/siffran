@@ -24,7 +24,7 @@ test("the launcher starts the observer, which serves the store summary on 127.0.
     assert.match(server.url, /^http:\/\/empirica\.localhost:\d+\/app\/$/);
     assert.equal(server.reused, false);
     // The test resolves no *.localhost name: it asks the loopback address, with the server's own name as the Host.
-    const loopback = new URL("/api/view", server.url.replace("empirica.localhost", "127.0.0.1"));
+    const loopback = new URL("/api/summary", server.url.replace("empirica.localhost", "127.0.0.1"));
     const view = await (await fetch(loopback)).json() as { contract: string; projects: unknown[] };
     assert.deepEqual([view.contract, view.projects], ["empirica-ui-view/v1", []]);
   } finally { server.stop(); }
@@ -34,7 +34,7 @@ test("a server that ends is reported as ended, and its stop is harmless after", 
   const server = await startObserver(home, { open: false });
   server.stop();
   await server.exited;
-  await assert.rejects(fetch(new URL("/api/view", server.url.replace("empirica.localhost", "127.0.0.1"))));
+  await assert.rejects(fetch(new URL("/api/summary", server.url.replace("empirica.localhost", "127.0.0.1"))));
   server.stop();
 }));
 

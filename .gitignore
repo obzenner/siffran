@@ -14,3 +14,11 @@ __pycache__/
 node_modules/
 # pi project-local package clones (pi install -l git:...) — never commit
 .pi/git/
+
+# Python dev tools (make dev-install); Hypothesis's local cache (the tests use no example database)
+.venv/
+.hypothesis/
+# make mutate (mutmut's scratch copy lives outside the repo): Stryker's sandbox, and its local reports (the incremental
+# record reports/stryker-incremental.json and the last run's reports/mutation.json)
+plugins/empirica/ui/.stryker-tmp/
+plugins/empirica/ui/reports/

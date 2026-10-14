@@ -1,5 +1,5 @@
 // Negative controls for scripts/audit.mjs: each rule must fire on a seeded violation.
-import test from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -95,13 +95,22 @@ test("T1: a hex colour in code or in app.css is found", () => {
   assert.ok(!has(audit(ok), "T1 raw colour"));
 });
 
+test("T1: a functional colour in code (the canvas's too) is found", () => {
+  const t = base(); t.code[meter] += '\nctx.fillStyle = "rgba(0, 0, 0, 0.5)";';
+  assert.ok(has(audit(t), "T1 raw colour", "rgba(0"));
+  const u = base(); u.code[meter] += '\nconst c = `oklch(0.7 0.1 200)`;';
+  assert.ok(has(audit(u), "T1 raw colour", "oklch(0"));
+  const ok = base(); ok.code[meter] += '\nconst v = `var(--color-tone-human)`;';
+  assert.ok(!has(audit(ok), "T1 raw colour"));
+});
+
 test("T8: an unused token, an unused semantic colour, an unused primitive and an unruled group are found", () => {
   const t = base(); t.tokens.spacing["9xl"] = { $value: "99rem" };
   assert.ok(has(audit(t), "T8 unused token", "spacing.9xl"));
   const u = base(); u.tokens.light.zz9 = { $value: "#000000" };
   assert.ok(has(audit(u), "T8 unused token", "light.zz9"));
-  const v = base(); v.tokens.primitive.gray.zz9 = { $value: "#010101" };
-  assert.ok(has(audit(v), "T8 unused token", "primitive.gray.zz9"));
+  const v = base(); v.tokens.primitive.neutral.zz9 = { $value: "#010101" };
+  assert.ok(has(audit(v), "T8 unused token", "primitive.neutral.zz9"));
   const w = base(); w.tokens.zz9 = { zz: { $value: "1px" } };
   assert.ok(has(audit(w), "T8 token group without a usage rule", "zz9"));
 });

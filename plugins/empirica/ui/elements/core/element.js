@@ -45,15 +45,39 @@ export function joined(...parts) { return parts.filter(Boolean).join(copy["list.
 export function when(seconds) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(seconds * 1000));
 }
+const RELATIVE = new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "narrow" });
+/** A moment the observer recorded (seconds since the epoch) as how long ago it was ("3h ago"), against `nowMs`; the
+ * catalogue's words when it has no time. A label for the reader, never an order. */
+export function ago(seconds, nowMs) {
+  if (typeof seconds !== "number") return t("time.unknown");
+  const gap = seconds - nowMs / 1000, size = Math.abs(gap);
+  if (size < 60) return t("time.now");
+  if (size < 3600) return RELATIVE.format(Math.round(gap / 60), "minute");
+  if (size < 86400) return RELATIVE.format(Math.round(gap / 3600), "hour");
+  return RELATIVE.format(Math.round(gap / 86400), "day");
+}
+/** A whole number in the reader's locale ("10,000"). */
+export const num = (n) => new Intl.NumberFormat().format(n);
+
+/** One value of a contract vocabulary as glyph and word. `variant`: "full" (the word always, where a person acts or reads
+ * a state alone), "glyph" (the glyph, its word in the title and for screen readers, shown beside it in words mode: the
+ * `Aa` toggle), "chip" (a badge on a tint). Unknown values render as "Unknown". */
+export function stateHtml(domain, value, variant = "full") {
+  const s = stateOf(domain, value), tone = TONE[s.tone], label = t(`${s.copy}.label`);
+  if (variant === "chip") return `<span class="badge ${tone.fg} ${tone.tint}">${icon(s.icon)}<span>${label}</span></span>`;
+  const word = variant === "glyph" ? "ev-word text-xs" : "text-s font-medium";
+  return `<span class="inline-flex shrink-0 items-center gap-2xs ${tone.fg}" title="${esc(plain(`${s.copy}.label`))}" ${s.live && variant === "glyph" ? "data-live" : ""}>${icon(s.icon)}<span class="${word}">${label}</span></span>`;
+}
+
 /** Literal class sets per tone (E7: no string-built classes; Tailwind scans these literals). */
 export const TONE = {
-  positive: { fg: "text-tone-positive", tint: "bg-tone-positive-tint" },
-  negative: { fg: "text-tone-negative", tint: "bg-tone-negative-tint" },
-  caution: { fg: "text-tone-caution", tint: "bg-tone-caution-tint" },
-  info: { fg: "text-tone-info", tint: "bg-tone-info-tint" },
-  human: { fg: "text-tone-human", tint: "bg-tone-human-tint" },
-  audit: { fg: "text-tone-audit", tint: "bg-tone-audit-tint" },
-  neutral: { fg: "text-tone-neutral", tint: "bg-tone-neutral-tint" },
+  positive: { fg: "text-tone-positive", tint: "bg-tone-positive-tint", solid: "bg-tone-positive" },
+  negative: { fg: "text-tone-negative", tint: "bg-tone-negative-tint", solid: "bg-tone-negative" },
+  caution: { fg: "text-tone-caution", tint: "bg-tone-caution-tint", solid: "bg-tone-caution" },
+  info: { fg: "text-tone-info", tint: "bg-tone-info-tint", solid: "bg-tone-info" },
+  human: { fg: "text-tone-human", tint: "bg-tone-human-tint", solid: "bg-tone-human" },
+  audit: { fg: "text-tone-audit", tint: "bg-tone-audit-tint", solid: "bg-tone-audit" },
+  neutral: { fg: "text-tone-neutral", tint: "bg-tone-neutral-tint", solid: "bg-tone-neutral" },
 };
 
 /** Shorten prose to `n` characters. Presentation only: the full text is always one click away. */

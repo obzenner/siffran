@@ -1,6 +1,6 @@
 // tests/cdp.mjs launch arguments: Chrome runs with the real HOME, so it must never ask the login keychain.
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import { chromeArgs } from "./cdp.mjs";
 
 test("Chrome always launches with the mock keychain and the basic password store", () => {

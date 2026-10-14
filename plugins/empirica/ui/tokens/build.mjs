@@ -27,6 +27,7 @@ StyleDictionary.registerFormat({
       "  --font-sans: var(--ev-font-sans);  /* overrides Basecoat's Geist default */",
       "  --font-mono: var(--ev-font-mono);",
       decls(of("duration"), "duration-"),
+      decls(of("weight"), "font-weight-"),  // overrides Basecoat's weights, so its components are as thin as ours
       "}",
       ".dark {",
       decls(of("dark")),
@@ -63,7 +64,7 @@ const sd = new StyleDictionary({
     css: {
       buildPath: "dist/",
       files: [
-        { destination: "tokens.css", format: "ev/runtime-css", filter: (t) => [...SCHEMES, "font", "duration"].includes(t.path[0]) },
+        { destination: "tokens.css", format: "ev/runtime-css", filter: (t) => [...SCHEMES, "font", "duration", "weight"].includes(t.path[0]) },
         { destination: "theme.css", format: "ev/tailwind-theme", filter: (t) => !["primitive", "dark"].includes(t.path[0]) },
       ],
     },

@@ -358,7 +358,9 @@ def project_governance(snapshot: EvaluationSnapshot) -> dict:
     bootstrap = bootstrap_status(snapshot)
     actions = bootstrap["next_actions"]  # empty for a terminal run or when bootstrap is complete
     value.update(request_ready=bootstrap["request_ready"], display_ready=bootstrap["display_ready"],
-                 next_action=actions[-1] if actions else snapshot.default_next_action)
+                 next_action=actions[-1] if actions else snapshot.default_next_action,
+                 # who acts on the configuration: the one predicate, published so a host reads it, never re-derives it
+                 human_wait=governance.human_wait(value, value["prompt_error"]))
     return value
 
 

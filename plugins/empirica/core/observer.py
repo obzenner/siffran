@@ -13,7 +13,11 @@ the same facts and each owned here (the UI reads them and decides nothing):
 * ``outstanding``, ``next`` and ``attention``: what the run still owes, who acts and where, shaped from the one
   projection of the report's ordering (``evaluation.report_requirements``) that the gate and the author view use; this
   module classifies nothing (and never infers liveness);
-* ``steps``: the history with its subject, the human outcome and whether the claim it names still stands.
+* ``steps``: the history with its subject, the human outcome and whether the claim it names still stands;
+* ``standing``: the one word a run is filed under, from ``attention``, its status, the audit and drift (``STANDINGS``);
+* ``ask``: what a human is asked (``ASKS``), read from the item the core presents, and the artifact that recorded it;
+* ``audits``, ``dropped`` and ``decisions``: every audit verdict, every claim the run no longer stands on and why (the
+  gate's own claim-state rule, ``evaluation.claim_state_cause``), and every answer a human gave.
 
 No I/O, no clock and no presentation: labels, colours and layout belong to the UI.
 """
@@ -24,10 +28,10 @@ from collections.abc import Mapping
 from typing import Any
 
 from . import citations, confirmation, governance
-from .evaluation import (LATER, EvaluationSnapshot, Requirement, active_evidence, audit_acceptance,
-                         audit_attributions, audit_passes, claim_blockers, claim_digest,
-                         derive_claims_for_projection, effective_scope_ids, evidence_digest, identity_pair,
-                         latest_audit_verdict,
+from .evaluation import (LATER, ClaimDerivation, EvaluationSnapshot, Requirement, active_evidence,
+                         audit_acceptance, audit_attributions, audit_passes, audit_verdicts, claim_blockers,
+                         claim_digest, claim_state_cause, confirmation_batch, derive_claims_for_projection,
+                         effective_scope_ids, evidence_digest, identity_pair, independence_then, latest_audit_verdict,
                          pending_decisions, report_requirements)
 from .projection import governance_facts, project_runview, spike_result
 
@@ -102,10 +106,11 @@ def assurance(state: str, review: str, accepted: bool) -> str:
     return "assured" if review == "passed" and accepted else "awaiting_audit"
 
 
-def _step(n: int, item: Mapping[str, Any], standing: Mapping[str, str]) -> dict[str, Any]:
+def _step(n: int, item: Mapping[str, Any], standing: Mapping[str, str], at: float | None = None) -> dict[str, Any]:
     """One history artifact: what it is about (the run, a claim, or one research record), the outcome it recorded (a
     human's too), whether it is the human's consent to end the run, and whether the claim it names still stands as
-    worded (``standing`` maps each current claim id to its digest)."""
+    worded (``standing`` maps each current claim id to its digest). ``at`` is the time the adapter recorded for the write
+    that committed it, a label only (``None`` when unknown)."""
     kind = item.get("kind")
     terminal = kind == confirmation.KIND and item.get("terminal") is True
     claim = None if terminal else item.get("claim_id")
@@ -114,7 +119,7 @@ def _step(n: int, item: Mapping[str, Any], standing: Mapping[str, str]) -> dict[
     outcome = (item.get("verdict") if kind == "audit_verdict"
                else item.get("outcome") if kind in {"research", "spike", confirmation.KIND} else None)
     digest = item.get("claim_digest")
-    return {"n": n, "kind": kind, "subject": subject, "claim": claim, "outcome": outcome,
+    return {"n": n, "at": at, "kind": kind, "subject": subject, "claim": claim, "outcome": outcome,
             "terminal": terminal, "bookkeeping": kind in BOOKKEEPING_KINDS, "command": item.get("command"),
             "standing": (None if claim is None else "gone" if claim not in standing
                          else "replaced" if digest is not None and digest != standing[claim] else "current")}
@@ -269,6 +274,208 @@ def attention(status: str, items: list[Mapping[str, Any]]) -> str:
     return "needs_you" if any(i["who"] == "human" and i["where"] in HUMAN_REACHABLE for i in items) else "not_ended"
 
 
+#: The one word a run is filed under, in precedence order (``standing``). ``unreadable``: not read in full.
+STANDINGS = ("unreadable", "needs_human", "audit_pending", "changed_since_audit", "not_ended", "proven",
+             "stopped_residual", "stopped_budget", "stopped_frozen")
+#: What a human is asked: approve the run's configuration, approve a revision of it, decide a ``needs-decision``
+#: claim, confirm a source the service cannot check, agree to stop, or agree to end with the scope frozen.
+ASKS = ("approve_configuration", "approve_revision", "decide_claim", "confirm_source", "consent_stop", "freeze_scope")
+#: The asks a run's configuration raises (recorded in its state, timed by the write that proposed it).
+GOVERNANCE_ASKS = ("approve_configuration", "approve_revision")
+#: Why a claim no longer counts (``dropped``): the gate's cause, or a regraph that removed it with no evidence against it.
+DROP_REASONS = ("refuted", "spike_failed", "rejected", "removed")
+#: A human's answer (``decisions``) and what the core recorded it to do.
+ANSWERS = ("approve", "reject", "later")
+EFFECTS = ("configuration_approved", "configuration_amended", "configuration_rejected", "record_confirmed",
+           "record_rejected", "claim_approved", "claim_rejected", "run_ended", "run_continued", "none")
+AUDIT_OUTCOMES = ("passed", "failed")
+
+
+def changed_since_audit(audit: Mapping[str, Any], drift: bool) -> bool:
+    """Whether what a passing audit reviewed has changed since: the pass no longer binds the argument (``audit.current``
+    is false) or a file the run's proof was bound to changed (``drift``, the run view's freshness changes)."""
+    return audit["verdict"] == "passed" and (audit["current"] is False or drift)
+
+
+def standing(status: str | None, attention_value: str | None, audit: Mapping[str, Any] | None, drift: bool) -> str:
+    """The one word a run is filed under. The precedence is defined here and nowhere else (``STANDINGS`` lists it):
+
+    1. ``unreadable``: the run was not read in full (``status`` is ``None``);
+    2. ``needs_human``: a human is owed a question a host will show (``attention`` is ``needs_you``);
+    3. ``audit_pending``: an active run whose re-audit is in flight;
+    4. ``changed_since_audit``: a pass no longer covers what it reviewed (``changed_since_audit``), whatever the status;
+    5. ``not_ended``: any other active run (liveness is never inferred);
+    6. ``proven``: converged;
+    7. the stop's own status (``stopped_residual``, ``stopped_budget``, ``stopped_frozen``)."""
+    if status is None or audit is None:
+        return "unreadable"
+    if attention_value == "needs_you":
+        return "needs_human"
+    if status == "active" and audit["pending"]:
+        return "audit_pending"
+    if changed_since_audit(audit, drift):
+        return "changed_since_audit"
+    if status == "active":
+        return "not_ended"
+    return "proven" if status == "converged" else status
+
+
+def _first_graph(snapshot: EvaluationSnapshot, claim_id: str, digest: str) -> str | None:
+    """The graph artifact that first declared ``claim_id`` as worded now (``digest``)."""
+    return next((a["artifact_id"] for a in snapshot.history if a.get("kind") == "graph"
+                 and any(c["id"] == claim_id and claim_digest(c) == digest for c in a["graph"]["claims"])), None)
+
+
+def ask(snapshot: EvaluationSnapshot, derivation: ClaimDerivation | None,
+        requirements: tuple[Requirement, ...]) -> tuple[str, str | None] | None:
+    """What a human is asked about an active run, and the history artifact that recorded the question (``None`` when no
+    artifact did: a configuration lives in the run's state, and ``project`` times it by the write that proposed it, from
+    ``configured``). Read from the items the core presents, first that applies:
+
+    * the configuration, when its requirement is the human's (``governance.human_wait``: the agent asked and a host can
+      show it): ``approve_revision`` for any governance ask after the first approval (5.0.0 does not record whether a
+      revision raised a ceiling, so a raise is not counted), else ``approve_configuration``;
+    * the first human requirement of the report (``report_requirements``): its batch (``confirmation_batch``) asks to
+      ``decide_claim`` when it holds a decision, else to ``confirm_source``; the terminal stage asks ``freeze_scope``
+      (unless the human declined it: then the agent acts, and nobody is asked).
+
+    A stop's consent (``consent_stop``) is asked inside the stop that reaches it and is answered there; one shown and left
+    without consent is the human's no (``confirmation.terminal_case``), so it is no row's ask (it is among the answers,
+    ``decisions``). ``None`` for an ended run or one nobody asks anything."""
+    state = snapshot.state
+    if state.status != "active":
+        return None
+    human = next((r for r in requirements if r.actor == "human"), None)
+    if human is not None and human.stage == "setup":
+        return ("approve_revision" if state.governance["first_approval"] else "approve_configuration"), None
+    if derivation is None or snapshot.graph is None or human is None:
+        return None
+    if human.stage == "terminal":
+        return "freeze_scope", None
+    batch = confirmation_batch(snapshot, derivation)
+    if batch is None:
+        return None
+    recorded = {a for a in [*(_first_graph(snapshot, c["claim_id"], c["claim_digest"]) for c in batch["claims"]),
+                            *batch["record_ids"]] if a is not None}
+    first = next((a["artifact_id"] for a in snapshot.history if a["artifact_id"] in recorded), None)
+    return ("decide_claim" if batch["claims"] else "confirm_source"), first
+
+
+def audits(snapshot: EvaluationSnapshot, at: Mapping[str, float | None]) -> list[dict[str, Any]]:
+    """Every audit verdict of the run in history order (``evaluation.audit_verdicts``; the last is the latest): its
+    verdict, its findings, the auditor the host recorded for it, its independence as it stood when it was recorded
+    (``evaluation.independence_then``: against the evidence its audit was launched over, never today's; ``None`` when
+    the run no longer holds that launch dossier) and the time of the write that recorded it."""
+    return [{"verdict": "passed" if v.get("verdict") == "pass" else "failed", "findings": list(v.get("findings", [])),
+             "auditor": identity_pair(audit_attributions(snapshot, v)[0]), "independence": independence_then(snapshot, v),
+             "at": at.get(v["artifact_id"])} for v in audit_verdicts(snapshot)]
+
+
+def _why(snapshot: EvaluationSnapshot, claim: Mapping[str, Any], stale: set[str],
+         at: Mapping[str, float | None]) -> dict[str, Any] | None:
+    """Why the gate discards ``claim`` (``evaluation.claim_state_cause``, the gate's own rule), else ``None``."""
+    state, cause = claim_state_cause(snapshot, dict(claim), stale)
+    if state != "discarded" or cause is None:
+        return None
+    kind = cause.get("kind")
+    why = "spike_failed" if kind == "spike" else "refuted" if kind == "research" else "rejected"
+    return {"why": why, "source": cause.get("source_ref") if kind == "research" else None,
+            "citation": cause.get("citation") if kind == "research" else None,
+            "command": cause.get("command") if kind == "spike" else None, "at": at.get(cause["artifact_id"])}
+
+
+def dropped(snapshot: EvaluationSnapshot, derivation: ClaimDerivation | None,
+            at: Mapping[str, float | None]) -> list[dict[str, Any]]:
+    """The claims the run no longer stands on: those an earlier graph declared and the selected one does not (each as
+    last declared, with the regraph that removed it), then the selected graph's claims the gate discards now, each with
+    its text, kind and why. The why is the gate's claim-state rule applied to the history (``_why``); a removed claim the
+    rule does not discard was ``removed`` with no evidence against it."""
+    if snapshot.graph is None or derivation is None:
+        return []
+    stale = set(derivation.stale_heads)
+    current = {c["id"] for c in snapshot.graph["claims"]}
+    removed: dict[str, tuple[Mapping[str, Any], str | None]] = {}
+    for art in (a for a in snapshot.history if a.get("kind") == "graph"):
+        ids = {c["id"] for c in art["graph"]["claims"]}
+        for claim_id, (claim, by) in list(removed.items()):
+            if claim_id not in ids and by is None:
+                removed[claim_id] = (claim, art["artifact_id"])
+        for c in art["graph"]["claims"]:
+            if c["id"] not in current:
+                removed[c["id"]] = (c, None)
+    rows = []
+    for claim, by in removed.values():
+        why = _why(snapshot, claim, stale, at) or {"why": "removed", "source": None, "citation": None, "command": None,
+                                                   "at": at.get(by) if by is not None else None}
+        rows.append({"claim": claim["id"], "text": claim["text"], "kind": claim["kind"], "removed": True, **why})
+    for claim in snapshot.graph["claims"]:
+        if derivation.states[claim["id"]] == "discarded":
+            why = _why(snapshot, claim, stale, at)
+            if why is not None:
+                rows.append({"claim": claim["id"], "text": claim["text"], "kind": claim["kind"], "removed": False, **why})
+    return rows
+
+
+_GOVERNANCE_ANSWERS = {"approve": ("approve", "configuration_approved"), "amend": ("approve", "configuration_amended"),
+                       "reject": ("reject", "configuration_rejected"), "dismiss": ("later", "none")}
+
+
+def decisions(snapshot: EvaluationSnapshot, at: Mapping[str, float | None],
+              receipts_at: Mapping[str, float | None] | None = None) -> list[dict[str, Any]]:
+    """Every answer a human gave the run: its configuration's receipts from a host's dialog (an ``auto`` approval is
+    nobody's answer), in the order the state records them (``at``: the write that recorded each, from ``receipts_at``),
+    then, in history order, each recorded confirmation and each item a host showed
+    that its human left for later. Each says what was asked (``ASKS``), what it is attached to (``claim``: the claim
+    decided, or the claim a confirmed source supports; ``source``: that source; ``plan``: the configuration's plan
+    revision; none of them for the run's end), the answer (``ANSWERS``) and the effect the core records for it
+    (``EFFECTS``)."""
+    rows, approved = [], False
+    for r in snapshot.state.governance["receipts"]:
+        if r["approval_kind"] == "host_ui" and r["outcome"] in _GOVERNANCE_ANSWERS:
+            answer, effect = _GOVERNANCE_ANSWERS[r["outcome"]]
+            rows.append({"asked": "approve_revision" if approved else "approve_configuration",
+                         "claim": None, "source": None, "plan": r["plan_revision"], "answer": answer, "effect": effect,
+                         "at": (receipts_at or {}).get(r["id"])})
+        approved = approved or r["outcome"] in {"approve", "amend"}  # the first approval; every later ask is a revision
+    records = {a["artifact_id"]: a for a in snapshot.history if a.get("kind") == "research"}
+    answered: dict[str, set[str]] = {}
+    for a in snapshot.history:
+        if a.get("kind") == confirmation.KIND:
+            answered.setdefault(a.get("receipt_id"), set()).add(a.get("record_id") or a.get("claim_id"))
+    for a in snapshot.history:
+        when = at.get(a["artifact_id"])
+        if a.get("kind") == confirmation.KIND:
+            yes = a["outcome"] in {confirmation.APPROVE, confirmation.CONFIRM}
+            claim = source = None
+            if a.get("terminal") is True:
+                asked = "freeze_scope" if a["claim_id"] == "stopped_frozen" else "consent_stop"
+                effect = "run_ended" if yes else "run_continued"
+            elif a.get("subject") == "research":
+                record = records.get(a["record_id"], {})
+                asked, claim, source = "confirm_source", record.get("claim_id"), record.get("source_ref")
+                effect = "record_confirmed" if yes else "record_rejected"
+            else:
+                asked, claim, effect = "decide_claim", a["claim_id"], "claim_approved" if yes else "claim_rejected"
+            rows.append({"asked": asked, "claim": claim, "source": source, "plan": None,
+                         "answer": "approve" if yes else "reject", "effect": effect, "at": when})
+        elif a.get("kind") == confirmation.PRESENTATION:
+            done = answered.get(a.get("receipt_id"), set())
+            terminal = isinstance(a.get("terminal"), Mapping)
+            for c in a.get("claims", []):
+                if c["claim_id"] not in done:
+                    asked = (("freeze_scope" if c["claim_id"] == "stopped_frozen" else "consent_stop") if terminal
+                             else "decide_claim")
+                    rows.append({"asked": asked, "claim": None if terminal else c["claim_id"], "source": None, "plan": None,
+                                 "answer": "later", "effect": "none", "at": when})
+            for record_id in a.get("record_ids", []):
+                if record_id not in done:
+                    record = records.get(record_id, {})
+                    rows.append({"asked": "confirm_source", "claim": record.get("claim_id"),
+                                 "source": record.get("source_ref"), "plan": None,
+                                 "answer": "later", "effect": "none", "at": when})
+    return rows
+
+
 def next_step(items: list[Mapping[str, Any]]) -> dict[str, Any] | None:
     """The one obligation a run's row names. A run that needs a human names the question it will be shown (the reason it is
     listed as needing one), else the first the gate names now (the first not held behind an earlier one, which is also the
@@ -294,7 +501,8 @@ def _current_rows(requirements: tuple[Requirement, ...], reasons: Mapping[str, A
 
 
 def project(snapshot: EvaluationSnapshot, reasons: Mapping[str, Any], *, stopped: EvaluationSnapshot | None = None,
-            recorded: str = "recorded") -> tuple[dict[str, Any], dict[str, Any]]:
+            recorded: str = "recorded", times: tuple[float | None, ...] | None = None,
+            configured: Mapping[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     """The run's row facts for the store summary and its detail, from one derivation. ``reasons`` is the
     public-contract registry's reasons (each with its wording).
 
@@ -303,7 +511,11 @@ def project(snapshot: EvaluationSnapshot, reasons: Mapping[str, Any], *, stopped
     from it by the same owners the author view uses, whatever became of the run. ``stopped`` is the same run as its last
     transaction recorded it, given for a run that has ended; it feeds only the facts *at the stop*: ``residuals`` (what the
     stop left unresolved) and, when today's evaluation differs, ``now`` beside them. ``recorded`` is ``"unavailable"`` when the
-    record cannot hold the stop: its residuals are then unknown, never inferred from today's files."""
+    record cannot hold the stop: its residuals are then unknown, never inferred from today's files.
+
+    ``times`` gives each history artifact's recorded time, aligned with ``snapshot.history`` (a label the adapter recorded
+    beside the run, ADR-0070); it is copied into the steps and decides nothing. ``configured`` gives, the same way, the time
+    of the write that proposed the current configuration (``proposal``) and of each receipt (``receipts``, by id)."""
     view = project_runview(snapshot)
     verdict = latest_audit_verdict(snapshot)
     graph = snapshot.graph
@@ -317,7 +529,8 @@ def project(snapshot: EvaluationSnapshot, reasons: Mapping[str, Any], *, stopped
     prompt_error = batch["prompt_error"] if batch is not None else None
     ended = snapshot.state.status != "active"
     audit = view["audit"]
-    items = ([] if ended else outstanding(report_requirements(snapshot, derivation, tuple(blockers.values())), reasons))
+    requirements = () if ended else report_requirements(snapshot, derivation, tuple(blockers.values()))
+    items = outstanding(requirements, reasons) if not ended else []
     accepted = derivation is not None and audit_acceptance(snapshot, derivation) is None
     row_claims = []
     for c in claims:
@@ -330,12 +543,30 @@ def project(snapshot: EvaluationSnapshot, reasons: Mapping[str, Any], *, stopped
             "evidence": evidence_kind(snapshot, c), "review": review,
             "assurance": assurance(state, review, accepted),
         })
+    at = ({item["artifact_id"]: times[n] for n, item in enumerate(snapshot.history)} if times is not None else {})
+    attention_value = attention(snapshot.state.status, items)
+    drift = bool(view["freshness"]["changes"])
+    audit_row = {key: audit[key] for key in ("verdict", "current", "pending", "independence")}
+    asked = None if ended else ask(snapshot, derivation, requirements)
+    recorded_audits = audits(snapshot, at)
+    lost = dropped(snapshot, derivation, at)
+    configured = configured or {"proposal": None, "receipts": {}}
+    answers = decisions(snapshot, at, configured["receipts"])
     row = {
+        "standing": standing(snapshot.state.status, attention_value, audit_row, drift),
+        "ask": asked[0] if asked else None,
+        "asked_at": (None if asked is None else configured["proposal"] if asked[0] in GOVERNANCE_ASKS
+                     else at.get(asked[1]) if asked[1] is not None else None),
+        "flags": {"failed_audit": any(v["verdict"] == "failed" for v in recorded_audits),
+                  "refuted": any(d["why"] in {"refuted", "spike_failed"} for d in lost),
+                  "decided": any(d["answer"] != "later" for d in answers),
+                  "changed_since_audit": changed_since_audit(audit_row, drift)},
         "goal": snapshot.state.goal,
+        "mode": snapshot.state.governance["control_mode"],
         "session": session_fact(governance.plain(snapshot.state.invocation)),
-        "attention": attention(snapshot.state.status, items),
+        "attention": attention_value,
         "next": next_step(items),
-        "audit": {key: audit[key] for key in ("verdict", "current", "pending", "independence")},
+        "audit": audit_row,
         "progress": {"required": sum(c["gating"] for c in row_claims),
                      "approved": sum(c["gating"] and c["state"] == "approved" for c in row_claims)},
         "root": graph["root"] if graph is not None else None,
@@ -344,7 +575,7 @@ def project(snapshot: EvaluationSnapshot, reasons: Mapping[str, Any], *, stopped
     }
     author = snapshot.state.governance.get("context", {}).get("author")
     auditor = audit_attributions(snapshot, verdict)[0] if verdict is not None else None
-    standing = {c["id"]: claim_digest(c) for c in claims}
+    wording = {c["id"]: claim_digest(c) for c in claims}
     residuals = _residual_rows(project_runview(stopped), reasons, ended=ended) if stopped is not None else None
     stop = None
     if ended:
@@ -368,7 +599,11 @@ def project(snapshot: EvaluationSnapshot, reasons: Mapping[str, Any], *, stopped
         "stale": changed,
         "author": identity_pair(author if isinstance(author, Mapping) else None),
         "auditor": identity_pair(auditor),
-        "steps": [_step(n, item, standing) for n, item in enumerate(snapshot.history, start=1)],
+        "audits": recorded_audits,
+        "dropped": lost,
+        "decisions": answers,
+        "steps": [_step(n, item, wording, times[n - 1] if times is not None else None)
+                  for n, item in enumerate(snapshot.history, start=1)],
         "claims": [_claim_detail(snapshot, c, c["id"] in scope,
                                  reason_message(reasons[blockers[c["id"]]["reason"]],
                                                 blockers[c["id"]]["parameters"], ended=ended)

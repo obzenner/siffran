@@ -27,6 +27,8 @@ for (const s of ["light", "dark"]) {
   // Graphical marks (T7, WCAG 1.4.11): the view's run diamonds and claim circles are outlined in `subtle`, so the
   // shape of every mark reads at >= 3:1 whatever its tint; lines and the gating outline are `muted-foreground`.
   for (const bg of ["background", "card"]) rows.push([s, "subtle", bg, UI]);
+  // Each island's name in the Universe is text in its own hue on the page's background.
+  for (let k = 1; k <= catalogue.universe.island_hues; k++) rows.push([s, `island-${k}`, "background", TEXT]);
 }
 let failed = 0;
 for (const [s, fg, bg, min] of rows) {

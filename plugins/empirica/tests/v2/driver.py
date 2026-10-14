@@ -86,13 +86,46 @@ class ConformanceDriver(Protocol):
 
 
 class FakeClock:
-    """Deterministic monotonic clock. Owns the tick fact only."""
+    """Deterministic monotonic clock. Owns the tick fact only: each read returns the time and then moves it on by
+    ``step`` (zero by default: a clock that stands still)."""
 
-    def __init__(self, start: float = 0.0) -> None:
+    def __init__(self, start: float = 0.0, step: float = 0.0) -> None:
         self._t = float(start)
+        self._step = float(step)
 
     def read(self) -> float:
-        return self._t
+        now = self._t
+        self._t += self._step
+        return now
+
+
+class MemoryTimeline:
+    """The timeline port (``adapters.state.timeline.Timeline``) held in memory: each generation's raw bytes, written and
+    parsed by the adapter's own codec. ``fail_on`` names the appends (1-based, in call order) that fail, as an
+    unwritable file would."""
+
+    def __init__(self, fail_on=()) -> None:
+        self.raw: dict = {}
+        self._fail_on = set(fail_on)
+        self._calls = 0
+
+    def append(self, key, previous, revision, value, at) -> None:
+        from adapters.state import timeline
+        self._calls += 1
+        if self._calls in self._fail_on:
+            raise OSError("timeline unwritable")
+        self.raw[key] = timeline.appended(self.raw.get(key), previous, revision, value, at)
+
+    def read(self, key):
+        from adapters.state import timeline
+        return timeline.parse(self.raw.get(key))
+
+    def retime(self, change) -> None:
+        """Rewrite every recorded time as ``change(key, at)``: what a skewed or different clock would have written."""
+        from adapters.state import timeline
+        for key, raw in self.raw.items():
+            entries = timeline.parse(raw)
+            self.raw[key] = timeline.encode([{**e, "at": float(change(key, e["at"]))} for e in entries])
 
 
 def _normalize(path: str) -> str:
@@ -126,24 +159,70 @@ class FakeWorkspace:
         self._errors: dict[str, str] = {}
         self.observe_calls = 0
         self._observe_history: list[tuple[tuple[str, ...], tuple[dict, ...]]] = []
+        # Change signatures, as a filesystem keeps them: (inode, size, mtime, ctime) per path, on a tick clock that
+        # moves on every write (``tick`` moves it too: time passing). Read only by a reader's change detection.
+        self._tick = 0
+        self._inodes = 0
+        self._sigs: dict[str, tuple] = {}
+        self.hashed_bytes = 0  # transport telemetry: the bytes ``observe`` hashed
 
-    def write(self, path: str, content: bytes) -> None:
+    def _touch(self, n: str, *, keep_mtime: bool = False, same_tick: bool = False) -> None:
+        if not same_tick:
+            self._tick += 1
+        old = self._sigs.get(n)
+        if same_tick and old is not None and old[3] == self._tick and old[1] == len(self._files.get(n, b"")):
+            return  # a write within the tick of the last change, of the same size: the signature cannot tell (racily clean)
+        self._inodes += 1
+        size = len(self._files.get(n, b""))
+        mtime = old[2] if keep_mtime and old is not None else self._tick
+        self._sigs[n] = (old[0] if old is not None else self._inodes, size, mtime, self._tick, self._errors.get(n))
+
+    def tick(self) -> None:
+        """Time passes."""
+        self._tick += 1
+
+    def write(self, path: str, content: bytes, *, keep_mtime: bool = False, same_tick: bool = False) -> None:
+        """Write ``path``. ``keep_mtime``: as ``touch -m -d`` restores it (the change time still moves); ``same_tick``:
+        within the clock tick of the last change, same size (nothing in the signature moves)."""
         n = _normalize(path)
         if not n:
             return
         self._files[n] = bytes(content)
         self._errors.pop(n, None)
+        self._touch(n, keep_mtime=keep_mtime, same_tick=same_tick)
 
     def delete(self, path: str) -> None:
         n = _normalize(path)
         self._files.pop(n, None)
         self._errors.pop(n, None)
+        self._sigs.pop(n, None)
+        self._tick += 1
 
     def set_error(self, path: str, code: str) -> None:
         n = _normalize(path)
         if not n:
             return
         self._errors[n] = code
+        self._touch(n)
+
+    # --- the change-detection port ``FilesystemWorkspace`` has --------------------------------------------------
+
+    def drift_id(self) -> str:
+        return f"fake:{id(self)}"
+
+    def now_ns(self) -> int:
+        return self._tick
+
+    def signatures(self, paths) -> dict:
+        return {p: self._sigs.get(_normalize(p)) for p in paths}
+
+    @staticmethod
+    def changed_at(signature) -> int | None:
+        return None if signature is None else signature[3]
+
+    @staticmethod
+    def basis_of(observations) -> str:
+        return observations_digest(tuple(observations))
 
     def observe(self, paths: list[str]) -> WorkspaceCapture:
         self.observe_calls += 1
@@ -170,6 +249,7 @@ class FakeWorkspace:
                 out.append({"path": n, "state": "missing", "sha256": None})
                 continue
             digest = hashlib.sha256(self._files[n]).hexdigest()
+            self.hashed_bytes += len(self._files[n])
             out.append({"path": n, "state": "present", "sha256": digest})
         self._observe_history.append((tuple(sorted(seen)), tuple(out)))
         files = []
@@ -343,12 +423,15 @@ _ABSENT = object()
 
 
 def new_driver(profile_id: str, *, limits: dict | None = None,
-               clock: FakeClock | None = None) -> ConformanceDriver:
+               clock: FakeClock | None = None, timeline: MemoryTimeline | None = None) -> ConformanceDriver:
     """Build the fake ports and compose the real v2 application/service seam through them.
 
     Fakes own only observations/transport. Composition (the ``application.v2`` import and service
     method calls) is delegated entirely to :func:`sut_adapter.bind_live`; if the v2 seam is absent,
     :class:`V2SeamAbsent` propagates and the assertion layer turns it into a per-case FAILURE.
+
+    With a ``timeline``, the run repository is the bridge's recording one (``adapters.bridge._RecordingRuns``), timing
+    each write with ``clock``: the same seam a host's bridge uses, with a deterministic clock.
     """
     workspace = FakeWorkspace()
     workspace.write(CITED_SOURCE[0], f"# Cited\n\n{CITED_SOURCE[1]}\n".encode())
@@ -357,7 +440,26 @@ def new_driver(profile_id: str, *, limits: dict | None = None,
     artifacts = FakeArtifactRepository()
     host = FakeHostChildSink()
     clk = clock or FakeClock()
+    if timeline is not None:
+        from adapters.bridge import _RecordingRuns
+        runs = _RecordingRuns(runs, timeline=timeline, clock=clk.read)
     lim = dict(limits or {})
     return sut_adapter.bind_live(
         workspace, harness, runs, artifacts, host, profile_id, lim, clk,
     )
+
+
+def clone_driver(drv) -> ConformanceDriver:
+    """A fresh service over copies of ``drv``'s fake ports: the same runs, artifacts, workspace, timeline and clock, and
+    nothing shared, so a test may change the copy freely. Cheaper than driving the same runs again."""
+    import copy
+    from adapters.bridge import _RecordingRuns
+    runs = drv._runs
+    recording = isinstance(runs, _RecordingRuns)
+    clock = copy.deepcopy(drv._clock)
+    inner = copy.deepcopy(runs._runs if recording else runs)
+    if recording:
+        inner = _RecordingRuns(inner, timeline=copy.deepcopy(runs._timeline), clock=clock.read)
+    return sut_adapter.bind_live(copy.deepcopy(drv._workspace), copy.deepcopy(drv._harness), inner,
+                                 copy.deepcopy(drv._artifacts), copy.deepcopy(drv._host), drv._profile_id,
+                                 dict(drv._limits), clock)

@@ -15,6 +15,8 @@ interface Governance {
   state: string; control_mode: string; proposal_digest: string; plan_revision: number;
   first_approval: boolean;
   proposal: Proposal; prompt_error: string | null;
+  /** Whether the configuration waits on its human: the core's answer (`core.governance.human_wait`). */
+  human_wait: boolean;
   context: { author: { provider_id: string; model_id: string } | null; ingress: string;
     interactive: boolean | null; delegation: boolean };
 }
@@ -135,24 +137,22 @@ export function expectedApprovalKind(governance: Governance): "host_ui" | "auto"
   return "auto";
 }
 
-const HUMAN_WAIT_REASON: Readonly<Record<string, string>> = {
-  pending: "governance.approval_required", rejected: "governance.approval_required",
-  revision_pending: "governance.revision_required",
-};
+/** The reasons an unapproved configuration blocks with (`governance.approval_required` before the first approval or
+ * after a rejection, `governance.revision_required` for a revision): the blocker the host may pause on. */
+const CONFIGURATION_REASONS: ReadonlySet<string> = new Set(["governance.approval_required", "governance.revision_required"]);
 
-/** True only for the sole legitimate human-approval blocker of an active run (ADR-0063);
- * mirrors Python `completion._human_approval_wait` with the Pi ingress. */
+/** True only for the sole legitimate human-approval blocker of an active run (ADR-0063). Whether the configuration
+ * waits on its human is the core's answer in the run view (`governance.human_wait`, the predicate the observer reads
+ * too); the host adds only its own ingress (Pi's dialog) and that the configuration's blocker is the run's sole one. The same
+ * rule as Python `completion._human_approval_wait`, case for case (`fixtures/turn-end-predicates.json`). */
 export function humanApprovalWait(result: Response["result"]): boolean {
   if (result.type !== "Block" || !("run" in result) || !result.run || result.run.status !== "active")
     return false;
-  const g = result.run.governance as (Governance & {
-    interactions_remaining: { proposal: number; total: number } }) | null;
+  const g = result.run.governance as Governance | null;
   if (g === null) return false;
   const reasons = result.reasons;
-  return g.state in HUMAN_WAIT_REASON && expectedApprovalKind(g) === "host_ui"
-    && g.context.ingress === "pi_ui" && g.prompt_error === null
-    && g.interactions_remaining.proposal > 0 && g.interactions_remaining.total > 0
-    && reasons.length === 1 && reasons[0].code === HUMAN_WAIT_REASON[g.state];
+  return g.human_wait === true && g.context.ingress === "pi_ui"
+    && reasons.length === 1 && CONFIGURATION_REASONS.has(reasons[0].code);
 }
 
 /** True only for the sole `budget.exhausted` blocker of an active run (ADR-0063 exhaustion rule); mirrors

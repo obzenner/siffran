@@ -43,6 +43,7 @@ from collections.abc import Mapping
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 # plugins/empirica/adapters/bridge.py -> plugins/empirica (so core/application/adapters import).
@@ -58,6 +59,7 @@ from adapters.git.artifact_repo import GitArtifactRepository, toplevel  # noqa: 
 from adapters.identity import POLICY_VERSION, observe  # noqa: E402
 from adapters.state.located import LocatedRunRepository  # noqa: E402
 from adapters.state.locations import Locations  # noqa: E402
+from adapters.state.timeline import Timeline  # noqa: E402
 
 _PROTOCOL = _proto.protocol_id()
 _PROFILES = _proto.profile_ids()
@@ -112,40 +114,63 @@ class _LazyGitArtifactRepository:
 
 
 class _RecordingRuns:
-    """The run repository, recording where each run it creates works (``adapters.state.locations``):
-    the repository holding its knowledge store and its workspace, so a reader finds them later.
+    """The run repository, recording two kinds of display data beside each run, neither read by a run's decisions:
 
-    The record is display and lookup data for readers, never read by a run's decisions, so failing to
-    write it never fails the run: the run is created either way and simply has no record."""
+    * where each run it creates works (``adapters.state.locations``): the repository holding its knowledge store and
+      its workspace, so a reader finds them later (only when ``repo_dir`` is given);
+    * when each successful write happened (``adapters.state.timeline``, ADR-0070): after a ``create`` or a
+      ``compare_and_set`` lands, one entry with the time of ``clock``. This is the only place the plugin reads a
+      clock for a run; a write that raises (a lost compare-and-set) records nothing and reads no clock.
 
-    def __init__(self, runs: LocatedRunRepository, repo_dir: Path, workspace_dir: Path) -> None:
+    Failing to record either never fails or changes the run: the write stands either way and simply has no record."""
+
+    def __init__(self, runs, repo_dir: Path | None = None, workspace_dir: Path | None = None, *,
+                 timeline=None, clock=time.time) -> None:
         self._runs, self._repo_dir, self._workspace_dir = runs, repo_dir, workspace_dir
+        self._timeline = timeline if timeline is not None else Timeline()
+        self._clock = clock
 
     def __getattr__(self, name: str):
+        if name == "_runs":  # not yet set (a copy being rebuilt): never recurse into ourselves
+            raise AttributeError(name)
         return getattr(self._runs, name)
+
+    def _record(self, key, previous, revision, value) -> None:
+        try:
+            self._timeline.append(key, previous, revision, value, self._clock())
+        except Exception:  # noqa: BLE001 - display data: no failure of it may reach the run
+            pass
 
     def create(self, key, value):
         revision = self._runs.create(key, value)
-        try:
-            Locations().record(key, toplevel(self._repo_dir), self._workspace_dir.resolve())
-        except (OSError, ValueError):
-            pass
+        self._record(key, None, revision, value)
+        if self._repo_dir is not None:
+            try:
+                Locations().record(key, toplevel(self._repo_dir), self._workspace_dir.resolve())
+            except (OSError, ValueError):
+                pass
+        return revision
+
+    def compare_and_set(self, key, value, expected):
+        revision = self._runs.compare_and_set(key, value, expected)
+        self._record(key, expected, revision, value)
         return revision
 
 
-def build_service(profile_id: str):
+def build_service(profile_id: str, *, clock=time.time):
     """Compose the v2 service with an explicit exact registry ``profile_id`` (D6-C §4).
 
     Requires an explicit exact ``profile_id``; there is no host default. A missing (``None``) or
     unknown profile raises :class:`ValueError`. The machine-local run repository is composed
     eagerly; Git artifact discovery is deferred until a resolved run needs its knowledge plane.
+    ``clock`` times the run's writes for its timeline (display data only, ADR-0070).
     """
     if not isinstance(profile_id, str) or not profile_id:
         raise ValueError("an explicit exact registry profile_id is required")
     if profile_id not in _PROFILES:
         raise ValueError(f"unknown host profile_id: {profile_id!r}")
     repo_dir = Path(os.environ.get("EMPIRICA_REPO_DIR", Path.cwd()))
-    runs = _RecordingRuns(LocatedRunRepository(), repo_dir, Path.cwd())
+    runs = _RecordingRuns(LocatedRunRepository(), repo_dir, Path.cwd(), clock=clock)
     artifacts = _LazyGitArtifactRepository(repo_dir)
     return _v2.compose(
         workspace=FilesystemWorkspace(Path.cwd()), harness=SubprocessSpikeHarness(),
